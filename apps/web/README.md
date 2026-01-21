@@ -8,6 +8,7 @@ Next.js web application configured with Tailwind CSS v4 and HeroUI.
 - **React 19** - Latest React with Server Components
 - **Tailwind CSS v4** - Utility-first styling framework
 - **HeroUI** - Component library for React
+- **Framer Motion** - Animation library required by HeroUI
 - **Shared UI Components** - From `packages/app/ui/` workspace
 
 ## Development
@@ -45,4 +46,4 @@ apps/web/
 
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Tailwind CSS Documentation](https://tailwindcss.com/docs)
-- [HeroUI Documentation](https://www.heroui.com/docs/guide/installation)
+- [HeroUI Next.js Guide](https://www.heroui.com/docs/frameworks/nextjs)
