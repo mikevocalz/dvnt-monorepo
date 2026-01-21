@@ -10,13 +10,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@heroui/react": "^3.0.0",
+    "framer-motion": "^12.15.0",
     "next": "16.1.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "ui": "workspace:*"
   },
   "devDependencies": {
-    "@heroui/react": "^3.0.0",
     "@eslint/eslintrc": "^3",
     "@types/node": "^20",
     "@types/react": "^19",
