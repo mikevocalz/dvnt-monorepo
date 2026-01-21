@@ -19,7 +19,8 @@ Write React components once, run them on web, iOS, and Android. A Turborepo + Na
 │   ├── mobile/     # Expo React Native app
 │   └── web/        # Next.js web app
 ├── packages/
-│   └── ui/         # Shared component library
+│   └── app/
+│       └── ui/     # Shared HeroUI component library
 └── turbo.json      # Turborepo config
 ```
 
@@ -52,7 +53,7 @@ pnpm --filter mobile dev    # Expo Metro bundler
 
 ## How It Works
 
-- **Shared Components**: `packages/ui/` contains React Native components styled with NativeWind
+- **Shared Components**: `packages/app/ui/` contains shared HeroUI components for web and native
 - **Web**: Next.js uses react-native-web to render React Native components as HTML
 - **Mobile**: Expo renders components natively on iOS/Android
 

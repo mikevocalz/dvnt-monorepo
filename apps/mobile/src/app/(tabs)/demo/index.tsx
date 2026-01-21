@@ -33,7 +33,7 @@ export default function Demo() {
     <SafeAreaView className="flex-1 bg-white" edges={['top', 'left', 'right']}>
       <Header
         title="Shared UI Components"
-        subtitle="Cross-platform components with NativeWind"
+        subtitle="Cross-platform components with Uniwind"
       />
 
       <ScrollView

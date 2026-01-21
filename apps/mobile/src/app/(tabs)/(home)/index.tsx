@@ -21,9 +21,9 @@ const technologies = [
     image: require("../../../../assets/images/expo-wordmark.png"),
   },
   {
-    name: "NativeWind",
-    description: "Tailwind CSS for React Native",
-    image: require("../../../../assets/images/nativewind-logo.jpeg"),
+    name: "Uniwind",
+    description: "Tailwind 4 for React Native",
+    image: require("../../../../assets/images/react-logo.png"),
   },
 ];
 
