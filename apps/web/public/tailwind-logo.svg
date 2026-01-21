@@ -1,0 +1,5 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="128" height="128" rx="24" fill="#0EA5E9"/>
+  <path d="M32 66C38.4 50.7 50.4 43.1 68 43C80.6 43 87.8 48.7 91.5 60.2C87.2 55.5 82 53.1 75.9 53C68.9 53 63.4 56.6 59.5 63.6C53.7 75 45.6 80.6 32 81C25.6 81 20.4 78.9 16 74.6C21.1 76.2 25.2 74.7 28.5 70.4C30.4 67.9 31.5 65.8 32 66Z" fill="white" opacity="0.9"/>
+  <text x="64" y="105" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="24" font-weight="600" fill="white">TW</text>
+</svg>

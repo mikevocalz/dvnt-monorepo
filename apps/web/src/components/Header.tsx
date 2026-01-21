@@ -10,10 +10,10 @@ export function Header() {
 
         <nav className="flex items-center gap-6 text-sm">
           <Link
-            href="/nativewind"
+            href="/heroui"
             className="text-gray-600 hover:text-gray-900 transition-colors"
           >
-            NativeWind
+            HeroUI
           </Link>
           <Link
             href="https://gurselcakar.com/monorepo"

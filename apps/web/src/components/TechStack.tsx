@@ -12,14 +12,19 @@ const technologies = [
     logo: '/next.svg',
   },
   {
+    name: 'Tailwind CSS v4',
+    description: 'Utility-first styling with the latest Tailwind engine',
+    logo: '/tailwind-logo.svg',
+  },
+  {
+    name: 'HeroUI',
+    description: 'Modern React component library for interfaces',
+    logo: '/heroui-logo.svg',
+  },
+  {
     name: 'Expo SDK 54',
     description: 'React Native framework with Expo Router',
     logo: '/expo-wordmark.png',
-  },
-  {
-    name: 'NativeWind',
-    description: 'Tailwind CSS for React Native',
-    logo: '/nativewind-logo.jpeg',
   },
 ]
 

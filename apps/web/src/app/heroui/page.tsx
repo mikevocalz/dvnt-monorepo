@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { View } from 'react-native'
 import { Header, Footer } from '../../components'
 import { Button, Card, Text, Badge, Input } from 'ui'
 
@@ -38,16 +37,13 @@ export default function ComponentsPage() {
         <section className="py-16 px-6">
           <div className="max-w-3xl mx-auto">
             <h1 className="text-3xl font-bold text-gray-900 mb-3">
-              Shared UI Components
+              HeroUI Component Showcase
             </h1>
             <p className="text-gray-500 mb-2">
-              Cross-platform components built with React Native primitives and NativeWind.
-            </p>
-            <p className="text-sm text-gray-400">
-              These same components render natively on iOS and Android.
+              Build production-ready interfaces with HeroUI components styled by Tailwind CSS v4.
             </p>
             <p className="text-sm text-gray-400 mt-4">
-              This is your starting point. Add, modify, or reorganize these components however you like.
+              Use this page as a starting point for composing components, layouts, and forms.
             </p>
           </div>
         </section>
@@ -56,49 +52,49 @@ export default function ComponentsPage() {
           <div className="max-w-3xl mx-auto">
 
             <ComponentSection title="Button" importStatement="import { Button } from 'ui'">
-              <View className="flex-row gap-3 flex-wrap">
+              <div className="flex flex-row gap-3 flex-wrap">
                 <Button title="Primary" onPress={() => {}} />
                 <Button title="Secondary" variant="secondary" onPress={() => {}} />
                 <Button title="Outline" variant="outline" onPress={() => {}} />
-              </View>
+              </div>
             </ComponentSection>
 
             <ComponentSection title="Card" importStatement="import { Card } from 'ui'">
-              <View className="gap-4">
+              <div className="flex flex-col gap-4">
                 <Card>
                   <Text variant="body">Default card with subtle border styling.</Text>
                 </Card>
                 <Card variant="elevated">
                   <Text variant="body">Elevated card with shadow for emphasis.</Text>
                 </Card>
-              </View>
+              </div>
             </ComponentSection>
 
             <ComponentSection title="Text" importStatement="import { Text } from 'ui'">
-              <View className="gap-2">
+              <div className="flex flex-col gap-2">
                 <Text variant="title">Title variant</Text>
                 <Text variant="body">Body variant for regular content.</Text>
                 <Text variant="caption">Caption variant for secondary information.</Text>
-              </View>
+              </div>
             </ComponentSection>
 
             <ComponentSection title="Badge" importStatement="import { Badge } from 'ui'">
-              <View className="flex-row gap-3 flex-wrap">
+              <div className="flex flex-row gap-3 flex-wrap">
                 <Badge label="Default" />
                 <Badge label="Success" variant="success" />
                 <Badge label="Warning" variant="warning" />
-              </View>
+              </div>
             </ComponentSection>
 
             <ComponentSection title="Input" importStatement="import { Input } from 'ui'">
-              <View className="max-w-sm">
+              <div className="max-w-sm">
                 <Input
                   label="Email address"
                   placeholder="you@example.com"
                   value={inputValue}
                   onChangeText={setInputValue}
                 />
-              </View>
+              </div>
             </ComponentSection>
 
           </div>

@@ -1,14 +1,14 @@
 /** @type {import('tailwindcss').Config} */
-import nativewindPreset from 'nativewind/preset';
+const { heroui } = require('@heroui/react')
 
 module.exports = {
   content: [
     './src/**/*.{js,ts,jsx,tsx,mdx}',
-    '../../packages/app/ui/src/**/*.{js,jsx,ts,tsx}'
+    '../../packages/app/ui/src/**/*.{js,jsx,ts,tsx}',
+    './node_modules/@heroui/react/dist/**/*.{js,ts,jsx,tsx}',
   ],
-  presets: [nativewindPreset],
   theme: {
     extend: {},
   },
-  plugins: [],
+  plugins: [heroui()],
 }

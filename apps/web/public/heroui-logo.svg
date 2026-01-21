@@ -1,0 +1,6 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="128" height="128" rx="24" fill="#111827"/>
+  <circle cx="64" cy="52" r="22" fill="#6366F1"/>
+  <path d="M48 90C48 80.1 55.2 72 64 72C72.8 72 80 80.1 80 90" stroke="white" stroke-width="8" stroke-linecap="round"/>
+  <text x="64" y="112" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="18" font-weight="600" fill="white">HeroUI</text>
+</svg>

@@ -26,11 +26,7 @@
       "@/*": [
         "./src/*"
       ]
-    },
-    "jsxImportSource": "nativewind",
-    "types": [
-      "nativewind/types"
-    ]
+    }
   },
   "include": [
     "next-env.d.ts",
