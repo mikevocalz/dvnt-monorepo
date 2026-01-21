@@ -1,13 +1,13 @@
 # Web App
 
-Next.js web application with React Native Web integration for cross-platform component sharing.
+Next.js web application configured with Tailwind CSS v4 and HeroUI.
 
 ## Tech Stack
 
 - **Next.js 16.1.0** - React framework with App Router
 - **React 19** - Latest React with Server Components
-- **React Native Web** - Renders React Native components as HTML
-- **NativeWind** - Cross-platform Tailwind CSS styling
+- **Tailwind CSS v4** - Utility-first styling framework
+- **HeroUI** - Component library for React
 - **Shared UI Components** - From `packages/app/ui/` workspace
 
 ## Development
@@ -22,27 +22,11 @@ pnpm typecheck  # TypeScript type checking
 
 ## Key Features
 
-### Cross-Platform Component Support
-The app uses React Native Web to share components with the mobile app. Both HTML elements and React Native components work seamlessly together:
+### HeroUI Component Showcase
+The `/heroui` route highlights shared HeroUI components rendered in the web app.
 
-```tsx
-export default function Page() {
-  return (
-    <div className="container">
-      <Button title="Shared Component" onPress={() => {}} />
-    </div>
-  );
-}
-```
-
-### Next.js Configuration
-The `next.config.ts` handles React Native Web integration:
-- Transpiles React Native packages
-- Aliases `react-native` to `react-native-web`
-- Supports platform-specific extensions (`.web.tsx`, `.web.ts`)
-
-### NativeWind Styling
-Tailwind CSS classes work on both HTML elements and React Native components, enabling consistent styling across platforms.
+### Tailwind CSS v4
+Tailwind CSS v4 powers utility-first styling across the application.
 
 ## Structure
 
@@ -50,9 +34,9 @@ Tailwind CSS classes work on both HTML elements and React Native components, ena
 apps/web/
 ├── src/app/
 │   ├── page.tsx           # Landing page
-│   ├── nativewind/        # Shared components demo
+│   ├── heroui/            # HeroUI components demo
 │   └── layout.tsx         # Root layout
-├── next.config.ts         # Next.js + RN Web config
+├── next.config.ts         # Next.js configuration
 ├── tailwind.config.js     # Tailwind configuration
 └── package.json           # Dependencies & scripts
 ```
@@ -60,5 +44,5 @@ apps/web/
 ## Learn More
 
 - [Next.js Documentation](https://nextjs.org/docs)
-- [React Native Web](https://necolas.github.io/react-native-web/)
-- [NativeWind](https://www.nativewind.dev/)
+- [Tailwind CSS Documentation](https://tailwindcss.com/docs)
+- [HeroUI Documentation](https://www.heroui.com/docs/guide/installation)
