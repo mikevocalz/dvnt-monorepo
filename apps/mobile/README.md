@@ -1,14 +1,14 @@
 # Mobile App
 
-Expo-based React Native application demonstrating cross-platform component sharing with the web app using NativeWind and shared UI components.
+Expo-based React Native application demonstrating cross-platform component sharing with the web app using Uniwind and shared UI components.
 
 ## Technologies
 
 - **Expo SDK 54**: React Native framework with Expo Router for file-based navigation
 - **React Native 0.81.5**: Cross-platform mobile development
-- **NativeWind 4.x**: Tailwind CSS styling for React Native
+- **Uniwind**: Tailwind 4 styling for React Native
 - **Expo Router 6.x**: File-based routing with tab navigation
-- **Shared UI Components**: Reusable components from `packages/ui/`
+- **Shared UI Components**: Reusable components from `packages/app/ui/`
 
 ## Development Commands
 
@@ -22,7 +22,7 @@ pnpm web        # Open in browser
 ## Key Features
 
 - **File-based routing** with Expo Router (tab navigation)
-- **NativeWind styling** with Tailwind CSS classes
+- **Uniwind styling** with Tailwind CSS classes
 - **Shared components** from the monorepo UI package
 - **Cross-platform support** for iOS, Android, and web
 - **New Architecture** enabled for improved performance
@@ -31,8 +31,8 @@ pnpm web        # Open in browser
 ## Configuration
 
 - **app.json**: Expo configuration with plugins for routing, splash screen, and fonts
-- **tailwind.config.js**: NativeWind setup with shared UI package paths
-- **metro.config.js**: Metro bundler configuration for monorepo support
+- **global.css**: Uniwind/Tailwind CSS entry point
+- **metro.config.js**: Metro bundler configuration with Uniwind
 
 ## Learn More
 

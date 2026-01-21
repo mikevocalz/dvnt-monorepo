@@ -2,6 +2,7 @@ packages:
   - apps/web
   - apps/mobile
   - packages/*
+  - packages/app/*
 
 onlyBuiltDependencies:
   - sharp

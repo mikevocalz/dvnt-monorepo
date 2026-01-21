@@ -8,7 +8,7 @@ Next.js web application with React Native Web integration for cross-platform com
 - **React 19** - Latest React with Server Components
 - **React Native Web** - Renders React Native components as HTML
 - **NativeWind** - Cross-platform Tailwind CSS styling
-- **Shared UI Components** - From `packages/ui/` workspace
+- **Shared UI Components** - From `packages/app/ui/` workspace
 
 ## Development
 
