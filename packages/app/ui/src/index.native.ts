@@ -1,29 +1,23 @@
+// Common components available in both @heroui/react (web) and heroui-native
 export {
   Accordion,
   Avatar,
-  BottomSheet,
   Button,
   Card,
   Checkbox,
   Chip,
-  Description,
-  Dialog,
-  Divider,
-  ErrorView,
-  FormField,
   InputOTP,
-  Label,
   Popover,
-  PressableFeedback,
   RadioGroup,
   ScrollShadow,
   Select,
   Skeleton,
-  SkeletonGroup,
   Spinner,
-  Surface,
   Switch,
   Tabs,
   TextField,
   Toast,
-} from '@heroui/native';
+} from "heroui-native";
+
+// Re-export HeroUINativeProvider for app setup
+export { HeroUINativeProvider } from "heroui-native";

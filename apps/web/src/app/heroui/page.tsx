@@ -1,18 +1,18 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { Header, Footer } from '../../components'
-import { Badge, Button, Card, CardBody, Input, Text } from 'ui'
+import { useState } from "react";
+import { Header, Footer } from "../../components";
+import { Button, Card, Chip, Switch, Spinner } from "ui";
 
 function ComponentSection({
   title,
   importStatement,
-  children
+  children,
 }: {
-  title: string
-  importStatement: string
-  children: React.ReactNode
-}) {
+  title: string;
+  importStatement: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
   return (
     <div className="py-10 border-b border-gray-100 last:border-b-0">
       <div className="flex items-baseline justify-between mb-6">
@@ -23,11 +23,12 @@ function ComponentSection({
       </div>
       {children}
     </div>
-  )
+  );
 }
 
 export default function ComponentsPage() {
-  const [inputValue, setInputValue] = useState('')
+  const [inputValue, setInputValue] = useState("");
+  const [switchValue, setSwitchValue] = useState(false);
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -40,88 +41,114 @@ export default function ComponentsPage() {
               HeroUI Component Showcase
             </h1>
             <p className="text-gray-500 mb-2">
-              Build production-ready interfaces with HeroUI components styled by Tailwind CSS v4.
+              Build production-ready interfaces with HeroUI components styled by
+              Tailwind CSS v4.
             </p>
             <p className="text-sm text-gray-400 mt-4">
-              Use this page as a starting point for composing components, layouts, and forms.
+              Use this page as a starting point for composing components,
+              layouts, and forms.
             </p>
           </div>
         </section>
 
         <section className="px-6 pb-16">
           <div className="max-w-3xl mx-auto">
-
-            <ComponentSection title="Button" importStatement="import { Button } from 'ui'">
+            <ComponentSection
+              title="Button"
+              importStatement="import { Button } from 'ui'"
+            >
               <div className="flex flex-row gap-3 flex-wrap">
-                <Button color="primary" onPress={() => {}}>
+                <Button variant="primary" onPress={() => {}}>
                   Primary
                 </Button>
-                <Button color="secondary" variant="flat" onPress={() => {}}>
+                <Button variant="secondary" onPress={() => {}}>
                   Secondary
                 </Button>
-                <Button variant="bordered" onPress={() => {}}>
+                <Button variant="outline" onPress={() => {}}>
                   Outline
+                </Button>
+                <Button variant="ghost" onPress={() => {}}>
+                  Ghost
                 </Button>
               </div>
             </ComponentSection>
 
-            <ComponentSection title="Card" importStatement="import { Card, CardBody } from 'ui'">
+            <ComponentSection
+              title="Card"
+              importStatement="import { Card } from 'ui'"
+            >
               <div className="flex flex-col gap-4">
                 <Card>
-                  <CardBody>
-                    <Text className="text-base text-gray-700">
-                      Default card with subtle border styling.
-                    </Text>
-                  </CardBody>
-                </Card>
-                <Card shadow="md">
-                  <CardBody>
-                    <Text className="text-base text-gray-700">
-                      Elevated card with shadow for emphasis.
-                    </Text>
-                  </CardBody>
+                  <div className="p-4">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Default Card
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Card with subtle border styling.
+                    </p>
+                    <p className="text-base text-gray-700 mt-3">
+                      This is the card content area.
+                    </p>
+                  </div>
                 </Card>
               </div>
             </ComponentSection>
 
-            <ComponentSection title="Text" importStatement="import { Text } from 'ui'">
-              <div className="flex flex-col gap-2">
-                <Text className="text-xl font-semibold text-gray-900">Title variant</Text>
-                <Text className="text-base text-gray-700">Body variant for regular content.</Text>
-                <Text className="text-sm text-gray-500">Caption variant for secondary information.</Text>
-              </div>
-            </ComponentSection>
-
-            <ComponentSection title="Badge" importStatement="import { Badge } from 'ui'">
+            <ComponentSection
+              title="Chip"
+              importStatement="import { Chip } from 'ui'"
+            >
               <div className="flex flex-row gap-3 flex-wrap">
-                <Badge content="Default" color="default">
-                  <Button variant="flat" size="sm">Inbox</Button>
-                </Badge>
-                <Badge content="Success" color="success">
-                  <Button variant="flat" size="sm">Team</Button>
-                </Badge>
-                <Badge content="Warning" color="warning">
-                  <Button variant="flat" size="sm">Alerts</Button>
-                </Badge>
+                <Chip>Default</Chip>
+                <Chip variant="primary">Primary</Chip>
+                <Chip variant="secondary">Secondary</Chip>
               </div>
             </ComponentSection>
 
-            <ComponentSection title="Input" importStatement="import { Input } from 'ui'">
-              <div className="max-w-sm">
-                <Input
-                  label="Email address"
+            <ComponentSection
+              title="Input"
+              importStatement="Native HTML input with Tailwind"
+            >
+              <div className="max-w-sm flex flex-col gap-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Email address
+                </label>
+                <input
+                  type="email"
+                  className="px-3 py-2 border border-gray-300 rounded-md text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="you@example.com"
                   value={inputValue}
-                  onValueChange={setInputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
                 />
               </div>
             </ComponentSection>
 
+            <ComponentSection
+              title="Switch"
+              importStatement="import { Switch } from 'ui'"
+            >
+              <div className="flex flex-row gap-4 items-center">
+                <Switch isSelected={switchValue} onChange={setSwitchValue}>
+                  Enable notifications
+                </Switch>
+              </div>
+            </ComponentSection>
+
+            <ComponentSection
+              title="Spinner"
+              importStatement="import { Spinner } from 'ui'"
+            >
+              <div className="flex flex-row gap-4 items-center">
+                <Spinner size="sm" />
+                <Spinner size="md" />
+                <Spinner size="lg" />
+              </div>
+            </ComponentSection>
           </div>
         </section>
       </main>
 
       <Footer />
     </div>
-  )
+  );
 }
