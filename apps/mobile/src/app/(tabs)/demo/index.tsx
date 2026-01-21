@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Text, View, Alert, ScrollView } from "react-native";
-import { Button, Card, Text as UIText, Badge, Input } from "ui";
+import { Badge, Button, Card, CardBody, Input, Text as HeroText } from "ui";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Header } from "../../../components";
 
@@ -50,36 +50,62 @@ export default function Demo() {
 
         <ComponentSection title="Button" importStatement="from 'ui'">
           <View className="flex-row gap-3 flex-wrap">
-            <Button title="Primary" onPress={() => Alert.alert('Pressed', 'Primary button')} />
-            <Button title="Secondary" variant="secondary" onPress={() => {}} />
-            <Button title="Outline" variant="outline" onPress={() => {}} />
+            <Button color="primary" onPress={() => Alert.alert('Pressed', 'Primary button')}>
+              Primary
+            </Button>
+            <Button color="secondary" variant="flat" onPress={() => {}}>
+              Secondary
+            </Button>
+            <Button variant="bordered" onPress={() => {}}>
+              Outline
+            </Button>
           </View>
         </ComponentSection>
 
         <ComponentSection title="Card" importStatement="from 'ui'">
           <View className="gap-3">
             <Card>
-              <UIText variant="body">Default card with subtle border styling.</UIText>
+              <CardBody>
+                <HeroText className="text-base text-gray-700">
+                  Default card with subtle border styling.
+                </HeroText>
+              </CardBody>
             </Card>
-            <Card variant="elevated">
-              <UIText variant="body">Elevated card with shadow for emphasis.</UIText>
+            <Card shadow="md">
+              <CardBody>
+                <HeroText className="text-base text-gray-700">
+                  Elevated card with shadow for emphasis.
+                </HeroText>
+              </CardBody>
             </Card>
           </View>
         </ComponentSection>
 
         <ComponentSection title="Text" importStatement="from 'ui'">
           <View className="gap-2">
-            <UIText variant="title">Title variant</UIText>
-            <UIText variant="body">Body variant for regular content.</UIText>
-            <UIText variant="caption">Caption variant for secondary information.</UIText>
+            <HeroText className="text-xl font-semibold text-gray-900">Title variant</HeroText>
+            <HeroText className="text-base text-gray-700">Body variant for regular content.</HeroText>
+            <HeroText className="text-sm text-gray-500">Caption variant for secondary information.</HeroText>
           </View>
         </ComponentSection>
 
         <ComponentSection title="Badge" importStatement="from 'ui'">
           <View className="flex-row gap-3 flex-wrap">
-            <Badge label="Default" />
-            <Badge label="Success" variant="success" />
-            <Badge label="Warning" variant="warning" />
+            <Badge content="Default" color="default">
+              <Button size="sm" variant="flat">
+                Inbox
+              </Button>
+            </Badge>
+            <Badge content="Success" color="success">
+              <Button size="sm" variant="flat">
+                Team
+              </Button>
+            </Badge>
+            <Badge content="Warning" color="warning">
+              <Button size="sm" variant="flat">
+                Alerts
+              </Button>
+            </Badge>
           </View>
         </ComponentSection>
 
@@ -88,7 +114,7 @@ export default function Demo() {
             label="Email address"
             placeholder="you@example.com"
             value={inputValue}
-            onChangeText={setInputValue}
+            onValueChange={setInputValue}
           />
         </ComponentSection>
 

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Header, Footer } from '../../components'
-import { Button, Card, Text, Badge, Input } from 'ui'
+import { Badge, Button, Card, CardBody, Input, Text } from 'ui'
 
 function ComponentSection({
   title,
@@ -53,36 +53,56 @@ export default function ComponentsPage() {
 
             <ComponentSection title="Button" importStatement="import { Button } from 'ui'">
               <div className="flex flex-row gap-3 flex-wrap">
-                <Button title="Primary" onPress={() => {}} />
-                <Button title="Secondary" variant="secondary" onPress={() => {}} />
-                <Button title="Outline" variant="outline" onPress={() => {}} />
+                <Button color="primary" onPress={() => {}}>
+                  Primary
+                </Button>
+                <Button color="secondary" variant="flat" onPress={() => {}}>
+                  Secondary
+                </Button>
+                <Button variant="bordered" onPress={() => {}}>
+                  Outline
+                </Button>
               </div>
             </ComponentSection>
 
-            <ComponentSection title="Card" importStatement="import { Card } from 'ui'">
+            <ComponentSection title="Card" importStatement="import { Card, CardBody } from 'ui'">
               <div className="flex flex-col gap-4">
                 <Card>
-                  <Text variant="body">Default card with subtle border styling.</Text>
+                  <CardBody>
+                    <Text className="text-base text-gray-700">
+                      Default card with subtle border styling.
+                    </Text>
+                  </CardBody>
                 </Card>
-                <Card variant="elevated">
-                  <Text variant="body">Elevated card with shadow for emphasis.</Text>
+                <Card shadow="md">
+                  <CardBody>
+                    <Text className="text-base text-gray-700">
+                      Elevated card with shadow for emphasis.
+                    </Text>
+                  </CardBody>
                 </Card>
               </div>
             </ComponentSection>
 
             <ComponentSection title="Text" importStatement="import { Text } from 'ui'">
               <div className="flex flex-col gap-2">
-                <Text variant="title">Title variant</Text>
-                <Text variant="body">Body variant for regular content.</Text>
-                <Text variant="caption">Caption variant for secondary information.</Text>
+                <Text className="text-xl font-semibold text-gray-900">Title variant</Text>
+                <Text className="text-base text-gray-700">Body variant for regular content.</Text>
+                <Text className="text-sm text-gray-500">Caption variant for secondary information.</Text>
               </div>
             </ComponentSection>
 
             <ComponentSection title="Badge" importStatement="import { Badge } from 'ui'">
               <div className="flex flex-row gap-3 flex-wrap">
-                <Badge label="Default" />
-                <Badge label="Success" variant="success" />
-                <Badge label="Warning" variant="warning" />
+                <Badge content="Default" color="default">
+                  <Button variant="flat" size="sm">Inbox</Button>
+                </Badge>
+                <Badge content="Success" color="success">
+                  <Button variant="flat" size="sm">Team</Button>
+                </Badge>
+                <Badge content="Warning" color="warning">
+                  <Button variant="flat" size="sm">Alerts</Button>
+                </Badge>
               </div>
             </ComponentSection>
 
@@ -92,7 +112,7 @@ export default function ComponentsPage() {
                   label="Email address"
                   placeholder="you@example.com"
                   value={inputValue}
-                  onChangeText={setInputValue}
+                  onValueChange={setInputValue}
                 />
               </div>
             </ComponentSection>
