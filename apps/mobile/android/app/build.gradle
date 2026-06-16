@@ -96,6 +96,12 @@ android {
         versionName "1.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+
+        // Google Maps key injected at build time — never hardcode it in the manifest.
+        // Source order: env (EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) > gradle property (MAPS_API_KEY) > empty.
+        manifestPlaceholders = [
+            MAPS_API_KEY: (System.getenv("EXPO_PUBLIC_GOOGLE_MAPS_API_KEY") ?: findProperty("MAPS_API_KEY") ?: "")
+        ]
     }
     signingConfigs {
         debug {
