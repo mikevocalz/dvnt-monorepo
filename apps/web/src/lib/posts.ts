@@ -1,8 +1,10 @@
 // src/lib/posts.ts — blog data layer.
-// Reads the Payload REST API (the web-vite admin app). Public reads return only
-// published docs; draft reads (live preview) pass `?draft=true`. Resilient to a
-// down/unset Payload so the Next build never fails on the blog routes.
-const PAYLOAD_URL = process.env.PAYLOAD_URL || process.env.NEXT_PUBLIC_PAYLOAD_URL || ''
+// Reads posts DIRECTLY from the Supabase `payload` schema (Payload's own tables)
+// so the live blog works without a hosted Payload server. Media files are served
+// as static assets from the blog's /public/blog-media (copied out of Payload).
+// `BLOG_DATABASE_URL` is the Supabase pooler connection string. Resilient: if the
+// DB is unset/unreachable the routes render empty instead of failing the build.
+import { Pool } from 'pg'
 
 export type PostMedia = {
   id: string
@@ -71,10 +73,11 @@ export type Post = {
   }
 }
 
+// ── helpers (unchanged surface) ──────────────────────────────────────────────
 export function mediaUrl(media: PostMedia | undefined, size: 'thumbnail' | 'card' | 'og' | 'full' = 'full'): string {
   if (!media) return ''
   const url = size !== 'full' && media.sizes?.[size]?.url ? media.sizes[size]!.url : media.url
-  return url?.startsWith('http') ? url : `${PAYLOAD_URL}${url}`
+  return url || ''
 }
 
 export function formatByline(authors: PostAuthor[]): string {
@@ -93,101 +96,209 @@ export function formatDateShort(iso: string | undefined): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-// Payload returns relative media URLs (/api/media/file/…) which would resolve
-// against the blog origin, not Payload. Absolutize them against PAYLOAD_URL.
-function absolutize<T>(node: T): T {
-  if (!node || typeof node !== 'object') return node
-  for (const [k, v] of Object.entries(node as any)) {
-    if (k === 'url' && typeof v === 'string' && v.startsWith('/')) (node as any)[k] = `${PAYLOAD_URL}${v}`
-    else if (v && typeof v === 'object') absolutize(v)
-  }
-  return node
+// ── Supabase (payload schema) access ─────────────────────────────────────────
+let pool: Pool | null = null
+function db(): Pool | null {
+  const url = process.env.BLOG_DATABASE_URL || process.env.DATABASE_URL
+  if (!url) return null
+  if (!pool) pool = new Pool({ connectionString: url, max: 3, ssl: { rejectUnauthorized: false } })
+  return pool
 }
 
-async function api<T>(path: string, opts?: { draft?: boolean }): Promise<T | null> {
-  if (!PAYLOAD_URL) return null
+async function q<T = any>(text: string, params: any[] = []): Promise<T[]> {
+  const p = db()
+  if (!p) return []
   try {
-    const url = `${PAYLOAD_URL}/api${path}`
-    const res = await fetch(url, {
-      // Drafts must bypass the CDN cache; published can ISR.
-      cache: opts?.draft ? 'no-store' : 'force-cache',
-      next: opts?.draft ? undefined : { revalidate: 60 },
-      headers: process.env.PAYLOAD_API_KEY
-        ? { Authorization: `admin-users API-Key ${process.env.PAYLOAD_API_KEY}` }
-        : undefined,
-    })
-    if (!res.ok) return null
-    return absolutize((await res.json()) as T)
-  } catch {
-    return null
+    return (await p.query(text, params)).rows as T[]
+  } catch (e) {
+    console.error('[posts] query failed:', (e as any)?.message)
+    return []
   }
 }
 
-type Paginated<T> = { docs: T[] }
+// Payload media URLs are `/api/media/file/<filename>`; the files are copied into
+// the blog's /public/blog-media, so rewrite to that static (Vercel-served) path.
+function fixMedia(url?: string | null): string | undefined {
+  if (!url) return undefined
+  const m = String(url).match(/\/api\/media\/file\/(.+)$/)
+  return m ? `/blog-media/${m[1]}` : url
+}
+const sized = (u?: string | null) => (fixMedia(u) ? { url: fixMedia(u)! } : undefined)
+
+const POST_COLS = `
+  p.id, p.title, p.slug, p.excerpt, p.eyebrow, p.content, p.content_html,
+  p.published_at, p.updated_at, p.hero_caption, p.hero_video_url,
+  p.featured, p.editors_pick, p.trending, p.read_time,
+  p.seo_title, p.seo_description, p.seo_canonical_url, p.seo_no_index,
+  hm.id as hero_id, hm.url as hero_url, hm.alt as hero_alt,
+  hm.width as hero_w, hm.height as hero_h,
+  hm.sizes_card_url as hero_card, hm.sizes_thumbnail_url as hero_thumb, hm.sizes_og_url as hero_og
+`
+
+function rowToPost(r: any, authors: PostAuthor[], categories: PostCategory[]): Post {
+  return {
+    id: String(r.id),
+    title: r.title,
+    slug: r.slug,
+    excerpt: r.excerpt ?? undefined,
+    eyebrow: r.eyebrow ?? undefined,
+    content: r.content ?? undefined,
+    contentHtml: r.content_html ?? undefined,
+    publishedAt: r.published_at ? new Date(r.published_at).toISOString() : undefined,
+    updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+    heroImage: r.hero_url
+      ? {
+          id: String(r.hero_id ?? ''),
+          url: fixMedia(r.hero_url)!,
+          alt: r.hero_alt ?? undefined,
+          width: r.hero_w ?? undefined,
+          height: r.hero_h ?? undefined,
+          sizes: { card: sized(r.hero_card), thumbnail: sized(r.hero_thumb), og: sized(r.hero_og) },
+        }
+      : undefined,
+    heroCaption: r.hero_caption ?? undefined,
+    heroVideoUrl: r.hero_video_url ?? undefined,
+    authors,
+    categories,
+    featured: !!r.featured,
+    editorsPick: !!r.editors_pick,
+    trending: !!r.trending,
+    readTime: r.read_time != null ? Number(r.read_time) : undefined,
+    seo: {
+      title: r.seo_title ?? undefined,
+      description: r.seo_description ?? undefined,
+      canonicalUrl: r.seo_canonical_url ?? undefined,
+      noIndex: !!r.seo_no_index,
+    },
+  }
+}
+
+// Core loader: posts (+ hero media) matching `whereSql`, then their authors +
+// categories via posts_rels in one batched query. Newest first.
+async function loadPosts(whereSql: string, params: any[], limit?: number, offset?: number): Promise<Post[]> {
+  const lim = limit != null ? `limit ${Math.max(0, Math.trunc(limit))}` : ''
+  const off = offset != null ? `offset ${Math.max(0, Math.trunc(offset))}` : ''
+  const rows = await q(
+    `select ${POST_COLS}
+       from payload.posts p
+       left join payload.media hm on hm.id = p.hero_image_id
+      where ${whereSql}
+      order by p.published_at desc nulls last ${lim} ${off}`,
+    params,
+  )
+  if (!rows.length) return []
+  const ids = rows.map((r) => r.id)
+  const rels = await q(
+    `select r.parent_id, r.path, r."order",
+            a.id as a_id, a.name as a_name, a.slug as a_slug, a.role as a_role, a.bio as a_bio,
+            a.socials_instagram, a.socials_twitter, a.socials_tiktok, a.socials_website, a.profile_url,
+            av.url as a_avatar_url, av.sizes_thumbnail_url as a_avatar_thumb,
+            c.id as c_id, c.title as c_title, c.slug as c_slug, c.accent_color, c.description
+       from payload.posts_rels r
+       left join payload.authors a on a.id = r.authors_id
+       left join payload.media av on av.id = a.avatar_id
+       left join payload.categories c on c.id = r.categories_id
+      where r.parent_id = any($1) and r.path in ('authors', 'categories')
+      order by r.parent_id, r."order" nulls last`,
+    [ids],
+  )
+  const authorsByPost = new Map<number, PostAuthor[]>()
+  const catsByPost = new Map<number, PostCategory[]>()
+  for (const rel of rels) {
+    if (rel.path === 'authors' && rel.a_id) {
+      const arr = authorsByPost.get(rel.parent_id) ?? []
+      arr.push({
+        id: String(rel.a_id),
+        name: rel.a_name,
+        slug: rel.a_slug,
+        role: rel.a_role ?? undefined,
+        bio: rel.a_bio ?? undefined,
+        avatar: rel.a_avatar_url
+          ? { id: '', url: fixMedia(rel.a_avatar_url)!, sizes: { thumbnail: sized(rel.a_avatar_thumb) } }
+          : undefined,
+        socials: {
+          instagram: rel.socials_instagram ?? undefined,
+          twitter: rel.socials_twitter ?? undefined,
+          tiktok: rel.socials_tiktok ?? undefined,
+          website: rel.socials_website ?? undefined,
+        },
+        profileUrl: rel.profile_url ?? undefined,
+      })
+      authorsByPost.set(rel.parent_id, arr)
+    } else if (rel.path === 'categories' && rel.c_id) {
+      const arr = catsByPost.get(rel.parent_id) ?? []
+      arr.push({
+        id: String(rel.c_id),
+        title: rel.c_title,
+        slug: rel.c_slug,
+        accentColor: rel.accent_color ?? undefined,
+        description: rel.description ?? undefined,
+      })
+      catsByPost.set(rel.parent_id, arr)
+    }
+  }
+  return rows.map((r) => rowToPost(r, authorsByPost.get(r.id) ?? [], catsByPost.get(r.id) ?? []))
+}
+
+const PUBLISHED = `p._status = 'published'`
+const inCategory = (n: number) =>
+  `exists (select 1 from payload.posts_rels rr join payload.categories cc on cc.id = rr.categories_id
+             where rr.parent_id = p.id and rr.path = 'categories' and cc.slug = $${n})`
 
 export async function getPublishedPosts(limit = 100, category?: string): Promise<Post[]> {
-  const cat = category ? `&where[categories.slug][equals]=${encodeURIComponent(category)}` : ''
-  const data = await api<Paginated<Post>>(
-    `/posts?where[_status][equals]=published&depth=2&sort=-publishedAt&limit=${limit}${cat}`,
-  )
-  return data?.docs ?? []
+  if (category) return loadPosts(`${PUBLISHED} and ${inCategory(1)}`, [category], limit)
+  return loadPosts(PUBLISHED, [], limit)
 }
 
-// Paginated index for the magazine grid (Payload returns totalPages/page).
 export async function getPostsPage(
   opts: { page?: number; limit?: number; category?: string } = {},
 ): Promise<{ docs: Post[]; totalPages: number; page: number }> {
   const { page = 1, limit = 12, category } = opts
-  const cat = category ? `&where[categories.slug][equals]=${encodeURIComponent(category)}` : ''
-  const data = await api<{ docs: Post[]; totalPages: number; page: number }>(
-    `/posts?where[_status][equals]=published&depth=2&sort=-publishedAt&page=${page}&limit=${limit}${cat}`,
-  )
-  return { docs: data?.docs ?? [], totalPages: data?.totalPages ?? 1, page: data?.page ?? page }
+  const where = category ? `${PUBLISHED} and ${inCategory(1)}` : PUBLISHED
+  const params = category ? [category] : []
+  const docs = await loadPosts(where, params, limit, (page - 1) * limit)
+  const countRows = await q<{ n: number }>(`select count(*)::int n from payload.posts p where ${where}`, params)
+  const total = countRows[0]?.n ?? docs.length
+  return { docs, totalPages: Math.max(1, Math.ceil(total / limit)), page }
 }
 
 export async function getFeaturedPost(): Promise<Post | null> {
-  const data = await api<Paginated<Post>>(
-    '/posts?where[_status][equals]=published&where[featured][equals]=true&sort=-publishedAt&depth=2&limit=1',
-  )
-  return data?.docs?.[0] ?? null
+  const r = await loadPosts(`${PUBLISHED} and p.featured = true`, [], 1)
+  return r[0] ?? null
 }
 
 export async function getEditorsPicks(limit = 4): Promise<Post[]> {
-  const data = await api<Paginated<Post>>(
-    `/posts?where[_status][equals]=published&where[editorsPick][equals]=true&sort=-publishedAt&depth=2&limit=${limit}`,
-  )
-  return data?.docs ?? []
+  return loadPosts(`${PUBLISHED} and p.editors_pick = true`, [], limit)
 }
 
 export async function getTrending(limit = 5): Promise<Post[]> {
-  const data = await api<Paginated<Post>>(
-    `/posts?where[_status][equals]=published&where[trending][equals]=true&sort=-publishedAt&depth=2&limit=${limit}`,
-  )
-  return data?.docs ?? []
+  return loadPosts(`${PUBLISHED} and p.trending = true`, [], limit)
 }
 
 export async function getCategories(): Promise<PostCategory[]> {
-  const data = await api<Paginated<PostCategory>>('/categories?sort=order&limit=50')
-  return data?.docs ?? []
+  const rows = await q(
+    `select id, title, slug, accent_color, description from payload.categories order by "order" nulls last limit 50`,
+  )
+  return rows.map((c) => ({
+    id: String(c.id),
+    title: c.title,
+    slug: c.slug,
+    accentColor: c.accent_color ?? undefined,
+    description: c.description ?? undefined,
+  }))
 }
 
 export async function getLatestPosts(limit = 4, excludeSlug?: string): Promise<Post[]> {
-  const data = await api<Paginated<Post>>(
-    `/posts?where[_status][equals]=published&sort=-publishedAt&depth=2&limit=${limit + 1}`,
-  )
-  const docs = data?.docs ?? []
-  return excludeSlug ? docs.filter((p) => p.slug !== excludeSlug).slice(0, limit) : docs.slice(0, limit)
+  const rows = await loadPosts(PUBLISHED, [], limit + 1)
+  return excludeSlug ? rows.filter((p) => p.slug !== excludeSlug).slice(0, limit) : rows.slice(0, limit)
 }
 
 export async function getAllSlugs(): Promise<string[]> {
-  const data = await api<Paginated<Pick<Post, 'slug'>>>(
-    '/posts?where[_status][equals]=published&depth=0&limit=1000',
-  )
-  return (data?.docs ?? []).map((d) => d.slug).filter(Boolean)
+  const rows = await q<{ slug: string }>(`select p.slug from payload.posts p where ${PUBLISHED} limit 1000`)
+  return rows.map((r) => r.slug).filter(Boolean)
 }
 
-export async function getPostBySlug(slug: string, draft = false): Promise<Post | null> {
-  const q = `/posts?where[slug][equals]=${encodeURIComponent(slug)}&depth=2&limit=1${draft ? '&draft=true' : ''}`
-  const data = await api<Paginated<Post>>(q, { draft })
-  return data?.docs?.[0] ?? null
+export async function getPostBySlug(slug: string, _draft = false): Promise<Post | null> {
+  const r = await loadPosts(`p.slug = $1 and ${PUBLISHED}`, [slug], 1)
+  return r[0] ?? null
 }
