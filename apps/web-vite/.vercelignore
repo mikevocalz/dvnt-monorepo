@@ -1,0 +1,11 @@
+.env
+.env.local
+.env.*
+node_modules
+dist
+.turbo
+.output
+.vinxi
+*.db
+.tanstack
+*.log
