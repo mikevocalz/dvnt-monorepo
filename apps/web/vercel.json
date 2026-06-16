@@ -1,8 +1,5 @@
 {
-  "buildCommand": "cd ../.. && npx pnpm@10.32.1 install && pnpm --filter web build",
-  "installCommand": "echo 'Install handled in buildCommand'",
-  "outputDirectory": ".next",
-  "framework": null,
+  "framework": "nextjs",
   "regions": ["iad1"],
   "headers": [
     {
