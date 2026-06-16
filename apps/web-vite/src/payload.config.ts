@@ -23,7 +23,7 @@ import { Categories } from './collections/Categories'
 import { Authors } from './collections/Authors'
 import { Media } from './collections/Media'
 import { Comments } from './collections/Comments'
-import { appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint } from './endpoints/appData'
+import { appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint, appVerifyEndpoint } from './endpoints/appData'
 import { getServerSideURL } from './utilities/getURL'
 
 const filename = fileURLToPath(import.meta.url)
@@ -64,7 +64,7 @@ export default buildConfig({
   collections: [AdminUsers, Members, Reports, Events, Tickets, BanList, ModerationActions, Posts, Categories, Authors, Media, Comments],
 
   // Read-only windows onto the live app DB (real members/events). See appData.ts.
-  endpoints: [appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint],
+  endpoints: [appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint, appVerifyEndpoint],
 
   editor: lexicalEditor(),
 

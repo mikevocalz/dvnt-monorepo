@@ -141,6 +141,16 @@ export function useRevokeAdmin() {
   })
 }
 
+// Manually verify an app user (onboarding manual-verify, exposed to staff).
+export function useVerifyMember() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ userId, verified }: { userId: string; verified?: boolean }) =>
+      payload.app.verify(userId, verified),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['members'] }),
+  })
+}
+
 // Overview counters — from the live app DB.
 export function useStats() {
   return useQuery({

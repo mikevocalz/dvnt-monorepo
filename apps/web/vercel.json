@@ -1,8 +1,5 @@
 {
-  "installCommand": "(cd ../.. && pnpm install)",
-  "buildCommand": "(cd ../.. && pnpm --filter web build)",
-  "outputDirectory": ".next",
-  "framework": null,
+  "framework": "nextjs",
   "regions": ["iad1"],
   "headers": [
     {

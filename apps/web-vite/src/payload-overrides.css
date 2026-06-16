@@ -349,10 +349,19 @@ a:not(.btn):not(.nav__link):hover {
   -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 16px !important;
-  overflow: hidden;
+  /* Scroll wide tables horizontally on narrow screens instead of overflowing /
+   * squishing the page (Payload list tables have many columns). */
+  overflow-x: auto !important;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 .table table thead th { background: rgba(255, 255, 255, 0.03) !important; }
 .table table tbody tr:hover td { background: rgba(255, 91, 252, 0.05) !important; }
+/* Keep the table from collapsing its columns below a readable width — forces the
+ * horizontal scroll above to kick in rather than cramming columns together. */
+@media (max-width: 1024px) {
+  .table table { min-width: 720px; }
+}
 
 /* Remove the default logout button from the sidebar — keep only the
  * "← DVNT Console" pill. (Logout remains in the top-right account menu.) */

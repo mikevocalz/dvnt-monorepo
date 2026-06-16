@@ -211,3 +211,6 @@
   .dv-section { padding: 14px; }
   .dv-menu { width: min(80vw, 260px); }
 }
+
+/* Verified checkmark next to a member's name. */
+.dv-verified { display: inline-grid; place-items: center; width: 15px; height: 15px; margin-left: 6px; border-radius: 5px; background: rgba(63, 220, 255, 0.16); color: var(--cyan); font-size: 10px; font-weight: 800; vertical-align: middle; }

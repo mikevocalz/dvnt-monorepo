@@ -474,6 +474,34 @@ export const appSyncEndpoint: Endpoint = {
   },
 }
 
+// Manual verification: mark an app user as verified (writes public.users.verified)
+// — the same "manual verify" the mobile onboarding offers, exposed to staff so
+// they can confirm a user who's stuck. admin+ only. Pass { verified:false } to
+// un-verify. Writes ONLY the boolean to the app DB.
+export const appVerifyEndpoint: Endpoint = {
+  path: '/app/verify',
+  method: 'post',
+  handler: async (req) => {
+    const role = (req.user as any)?.role
+    if (!req.user || !['super_admin', 'admin'].includes(role)) {
+      return Response.json({ errors: [{ message: 'Forbidden' }] }, { status: 403 })
+    }
+    const body = (await (req as any).json?.()) ?? {}
+    const userId = body.userId != null ? String(body.userId) : ''
+    const verified = body.verified === false ? false : true
+    if (!userId) return Response.json({ errors: [{ message: 'userId is required' }] }, { status: 400 })
+    const p = await appPool()
+    if (!p) return Response.json({ errors: [{ message: 'App DB unavailable' }] }, { status: 503 })
+    try {
+      const r = await p.query('update public.users set verified = $1 where id = $2 returning id, verified', [verified, userId])
+      if (!r.rows[0]) return Response.json({ errors: [{ message: 'app user not found' }] }, { status: 404 })
+      return Response.json({ ok: true, userId, verified: r.rows[0].verified })
+    } catch (e: any) {
+      return Response.json({ errors: [{ message: e?.message ?? 'verify failed' }] }, { status: 500 })
+    }
+  },
+}
+
 export const appStatsEndpoint: Endpoint = {
   path: '/app/stats',
   method: 'get',

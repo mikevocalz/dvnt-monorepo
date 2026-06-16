@@ -35,7 +35,10 @@ export function MembersScreen() {
                   <div className="dv-member">
                     <Avatar uri={m.avatarUrl} name={m.username} />
                     <div>
-                      <div className="dv-name">{m.username}</div>
+                      <div className="dv-name">
+                        {m.username}
+                        {m.verified && <span className="dv-verified" title="Verified">✓</span>}
+                      </div>
                       <div className="dv-subtle">{m.email}</div>
                     </div>
                   </div>

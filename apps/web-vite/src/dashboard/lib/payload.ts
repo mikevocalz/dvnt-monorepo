@@ -112,6 +112,12 @@ export const payload = {
         method: 'POST',
         body: JSON.stringify({ userId, role }),
       }),
+    // Manually verify (or un-verify) an app user — the onboarding manual-verify.
+    verify: (userId: string, verified = true) =>
+      req<{ ok: boolean; userId: string; verified: boolean }>('/app/verify', {
+        method: 'POST',
+        body: JSON.stringify({ userId, verified }),
+      }),
   },
 }
 

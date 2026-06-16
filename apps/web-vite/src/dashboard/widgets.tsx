@@ -1,6 +1,6 @@
 // src/dashboard/widgets.tsx — small HTML widgets shared by the screens.
 import { useState } from 'react'
-import { useSetStatus } from './lib/hooks'
+import { useSetStatus, useVerifyMember } from './lib/hooks'
 import { useRole } from './lib/role'
 import { STATUS_COLOR } from './theme/tokens'
 
@@ -38,7 +38,8 @@ export function ModerationMenu({ member }: { member: any }) {
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
   const setStatus = useSetStatus()
-  const { canModerate } = useRole()
+  const verify = useVerifyMember()
+  const { canModerate, isAdminPlus } = useRole()
   if (!canModerate) return null
 
   const act = (status: string, days?: number) => {
@@ -49,11 +50,24 @@ export function ModerationMenu({ member }: { member: any }) {
     setReason('')
   }
 
+  const toggleVerify = () => {
+    verify.mutate({ userId: String(member.id), verified: !member.verified })
+    setOpen(false)
+  }
+
   return (
     <div style={{ position: 'relative' }}>
       <button className="dv-btn" onClick={() => setOpen((o) => !o)}>Action ▾</button>
       {open && (
         <div className="dv-menu">
+          {/* Manual verify — confirm a user stuck in onboarding. Admin+ only. */}
+          {isAdminPlus && (
+            member.verified ? (
+              <button className="dv-btn dv-btn--ghost" onClick={toggleVerify} disabled={verify.isPending}>✓ Verified — un-verify</button>
+            ) : (
+              <button className="dv-btn dv-btn--primary" onClick={toggleVerify} disabled={verify.isPending}>Verify user ✓</button>
+            )
+          )}
           <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (required to suspend/ban)" />
           <button className="dv-btn" onClick={() => act('under_review')}>Mark under review</button>
           <button className="dv-btn" onClick={() => act('warned')}>Warn</button>
