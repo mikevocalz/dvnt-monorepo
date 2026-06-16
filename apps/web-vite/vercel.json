@@ -1,6 +1,6 @@
 {
   "installCommand": "(cd ../.. && pnpm install)",
-  "buildCommand": "vite build",
+  "buildCommand": "(cd ../.. && pnpm --filter web-vite build)",
   "outputDirectory": "dist",
   "framework": null,
   "regions": ["iad1"],
