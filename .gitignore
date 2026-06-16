@@ -17,4 +17,4 @@ dist
 
 # Claude local
 .claude
-CLAUDE.md
+CLAUDE.md.vercel

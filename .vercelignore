@@ -1,0 +1,7 @@
+node_modules
+.next
+dist
+.vercel
+apps/*/.next
+apps/*/dist
+**/node_modules
