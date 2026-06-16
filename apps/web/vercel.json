@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd ../.. && pnpm install && pnpm --filter web build",
+  "buildCommand": "cd ../.. && npx pnpm@10.32.1 install && npx pnpm@10.32.1 --filter web build",
   "outputDirectory": ".next",
   "framework": "nextjs",
   "regions": ["iad1"],
