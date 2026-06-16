@@ -1,0 +1,19 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "react-jsx",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@dvnt/app/*": ["./*"],
+      "react-native-screen-transitions": [
+        "../../node_modules/react-native-screen-transitions/lib/typescript/shared/index.d.ts"
+      ]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", "types/**/*.d.ts"],
+  "exclude": ["node_modules"]
+}

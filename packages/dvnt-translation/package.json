@@ -1,0 +1,12 @@
+{
+  "name": "@deviant/dvnt-translation",
+  "version": "1.0.0",
+  "description": "On-device translation — Apple Translation (iOS 18.0+) and ML Kit (Android)",
+  "main": "src/index.ts",
+  "expoModule": true,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

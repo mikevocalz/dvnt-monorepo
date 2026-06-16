@@ -1,0 +1,135 @@
+# Set by expo-router. This enables Fabric-only features from react-native-screens
+ENV['RNS_GAMMA_ENABLED'] ||= '1'
+require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts/autolinking")
+require File.join(File.dirname(`node --print "require.resolve('react-native/package.json')"`), "scripts/react_native_pods")
+
+require 'json'
+podfile_properties = JSON.parse(File.read(File.join(__dir__, 'Podfile.properties.json'))) rescue {}
+
+def ccache_enabled?(podfile_properties)
+  # Environment variable takes precedence
+  return ENV['USE_CCACHE'] == '1' if ENV['USE_CCACHE']
+
+  # Fall back to Podfile properties
+  podfile_properties['apple.ccacheEnabled'] == 'true'
+end
+
+ENV['EX_DEV_CLIENT_NETWORK_INSPECTOR'] ||= podfile_properties['EX_DEV_CLIENT_NETWORK_INSPECTOR']
+ENV['RCT_USE_RN_DEP'] ||= podfile_properties['ios.buildReactNativeFromSource'] == 'true' ? '0' : '1'
+ENV['RCT_USE_PREBUILT_RNCORE'] ||= podfile_properties['ios.buildReactNativeFromSource'] == 'true' ? '0' : '1'
+ENV['RCT_HERMES_V1_ENABLED'] ||= '1' if podfile_properties['expo.useHermesV1'] == 'true'
+ENV['EXPO_USE_PRECOMPILED_MODULES'] ||= '1' if podfile_properties['EXPO_USE_PRECOMPILED_MODULES'] != 'false'
+platform :ios, podfile_properties['ios.deploymentTarget'] || '16.4'
+
+prepare_react_native_project!
+
+# Disable VisionCamera Frame Processors (no worklets-core needed)
+$VCEnableFrameProcessors = false
+
+target 'DVNT' do
+  use_expo_modules!
+
+  if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
+    config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
+  else
+    config_command = [
+      'node',
+      '--no-warnings',
+      '--eval',
+      'require(\'expo/bin/autolinking\')',
+      'expo-modules-autolinking',
+      'react-native-config',
+      '--json',
+      '--platform',
+      'ios'
+    ]
+  end
+
+  config = use_native_modules!(config_command)
+
+  use_frameworks! :linkage => podfile_properties['ios.useFrameworks'].to_sym if podfile_properties['ios.useFrameworks']
+  use_frameworks! :linkage => ENV['USE_FRAMEWORKS'].to_sym if ENV['USE_FRAMEWORKS']
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    :hermes_enabled => podfile_properties['expo.jsEngine'] == nil || podfile_properties['expo.jsEngine'] == 'hermes',
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/..",
+    :privacy_file_aggregation_enabled => podfile_properties['apple.privacyManifestAggregationEnabled'] != 'false',
+  )
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      :ccache_enabled => ccache_enabled?(podfile_properties),
+    )
+
+    # ── Swift 5.9 compat: disable strict concurrency for Expo pods ──
+    # ExpoModulesCore podspec patched to swift_version='5.9'.
+    # SWIFT_STRICT_CONCURRENCY=minimal is respected in Swift 5.9 mode
+    # (unlike Swift 6 mode where it is always 'complete').
+    installer.pods_project.targets.each do |target|
+      next unless target.name.start_with?('Expo') || target.name == 'EXUpdates'
+      target.build_configurations.each do |config|
+        config.build_settings['SWIFT_VERSION'] = '5.9'
+        config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+      end
+    end
+
+    # ── Nitro/Rive ODR fix ──────────────────────────────────────────
+    # RiveRuntime.xcframework is pre-built with Swift 5.x C++ interop
+    # headers. On Xcode 26 (Swift 6), NitroModules compiles with Swift 6
+    # headers causing ODR violations (swift::Optional, swift::String
+    # definitions differ). Force Swift 5.9 for nitro-related pods so
+    # their Swift C++ headers match the pre-built RiveRuntime.xcframework.
+    nitro_pods = ['ReactNativeNitroModules', 'react-native-nitro-modules',
+                  'NitroModules', 'RNMMKV', 'react-native-mmkv']
+    installer.pods_project.targets.each do |target|
+      next unless nitro_pods.any? { |n| target.name.start_with?(n) }
+      target.build_configurations.each do |config|
+        config.build_settings['SWIFT_VERSION'] = '5.9'
+      end
+    end
+    # [fix-visioncamera-barcode-scanner-swift] Xcode 26 can crash while
+    # incrementally compiling Nitrogen-generated Swift in
+    # VisionCameraBarcodeScanner. Pin the pod to Swift 5.9 and whole-module
+    # compilation so local dev and EAS preview builds stay stable.
+    installer.pods_project.targets.each do |target|
+      next unless target.name == 'VisionCameraBarcodeScanner'
+      target.build_configurations.each do |config|
+        config.build_settings['SWIFT_VERSION'] = '5.9'
+        config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+        config.build_settings['SWIFT_COMPILATION_MODE'] = 'wholemodule'
+      end
+    end
+    # [fix-wgpu-headers] Ensure wgpu's cpp/ tree is in HEADER_SEARCH_PATHS so
+    # qualified includes like "jsi/NativeObject.h" resolve to wgpu's own headers
+    # instead of Skia's identically-named copies.
+    installer.pods_project.targets.each do |t|
+      next unless t.name == 'react-native-wgpu'
+      t.build_configurations.each do |config|
+        paths = config.build_settings['HEADER_SEARCH_PATHS'] || ['$(inherited)']
+        paths = [paths] if paths.is_a?(String)
+        paths << '"$(PODS_TARGET_SRCROOT)/cpp"' unless paths.any? { |p| p.include?('PODS_TARGET_SRCROOT)/cpp"') }
+        paths << '"$(PODS_TARGET_SRCROOT)/cpp/jsi"' unless paths.any? { |p| p.include?('cpp/jsi') }
+        config.build_settings['HEADER_SEARCH_PATHS'] = paths
+      end
+    end
+  end
+end
+
+
+# apple-targets-extension-loader -- Dynamic loading of target configurations
+Dir.glob(File.join(__dir__, '..', 'targets', '**', 'pods.rb')).each do |target_file|
+  target_name = File.basename(File.dirname(target_file))
+  target target_name do
+    # Create a new binding with access to necessary methods and variables
+    target_binding = binding
+    target_binding.local_variable_set(:podfile_properties, podfile_properties)
+
+    # Evaluate the target file content in the new binding
+    eval(File.read(target_file), target_binding, target_file)
+  end
+end

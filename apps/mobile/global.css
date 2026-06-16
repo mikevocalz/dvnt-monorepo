@@ -1,0 +1,130 @@
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css";
+@import "nativewind/theme";
+
+/* Monorepo content scan (PROMPT 0 §4.2) — Tailwind v4 detects classes via
+   @source. Without these, NativeWind emits zero styles for code that moved into
+   the workspace packages. Paths are relative to this file (apps/mobile/). */
+@source "../../packages/app/components/**/*.{ts,tsx,js,jsx}";
+@source "../../packages/app/features/**/*.{ts,tsx,js,jsx}";
+@source "../../packages/app/lib/**/*.{ts,tsx,js,jsx}";
+@source "../../packages/app/src/**/*.{ts,tsx,js,jsx}";
+@source "../../packages/ui/src/**/*.{ts,tsx,js,jsx}";
+
+@theme {
+  /* Fonts */
+  --font-sans: Inter-Regular, system-ui, sans-serif;
+  --font-sans-semibold: Inter-SemiBold, system-ui, sans-serif;
+  --font-sans-bold: Inter-Bold, system-ui, sans-serif;
+  --font-display: SpaceGrotesk-Regular, system-ui, sans-serif;
+  --font-display-semibold: SpaceGrotesk-SemiBold, system-ui, sans-serif;
+  --font-display-bold: SpaceGrotesk-Bold, system-ui, sans-serif;
+
+  /* Type scale */
+  --text-display: 32px;
+  --text-display--line-height: 40px;
+  --text-display--letter-spacing: -0.5px;
+  --text-display--font-weight: 700;
+  --text-title: 22px;
+  --text-title--line-height: 28px;
+  --text-title--letter-spacing: -0.3px;
+  --text-title--font-weight: 600;
+  --text-heading: 17px;
+  --text-heading--line-height: 22px;
+  --text-heading--letter-spacing: -0.2px;
+  --text-heading--font-weight: 600;
+  --text-body: 15px;
+  --text-body--line-height: 20px;
+  --text-body--font-weight: 400;
+  --text-caption: 13px;
+  --text-caption--line-height: 16px;
+  --text-caption--font-weight: 500;
+  --text-micro: 11px;
+  --text-micro--line-height: 14px;
+  --text-micro--letter-spacing: 0.3px;
+  --text-micro--font-weight: 600;
+
+  /* Semantic colors (resolved from CSS vars set in :root) */
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-accent-cyan: hsl(var(--accent-cyan));
+  --color-accent-vip-soft: hsl(var(--accent-vip-soft));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-purple: hsl(var(--purple));
+
+  /* Border radius */
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  /* Hairline border */
+  --border-width-hairline: 0.5px;
+}
+
+@layer base {
+  :root {
+    /* Brand Colors */
+    --primary: 199 88% 54%;
+    --accent: 304 100% 68%;
+    --purple: 267 55% 53%;
+
+    /* Tier-Accent Semantic Aliases — see lib/theme/tier-colors.ts */
+    --accent-cyan: 191 100% 62%;     /* #3FDCFF — free tier */
+    --accent-vip-soft: 270 89% 75%;  /* #C084FC — VIP highlight variant */
+
+    /* Base Colors */
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+
+    /* Muted Colors */
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 64%;
+
+    /* Border & Input */
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 199 88% 54%;
+
+    /* Card */
+    --card: 0 0% 0%;
+    --card-foreground: 0 0% 100%;
+
+    /* Popover */
+    --popover: 0 0% 0%;
+    --popover-foreground: 0 0% 100%;
+
+    /* Primary */
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary */
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 100%;
+
+    /* Accent */
+    --accent-foreground: 0 0% 100%;
+
+    /* Destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Radius */
+    --radius: 0.5rem;
+  }
+}

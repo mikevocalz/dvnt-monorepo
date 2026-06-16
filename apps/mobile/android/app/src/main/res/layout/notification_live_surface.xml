@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:background="#CC000000">
+    <ImageView
+        android:id="@+id/live_logo"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:src="@mipmap/ic_launcher"
+        android:layout_gravity="top"
+        android:layout_marginEnd="10dp"
+        android:contentDescription="DVNT" />
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+        <TextView
+            android:id="@+id/tile_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:maxLines="2"
+            android:ellipsize="end" />
+        <TextView
+            android:id="@+id/tile_subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#B3FFFFFF"
+            android:textSize="12sp"
+            android:maxLines="1"
+            android:layout_marginTop="2dp" />
+        <LinearLayout
+            android:id="@+id/dots_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginTop="6dp">
+            <View android:id="@+id/dot_0" android:layout_width="5dp" android:layout_height="5dp" android:background="@android:color/white" android:layout_margin="2dp" />
+            <View android:id="@+id/dot_1" android:layout_width="5dp" android:layout_height="5dp" android:background="#4DFFFFFF" android:layout_margin="2dp" />
+            <View android:id="@+id/dot_2" android:layout_width="5dp" android:layout_height="5dp" android:background="#4DFFFFFF" android:layout_margin="2dp" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

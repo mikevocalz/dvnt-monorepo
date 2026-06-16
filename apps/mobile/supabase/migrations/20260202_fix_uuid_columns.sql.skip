@@ -1,0 +1,56 @@
+-- Migration: Fix integer columns to uuid for Supabase Auth compatibility
+-- The users.id and related foreign keys need to be uuid type to match auth.users.id
+
+-- Step 1: Drop all foreign key constraints
+ALTER TABLE public.posts DROP CONSTRAINT IF EXISTS posts_author_id_users_id_fk;
+ALTER TABLE public.likes DROP CONSTRAINT IF EXISTS likes_user_id_users_id_fk;
+ALTER TABLE public.comments DROP CONSTRAINT IF EXISTS comments_author_id_users_id_fk;
+ALTER TABLE public.follows DROP CONSTRAINT IF EXISTS follows_follower_id_users_id_fk;
+ALTER TABLE public.follows DROP CONSTRAINT IF EXISTS follows_following_id_users_id_fk;
+ALTER TABLE public.bookmarks DROP CONSTRAINT IF EXISTS bookmarks_user_id_users_id_fk;
+ALTER TABLE public.notifications DROP CONSTRAINT IF EXISTS notifications_recipient_id_users_id_fk;
+ALTER TABLE public.notifications DROP CONSTRAINT IF EXISTS notifications_actor_id_users_id_fk;
+ALTER TABLE public.stories DROP CONSTRAINT IF EXISTS stories_author_id_users_id_fk;
+ALTER TABLE public.events DROP CONSTRAINT IF EXISTS events_host_id_users_id_fk;
+ALTER TABLE public.event_rsvps DROP CONSTRAINT IF EXISTS event_rsvps_user_id_users_id_fk;
+ALTER TABLE public.messages DROP CONSTRAINT IF EXISTS messages_sender_id_users_id_fk;
+ALTER TABLE public.media DROP CONSTRAINT IF EXISTS media_owner_id_users_id_fk;
+ALTER TABLE public.conversations_rels DROP CONSTRAINT IF EXISTS conversations_rels_users_fk;
+
+-- Step 2: Drop default on users.id if exists
+ALTER TABLE public.users ALTER COLUMN id DROP DEFAULT;
+
+-- Step 3: Change users.id from integer to uuid
+ALTER TABLE public.users ALTER COLUMN id TYPE uuid USING gen_random_uuid();
+
+-- Step 4: Update all foreign key columns to uuid
+ALTER TABLE public.posts ALTER COLUMN author_id TYPE uuid USING NULL;
+ALTER TABLE public.likes ALTER COLUMN user_id TYPE uuid USING NULL;
+ALTER TABLE public.comments ALTER COLUMN author_id TYPE uuid USING NULL;
+ALTER TABLE public.follows ALTER COLUMN follower_id TYPE uuid USING NULL;
+ALTER TABLE public.follows ALTER COLUMN following_id TYPE uuid USING NULL;
+ALTER TABLE public.bookmarks ALTER COLUMN user_id TYPE uuid USING NULL;
+ALTER TABLE public.notifications ALTER COLUMN recipient_id TYPE uuid USING NULL;
+ALTER TABLE public.notifications ALTER COLUMN actor_id TYPE uuid USING NULL;
+ALTER TABLE public.stories ALTER COLUMN author_id TYPE uuid USING NULL;
+ALTER TABLE public.events ALTER COLUMN host_id TYPE uuid USING NULL;
+ALTER TABLE public.event_rsvps ALTER COLUMN user_id TYPE uuid USING NULL;
+ALTER TABLE public.messages ALTER COLUMN sender_id TYPE uuid USING NULL;
+ALTER TABLE public.media ALTER COLUMN owner_id TYPE uuid USING NULL;
+ALTER TABLE public.conversations_rels ALTER COLUMN users_id TYPE uuid USING NULL;
+
+-- Step 5: Recreate foreign key constraints
+ALTER TABLE public.posts ADD CONSTRAINT posts_author_id_users_id_fk FOREIGN KEY (author_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.likes ADD CONSTRAINT likes_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.comments ADD CONSTRAINT comments_author_id_users_id_fk FOREIGN KEY (author_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.follows ADD CONSTRAINT follows_follower_id_users_id_fk FOREIGN KEY (follower_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.follows ADD CONSTRAINT follows_following_id_users_id_fk FOREIGN KEY (following_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.bookmarks ADD CONSTRAINT bookmarks_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.notifications ADD CONSTRAINT notifications_recipient_id_users_id_fk FOREIGN KEY (recipient_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.notifications ADD CONSTRAINT notifications_actor_id_users_id_fk FOREIGN KEY (actor_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.stories ADD CONSTRAINT stories_author_id_users_id_fk FOREIGN KEY (author_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.events ADD CONSTRAINT events_host_id_users_id_fk FOREIGN KEY (host_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.event_rsvps ADD CONSTRAINT event_rsvps_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.messages ADD CONSTRAINT messages_sender_id_users_id_fk FOREIGN KEY (sender_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.media ADD CONSTRAINT media_owner_id_users_id_fk FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.conversations_rels ADD CONSTRAINT conversations_rels_users_fk FOREIGN KEY (users_id) REFERENCES public.users(id) ON DELETE CASCADE;

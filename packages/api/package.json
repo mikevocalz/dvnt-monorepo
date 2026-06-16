@@ -1,0 +1,40 @@
+{
+  "name": "@dvnt/api",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "react-native": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./persistence": {
+      "types": "./src/persistence.ts",
+      "react-native": "./src/persistence.native.ts",
+      "import": "./src/persistence.web.ts",
+      "default": "./src/persistence.web.ts"
+    }
+  },
+  "scripts": {
+    "lint": "node ../../node_modules/typescript/bin/tsc --noEmit",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc --noEmit"
+  },
+  "dependencies": {
+    "@dvnt/core": "workspace:*",
+    "@dvnt/functions": "workspace:*",
+    "@dvnt/types": "workspace:*",
+    "@tanstack/query-sync-storage-persister": "^5.101.0",
+    "@tanstack/react-query": "^5.101.0",
+    "@tanstack/react-query-persist-client": "^5.101.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.14",
+    "typescript": "~5.9.2"
+  },
+  "peerDependencies": {
+    "react": "19.2.3"
+  }
+}

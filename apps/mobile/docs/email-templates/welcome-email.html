@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to DVNT</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.6;
+      color: #e4e4e7;
+      background-color: #09090b;
+      padding: 20px;
+    }
+    .email-container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: linear-gradient(135deg, #18181b 0%, #1a1a1a 100%);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    }
+    .header {
+      background: linear-gradient(135deg, #8a40cf 0%, #6b21a8 100%);
+      padding: 40px 30px;
+      text-align: center;
+    }
+    .logo {
+      font-size: 32px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 2px;
+      margin-bottom: 8px;
+    }
+    .logo-image {
+      height: 60px;
+      width: auto;
+      margin-bottom: 12px;
+    }
+    .tagline {
+      font-size: 14px;
+      color: #e9d5ff;
+      letter-spacing: 0.5px;
+    }
+    .content {
+      padding: 40px 30px;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 16px;
+    }
+    p {
+      font-size: 16px;
+      color: #a1a1aa;
+      margin-bottom: 24px;
+    }
+    .button-container {
+      text-align: center;
+      margin: 40px 0;
+    }
+    .button {
+      display: inline-block;
+      background: linear-gradient(135deg, #8a40cf 0%, #6b21a8 100%);
+      color: #ffffff !important;
+      text-decoration: none;
+      padding: 16px 48px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      box-shadow: 0 4px 12px rgba(138, 64, 207, 0.4);
+      transition: all 0.3s ease;
+    }
+    .feature-box {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 12px;
+      padding: 20px;
+      margin: 16px 0;
+      display: flex;
+      align-items: start;
+      gap: 16px;
+    }
+    .feature-icon {
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+    .feature-content h3 {
+      font-size: 16px;
+      color: #ffffff;
+      margin-bottom: 4px;
+    }
+    .feature-content p {
+      font-size: 14px;
+      color: #a1a1aa;
+      margin: 0;
+    }
+    .footer {
+      background: #09090b;
+      padding: 30px;
+      text-align: center;
+      border-top: 1px solid #27272a;
+    }
+    .footer p {
+      font-size: 13px;
+      color: #71717a;
+      margin-bottom: 8px;
+    }
+    .footer a {
+      color: #8a40cf;
+      text-decoration: none;
+    }
+    @media only screen and (max-width: 600px) {
+      .email-container {
+        border-radius: 0;
+      }
+      .content {
+        padding: 30px 20px;
+      }
+      .header {
+        padding: 30px 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <!-- Header -->
+    <div class="header">
+      <img src="https://images.squarespace-cdn.com/content/v1/6970176c1abbac076dce861e/44194a62-f354-49eb-bc41-160942213388/DVNT-app_white.png" alt="DVNT" width="180" height="auto" style="display: block; margin: 0 auto 12px; height: auto; max-width: 180px;" />
+      <div class="tagline">connect. gather. move.</div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+      <h1>You being here changes things.</h1>
+      <p>Welcome to DVNT—an intentional space for queer people to connect, gather, and move culture on their own terms.</p>
+
+      <div class="button-container">
+        <a href="{{ .ConfirmationURL }}" class="button">Verify Your Email</a>
+      </div>
+
+      <h2 style="font-size: 20px; color: #ffffff; margin: 32px 0 16px;">What is DVNT?</h2>
+      <p style="margin-bottom: 16px;">A social platform for nightlife, community, and curated access.</p>
+
+      <div class="feature-box">
+        <div class="feature-icon">💬</div>
+        <div class="feature-content">
+          <h3>The conversation starts here.</h3>
+          <p>Curated posts, recaps, and chatter—minus the public performance. Real updates from real people. Not content farms.</p>
+        </div>
+      </div>
+
+      <div class="feature-box">
+        <div class="feature-icon">🎫</div>
+        <div class="feature-content">
+          <h3>Your calendar just got dangerous.</h3>
+          <p>Discover what's happening, who's hosting, and what's worth pulling up to. RSVP. Pull up. Repeat.</p>
+        </div>
+      </div>
+
+      <div class="feature-box">
+        <div class="feature-icon">💜</div>
+        <div class="feature-content">
+          <h3>Face-to-face. With no audience.</h3>
+          <p>Private messages for the people you actually trust. Keep it discreet. Keep it cute.</p>
+        </div>
+      </div>
+
+      <p style="margin-top: 32px;">Your profile isn't a resume. It's a signal. Show what you want. Hide what you don't. Keep it moving.</p>
+
+      <p style="font-size: 14px; color: #71717a; margin-top: 32px;">If the button doesn't work, copy and paste this link:</p>
+      <p style="word-break: break-all; font-size: 13px; color: #8a40cf;">{{ .ConfirmationURL }}</p>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p>© 2024 DVNT. All rights reserved.</p>
+      <p>
+        <a href="https://dvntapp.live/contact">Support</a> •
+        <a href="https://dvntapp.live/privacy">Privacy</a> •
+        <a href="https://dvntapp.live/terms">Terms</a>
+      </p>
+      <p style="margin-top: 16px;">If you know, you know.</p>
+    </div>
+  </div>
+</body>
+</html>

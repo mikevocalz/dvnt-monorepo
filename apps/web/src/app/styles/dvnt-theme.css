@@ -1,0 +1,237 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   DVNT Blog — locked brand theme (teal→blue + purple on near-black).
+   Every accent, glow, gradient and motion colour below derives from the
+   ramps defined here. No new hues are introduced anywhere in the blog.
+
+   Scope: blog chrome is gated under `.dvnt-blog` so the rest of the app keeps
+   its own identity. Only inherently document-level rules (smooth scroll via
+   :has(), the @view-transition opt-in, keyframes) live unscoped — and each is
+   guarded by prefers-reduced-motion.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Canvas + surface */
+  --dvnt-bg: #07090c;
+  --dvnt-surface: #0e1318;
+  --dvnt-glass: rgba(14, 19, 24, 0.72);
+  --dvnt-hairline: rgba(255, 255, 255, 0.09);
+  --dvnt-text: #fafaf9;
+  --dvnt-text-dim: rgba(245, 245, 244, 0.62);
+
+  /* Teal → blue ramp (b1 darkest → b8 brightest) */
+  --dvnt-b1: #0f4961;
+  --dvnt-b2: #175b7b;
+  --dvnt-b3: #217098;
+  --dvnt-b4: #2981af;
+  --dvnt-b5: #2f8ec1;
+  --dvnt-b6: #3397ce;
+  --dvnt-b7: #369cd5;
+  --dvnt-b8: #379ed8;
+
+  /* Purple ramp (p1 brightest → p5 deepest) */
+  --dvnt-p1: #874e9f;
+  --dvnt-p2: #824a9b;
+  --dvnt-p3: #743f92;
+  --dvnt-p4: #5d2d82;
+  --dvnt-p5: #5b2c81;
+
+  /* Semantic accents — chosen for AA contrast on the near-black canvas.
+     Primary (interactive: links, active TOC, CTAs) = brightest blue.
+     Secondary (eyebrows, labels, small caps) = a lightened purple derived
+     from p1's hue so small mono text still clears AA on #07090c. */
+  --dvnt-accent: #379ed8;          /* = b8 */
+  --dvnt-accent-2: #b07ec9;        /* lightened p1 — AA for small text */
+  --dvnt-accent-soft: rgba(55, 158, 216, 0.18);
+
+  /* The one signature gradient (purple → blue) and its horizontal twin. */
+  --dvnt-grad: linear-gradient(135deg, #5b2c81, #743f92, #2981af, #379ed8);
+  --dvnt-grad-h: linear-gradient(90deg, #5b2c81, #743f92, #2981af, #379ed8);
+
+  /* Glows derived from the ramp stops. */
+  --dvnt-glow: rgba(55, 158, 216, 0.45);
+  --dvnt-glow-purple: rgba(135, 78, 159, 0.4);
+
+  /* Faces (display = brand wordmark weight, body = Geist, utility = mono). */
+  --dvnt-display: "Republica-Minor", system-ui, sans-serif;
+  --dvnt-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --dvnt-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ── Keyframes (global by nature; effects that use them are gated) ──────── */
+
+/* Slow gradient drift for the article spine + section rules. */
+@keyframes dvntShimmer {
+  to { background-position: 200% 0; }
+}
+
+/* Hero entrance — gentle scale settle, used by the cinematic cover. */
+@keyframes dvntHeroIn {
+  from { opacity: 0; transform: scale(1.03); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Staggered load rise for index cards. */
+@keyframes dvntRise {
+  to { opacity: 1; transform: none; }
+}
+
+/* ── Signature: animated brand-gradient hairline ───────────────────────── */
+/* Used for the cinematic hero underline, the article card spine, and any
+   section divider that wants the brand to "breathe". GPU-cheap: a 1px (or
+   3px) element with a wide gradient drifting via background-position. */
+.dvnt-rule {
+  border: 0;
+  height: 1px;
+  width: 100%;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--dvnt-p3) 22%,
+    var(--dvnt-b4) 50%,
+    var(--dvnt-b8) 72%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-position: 0 0;
+  animation: dvntShimmer 9s linear infinite;
+}
+.dvnt-rule--spine {
+  height: auto;
+  width: 3px;
+  border-radius: 3px;
+  background-image: linear-gradient(180deg, var(--dvnt-p5), var(--dvnt-b4), var(--dvnt-b8));
+  background-size: 100% 240%;
+  animation: dvntShimmer 7s linear infinite;
+  opacity: 0.85;
+}
+
+/* ── Brand utility kit (real, reusable, brand-derived) ─────────────────── */
+
+.dvnt-card {
+  border-radius: 16px;
+  border: 1px solid var(--dvnt-hairline);
+  background: var(--dvnt-glass);
+  backdrop-filter: saturate(160%) blur(18px);
+}
+
+.dvnt-link {
+  color: var(--dvnt-accent);
+  text-decoration: none;
+  background-image: var(--dvnt-grad-h);
+  background-size: 0% 1px;
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  transition: background-size 0.25s ease, color 0.15s ease;
+}
+.dvnt-link:hover { color: var(--dvnt-text); background-size: 100% 1px; }
+
+.dvnt-btn {
+  background-image: var(--dvnt-grad);
+  color: #fff;
+  border: 0;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.18s ease, box-shadow 0.18s ease;
+}
+.dvnt-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 8px 28px var(--dvnt-glow-purple);
+}
+.dvnt-btn:disabled { opacity: 0.5; cursor: default; }
+
+.dvnt-input {
+  border: 1px solid var(--dvnt-hairline);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--dvnt-text);
+  border-radius: 12px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.dvnt-input:focus {
+  border-color: var(--dvnt-accent);
+  box-shadow: 0 0 0 3px var(--dvnt-accent-soft);
+}
+
+/* Avatar fallback — rounded square (DVNT avatars are never circular). */
+.dvnt-avatar-fallback {
+  border-radius: 28%;
+  background-image: var(--dvnt-grad);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+}
+
+/* White gradient wordmark. */
+.dvnt-wordmark {
+  font-family: var(--dvnt-display);
+  background: linear-gradient(180deg, #ffffff, rgba(255, 255, 255, 0.72));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* ── Editorial prose extras (drop-cap, measure are wired by client JS) ──── */
+/* The drop-cap class is added to the first paragraph by ScrollReveal so it is
+   robust to whatever wrapper the Lexical converter emits. */
+.dvnt-blog .dvnt-dropcap::first-letter {
+  float: left;
+  font-family: var(--dvnt-display);
+  font-weight: 900;
+  font-size: 3.4em;
+  line-height: 0.82;
+  margin: 6px 14px 0 0;
+  background: var(--dvnt-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ── Scroll-reveal (progressive: JS adds .dvnt-sr, so no-JS = fully visible) */
+.dvnt-blog .dvnt-sr {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+.dvnt-blog .dvnt-sr.is-visible { opacity: 1; transform: none; will-change: auto; }
+
+/* ── Magnetic / tilt cards (JS sets --rx/--ry with !important while engaged) */
+.dvnt-tilt { transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* ── Branded focus ring (keyboard only) ────────────────────────────────── */
+.dvnt-blog :focus-visible {
+  outline: 2px solid var(--dvnt-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Smooth scroll, scoped to pages that contain the blog ──────────────── */
+@media (prefers-reduced-motion: no-preference) {
+  html:has(.dvnt-blog) { scroll-behavior: smooth; }
+}
+
+/* ── View Transitions API ──────────────────────────────────────────────── */
+/* Progressive cross-document opt-in: smooth cross-fade on supported browsers
+   for MPA/back-forward navigations; a no-op everywhere else (hard fallback =
+   instant nav). Shared-element morph on the hero is named in the page styles
+   via view-transition-name. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition { navigation: auto; }
+}
+
+/* ── Reduced-motion: static fallback for every effect above ────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .dvnt-rule,
+  .dvnt-rule--spine { animation: none; background-position: 50% 0; }
+  .dvnt-blog .dvnt-sr { opacity: 1 !important; transform: none !important; transition: none; }
+  .dvnt-tilt { transition: none; }
+  .dvnt-link { transition: none; }
+  html:has(.dvnt-blog) { scroll-behavior: auto; }
+}

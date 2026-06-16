@@ -1,0 +1,60 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "moduleSuffixes": [
+      ".web",
+      ""
+    ],
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@dvnt/app/*": [
+        "../../packages/app/*"
+      ],
+      "react-native-screen-transitions": [
+        "../../node_modules/react-native-screen-transitions/lib/typescript/shared/index.d.ts"
+      ],
+      "lucide-react-native": [
+        "./src/platform/lucide-react-native.web.ts"
+      ]
+    },
+    "jsxImportSource": "nativewind",
+    "types": [
+      "nativewind/types"
+    ]
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next"
+  ]
+}

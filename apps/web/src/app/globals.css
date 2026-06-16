@@ -1,0 +1,96 @@
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css";
+@import "nativewind/theme";
+
+/* DVNT blog brand theme — tokens, keyframes, utilities. Scoped to `.dvnt-blog`
+   for chrome; only smooth-scroll/view-transitions are document-level (guarded
+   by prefers-reduced-motion). Importing here keeps it in the app bundle. */
+@import "./styles/dvnt-theme.css";
+
+/* Tailwind v4 content sources. The layered @imports above don't auto-detect the
+   monorepo, so the shared universal screens/components (which carry most of the
+   app's classes) must be registered explicitly or their utilities never get
+   generated. Paths are relative to this file (apps/web/src/app/). */
+@source "../../";
+@source "../../../../packages/app";
+@source "../../../../packages/ui";
+
+/* Rounded scrollbar utilities (scrollbar-thin, scrollbar-thumb-*, etc.).
+   nocompatible enables the rounded-thumb + custom-width variants. */
+@plugin "tailwind-scrollbar" {
+  nocompatible: true;
+}
+
+/* ── Deviant brand tokens (web) ── */
+:root {
+  --dvnt-cyan: #3fdcff;
+  --dvnt-purple: #8a40cf;
+  --dvnt-magenta: #ff5bfc;
+  --dvnt-violet: #7c3aed;
+}
+
+/* Global rounded, gradient deviant scrollbar (Firefox + WebKit/Blink). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--dvnt-purple) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background-color: var(--dvnt-purple);
+  background-image: linear-gradient(
+    180deg,
+    var(--dvnt-cyan),
+    var(--dvnt-purple) 55%,
+    var(--dvnt-magenta)
+  );
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-image: linear-gradient(180deg, var(--dvnt-cyan), var(--dvnt-magenta));
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── nextjs-toploader → deviant gradient bar + glow ── */
+#nprogress .bar {
+  background: linear-gradient(
+    90deg,
+    var(--dvnt-cyan),
+    var(--dvnt-purple) 50%,
+    var(--dvnt-magenta)
+  ) !important;
+  height: 3px !important;
+}
+#nprogress .peg {
+  box-shadow:
+    0 0 12px var(--dvnt-magenta),
+    0 0 8px var(--dvnt-cyan) !important;
+}
+
+/* Dark app canvas — prevents a white flash above the fixed landing header and
+   on overscroll. Mirrors apps/web-vite/src/globals.css. */
+html,
+body {
+  background-color: #02030a;
+}
+
+/* Brand wordmark/nav font used by the landing header & sections
+   (fontFamily: "Republica-Minor"). Served from apps/web/public/fonts. The
+   variable weight range covers the 400–900 the design uses. */
+@font-face {
+  font-family: "Republica-Minor";
+  src: url("/fonts/Republica-Minor.ttf") format("truetype");
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+}

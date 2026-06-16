@@ -1,0 +1,44 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+apply plugin: 'maven-publish'
+
+buildscript {
+  def expoModulesCorePlugin = new File(
+    project(':expo-modules-core').projectDir.absolutePath,
+    'ExpoModulesCorePlugin.gradle'
+  )
+  if (expoModulesCorePlugin.exists()) {
+    apply from: expoModulesCorePlugin
+    applyKotlinExpoModulesCorePlugin()
+  }
+
+  // If the previous section failed to apply the plugin, we apply a fallback version here.
+  if (!project.plugins.hasPlugin('org.jetbrains.kotlin.android')) {
+    apply plugin: 'org.jetbrains.kotlin.android'
+  }
+}
+
+android {
+  compileSdkVersion safeExtGet("compileSdkVersion", 34)
+  namespace 'expo.modules.dvnttranslation'
+
+  defaultConfig {
+    minSdkVersion safeExtGet("minSdkVersion", 24)
+    targetSdkVersion safeExtGet("targetSdkVersion", 34)
+  }
+
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  implementation project(':expo-modules-core')
+  implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:${safeExtGet('kotlinVersion', '1.9.0')}"
+
+  // ML Kit on-device translation
+  implementation 'com.google.mlkit:translate:17.0.3'
+
+  // ML Kit language identification (for auto-detect)
+  implementation 'com.google.mlkit:language-id:17.0.6'
+}

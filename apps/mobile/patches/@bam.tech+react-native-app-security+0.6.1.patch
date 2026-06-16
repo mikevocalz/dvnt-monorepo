@@ -1,0 +1,19 @@
+diff --git a/node_modules/@bam.tech/react-native-app-security/android/src/main/java/tech/bam/rnas/AndroidReactActivityLifecycleListener.kt b/node_modules/@bam.tech/react-native-app-security/android/src/main/java/tech/bam/rnas/AndroidReactActivityLifecycleListener.kt
+index fa0a78c..ff70d2e 100644
+--- a/node_modules/@bam.tech/react-native-app-security/android/src/main/java/tech/bam/rnas/AndroidReactActivityLifecycleListener.kt
++++ b/node_modules/@bam.tech/react-native-app-security/android/src/main/java/tech/bam/rnas/AndroidReactActivityLifecycleListener.kt
+@@ -27,7 +27,13 @@ class AndroidReactActivityLifecycleListener : ReactActivityLifecycleListener {
+ 
+   override fun onCreate(activity: Activity, savedInstanceState: Bundle?) {
+     super.onCreate(activity, savedInstanceState)
+-    OkHttpClientProvider.setOkHttpClientFactory(SSLPinning())
++    // Conservative rollout: do not replace React Native's OkHttp client unless
++    // DVNT has explicitly configured SSL pinning domains. The upstream module
++    // also enables certificate transparency through this override, which is too
++    // broad for an initial hardening pass.
++    if (parseConfig().isNotEmpty()) {
++      OkHttpClientProvider.setOkHttpClientFactory(SSLPinning())
++    }
+ 
+     if(BuildConfig.RNAS_PREVENT_RECENT_SCREENSHOTS && Build.VERSION.SDK_INT >= 33) {
+       activity.setRecentsScreenshotEnabled(false)

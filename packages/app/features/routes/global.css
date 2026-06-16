@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Brand Colors */
+    --primary: 199 88% 54%;
+    --accent: 304 100% 68%;
+    --purple: 267 55% 53%;
+
+    /* Tier-Accent Semantic Aliases — see lib/theme/tier-colors.ts */
+    --accent-cyan: 191 100% 62%;     /* #3FDCFF — free tier */
+    --accent-vip-soft: 270 89% 75%;  /* #C084FC — VIP highlight variant */
+
+    /* Base Colors */
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+
+    /* Muted Colors */
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 64%;
+
+    /* Border & Input */
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 199 88% 54%;
+
+    /* Card */
+    --card: 0 0% 0%;
+    --card-foreground: 0 0% 100%;
+
+    /* Popover */
+    --popover: 0 0% 0%;
+    --popover-foreground: 0 0% 100%;
+
+    /* Primary */
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary */
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 100%;
+
+    /* Accent */
+    --accent-foreground: 0 0% 100%;
+
+    /* Destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Radius */
+    --radius: 0.5rem;
+  }
+}

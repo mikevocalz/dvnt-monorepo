@@ -1,0 +1,36 @@
+{
+  "name": "@dvnt/auth",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/client.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "react-native": "./src/client.native.ts",
+      "import": "./src/client.web.ts",
+      "default": "./src/client.ts"
+    }
+  },
+  "scripts": {
+    "lint": "eslint",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc --noEmit"
+  },
+  "dependencies": {
+    "better-auth": "^1.5.5",
+    "@better-auth/passkey": "^1.5.5"
+  },
+  "peerDependencies": {
+    "@better-auth/expo": "^1.5.5",
+    "expo-secure-store": "*",
+    "react": "*"
+  },
+  "peerDependenciesMeta": {
+    "@better-auth/expo": {
+      "optional": true
+    },
+    "expo-secure-store": {
+      "optional": true
+    }
+  }
+}

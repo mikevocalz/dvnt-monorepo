@@ -1,0 +1,436 @@
+-- Media Pipeline Migration
+-- Creates all tables required for the media upload system
+
+-- ============================================
+-- 1) MEDIA TABLE (central media storage)
+-- ============================================
+CREATE TABLE IF NOT EXISTS media (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  url TEXT NOT NULL,
+  key TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  duration_sec INTEGER NULL,
+  width INTEGER NULL,
+  height INTEGER NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_user_id ON media(user_id);
+CREATE INDEX IF NOT EXISTS idx_media_kind ON media(kind);
+
+-- ============================================
+-- 2) PROFILES TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  username TEXT UNIQUE NOT NULL,
+  display_name TEXT NULL,
+  bio TEXT NULL,
+  avatar_media_id UUID NULL REFERENCES media(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_profiles_username ON profiles(username);
+
+-- ============================================
+-- 3) POSTS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS posts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  caption TEXT NULL,
+  location TEXT NULL,
+  is_nsfw BOOLEAN DEFAULT false,
+  likes_count INTEGER DEFAULT 0,
+  comments_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
+CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
+
+-- ============================================
+-- 4) POST_MEDIA TABLE (junction table)
+-- ============================================
+CREATE TABLE IF NOT EXISTS post_media (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  media_id UUID NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(post_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_post_media_post_id ON post_media(post_id);
+
+-- ============================================
+-- 5) POST_LIKES TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS post_likes (
+  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (post_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_post_likes_user_id ON post_likes(user_id);
+
+-- ============================================
+-- 6) BOOKMARKS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS bookmarks (
+  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (post_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bookmarks_user_id ON bookmarks(user_id);
+
+-- ============================================
+-- 7) FOLLOWS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS follows (
+  follower_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  following_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (follower_id, following_id),
+  CHECK (follower_id <> following_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows(follower_id);
+CREATE INDEX IF NOT EXISTS idx_follows_following_id ON follows(following_id);
+
+-- ============================================
+-- 8) COMMENTS TABLE (threaded)
+-- ============================================
+CREATE TABLE IF NOT EXISTS comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  parent_id UUID NULL REFERENCES comments(id) ON DELETE CASCADE,
+  text TEXT NULL,
+  gif_url TEXT NULL,
+  likes_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT comments_content_check CHECK (text IS NOT NULL OR gif_url IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
+CREATE INDEX IF NOT EXISTS idx_comments_user_id ON comments(user_id);
+CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_id);
+
+-- ============================================
+-- 9) COMMENT_LIKES TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS comment_likes (
+  comment_id UUID NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (comment_id, user_id)
+);
+
+-- ============================================
+-- 10) STORIES TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS stories (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  media_id UUID NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+  viewers_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_stories_user_id ON stories(user_id);
+CREATE INDEX IF NOT EXISTS idx_stories_expires_at ON stories(expires_at);
+
+-- Trigger to auto-set expires_at to 24 hours from created_at
+CREATE OR REPLACE FUNCTION set_story_expiry()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.expires_at IS NULL THEN
+    NEW.expires_at := NEW.created_at + INTERVAL '24 hours';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_set_story_expiry ON stories;
+CREATE TRIGGER trigger_set_story_expiry
+  BEFORE INSERT ON stories
+  FOR EACH ROW
+  EXECUTE FUNCTION set_story_expiry();
+
+-- ============================================
+-- 11) STORY_VIEWS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS story_views (
+  story_id UUID NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  viewed_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (story_id, user_id)
+);
+
+-- ============================================
+-- 12) STORY_REPLIES TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS story_replies (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  story_id UUID NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  receiver_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  text TEXT NULL,
+  gif_url TEXT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT story_replies_content_check CHECK (text IS NOT NULL OR gif_url IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_story_replies_story_id ON story_replies(story_id);
+
+-- ============================================
+-- 13) EVENTS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organizer_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT NULL,
+  cover_media_id UUID NULL REFERENCES media(id) ON DELETE SET NULL,
+  location TEXT NULL,
+  start_date TIMESTAMPTZ NULL,
+  end_date TIMESTAMPTZ NULL,
+  price DECIMAL(10, 2) DEFAULT 0,
+  max_attendees INTEGER NULL,
+  total_attendees INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_organizer_id ON events(organizer_id);
+CREATE INDEX IF NOT EXISTS idx_events_start_date ON events(start_date);
+
+-- ============================================
+-- 14) EVENT_MEDIA TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS event_media (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  media_id UUID NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(event_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_media_event_id ON event_media(event_id);
+
+-- ============================================
+-- 15) EVENT_PARTICIPANTS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS event_participants (
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (event_id, user_id)
+);
+
+-- ============================================
+-- 16) EVENT_COMMENTS TABLE (threaded)
+-- ============================================
+CREATE TABLE IF NOT EXISTS event_comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  parent_id UUID NULL REFERENCES event_comments(id) ON DELETE CASCADE,
+  text TEXT NULL,
+  gif_url TEXT NULL,
+  likes_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT event_comments_content_check CHECK (text IS NOT NULL OR gif_url IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_comments_event_id ON event_comments(event_id);
+
+-- ============================================
+-- 17) NOTIFICATIONS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  actor_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  entity_type TEXT NULL,
+  entity_id UUID NULL,
+  read BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(user_id, read);
+
+-- ============================================
+-- 18) CONVERSATIONS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  is_group BOOLEAN DEFAULT false,
+  name TEXT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- ============================================
+-- 19) CONVERSATION_PARTICIPANTS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS conversation_participants (
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  joined_at TIMESTAMPTZ DEFAULT now(),
+  last_read_at TIMESTAMPTZ NULL,
+  PRIMARY KEY (conversation_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_participants_user_id ON conversation_participants(user_id);
+
+-- ============================================
+-- 20) MESSAGES TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  text TEXT NULL,
+  media_id UUID NULL REFERENCES media(id) ON DELETE SET NULL,
+  gif_url TEXT NULL,
+  story_id UUID NULL REFERENCES stories(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT messages_content_check CHECK (text IS NOT NULL OR media_id IS NOT NULL OR gif_url IS NOT NULL OR story_id IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC);
+
+-- ============================================
+-- FUNCTIONS: Update counts
+-- ============================================
+
+-- Function to update post likes count
+CREATE OR REPLACE FUNCTION update_post_likes_count()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    UPDATE posts SET likes_count = likes_count + 1 WHERE id = NEW.post_id;
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    UPDATE posts SET likes_count = GREATEST(0, likes_count - 1) WHERE id = OLD.post_id;
+    RETURN OLD;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_post_likes_count ON post_likes;
+CREATE TRIGGER trigger_update_post_likes_count
+  AFTER INSERT OR DELETE ON post_likes
+  FOR EACH ROW
+  EXECUTE FUNCTION update_post_likes_count();
+
+-- Function to update post comments count
+CREATE OR REPLACE FUNCTION update_post_comments_count()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    UPDATE posts SET comments_count = comments_count + 1 WHERE id = NEW.post_id;
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    UPDATE posts SET comments_count = GREATEST(0, comments_count - 1) WHERE id = OLD.post_id;
+    RETURN OLD;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_post_comments_count ON comments;
+CREATE TRIGGER trigger_update_post_comments_count
+  AFTER INSERT OR DELETE ON comments
+  FOR EACH ROW
+  EXECUTE FUNCTION update_post_comments_count();
+
+-- Function to update comment likes count
+CREATE OR REPLACE FUNCTION update_comment_likes_count()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    UPDATE comments SET likes_count = likes_count + 1 WHERE id = NEW.comment_id;
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    UPDATE comments SET likes_count = GREATEST(0, likes_count - 1) WHERE id = OLD.comment_id;
+    RETURN OLD;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_comment_likes_count ON comment_likes;
+CREATE TRIGGER trigger_update_comment_likes_count
+  AFTER INSERT OR DELETE ON comment_likes
+  FOR EACH ROW
+  EXECUTE FUNCTION update_comment_likes_count();
+
+-- Function to update story viewers count
+CREATE OR REPLACE FUNCTION update_story_viewers_count()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    UPDATE stories SET viewers_count = viewers_count + 1 WHERE id = NEW.story_id;
+    RETURN NEW;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_story_viewers_count ON story_views;
+CREATE TRIGGER trigger_update_story_viewers_count
+  AFTER INSERT ON story_views
+  FOR EACH ROW
+  EXECUTE FUNCTION update_story_viewers_count();
+
+-- Function to update event attendees count
+CREATE OR REPLACE FUNCTION update_event_attendees_count()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    UPDATE events SET total_attendees = total_attendees + 1 WHERE id = NEW.event_id;
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    UPDATE events SET total_attendees = GREATEST(0, total_attendees - 1) WHERE id = OLD.event_id;
+    RETURN OLD;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_event_attendees_count ON event_participants;
+CREATE TRIGGER trigger_update_event_attendees_count
+  AFTER INSERT OR DELETE ON event_participants
+  FOR EACH ROW
+  EXECUTE FUNCTION update_event_attendees_count();
+
+-- Function to update conversation updated_at on new message
+CREATE OR REPLACE FUNCTION update_conversation_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE conversations SET updated_at = now() WHERE id = NEW.conversation_id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_conversation_timestamp ON messages;
+CREATE TRIGGER trigger_update_conversation_timestamp
+  AFTER INSERT ON messages
+  FOR EACH ROW
+  EXECUTE FUNCTION update_conversation_timestamp();

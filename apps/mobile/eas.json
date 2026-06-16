@@ -1,0 +1,126 @@
+{
+  "cli": {
+    "version": ">= 5.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "ios": {
+        "image": "latest"
+      },
+      "env": {
+        "APP_ENV": "development",
+        "DATABASE_URL": "${DATABASE_URL}",
+        "EXPO_PUBLIC_API_URL": "${API_URL}",
+        "EXPO_PUBLIC_AUTH_URL": "https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/auth",
+        "EXPO_PUBLIC_BUNNY_STORAGE_ZONE": "${BUNNY_STORAGE_ZONE}",
+        "EXPO_PUBLIC_BUNNY_STORAGE_REGION": "${BUNNY_STORAGE_REGION}",
+        "EXPO_PUBLIC_BUNNY_CDN_URL": "${BUNNY_CDN_URL}",
+        "EXPO_PUBLIC_FISHJAM_APP_ID": "${FISHJAM_APP_ID}",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://npfjanxturvmjyevoyfo.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "${EXPO_PUBLIC_SUPABASE_ANON_KEY}",
+        "EXPO_PUBLIC_KLIPY_API_KEY": "${EXPO_PUBLIC_KLIPY_API_KEY}",
+        "RESEND_API_KEY": "${RESEND_API_KEY}",
+        "RESEND_FROM_EMAIL": "${RESEND_FROM_EMAIL}",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "${EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY}",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}",
+        "EXPO_PUBLIC_GOOGLE_PLACES_API_KEY": "${EXPO_PUBLIC_GOOGLE_PLACES_API_KEY}"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "ios": {
+        "image": "latest"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "STRICT_PATCHES": "1",
+        "APP_ENV": "preview",
+        "DATABASE_URL": "${DATABASE_URL}",
+        "EXPO_PUBLIC_API_URL": "${API_URL}",
+        "EXPO_PUBLIC_AUTH_URL": "https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/auth",
+        "EXPO_PUBLIC_BUNNY_STORAGE_ZONE": "${BUNNY_STORAGE_ZONE}",
+        "EXPO_PUBLIC_BUNNY_STORAGE_REGION": "${BUNNY_STORAGE_REGION}",
+        "EXPO_PUBLIC_BUNNY_CDN_URL": "${BUNNY_CDN_URL}",
+        "EXPO_PUBLIC_FISHJAM_APP_ID": "${FISHJAM_APP_ID}",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://npfjanxturvmjyevoyfo.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "${EXPO_PUBLIC_SUPABASE_ANON_KEY}",
+        "EXPO_PUBLIC_KLIPY_API_KEY": "${EXPO_PUBLIC_KLIPY_API_KEY}",
+        "RESEND_API_KEY": "${RESEND_API_KEY}",
+        "RESEND_FROM_EMAIL": "${RESEND_FROM_EMAIL}",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "${EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY}",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}",
+        "EXPO_PUBLIC_GOOGLE_PLACES_API_KEY": "${EXPO_PUBLIC_GOOGLE_PLACES_API_KEY}"
+      }
+    },
+    "apk": {
+      "distribution": "internal",
+      "channel": "production",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "STRICT_PATCHES": "1",
+        "APP_ENV": "production",
+        "DATABASE_URL": "${DATABASE_URL}",
+        "EXPO_PUBLIC_API_URL": "${API_URL}",
+        "EXPO_PUBLIC_AUTH_URL": "https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/auth",
+        "EXPO_PUBLIC_BUNNY_STORAGE_ZONE": "${BUNNY_STORAGE_ZONE}",
+        "EXPO_PUBLIC_BUNNY_STORAGE_REGION": "${BUNNY_STORAGE_REGION}",
+        "EXPO_PUBLIC_BUNNY_CDN_URL": "${BUNNY_CDN_URL}",
+        "EXPO_PUBLIC_FISHJAM_APP_ID": "${FISHJAM_APP_ID}",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://npfjanxturvmjyevoyfo.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "${EXPO_PUBLIC_SUPABASE_ANON_KEY}",
+        "EXPO_PUBLIC_KLIPY_API_KEY": "${EXPO_PUBLIC_KLIPY_API_KEY}",
+        "RESEND_API_KEY": "${RESEND_API_KEY}",
+        "RESEND_FROM_EMAIL": "${RESEND_FROM_EMAIL}",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "${EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY}",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}",
+        "EXPO_PUBLIC_GOOGLE_PLACES_API_KEY": "${EXPO_PUBLIC_GOOGLE_PLACES_API_KEY}"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "autoIncrement": true,
+      "ios": {
+        "image": "latest"
+      },
+      "android": {
+        "buildType": "app-bundle",
+        "resourceClass": "large"
+      },
+      "env": {
+        "STRICT_PATCHES": "1",
+        "APP_ENV": "production",
+        "DATABASE_URL": "${DATABASE_URL}",
+        "EXPO_PUBLIC_API_URL": "${API_URL}",
+        "EXPO_PUBLIC_AUTH_URL": "https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/auth",
+        "EXPO_PUBLIC_BUNNY_STORAGE_ZONE": "${BUNNY_STORAGE_ZONE}",
+        "EXPO_PUBLIC_BUNNY_STORAGE_REGION": "${BUNNY_STORAGE_REGION}",
+        "EXPO_PUBLIC_BUNNY_CDN_URL": "${BUNNY_CDN_URL}",
+        "EXPO_PUBLIC_FISHJAM_APP_ID": "${FISHJAM_APP_ID}",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://npfjanxturvmjyevoyfo.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "${EXPO_PUBLIC_SUPABASE_ANON_KEY}",
+        "EXPO_PUBLIC_KLIPY_API_KEY": "${EXPO_PUBLIC_KLIPY_API_KEY}",
+        "RESEND_API_KEY": "${RESEND_API_KEY}",
+        "RESEND_FROM_EMAIL": "${RESEND_FROM_EMAIL}",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "${EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY}",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}",
+        "EXPO_PUBLIC_GOOGLE_PLACES_API_KEY": "${EXPO_PUBLIC_GOOGLE_PLACES_API_KEY}"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6758054072"
+      }
+    }
+  }
+}

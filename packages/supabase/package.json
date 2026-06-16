@@ -1,0 +1,31 @@
+{
+  "name": "@dvnt/supabase",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/client.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "react-native": "./src/client.native.ts",
+      "import": "./src/client.web.ts",
+      "default": "./src/client.ts"
+    }
+  },
+  "scripts": {
+    "lint": "eslint",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.103.2"
+  },
+  "peerDependencies": {
+    "expo-secure-store": "*",
+    "react-native": "*"
+  },
+  "peerDependenciesMeta": {
+    "expo-secure-store": {
+      "optional": true
+    }
+  }
+}

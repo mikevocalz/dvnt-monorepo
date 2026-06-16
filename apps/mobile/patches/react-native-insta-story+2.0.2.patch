@@ -1,0 +1,29 @@
+diff --git a/node_modules/react-native-insta-story/lib/src/StoryListItem.js b/node_modules/react-native-insta-story/lib/src/StoryListItem.js
+index 0000001..0000002 100644
+--- a/node_modules/react-native-insta-story/lib/src/StoryListItem.js
++++ b/node_modules/react-native-insta-story/lib/src/StoryListItem.js
+@@ -290,10 +290,22 @@ const StoryListItem = ({ index, key, userId, profileImage, profileName, duration
+           </react_native_1.View>
+         </react_native_1.View>
+       </react_native_1.SafeAreaView>
+-      {typeof renderSwipeUpComponent === 'function' ? (renderSwipeUpComponent({
++      {typeof renderSwipeUpComponent === 'function' ? (renderSwipeUpComponent(Object.assign({
+             onPress: onSwipeUp,
+             item: content[current],
+-        })) : (<react_native_1.TouchableOpacity activeOpacity={1} onPress={onSwipeUp} style={styles.swipeUpBtn}>
++        }, {
++            pause: function() {
++                setIsInteractionPaused(true);
++                progress.stopAnimation();
++            },
++            resume: function() {
++                setIsInteractionPaused(false);
++                setPressed(false);
++                if (!isVideo) {
++                    startAnimation();
++                }
++            },
++        }))) : (<react_native_1.TouchableOpacity activeOpacity={1} onPress={onSwipeUp} style={styles.swipeUpBtn}>
+           <react_native_1.Text style={styles.swipeText}></react_native_1.Text>
+           <react_native_1.Text style={styles.swipeText}>{swipeText}</react_native_1.Text>
+         </react_native_1.TouchableOpacity>)}

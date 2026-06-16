@@ -1,0 +1,33 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "@dvnt/app/*": [
+        "../../packages/app/*"
+      ],
+      "react-native-screen-transitions": [
+        "../../node_modules/react-native-screen-transitions/lib/typescript/shared/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts",
+    "babel.config.js",
+    "nativewind-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "server",
+    "supabase/functions",
+    "scripts"
+  ]
+}

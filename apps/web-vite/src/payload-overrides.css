@@ -1,0 +1,394 @@
+div.table {
+  display: block;
+}
+
+/*
+ * Backport newer @payloadcms/next nav-link styling onto the older
+ * @payloadcms/ui DefaultNav that ships in payloadcms-next-4.0.0-beta.0.tgz.
+ * Without this, .nav__link uses asymmetric base(0.125) / base(1.5) padding;
+ * payload main uses spacer-1 / spacer-2 with a hover background.
+ */
+.nav__link {
+  padding-block: var(--spacer-1);
+  padding-inline: var(--spacer-2);
+  border-radius: var(--radius-medium);
+}
+
+a.nav__link:hover {
+  background: var(--color-bg-secondary);
+  text-decoration: none;
+}
+
+.nav__link--selected,
+.nav__link.active {
+  font-weight: 600;
+  border-radius: var(--radius-medium);
+  background: var(--color-bg-selected);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * DVNT brand theme for the Payload admin — make the CMS read as the same
+ * product as the moderation console (deviant base + magenta/cyan accents).
+ * ─────────────────────────────────────────────────────────────────────────── */
+:root,
+html[data-theme='dark'] {
+  --dvnt-magenta: #ff5bfc;
+  --dvnt-cyan: #3fdcff;
+  --dvnt-bg: #04050c;
+}
+
+/* Login: deviant gradient wash behind the form. */
+.login,
+.template-minimal {
+  background:
+    radial-gradient(70% 42% at 50% 0%, rgba(138, 64, 207, 0.3) 0%, rgba(124, 58, 237, 0.12) 38%, rgba(2, 3, 10, 0) 78%),
+    var(--dvnt-bg) !important;
+}
+.login .login__brand img,
+.login__brand img {
+  margin-inline: auto;
+}
+
+/* Primary actions → DVNT magenta. */
+.btn--style-primary,
+button.btn--style-primary {
+  background: var(--dvnt-magenta) !important;
+  border-color: var(--dvnt-magenta) !important;
+  color: #0a0a14 !important;
+}
+.btn--style-primary:hover {
+  filter: brightness(1.06);
+}
+
+/* Active nav + links pick up the brand. */
+.nav__link--active,
+.nav__link.active {
+  color: var(--dvnt-magenta) !important;
+  box-shadow: inset 3px 0 0 var(--dvnt-magenta);
+}
+a:not(.btn):hover {
+  color: var(--dvnt-cyan);
+}
+
+/* Pill/“new” badges + focus rings on brand. */
+.pill--style-success,
+.status--has-value {
+  --theme-success-500: var(--dvnt-magenta);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * DVNT DEVIANT dark theme. The admin is forced to dark (admin.theme:'dark');
+ * here we retint the grey ramp the dark palette derives from to deviant
+ * near-blacks, and recolor the brand to DVNT magenta + cyan accents. Loaded
+ * last, so it wins the cascade.
+ * ─────────────────────────────────────────────────────────────────────────── */
+html[data-theme='dark'],
+:root[data-theme='dark'],
+[data-theme='dark'] {
+  --ramp-grey-1000: #010208;
+  --ramp-grey-900: #02030a;
+  --ramp-grey-800: #05060f;
+  --ramp-grey-700: #0a0c17;
+  --ramp-grey-600: #161a28;
+  --ramp-grey-500: #232a3b;
+
+  /* Brand → DVNT magenta (primary actions, active nav, focus). */
+  --color-bg-brand: #ff5bfc;
+  --color-bg-brand-hover: #ff74fd;
+  --color-bg-brand-pressed: #e84fe6;
+  --color-bg-brand-secondary: rgba(255, 91, 252, 0.14);
+  --color-bg-brand-tertiary: rgba(255, 91, 252, 0.1);
+  --color-text-brand: #ff5bfc;
+  --color-border-brand: #ff5bfc;
+  --color-bg-selected: rgba(255, 91, 252, 0.16);
+  --color-bg-selected-hover: rgba(255, 91, 252, 0.22);
+  --color-bg-selected-strong: rgba(255, 91, 252, 0.28);
+}
+
+/* Deviant gradient wash behind the whole admin shell. */
+body,
+.template-default,
+.template-minimal,
+.app-header {
+  background-color: #02030a !important;
+}
+/* Gradient wash painted on the element's own background — NOT a positioned
+ * ::before overlay (that overlay sat above the nav and ate every click). */
+.template-default,
+.template-minimal {
+  background-image:
+    radial-gradient(75% 45% at 50% 0%, rgba(138, 64, 207, 0.16) 0%, rgba(124, 58, 237, 0.06) 42%, rgba(2, 3, 10, 0) 80%) !important;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* Cyan accents for links + focus rings (matches the console). */
+a:not(.btn):not(.nav__link):hover {
+  color: #3fdcff !important;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * Sidebar — DESKTOP ONLY (≥1025px, matching Payload's own 1024 breakpoint).
+ * Above this we force a persistent liquid-glass sidebar (grid column + inert
+ * strip via KeepNavInteractive). Below it, Payload's native off-canvas hamburger
+ * drawer takes over (see the max-width:1024 block lower down) — so tablet/phone
+ * never get a forced sidebar overlapping the content.
+ * ─────────────────────────────────────────────────────────────────────────── */
+@media (min-width: 1025px) {
+  /* Force the open grid. Payload's hydrated-but-closed rule is
+   * `.template-default--nav-hydrated { grid-template-columns: 0 auto }` (0,1,0),
+   * which collapses the sidebar column to 0 so the nav overlaps the content.
+   * Our `.template-default.template-default--nav-hydrated` selector is (0,2,0)
+   * and wins — restoring a real sidebar column so nothing overlaps. */
+  .template-default.template-default--nav-hydrated,
+  .template-default.template-default--nav-open,
+  .template-default {
+    grid-template-columns: var(--nav-width, 275px) auto !important;
+  }
+  /* Sidebar-only chrome: right edge, drop shadow + a specular sheen. */
+  .nav {
+    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05), 2px 0 40px rgba(0, 0, 0, 0.45) !important;
+  }
+  .nav::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 160px;
+    pointer-events: none;
+    background: radial-gradient(120% 80% at 30% 0%, rgba(255, 91, 252, 0.12), transparent 70%);
+  }
+}
+
+/* ── Nav panel + links — styled at ALL sizes, so the mobile off-canvas drawer
+ *    gets the same glass + padded links instead of bare unstyled text. The grid
+ *    column / sidebar edge above are the ONLY desktop-specific bits. */
+.nav {
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 18px 14px 16px !important;
+  gap: 1px !important;
+  background: linear-gradient(180deg, rgba(22, 16, 38, 0.55) 0%, rgba(6, 8, 16, 0.66) 60%) !important;
+  backdrop-filter: blur(22px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(160%) !important;
+}
+.nav__wrap,
+.nav__scroll { display: flex !important; flex-direction: column !important; gap: 1px !important; width: 100% !important; position: relative; }
+.nav a,
+.nav__link {
+  position: relative;
+  display: flex !important;
+  align-items: center !important;
+  padding: 10px 12px !important;
+  border-radius: 10px !important;
+  text-decoration: none !important;
+  color: var(--color-text-secondary, rgba(245, 245, 244, 0.72)) !important;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.nav a:hover,
+.nav__link:hover { background: rgba(255, 255, 255, 0.06) !important; color: #fafaf9 !important; }
+/* Group headings (Collections / Blog) — muted uppercase, like the console. */
+.nav-group__label,
+.nav-group__toggle,
+.nav__label {
+  color: rgba(245, 245, 244, 0.5) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 1.3px !important;
+  padding: 10px 12px 4px !important;
+}
+
+/* ── Mobile/tablet drawer (≤1024px): near-solid so content doesn't bleed
+ *    through the full-screen overlay; a touch more breathing room at the top. */
+@media (max-width: 1024px) {
+  /* CRITICAL: when the closed nav is `display:none` it leaves the grid, so the
+   * content wrapper auto-places into the FIRST (0px) column → 0-width content
+   * (the whole CMS page renders blank/squished). Pin it to the 2nd column so it
+   * always fills the real width whether the nav is hidden or an open overlay. */
+  .template-default__wrap {
+    grid-column: 2 / 3 !important;
+    min-width: 0 !important;
+  }
+  .template-default--nav-open .nav {
+    background: linear-gradient(180deg, #130d22 0%, #06080f 72%) !important;
+    padding: 22px 16px 20px !important;
+    overflow-y: auto !important;
+  }
+  .template-default--nav-open .nav a,
+  .template-default--nav-open .nav__link { padding: 12px 12px !important; font-size: 16px !important; }
+}
+
+/* ── Tablet/phone (≤1024px): native hamburger drawer. Payload's hydrated nav is
+ *    `display:unset` with no off-canvas transform, so in the collapsed 0-width
+ *    grid column it overflows on top of the content. Hide the nav whenever the
+ *    drawer is CLOSED — keyed on Payload's authoritative `--nav-open` class (NOT
+ *    `inert`, which KeepNavInteractive strips on desktop and never restores, so
+ *    it goes stale when you resize a desktop window down). The hamburger
+ *    (`.nav-toggler`) adds `--nav-open` → the nav shows as a full-width drawer. */
+@media (max-width: 1024px) {
+  .template-default:not(.template-default--nav-open) .nav {
+    display: none !important;
+  }
+}
+
+/* ── Soften the active/selected nav state (was a big filled "button"). A subtle
+ *    glass tint + a magenta left-edge — reads as selected, not a second button. */
+.nav__link--selected,
+.nav__link--active,
+.nav__link.active {
+  font-weight: 600 !important;
+  color: #fafaf9 !important;
+  background: rgba(255, 91, 252, 0.08) !important;
+  box-shadow: inset 2px 0 0 var(--dvnt-magenta) !important;
+}
+
+/* ── Liquid-glass footer pill: "← DVNT Console". Separated from the nav list so
+ *    it no longer reads as a stacked double-button. */
+.dvnt-back {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 8px 6px !important;
+  padding: 11px 14px !important;
+  border-radius: 14px !important;
+  text-decoration: none !important;
+  color: #ffd6fb !important;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  border: 1px solid rgba(255, 91, 252, 0.28);
+  background: linear-gradient(135deg, rgba(255, 91, 252, 0.16), rgba(138, 64, 207, 0.12)) !important;
+  backdrop-filter: blur(14px) saturate(180%);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 6px 22px rgba(138, 64, 207, 0.28);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.dvnt-back:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 91, 252, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 10px 28px rgba(255, 91, 252, 0.32);
+}
+.dvnt-back__icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+}
+/* Add a hairline divider above the footer pill to set it apart from the list. */
+.dvnt-back::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  margin-top: -14px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Login form: constrain the inputs to max-w-3xl (768px), centered — was full width. */
+.login__form {
+  max-width: 768px;
+  margin-inline: auto;
+  width: 100%;
+}
+.login__form .field-type input,
+.login__form input[type='text'],
+.login__form input[type='email'],
+.login__form input[type='password'] {
+  width: 100%;
+}
+
+/* Login: space the form VIEW (inputs + button) down from the logo. */
+.login__form {
+  margin-top: clamp(32px, 10vh, 72px);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * Liquid-glass content surfaces — dashboard collection tiles (.card) + list
+ * tables — to match the glass sidebar.
+ * ─────────────────────────────────────────────────────────────────────────── */
+.card {
+  background: linear-gradient(160deg, rgba(22, 16, 38, 0.42) 0%, rgba(8, 10, 20, 0.55) 70%) !important;
+  backdrop-filter: blur(16px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  overflow: hidden;
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+}
+/* Specular sheen across the top of each card. */
+.card::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 50%;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent);
+}
+.card--has-onclick:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 91, 252, 0.4) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 16px 40px rgba(138, 64, 207, 0.22) !important;
+}
+.card__title { color: #fafaf9 !important; position: relative; z-index: 1; }
+.card__actions { position: relative; z-index: 1; }
+
+/* List-view table → glass card. */
+.table,
+.collection-list__wrap .table {
+  background: linear-gradient(160deg, rgba(22, 16, 38, 0.4) 0%, rgba(8, 10, 20, 0.52) 70%) !important;
+  backdrop-filter: blur(16px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+.table table thead th { background: rgba(255, 255, 255, 0.03) !important; }
+.table table tbody tr:hover td { background: rgba(255, 91, 252, 0.05) !important; }
+
+/* Remove the default logout button from the sidebar — keep only the
+ * "← DVNT Console" pill. (Logout remains in the top-right account menu.) */
+.nav .logout,
+.nav .logout__wrap,
+.nav__controls .logout {
+  display: none !important;
+}
+
+/* Remove the redundant sidebar logout (the "↩]" icon under DVNT Console — it
+ * duplicated the ← glyph). Log out from the top-right account menu instead. */
+.nav__controls,
+.nav__log-out,
+.nav a[href='/admin/logout'] {
+  display: none !important;
+}
+
+/* ── "Sync from app" card (beforeDashboard). Glass panel matching the console. */
+.dvnt-sync {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 91, 252, 0.22);
+  background: linear-gradient(135deg, rgba(255, 91, 252, 0.08), rgba(138, 64, 207, 0.06)) !important;
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+}
+.dvnt-sync__text { display: flex; flex-direction: column; gap: 2px; }
+.dvnt-sync__text strong { font-size: 14px; color: #fafaf9; }
+.dvnt-sync__text span { font-size: 13px; color: rgba(245, 245, 244, 0.6); }
+.dvnt-sync__action { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dvnt-sync__msg { font-size: 13px; }
+.dvnt-sync__msg--ok { color: #3fdcff; }
+.dvnt-sync__msg--err { color: #fca5a5; }

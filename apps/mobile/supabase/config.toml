@@ -1,0 +1,149 @@
+[functions.auth]
+verify_jwt = false
+
+[functions.media-upload]
+verify_jwt = false
+
+[functions.auth-sync]
+verify_jwt = false
+
+[functions.update-profile]
+verify_jwt = false
+
+[functions.toggle-like]
+verify_jwt = false
+
+[functions.toggle-event-like]
+verify_jwt = false
+
+[functions.toggle-bookmark]
+verify_jwt = false
+
+[functions.toggle-follow]
+verify_jwt = false
+
+[functions.add-comment]
+verify_jwt = false
+
+[functions.delete-comment]
+verify_jwt = false
+
+[functions.send-message]
+verify_jwt = false
+
+[functions.create-post]
+verify_jwt = false
+
+[functions.create-story]
+verify_jwt = false
+
+[functions.update-post]
+verify_jwt = false
+
+[functions.delete-post]
+verify_jwt = false
+
+[functions.delete-story]
+verify_jwt = false
+
+[functions.update-avatar]
+verify_jwt = false
+
+[functions.toggle-block]
+verify_jwt = false
+
+[functions.create-conversation]
+verify_jwt = false
+
+[functions.create-test-user]
+verify_jwt = false
+
+[functions.send_notification]
+verify_jwt = false
+
+[functions.video_create_room]
+verify_jwt = false
+
+[functions.video_join_room]
+verify_jwt = false
+
+[functions.video_refresh_token]
+verify_jwt = false
+
+[functions.video_end_room]
+verify_jwt = false
+
+[functions.video_leave_room]
+verify_jwt = false
+
+[functions.video_kick_user]
+verify_jwt = false
+
+[functions.video_ban_user]
+verify_jwt = false
+
+[functions.video_change_role]
+verify_jwt = false
+
+[functions.video_mute_all]
+verify_jwt = false
+
+[functions.video_mute_peer]
+verify_jwt = false
+
+[functions.ticket_wallet_apple]
+verify_jwt = false
+
+[functions.ticket_wallet_google]
+verify_jwt = false
+
+[functions.cart-create-hold]
+verify_jwt = false
+
+[functions.cart-release-hold]
+verify_jwt = false
+
+[functions.cart-checkout]
+verify_jwt = false
+
+[functions.ticket-refund]
+verify_jwt = false
+
+[functions.get-cart-status]
+verify_jwt = false
+
+[functions.cart-line-refund]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+# Guest commerce (Phase 5.6) — public, no-account endpoints. They're guarded by
+# their own checks (OTP / HMAC grant / event-visibility + per-email caps), so a
+# session JWT must NOT be required. Pin here so CLI deploys keep them public.
+[functions.rsvp-verify]
+verify_jwt = false
+
+[functions.rsvp-issue-guest]
+verify_jwt = false
+
+[functions.guest-checkout]
+verify_jwt = false
+
+# OG/share page — crawlers + anon hit it; gates visibility internally.
+[functions.share-page]
+verify_jwt = false
+
+# Client color write-back — anon viewers on public events populate dominant_color
+# (only-if-null, single column). See docs/color-extraction-fit.md.
+[functions.set-event-color]
+verify_jwt = false
+
+[functions.wallet_web_service]
+verify_jwt = false
+
+[functions.get-text-post-slides]
+verify_jwt = false
+
+[functions.delete-conversation]
+verify_jwt = false

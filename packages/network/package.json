@@ -1,0 +1,36 @@
+{
+  "name": "@dvnt/network",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/client.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "react-native": "./src/client.native.ts",
+      "import": "./src/client.web.ts",
+      "default": "./src/client.ts"
+    },
+    "./registry": {
+      "types": "./src/registry.ts",
+      "default": "./src/registry.ts"
+    }
+  },
+  "scripts": {
+    "lint": "eslint",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": ">=5",
+    "expo-image": "*",
+    "react-native-nitro-fetch": "*"
+  },
+  "peerDependenciesMeta": {
+    "expo-image": {
+      "optional": true
+    },
+    "react-native-nitro-fetch": {
+      "optional": true
+    }
+  }
+}

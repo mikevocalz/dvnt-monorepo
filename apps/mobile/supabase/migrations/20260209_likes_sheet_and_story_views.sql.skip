@@ -1,0 +1,134 @@
+-- Migration: Likes sheet + Story views reliability
+-- Date: 2026-02-09
+--
+-- 1) Add indexes on likes table for efficient liker list queries
+-- 2) Ensure story_views has proper indexes and unique constraint
+-- 3) RLS policies for likes SELECT (likers list) and story_views INSERT/SELECT
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 1. LIKES — indexes for getPostLikers query
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Index for fetching likers of a post ordered by most recent
+CREATE INDEX IF NOT EXISTS idx_likes_post_id_created_at
+  ON likes (post_id, created_at DESC);
+
+-- Unique constraint to prevent duplicate likes (may already exist)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_likes_post_user_unique
+  ON likes (post_id, user_id);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 2. STORY_VIEWS — indexes and unique constraint
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Unique constraint for upsert (may already exist from initial schema)
+-- This is the composite key used by onConflict: "story_id,user_id"
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'story_views_story_id_user_id_key'
+  ) THEN
+    ALTER TABLE story_views
+      ADD CONSTRAINT story_views_story_id_user_id_key
+      UNIQUE (story_id, user_id);
+  END IF;
+END $$;
+
+-- Index for fetching viewers of a story ordered by most recent
+CREATE INDEX IF NOT EXISTS idx_story_views_story_id_viewed_at
+  ON story_views (story_id, viewed_at DESC);
+
+-- Index for fetching stories a user has viewed
+CREATE INDEX IF NOT EXISTS idx_story_views_user_id_viewed_at
+  ON story_views (user_id, viewed_at DESC);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 3. RLS — likes SELECT for likers list
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Enable RLS on likes if not already
+ALTER TABLE likes ENABLE ROW LEVEL SECURITY;
+
+-- Allow any authenticated user to read likes (needed for likers list)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'likes' AND policyname = 'likes_select_authenticated'
+  ) THEN
+    CREATE POLICY likes_select_authenticated ON likes
+      FOR SELECT
+      TO authenticated
+      USING (true);
+  END IF;
+END $$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 4. RLS — story_views INSERT and SELECT
+-- ═══════════════════════════════════════════════════════════════════════
+
+ALTER TABLE story_views ENABLE ROW LEVEL SECURITY;
+
+-- Allow authenticated users to insert their own views
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'story_views' AND policyname = 'story_views_insert_own'
+  ) THEN
+    CREATE POLICY story_views_insert_own ON story_views
+      FOR INSERT
+      TO authenticated
+      WITH CHECK (user_id = (
+        SELECT id FROM users WHERE auth_id = auth.uid()::text LIMIT 1
+      ));
+  END IF;
+END $$;
+
+-- Allow story owners to see all viewers, and viewers to see their own rows
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'story_views' AND policyname = 'story_views_select'
+  ) THEN
+    CREATE POLICY story_views_select ON story_views
+      FOR SELECT
+      TO authenticated
+      USING (
+        -- Viewer can see their own view
+        user_id = (SELECT id FROM users WHERE auth_id = auth.uid()::text LIMIT 1)
+        OR
+        -- Story owner can see all viewers
+        story_id IN (
+          SELECT id FROM stories
+          WHERE author_id = (SELECT id FROM users WHERE auth_id = auth.uid()::text LIMIT 1)
+        )
+      );
+  END IF;
+END $$;
+
+-- Allow upsert (UPDATE on conflict) for story_views
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'story_views' AND policyname = 'story_views_update_own'
+  ) THEN
+    CREATE POLICY story_views_update_own ON story_views
+      FOR UPDATE
+      TO authenticated
+      USING (user_id = (
+        SELECT id FROM users WHERE auth_id = auth.uid()::text LIMIT 1
+      ));
+  END IF;
+END $$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 5. GRANT service_role access (required for Edge Functions)
+-- ═══════════════════════════════════════════════════════════════════════
+
+GRANT ALL ON public.likes TO service_role;
+GRANT ALL ON public.story_views TO service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role;

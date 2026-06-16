@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["DVNTTranslationModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.dvnttranslation.DVNTTranslationModule"]
+  }
+}

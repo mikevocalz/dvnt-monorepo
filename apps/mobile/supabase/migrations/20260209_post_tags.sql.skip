@@ -1,0 +1,30 @@
+-- Post Tags table (Instagram-style user tagging on post images)
+-- Same schema pattern as story_tags
+CREATE TABLE IF NOT EXISTS post_tags (
+  id SERIAL PRIMARY KEY,
+  post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  tagged_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  x_position FLOAT NOT NULL DEFAULT 0.5,
+  y_position FLOAT NOT NULL DEFAULT 0.5,
+  media_index INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(post_id, tagged_user_id, media_index)
+);
+
+-- Index for fast lookups
+CREATE INDEX IF NOT EXISTS idx_post_tags_post_id ON post_tags(post_id);
+CREATE INDEX IF NOT EXISTS idx_post_tags_tagged_user_id ON post_tags(tagged_user_id);
+
+-- Grant access to service_role
+GRANT ALL ON post_tags TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE post_tags_id_seq TO service_role;
+
+-- RLS
+ALTER TABLE post_tags ENABLE ROW LEVEL SECURITY;
+
+-- Anyone can read tags
+CREATE POLICY "post_tags_select" ON post_tags FOR SELECT USING (true);
+
+-- Only post author can insert/delete (enforced at app level via edge functions)
+CREATE POLICY "post_tags_insert" ON post_tags FOR INSERT WITH CHECK (true);
+CREATE POLICY "post_tags_delete" ON post_tags FOR DELETE USING (true);

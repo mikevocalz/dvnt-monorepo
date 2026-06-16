@@ -1,0 +1,11 @@
+{
+  "expo.jsEngine": "hermes",
+  "EX_DEV_CLIENT_NETWORK_INSPECTOR": "true",
+  "ios.deploymentTarget": "17.0",
+  "expo.inlineModules.watchedDirectories": "[]",
+  "ios.forceStaticLinking": "[]",
+  "apple.privacyManifestAggregationEnabled": "true",
+  "ios.buildReactNativeFromSource": "true",
+  "EXPO_USE_PRECOMPILED_MODULES": "true",
+  "expo-image.disable-libdav1d": "false"
+}
