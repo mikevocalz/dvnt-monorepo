@@ -1,8 +1,8 @@
 {
-  "buildCommand": "cd ../.. && pnpm install && pnpm --filter web-vite build",
+  "buildCommand": "cd ../.. && corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install && pnpm --filter web-vite build",
   "outputDirectory": "dist",
   "framework": null,
-  "installCommand": "pnpm install",
+  "installCommand": "corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install",
   "regions": ["iad1"],
   "rewrites": [
     {

@@ -1,8 +1,8 @@
 {
-  "buildCommand": "cd ../.. && pnpm install && pnpm --filter web build",
+  "buildCommand": "cd ../.. && corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install && pnpm --filter web build",
   "outputDirectory": ".next",
   "framework": "nextjs",
-  "installCommand": "pnpm install",
+  "installCommand": "corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install",
   "regions": ["iad1"],
   "headers": [
     {
