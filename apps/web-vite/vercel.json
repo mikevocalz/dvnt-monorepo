@@ -1,5 +1,6 @@
 {
-  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter web-vite build",
+  "installCommand": "pnpm install",
+  "buildCommand": "vite build",
   "outputDirectory": "dist",
   "framework": null,
   "regions": ["iad1"],
