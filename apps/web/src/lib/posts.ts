@@ -133,6 +133,18 @@ export async function getPublishedPosts(limit = 100, category?: string): Promise
   return data?.docs ?? []
 }
 
+// Paginated index for the magazine grid (Payload returns totalPages/page).
+export async function getPostsPage(
+  opts: { page?: number; limit?: number; category?: string } = {},
+): Promise<{ docs: Post[]; totalPages: number; page: number }> {
+  const { page = 1, limit = 12, category } = opts
+  const cat = category ? `&where[categories.slug][equals]=${encodeURIComponent(category)}` : ''
+  const data = await api<{ docs: Post[]; totalPages: number; page: number }>(
+    `/posts?where[_status][equals]=published&depth=2&sort=-publishedAt&page=${page}&limit=${limit}${cat}`,
+  )
+  return { docs: data?.docs ?? [], totalPages: data?.totalPages ?? 1, page: data?.page ?? page }
+}
+
 export async function getFeaturedPost(): Promise<Post | null> {
   const data = await api<Paginated<Post>>(
     '/posts?where[_status][equals]=published&where[featured][equals]=true&sort=-publishedAt&depth=2&limit=1',

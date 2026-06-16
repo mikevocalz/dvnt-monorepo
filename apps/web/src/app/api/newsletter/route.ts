@@ -7,7 +7,10 @@
 import { NextResponse } from 'next/server'
 import { Resend } from 'resend'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+// NOTE: do NOT construct Resend at module top-level — `new Resend(undefined)`
+// throws "Missing API key" and that runs at build time when Next collects route
+// data (no env yet), failing the build. Construct it lazily inside the handler
+// after the key check below.
 const FROM = process.env.RESEND_FROM_EMAIL ?? 'DVNT Dispatch <onboarding@resend.dev>'
 const AUDIENCE_ID = process.env.RESEND_AUDIENCE_ID ?? ''
 
@@ -29,6 +32,8 @@ export async function POST(req: Request) {
     console.warn('[newsletter] RESEND_API_KEY not set — skipping send')
     return NextResponse.json({ ok: true, dev: true })
   }
+
+  const resend = new Resend(process.env.RESEND_API_KEY)
 
   try {
     // 1. Add contact to audience (idempotent — Resend dedupes by email)
