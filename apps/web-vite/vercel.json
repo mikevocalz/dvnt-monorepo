@@ -1,6 +1,6 @@
 {
-  "installCommand": "npm install",
-  "buildCommand": "npm run build",
+  "installCommand": "(cd ../.. && pnpm install)",
+  "buildCommand": "vite build",
   "outputDirectory": "dist",
   "framework": null,
   "regions": ["iad1"],
