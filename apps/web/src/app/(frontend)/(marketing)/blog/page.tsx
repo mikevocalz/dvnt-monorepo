@@ -317,7 +317,7 @@ const masthead: React.CSSProperties = {
   WebkitBackdropFilter: 'saturate(180%) blur(20px)',
 }
 const mastheadInner: React.CSSProperties = {
-  maxWidth: 1280, margin: '0 auto', padding: '14px 24px',
+  maxWidth: 1536, margin: '0 auto', padding: '14px 24px',
   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
 }
 const mastheadLogo: React.CSSProperties = {
@@ -329,7 +329,7 @@ const mastheadMag: React.CSSProperties = {
 }
 const main: React.CSSProperties = {
   position: 'relative', zIndex: 1,
-  maxWidth: 1280, margin: '0 auto', padding: '40px 24px 120px',
+  maxWidth: 1536, margin: '0 auto', padding: '40px 24px 120px',
   display: 'flex', flexDirection: 'column', gap: 64,
 }
 

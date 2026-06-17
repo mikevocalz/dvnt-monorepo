@@ -11,10 +11,11 @@
 /* Tailwind v4 content sources. The layered @imports above don't auto-detect the
    monorepo, so the shared universal screens/components (which carry most of the
    app's classes) must be registered explicitly or their utilities never get
-   generated. Paths are relative to this file (apps/web/src/app/). */
-@source "../../";
-@source "../../../../packages/app";
-@source "../../../../packages/ui";
+   generated. Paths are relative to this file (apps/web/src/app/(frontend)/) —
+   one level deeper than app/, so each path carries an extra `../`. */
+@source "../../../";
+@source "../../../../../packages/app";
+@source "../../../../../packages/ui";
 
 /* Rounded scrollbar utilities (scrollbar-thin, scrollbar-thumb-*, etc.).
    nocompatible enables the rounded-thumb + custom-width variants. */
