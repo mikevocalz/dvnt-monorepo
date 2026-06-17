@@ -179,7 +179,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     textTransform: "uppercase",
     backgroundColor: LANDING_COLORS.cyan,
-    borderRadius: 999,
+    borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
     overflow: "hidden",

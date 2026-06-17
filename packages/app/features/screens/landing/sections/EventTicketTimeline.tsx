@@ -269,7 +269,7 @@ const styles = StyleSheet.create({
   statusPill: {
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 999,
+    borderRadius: 12,
     borderWidth: 1,
   },
   statusText: {

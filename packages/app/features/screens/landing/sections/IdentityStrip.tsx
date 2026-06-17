@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     borderWidth: 1,
     borderColor: LANDING_COLORS.glassBorder,
-    borderRadius: 999,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 7,
     overflow: "hidden",

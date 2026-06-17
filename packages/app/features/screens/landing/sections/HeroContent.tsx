@@ -151,14 +151,14 @@ const styles = StyleSheet.create({
   primary: {
     paddingHorizontal: 26,
     paddingVertical: 14,
-    borderRadius: 14,
+    borderRadius: 12,
     ...GRADIENT_STYLE,
   },
   primaryText: { color: "#0A0118", fontWeight: "800", fontSize: 16 },
   ghost: {
     paddingHorizontal: 26,
     paddingVertical: 14,
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: LANDING_COLORS.glassBorderStrong,
   },
