@@ -20,6 +20,7 @@
     "@dvnt/app": "workspace:*",
     "@dvnt/core": "workspace:*",
     "@dvnt/functions": "workspace:*",
+    "@dvnt/observability": "workspace:*",
     "@dvnt/types": "workspace:*",
     "@dvnt/ui": "workspace:*",
     "@fishjam-cloud/react-client": "0.27.0",

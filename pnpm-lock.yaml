@@ -526,6 +526,9 @@ importers:
       '@dvnt/functions':
         specifier: workspace:*
         version: link:../../packages/functions
+      '@dvnt/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@dvnt/types':
         specifier: workspace:*
         version: link:../../packages/types

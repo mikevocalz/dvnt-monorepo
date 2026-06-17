@@ -5,7 +5,7 @@ import React from 'react'
 
 export default function BackToConsole() {
   return (
-    <a href="/" className="dvnt-back" aria-label="Back to DVNT Console">
+    <a href="/console" className="dvnt-back" aria-label="Back to DVNT Console">
       <span className="dvnt-back__icon" aria-hidden>
         ←
       </span>

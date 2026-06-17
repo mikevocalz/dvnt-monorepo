@@ -93,6 +93,7 @@ const nextConfig: NextConfig = {
     '@dvnt/api',
     '@dvnt/core',
     '@dvnt/functions',
+    '@dvnt/observability',
     '@dvnt/types',
     '@shopify/react-native-skia',
   ],
