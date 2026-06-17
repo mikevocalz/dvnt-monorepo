@@ -499,8 +499,7 @@ export interface Event {
    * Live app event id
    */
   appEventId?: string | null;
-  status?: ('draft' | 'active' | 'cancelled' | 'postponed' | 'suspended') | null;
-  visibility?: ('public' | 'private' | 'spicy' | 'link_only') | null;
+  status?: ('draft' | 'published' | 'cancelled' | 'ended') | null;
   startsAt?: string | null;
   endsAt?: string | null;
   capacity?: number | null;
@@ -553,7 +552,7 @@ export interface Ticket {
    * Tickets in this holding. Editable.
    */
   quantity?: number | null;
-  status?: ('active' | 'scanned' | 'refunded' | 'void' | 'transfer_pending') | null;
+  status?: ('valid' | 'checked_in' | 'cancelled' | 'refunded' | 'transferred' | 'pending') | null;
   guestEmail?: string | null;
   purchasedAt?: string | null;
   /**
@@ -779,7 +778,6 @@ export interface EventsSelect<T extends boolean = true> {
   title?: T;
   appEventId?: T;
   status?: T;
-  visibility?: T;
   startsAt?: T;
   endsAt?: T;
   capacity?: T;

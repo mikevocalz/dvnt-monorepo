@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/payload.config.ts",
     "./types": "./src/payload-types.ts",
+    "./endpoints/appData": "./src/endpoints/appData.ts",
     "./components/*": "./src/components/*.tsx"
   },
   "dependencies": {

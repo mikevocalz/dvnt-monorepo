@@ -5,9 +5,7 @@
 import type { CollectionConfig } from 'payload'
 import { canModerate, isAdminPlus } from '../access/roles'
 
-// Mirrors the live public.tickets.status state machine (migration
-// 20260328_ticket_transfers): active → scanned, refunded, void, transfer_pending.
-export const TICKET_STATUSES = ['active', 'scanned', 'refunded', 'void', 'transfer_pending'] as const
+export const TICKET_STATUSES = ['valid', 'checked_in', 'cancelled', 'refunded', 'transferred', 'pending'] as const
 
 export const Tickets: CollectionConfig = {
   slug: 'tickets',
@@ -33,7 +31,7 @@ export const Tickets: CollectionConfig = {
     {
       name: 'status',
       type: 'select',
-      defaultValue: 'active',
+      defaultValue: 'valid',
       options: TICKET_STATUSES.map((v) => ({ label: v.replace('_', ' '), value: v })),
     },
     { name: 'guestEmail', type: 'email', admin: { position: 'sidebar' } },

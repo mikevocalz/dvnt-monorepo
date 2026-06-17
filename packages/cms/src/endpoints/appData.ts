@@ -129,7 +129,7 @@ export const appEventsEndpoint: Endpoint = {
 
     const total = await p.query(`select count(*)::int as c from public.events e ${where}`, params)
     const rows = await p.query(
-      `select e.id, e.title, e.visibility, e.status, e.start_date, e.total_attendees,
+      `select e.id, e.title, e.visibility, e.start_date, e.total_attendees,
               e.max_attendees, e.location_name, e.location, e.price,
               nullif(coalesce(e.cover_image_url, e.flyer_image_url, e.image), '') as flyer_url,
               coalesce(h.username, e.host_id) as host_name
@@ -144,8 +144,7 @@ export const appEventsEndpoint: Endpoint = {
     const docs = rows.rows.map((r: any) => ({
       id: String(r.id),
       title: r.title,
-      status: r.status ?? 'draft',
-      visibility: r.visibility ?? 'public',
+      status: r.visibility === 'public' ? 'published' : (r.visibility ?? 'draft'),
       startsAt: r.start_date,
       host: { username: r.host_name },
       location: r.location_name || r.location,
@@ -183,8 +182,7 @@ export const appEventEndpoint: Endpoint = {
     return Response.json({
       id: String(e.id),
       title: e.title,
-      status: e.status ?? 'draft',
-      visibility: e.visibility ?? 'public',
+      status: e.visibility === 'public' ? 'published' : (e.visibility ?? 'draft'),
       startsAt: e.start_date,
       endsAt: e.end_date,
       capacity: e.max_attendees,
@@ -312,6 +310,7 @@ export const appPromoteEndpoint: Endpoint = {
 // update (that's Payload-owned), so a sync can't undo a ban or fire the
 // status-change side effects (session revoke / ban-list). New members get their
 // initial status from the app (banned_at → 'banned').
+const eventStatusFromVisibility = (v?: string) => (v === 'public' ? 'published' : 'draft')
 
 export const appSyncEndpoint: Endpoint = {
   path: '/app/sync',
@@ -383,7 +382,7 @@ export const appSyncEndpoint: Endpoint = {
 
       // ── Events ───────────────────────────────────────────────────────────
       const events = await app.query(
-        `select e.id, e.title, e.visibility, e.status, e.start_date, e.end_date,
+        `select e.id, e.title, e.visibility, e.start_date, e.end_date,
                 e.max_attendees, e.location_name, e.location, e.host_id, e.total_attendees
            from public.events e`,
       )
@@ -397,10 +396,7 @@ export const appSyncEndpoint: Endpoint = {
         const data: Record<string, any> = {
           title: e.title || 'Untitled event',
           appEventId,
-          // Write the REAL app status (state machine), not a visibility-derived
-          // value; visibility is its own field now.
-          status: e.status || 'draft',
-          visibility: e.visibility || 'public',
+          status: eventStatusFromVisibility(e.visibility),
           startsAt: e.start_date || undefined,
           endsAt: e.end_date || undefined,
           capacity: e.max_attendees != null ? Number(e.max_attendees) : undefined,
@@ -429,8 +425,7 @@ export const appSyncEndpoint: Endpoint = {
       }
 
       // ── Tickets (per attendee) ───────────────────────────────────────────
-      // Live state machine (migration 20260328_ticket_transfers).
-      const STATUSES = new Set(['active', 'scanned', 'refunded', 'void', 'transfer_pending'])
+      const STATUSES = new Set(['valid', 'checked_in', 'cancelled', 'refunded', 'transferred', 'pending'])
       const tickets = await app.query(
         `select id, event_id, ticket_type_id, user_id, status, qr_token,
                 checked_in_at, attendee_name, guest_name, guest_email, created_at
@@ -441,8 +436,7 @@ export const appSyncEndpoint: Endpoint = {
         const appTicketId = String(t.id)
         const holderUserId = t.user_id ? (authIdToUserId.get(String(t.user_id)) ?? String(t.user_id)) : undefined
         const holderMember = holderUserId ? userIdToMemberId.get(holderUserId) : undefined
-        // checked-in is `scanned` in the live machine; fall back to `active`.
-        const status = t.checked_in_at ? 'scanned' : (STATUSES.has(String(t.status)) ? String(t.status) : 'active')
+        const status = t.checked_in_at ? 'checked_in' : (STATUSES.has(String(t.status)) ? String(t.status) : 'valid')
         const appFields = {
           event: eventByAppId.get(String(t.event_id)),
           holder: holderMember,

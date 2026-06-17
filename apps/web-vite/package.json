@@ -15,7 +15,8 @@
     "seed:posts": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/seed-posts.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "migrate:media": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/migrate-media-to-s3.ts"
+    "migrate:media": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/migrate-media-to-s3.ts",
+    "sync:app": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/sync-from-app.ts"
   },
   "dependencies": {
     "@dvnt/cms": "workspace:*",

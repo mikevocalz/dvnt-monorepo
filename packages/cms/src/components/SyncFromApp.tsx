@@ -23,7 +23,7 @@ export default function SyncFromApp() {
     setBusy(true)
     setResult(null)
     try {
-      const res = await fetch('/api/app/sync', { method: 'POST', credentials: 'include' })
+      const res = await fetch('/payload-api/app/sync', { method: 'POST', credentials: 'include' })
       setResult(await res.json())
     } catch (e: any) {
       setResult({ errors: [{ message: e?.message ?? 'Sync failed' }] })
