@@ -13,10 +13,12 @@ export const LANDING_COLORS = {
   /** Near-black canvas. */
   bg: "#02030A",
   bgElevated: "#080A14",
-  /** Core accents. */
-  cyan: "#3FDCFF",
-  purple: "#8A40CF",
-  magenta: "#FF5BFC",
+  /** Core accents — DVNT Design Brief teal-blue → purple (was cyan/magenta neon). */
+  tealDeep: "#0F4961",
+  cyan: "#379ED8", // teal-blue (brief), primary accent (was #3FDCFF)
+  purple: "#874E9F", // brief purple (was #8A40CF)
+  purpleDeep: "#5B2C81",
+  magenta: "#FF5BFC", // demoted: like/love only, not the brand stroke
   violet: "#7C3AED",
   /** Text. */
   text: "#FAFAF9",
@@ -31,17 +33,21 @@ export const LANDING_COLORS = {
   glassScrimStrong: "rgba(8,12,20,0.44)",
 } as const;
 
-/** CSS gradient strings (web) and color-stop arrays (native linear-gradient libs). */
+/** CSS gradient strings (web) and color-stop arrays (native linear-gradient libs).
+ *  DVNT Design Brief: the signature is teal-blue → purple, glowing through glass. */
 export const LANDING_GRADIENTS = {
-  /** Deviant: purple → magenta. Used for CTAs / wordmark accents. */
-  deviant: ["#8A40CF", "#FF5BFC"] as const,
-  deviantCss: "linear-gradient(135deg, #8A40CF 0%, #FF5BFC 100%)",
-  /** Brand: cyan → purple. */
-  brand: ["#3FDCFF", "#8A40CF"] as const,
-  brandCss: "linear-gradient(135deg, #3FDCFF 0%, #8A40CF 100%)",
-  /** Ambient purple paint-light field (web radial). */
+  /** Deviant (signature, CTAs / wordmark accents): teal-blue → purple. */
+  deviant: ["#0F4961", "#379ED8", "#874E9F", "#5B2C81"] as const,
+  deviantCss:
+    "linear-gradient(135deg, #0F4961 0%, #379ED8 38%, #874E9F 72%, #5B2C81 100%)",
+  /** Brand (teal-blue half). */
+  brand: ["#0F4961", "#379ED8"] as const,
+  brandCss: "linear-gradient(135deg, #0F4961 0%, #379ED8 100%)",
+  /** Purple half. */
+  purpleCss: "linear-gradient(135deg, #874E9F 0%, #5B2C81 100%)",
+  /** Ambient paint-light field — teal-blue + purple glow refracting on dark. */
   ambientCss:
-    "radial-gradient(60% 50% at 50% 40%, rgba(138,64,207,0.38) 0%, rgba(124,58,237,0.18) 35%, rgba(2,3,10,0) 75%)",
+    "radial-gradient(55% 50% at 30% 35%, rgba(55,158,216,0.30) 0%, transparent 65%), radial-gradient(55% 55% at 78% 30%, rgba(135,78,159,0.28) 0%, rgba(91,44,129,0.14) 40%, rgba(2,3,10,0) 75%)",
 } as const;
 
 /**
