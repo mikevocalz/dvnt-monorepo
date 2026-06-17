@@ -37,7 +37,26 @@ import { WebTabBar } from "./web-tab-bar";
 const ACCENT = "#379ED8"; // teal-blue (refined brand)
 const HEADER_FONT = "Republica-Minor"; // matches the marketing header nav (FAQ, Privacy…)
 const MUTED = "rgba(255,255,255,0.58)";
-const GRADIENT = "linear-gradient(120deg, #0F4961 0%, #379ED8 38%, #874E9F 72%, #5B2C81 100%)";
+
+// Create button — same flowing-gradient-ring + pulsing-glow + hover treatment as
+// the marketing Login button (HeaderLoginButton.web), so the two read as one
+// family. Pure CSS on a real <button>; respects prefers-reduced-motion.
+const CREATE_CSS = `
+@keyframes dvntCreateFlow { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+@keyframes dvntCreateGlow {
+  0%,100%{ box-shadow:0 4px 14px rgba(138,64,207,0.38),0 0 7px rgba(255,91,252,0.24) }
+  50%{ box-shadow:0 6px 18px rgba(138,64,207,0.55),0 0 11px rgba(63,220,255,0.40) }
+}
+.dvnt-create-btn {
+  background-image: linear-gradient(120deg,#3FDCFF 0%,#FF5BFC 33%,#8A40CF 66%,#3FDCFF 100%);
+  background-size: 300% 300%;
+  animation: dvntCreateFlow 4s ease infinite, dvntCreateGlow 2.4s ease-in-out infinite;
+  transition: transform 180ms cubic-bezier(0.22,1,0.36,1);
+}
+.dvnt-create-btn:hover { transform: translateY(-1px) scale(1.03); }
+.dvnt-create-btn:active { transform: translateY(0) scale(0.98); }
+@media (prefers-reduced-motion: reduce){ .dvnt-create-btn{ animation:none !important } }
+`;
 
 type NavItem = { href: string; Icon: typeof Home; label: string };
 
@@ -188,34 +207,49 @@ export function AppShell({
           <NavRow key={it.href} {...it} />
         ))}
 
-        {/* Create — the brand-gradient CTA */}
+        {/* Spacer pushes Create to the BOTTOM of the rail. */}
+        <div style={{ flex: 1 }} />
+
+        {/* Create — animated to match the Login button (flowing gradient ring +
+            pulsing glow + hover lift), pinned to the bottom with a 20px margin. */}
+        <style>{CREATE_CSS}</style>
         <button
           onClick={() => router.push("/feed/create")}
           title="Create"
+          aria-label="Create"
+          className="dvnt-create-btn"
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 10,
             marginTop: 14,
-            padding: expanded ? "12px 16px" : "12px 0",
-            borderRadius: 12,
+            marginBottom: 20,
+            padding: 2, // the visible gradient ring
+            borderRadius: 14,
             border: "none",
-            background: GRADIENT,
-            color: "#FFFFFF",
-            fontFamily: HEADER_FONT,
-            fontWeight: 800,
-            fontSize: 16,
-            letterSpacing: 0.5,
+            background: "transparent",
             cursor: "pointer",
-            boxShadow: "0 8px 22px rgba(135,78,159,0.28)",
+            display: "block",
+            width: "100%",
           }}
         >
-          <Plus size={20} strokeWidth={2.8} color="#FFFFFF" />
-          {expanded ? <span>Create</span> : null}
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              padding: expanded ? "12px 16px" : "12px 0",
+              borderRadius: 12,
+              background: "#0A0118", // dark inner surface masks the ring to a border
+              color: "#FFFFFF",
+              fontFamily: HEADER_FONT,
+              fontWeight: 900,
+              fontSize: 16,
+              letterSpacing: 1,
+            }}
+          >
+            <Plus size={20} strokeWidth={2.8} color="#FFFFFF" />
+            {expanded ? <span>Create</span> : null}
+          </span>
         </button>
-
-        <div style={{ flex: 1 }} />
       </nav>
 
       {/* ── Center column ── fills the available track (IG/X width), the inner
