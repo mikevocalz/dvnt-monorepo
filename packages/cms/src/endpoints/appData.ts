@@ -327,7 +327,7 @@ export const appSyncEndpoint: Endpoint = {
       // ── Members ──────────────────────────────────────────────────────────
       const avatarSel = 'coalesce(am.sizes_thumbnail_url, am.thumbnail_u_r_l, am.url) as avatar_url'
       const users = await app.query(
-        `select u.id, u.auth_id, u.username, u.email, u.banned_at, ${avatarSel}
+        `select u.id, u.auth_id, u.username, u.email, u.banned_at, u.role, ${avatarSel}
            from public.users u
            left join public.media am on am.id = u.avatar_id`,
       )
@@ -342,13 +342,17 @@ export const appSyncEndpoint: Endpoint = {
           email: u.email || undefined,
           avatarUrl: u.avatar_url || undefined,
           appUserId,
+          // Mirror the app role (public.users.role) so the dropdown shows it. The
+          // write-back hook keeps CMS edits → public.users.role, so this stays in
+          // sync; skip the echo write-back during sync.
+          role: u.role || 'Basic',
         }
         const existing = await payload.find({
           collection: 'members', where: { appUserId: { equals: appUserId } }, limit: 1, overrideAccess: true,
         })
         if (existing.docs[0]) {
           // App-sourced fields only — leave moderation `status` untouched.
-          await payload.update({ collection: 'members', id: existing.docs[0].id, data: appFields, overrideAccess: true })
+          await payload.update({ collection: 'members', id: existing.docs[0].id, data: appFields, overrideAccess: true, context: { skipRoleWriteBack: true } })
           userIdToMemberId.set(appUserId, existing.docs[0].id)
           mUpdated++
         } else {
@@ -356,6 +360,7 @@ export const appSyncEndpoint: Endpoint = {
             collection: 'members',
             data: { ...appFields, status: u.banned_at ? 'banned' : 'active' },
             overrideAccess: true,
+            context: { skipRoleWriteBack: true },
           })
           userIdToMemberId.set(appUserId, created.id)
           mCreated++

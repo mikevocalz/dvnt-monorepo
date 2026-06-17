@@ -6,6 +6,11 @@
 import type { CollectionConfig } from 'payload'
 import { canModerate, isAdminPlus } from '../access/roles'
 import { onStatusChange } from './hooks/moderation'
+import { onMemberRoleChange } from './hooks/role'
+
+// App role values — MUST match public.enum_users_role exactly (the write-back
+// hook casts these straight into that enum).
+export const MEMBER_ROLES = ['Super-Admin', 'Admin', 'Moderator', 'Basic'] as const
 
 export const MEMBER_STATUSES = [
   'active',
@@ -27,15 +32,30 @@ export const Members: CollectionConfig = {
   },
   admin: {
     useAsTitle: 'username',
-    defaultColumns: ['avatarUrl', 'username', 'email', 'status', 'openReportsAgainst', 'createdAt'],
+    defaultColumns: ['avatarUrl', 'username', 'email', 'role', 'status', 'openReportsAgainst', 'createdAt'],
     listSearchableFields: ['username', 'email'],
   },
   hooks: {
-    afterChange: [onStatusChange],
+    afterChange: [onStatusChange, onMemberRoleChange],
   },
   fields: [
     { name: 'username', type: 'text', index: true, required: true },
     { name: 'email', type: 'email', index: true },
+    // App role. Editing this writes back to public.users.role (onMemberRoleChange)
+    // and — for Moderator/Admin/Super-Admin — grants CMS access via the
+    // Better-Auth SSO strategy. Only Admin+ may change a role (a moderator can't
+    // elevate themselves); everyone on staff can read it.
+    {
+      name: 'role',
+      type: 'select',
+      defaultValue: 'Basic',
+      index: true,
+      options: MEMBER_ROLES.map((v) => ({ label: v, value: v })),
+      access: { update: isAdminPlus, create: isAdminPlus },
+      admin: {
+        description: "App role — saving updates the user's role in the app and grants CMS access for Moderator/Admin/Super-Admin.",
+      },
+    },
     {
       name: 'avatarUrl',
       type: 'text',

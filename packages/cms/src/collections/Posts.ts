@@ -210,9 +210,21 @@ export const Posts: CollectionConfig = {
       if (req.user) return true
       return { _status: { equals: 'published' } }
     },
-    create: isAdminPlus,
-    update: isAdminPlus,
-    delete: isAdminPlus,
+    // Moderators+ can author posts; admins+ edit/delete anything, while a
+    // moderator is scoped to the posts they created (own-blog editing).
+    create: canModerate,
+    update: ({ req }) => {
+      const role = req.user?.role
+      if (role === 'super_admin' || role === 'admin') return true
+      if (role === 'moderator') return { createdBy: { equals: req.user?.id } }
+      return false
+    },
+    delete: ({ req }) => {
+      const role = req.user?.role
+      if (role === 'super_admin' || role === 'admin') return true
+      if (role === 'moderator') return { createdBy: { equals: req.user?.id } }
+      return false
+    },
     readVersions: canModerate,
   },
   admin: {
@@ -227,7 +239,7 @@ export const Posts: CollectionConfig = {
   },
   hooks: {
     beforeChange: [
-      ({ data, operation }) => {
+      ({ data, operation, req }) => {
         if (operation === 'create' || operation === 'update') {
           if (data._status === 'published' && !data.publishedAt)
             data.publishedAt = new Date().toISOString()
@@ -235,6 +247,9 @@ export const Posts: CollectionConfig = {
             const words = (data.contentHtml as string).replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length
             data.readTime = Math.max(1, Math.ceil(words / 238))
           }
+          // Stamp the creating staff member so a moderator can be scoped to
+          // editing only their own posts (see access.update).
+          if (operation === 'create' && req?.user && !data.createdBy) data.createdBy = req.user.id
         }
         return data
       },
@@ -303,13 +318,23 @@ export const Posts: CollectionConfig = {
     },
 
     // ─── Authorship ─────────────────────────────────────────────────────
-    // Primary byline — shown as "By Alice Kim" in article header.
+    // Primary byline — shown as "By Alice Kim" (and co-authors) in the article
+    // header. hasMany = NYT-style multi-writer credit, picked from a dropdown.
     {
       name: 'authors',
       type: 'relationship',
       relationTo: 'authors',
       hasMany: true,
-      admin: { position: 'sidebar', description: 'Primary byline ("By …")' },
+      admin: { position: 'sidebar', description: 'Primary byline — add co-authors here ("By A, B & C")' },
+    },
+    // Which staff member created this post (auto-set). Drives moderator
+    // own-post edit scoping; read-only in the UI.
+    {
+      name: 'createdBy',
+      type: 'relationship',
+      relationTo: 'admin-users',
+      access: { update: () => false },
+      admin: { position: 'sidebar', readOnly: true, description: 'Staff member who created this post.' },
     },
     // Contributors — NYT-style secondary credits shown beneath the byline.
     // Each entry carries a role label: "Photographs by", "Video by", "Reporting by", etc.

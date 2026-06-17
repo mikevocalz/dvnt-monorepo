@@ -3,11 +3,17 @@
 // by email so an edit can't silently demote them.
 import type { CollectionConfig } from 'payload'
 import { isSuperAdmin, isStaff, forceSuperAdminByEmail } from '../access/roles'
+import { betterAuthStrategy } from '../auth/betterAuthStrategy'
 
 export const AdminUsers: CollectionConfig = {
   slug: 'admin-users',
   dbName: 'admin_users',
-  auth: true,
+  // Local (email+password) login stays enabled; the custom strategy lets an app
+  // user with a staff role into /admin via their existing Better Auth session
+  // (no second login). A failing strategy returns null → local login unaffected.
+  auth: {
+    strategies: [betterAuthStrategy],
+  },
   access: {
     read: isStaff,
     create: isSuperAdmin, // only super-admins mint new staff
