@@ -8,11 +8,11 @@
     "start": "next start --webpack",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "payload": "cross-env NODE_OPTIONS=--no-deprecation TSX_TSCONFIG_PATH=tsconfig.payload.json payload",
-    "generate:importmap": "cross-env NODE_OPTIONS=--no-deprecation TSX_TSCONFIG_PATH=tsconfig.payload.json payload generate:importmap",
-    "generate:types": "cross-env NODE_OPTIONS=--no-deprecation TSX_TSCONFIG_PATH=tsconfig.payload.json payload generate:types",
-    "migrate": "cross-env NODE_OPTIONS=--no-deprecation TSX_TSCONFIG_PATH=tsconfig.payload.json payload migrate",
-    "migrate:create": "cross-env NODE_OPTIONS=--no-deprecation TSX_TSCONFIG_PATH=tsconfig.payload.json payload migrate:create",
+    "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
+    "generate:importmap": "cross-env NODE_OPTIONS=--no-deprecation payload generate:importmap",
+    "generate:types": "cross-env NODE_OPTIONS=--no-deprecation payload generate:types",
+    "migrate": "cross-env NODE_OPTIONS=--no-deprecation payload migrate",
+    "migrate:create": "cross-env NODE_OPTIONS=--no-deprecation payload migrate:create",
     "postinstall": "node -e \"require('fs').copyFileSync(require.resolve('canvaskit-wasm/bin/full/canvaskit.wasm'), 'public/canvaskit.wasm')\""
   },
   "dependencies": {
@@ -62,17 +62,17 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
-    "cross-env": "^10.1.0",
-    "sass": "^1.78.0",
     "@tailwindcss/postcss": "^4.3.0",
     "@types/node": "^20",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
+    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "postcss": "^8.5.6",
+    "sass": "^1.78.0",
     "tailwindcss": "4.3.0",
     "typescript": "^5"
   }

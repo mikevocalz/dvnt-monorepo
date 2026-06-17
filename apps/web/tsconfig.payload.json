@@ -1,7 +1,0 @@
-{
-  "//": "Dedicated tsconfig for the Payload CLI (generate:importmap / :types / migrate). It extends the app tsconfig but drops the react-native-web `moduleSuffixes: ['.web','']`, which makes tsx mis-resolve Payload's server packages (e.g. @payloadcms/db-postgres) when loading payload.config.ts. Point the CLI at this with TSX_TSCONFIG_PATH.",
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "moduleSuffixes": [""]
-  }
-}
