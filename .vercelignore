@@ -13,3 +13,9 @@ apps/mobile/android
 apps/web-vite/media
 *.log
 *.tgz
+
+# never bundle local env into the deploy — Vercel project env is the source
+.env
+.env.*
+**/.env
+**/.env.*
