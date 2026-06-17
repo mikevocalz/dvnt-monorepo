@@ -18,6 +18,10 @@ import {
 export { authClient, signIn, signUp, signOut, useSession, getSession };
 
 type BetterAuthRecoveryClient = typeof authClient & {
+  // Newer Better Auth (the client bundles 1.6.x) renamed forget-password ->
+  // request-password-reset. The auth edge function only exposes
+  // /request-password-reset, so the deprecated forgetPassword alias 404s.
+  requestPasswordReset?: (args: { email: string; redirectTo: string }) => Promise<{ error?: { message?: string } | null }>;
   forgetPassword?: (args: { email: string; redirectTo: string }) => Promise<{ error?: { message?: string } | null }>;
   resetPassword?: (args: { newPassword: string }) => Promise<{ error?: { message?: string } | null }>;
   sendVerificationEmail?: (args: { email: string }) => Promise<{ error?: { message?: string } | null }>;
@@ -32,8 +36,11 @@ export const AUTH_RECOVERY_REDIRECT =
     : "/auth/reset-password";
 
 export async function requestPasswordReset(email: string) {
-  if (!recoveryClient.forgetPassword) throw new Error("Password reset not available");
-  return recoveryClient.forgetPassword({ email, redirectTo: AUTH_RECOVERY_REDIRECT });
+  // Prefer the current method (/request-password-reset, which the edge
+  // function serves); fall back to the legacy alias for older servers.
+  const fn = recoveryClient.requestPasswordReset ?? recoveryClient.forgetPassword;
+  if (!fn) throw new Error("Password reset not available");
+  return fn({ email, redirectTo: AUTH_RECOVERY_REDIRECT });
 }
 
 export async function submitPasswordReset(newPassword: string) {

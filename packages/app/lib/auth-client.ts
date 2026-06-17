@@ -22,6 +22,12 @@ import {
 export { authClient, signIn, signUp, signOut, useSession, getSession };
 
 type BetterAuthRecoveryClient = typeof authClient & {
+  // Newer Better Auth renamed forget-password -> request-password-reset; the
+  // auth edge function only exposes /request-password-reset (the legacy alias
+  // 404s).
+  requestPasswordReset?: (args: { email: string; redirectTo: string }) => Promise<{
+    error?: { message?: string } | null;
+  }>;
   forgetPassword?: (args: { email: string; redirectTo: string }) => Promise<{
     error?: { message?: string } | null;
   }>;
@@ -38,11 +44,12 @@ const recoveryClient = authClient as BetterAuthRecoveryClient;
 export const AUTH_RECOVERY_REDIRECT = "dvnt://auth/reset";
 
 export async function requestPasswordReset(email: string) {
-  if (!recoveryClient.forgetPassword) {
+  const fn = recoveryClient.requestPasswordReset ?? recoveryClient.forgetPassword;
+  if (!fn) {
     throw new Error("Password reset is not available in this client build");
   }
 
-  return recoveryClient.forgetPassword({
+  return fn({
     email,
     redirectTo: AUTH_RECOVERY_REDIRECT,
   });
