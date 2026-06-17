@@ -175,10 +175,27 @@ async function getAuth() {
         "exp+dvnt://*",
         "exp://",
         "http://localhost:8081",
-        // Web clients (Better Auth's CSRF gate rejects untrusted origins):
+        // Web clients (Better Auth's CSRF gate rejects untrusted origins with a
+        // 403 "Invalid origin" BEFORE checking credentials). The web app proxies
+        // /api/auth/* through Next, so the browser's Origin header is the Vercel
+        // page origin — it MUST be trusted here or every browser login 403s.
+        // Cross-site CSRF risk is independently mitigated by the session cookie's
+        // SameSite=Lax attribute (cross-site POSTs don't carry the cookie).
         "http://localhost:5173", // apps/web-vite dev
         "http://localhost:3000", // apps/web (Next) dev
-        // TODO: add the production web origin(s) here, e.g. "https://dvnt.app".
+        // Production web origins:
+        "https://dvnt-blog.vercel.app", // Vercel default domain
+        "https://blog.dvntapp.live", // custom blog domain
+        "https://dvntapp.live",
+        "https://www.dvntapp.live",
+        // Vercel preview deploys (random per-commit subdomains under the team):
+        "https://*.vercel.app",
+        // Any additional origins from env (comma-separated), for future domains
+        // without a code change:
+        ...(Deno.env.get("WEB_TRUSTED_ORIGINS") || "")
+          .split(",")
+          .map((o) => o.trim())
+          .filter(Boolean),
         AUTH_BASE_URL,
       ],
       plugins: [expo(), username()],
