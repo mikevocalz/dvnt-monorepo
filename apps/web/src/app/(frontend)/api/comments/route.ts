@@ -5,8 +5,14 @@
 import type { NextRequest } from 'next/server'
 import { verifyAppSession } from '@/lib/verifyAppSession'
 
-const PAYLOAD_URL = process.env.PAYLOAD_URL || ''
 const COMMENT_SERVICE_TOKEN = process.env.COMMENT_SERVICE_TOKEN || ''
+
+// Payload runs in THIS app under routes.api = '/payload-api'. Call it on the
+// same origin as the incoming request (works on any domain/preview without a
+// PAYLOAD_URL env), falling back to an explicit env if provided.
+function payloadBase(req: NextRequest) {
+  return process.env.PAYLOAD_URL || new URL(req.url).origin
+}
 
 function bearer(req: NextRequest) {
   const h = req.headers.get('authorization') ?? ''
@@ -21,7 +27,7 @@ export async function POST(req: NextRequest) {
   if (!postId || !body?.trim()) return Response.json({ error: 'post and body required' }, { status: 400 })
   if (body.length > 4000) return Response.json({ error: 'too long' }, { status: 400 })
 
-  const res = await fetch(`${PAYLOAD_URL}/api/comments/submit`, {
+  const res = await fetch(`${payloadBase(req)}/payload-api/comments/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-comment-service-token': COMMENT_SERVICE_TOKEN },
     body: JSON.stringify({ post: postId, authorMember: session.memberId, parent: parentId ?? null, body: body.trim() }),
@@ -40,7 +46,7 @@ export async function PUT(req: NextRequest) {
   const { commentId, reportedMemberId, reason } = await req.json().catch(() => ({}))
   if (!commentId) return Response.json({ error: 'commentId required' }, { status: 400 })
 
-  const res = await fetch(`${PAYLOAD_URL}/api/comments/report`, {
+  const res = await fetch(`${payloadBase(req)}/payload-api/comments/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-comment-service-token': COMMENT_SERVICE_TOKEN },
     body: JSON.stringify({ commentId, reportedMemberId, reporter: session.memberId, reason: reason ?? '' }),

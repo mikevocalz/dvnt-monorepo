@@ -3,10 +3,11 @@
 // built from @expo/html-elements (semantic DOM) + solito/image + react-native
 // primitives for the interactive bits. No raw HTML tags. Rounded-square avatars
 // (the DVNT rule — never circles).
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Section, H2, UL, LI, Div, Span, P } from '@expo/html-elements'
 import { Pressable, TextInput } from 'react-native'
 import { SolitoImage } from 'solito/image'
+import { getSession } from '@dvnt/app/lib/auth-client'
 import type { CommentNode } from '@/lib/comments'
 
 const ACCENT = '#FF5BFC'
@@ -14,8 +15,8 @@ const ACCENT = '#FF5BFC'
 export function Comments({
   postId,
   initial,
-  accessToken,
-  viewerId,
+  accessToken: tokenProp,
+  viewerId: viewerProp,
 }: {
   postId: string
   initial: CommentNode[]
@@ -23,6 +24,24 @@ export function Comments({
   viewerId?: string
 }) {
   const [tree, setTree] = useState<CommentNode[]>(initial)
+  // The post page renders on the server and can't read the Better Auth session,
+  // so resolve the token + viewer client-side. Without this, `authed` was always
+  // false and the comment form never appeared / submitted.
+  const [accessToken, setAccessToken] = useState<string | undefined>(tokenProp)
+  const [viewerId, setViewerId] = useState<string | undefined>(viewerProp)
+  useEffect(() => {
+    let alive = true
+    getSession()
+      .then((res: any) => {
+        if (!alive) return
+        setAccessToken(res?.data?.session?.token ?? undefined)
+        setViewerId(res?.data?.user?.id ?? undefined)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
   const authed = Boolean(accessToken)
 
   const addLocal = (node: any, parentId?: string) => {

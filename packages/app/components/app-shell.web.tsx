@@ -200,14 +200,14 @@ export function AppShell({
             borderRadius: 12,
             border: "none",
             background: GRADIENT,
-            color: "#03040A",
+            color: "#FFFFFF",
             fontWeight: 800,
             fontSize: 15,
             cursor: "pointer",
             boxShadow: "0 8px 22px rgba(135,78,159,0.28)",
           }}
         >
-          <Plus size={20} strokeWidth={2.6} color="#03040A" />
+          <Plus size={20} strokeWidth={2.8} color="#FFFFFF" />
           {expanded ? <span>Create</span> : null}
         </button>
 
