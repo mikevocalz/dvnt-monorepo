@@ -11,7 +11,9 @@
     "./types": "./src/payload-types.ts",
     "./components/*": "./src/components/*.tsx"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@payloadcms/storage-s3": "4.0.0-internal.a0ef1b8"
+  },
   "peerDependencies": {
     "@payloadcms/db-postgres": "4.0.0-internal.a0ef1b8",
     "@payloadcms/richtext-lexical": "4.0.0-internal.a0ef1b8",

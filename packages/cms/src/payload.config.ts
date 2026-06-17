@@ -6,9 +6,10 @@
 // changes go through reviewed migrations (`pnpm migrate`), never auto-sync.
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
+import { s3Storage } from '@payloadcms/storage-s3'
 import sharp from 'sharp'
 import path from 'path'
-import { buildConfig } from 'payload'
+import { buildConfig, type Plugin } from 'payload'
 import { fileURLToPath } from 'url'
 
 import { AdminUsers } from './collections/AdminUsers'
@@ -28,6 +29,38 @@ import { getServerSideURL } from './utilities/getURL'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
+
+// Media storage: when S3 creds are present, store uploads in Supabase Storage
+// (S3-compatible). INERT until configured — with the env unset the plugin list
+// is empty and Media stays on the previous (local/static) behavior, so the
+// build and existing /blog-media assets are unaffected. Supabase needs
+// forcePathStyle + the /storage/v1/s3 endpoint. See packages/cms/README.
+const s3Enabled = Boolean(
+  process.env.S3_BUCKET &&
+    process.env.S3_ACCESS_KEY_ID &&
+    process.env.S3_SECRET_ACCESS_KEY,
+)
+
+const storagePlugins: Plugin[] = s3Enabled
+  ? [
+      s3Storage({
+        collections: { media: true },
+        bucket: process.env.S3_BUCKET as string,
+        acl: 'public-read',
+        config: {
+          endpoint: process.env.S3_ENDPOINT, // https://<ref>.supabase.co/storage/v1/s3
+          region: process.env.S3_REGION || 'us-east-1',
+          forcePathStyle: true, // required for Supabase Storage's S3 gateway
+          credentials: {
+            accessKeyId: process.env.S3_ACCESS_KEY_ID as string,
+            secretAccessKey: process.env.S3_SECRET_ACCESS_KEY as string,
+          },
+        },
+        // storage adapters are valid plugins at runtime; the package's
+        // StorageAdapter type just doesn't line up with payload's Plugin type.
+      }) as unknown as Plugin,
+    ]
+  : []
 
 export default buildConfig({
   // The Payload admin login collection (separate from DVNT app members).
@@ -72,6 +105,9 @@ export default buildConfig({
 
   // Read-only windows onto the live app DB (real members/events). See appData.ts.
   endpoints: [appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint, appVerifyEndpoint],
+
+  // Supabase Storage for Media uploads (inert until S3 env is set — see above).
+  plugins: storagePlugins,
 
   editor: lexicalEditor(),
 

@@ -109,13 +109,20 @@ function client(): Promise<Payload> {
   return _payload
 }
 
-// Payload media URLs are `/payload-api/media/file/<filename>` (or the legacy
-// `/api/media/file/<filename>`); the files live in /public/blog-media, so
-// rewrite to that static path. Absolute CDN/storage URLs pass through.
+// Media URL strategy:
+//  - Absolute URLs (direct Supabase public URLs) always pass through.
+//  - When Media lives in Supabase Storage (S3_BUCKET set — see
+//    packages/cms/payload.config.ts s3Storage), serve Payload's own URL
+//    (`/payload-api/media/file/<name>`, which proxies S3) untouched.
+//  - Otherwise (legacy), rewrite to the static /public/blog-media assets.
+const MEDIA_ON_S3 = Boolean(process.env.S3_BUCKET)
 function fixMedia(url?: string | null): string | undefined {
   if (!url) return undefined
-  const m = String(url).match(/\/(?:payload-)?api\/media\/file\/(.+)$/)
-  return m ? `/blog-media/${m[1]}` : String(url)
+  const u = String(url)
+  if (/^https?:\/\//.test(u)) return u
+  if (MEDIA_ON_S3) return u
+  const m = u.match(/\/(?:payload-)?api\/media\/file\/(.+)$/)
+  return m ? `/blog-media/${m[1]}` : u
 }
 const sized = (u?: string | null) => (fixMedia(u) ? { url: fixMedia(u)! } : undefined)
 
