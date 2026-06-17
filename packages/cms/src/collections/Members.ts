@@ -4,7 +4,7 @@
 // through the `onStatusChange` hook (ban_list + moderation_actions + session
 // revocation). Reports drive `openReportsAgainst` via `onReportChange`.
 import type { CollectionConfig } from 'payload'
-import { canModerate, isAdminPlus } from '../access/roles'
+import { canModerate, isAdminPlus, fieldAdminPlus } from '../access/roles'
 import { onStatusChange } from './hooks/moderation'
 import { onMemberRoleChange } from './hooks/role'
 
@@ -51,7 +51,7 @@ export const Members: CollectionConfig = {
       defaultValue: 'Basic',
       index: true,
       options: MEMBER_ROLES.map((v) => ({ label: v, value: v })),
-      access: { update: isAdminPlus, create: isAdminPlus },
+      access: { update: fieldAdminPlus, create: fieldAdminPlus },
       admin: {
         description: "App role — saving updates the user's role in the app and grants CMS access for Moderator/Admin/Super-Admin.",
       },
