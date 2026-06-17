@@ -9,7 +9,7 @@ import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { s3Storage } from '@payloadcms/storage-s3'
 import sharp from 'sharp'
 import path from 'path'
-import { buildConfig, type Plugin } from 'payload'
+import { buildConfig } from 'payload'
 import { fileURLToPath } from 'url'
 
 import { AdminUsers } from './collections/AdminUsers'
@@ -41,7 +41,9 @@ const s3Enabled = Boolean(
     process.env.S3_SECRET_ACCESS_KEY,
 )
 
-const storagePlugins: Plugin[] = s3Enabled
+// NB: this internal Payload build takes storage adapters in the top-level
+// `storage` key (it calls adapter.init(config)) — NOT `plugins`.
+const storageAdapters = s3Enabled
   ? [
       s3Storage({
         collections: { media: true },
@@ -56,9 +58,7 @@ const storagePlugins: Plugin[] = s3Enabled
             secretAccessKey: process.env.S3_SECRET_ACCESS_KEY as string,
           },
         },
-        // storage adapters are valid plugins at runtime; the package's
-        // StorageAdapter type just doesn't line up with payload's Plugin type.
-      }) as unknown as Plugin,
+      }),
     ]
   : []
 
@@ -107,7 +107,7 @@ export default buildConfig({
   endpoints: [appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint, appVerifyEndpoint],
 
   // Supabase Storage for Media uploads (inert until S3 env is set — see above).
-  plugins: storagePlugins,
+  storage: storageAdapters,
 
   editor: lexicalEditor(),
 
