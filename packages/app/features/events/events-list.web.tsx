@@ -232,13 +232,17 @@ export function EventsListScreen() {
             <h1 className="text-3xl font-extrabold mt-0.5">Events</h1>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => router.push("/events/my-tickets")}
-              className="h-10 px-3.5 rounded-xl border border-white/12 bg-white/[0.06] flex items-center gap-1.5 text-sm font-semibold"
-            >
-              <Ticket size={16} color="#379ED8" />
-              Tickets
-            </button>
+            {/* "My tickets" is member-only — a signed-out visitor has none, so
+                hide it entirely (PROMPT 13 §4: gate member affordances). */}
+            {isAuthenticated ? (
+              <button
+                onClick={() => router.push("/events/my-tickets")}
+                className="h-10 px-3.5 rounded-xl border border-white/12 bg-white/[0.06] flex items-center gap-1.5 text-sm font-semibold"
+              >
+                <Ticket size={16} color="#379ED8" />
+                Tickets
+              </button>
+            ) : null}
             {/* SPICY toggle is a member-only affordance — hidden entirely for
                 signed-out users (PROMPT 13 §4 / 13B: no leak). */}
             {isAuthenticated ? (
