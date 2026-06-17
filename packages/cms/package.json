@@ -1,0 +1,21 @@
+{
+  "name": "@dvnt/cms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DVNT Payload v4 CMS core — buildConfig, collections, access, fields, endpoints, generated types, and admin UI components. Single source of truth shared by apps/web (runtime admin/REST/console) and web-vite (CLI/migrations).",
+  "type": "module",
+  "main": "src/payload.config.ts",
+  "types": "src/payload-types.ts",
+  "exports": {
+    ".": "./src/payload.config.ts",
+    "./types": "./src/payload-types.ts",
+    "./components/*": "./src/components/*.tsx"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@payloadcms/db-postgres": "4.0.0-internal.a0ef1b8",
+    "@payloadcms/richtext-lexical": "4.0.0-internal.a0ef1b8",
+    "payload": "4.0.0-internal.a0ef1b8",
+    "sharp": "0.34.2"
+  }
+}

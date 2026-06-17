@@ -20,6 +20,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@dvnt/cms": "workspace:*",
+    "@expo/html-elements": "^0.13.1",
     "@faceless-ui/window-info": "^3.0.1",
     "@payloadcms/admin-bar": "4.0.0-internal.a0ef1b8",
     "@payloadcms/db-postgres": "4.0.0-internal.a0ef1b8",
@@ -31,7 +33,6 @@
     "@payloadcms/tanstack-start": "4.0.0-internal.a0ef1b8",
     "@payloadcms/translations": "4.0.0-internal.a0ef1b8",
     "@payloadcms/ui": "4.0.0-internal.a0ef1b8",
-    "@expo/html-elements": "^0.13.1",
     "@tanstack/react-pacer": "^0.22.1",
     "@tanstack/react-query": "^5.69.0",
     "@tanstack/react-router": "1.169.2",

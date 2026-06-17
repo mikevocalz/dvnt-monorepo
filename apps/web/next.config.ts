@@ -91,6 +91,7 @@ const nextConfig: NextConfig = {
     '@dvnt/ui',
     '@dvnt/app',
     '@dvnt/api',
+    '@dvnt/cms',
     '@dvnt/core',
     '@dvnt/functions',
     '@dvnt/observability',

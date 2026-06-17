@@ -40,7 +40,7 @@ export const Members: CollectionConfig = {
       name: 'avatarUrl',
       type: 'text',
       label: 'Avatar',
-      admin: { components: { Cell: '@/components/payload/AvatarCell' } },
+      admin: { components: { Cell: '@dvnt/cms/components/AvatarCell' } },
     },
     // Link back to the app's auth/profiles row so a ban can revoke app sessions.
     { name: 'appUserId', type: 'text', index: true, admin: { description: 'Supabase/Better Auth user id' } },

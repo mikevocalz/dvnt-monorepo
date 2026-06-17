@@ -38,17 +38,16 @@ export default buildConfig({
     // Brand the CMS as DVNT so it reads as the same product as the console.
     components: {
       graphics: {
-        Logo: '@/components/payload/Logo',
-        Icon: '@/components/payload/Icon',
+        Logo: '@dvnt/cms/components/Logo',
+        Icon: '@dvnt/cms/components/Icon',
       },
-      beforeLogin: ['@/components/payload/BeforeLogin'],
-      beforeDashboard: ['@/components/payload/SyncFromApp'],
-      afterNavLinks: ['@/components/payload/BackToConsole', '@/components/payload/KeepNavInteractive'],
+      beforeLogin: ['@dvnt/cms/components/BeforeLogin'],
+      beforeDashboard: ['@dvnt/cms/components/SyncFromApp'],
+      afterNavLinks: ['@dvnt/cms/components/BackToConsole', '@dvnt/cms/components/KeepNavInteractive'],
     },
     importMap: {
-      // Next.js adapter: the CLI discovers app/(payload)/admin and writes the
-      // generated importMap.js there. baseDir resolves the `@/...` component
-      // paths below (mapped to src/* in tsconfig).
+      // Admin component paths above are package specifiers (@dvnt/cms/components/*)
+      // so they resolve identically in apps/web (runtime) and web-vite (CLI).
       baseDir: path.resolve(dirname),
     },
     livePreview: {

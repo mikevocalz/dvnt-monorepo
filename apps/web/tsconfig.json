@@ -29,7 +29,7 @@
     ],
     "paths": {
       "@payload-config": [
-        "./src/payload.config.ts"
+        "../../packages/cms/src/payload.config.ts"
       ],
       "@/*": [
         "./src/*"

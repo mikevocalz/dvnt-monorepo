@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@dvnt/api": "workspace:*",
+    "@dvnt/cms": "workspace:*",
     "@dvnt/app": "workspace:*",
     "@dvnt/core": "workspace:*",
     "@dvnt/functions": "workspace:*",
