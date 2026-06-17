@@ -1,10 +1,16 @@
 // src/lib/posts.ts — blog data layer.
-// Reads posts DIRECTLY from the Supabase `payload` schema (Payload's own tables)
-// so the live blog works without a hosted Payload server. Media files are served
-// as static assets from the blog's /public/blog-media (copied out of Payload).
-// `BLOG_DATABASE_URL` is the Supabase pooler connection string. Resilient: if the
-// DB is unset/unreachable the routes render empty instead of failing the build.
-import { Pool } from 'pg'
+// Reads posts via Payload's LOCAL API (Payload now runs in-process in this Next
+// app — see src/payload.config.ts + app/(payload)). No HTTP, no raw SQL: the
+// same getPayload() instance that powers /admin serves the public blog.
+//
+// Media: Payload returns upload URLs under /payload-api/media/file/<name>; the
+// files are also copied into /public/blog-media (Vercel-served static), so we
+// rewrite to that static path — matching the previous production behavior.
+//
+// Resilient: every query is wrapped so a DB hiccup (or build with no DATABASE_URI)
+// renders empty instead of failing the build, exactly as the old pg layer did.
+import { getPayload, type Payload } from 'payload'
+import config from '@payload-config'
 
 export type PostMedia = {
   id: string
@@ -96,209 +102,202 @@ export function formatDateShort(iso: string | undefined): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-// ── Supabase (payload schema) access ─────────────────────────────────────────
-let pool: Pool | null = null
-function db(): Pool | null {
-  const url = process.env.BLOG_DATABASE_URL || process.env.DATABASE_URL
-  if (!url) return null
-  if (!pool) pool = new Pool({ connectionString: url, max: 3, ssl: { rejectUnauthorized: false } })
-  return pool
+// ── Payload Local API client (cached singleton) ──────────────────────────────
+let _payload: Promise<Payload> | null = null
+function client(): Promise<Payload> {
+  if (!_payload) _payload = getPayload({ config })
+  return _payload
 }
 
-async function q<T = any>(text: string, params: any[] = []): Promise<T[]> {
-  const p = db()
-  if (!p) return []
-  try {
-    return (await p.query(text, params)).rows as T[]
-  } catch (e) {
-    console.error('[posts] query failed:', (e as any)?.message)
-    return []
-  }
-}
-
-// Payload media URLs are `/api/media/file/<filename>`; the files are copied into
-// the blog's /public/blog-media, so rewrite to that static (Vercel-served) path.
+// Payload media URLs are `/payload-api/media/file/<filename>` (or the legacy
+// `/api/media/file/<filename>`); the files live in /public/blog-media, so
+// rewrite to that static path. Absolute CDN/storage URLs pass through.
 function fixMedia(url?: string | null): string | undefined {
   if (!url) return undefined
-  const m = String(url).match(/\/api\/media\/file\/(.+)$/)
-  return m ? `/blog-media/${m[1]}` : url
+  const m = String(url).match(/\/(?:payload-)?api\/media\/file\/(.+)$/)
+  return m ? `/blog-media/${m[1]}` : String(url)
 }
 const sized = (u?: string | null) => (fixMedia(u) ? { url: fixMedia(u)! } : undefined)
 
-const POST_COLS = `
-  p.id, p.title, p.slug, p.excerpt, p.eyebrow, p.content, p.content_html,
-  p.published_at, p.updated_at, p.hero_caption, p.hero_video_url,
-  p.featured, p.editors_pick, p.trending, p.read_time,
-  p.seo_title, p.seo_description, p.seo_canonical_url, p.seo_no_index,
-  hm.id as hero_id, hm.url as hero_url, hm.alt as hero_alt,
-  hm.width as hero_w, hm.height as hero_h,
-  hm.sizes_card_url as hero_card, hm.sizes_thumbnail_url as hero_thumb, hm.sizes_og_url as hero_og
-`
-
-function rowToPost(r: any, authors: PostAuthor[], categories: PostCategory[]): Post {
+// ── Payload doc → blog type mappers ──────────────────────────────────────────
+function mapMedia(m: any): PostMedia | undefined {
+  if (!m || typeof m !== 'object') return undefined
   return {
-    id: String(r.id),
-    title: r.title,
-    slug: r.slug,
-    excerpt: r.excerpt ?? undefined,
-    eyebrow: r.eyebrow ?? undefined,
-    content: r.content ?? undefined,
-    contentHtml: r.content_html ?? undefined,
-    publishedAt: r.published_at ? new Date(r.published_at).toISOString() : undefined,
-    updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
-    heroImage: r.hero_url
-      ? {
-          id: String(r.hero_id ?? ''),
-          url: fixMedia(r.hero_url)!,
-          alt: r.hero_alt ?? undefined,
-          width: r.hero_w ?? undefined,
-          height: r.hero_h ?? undefined,
-          sizes: { card: sized(r.hero_card), thumbnail: sized(r.hero_thumb), og: sized(r.hero_og) },
-        }
-      : undefined,
-    heroCaption: r.hero_caption ?? undefined,
-    heroVideoUrl: r.hero_video_url ?? undefined,
-    authors,
-    categories,
-    featured: !!r.featured,
-    editorsPick: !!r.editors_pick,
-    trending: !!r.trending,
-    readTime: r.read_time != null ? Number(r.read_time) : undefined,
-    seo: {
-      title: r.seo_title ?? undefined,
-      description: r.seo_description ?? undefined,
-      canonicalUrl: r.seo_canonical_url ?? undefined,
-      noIndex: !!r.seo_no_index,
+    id: String(m.id ?? ''),
+    url: fixMedia(m.url) ?? '',
+    alt: m.alt ?? undefined,
+    width: m.width ?? undefined,
+    height: m.height ?? undefined,
+    sizes: {
+      thumbnail: sized(m.sizes?.thumbnail?.url),
+      card: sized(m.sizes?.card?.url),
+      og: sized(m.sizes?.og?.url),
     },
   }
 }
 
-// Core loader: posts (+ hero media) matching `whereSql`, then their authors +
-// categories via posts_rels in one batched query. Newest first.
-async function loadPosts(whereSql: string, params: any[], limit?: number, offset?: number): Promise<Post[]> {
-  const lim = limit != null ? `limit ${Math.max(0, Math.trunc(limit))}` : ''
-  const off = offset != null ? `offset ${Math.max(0, Math.trunc(offset))}` : ''
-  const rows = await q(
-    `select ${POST_COLS}
-       from payload.posts p
-       left join payload.media hm on hm.id = p.hero_image_id
-      where ${whereSql}
-      order by p.published_at desc nulls last ${lim} ${off}`,
-    params,
-  )
-  if (!rows.length) return []
-  const ids = rows.map((r) => r.id)
-  const rels = await q(
-    `select r.parent_id, r.path, r."order",
-            a.id as a_id, a.name as a_name, a.slug as a_slug, a.role as a_role, a.bio as a_bio,
-            a.socials_instagram, a.socials_twitter, a.socials_tiktok, a.socials_website, a.profile_url,
-            av.url as a_avatar_url, av.sizes_thumbnail_url as a_avatar_thumb,
-            c.id as c_id, c.title as c_title, c.slug as c_slug, c.accent_color, c.description
-       from payload.posts_rels r
-       left join payload.authors a on a.id = r.authors_id
-       left join payload.media av on av.id = a.avatar_id
-       left join payload.categories c on c.id = r.categories_id
-      where r.parent_id = any($1) and r.path in ('authors', 'categories')
-      order by r.parent_id, r."order" nulls last`,
-    [ids],
-  )
-  const authorsByPost = new Map<number, PostAuthor[]>()
-  const catsByPost = new Map<number, PostCategory[]>()
-  for (const rel of rels) {
-    if (rel.path === 'authors' && rel.a_id) {
-      const arr = authorsByPost.get(rel.parent_id) ?? []
-      arr.push({
-        id: String(rel.a_id),
-        name: rel.a_name,
-        slug: rel.a_slug,
-        role: rel.a_role ?? undefined,
-        bio: rel.a_bio ?? undefined,
-        avatar: rel.a_avatar_url
-          ? { id: '', url: fixMedia(rel.a_avatar_url)!, sizes: { thumbnail: sized(rel.a_avatar_thumb) } }
-          : undefined,
-        socials: {
-          instagram: rel.socials_instagram ?? undefined,
-          twitter: rel.socials_twitter ?? undefined,
-          tiktok: rel.socials_tiktok ?? undefined,
-          website: rel.socials_website ?? undefined,
-        },
-        profileUrl: rel.profile_url ?? undefined,
-      })
-      authorsByPost.set(rel.parent_id, arr)
-    } else if (rel.path === 'categories' && rel.c_id) {
-      const arr = catsByPost.get(rel.parent_id) ?? []
-      arr.push({
-        id: String(rel.c_id),
-        title: rel.c_title,
-        slug: rel.c_slug,
-        accentColor: rel.accent_color ?? undefined,
-        description: rel.description ?? undefined,
-      })
-      catsByPost.set(rel.parent_id, arr)
-    }
+function mapAuthor(a: any): PostAuthor | null {
+  if (!a || typeof a !== 'object') return null
+  return {
+    id: String(a.id ?? ''),
+    name: a.name,
+    slug: a.slug,
+    role: a.role ?? undefined,
+    bio: a.bio ?? undefined,
+    avatar: mapMedia(a.avatar),
+    socials: {
+      instagram: a.socials?.instagram ?? undefined,
+      twitter: a.socials?.twitter ?? undefined,
+      tiktok: a.socials?.tiktok ?? undefined,
+      website: a.socials?.website ?? undefined,
+    },
+    profileUrl: a.profileUrl ?? undefined,
   }
-  return rows.map((r) => rowToPost(r, authorsByPost.get(r.id) ?? [], catsByPost.get(r.id) ?? []))
 }
 
-const PUBLISHED = `p._status = 'published'`
-const inCategory = (n: number) =>
-  `exists (select 1 from payload.posts_rels rr join payload.categories cc on cc.id = rr.categories_id
-             where rr.parent_id = p.id and rr.path = 'categories' and cc.slug = $${n})`
+function mapCategory(c: any): PostCategory | null {
+  if (!c || typeof c !== 'object') return null
+  return {
+    id: String(c.id ?? ''),
+    title: c.title,
+    slug: c.slug,
+    accentColor: c.accentColor ?? undefined,
+    description: c.description ?? undefined,
+  }
+}
 
+function docToPost(d: any): Post {
+  return {
+    id: String(d.id),
+    title: d.title,
+    slug: d.slug,
+    excerpt: d.excerpt ?? undefined,
+    eyebrow: d.eyebrow ?? undefined,
+    content: d.content ?? undefined,
+    publishedAt: d.publishedAt ? new Date(d.publishedAt).toISOString() : undefined,
+    updatedAt: d.updatedAt ? new Date(d.updatedAt).toISOString() : undefined,
+    heroImage: mapMedia(d.heroImage),
+    heroCaption: d.heroCaption ?? undefined,
+    heroVideoUrl: d.heroVideoUrl ?? undefined,
+    authors: Array.isArray(d.authors) ? (d.authors.map(mapAuthor).filter(Boolean) as PostAuthor[]) : [],
+    categories: Array.isArray(d.categories) ? (d.categories.map(mapCategory).filter(Boolean) as PostCategory[]) : [],
+    tags: Array.isArray(d.tags) ? d.tags : undefined,
+    featured: !!d.featured,
+    editorsPick: !!d.editorsPick,
+    trending: !!d.trending,
+    readTime: d.readTime != null ? Number(d.readTime) : undefined,
+    seo: d.seo
+      ? {
+          title: d.seo.title ?? undefined,
+          description: d.seo.description ?? undefined,
+          ogImage: mapMedia(d.seo.ogImage),
+          canonicalUrl: d.seo.canonicalUrl ?? undefined,
+          noIndex: !!d.seo.noIndex,
+        }
+      : undefined,
+  }
+}
+
+// ── Query core ───────────────────────────────────────────────────────────────
+const PUBLISHED = { _status: { equals: 'published' } }
+const inCategory = (slug: string) => ({ 'categories.slug': { equals: slug } })
+
+async function findPosts(where: any, opts: { limit?: number; page?: number } = {}): Promise<Post[]> {
+  try {
+    const payload = await client()
+    const res = await payload.find({
+      collection: 'posts',
+      where,
+      depth: 2,
+      limit: opts.limit ?? 100,
+      page: opts.page,
+      sort: '-publishedAt',
+      overrideAccess: true,
+    })
+    return res.docs.map(docToPost)
+  } catch (e) {
+    console.error('[posts] find failed:', (e as any)?.message)
+    return []
+  }
+}
+
+// ── public API (unchanged surface) ───────────────────────────────────────────
 export async function getPublishedPosts(limit = 100, category?: string): Promise<Post[]> {
-  if (category) return loadPosts(`${PUBLISHED} and ${inCategory(1)}`, [category], limit)
-  return loadPosts(PUBLISHED, [], limit)
+  const where = category ? { and: [PUBLISHED, inCategory(category)] } : PUBLISHED
+  return findPosts(where, { limit })
 }
 
 export async function getPostsPage(
   opts: { page?: number; limit?: number; category?: string } = {},
 ): Promise<{ docs: Post[]; totalPages: number; page: number }> {
   const { page = 1, limit = 12, category } = opts
-  const where = category ? `${PUBLISHED} and ${inCategory(1)}` : PUBLISHED
-  const params = category ? [category] : []
-  const docs = await loadPosts(where, params, limit, (page - 1) * limit)
-  const countRows = await q<{ n: number }>(`select count(*)::int n from payload.posts p where ${where}`, params)
-  const total = countRows[0]?.n ?? docs.length
-  return { docs, totalPages: Math.max(1, Math.ceil(total / limit)), page }
+  const where = category ? { and: [PUBLISHED, inCategory(category)] } : PUBLISHED
+  try {
+    const payload = await client()
+    const res = await payload.find({
+      collection: 'posts',
+      where,
+      depth: 2,
+      limit,
+      page,
+      sort: '-publishedAt',
+      overrideAccess: true,
+    })
+    return { docs: res.docs.map(docToPost), totalPages: res.totalPages, page: res.page ?? page }
+  } catch (e) {
+    console.error('[posts] page query failed:', (e as any)?.message)
+    return { docs: [], totalPages: 1, page }
+  }
 }
 
 export async function getFeaturedPost(): Promise<Post | null> {
-  const r = await loadPosts(`${PUBLISHED} and p.featured = true`, [], 1)
+  const r = await findPosts({ and: [PUBLISHED, { featured: { equals: true } }] }, { limit: 1 })
   return r[0] ?? null
 }
 
 export async function getEditorsPicks(limit = 4): Promise<Post[]> {
-  return loadPosts(`${PUBLISHED} and p.editors_pick = true`, [], limit)
+  return findPosts({ and: [PUBLISHED, { editorsPick: { equals: true } }] }, { limit })
 }
 
 export async function getTrending(limit = 5): Promise<Post[]> {
-  return loadPosts(`${PUBLISHED} and p.trending = true`, [], limit)
+  return findPosts({ and: [PUBLISHED, { trending: { equals: true } }] }, { limit })
 }
 
 export async function getCategories(): Promise<PostCategory[]> {
-  const rows = await q(
-    `select id, title, slug, accent_color, description from payload.categories order by "order" nulls last limit 50`,
-  )
-  return rows.map((c) => ({
-    id: String(c.id),
-    title: c.title,
-    slug: c.slug,
-    accentColor: c.accent_color ?? undefined,
-    description: c.description ?? undefined,
-  }))
+  try {
+    const payload = await client()
+    const res = await payload.find({ collection: 'categories', limit: 50, sort: 'title', overrideAccess: true })
+    return res.docs.map((c) => mapCategory(c)).filter(Boolean) as PostCategory[]
+  } catch (e) {
+    console.error('[posts] categories failed:', (e as any)?.message)
+    return []
+  }
 }
 
 export async function getLatestPosts(limit = 4, excludeSlug?: string): Promise<Post[]> {
-  const rows = await loadPosts(PUBLISHED, [], limit + 1)
+  const rows = await findPosts(PUBLISHED, { limit: limit + 1 })
   return excludeSlug ? rows.filter((p) => p.slug !== excludeSlug).slice(0, limit) : rows.slice(0, limit)
 }
 
 export async function getAllSlugs(): Promise<string[]> {
-  const rows = await q<{ slug: string }>(`select p.slug from payload.posts p where ${PUBLISHED} limit 1000`)
-  return rows.map((r) => r.slug).filter(Boolean)
+  try {
+    const payload = await client()
+    const res = await payload.find({
+      collection: 'posts',
+      where: PUBLISHED,
+      depth: 0,
+      limit: 1000,
+      pagination: false,
+      overrideAccess: true,
+    })
+    return res.docs.map((d: any) => d.slug).filter(Boolean)
+  } catch (e) {
+    console.error('[posts] slugs failed:', (e as any)?.message)
+    return []
+  }
 }
 
 export async function getPostBySlug(slug: string, _draft = false): Promise<Post | null> {
-  const r = await loadPosts(`p.slug = $1 and ${PUBLISHED}`, [slug], 1)
+  const r = await findPosts({ and: [PUBLISHED, { slug: { equals: slug } }] }, { limit: 1 })
   return r[0] ?? null
 }
