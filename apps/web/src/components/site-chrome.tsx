@@ -35,7 +35,10 @@ const Footer = dynamic(
   { ssr: false },
 );
 
-// Route prefixes that use the logged-in app chrome (header + tab bar, no footer).
+// Route prefixes that use the logged-in app chrome (the AppShell rail), no
+// marketing header/footer. The blog (/blog, /posts) is in the rail nav, so when
+// signed in it stays INSIDE the shell instead of flipping to the marketing
+// GlassHeader (which also wrongly showed a "Login" button while authed).
 const APP_SURFACES = [
   '/feed',
   '/notifications',
@@ -43,6 +46,8 @@ const APP_SURFACES = [
   '/settings',
   '/video',
   '/events',
+  '/blog',
+  '/posts',
 ];
 
 const isAppSurface = (path: string) =>

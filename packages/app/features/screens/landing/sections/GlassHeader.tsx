@@ -211,8 +211,8 @@ export function GlassHeader({
         pointerEvents="box-none"
         style={[styles.center, containerStyle]}
       >
-        <Animated.View style={[styles.maxw, borderStyle]}>
-          <GlassSurface radius={20} blur={14} tintStyle={tintStyle as never}>
+        <Animated.View style={[styles.maxw, { borderRadius: isMobile ? 14 : 20 }, borderStyle]}>
+          <GlassSurface radius={isMobile ? 14 : 20} blur={14} tintStyle={tintStyle as never}>
             <View style={styles.row}>
               <NavLink href="/" style={styles.brand}>
                 <Logo width={92} height={36} style={{marginTop: -6}}/>

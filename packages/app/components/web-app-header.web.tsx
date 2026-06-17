@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
   barMobile: web({
     marginTop: 2,
     maxWidth: "100%",
-    borderRadius: 20,
+    borderRadius: 12,
     boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
     height: "auto",
     paddingBottom: 8,

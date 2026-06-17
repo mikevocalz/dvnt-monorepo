@@ -11,7 +11,7 @@
  * Styling = raw semantic tags + Tailwind; media via @dvnt/ui Image (next/image);
  * routing via Solito. Avatars/story tiles are rounded squares (never circles).
  */
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
 import { Heart, Bookmark, Play, Grid3x3, Plus } from "lucide-react";
@@ -89,15 +89,33 @@ export function HomeScreen() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const posts: Post[] = data?.pages?.flatMap((p: any) => p?.data ?? []) ?? [];
 
-  const containerWidth = Math.min(winW - 24, MAX_W);
-  const numColumns = columnsFor(winW);
+  // Size the grid from the ACTUAL container width (the shell's center column),
+  // not the window. Driving it off `winW` made the grid compute a window-wide
+  // layout that overflowed the narrower app-shell column → clipped columns + a
+  // horizontal scrollbar. Measuring the scroller makes it fit any container and
+  // stay responsive (2/3/4 columns by the real available width).
+  const parentRef = useRef<HTMLDivElement>(null);
+  const [measuredW, setMeasuredW] = useState(0);
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width;
+      if (w) setMeasuredW(Math.round(w));
+    });
+    ro.observe(el);
+    setMeasuredW(Math.round(el.clientWidth));
+    return () => ro.disconnect();
+  }, []);
+  const availW = measuredW || winW;
+
+  const containerWidth = Math.min(availW - 16, MAX_W);
+  const numColumns = columnsFor(availW);
   const columnWidth = Math.floor(
     (containerWidth - (numColumns - 1) * GAP) / numColumns,
   );
   const cellHeight = (post: Post) =>
     Math.round(estimateRatio(post) * columnWidth);
-
-  const parentRef = useRef<HTMLDivElement>(null);
 
   // Deterministic masonry: greedily place each post into the SHORTEST column
   // using its estimated height. Packing happens in plain JS up-front, so the

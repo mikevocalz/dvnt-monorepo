@@ -31,6 +31,7 @@ import {
   Plus,
 } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import Logo from "@dvnt/app/components/logo";
 import { WebTabBar } from "./web-tab-bar";
 
 const ACCENT = "#379ED8"; // teal-blue (refined brand)
@@ -67,7 +68,10 @@ export function AppShell({
   }
 
   const expanded = width >= 1024; // rail shows labels
-  const showAside = width >= 1280; // right aside appears
+  // The right aside is reserved but currently empty — only carve out its column
+  // when a panel is actually passed, so the center (feed/blog) gets the full
+  // remaining width ("3xl worth of space") instead of a dead 320px gutter.
+  const showAside = width >= 1280 && !!aside;
   const railW = expanded ? 244 : 78;
 
   const items: NavItem[] = [
@@ -132,7 +136,7 @@ export function AppShell({
         background: "#06070D",
       }}
     >
-      {/* ── Left rail ── */}
+      {/* ── Left rail (liquid glass) ── */}
       <nav
         aria-label="Primary"
         style={{
@@ -143,40 +147,39 @@ export function AppShell({
           flexDirection: "column",
           padding: expanded ? "22px 14px 18px" : "22px 10px 18px",
           gap: 6,
-          borderRight: "1px solid rgba(255,255,255,0.08)",
-          background: "rgba(8,10,18,0.55)",
-          backdropFilter: "saturate(160%) blur(18px)",
-          WebkitBackdropFilter: "saturate(160%) blur(18px)",
+          borderRight: "1px solid rgba(255,255,255,0.10)",
+          // Liquid glass: translucent base + heavy saturated blur + a soft
+          // top-light sheen so it reads as frosted glass, not a flat panel.
+          backgroundColor: "rgba(10,12,22,0.42)",
+          backgroundImage:
+            "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.015) 22%, rgba(255,255,255,0) 60%)",
+          backdropFilter: "saturate(185%) brightness(1.06) blur(22px)",
+          WebkitBackdropFilter: "saturate(185%) brightness(1.06) blur(22px)",
+          boxShadow: "inset -1px 0 0 rgba(255,255,255,0.04)",
         }}
       >
-        {/* Wordmark */}
+        {/* Logo — the same DVNT mark as the marketing header. Scaled to fit the
+            rail at both widths so the collapsed rail never clips it. */}
         <button
           onClick={() => router.push("/feed")}
           title="DVNT"
+          aria-label="DVNT home"
           style={{
             display: "flex",
             justifyContent: expanded ? "flex-start" : "center",
             alignItems: "center",
-            padding: expanded ? "4px 14px 18px" : "4px 0 18px",
+            padding: expanded ? "2px 12px 20px" : "2px 0 20px",
             border: "none",
             background: "transparent",
             cursor: "pointer",
+            overflow: "visible",
           }}
         >
-          <span
-            style={{
-              fontWeight: 900,
-              fontSize: expanded ? 26 : 20,
-              letterSpacing: expanded ? 4 : 1,
-              backgroundImage: GRADIENT,
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              color: "transparent",
-            }}
-          >
-            {expanded ? "DVNT" : "D"}
-          </span>
+          {expanded ? (
+            <Logo width={112} height={43} />
+          ) : (
+            <Logo width={railW - 26} height={(railW - 26) * 0.385} />
+          )}
         </button>
 
         {items.map((it) => (
@@ -211,15 +214,15 @@ export function AppShell({
         <div style={{ flex: 1 }} />
       </nav>
 
-      {/* ── Center column ── */}
+      {/* ── Center column ── fills the available track (IG/X width), the inner
+           screens cap themselves (the feed grid is responsive). overflowX hidden
+           so a child can never spawn a horizontal scrollbar on the shell. */}
       <main
         style={{
           minWidth: 0,
           width: "100%",
-          maxWidth: 680,
           margin: "0 auto",
-          paddingLeft: 8,
-          paddingRight: 8,
+          overflowX: "hidden",
         }}
       >
         {children}
