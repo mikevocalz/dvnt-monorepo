@@ -12,7 +12,11 @@ import 'dotenv/config'
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Agent } from 'node:https'
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { NodeHttpHandler } from '@smithy/node-http-handler'
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 const MEDIA_DIR = path.resolve(dirname, '../../web/public/blog-media')
@@ -43,6 +47,12 @@ async function main() {
     region: process.env.S3_REGION || 'us-east-1',
     forcePathStyle: true,
     credentials: { accessKeyId, secretAccessKey },
+    maxAttempts: 5,
+    // Supabase's S3 gateway throws TLS "bad record mac" on reused keep-alive
+    // sockets under rapid requests — force a fresh connection per request.
+    requestHandler: new NodeHttpHandler({
+      httpsAgent: new Agent({ keepAlive: false, maxSockets: 1 }),
+    }),
   })
 
   const files = readdirSync(MEDIA_DIR).filter((f) => !f.startsWith('.'))
@@ -52,17 +62,29 @@ async function main() {
   for (const filename of files) {
     const Body = readFileSync(path.join(MEDIA_DIR, filename))
     const ext = path.extname(filename).toLowerCase()
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: filename,
-        Body,
-        ContentType: CONTENT_TYPES[ext] || 'application/octet-stream',
-        ACL: 'public-read',
-      }),
-    )
+    const cmd = new PutObjectCommand({
+      Bucket: bucket,
+      Key: filename,
+      Body,
+      ContentType: CONTENT_TYPES[ext] || 'application/octet-stream',
+      ACL: 'public-read',
+    })
+    // Retry transient TLS resets a few times before giving up.
+    let lastErr: unknown
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        await s3.send(cmd)
+        lastErr = undefined
+        break
+      } catch (e) {
+        lastErr = e
+        await sleep(attempt * 400)
+      }
+    }
+    if (lastErr) throw lastErr
     ok++
     console.log(`  ✓ ${filename}`)
+    await sleep(120) // gentle pacing for the gateway
   }
   console.log(`Done — ${ok}/${files.length} uploaded to ${bucket}.`)
 }
