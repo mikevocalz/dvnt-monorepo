@@ -29,15 +29,11 @@ class CopySkiaPlugin {
 }
 
 const nextConfig: NextConfig = {
-  // Payload Media storage runs server-side only — keep the S3 SDK + storage
-  // plugin OUT of the webpack bundle (bundling/minifying them breaks Payload
-  // init with "b is not a function"). withPayload merges its own externals.
-  serverExternalPackages: [
-    '@payloadcms/storage-s3',
-    '@payloadcms/plugin-cloud-storage',
-    '@aws-sdk/client-s3',
-    '@smithy/node-http-handler',
-  ],
+  // Keep only the genuinely server-only AWS SDK external. Do NOT externalize
+  // @payloadcms/storage-s3 / plugin-cloud-storage — they ship the admin's
+  // client component (S3ClientUploadHandler, referenced from the import map),
+  // and externalizing them breaks /admin's build-time page-data collection.
+  serverExternalPackages: ['@aws-sdk/client-s3', '@smithy/node-http-handler'],
   transpilePackages: [
     'react-native',
     'react-native-web',

@@ -82,6 +82,16 @@ export default buildConfig({
       // Admin component paths above are package specifiers (@dvnt/cms/components/*)
       // so they resolve identically in apps/web (runtime) and web-vite (CLI).
       baseDir: path.resolve(dirname),
+      // apps/web is the only app that renders the admin, and it (CommonJS) can't
+      // run the ESM-only Payload CLI — so regenerate the import map from web-vite
+      // (`pnpm --filter web-vite generate:importmap`) and write it straight into
+      // apps/web's (payload)/admin folder. This MUST be regenerated whenever the
+      // config's components change (e.g. enabling s3Storage adds its client
+      // upload handler) or the admin renders blank ("PayloadComponent not found").
+      importMapFile: path.resolve(
+        dirname,
+        '../../../apps/web/src/app/(payload)/admin/importMap.js',
+      ),
     },
     livePreview: {
       breakpoints: [

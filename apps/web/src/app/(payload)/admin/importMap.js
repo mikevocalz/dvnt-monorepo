@@ -1,4 +1,4 @@
-import { default as default_c880f40867356e4d4b5d4b4312ec0be7 } from '@dvnt/cms/components/AvatarCell'
+import { default as default_3245a2a2b01636659cb10cfa6576da43 } from '@dvnt/cms/components/AvatarCell'
 import { RscEntryLexicalCell as RscEntryLexicalCell_44fe37237e0ebf4470c9990d8cb7b07e } from '@payloadcms/richtext-lexical/rsc'
 import { RscEntryLexicalField as RscEntryLexicalField_44fe37237e0ebf4470c9990d8cb7b07e } from '@payloadcms/richtext-lexical/rsc'
 import { LexicalDiffComponent as LexicalDiffComponent_44fe37237e0ebf4470c9990d8cb7b07e } from '@payloadcms/richtext-lexical/rsc'
@@ -24,17 +24,18 @@ import { StrikethroughFeatureClient as StrikethroughFeatureClient_e70f5e05f09f93
 import { UnderlineFeatureClient as UnderlineFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { BoldFeatureClient as BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { ItalicFeatureClient as ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
-import { default as default_6f14b747d7d9d385f91171711bbf7132 } from '@dvnt/cms/components/Icon'
-import { default as default_e34c28bdc97e3fecf976b23b26d64cc9 } from '@dvnt/cms/components/Logo'
-import { default as default_a0a2f1e413778eb69833e33f169970fe } from '@dvnt/cms/components/BackToConsole'
-import { default as default_f767cd244bfeac74859edf98b393dd2f } from '@dvnt/cms/components/KeepNavInteractive'
-import { default as default_057390472e53fc3602312364d5a35799 } from '@dvnt/cms/components/SyncFromApp'
-import { default as default_be7cf7eb3883beb9807d8789bb1dd363 } from '@dvnt/cms/components/BeforeLogin'
+import { default as default_0ccfca3c4dc527a80f5674d21fdb9861 } from '@dvnt/cms/components/Icon'
+import { default as default_e6ec51973242ecc02deba9d3e1f63635 } from '@dvnt/cms/components/Logo'
+import { default as default_20f08b10c0dae90cd957cf30d87bff98 } from '@dvnt/cms/components/BackToConsole'
+import { default as default_8927304619b103ad9825942558eb3b2b } from '@dvnt/cms/components/KeepNavInteractive'
+import { default as default_bd2eb919a0ef345761afe56bded2090b } from '@dvnt/cms/components/SyncFromApp'
+import { default as default_1ee0f43f5fc02685c2849a5e4ca0319c } from '@dvnt/cms/components/BeforeLogin'
+import { S3ClientUploadHandler as S3ClientUploadHandler_f97aa6c64367fa259c5bc0567239ef24 } from '@payloadcms/storage-s3/client'
 import { CollectionCards as CollectionCards_ab83ff7e88da8d3530831f296ec4756a } from '@payloadcms/ui/rsc'
 
 /** @type import('payload').ImportMap */
 export const importMap = {
-  "@dvnt/cms/components/AvatarCell#default": default_c880f40867356e4d4b5d4b4312ec0be7,
+  "@dvnt/cms/components/AvatarCell#default": default_3245a2a2b01636659cb10cfa6576da43,
   "@payloadcms/richtext-lexical/rsc#RscEntryLexicalCell": RscEntryLexicalCell_44fe37237e0ebf4470c9990d8cb7b07e,
   "@payloadcms/richtext-lexical/rsc#RscEntryLexicalField": RscEntryLexicalField_44fe37237e0ebf4470c9990d8cb7b07e,
   "@payloadcms/richtext-lexical/rsc#LexicalDiffComponent": LexicalDiffComponent_44fe37237e0ebf4470c9990d8cb7b07e,
@@ -60,11 +61,12 @@ export const importMap = {
   "@payloadcms/richtext-lexical/client#UnderlineFeatureClient": UnderlineFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@payloadcms/richtext-lexical/client#BoldFeatureClient": BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@payloadcms/richtext-lexical/client#ItalicFeatureClient": ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
-  "@dvnt/cms/components/Icon#default": default_6f14b747d7d9d385f91171711bbf7132,
-  "@dvnt/cms/components/Logo#default": default_e34c28bdc97e3fecf976b23b26d64cc9,
-  "@dvnt/cms/components/BackToConsole#default": default_a0a2f1e413778eb69833e33f169970fe,
-  "@dvnt/cms/components/KeepNavInteractive#default": default_f767cd244bfeac74859edf98b393dd2f,
-  "@dvnt/cms/components/SyncFromApp#default": default_057390472e53fc3602312364d5a35799,
-  "@dvnt/cms/components/BeforeLogin#default": default_be7cf7eb3883beb9807d8789bb1dd363,
+  "@dvnt/cms/components/Icon#default": default_0ccfca3c4dc527a80f5674d21fdb9861,
+  "@dvnt/cms/components/Logo#default": default_e6ec51973242ecc02deba9d3e1f63635,
+  "@dvnt/cms/components/BackToConsole#default": default_20f08b10c0dae90cd957cf30d87bff98,
+  "@dvnt/cms/components/KeepNavInteractive#default": default_8927304619b103ad9825942558eb3b2b,
+  "@dvnt/cms/components/SyncFromApp#default": default_bd2eb919a0ef345761afe56bded2090b,
+  "@dvnt/cms/components/BeforeLogin#default": default_1ee0f43f5fc02685c2849a5e4ca0319c,
+  "@payloadcms/storage-s3/client#S3ClientUploadHandler": S3ClientUploadHandler_f97aa6c64367fa259c5bc0567239ef24,
   "@payloadcms/ui/rsc#CollectionCards": CollectionCards_ab83ff7e88da8d3530831f296ec4756a
 }
