@@ -1,3 +1,26 @@
+/*
+ * DVNT Payload admin theme — deviant dark palette + magenta/cyan accents,
+ * branded nav + login, and the SyncFromApp/BackToConsole component styling.
+ * Ported from web-vite. Payload's base UI CSS comes from @payloadcms/next/css
+ * (imported in layout.tsx before this), so the Vite-era payload-foundation.scss
+ * (manual @payloadcms/ui css imports) is NOT needed here.
+ */
+
+/* Cascade-layer order + base typography. Imported via Vite (NOT rendered as an
+ * inline <style> in the SSR <head>) so the markup is byte-identical on the server
+ * and client — an inline <style> there collides with Vite's dev `/@vite/client`
+ * script injection and breaks head hydration (which silently kills interactivity,
+ * e.g. the sidebar nav stops responding to clicks). */
+@layer payload-default, base, tailwind, payload;
+
+@layer base {
+  html {
+    font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
 div.table {
   display: block;
 }
