@@ -29,6 +29,7 @@ import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useTicketTypes } from "@dvnt/app/lib/hooks/use-tickets";
 import { usePublicGateStore } from "@dvnt/app/lib/stores/public-gate-store";
 import { GuestCheckoutSheet } from "@dvnt/app/components/events/GuestCheckoutSheet";
+import { OrganizerCard } from "@dvnt/app/src/events/ui";
 
 interface TierLite {
   id: string;
@@ -338,6 +339,9 @@ function PublicEventDetailContent() {
               );
             })
           )}
+
+          {/* ── Hosted by — organizer card (posh-style) ──────────── */}
+          <OrganizerCard eventId={eventId} />
         </View>
       </ScrollView>
 

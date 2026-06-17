@@ -51,6 +51,37 @@ export interface EventHost {
   name?: string;
   avatar: string;
   verified?: boolean;
+  followersCount?: number;
+}
+
+/**
+ * Organizer card payload (posh.vip-style "Hosted by" section).
+ * Backed by the get_event_organizer RPC — identity + aggregate stats +
+ * the viewer's follow relationship, all in one round-trip.
+ */
+export interface OrganizerSocials {
+  instagram?: string;
+  x?: string;
+  website?: string;
+}
+
+export interface EventOrganizer {
+  id: string;
+  username: string;
+  /** Display name — falls back to username at render time. */
+  name?: string;
+  avatar: string;
+  verified: boolean;
+  followersCount: number;
+  /** Number of public, non-cancelled events this organizer hosts. */
+  eventsCount: number;
+  /** Sum of attendees across this organizer's public events. */
+  totalAttendees: number;
+  socials: OrganizerSocials;
+  /** Does the current viewer already follow this organizer? */
+  isFollowing: boolean;
+  /** Is the viewer the organizer (hides the follow/contact CTAs)? */
+  isSelf: boolean;
 }
 
 export interface TicketTier {

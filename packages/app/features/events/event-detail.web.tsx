@@ -45,6 +45,7 @@ import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { computePromoDiscountCents, promoLabel } from "@dvnt/app/lib/payments/promo-discount";
 import { WhoAllOverThere } from "@dvnt/app/components/event/WhoAllOverThere.web";
 import { WeatherStrip } from "@dvnt/app/components/events/weather-strip.web";
+import { OrganizerCard } from "@dvnt/app/src/events/ui/OrganizerCard.web";
 import {
   useTicketTypes,
   useMyTicketForEvent,
@@ -1137,6 +1138,9 @@ export function EventDetailScreen() {
               ) : null}
             </Section>
           ) : null}
+
+          {/* Hosted by — organizer card (posh-style) */}
+          <OrganizerCard eventId={eventId} />
 
           {/* Tags */}
           {tags.length > 0 ? (

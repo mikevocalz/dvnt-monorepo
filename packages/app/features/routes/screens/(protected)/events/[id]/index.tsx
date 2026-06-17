@@ -100,6 +100,7 @@ import {
   WeatherModule,
   EventMapSection,
   TicketsOpeningSoonCard,
+  OrganizerCard,
 } from "@dvnt/app/src/events/ui";
 import type {
   TicketTier,
@@ -1993,6 +1994,9 @@ function EventDetailScreenContent() {
               onAttendeePress={handleAttendeePress}
             />
           </View>
+
+          {/* ── Hosted by — organizer card (posh-style) ──────────── */}
+          <OrganizerCard eventId={eventId} />
 
           {/* ── 3.25 HOST ORGANIZER TOOLS ──────────────────────────── */}
           {isHost ? (
