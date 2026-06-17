@@ -1,10 +1,12 @@
 import { View, Text, Pressable, ScrollView } from 'react-native';
-import { useNavigate } from '@tanstack/react-router';
+import { useRouter } from 'solito/navigation';
 import { Button } from '../../../components/ui/button';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
 
 export function OnboardingScreen() {
-  const navigate = useNavigate();
+  // Next app uses Solito/Next routing (no TanStack RouterProvider).
+  const router = useRouter();
+  const navigate = ({ to }: { to: string }) => router.push(to);
 
   return (
     <ScrollView style={{ minHeight: '100%' as any, backgroundColor: '#02030A' }} contentContainerStyle={{ minHeight: 720, justifyContent: 'center', padding: 24 }}>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useForm } from '@tanstack/react-form';
-import { useNavigate } from '@tanstack/react-router';
+import { useRouter } from 'solito/navigation';
 import { toast } from 'sonner';
 import { Button } from '../../../components/ui/button';
 import { FormInput } from '../../../components/form';
@@ -19,7 +19,9 @@ export function SignupScreen() {
   const [activeStep, setActiveStep] = useState(0);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const { setUser } = useAuthStore();
-  const navigate = useNavigate();
+  // Next app uses Solito/Next routing (no TanStack RouterProvider).
+  const router = useRouter();
+  const navigate = ({ to }: { to: string }) => router.push(to);
 
   const form = useForm({
     defaultValues: { email: '', username: '', password: '' },

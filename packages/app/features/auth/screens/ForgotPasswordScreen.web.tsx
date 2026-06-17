@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useForm } from '@tanstack/react-form';
-import { useNavigate } from '@tanstack/react-router';
+import { useRouter } from 'solito/navigation';
 import { toast } from 'sonner';
 import { Button } from '../../../components/ui/button';
 import { FormInput } from '../../../components/form';
@@ -12,7 +12,10 @@ import { AUTH_PRIMARY_COLOR as P, AUTH_SUPPORT_EMAIL } from './AuthScreens.share
 export function ForgotPasswordScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedEmail, setSubmittedEmail] = useState<string | null>(null);
-  const navigate = useNavigate();
+  // Next app uses Solito/Next routing (no TanStack RouterProvider). Shim keeps
+  // the `navigate({ to })` call sites unchanged.
+  const router = useRouter();
+  const navigate = ({ to }: { to: string }) => router.push(to);
 
   const form = useForm({
     defaultValues: { email: '' },

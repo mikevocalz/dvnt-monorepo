@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { View, Text, ScrollView } from 'react-native';
-import { useNavigate } from '@tanstack/react-router';
+import { useRouter } from 'solito/navigation';
 import { toast } from 'sonner';
 import { Button } from '../../../components/ui/button';
 import { authClient, resendVerificationEmail } from '../../../lib/auth-client';
@@ -11,7 +11,9 @@ type Status = 'checking' | 'success' | 'error' | 'waiting';
 
 export function VerifyEmailScreen() {
   const [status, setStatus] = useState<Status>('checking');
-  const navigate = useNavigate();
+  // Next app uses Solito/Next routing (no TanStack RouterProvider).
+  const router = useRouter();
+  const navigate = ({ to }: { to: string }) => router.push(to);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

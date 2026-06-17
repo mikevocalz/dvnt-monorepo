@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useForm } from '@tanstack/react-form';
-import { useNavigate } from '@tanstack/react-router';
+import { useRouter } from 'solito/navigation';
 import { toast } from 'sonner';
 import { Button } from '../../../components/ui/button';
 import { FormInput } from '../../../components/form';
@@ -14,7 +14,9 @@ type Status = 'checking' | 'ready' | 'success' | 'invalid';
 export function ResetPasswordScreen() {
   const [status, setStatus] = useState<Status>('checking');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const navigate = useNavigate();
+  // Next app uses Solito/Next routing (no TanStack RouterProvider).
+  const router = useRouter();
+  const navigate = ({ to }: { to: string }) => router.push(to);
 
   useEffect(() => {
     authClient.getSession().then(({ data }: any) => setStatus(data ? 'ready' : 'invalid')).catch(() => setStatus('invalid'));
