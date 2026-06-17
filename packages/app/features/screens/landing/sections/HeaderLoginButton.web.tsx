@@ -61,7 +61,7 @@ const ring: React.CSSProperties = {
   marginLeft: 20,
   marginRight: 4,
   padding: 2,
-  borderRadius: 13,
+  borderRadius: 12,
   display: "inline-flex",
   textDecoration: "none",
   cursor: "pointer",
@@ -75,7 +75,7 @@ const inner: React.CSSProperties = {
   paddingBottom: 10,
   paddingLeft: 20,
   paddingRight: 20,
-  borderRadius: 11,
+  borderRadius: 10,
   background: "#0A0118",
 };
 const label: React.CSSProperties = {

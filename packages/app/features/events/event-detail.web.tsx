@@ -144,7 +144,7 @@ function Section({
   return (
     <section className="mt-6">
       <div className="flex items-center gap-2 mb-2">
-        {Icon ? <Icon size={16} color="#3FDCFF" /> : null}
+        {Icon ? <Icon size={16} color="#379ED8" /> : null}
         <h2 className="text-base font-bold">{title}</h2>
       </div>
       {children}
@@ -556,7 +556,7 @@ export function EventDetailScreen() {
         </div>
 
         <div className="px-4 pt-4">
-          <div className="flex items-center gap-1.5 text-[#3FDCFF] text-sm font-semibold">
+          <div className="flex items-center gap-1.5 text-[#379ED8] text-sm font-semibold">
             <Calendar size={15} />
             {fmt(e.date || e.fullDate)}
           </div>
@@ -645,7 +645,7 @@ export function EventDetailScreen() {
                   disabled={rsvpMutation.isPending}
                   className="w-full mt-4 h-12 rounded-xl border border-white/15 bg-white/[0.04] text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <Check size={18} color="#3FDCFF" /> You&apos;re going · Tap to cancel
+                  <Check size={18} color="#379ED8" /> You&apos;re going · Tap to cancel
                 </button>
               );
             }
@@ -656,7 +656,7 @@ export function EventDetailScreen() {
                   onClick={() => router.push(`/ticket/${eventId}`)}
                   className="w-full mt-4 h-12 rounded-xl bg-white/10 text-white font-bold flex items-center justify-center gap-2"
                 >
-                  <Ticket size={18} color="#3FDCFF" /> View ticket
+                  <Ticket size={18} color="#379ED8" /> View ticket
                 </button>
               );
             }
@@ -670,7 +670,7 @@ export function EventDetailScreen() {
                   className={`w-full mt-4 h-12 rounded-xl font-bold disabled:opacity-50 ${
                     waitlistJoined
                       ? "border border-white/15 bg-white/[0.04] text-white"
-                      : "bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white"
+                      : "bg-linear-to-r from-[#379ED8] to-[#874E9F] text-white"
                   }`}
                 >
                   {isWaitlistBusy
@@ -725,7 +725,7 @@ export function EventDetailScreen() {
                   gateAuth(openCheckout);
                 }}
                 disabled={isFreeRsvp && rsvpMutation.isPending}
-                className="w-full mt-4 h-12 rounded-xl bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold"
+                className="w-full mt-4 h-12 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-white font-bold"
               >
                 {e.price ? "Get tickets" : "RSVP"}
               </button>
@@ -750,7 +750,7 @@ export function EventDetailScreen() {
                         {opt.available ? "Available" : "Sold out"}
                       </div>
                     </div>
-                    <span className="text-[#3FDCFF] font-bold">
+                    <span className="text-[#379ED8] font-bold">
                       +${(opt.diffCents / 100).toFixed(0)}
                     </span>
                   </button>
@@ -774,7 +774,7 @@ export function EventDetailScreen() {
               </p>
               <button
                 onClick={handleToggleTranslate}
-                className="mt-2 inline-flex items-center gap-1.5 text-[#3FDCFF] text-sm font-medium"
+                className="mt-2 inline-flex items-center gap-1.5 text-[#379ED8] text-sm font-medium"
               >
                 <Languages size={14} />
                 {isDescriptionTranslated ? "Show original" : "Translate"}
@@ -836,7 +836,7 @@ export function EventDetailScreen() {
               <ul className="flex flex-col gap-1.5">
                 {perks.map((p, i) => (
                   <li key={i} className="flex items-center gap-2 text-white/85 text-[15px]">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#3FDCFF]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#379ED8]" />
                     {p}
                   </li>
                 ))}
@@ -910,13 +910,13 @@ export function EventDetailScreen() {
                       }}
                       className={`w-full text-left rounded-xl border p-4 disabled:opacity-50 ${
                         isSelected
-                          ? "border-[#3FDCFF] bg-[#3FDCFF]/[0.06]"
+                          ? "border-[#379ED8] bg-[#379ED8]/[0.06]"
                           : "border-white/10 bg-white/[0.03]"
                       }`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-bold">{t.name || t.title || "Ticket"}</span>
-                        <span className="text-[#3FDCFF] font-bold">
+                        <span className="text-[#379ED8] font-bold">
                           {soldOut ? "Sold out" : price ? `$${price}` : "Free"}
                         </span>
                       </div>
@@ -1031,7 +1031,7 @@ export function EventDetailScreen() {
               {!isHost ? (
                 <button
                   onClick={() => gateAuth(() => setReviewOpen(true))}
-                  className="mt-3 inline-flex items-center gap-1.5 text-[#3FDCFF] text-sm font-medium"
+                  className="mt-3 inline-flex items-center gap-1.5 text-[#379ED8] text-sm font-medium"
                 >
                   <Star size={14} /> Write a review
                 </button>
@@ -1043,7 +1043,7 @@ export function EventDetailScreen() {
               <p className="text-white/50 text-sm">No reviews yet.</p>
               <button
                 onClick={() => gateAuth(() => setReviewOpen(true))}
-                className="mt-3 inline-flex items-center gap-1.5 text-[#3FDCFF] text-sm font-medium"
+                className="mt-3 inline-flex items-center gap-1.5 text-[#379ED8] text-sm font-medium"
               >
                 <Star size={14} /> Write a review
               </button>
@@ -1087,7 +1087,7 @@ export function EventDetailScreen() {
                       onClick={() =>
                         router.push(`/feed/events/${eventId}/comments`)
                       }
-                      className="text-[#3FDCFF] text-sm font-medium mt-3"
+                      className="text-[#379ED8] text-sm font-medium mt-3"
                     >
                       View all comments
                     </button>
@@ -1131,7 +1131,7 @@ export function EventDetailScreen() {
                   href={mapsHref}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 mt-2 text-[#3FDCFF] text-sm font-medium"
+                  className="inline-flex items-center gap-1.5 mt-2 text-[#379ED8] text-sm font-medium"
                 >
                   Open in Maps <ExternalLink size={13} />
                 </a>
@@ -1146,7 +1146,7 @@ export function EventDetailScreen() {
           {tags.length > 0 ? (
             <div className="flex flex-wrap gap-2 mt-6">
               {tags.map((t, i) => (
-                <span key={i} className="text-[#3FDCFF] text-sm">
+                <span key={i} className="text-[#379ED8] text-sm">
                   #{t}
                 </span>
               ))}
@@ -1267,7 +1267,7 @@ export function EventDetailScreen() {
                   },
                 );
               }}
-              className="flex-1 rounded-xl bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] py-3 font-semibold text-white disabled:opacity-50"
+              className="flex-1 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] py-3 font-semibold text-white disabled:opacity-50"
             >
               {isUpgradePending ? "Working…" : "Upgrade"}
             </button>
@@ -1307,7 +1307,7 @@ export function EventDetailScreen() {
             <button
               disabled={createReview.isPending}
               onClick={handleSubmitReview}
-              className="flex-1 rounded-xl bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] py-3 font-semibold text-white disabled:opacity-50"
+              className="flex-1 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] py-3 font-semibold text-white disabled:opacity-50"
             >
               {createReview.isPending ? "Posting…" : "Post review"}
             </button>
@@ -1334,7 +1334,7 @@ export function EventDetailScreen() {
           onChange={(ev) => setReviewText(ev.target.value)}
           placeholder="Share how the event went…"
           rows={4}
-          className="w-full rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#3FDCFF]"
+          className="w-full rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#379ED8]"
         />
       </Dialog>
 
@@ -1479,13 +1479,13 @@ function CheckoutSheet({
               onChange={(ev) => setPromoCode(ev.target.value)}
               placeholder="Promo code (optional)"
               autoCapitalize="characters"
-              className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#3FDCFF]"
+              className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#379ED8]"
             />
             <button
               type="button"
               onClick={applyPromo}
               disabled={promoApplying || !tier || !promoCode.trim()}
-              className="h-11 shrink-0 rounded-xl border border-[#3FDCFF]/40 bg-[#3FDCFF]/10 px-4 text-sm font-semibold text-[#3FDCFF] disabled:opacity-40"
+              className="h-11 shrink-0 rounded-xl border border-[#379ED8]/40 bg-[#379ED8]/10 px-4 text-sm font-semibold text-[#379ED8] disabled:opacity-40"
             >
               {promoApplying ? "…" : appliedPromo ? "Applied" : "Apply"}
             </button>
@@ -1493,8 +1493,8 @@ function CheckoutSheet({
           {promoError ? (
             <p className="text-sm text-[#FC253A]">{promoError}</p>
           ) : appliedPromo ? (
-            <p className="flex items-center gap-1 text-sm text-[#3FDCFF]">
-              <Check size={14} color="#3FDCFF" />
+            <p className="flex items-center gap-1 text-sm text-[#379ED8]">
+              <Check size={14} color="#379ED8" />
               {promoLabel(appliedPromo.type, appliedPromo.value)} applied
             </p>
           ) : null}
@@ -1509,10 +1509,10 @@ function CheckoutSheet({
                 <span className="text-sm text-white/80">{money(subtotalCents)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-[#3FDCFF]">
+                <span className="text-sm text-[#379ED8]">
                   {promoLabel(appliedPromo!.type, appliedPromo!.value)}
                 </span>
-                <span className="text-sm text-[#3FDCFF]">−{money(discountCents)}</span>
+                <span className="text-sm text-[#379ED8]">−{money(discountCents)}</span>
               </div>
             </>
           ) : null}
@@ -1525,7 +1525,7 @@ function CheckoutSheet({
         <button
           onClick={onCheckout}
           disabled={isCheckingOut || !tier}
-          className="w-full h-12 rounded-xl bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-50"
+          className="w-full h-12 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-white font-bold disabled:opacity-50"
         >
           {isCheckingOut
             ? "Processing…"
@@ -1567,11 +1567,11 @@ function MembersOnly({
         {children}
       </div>
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#02030A]/35 px-4 text-center">
-        <Lock size={18} color="#3FDCFF" />
+        <Lock size={18} color="#379ED8" />
         <p className="max-w-[260px] text-sm font-medium text-white/85">{label}</p>
         <button
           onClick={onSignIn}
-          className="mt-1 rounded-lg bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] px-4 py-2 text-sm font-semibold text-white"
+          className="mt-1 rounded-lg bg-linear-to-r from-[#379ED8] to-[#874E9F] px-4 py-2 text-sm font-semibold text-white"
         >
           Sign in
         </button>

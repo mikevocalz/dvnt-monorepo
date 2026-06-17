@@ -234,7 +234,7 @@ export function EventsListScreen() {
               onClick={() => router.push("/events/my-tickets")}
               className="h-10 px-3.5 rounded-xl border border-white/12 bg-white/[0.06] flex items-center gap-1.5 text-sm font-semibold"
             >
-              <Ticket size={16} color="#3FDCFF" />
+              <Ticket size={16} color="#379ED8" />
               Tickets
             </button>
             <button
@@ -276,7 +276,7 @@ export function EventsListScreen() {
           >
             <SlidersHorizontal size={18} color="#fff" />
             {activeFilters.length > 0 ? (
-              <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-lg bg-[#3FDCFF] text-black text-[9px] font-bold flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-lg bg-[#379ED8] text-black text-[9px] font-bold flex items-center justify-center">
                 {activeFilters.length}
               </span>
             ) : null}
@@ -296,7 +296,7 @@ export function EventsListScreen() {
                   {activeFilters.length > 0 ? (
                     <button
                       onClick={() => clearAllFilters()}
-                      className="text-xs text-[#3FDCFF] font-medium"
+                      className="text-xs text-[#379ED8] font-medium"
                     >
                       Clear all
                     </button>
@@ -496,7 +496,7 @@ function LargeEventCard({
           className="absolute inset-0 w-full h-full object-cover"
         />
       ) : (
-        <div className="absolute inset-0 bg-linear-to-br from-[#1A0A2E] via-[#8A40CF]/50 to-[#02030A]" />
+        <div className="absolute inset-0 bg-linear-to-br from-[#1A0A2E] via-[#874E9F]/50 to-[#02030A]" />
       )}
       <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/25 to-transparent" />
       {/* Like / save — real useToggleEventLike mutation. Sibling of the card
@@ -533,7 +533,7 @@ function LargeEventCard({
         ) : null}
       </div>
       <div className="absolute inset-x-0 bottom-0 p-5">
-        <div className="flex items-center gap-1.5 text-[#3FDCFF] text-xs font-semibold">
+        <div className="flex items-center gap-1.5 text-[#379ED8] text-xs font-semibold">
           <Calendar size={14} />
           {shortDate(e.fullDate || e.date)}
         </div>
@@ -579,14 +579,14 @@ function EventCard({
           <img src={img} alt={e.title} className="w-full h-full object-cover" />
         ) : (
           // No cover → themed gradient with the title (consistent, never blank).
-          <div className="absolute inset-0 flex items-center justify-center p-3 bg-linear-to-br from-[#1A0A2E] via-[#8A40CF]/50 to-[#02030A]">
+          <div className="absolute inset-0 flex items-center justify-center p-3 bg-linear-to-br from-[#1A0A2E] via-[#874E9F]/50 to-[#02030A]">
             <span className="text-center text-[15px] font-bold leading-snug line-clamp-4">
               {e.title}
             </span>
           </div>
         )}
       </div>
-      <div className="text-[#3FDCFF] text-[11px] font-semibold mt-1.5">
+      <div className="text-[#379ED8] text-[11px] font-semibold mt-1.5">
         {shortDate(e.fullDate || e.date)}
       </div>
       <div className="text-sm font-semibold leading-snug line-clamp-2">
@@ -624,7 +624,7 @@ function Spotlight({
             />
             <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/20 to-transparent" />
             <div className="absolute inset-x-0 bottom-0 p-4">
-              <div className="flex items-center gap-1.5 text-[#3FDCFF] text-xs font-semibold">
+              <div className="flex items-center gap-1.5 text-[#379ED8] text-xs font-semibold">
                 <Calendar size={13} />
                 {shortDate(it.start_date || it.date)}
               </div>
@@ -663,7 +663,7 @@ function EventRow({
   return (
     <section className="-mx-4 mb-6">
       <div className="flex items-center gap-2 px-4 mb-2">
-        <Icon size={16} color="#3FDCFF" />
+        <Icon size={16} color="#379ED8" />
         <h2 className="text-base font-bold">{title}</h2>
       </div>
       <div className="flex gap-3 overflow-x-auto no-scrollbar px-4">
