@@ -8,7 +8,7 @@
   "scripts": {
     "build": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vite build",
     "dev": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vite dev",
-    "start": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vite preview",
+    "start": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vite preview --host 0.0.0.0 --port ${PORT:-3000}",
     "generate:importmap": "cross-env NODE_OPTIONS=--no-deprecation payload generate:importmap",
     "generate:types": "cross-env NODE_OPTIONS=--no-deprecation payload generate:types",
     "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
