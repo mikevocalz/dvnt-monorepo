@@ -35,6 +35,7 @@ import Logo from "@dvnt/app/components/logo";
 import { WebTabBar } from "./web-tab-bar";
 
 const ACCENT = "#379ED8"; // teal-blue (refined brand)
+const HEADER_FONT = "Republica-Minor"; // matches the marketing header nav (FAQ, Privacy…)
 const MUTED = "rgba(255,255,255,0.58)";
 const GRADIENT = "linear-gradient(120deg, #0F4961 0%, #379ED8 38%, #874E9F 72%, #5B2C81 100%)";
 
@@ -106,6 +107,7 @@ export function AppShell({
           background: active ? "rgba(55,158,216,0.10)" : "transparent",
           boxShadow: active ? `inset 2px 0 0 ${ACCENT}` : undefined,
           color: active ? "#FFFFFF" : MUTED,
+          fontFamily: HEADER_FONT,
           fontWeight: active ? 700 : 500,
           fontSize: 16,
           cursor: "pointer",
@@ -201,8 +203,10 @@ export function AppShell({
             border: "none",
             background: GRADIENT,
             color: "#FFFFFF",
+            fontFamily: HEADER_FONT,
             fontWeight: 800,
-            fontSize: 15,
+            fontSize: 16,
+            letterSpacing: 0.5,
             cursor: "pointer",
             boxShadow: "0 8px 22px rgba(135,78,159,0.28)",
           }}
