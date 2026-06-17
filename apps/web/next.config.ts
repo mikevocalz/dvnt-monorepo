@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { NextConfig } from 'next';
 import type { Compiler, Compilation } from 'webpack';
+import { withPayload } from '@payloadcms/next/withPayload';
 
 class CopySkiaPlugin {
   apply(compiler: Compiler) {
@@ -244,4 +245,8 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// withPayload wraps the existing custom webpack config (RNW aliases, Skia,
+// DefinePlugin) and adds Payload's serverExternalPackages + admin handling.
+// devBundleServerPackages:false keeps Payload's server deps external in dev so
+// the heavy RNW/Skia webpack pipeline doesn't try to bundle pg/sharp/payload.
+export default withPayload(nextConfig, { devBundleServerPackages: false });
