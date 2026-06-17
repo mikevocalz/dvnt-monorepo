@@ -4,6 +4,7 @@ import NextTopLoader from "nextjs-toploader";
 import { ApiProvider } from "@dvnt/api";
 import { ImageProvider } from "@dvnt/ui/image-provider";
 import { SiteChrome } from "@/components/site-chrome";
+import { WebToaster } from "@/components/web-toaster";
 import { RNWStyleRegistry } from "./registry";
 import "./globals.css";
 
@@ -60,6 +61,9 @@ export default function FrontendLayout({
               {/* Persistent header + footer wrapping every page — mounted once
                   at the root, so the chrome never remounts/jumps on navigation. */}
               <SiteChrome>{children}</SiteChrome>
+              {/* Single web toast host — the RNW auth screens call sonner's
+                  `toast.*`; without this nothing rendered (silent login errors). */}
+              <WebToaster />
             </ApiProvider>
           </ImageProvider>
         </RNWStyleRegistry>
