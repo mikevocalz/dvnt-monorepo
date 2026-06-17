@@ -14,7 +14,8 @@
     "seed:admins": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/seed-admins.ts",
     "seed:posts": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/seed-posts.ts",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "migrate:media": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/migrate-media-to-s3.ts"
   },
   "dependencies": {
     "@dvnt/cms": "workspace:*",

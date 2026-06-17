@@ -115,7 +115,12 @@ function client(): Promise<Payload> {
 //    packages/cms/payload.config.ts s3Storage), serve Payload's own URL
 //    (`/payload-api/media/file/<name>`, which proxies S3) untouched.
 //  - Otherwise (legacy), rewrite to the static /public/blog-media assets.
-const MEDIA_ON_S3 = Boolean(process.env.S3_BUCKET)
+// Mirror packages/cms s3Storage gating EXACTLY (bucket + both keys) so the blog
+// only switches to Payload/S3 URLs once the storage plugin is actually active —
+// pre-filling S3_BUCKET alone must not flip this.
+const MEDIA_ON_S3 = Boolean(
+  process.env.S3_BUCKET && process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY,
+)
 function fixMedia(url?: string | null): string | undefined {
   if (!url) return undefined
   const u = String(url)
