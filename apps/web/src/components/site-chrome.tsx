@@ -18,9 +18,7 @@
 import dynamic from 'next/dynamic';
 import { usePathname } from 'solito/navigation';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
-import { routeOwnsHeader } from '@dvnt/app/lib/web-chrome';
-import { WebAppHeader } from '@dvnt/app/components/web-app-header';
-import { WebTabBar } from '@dvnt/app/components/web-tab-bar';
+import { AppShell } from '@dvnt/app/components/app-shell';
 
 const GlassHeader = dynamic(
   () =>
@@ -62,16 +60,10 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   // (WebAppShell still redirects logged-out users away from auth-only surfaces;
   // /events stays public and falls through to the marketing shell below.)
   if (isAppSurface(pathname) && hasHydrated && isAuthenticated) {
-    // Pushed sub-screens (e.g. /profile/[username]) render their own back/title
-    // header — show only the tab bar so we don't stack two top bars.
-    const ownsHeader = routeOwnsHeader(pathname);
-    return (
-      <>
-        {ownsHeader ? null : <WebAppHeader />}
-        {children}
-        <WebTabBar />
-      </>
-    );
+    // The persistent 3-column shell (PROMPT 13 §1): left rail + center + right
+    // aside on desktop, the bottom tab bar on phones. AppShell switches by
+    // breakpoint and owns the nav, replacing the old floating header + tab bar.
+    return <AppShell>{children}</AppShell>;
   }
 
   // Marketing / landing / public + logged-out app surfaces.

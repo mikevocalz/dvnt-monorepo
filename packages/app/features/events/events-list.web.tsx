@@ -9,6 +9,7 @@
  */
 import { useMemo, useRef, useEffect } from "react";
 import { useRouter } from "solito/navigation";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   Calendar,
@@ -79,6 +80,7 @@ function weekendRange() {
 
 export function EventsListScreen() {
   const router = useRouter();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   // Phase 2 — live propagation: patch any event card in place when its row
   // changes elsewhere (host edit / cancel), no refetch/flicker.
   useEventsFeedRealtime();
@@ -237,19 +239,23 @@ export function EventsListScreen() {
               <Ticket size={16} color="#379ED8" />
               Tickets
             </button>
-            <button
-              onClick={() => setNsfwFilter(nsfwFilter === true ? false : true)}
-              aria-label="Toggle spicy events"
-              className="w-10 h-10 rounded-xl border border-white/12 flex items-center justify-center text-lg"
-              style={{
-                backgroundColor:
-                  nsfwFilter === true
-                    ? "rgba(153,27,27,0.3)"
-                    : "rgba(255,255,255,0.06)",
-              }}
-            >
-            {nsfwFilter === true ? "😈" : "😇"}
-            </button>
+            {/* SPICY toggle is a member-only affordance — hidden entirely for
+                signed-out users (PROMPT 13 §4 / 13B: no leak). */}
+            {isAuthenticated ? (
+              <button
+                onClick={() => setNsfwFilter(nsfwFilter === true ? false : true)}
+                aria-label="Toggle spicy events"
+                className="w-10 h-10 rounded-xl border border-white/12 flex items-center justify-center text-lg"
+                style={{
+                  backgroundColor:
+                    nsfwFilter === true
+                      ? "rgba(153,27,27,0.3)"
+                      : "rgba(255,255,255,0.06)",
+                }}
+              >
+                {nsfwFilter === true ? "😈" : "😇"}
+              </button>
+            ) : null}
           </div>
         </div>
 

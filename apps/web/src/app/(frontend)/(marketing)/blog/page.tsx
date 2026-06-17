@@ -116,7 +116,7 @@ function FeaturedHero({ post }: { post: BlogPostCard }) {
   const cat = post.categories?.[0]
   return (
     <section style={heroSection} aria-label="Featured story">
-      <Link href={`/blog/${post.slug}`} style={heroLink} className="dvnt-hero-card">
+      <Link href={`/posts/${post.slug}`} style={heroLink} className="dvnt-hero-card">
         <div style={heroImgWrap}>
           {imgSrc
             ? <img src={imgSrc} alt={post.heroImage?.alt ?? post.title} style={heroImg} />
@@ -148,7 +148,7 @@ function SecondaryCard({ post }: { post: BlogPostCard }) {
   const cat = post.categories?.[0]
   return (
     <article style={secCard} className="dvnt-card">
-      <Link href={`/blog/${post.slug}`} style={secImgLink}>
+      <Link href={`/posts/${post.slug}`} style={secImgLink}>
         <div style={secImgWrap}>
           {imgSrc
             ? <img src={imgSrc} alt={post.heroImage?.alt ?? post.title} style={secImg} />
@@ -158,7 +158,7 @@ function SecondaryCard({ post }: { post: BlogPostCard }) {
       </Link>
       <div style={secBody}>
         {cat && <CategoryPill category={cat} />}
-        <Link href={`/blog/${post.slug}`} style={titleLink}>
+        <Link href={`/posts/${post.slug}`} style={titleLink}>
           <h3 style={secTitle}>{post.title}</h3>
         </Link>
         {post.excerpt && <p style={secExcerpt}>{post.excerpt}</p>}
@@ -177,7 +177,7 @@ function CompactCard({ post, index }: { post: BlogPostCard; index: number }) {
       <span style={cmpNum} aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
       <div style={cmpBody}>
         {cat && <CategoryPill category={cat} />}
-        <Link href={`/blog/${post.slug}`} style={titleLink}>
+        <Link href={`/posts/${post.slug}`} style={titleLink}>
           <h3 style={cmpTitle}>{post.title}</h3>
         </Link>
         {post.publishedAt && <time dateTime={post.publishedAt} style={metaText}>{formatDateShort(post.publishedAt)}</time>}
@@ -193,7 +193,7 @@ function HorizontalCard({ post }: { post: BlogPostCard }) {
   const cat = post.categories?.[0]
   return (
     <article style={hzCard} className="dvnt-hz-card">
-      <Link href={`/blog/${post.slug}`} style={hzImgLink} aria-hidden="true" tabIndex={-1}>
+      <Link href={`/posts/${post.slug}`} style={hzImgLink} aria-hidden="true" tabIndex={-1}>
         <div style={hzImgWrap}>
           {imgSrc
             ? <img src={imgSrc} alt={post.heroImage?.alt ?? post.title} style={hzImg} />
@@ -202,7 +202,7 @@ function HorizontalCard({ post }: { post: BlogPostCard }) {
       </Link>
       <div style={hzBody}>
         {cat && <CategoryPill category={cat} />}
-        <Link href={`/blog/${post.slug}`} style={titleLink}>
+        <Link href={`/posts/${post.slug}`} style={titleLink}>
           <h3 style={hzTitle}>{post.title}</h3>
         </Link>
         <BylineRow post={post} compact />
