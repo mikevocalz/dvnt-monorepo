@@ -5,7 +5,7 @@
 // the anonymous public) doesn't apply. The beforeOperation hook still runs, so
 // moderation (banned/suspended/shadow_banned) is enforced here.
 import type { Endpoint } from 'payload'
-import { APIError } from 'payload'
+import { APIError, addDataAndFileToRequest } from 'payload'
 
 export const createCommentEndpoint: Endpoint = {
   path: '/submit',
@@ -15,8 +15,10 @@ export const createCommentEndpoint: Endpoint = {
     if (!token || token !== process.env.COMMENT_SERVICE_TOKEN) {
       return Response.json({ error: 'forbidden' }, { status: 403 })
     }
-    const body = await (req as any).json?.()
-    const { post, authorMember, parent, body: text } = body ?? {}
+    // Payload v4: the JSON body is parsed onto req.data via this helper —
+    // `req.json()` alone doesn't populate it (it returned empty → 400 "required").
+    await addDataAndFileToRequest(req)
+    const { post, authorMember, parent, body: text } = ((req as any).data ?? {}) as any
     if (!post || !authorMember || !text?.trim()) {
       return Response.json({ error: 'post, authorMember, body required' }, { status: 400 })
     }
@@ -44,7 +46,8 @@ export const reportCommentEndpoint: Endpoint = {
     if (!token || token !== process.env.COMMENT_SERVICE_TOKEN) {
       return Response.json({ error: 'forbidden' }, { status: 403 })
     }
-    const { commentId, reportedMemberId, reporter, reason } = (await (req as any).json?.()) ?? {}
+    await addDataAndFileToRequest(req)
+    const { commentId, reportedMemberId, reporter, reason } = ((req as any).data ?? {}) as any
     if (!commentId) return Response.json({ error: 'commentId required' }, { status: 400 })
     try {
       await req.payload.create({

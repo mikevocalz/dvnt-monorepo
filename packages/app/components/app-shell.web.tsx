@@ -36,7 +36,6 @@ import { WebTabBar } from "./web-tab-bar";
 
 const ACCENT = "#379ED8"; // teal-blue (refined brand)
 const HEADER_FONT = "Republica-Minor"; // matches the marketing header nav (FAQ, Privacy…)
-const MUTED = "rgba(255,255,255,0.58)";
 
 // Create button — same flowing-gradient-ring + pulsing-glow + hover treatment as
 // the marketing Login button (HeaderLoginButton.web), so the two read as one
@@ -118,17 +117,20 @@ export function AppShell({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 14,
+          gap: 16,
           width: "100%",
-          padding: expanded ? "11px 14px" : "11px 0",
+          padding: expanded ? "13px 16px" : "13px 0",
           justifyContent: expanded ? "flex-start" : "center",
           borderRadius: 12,
           background: active ? "rgba(55,158,216,0.10)" : "transparent",
           boxShadow: active ? `inset 2px 0 0 ${ACCENT}` : undefined,
-          color: active ? "#FFFFFF" : MUTED,
+          // White text in both states (active reads via weight + tint + accent
+          // icon); inactive is a hair softer so the active row still leads.
+          color: active ? "#FFFFFF" : "rgba(255,255,255,0.92)",
           fontFamily: HEADER_FONT,
           fontWeight: active ? 700 : 500,
           fontSize: 16,
+          letterSpacing: 0.4,
           cursor: "pointer",
           border: "none",
           transition: "background 140ms ease, color 140ms ease",
@@ -140,7 +142,7 @@ export function AppShell({
           if (!active) e.currentTarget.style.background = "transparent";
         }}
       >
-        <Icon size={24} strokeWidth={active ? 2.4 : 2} color={active ? ACCENT : MUTED} />
+        <Icon size={24} strokeWidth={active ? 2.4 : 2} color={active ? ACCENT : "rgba(255,255,255,0.82)"} />
         {expanded ? <span>{label}</span> : null}
       </button>
     );
@@ -167,7 +169,7 @@ export function AppShell({
           display: "flex",
           flexDirection: "column",
           padding: expanded ? "22px 14px 18px" : "22px 10px 18px",
-          gap: 6,
+          gap: 10,
           borderRight: "1px solid rgba(255,255,255,0.10)",
           // Liquid glass: translucent base + heavy saturated blur + a soft
           // top-light sheen so it reads as frosted glass, not a flat panel.
@@ -203,9 +205,12 @@ export function AppShell({
           )}
         </button>
 
-        {items.map((it) => (
-          <NavRow key={it.href} {...it} />
-        ))}
+        {/* 40px breathing room between the logo and the first nav item. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 40 }}>
+          {items.map((it) => (
+            <NavRow key={it.href} {...it} />
+          ))}
+        </div>
 
         {/* Spacer pushes Create to the BOTTOM of the rail. */}
         <div style={{ flex: 1 }} />
@@ -238,7 +243,7 @@ export function AppShell({
               gap: 10,
               padding: expanded ? "12px 16px" : "12px 0",
               borderRadius: 12,
-              background: "#0A0118", // dark inner surface masks the ring to a border
+              background: "transparent", // let the flowing gradient FILL the button
               color: "#FFFFFF",
               fontFamily: HEADER_FONT,
               fontWeight: 900,
