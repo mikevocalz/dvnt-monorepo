@@ -8,7 +8,8 @@
  */
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useParams, useRouter } from "solito/navigation";
+import { useParams, useRouter, usePathname } from "solito/navigation";
+import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
 import {
   ArrowLeft,
   MoreHorizontal,
@@ -163,6 +164,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 export function EventDetailScreen() {
   const params = useParams();
   const router = useRouter();
+  const pathname = usePathname() ?? "";
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const slug = String((params as any)?.slug ?? "");
   const { data: events, isLoading } = useEvents();
@@ -209,7 +211,7 @@ export function EventDetailScreen() {
   // to sign in rather than into a checkout that throws "Not authenticated".
   const gateAuth = (action: () => void) => {
     if (!isAuthenticated) {
-      router.push("/auth/login");
+      router.push(loginPathWithReturn(pathname));
       return;
     }
     action();
@@ -259,7 +261,7 @@ export function EventDetailScreen() {
   const isLiked = !!(full as any)?.isLiked;
   const handleToggleLike = () => {
     if (!isAuthenticated) {
-      router.push("/auth/login");
+      router.push(loginPathWithReturn(pathname));
       return;
     }
     if (!eventId) return;
@@ -309,7 +311,7 @@ export function EventDetailScreen() {
   const isWaitlistBusy = joinWaitlist.isPending || leaveWaitlist.isPending;
   const handleJoinWaitlist = () => {
     if (!isAuthenticated) {
-      router.push("/auth/login");
+      router.push(loginPathWithReturn(pathname));
       return;
     }
     if (!eventId || isWaitlistBusy) return;
@@ -714,7 +716,7 @@ export function EventDetailScreen() {
                       });
                       return;
                     }
-                    router.push("/auth/login");
+                    router.push(loginPathWithReturn(pathname));
                     return;
                   }
                   // Authed: free tier-less event → RSVP; else open checkout.
@@ -899,7 +901,7 @@ export function EventDetailScreen() {
                           } else if (!e.price) {
                             openGuestRsvp(eventId, e.title ?? "Event");
                           } else {
-                            router.push("/auth/login");
+                            router.push(loginPathWithReturn(pathname));
                           }
                           return;
                         }
@@ -946,7 +948,7 @@ export function EventDetailScreen() {
               <MembersOnly
                 locked={!isAuthenticated}
                 label="Sign in to see who's going."
-                onSignIn={() => router.push("/auth/login")}
+                onSignIn={() => router.push(loginPathWithReturn(pathname))}
               >
                 {going > 0 || attendeeAvatars.length > 0 ? (
                   <div className="flex items-center gap-2">
@@ -1056,7 +1058,7 @@ export function EventDetailScreen() {
               <MembersOnly
                 locked={!isAuthenticated}
                 label="Sign in to read and join the conversation."
-                onSignIn={() => router.push("/auth/login")}
+                onSignIn={() => router.push(loginPathWithReturn(pathname))}
               >
                 {comments.length > 0 ? (
                   <>

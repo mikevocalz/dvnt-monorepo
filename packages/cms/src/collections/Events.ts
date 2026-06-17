@@ -20,9 +20,19 @@ export const Events: CollectionConfig = {
     // on this so re-running never duplicates. Read-only; set by the sync.
     { name: 'appEventId', type: 'text', index: true, admin: { position: 'sidebar', readOnly: true, description: 'Live app event id' } },
     {
+      // Mirrors the live public.events.status state machine (NOT visibility).
+      // Edits write the same column the app reads; illegal transitions are
+      // guarded by the DB triggers, so CMS edits stay within the machine.
       name: 'status',
       type: 'select',
-      options: ['draft', 'published', 'cancelled', 'ended'].map((v) => ({ label: v, value: v })),
+      options: ['draft', 'active', 'cancelled', 'postponed', 'suspended'].map((v) => ({ label: v, value: v })),
+    },
+    {
+      // Visibility is separate from status (was conflated before). public/
+      // private/spicy/link_only per the app's visibility enum.
+      name: 'visibility',
+      type: 'select',
+      options: ['public', 'private', 'spicy', 'link_only'].map((v) => ({ label: v, value: v })),
     },
     { name: 'startsAt', type: 'date' },
     { name: 'endsAt', type: 'date' },

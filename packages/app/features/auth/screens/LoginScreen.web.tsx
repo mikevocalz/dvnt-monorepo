@@ -12,6 +12,7 @@ import { useAuthStore } from '../../../lib/stores/auth-store';
 import { useLoginUiStore } from '../../../lib/stores/login-ui-store';
 import { syncAuthUser } from '../../../lib/api/privileged';
 import { auth } from '../../../lib/api/auth';
+import { readReturnToFromUrl } from '../../../lib/auth/return-to';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
 
 /**
@@ -88,7 +89,9 @@ export function LoginScreen() {
               followersCount: profile.followersCount,
               followingCount: profile.followingCount,
             });
-            router.replace('/feed');
+            // Honor intent: return to the gated URL the user came from
+            // (validated internal-only), else the feed.
+            router.replace(readReturnToFromUrl('/feed'));
           } else {
             toast.error('Login Failed', { description: 'Could not load user profile from database' });
           }
