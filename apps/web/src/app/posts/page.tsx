@@ -186,7 +186,7 @@ function CinematicHero({ post }: { post: Post }) {
         ) : (
           <div style={{ ...cinemaImgWrap, background: 'linear-gradient(135deg,#0e1318,#07090c)' } as any} />
         )}
-        <div style={cinemaBody as any}>
+        <div className="dvnt-cinema-body" style={cinemaBody as any}>
           <div style={cinemaTopBar as any}>
             <span style={cinemaSiteName as any}>DVNT Magazine</span>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' as const }}>
@@ -556,6 +556,11 @@ a[style*="borderRadius: 7"]:hover{opacity:.85}
   /* Wide cards: image on top, body below — no thin side strip on phones */
   section[aria-label="Latest stories"] .dvnt-card > a{flex-direction:column!important}
   section[aria-label="Latest stories"] .dvnt-card > a > div:first-child{width:100%!important;aspect-ratio:16/9}
+  /* Featured hero: the fixed site header floats over it; on phones (esp. with a
+     notch) the header + safe-area inset crowded the hero's top row. Push the
+     hero content below the header and reserve safe-area space so nothing overlaps. */
+  .dvnt-cinema-body{padding-top:calc(96px + env(safe-area-inset-top,0px))!important}
+  .dvnt-cinema-body > div:first-child{margin-top:0!important}
 }
 
 @media(prefers-reduced-motion:reduce){

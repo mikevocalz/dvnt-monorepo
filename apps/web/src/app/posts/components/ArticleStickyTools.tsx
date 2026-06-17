@@ -59,7 +59,7 @@ export function ArticleStickyTools({ toc, title, url }: Props) {
 
   if (!toc.length) {
     return (
-      <aside style={sideRail as any} aria-label="Share article">
+      <aside className="dvnt-toc-share" style={sideRail as any} aria-label="Share article">
         <ShareButtons share={share} copied={copied} />
       </aside>
     )
@@ -67,8 +67,8 @@ export function ArticleStickyTools({ toc, title, url }: Props) {
 
   return (
     <>
-      {/* Desktop: sidebar rail */}
-      <aside style={sideRail as any} aria-label="Article navigation and share">
+      {/* Desktop: sidebar rail (hidden ≤1100px by .dvnt-toc-share) */}
+      <aside className="dvnt-toc-share" style={sideRail as any} aria-label="Article navigation and share">
         <ShareButtons share={share} copied={copied} />
         <div style={divider} />
         <nav aria-label="Table of contents">
@@ -94,8 +94,8 @@ export function ArticleStickyTools({ toc, title, url }: Props) {
         </nav>
       </aside>
 
-      {/* Mobile: floating bottom TOC toggle */}
-      <div style={mobileTocBar as any} aria-hidden="true">
+      {/* Mobile: floating bottom TOC toggle (hidden ≥1101px by .dvnt-mobile-toc) */}
+      <div className="dvnt-mobile-toc" style={mobileTocBar as any}>
         <button
           style={mobileTocBtn as any}
           onClick={() => setTocOpen((v) => !v)}
@@ -292,7 +292,8 @@ const drawerItem: React.CSSProperties = {
 
 const CSS = `
 button[style]:hover{opacity:.85}
-.dvnt-toc-share{display:flex}
-@media(max-width:1100px){.dvnt-toc-share{display:none}}
-@media(min-width:1101px){[data-mobile-toc]{display:none}}
+/* Desktop rail visible only ≥1101px; mobile bottom bar only ≤1100px. Use
+   !important so these win over the components' inline display:flex. */
+@media(max-width:1100px){.dvnt-toc-share{display:none!important}}
+@media(min-width:1101px){.dvnt-mobile-toc{display:none!important}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}`
