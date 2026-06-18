@@ -3,6 +3,7 @@
 // Moderators get read-only (events aren't a moderation surface).
 import type { CollectionConfig } from 'payload'
 import { isAdminPlus, canModerate } from '../access/roles'
+import { onEventChange } from './hooks/event'
 
 export const Events: CollectionConfig = {
   slug: 'events',
@@ -14,6 +15,8 @@ export const Events: CollectionConfig = {
     delete: isAdminPlus,
   },
   admin: { useAsTitle: 'title', defaultColumns: ['title', 'status', 'startsAt', 'host'] },
+  // Saving writes the editable fields back to the live app event (public.events).
+  hooks: { afterChange: [onEventChange] },
   fields: [
     { name: 'title', type: 'text', index: true, required: true },
     // Stable key back to the live app event (public.events.id) — the sync upserts
@@ -24,6 +27,7 @@ export const Events: CollectionConfig = {
       type: 'select',
       options: ['draft', 'published', 'cancelled', 'ended'].map((v) => ({ label: v, value: v })),
     },
+    { name: 'description', type: 'textarea', admin: { description: 'Event description. Saving updates the app.' } },
     { name: 'startsAt', type: 'date' },
     { name: 'endsAt', type: 'date' },
     { name: 'capacity', type: 'number' },

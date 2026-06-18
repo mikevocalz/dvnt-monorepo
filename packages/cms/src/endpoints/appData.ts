@@ -395,7 +395,7 @@ export const appSyncEndpoint: Endpoint = {
 
       // ── Events ───────────────────────────────────────────────────────────
       const events = await app.query(
-        `select e.id, e.title, e.visibility, e.start_date, e.end_date,
+        `select e.id, e.title, e.description, e.visibility, e.start_date, e.end_date,
                 e.max_attendees, e.location_name, e.location, e.host_id, e.total_attendees
            from public.events e`,
       )
@@ -409,6 +409,7 @@ export const appSyncEndpoint: Endpoint = {
         const data: Record<string, any> = {
           title: e.title || 'Untitled event',
           appEventId,
+          description: e.description || undefined,
           status: eventStatusFromVisibility(e.visibility),
           startsAt: e.start_date || undefined,
           endsAt: e.end_date || undefined,
@@ -426,12 +427,12 @@ export const appSyncEndpoint: Endpoint = {
           if (tiers && !(existing.docs[0].ticketTiers?.length)) data.ticketTiers = tiers
           // data is dynamic app-sync payload (Record<string,any>) — cast past
           // Payload's strict create/update data overloads.
-          await payload.update({ collection: 'events', id: existing.docs[0].id, data: data as any, overrideAccess: true })
+          await payload.update({ collection: 'events', id: existing.docs[0].id, data: data as any, overrideAccess: true, context: { skipEventWriteBack: true } })
           eventByAppId.set(appEventId, existing.docs[0].id)
           eUpdated++
         } else {
           if (tiers) data.ticketTiers = tiers
-          const created = await payload.create({ collection: 'events', data: data as any, overrideAccess: true })
+          const created = await payload.create({ collection: 'events', data: data as any, overrideAccess: true, context: { skipEventWriteBack: true } })
           eventByAppId.set(appEventId, created.id)
           eCreated++
         }
