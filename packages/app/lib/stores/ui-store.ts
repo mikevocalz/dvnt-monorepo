@@ -67,24 +67,36 @@ export const useUIStore = create<UIState>((set, get) => ({
       loadingScreens: { ...state.loadingScreens, [screen]: true },
     })),
 
-  // Unified toast using sonner-native
+  // Unified toast using sonner-native.
+  // MUST be non-throwing: on web, sonner's <Toaster> isn't mounted on the
+  // ssr:false standalone routes (the Sneaky Lynk create/room screens render
+  // outside the provider), so toast.* throws "ToastContext is not initialized".
+  // That throw was aborting handleCreate before router.push — "Start Lynk"
+  // reverted and never entered the room. A toast must never break its caller.
   showToast: (type, title, description) => {
     const options = { description }
-    
-    switch (type) {
-      case 'success':
-        toast.success(title, options)
-        break
-      case 'error':
-        toast.error(title, options)
-        break
-      case 'warning':
-        toast.warning(title, options)
-        break
-      case 'info':
-      default:
-        toast.info(title, options)
-        break
+
+    try {
+      switch (type) {
+        case 'success':
+          toast.success(title, options)
+          break
+        case 'error':
+          toast.error(title, options)
+          break
+        case 'warning':
+          toast.warning(title, options)
+          break
+        case 'info':
+        default:
+          toast.info(title, options)
+          break
+      }
+    } catch {
+      // Toaster not mounted in this render tree — degrade to a log, never throw.
+      if (typeof console !== 'undefined') {
+        console.warn(`[toast:${type}] ${title}${description ? ` — ${description}` : ''}`)
+      }
     }
   },
 
