@@ -53,6 +53,8 @@ import {
   Hand,
   Users,
   EyeOff,
+  Camera as CameraIcon,
+  CircleDot,
   PhoneOff,
   MessageCircle,
   Send,
@@ -72,6 +74,7 @@ import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
 import { videoApi } from "@dvnt/app/src/video/api";
 import { useRoomReactions } from "@dvnt/app/src/sneaky-lynk/hooks/useRoomReactions";
+import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureBroadcast";
 import {
   fetchRoomComments,
   postRoomComment,
@@ -81,6 +84,7 @@ import {
 import type { SneakyUser } from "@dvnt/app/src/sneaky-lynk/types";
 import { useRoomStore } from "@dvnt/app/src/sneaky-lynk/stores/room-store";
 import { useLynkHistoryStore } from "@dvnt/app/src/sneaky-lynk/stores/lynk-history-store";
+import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
 import { SecureCaptureBoundary } from "@dvnt/app/lib/secure-capture";
 import { useRoomUIStore } from "./room-ui-store";
 
@@ -423,6 +427,45 @@ function ConnectionBanner({ status }: { status: string }) {
     >
       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
       {reconnecting ? "Reconnecting…" : "Connection lost"}
+    </div>
+  );
+}
+
+function CaptureNotificationBannerWeb() {
+  const current = useSneakyLynkCaptureStore((s) => s.currentCapture);
+  if (!current) return null;
+
+  const isRecording = current.kind === "recording_start";
+  const isSelf = current.isSelf;
+  const iconClass = isSelf ? "text-[#3FDCFF]" : "text-[#FC253A]";
+  const shellClass = isSelf
+    ? "border-[#3FDCFF]/35 bg-[#08131a]/95"
+    : "border-[#FC253A]/40 bg-[#16070b]/95";
+  const title = isSelf
+    ? isRecording
+      ? "Screen recording detected"
+      : "Screenshot attempt blocked"
+    : isRecording
+      ? `${current.actorUsername} may be recording`
+      : `${current.actorUsername} attempted a screenshot`;
+  const body = isSelf ? "Everyone in the room was notified." : "The room was notified.";
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none absolute inset-x-0 top-0 z-[70] flex justify-center px-4"
+      style={{ paddingTop: "calc(env(safe-area-inset-top) + 14px)" }}
+    >
+      <div className={`flex max-w-[92vw] items-center gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-xl ${shellClass}`}>
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/8 ${iconClass}`}>
+          {isRecording ? <CircleDot size={17} /> : <CameraIcon size={17} />}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-bold text-white">{title}</span>
+          <span className="mt-0.5 block text-xs font-medium text-white/60">{body}</span>
+        </span>
+      </div>
     </div>
   );
 }
@@ -965,6 +1008,15 @@ function RoomInner({
   const { reactions, sendReaction } = useRoomReactions({ roomId: id, currentUser });
   const { comments, send: sendChat } = useRoomChat(id, currentUser);
   const members = useRoomMembersSync(id, authUser?.id);
+  const captureBroadcast = useSneakyLynkCaptureBroadcast({
+    roomId: id,
+    roomTitle: roomSnapshot?.title || paramTitle || undefined,
+    localUserId: currentUser.id,
+    localUsername: currentUser.displayName || currentUser.username,
+    hostUserId: roomSnapshot?.host?.id,
+    attributable: !currentUser.isAnonymous,
+    realUsername: authUser?.username ?? undefined,
+  });
 
   useEjectWatcher(id, authUser?.id, (reason) => {
     try {
@@ -1369,11 +1421,13 @@ function RoomInner({
       mode="sneaky-lynk"
       blackoutOnBlur
       blackoutOnVisibilityHidden
-      watermark={phase === "connected"}
+      watermark={false}
       logEvents
+      onCaptureAttempt={(kind) => captureBroadcast.notifyLocalCapture(kind)}
     >
       <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white">
       <ConnectionBanner status={connecting ? "connecting" : peerStatus} />
+      <CaptureNotificationBannerWeb />
 
       {/* Header */}
       <header
@@ -1693,12 +1747,12 @@ function PreJoinScreen({
               role="switch"
               aria-checked={joinAnonymous}
               onClick={() => setJoinAnonymous(!joinAnonymous)}
-              className="relative w-12 h-7 rounded-full transition-colors shrink-0"
+              className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
               style={{ backgroundColor: joinAnonymous ? ROSE : "#374151" }}
             >
               <span
-                className="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-transform"
-                style={{ transform: joinAnonymous ? "translateX(20px)" : "translateX(2px)" }}
+                className="absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform"
+                style={{ transform: joinAnonymous ? "translateX(24px)" : "translateX(4px)" }}
               />
             </button>
           </div>

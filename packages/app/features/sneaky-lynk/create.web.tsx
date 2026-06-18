@@ -115,12 +115,12 @@ function ToggleRow({
         role="switch"
         aria-checked={value}
         onClick={() => onChange(!value)}
-        className="relative w-12 h-7 rounded-full transition-colors shrink-0"
+        className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
         style={{ backgroundColor: value ? ACCENT : "#374151" }}
       >
         <span
-          className="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-transform"
-          style={{ transform: value ? "translateX(20px)" : "translateX(2px)" }}
+          className="absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform"
+          style={{ transform: value ? "translateX(24px)" : "translateX(4px)" }}
         />
       </button>
     </div>
