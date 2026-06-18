@@ -30,6 +30,24 @@ interface RoomUIStore {
   isMicOn: boolean;
   isCameraOn: boolean;
 
+  /**
+   * WEB-only surfaces with no native-useState equivalent. The native room
+   * uses bottom-sheets (RoomParticipantsSheet) + an RN subscription paywall;
+   * on web (Law 3) these become side-panels / dialogs, driven from here.
+   * Chat + hand-queue open flags stay in the SHARED `useRoomStore` (parity).
+   */
+  isParticipantsOpen: boolean;
+  /** Free host → countdown timer + duration-limit paywall. Set after the
+   *  `sneaky_subscriptions` lookup; null until known. */
+  isPaidHost: boolean | null;
+  /** Wall-clock ms the room timer counts down from (host's connect time). */
+  timerStartedAt: number | null;
+  /** Free-host duration-limit dialog (mirrors the native time-up paywall). */
+  showTimeUp: boolean;
+  /** Pinned banner shown when the host kicks/bans the local user or ends the
+   *  room (mirrors the native EjectModal). */
+  ejectReason: string | null;
+
   setInitStarted: (v: boolean) => void;
   setPhase: (v: RoomPhase) => void;
   setJoinAnonymous: (v: boolean) => void;
@@ -38,18 +56,32 @@ interface RoomUIStore {
   setError: (message: string) => void;
   setMicOn: (v: boolean) => void;
   setCameraOn: (v: boolean) => void;
+  setParticipantsOpen: (v: boolean) => void;
+  setIsPaidHost: (v: boolean) => void;
+  setTimerStartedAt: (v: number) => void;
+  setShowTimeUp: (v: boolean) => void;
+  setEjectReason: (v: string | null) => void;
   reset: () => void;
 }
 
-export const useRoomUIStore = create<RoomUIStore>((set) => ({
+const initialUIState = {
   initStarted: false,
-  phase: "prejoin",
+  phase: "prejoin" as RoomPhase,
   joinAnonymous: false,
-  roomSnapshot: null,
-  closedReason: null,
-  errorMessage: null,
+  roomSnapshot: null as SneakyRoom | null,
+  closedReason: null as string | null,
+  errorMessage: null as string | null,
   isMicOn: false,
   isCameraOn: false,
+  isParticipantsOpen: false,
+  isPaidHost: null as boolean | null,
+  timerStartedAt: null as number | null,
+  showTimeUp: false,
+  ejectReason: null as string | null,
+};
+
+export const useRoomUIStore = create<RoomUIStore>((set) => ({
+  ...initialUIState,
 
   setInitStarted: (initStarted) => set({ initStarted }),
   setPhase: (phase) => set({ phase }),
@@ -59,15 +91,10 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setError: (errorMessage) => set({ phase: "error", errorMessage }),
   setMicOn: (isMicOn) => set({ isMicOn }),
   setCameraOn: (isCameraOn) => set({ isCameraOn }),
-  reset: () =>
-    set({
-      initStarted: false,
-      phase: "prejoin",
-      joinAnonymous: false,
-      roomSnapshot: null,
-      closedReason: null,
-      errorMessage: null,
-      isMicOn: false,
-      isCameraOn: false,
-    }),
+  setParticipantsOpen: (isParticipantsOpen) => set({ isParticipantsOpen }),
+  setIsPaidHost: (isPaidHost) => set({ isPaidHost }),
+  setTimerStartedAt: (timerStartedAt) => set({ timerStartedAt }),
+  setShowTimeUp: (showTimeUp) => set({ showTimeUp }),
+  setEjectReason: (ejectReason) => set({ ejectReason }),
+  reset: () => set({ ...initialUIState }),
 }));
