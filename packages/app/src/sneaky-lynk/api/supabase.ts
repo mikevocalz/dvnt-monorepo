@@ -268,12 +268,12 @@ export const sneakyLynkApi = {
       const roomIds = (data || []).map((r: any) => r.id).filter(Boolean);
       let roomStats: Record<
         number,
-        { activeCount: number; historicalCount: number }
+        { activeCount: number; activeHostCount: number; historicalCount: number }
       > = {};
       if (roomIds.length > 0) {
         const { data: members } = await supabase
           .from("video_room_members")
-          .select("room_id, user_id, status, joined_at, left_at")
+          .select("room_id, user_id, role, status, joined_at, left_at")
           .in("room_id", roomIds);
         if (members) {
           roomStats = buildRoomParticipantStats(members, nowMs);
@@ -358,7 +358,7 @@ export const sneakyLynkApi = {
 
       const { data: members } = await supabase
         .from("video_room_members")
-        .select("room_id, user_id, status, joined_at, left_at")
+        .select("room_id, user_id, role, status, joined_at, left_at")
         .eq("room_id", data.id);
 
       const roomStats = buildRoomParticipantStats(members || [], Date.now());

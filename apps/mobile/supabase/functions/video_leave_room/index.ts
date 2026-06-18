@@ -149,6 +149,21 @@ Deno.serve(async (req) => {
 
     const newCount = activeCount ?? 0;
 
+    const { count: activeHostCount, error: activeHostCountError } =
+      await supabase
+        .from("video_room_members")
+        .select("id", { count: "exact", head: true })
+        .eq("room_id", internalRoomId)
+        .eq("status", "active")
+        .in("role", ["host", "co-host"]);
+
+    if (activeHostCountError) {
+      console.error(
+        "[video_leave_room] Active host count error:",
+        activeHostCountError.message,
+      );
+    }
+
     // Update participant_count
     await supabase
       .from("video_rooms")
@@ -173,7 +188,14 @@ Deno.serve(async (req) => {
 
     // Auto-end the room if no active participants remain
     let roomEnded = false;
-    if (newCount === 0) {
+    const endReason =
+      newCount === 0
+        ? "all_participants_left"
+        : !activeHostCountError && (activeHostCount ?? 0) === 0
+          ? "no_active_host"
+          : null;
+
+    if (endReason) {
       const { error: endError } = await supabase
         .from("video_rooms")
         .update({
@@ -192,11 +214,11 @@ Deno.serve(async (req) => {
           room_id: internalRoomId,
           type: "room_ended",
           actor_id: userId,
-          payload: { reason: "all_participants_left" },
+          payload: { reason: endReason },
         });
 
         console.log(
-          `[video_leave_room] Room ${roomId} auto-ended (no participants)`,
+          `[video_leave_room] Room ${roomId} auto-ended (${endReason})`,
         );
       }
     }

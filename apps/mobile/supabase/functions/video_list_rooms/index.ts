@@ -13,6 +13,7 @@ const corsHeaders = {
 };
 
 type ErrorCode = "unauthorized" | "validation_error" | "internal_error";
+const OPEN_MEMBER_FRESHNESS_MS = 12 * 60 * 60 * 1000;
 
 interface ApiResponse<T = unknown> {
   ok: boolean;
@@ -38,12 +39,14 @@ function resolveRoomAudience(
     participant_count?: number | null;
     created_at?: string | null;
   },
-  stats: { activeCount: number; historicalCount: number } | undefined,
+  stats:
+    | { activeCount: number; activeHostCount: number; historicalCount: number }
+    | undefined,
   nowMs: number,
 ): { isLive: boolean; listeners: number } {
   if (room.status === "open") {
     return {
-      isLive: true,
+      isLive: (stats?.activeHostCount ?? 0) > 0,
       listeners: Math.max(
         Number(room.participant_count ?? 0),
         stats?.activeCount ?? 0,
@@ -68,32 +71,44 @@ function resolveRoomAudience(
 function buildRoomParticipantStats(
   members: Array<{
     room_id: number;
+    user_id?: string | null;
+    role?: string | null;
     status?: string | null;
     joined_at?: string | null;
     left_at?: string | null;
   }>,
   nowMs: number,
-): Record<number, { activeCount: number; historicalCount: number }> {
+): Record<
+  number,
+  { activeCount: number; activeHostCount: number; historicalCount: number }
+> {
   const stats: Record<
     number,
-    { activeCount: number; historicalCount: number }
+    { activeCount: number; activeHostCount: number; historicalCount: number }
   > = {};
 
   for (const member of members) {
     if (!stats[member.room_id]) {
-      stats[member.room_id] = { activeCount: 0, historicalCount: 0 };
+      stats[member.room_id] = {
+        activeCount: 0,
+        activeHostCount: 0,
+        historicalCount: 0,
+      };
     }
 
     stats[member.room_id].historicalCount += 1;
 
-    const leftRecently =
-      member.left_at != null &&
-      nowMs - new Date(member.left_at).getTime() < 30_000;
+    const joinedAtMs = member.joined_at ? Date.parse(member.joined_at) : NaN;
     const isActive =
-      member.status === "active" || (member.left_at == null && !leftRecently);
+      member.status === "active" &&
+      Number.isFinite(joinedAtMs) &&
+      nowMs - joinedAtMs <= OPEN_MEMBER_FRESHNESS_MS;
 
     if (isActive) {
       stats[member.room_id].activeCount += 1;
+      if (member.role === "host" || member.role === "co-host") {
+        stats[member.room_id].activeHostCount += 1;
+      }
     }
   }
 
@@ -247,12 +262,12 @@ Deno.serve(async (req) => {
     const roomIds = rooms.map((room: any) => room.id).filter(Boolean);
     let roomStats: Record<
       number,
-      { activeCount: number; historicalCount: number }
+      { activeCount: number; activeHostCount: number; historicalCount: number }
     > = {};
     if (roomIds.length > 0) {
       const { data: members } = await supabase
         .from("video_room_members")
-        .select("room_id, user_id, status, joined_at, left_at")
+        .select("room_id, user_id, role, status, joined_at, left_at")
         .in("room_id", roomIds);
 
       roomStats = buildRoomParticipantStats(members || [], nowMs);

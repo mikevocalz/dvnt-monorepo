@@ -225,7 +225,27 @@ export interface Member {
   id: number;
   username: string;
   email?: string | null;
+  /**
+   * App role — saving updates the user's role in the app and grants CMS access for Moderator/Admin/Super-Admin.
+   */
+  role?: ('Super-Admin' | 'Admin' | 'Moderator' | 'Basic') | null;
+  /**
+   * App profile first name. Saving updates the app.
+   */
+  firstName?: string | null;
+  lastName?: string | null;
+  bio?: string | null;
+  location?: string | null;
+  website?: string | null;
+  gender?: string | null;
+  /**
+   * Current app avatar URL (read-only — use “Replace avatar” below to change).
+   */
   avatarUrl?: string | null;
+  /**
+   * Drag/drop a new image to set as this user’s profile picture.
+   */
+  avatarUpload?: (number | null) | Media;
   /**
    * Supabase/Better Auth user id
    */
@@ -240,6 +260,52 @@ export interface Member {
   deviceId?: string | null;
   updatedAt: string;
   createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "media".
+ */
+export interface Media {
+  id: number;
+  alt: string;
+  creditText?: string | null;
+  updatedAt: string;
+  createdAt: string;
+  url?: string | null;
+  thumbnailURL?: string | null;
+  filename?: string | null;
+  mimeType?: string | null;
+  filesize?: number | null;
+  width?: number | null;
+  height?: number | null;
+  focalX?: number | null;
+  focalY?: number | null;
+  sizes?: {
+    thumbnail?: {
+      url?: string | null;
+      width?: number | null;
+      height?: number | null;
+      mimeType?: string | null;
+      filesize?: number | null;
+      filename?: string | null;
+    };
+    card?: {
+      url?: string | null;
+      width?: number | null;
+      height?: number | null;
+      mimeType?: string | null;
+      filesize?: number | null;
+      filename?: string | null;
+    };
+    og?: {
+      url?: string | null;
+      width?: number | null;
+      height?: number | null;
+      mimeType?: string | null;
+      filesize?: number | null;
+      filename?: string | null;
+    };
+  };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -318,9 +384,13 @@ export interface Post {
       }[]
     | null;
   /**
-   * Primary byline ("By …")
+   * Primary byline — add co-authors here ("By A, B & C")
    */
   authors?: (number | Author)[] | null;
+  /**
+   * Staff member who created this post.
+   */
+  createdBy?: (number | null) | AdminUser;
   /**
    * Secondary credits shown beneath the byline ("Photographs by …")
    */
@@ -395,52 +465,6 @@ export interface Post {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "media".
- */
-export interface Media {
-  id: number;
-  alt: string;
-  creditText?: string | null;
-  updatedAt: string;
-  createdAt: string;
-  url?: string | null;
-  thumbnailURL?: string | null;
-  filename?: string | null;
-  mimeType?: string | null;
-  filesize?: number | null;
-  width?: number | null;
-  height?: number | null;
-  focalX?: number | null;
-  focalY?: number | null;
-  sizes?: {
-    thumbnail?: {
-      url?: string | null;
-      width?: number | null;
-      height?: number | null;
-      mimeType?: string | null;
-      filesize?: number | null;
-      filename?: string | null;
-    };
-    card?: {
-      url?: string | null;
-      width?: number | null;
-      height?: number | null;
-      mimeType?: string | null;
-      filesize?: number | null;
-      filename?: string | null;
-    };
-    og?: {
-      url?: string | null;
-      width?: number | null;
-      height?: number | null;
-      mimeType?: string | null;
-      filesize?: number | null;
-      filename?: string | null;
-    };
-  };
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "categories".
  */
 export interface Category {
@@ -466,6 +490,13 @@ export interface Category {
  */
 export interface Author {
   id: number;
+  /**
+   * The moderator/user this byline belongs to. Name + avatar sync from them.
+   */
+  user?: (number | null) | AdminUser;
+  /**
+   * Defaults to the linked user; set to override (pen name / byline).
+   */
   name: string;
   slug?: string | null;
   email?: string | null;
@@ -474,7 +505,14 @@ export interface Author {
    */
   role?: string | null;
   bio?: string | null;
+  /**
+   * Optional override; defaults to the linked user’s avatar.
+   */
   avatar?: (number | null) | Media;
+  /**
+   * Synced from the linked user’s avatar.
+   */
+  avatarUrl?: string | null;
   socials?: {
     instagram?: string | null;
     twitter?: string | null;
@@ -500,6 +538,10 @@ export interface Event {
    */
   appEventId?: string | null;
   status?: ('draft' | 'published' | 'cancelled' | 'ended') | null;
+  /**
+   * Event description. Saving updates the app.
+   */
+  description?: string | null;
   startsAt?: string | null;
   endsAt?: string | null;
   capacity?: number | null;
@@ -740,7 +782,15 @@ export interface AdminUsersSelect<T extends boolean = true> {
 export interface MembersSelect<T extends boolean = true> {
   username?: T;
   email?: T;
+  role?: T;
+  firstName?: T;
+  lastName?: T;
+  bio?: T;
+  location?: T;
+  website?: T;
+  gender?: T;
   avatarUrl?: T;
+  avatarUpload?: T;
   appUserId?: T;
   status?: T;
   lastModerationReason?: T;
@@ -778,6 +828,7 @@ export interface EventsSelect<T extends boolean = true> {
   title?: T;
   appEventId?: T;
   status?: T;
+  description?: T;
   startsAt?: T;
   endsAt?: T;
   capacity?: T;
@@ -865,6 +916,7 @@ export interface PostsSelect<T extends boolean = true> {
         id?: T;
       };
   authors?: T;
+  createdBy?: T;
   contributors?:
     | T
     | {
@@ -919,12 +971,14 @@ export interface CategoriesSelect<T extends boolean = true> {
  * via the `definition` "authors_select".
  */
 export interface AuthorsSelect<T extends boolean = true> {
+  user?: T;
   name?: T;
   slug?: T;
   email?: T;
   role?: T;
   bio?: T;
   avatar?: T;
+  avatarUrl?: T;
   socials?:
     | T
     | {

@@ -36,6 +36,17 @@ import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
 import { useCreateLynkStore } from "./create-store";
 
 const ACCENT = "#FC253A";
+const ROOM_UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function resolveCreatedRoomId(room: unknown): string {
+  const candidate = room as { id?: unknown; uuid?: unknown } | null;
+  const ids = [candidate?.id, candidate?.uuid]
+    .filter((id): id is string | number => id != null)
+    .map((id) => String(id));
+
+  return ids.find((id) => ROOM_UUID_REGEX.test(id)) ?? "";
+}
 
 // Rounded-SQUARE avatar (never circular, per DVNT rule).
 function SquareAvatar({
@@ -134,7 +145,12 @@ export function SneakyLynkCreateScreen() {
   const setInviteResults = useCreateLynkStore((s) => s.setInviteResults);
   const addInvitee = useCreateLynkStore((s) => s.addInvitee);
   const removeInvitee = useCreateLynkStore((s) => s.removeInvitee);
-  const reset = useCreateLynkStore((s) => s.reset);
+
+  useEffect(() => {
+    return () => {
+      useCreateLynkStore.getState().reset();
+    };
+  }, []);
 
   const selfIds = [authUser?.id, (authUser as any)?.authId, (authUser as any)?.auth_id]
     .filter((id): id is string | number => id != null)
@@ -187,6 +203,7 @@ export function SneakyLynkCreateScreen() {
       return;
     }
     setIsCreating(true);
+    let didStartNavigation = false;
     try {
       const result = await sneakyLynkApi.createRoom({
         title: title.trim(),
@@ -201,7 +218,12 @@ export function SneakyLynkCreateScreen() {
         throw new Error(result.error?.message || "Failed to create room");
       }
 
-      const roomId = result.data.room?.id || `space-${Date.now()}`;
+      const roomId = resolveCreatedRoomId(result.data.room);
+
+      if (!ROOM_UUID_REGEX.test(roomId)) {
+        console.error("[CreateLynk] Invalid room id from create response:", result.data);
+        throw new Error("Created Lynk did not return a valid room id");
+      }
 
       addRoom({
         id: roomId,
@@ -225,20 +247,26 @@ export function SneakyLynkCreateScreen() {
         createdAt: new Date().toISOString(),
       });
 
-      showToast("success", "Lynk Created", "Your Lynk is now live!");
-      reset();
-
       const qs = new URLSearchParams({
         title: title.trim(),
         hasVideo: hasVideo ? "1" : "0",
         isHost: "1",
       }).toString();
+
+      showToast("success", "Lynk Created", "Your Lynk is now live!");
+      didStartNavigation = true;
       router.push(`/feed/sneaky-lynk/room/${roomId}?${qs}`);
     } catch (error) {
       console.error("[CreateLynk] Error:", error);
-      showToast("error", "Error", "Failed to create Lynk");
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Failed to create Lynk";
+      showToast("error", "Error", message);
     } finally {
-      setIsCreating(false);
+      if (!didStartNavigation) {
+        setIsCreating(false);
+      }
     }
   }, [
     title,
@@ -248,7 +276,6 @@ export function SneakyLynkCreateScreen() {
     invitees,
     authUser,
     addRoom,
-    reset,
     router,
     showToast,
     setIsCreating,

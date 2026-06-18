@@ -21,10 +21,11 @@
  *     `sneakyLynkApi.endRoom(id)` (host) + `useLynkHistoryStore.endRoom(...)`.
  *   - Hand-raise / chat / eject domain state = the SHARED `useRoomStore`.
  *
- * Native-only skipped on web: `useSneakyLynkCaptureProtection` /
- * `useSneakyLynkCaptureBroadcast` (screen-capture guard), VisionCamera
- * permissions, expo audio session, AppState host-disconnect guards, the
- * subscription/paywall RN modals.
+ * Web capture protection is deterrence-only: browsers cannot provide the same
+ * OS-level secure-screen guarantees as Android FLAG_SECURE or native capture
+ * APIs. The live room uses `SecureCaptureBoundary` for practical web controls:
+ * anti-capture wrapper, focus/visibility blackout, shortcut/context/copy
+ * blocking, and forensic watermarking.
  *
  * Law 3 (web): raw semantic HTML + Tailwind only (NativeWind interop off) — no
  * <View>/<Text>. State = Zustand (`useRoomUIStore` + shared `useRoomStore`, no
@@ -80,6 +81,7 @@ import {
 import type { SneakyUser } from "@dvnt/app/src/sneaky-lynk/types";
 import { useRoomStore } from "@dvnt/app/src/sneaky-lynk/stores/room-store";
 import { useLynkHistoryStore } from "@dvnt/app/src/sneaky-lynk/stores/lynk-history-store";
+import { SecureCaptureBoundary } from "@dvnt/app/lib/secure-capture";
 import { useRoomUIStore } from "./room-ui-store";
 
 const ACCENT = "#3FDCFF";
@@ -135,6 +137,11 @@ function VideoTile({
       autoPlay
       playsInline
       muted={muted}
+      disablePictureInPicture
+      controlsList="nodownload noplaybackrate noremoteplayback"
+      draggable={false}
+      onContextMenu={(event) => event.preventDefault()}
+      onDragStart={(event) => event.preventDefault()}
       className={className}
       style={mirror ? { transform: "scaleX(-1)" } : undefined}
     />
@@ -1353,7 +1360,19 @@ function RoomInner({
   const showTimer = isHost && isPaidHost === false && timerStartedAt != null;
 
   return (
-    <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white">
+    <SecureCaptureBoundary
+      enabled={phase === "connected" || phase === "joining" || phase === "connecting"}
+      roomId={id}
+      sessionId={roomSnapshot?.fishjamRoomId}
+      userId={authUser?.id}
+      userHandle={joinAnonymous ? currentUser.anonLabel ?? "anon" : authUser?.username}
+      mode="sneaky-lynk"
+      blackoutOnBlur
+      blackoutOnVisibilityHidden
+      watermark={phase === "connected"}
+      logEvents
+    >
+      <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white">
       <ConnectionBanner status={connecting ? "connecting" : peerStatus} />
 
       {/* Header */}
@@ -1590,7 +1609,8 @@ function RoomInner({
           }}
         />
       ) : null}
-    </main>
+      </main>
+    </SecureCaptureBoundary>
   );
 }
 

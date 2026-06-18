@@ -150,13 +150,18 @@ function mapMedia(m: any): PostMedia | undefined {
 
 function mapAuthor(a: any): PostAuthor | null {
   if (!a || typeof a !== 'object') return null
+  // Avatar: an explicit media upload overrides; otherwise use the avatar synced
+  // from the linked user (admin-users.avatarUrl → authors.avatarUrl).
+  const avatar =
+    mapMedia(a.avatar) ??
+    (a.avatarUrl ? { id: '', url: fixMedia(a.avatarUrl) ?? '' } : undefined)
   return {
     id: String(a.id ?? ''),
     name: a.name,
     slug: a.slug,
     role: a.role ?? undefined,
     bio: a.bio ?? undefined,
-    avatar: mapMedia(a.avatar),
+    avatar,
     socials: {
       instagram: a.socials?.instagram ?? undefined,
       twitter: a.socials?.twitter ?? undefined,

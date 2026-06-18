@@ -1,6 +1,7 @@
 export interface RoomMemberStatRow {
   room_id: number;
   user_id: string;
+  role?: string | null;
   status: "active" | "left" | "kicked" | "banned" | string;
   joined_at?: string | null;
   left_at?: string | null;
@@ -8,6 +9,7 @@ export interface RoomMemberStatRow {
 
 export interface RoomPresenceStats {
   activeCount: number;
+  activeHostCount: number;
   historicalCount: number;
 }
 
@@ -35,6 +37,7 @@ export function buildRoomParticipantStats(
   freshnessMs = OPEN_MEMBER_FRESHNESS_MS,
 ): Record<number, RoomPresenceStats> {
   const activeByRoom = new Map<number, Set<string>>();
+  const activeHostsByRoom = new Map<number, Set<string>>();
   const historicalByRoom = new Map<number, Set<string>>();
 
   for (const member of members) {
@@ -54,6 +57,9 @@ export function buildRoomParticipantStats(
 
     if (isFreshActive) {
       getOrCreateSet(activeByRoom, roomId).add(userId);
+      if (member.role === "host" || member.role === "co-host") {
+        getOrCreateSet(activeHostsByRoom, roomId).add(userId);
+      }
     }
   }
 
@@ -66,6 +72,7 @@ export function buildRoomParticipantStats(
   for (const roomId of roomIds) {
     stats[roomId] = {
       activeCount: activeByRoom.get(roomId)?.size ?? 0,
+      activeHostCount: activeHostsByRoom.get(roomId)?.size ?? 0,
       historicalCount: historicalByRoom.get(roomId)?.size ?? 0,
     };
   }
@@ -80,6 +87,7 @@ export function resolveRoomAudience(
 ) {
   const persistedCount = Math.max(0, Number(room.participant_count || 0));
   const activeCount = stats?.activeCount ?? 0;
+  const activeHostCount = stats?.activeHostCount ?? 0;
   const historicalCount = Math.max(stats?.historicalCount ?? 0, persistedCount);
 
   const createdAtMs = room.created_at ? Date.parse(room.created_at) : NaN;
@@ -97,8 +105,9 @@ export function resolveRoomAudience(
 
   return {
     listeners,
-    isLive: room.status === "open" && listeners > 0,
+    isLive: room.status === "open" && activeHostCount > 0,
     activeCount,
+    activeHostCount,
     historicalCount,
   };
 }
