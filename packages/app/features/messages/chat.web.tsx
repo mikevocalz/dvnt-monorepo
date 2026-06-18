@@ -874,6 +874,37 @@ export function ChatScreen() {
     if (recipient) router.push(`/feed/${recipient.username}`);
   }, [recipient, router]);
 
+  // Start a 1:1 / group call — mirrors the native chat header (routes to the
+  // web call screen `/feed/call/[roomId]` with the same outgoing-call params).
+  const startCall = useCallback(
+    (callType: "audio" | "video") => {
+      const roomId = `call-${Date.now()}`;
+      const query = new URLSearchParams({
+        isOutgoing: "true",
+        callType,
+        chatId: String(chatId ?? ""),
+      });
+      if (isGroupChat) {
+        const ids = safeGroupMembers
+          .map((m) => m.id || (m as any).authId || "")
+          .filter(Boolean)
+          .join(",");
+        if (!ids) return;
+        query.set("participantIds", ids);
+        query.set("isGroup", "true");
+        query.set("recipientUsername", groupName || "Group");
+        query.set("recipientAvatar", safeGroupMembers[0]?.avatar || "");
+      } else {
+        if (!recipient?.id) return;
+        query.set("participantIds", recipient.id);
+        query.set("recipientUsername", recipient.username || "");
+        query.set("recipientAvatar", recipient.avatar || "");
+      }
+      router.push(`/feed/call/${roomId}?${query.toString()}`);
+    },
+    [chatId, isGroupChat, safeGroupMembers, groupName, recipient, router],
+  );
+
   const handlePickMedia = useCallback(
     (files: FileList | null) => {
       if (!files || files.length === 0) return;
@@ -995,12 +1026,26 @@ export function ChatScreen() {
         {isGroupChat ? (
           <>
             <div className="flex flex-1 items-center gap-3">
-              <Avatar
-                uri={safeGroupMembers[0]?.avatar || ""}
-                username={groupName || "Group"}
-                size={40}
-                variant="roundedSquare"
-              />
+              {/* Group avatar — 2×2 member stack (parity with native header). */}
+              <div className="grid h-10 w-10 shrink-0 grid-cols-2 grid-rows-2 gap-px overflow-hidden rounded-2xl bg-white/10">
+                {safeGroupMembers.slice(0, 4).map((m, i) =>
+                  m.avatar ? (
+                    <img
+                      key={m.id || i}
+                      src={m.avatar}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span
+                      key={m.id || i}
+                      className="flex items-center justify-center bg-white/15 text-[8px] font-bold text-white/80"
+                    >
+                      {(m.username?.[0] || "?").toUpperCase()}
+                    </span>
+                  ),
+                )}
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-base font-semibold">
                   {groupName ||
@@ -1013,6 +1058,7 @@ export function ChatScreen() {
               </div>
             </div>
             <button
+              onClick={() => startCall("audio")}
               aria-label="Audio call"
               className="flex h-11 w-11 items-center justify-center rounded-2xl"
               style={{ backgroundColor: "rgba(62,164,229,0.16)" }}
@@ -1020,6 +1066,7 @@ export function ChatScreen() {
               <Phone size={22} color="#3EA4E5" />
             </button>
             <button
+              onClick={() => startCall("video")}
               aria-label="Video call"
               className="flex h-11 w-11 items-center justify-center rounded-2xl"
               style={{ backgroundColor: "rgba(62,164,229,0.16)" }}
@@ -1047,6 +1094,7 @@ export function ChatScreen() {
               </div>
             </button>
             <button
+              onClick={() => startCall("audio")}
               aria-label="Audio call"
               className="flex h-11 w-11 items-center justify-center rounded-2xl"
               style={{ backgroundColor: "rgba(62,164,229,0.16)" }}
@@ -1054,6 +1102,7 @@ export function ChatScreen() {
               <Phone size={22} color="#3EA4E5" />
             </button>
             <button
+              onClick={() => startCall("video")}
               aria-label="Video call"
               className="flex h-11 w-11 items-center justify-center rounded-2xl"
               style={{ backgroundColor: "rgba(62,164,229,0.16)" }}

@@ -161,10 +161,9 @@ const KNOWN_WEB_DEBT = {
     phase: "P5 media",
     items: new Set(["feed-post-store", "useFeedPostUIStore"]),
   },
-  "sneaky-lynk/room.web.tsx": {
-    phase: "P6 lynk-reactions",
-    items: new Set(["useRoomReactions"]),
-  },
+  // sneaky-lynk/room.web.tsx — P6 lynk debt PAID DOWN (Prompt 14): useRoomReactions
+  // + room chat + hand-queue + participant moderation + free-host timer/paywall
+  // + eject are all wired to the shared stores / Supabase channels / edge fns.
 };
 
 // React / RN / router / reanimated hooks that carry no data wiring — ignored
@@ -458,11 +457,46 @@ for (const webRel of allWebScreens) {
   }
 }
 
+// ── 6. PER-FEATURE REAL-WEB CHECK (Prompt 14: messages + Sneaky Lynk) ──────────
+// Data-wiring parity (section 5) proves the web screen calls the same hooks/
+// stores. This section proves the web screen is a REAL port and not a shell:
+//  (a) no WebScreenFallback / native re-render,
+//  (b) no raw `react-native` import (web screens are raw semantic HTML — Law 3;
+//      a react-native Text/TextInput/etc. would render wrong on web — Law 2),
+//  (c) substantive (not a thin stub).
+// Any violation is a HARD failure — Prompt 14's "half-built is a defect" bar.
+const PROMPT14_WEB_SCREENS = [
+  "messages/messages.web.tsx",
+  "messages/chat.web.tsx",
+  "messages/new-message.web.tsx",
+  "messages/new-group.web.tsx",
+  "settings/messages.web.tsx",
+  "sneaky-lynk/room.web.tsx",
+  "sneaky-lynk/create.web.tsx",
+  "sneaky-lynk/billing.web.tsx",
+];
+const MIN_REAL_BYTES = 1500; // a real ported screen is never a thin shell
+const realWebFails = [];
+for (const webRel of PROMPT14_WEB_SCREENS) {
+  const p = join(FEATURES_DIR, webRel);
+  if (!existsSync(p)) {
+    realWebFails.push({ webRel, reasons: ["file missing"] });
+    continue;
+  }
+  const src = readFileSync(p, "utf8");
+  const reasons = [];
+  if (/WebScreenFallback/.test(src)) reasons.push("renders WebScreenFallback");
+  if (/from\s+["']react-native["']/.test(stripComments(src)))
+    reasons.push('imports from "react-native" (web must be raw HTML — Law 2/3)');
+  if (src.length < MIN_REAL_BYTES) reasons.push(`thin shell (${src.length} bytes)`);
+  if (reasons.length) realWebFails.push({ webRel, reasons });
+}
+
 // ── Report ─────────────────────────────────────────────────────────────────
 const json = process.argv.includes("--json");
 if (json) {
   console.log(
-    JSON.stringify({ missing, wiringDiffs, webDataDiffs, counts: { deviantRoutes: deviantRoutes.length, present: present.length, webPages, webDataChecked: webDataChecked.length } }, null, 2),
+    JSON.stringify({ missing, wiringDiffs, webDataDiffs, realWebFails, counts: { deviantRoutes: deviantRoutes.length, present: present.length, webPages, webDataChecked: webDataChecked.length } }, null, 2),
   );
 } else {
   console.log("\n════════ PORT PARITY (PROMPT 5) ════════");
@@ -504,7 +538,18 @@ if (json) {
     for (const d of webDataDebt)
       console.log(`    ⌛ ${d.webRel} [${d.phase}]: ${d.items.join(", ")}`);
   }
+
+  console.log(`\n── 5. REAL-WEB CHECK (Prompt 14: messages + Sneaky Lynk, ${PROMPT14_WEB_SCREENS.length} screens) ──`);
+  if (realWebFails.length === 0)
+    console.log("  ✓ all real ports — no fallbacks, no react-native imports, no thin shells");
+  else
+    for (const f of realWebFails)
+      console.log(`  ✗ ${f.webRel}: ${f.reasons.join("; ")}`);
 }
 
-const hardFail = missing.length > 0 || wiringDiffs.length > 0 || webDataDiffs.length > 0;
+const hardFail =
+  missing.length > 0 ||
+  wiringDiffs.length > 0 ||
+  webDataDiffs.length > 0 ||
+  realWebFails.length > 0;
 process.exit(hardFail ? 1 : 0);

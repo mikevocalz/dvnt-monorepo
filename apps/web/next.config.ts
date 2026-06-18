@@ -134,6 +134,19 @@ const nextConfig: NextConfig = {
       { source: '/api/auth/:path*', destination: `${authUrl}/api/auth/:path*` },
     ];
   },
+  // The authenticated web app lives under /feed (the AppShell). Native routes
+  // protected screens at bare paths (e.g. /(protected)/sneaky-lynk/room/[id]),
+  // so bare /sneaky-lynk/* web links — shared URLs, deep links, older clients —
+  // would 404. Redirect them to the canonical /feed/sneaky-lynk/* route.
+  async redirects() {
+    return [
+      {
+        source: '/sneaky-lynk/:path*',
+        destination: '/feed/sneaky-lynk/:path*',
+        permanent: false,
+      },
+    ];
+  },
   webpack: (config, { webpack }) => {
     config.resolve.alias = {
       ...(config.resolve.alias || {}),

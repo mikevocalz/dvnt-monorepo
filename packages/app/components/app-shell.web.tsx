@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import Logo from "@dvnt/app/components/logo";
-import { WebTabBar } from "./web-tab-bar";
+import { WebTabBar } from "./web-tab-bar.web";
 
 const ACCENT = "#379ED8"; // teal-blue (refined brand)
 const HEADER_FONT = "Republica-Minor"; // the display font (Create CTA)

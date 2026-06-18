@@ -40,6 +40,7 @@ import {
   CheckCheck,
   MessageSquare,
   Radio,
+  Plus,
 } from "lucide-react";
 import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
 import { useQuery } from "@tanstack/react-query";
@@ -92,6 +93,9 @@ interface ConversationItem {
 type TabType = "primary" | "requests" | "lynk";
 
 // ── Sneaky Lynk tab — live rooms, mirrors the native 3rd inbox tab ────────────
+// Parity with native `SneakyLynkContent`: a "Lynks" header with a + create
+// button (→ /feed/sneaky-lynk/create) and a "Start a Lynk" empty-state CTA, so
+// hosts can start a room from this tab (the native affordance was dropped).
 function SneakyLynkTab() {
   const router = useRouter();
   const { data: rooms = [], isLoading } = useQuery({
@@ -100,58 +104,110 @@ function SneakyLynkTab() {
     refetchInterval: 20000,
     staleTime: 10000,
   });
+  const showToast = useUIStore((s) => s.showToast);
+
+  const createLynk = () => router.push("/feed/sneaky-lynk/create");
+
+  const openRoom = (r: any) => {
+    if (r.isLive === false || r.status === "ended") {
+      showToast("info", "Lynk Ended", "This Lynk has ended and can't be rejoined");
+      return;
+    }
+    const query = new URLSearchParams({
+      title: r.title || "",
+      hasVideo: r.hasVideo ? "1" : "0",
+    });
+    router.push(`/feed/sneaky-lynk/room/${r.id}?${query.toString()}`);
+  };
+
+  // Header — "Lynks" + create button (shown above the list and the empty state).
+  const header = (
+    <div className="mb-3 flex items-center justify-between">
+      <span className="flex items-center gap-2">
+        <Radio size={22} color="#FC253A" />
+        <span className="text-lg font-extrabold text-white">Lynks</span>
+      </span>
+      <button
+        type="button"
+        onClick={createLynk}
+        aria-label="Start a Lynk"
+        className="flex h-9 w-9 items-center justify-center rounded-xl text-white transition-transform active:scale-95"
+        style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+      >
+        <Plus size={20} color="#06070d" />
+      </button>
+    </div>
+  );
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center py-24">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-[#3FDCFF]" />
+      <div className="flex flex-col">
+        {header}
+        <div className="flex flex-col items-center justify-center py-24">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-[#3FDCFF]" />
+        </div>
       </div>
     );
   }
   if (!rooms.length) {
     return (
-      <div className="flex flex-col items-center justify-center px-8 py-20 text-center">
-        <div
-          className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
-          style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
-        >
-          <Radio size={28} color="#06070d" />
+      <div className="flex flex-col">
+        {header}
+        <div className="flex flex-col items-center justify-center px-8 py-20 text-center">
+          <div
+            className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
+            style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+          >
+            <Radio size={28} color="#06070d" />
+          </div>
+          <p className="text-[17px] font-bold text-white">No Lynks Yet</p>
+          <p className="mt-1 max-w-sm text-sm text-white/55">
+            Start a live conversation with friends.
+          </p>
+          <button
+            type="button"
+            onClick={createLynk}
+            className="mt-5 flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-[#06070d] transition-transform active:scale-95"
+            style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+          >
+            <Plus size={18} color="#06070d" /> Start a Lynk
+          </button>
         </div>
-        <p className="text-[17px] font-bold text-white">No live Sneaky Lynks right now</p>
-        <p className="mt-1 max-w-sm text-sm text-white/55">
-          When members go live, their rooms show up here. Pull up a seat.
-        </p>
       </div>
     );
   }
   return (
-    <div className="flex flex-col gap-2">
-      {rooms.map((r: any) => (
-        <button
-          key={r.id}
-          type="button"
-          onClick={() => router.push(`/sneaky-lynk/room/${r.id}`)}
-          className="group flex items-center gap-3 rounded-2xl border border-[#3FDCFF]/18 bg-white/[0.045] px-3 py-3 text-left transition-colors hover:bg-white/[0.08]"
-        >
-          <span
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
-            style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+    <div className="flex flex-col">
+      {header}
+      <div className="flex flex-col gap-2">
+        {rooms.map((r: any) => (
+          <button
+            key={r.id}
+            type="button"
+            onClick={() => openRoom(r)}
+            className="group flex items-center gap-3 rounded-2xl border border-[#3FDCFF]/18 bg-white/[0.045] px-3 py-3 text-left transition-colors hover:bg-white/[0.08]"
           >
-            <Radio size={18} color="#06070d" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[15px] font-bold text-white">
-              {r.title || r.name || r.hostName || "Live room"}
+            <span
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+              style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+            >
+              <Radio size={18} color="#06070d" />
             </span>
-            <span className="block truncate text-xs text-white/55">
-              {(r.hostName || r.host_name || "") + (r.viewerCount != null ? ` · ${r.viewerCount} watching` : "")}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[15px] font-bold text-white">
+                {r.title || r.name || r.hostName || "Live room"}
+              </span>
+              <span className="block truncate text-xs text-white/55">
+                {(r.host?.displayName || r.host?.username || r.hostName || r.host_name || "") +
+                  (r.listeners != null ? ` · ${r.listeners} listening` : "")}
+              </span>
             </span>
-          </span>
-          <span className="flex items-center gap-1 rounded-full bg-[#FF5BFC]/18 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-[#FFC7FB]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#FF5BFC]" /> live
-          </span>
-        </button>
-      ))}
+            <span className="flex items-center gap-1 rounded-full bg-[#FF5BFC]/18 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-[#FFC7FB]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#FF5BFC]" /> live
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
