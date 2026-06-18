@@ -1747,12 +1747,32 @@ function PreJoinScreen({
               role="switch"
               aria-checked={joinAnonymous}
               onClick={() => setJoinAnonymous(!joinAnonymous)}
-              className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
-              style={{ backgroundColor: joinAnonymous ? ROSE : "#374151" }}
+              style={{
+                position: "relative",
+                width: 48,
+                height: 28,
+                flexShrink: 0,
+                padding: 0,
+                border: "none",
+                borderRadius: 9999,
+                cursor: "pointer",
+                backgroundColor: joinAnonymous ? ROSE : "#374151",
+                transition: "background-color 140ms ease",
+              }}
             >
               <span
-                className="absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform"
-                style={{ transform: joinAnonymous ? "translateX(24px)" : "translateX(4px)" }}
+                style={{
+                  position: "absolute",
+                  top: 4,
+                  left: 4,
+                  width: 20,
+                  height: 20,
+                  borderRadius: 9999,
+                  backgroundColor: "#fff",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.35)",
+                  transition: "transform 140ms ease",
+                  transform: joinAnonymous ? "translateX(20px)" : "translateX(0px)",
+                }}
               />
             </button>
           </div>
