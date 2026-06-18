@@ -39,7 +39,10 @@ import {
   Trash2,
   CheckCheck,
   MessageSquare,
+  Radio,
 } from "lucide-react";
+import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
+import { useQuery } from "@tanstack/react-query";
 
 import { messagesApi as messagesApiClient } from "@dvnt/app/lib/api/messages-impl";
 import {
@@ -86,7 +89,72 @@ interface ConversationItem {
   members?: ConversationMember[];
 }
 
-type TabType = "primary" | "requests";
+type TabType = "primary" | "requests" | "lynk";
+
+// ── Sneaky Lynk tab — live rooms, mirrors the native 3rd inbox tab ────────────
+function SneakyLynkTab() {
+  const router = useRouter();
+  const { data: rooms = [], isLoading } = useQuery({
+    queryKey: ["sneaky-lynk", "rooms"],
+    queryFn: () => sneakyLynkApi.getLiveRooms(),
+    refetchInterval: 20000,
+    staleTime: 10000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-[#3FDCFF]" />
+      </div>
+    );
+  }
+  if (!rooms.length) {
+    return (
+      <div className="flex flex-col items-center justify-center px-8 py-20 text-center">
+        <div
+          className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
+          style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+        >
+          <Radio size={28} color="#06070d" />
+        </div>
+        <p className="text-[17px] font-bold text-white">No live Sneaky Lynks right now</p>
+        <p className="mt-1 max-w-sm text-sm text-white/55">
+          When members go live, their rooms show up here. Pull up a seat.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {rooms.map((r: any) => (
+        <button
+          key={r.id}
+          type="button"
+          onClick={() => router.push(`/sneaky-lynk/room/${r.id}`)}
+          className="group flex items-center gap-3 rounded-2xl border border-[#3FDCFF]/18 bg-white/[0.045] px-3 py-3 text-left transition-colors hover:bg-white/[0.08]"
+        >
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+            style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+          >
+            <Radio size={18} color="#06070d" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[15px] font-bold text-white">
+              {r.title || r.name || r.hostName || "Live room"}
+            </span>
+            <span className="block truncate text-xs text-white/55">
+              {(r.hostName || r.host_name || "") + (r.viewerCount != null ? ` · ${r.viewerCount} watching` : "")}
+            </span>
+          </span>
+          <span className="flex items-center gap-1 rounded-full bg-[#FF5BFC]/18 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-[#FFC7FB]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#FF5BFC]" /> live
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // ── Tab + search state in zustand (never useState — project rule) ────────────
 interface MessagesTabState {
@@ -124,7 +192,7 @@ function PresenceDot({ oderpantId }: { oderpantId: string }) {
   const { isOnline } = useUserPresence(oderpantId);
   if (!isOnline) return null;
   return (
-    <span className="absolute -right-0.5 -top-0.5 h-3.5 w-3.5 rounded-full border-2 border-[#06070d] bg-emerald-500" />
+    <span className="absolute -right-0.5 -top-0.5 h-3.5 w-3.5 rounded-full border-2 border-[#06070d] bg-[#3FDCFF]" />
   );
 }
 
@@ -635,9 +703,23 @@ export function MessagesScreen() {
               </span>
             ) : null}
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("lynk")}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition-colors ${
+              activeTab === "lynk"
+                ? "border-[#FF5BFC]/30 bg-[#FF5BFC]/14 text-[#FF8BFD]"
+                : "border-transparent bg-transparent text-white/60"
+            }`}
+          >
+            <Radio size={16} color={activeTab === "lynk" ? "#FF8BFD" : "#6B7280"} />
+            Sneaky Lynk
+          </button>
         </nav>
 
-        {isInitialLoading ? (
+        {activeTab === "lynk" ? (
+          <SneakyLynkTab />
+        ) : isInitialLoading ? (
           <div className="flex flex-col items-center justify-center py-24">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-cyan-500" />
             <p className="mt-4 text-sm text-white/60">Loading messages...</p>
