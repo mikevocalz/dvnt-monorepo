@@ -904,7 +904,6 @@ function RoomInner({
   const errorMessage = useRoomUIStore((s) => s.errorMessage);
   const isMicOn = useRoomUIStore((s) => s.isMicOn);
   const isCameraOn = useRoomUIStore((s) => s.isCameraOn);
-  const initStarted = useRoomUIStore((s) => s.initStarted);
   const roomSnapshot = useRoomUIStore((s) => s.roomSnapshot);
   const setInitStarted = useRoomUIStore((s) => s.setInitStarted);
   const setPhase = useRoomUIStore((s) => s.setPhase);
@@ -936,6 +935,13 @@ function RoomInner({
   const micRef = useRef(microphone);
   micRef.current = microphone;
   const isHostRef = useRef(isCreator);
+  // Per-MOUNT join guard. Must be a local ref, NOT the global store's
+  // `initStarted`: RoomInner is a child of SneakyLynkRoomScreen, and React runs
+  // child effects before parent effects, so this effect would read a STALE
+  // global `initStarted=true` left by a previous room entry (before the parent's
+  // pre-join reset runs) and skip the join entirely — the room then mounts but
+  // never calls video_join_room. A ref is fresh on every mount.
+  const joinFiredRef = useRef(false);
 
   // Local identity projected as a SneakyUser for reactions/chat authorship.
   const currentUser: SneakyUser = {
@@ -970,7 +976,8 @@ function RoomInner({
 
   // ── JOIN: sneaky-lynk peer token → Fishjam joinRoom → start media ──────────
   useEffect(() => {
-    if (initStarted || !id) return;
+    if (joinFiredRef.current || !id) return;
+    joinFiredRef.current = true;
     setInitStarted(true);
     let cancelled = false;
 
@@ -1055,7 +1062,7 @@ function RoomInner({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, initStarted, joinAnonymous, roomHasVideo]);
+  }, [id, joinAnonymous, roomHasVideo]);
 
   // ── Sync Fishjam peerStatus → phase ───────────────────────────────────────
   useEffect(() => {
@@ -1064,6 +1071,22 @@ function RoomInner({
     else if (peerStatus === "error") setErrorState("Peer connection failed");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [peerStatus]);
+
+  // ── Connection watchdog: never leave the user on an infinite spinner ───────
+  // Purely additive — only fires if we're still joining/connecting after 25s.
+  // Turns a silent "won't connect" into a visible, retryable error.
+  useEffect(() => {
+    if (phase !== "joining" && phase !== "connecting") return;
+    const timer = setTimeout(() => {
+      const p = useRoomUIStore.getState().phase;
+      if (p === "joining" || p === "connecting") {
+        setErrorState(
+          "Couldn't connect to the Lynk. Check your connection (camera/mic permissions, VPN, or ad-blockers can block WebRTC) and try again.",
+        );
+      }
+    }, 25000);
+    return () => clearTimeout(timer);
+  }, [phase, setErrorState]);
 
   // ── Cleanup on unmount (mirrors native leave/reset) ───────────────────────
   useEffect(() => {
