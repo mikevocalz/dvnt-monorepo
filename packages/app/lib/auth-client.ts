@@ -31,10 +31,17 @@ type BetterAuthRecoveryClient = typeof authClient & {
   forgetPassword?: (args: { email: string; redirectTo: string }) => Promise<{
     error?: { message?: string } | null;
   }>;
-  resetPassword?: (args: { newPassword: string }) => Promise<{
+  resetPassword?: (args: {
+    newPassword: string;
+    token?: string;
+  }) => Promise<{
     error?: { message?: string } | null;
   }>;
   sendVerificationEmail?: (args: { email: string }) => Promise<{
+    error?: { message?: string } | null;
+  }>;
+  verifyEmail?: (args: { query: { token: string } }) => Promise<{
+    data?: { status?: boolean; user?: { emailVerified?: boolean } } | null;
     error?: { message?: string } | null;
   }>;
 };
@@ -42,6 +49,20 @@ type BetterAuthRecoveryClient = typeof authClient & {
 const recoveryClient = authClient as BetterAuthRecoveryClient;
 
 export const AUTH_RECOVERY_REDIRECT = "dvnt://auth/reset";
+
+/**
+ * Where the reset email link should send the user back to. On WEB this MUST be
+ * the web origin's reset page so the link is first-party + token-based — the
+ * old hardcoded `dvnt://` deep link made web reset impossible (the browser
+ * can't open dvnt://, and the recovery cookie landed on the wrong domain →
+ * "This link is no longer valid"). Native keeps the deep link.
+ */
+function recoveryRedirect(): string {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}/auth/reset-password`;
+  }
+  return AUTH_RECOVERY_REDIRECT;
+}
 
 export async function requestPasswordReset(email: string) {
   const fn = recoveryClient.requestPasswordReset ?? recoveryClient.forgetPassword;
@@ -51,16 +72,35 @@ export async function requestPasswordReset(email: string) {
 
   return fn({
     email,
-    redirectTo: AUTH_RECOVERY_REDIRECT,
+    redirectTo: recoveryRedirect(),
   });
 }
 
-export async function submitPasswordReset(newPassword: string) {
+/**
+ * Submit a new password. On web the recovery token comes from the email link's
+ * `?token=` query (token-based reset — no session/cookie needed). Native still
+ * uses the session-based flow (no token), so token is optional.
+ */
+export async function submitPasswordReset(newPassword: string, token?: string) {
   if (!recoveryClient.resetPassword) {
     throw new Error("Password reset is not available in this client build");
   }
 
-  return recoveryClient.resetPassword({ newPassword });
+  return recoveryClient.resetPassword(
+    token ? { newPassword, token } : { newPassword },
+  );
+}
+
+/**
+ * Token-based email verification (web). The email link carries `?token=`; we
+ * complete verification with that token directly instead of relying on a
+ * cross-domain session cookie (same web issue the reset flow had).
+ */
+export async function submitEmailVerification(token: string) {
+  if (!recoveryClient.verifyEmail) {
+    throw new Error("Email verification is not available in this client build");
+  }
+  return recoveryClient.verifyEmail({ query: { token } });
 }
 
 export async function resendVerificationEmail(email: string) {

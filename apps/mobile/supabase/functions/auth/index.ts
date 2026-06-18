@@ -8,7 +8,7 @@
  *   DATABASE_URL          — Supabase Postgres connection string
  *   BETTER_AUTH_SECRET    — Secret for signing sessions/tokens
  *   RESEND_API_KEY        — Resend API token (re_...)
- *   RESEND_FROM_EMAIL     — Verified sender (e.g. DVNT <noreply@dvnt.app>)
+ *   RESEND_FROM_EMAIL     — Verified sender (e.g. DVNT <noreply@dvntapp.live>)
  *   APPLE_CLIENT_ID       — Apple Services ID (e.g. com.dvnt.app)
  *   APPLE_CLIENT_SECRET   — Apple JWT client secret
  */
@@ -18,13 +18,15 @@ import {
   resetPassword as resetPasswordEmail,
   verifyEmailLink,
 } from "../_shared/email/templates.ts";
+import { brandEmailWrapper } from "../_shared/email/wrapper.ts";
 
 // ─── Env ────────────────────────────────────────────────────────────────────
 const DATABASE_URL = Deno.env.get("DATABASE_URL") || "";
 const BETTER_AUTH_SECRET = Deno.env.get("BETTER_AUTH_SECRET") || "";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const RESEND_FROM_EMAIL =
-  Deno.env.get("RESEND_FROM_EMAIL") || "DVNT <onboarding@resend.dev>";
+  Deno.env.get("RESEND_FROM_EMAIL") || "DVNT <noreply@dvntapp.live>";
+const DARK_EMAIL_MARKER = 'name="color-scheme" content="dark"';
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
 const AUTH_BASE_URL = SUPABASE_URL; // Origin only — basePath stripping below depends on this
@@ -60,6 +62,33 @@ function fixEmailUrl(url: string): string {
     ? `${fixed}${sep}apikey=${SUPABASE_ANON_KEY}`
     : fixed;
 }
+
+/**
+ * For WEB recovery/verification, point the email link at the requesting app
+ * origin's OWN page with the token in the query — a first-party, TOKEN-BASED
+ * link. The page completes the action with the token directly, so it never
+ * depends on a session cookie (which Better Auth would have set on the Supabase
+ * domain, not the app domain — the cause of web "This link is no longer valid").
+ *
+ * Returns null for native requests (callbackURL is a `dvnt://` deep link, not
+ * https) so those keep the existing `fixEmailUrl` behavior untouched.
+ */
+function webFirstPartyEmailLink(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const callbackURL = u.searchParams.get("callbackURL");
+    if (!callbackURL || !/^https?:\/\//i.test(callbackURL)) return null;
+    const token =
+      u.searchParams.get("token") ||
+      u.pathname.match(/\/(?:reset-password|verify-email)\/([^/?]+)/)?.[1] ||
+      null;
+    if (!token) return null;
+    const sep = callbackURL.includes("?") ? "&" : "?";
+    return `${callbackURL}${sep}token=${encodeURIComponent(token)}`;
+  } catch {
+    return null;
+  }
+}
 console.log("[Auth] Starting edge function...");
 console.log("[Auth] DATABASE_URL:", DATABASE_URL ? "SET" : "MISSING");
 console.log(
@@ -92,6 +121,12 @@ function corsFor(req: Request): Record<string, string> {
 // keeps only the low-level Resend send (its fire-and-forget logging behavior),
 // and composes the new landing-grade templates for reset / verify / welcome.
 
+function ensureDarkEmail(html: string): string {
+  return html.includes(DARK_EMAIL_MARKER)
+    ? html
+    : brandEmailWrapper(html, { preheader: "" });
+}
+
 async function sendEmail(
   to: string,
   subject: string,
@@ -108,7 +143,12 @@ async function sendEmail(
         Authorization: `Bearer ${RESEND_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ from: RESEND_FROM_EMAIL, to, subject, html }),
+      body: JSON.stringify({
+        from: RESEND_FROM_EMAIL,
+        to,
+        subject,
+        html: ensureDarkEmail(html),
+      }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -233,7 +273,8 @@ async function getAuth() {
         }) => {
           console.log(`[Auth] Password reset requested for ${user.email}`);
           console.log(`[Auth] Original reset URL: ${url}`);
-          const resetUrl = fixEmailUrl(url);
+          // Web → first-party token link (cookie-independent); native → legacy.
+          const resetUrl = webFirstPartyEmailLink(url) ?? fixEmailUrl(url);
           console.log(`[Auth] Fixed reset URL: ${resetUrl}`);
           const { subject, html } = resetPasswordEmail(resetUrl);
           await sendEmail(user.email, subject, html);
@@ -246,7 +287,8 @@ async function getAuth() {
           url: string;
         }) => {
           console.log(`[Auth] Email verification requested for ${user.email}`);
-          const verifyUrl = fixEmailUrl(url);
+          // Web → first-party token link (cookie-independent); native → legacy.
+          const verifyUrl = webFirstPartyEmailLink(url) ?? fixEmailUrl(url);
           const name = user.name || user.email.split("@")[0];
           const { subject, html } = verifyEmailLink(verifyUrl, name);
           await sendEmail(user.email, subject, html);
