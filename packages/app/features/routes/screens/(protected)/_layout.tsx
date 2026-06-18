@@ -2,9 +2,11 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "expo-router";
 import { View, Text, Pressable, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Settings } from "lucide-react-native";
+import { Settings, Menu } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { TabHeaderLogo, TabHeaderRight } from "@dvnt/app/components/tab-header";
+import { AppDrawer } from "@dvnt/app/components/drawer/AppDrawer";
+import { useDrawerStore } from "@dvnt/app/lib/stores/drawer-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCallKeepCoordinator } from "@dvnt/app/src/services/callkeep";
 import { NotificationListener } from "@dvnt/app/src/services/callkeep/NotificationListener";
@@ -82,6 +84,7 @@ function TabsHeader() {
     pathname === "/create" || pathname === "/(protected)/(tabs)/create";
   const user = useAuthStore.getState().user;
   const router = useRouter();
+  const openDrawer = useDrawerStore((s) => s.openDrawer);
 
   // Create screen renders its own header
   if (isCreate) return null;
@@ -98,15 +101,27 @@ function TabsHeader() {
         justifyContent: "space-between",
       }}
     >
-      {isProfile ? (
-        <Text
-          style={{ color: colors.foreground, fontWeight: "700", fontSize: 14 }}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Pressable
+          onPress={openDrawer}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Open menu"
+          accessibilityHint="Opens the navigation drawer"
+          style={{ width: 36, height: 44, alignItems: "center", justifyContent: "center" }}
         >
-          @{user?.username || ""}
-        </Text>
-      ) : (
-        <TabHeaderLogo />
-      )}
+          <Menu size={26} color={colors.foreground} />
+        </Pressable>
+        {isProfile ? (
+          <Text
+            style={{ color: colors.foreground, fontWeight: "700", fontSize: 14 }}
+          >
+            @{user?.username || ""}
+          </Text>
+        ) : (
+          <TabHeaderLogo />
+        )}
+      </View>
       {isProfile ? (
         <Pressable
           onPress={() => router.push("/settings" as any)}
@@ -235,6 +250,8 @@ export default function ProtectedLayout() {
           }}
         />
         <Stack.Screen name="search" />
+        <Stack.Screen name="blog/index" />
+        <Stack.Screen name="blog/[slug]" />
         <Stack.Screen name="messages" />
         <Stack.Screen name="messages/new" options={modalTransitionConfig} />
         <Stack.Screen
@@ -323,6 +340,10 @@ export default function ProtectedLayout() {
       {/* PERSISTENT: Weather overlay — renders ON TOP of screens.
           pointerEvents="none" — touches pass through to content below. */}
       <WeatherReanimatedOverlay />
+      {/* PERSISTENT: slide-over navigation drawer (Blog, Search, Messages, …).
+          Mounted once here, driven by useDrawerStore, opened from the tab
+          header hamburger. */}
+      <AppDrawer />
       {/* WeatherGPUEngine disabled - requires react-native-wgpu native module */}
       {/* {isWebGPUAvailable() && <WeatherGPUEngine />} */}
     </>
