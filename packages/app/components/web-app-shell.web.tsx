@@ -17,7 +17,6 @@ import { Main } from "@expo/html-elements";
 import { useRouter, usePathname } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { routeOwnsHeader } from "@dvnt/app/lib/web-chrome";
-import { WEB_APP_HEADER_HEIGHT } from "./web-app-header.web";
 
 export function WebAppShell({
   children,
@@ -73,9 +72,13 @@ export function WebAppShell({
 const styles = StyleSheet.create({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   root: { minHeight: "100vh" as any, backgroundColor: "#02030A" },
-  content: { paddingTop: WEB_APP_HEADER_HEIGHT },
+  // The rail AppShell (site-chrome) is now the authed shell and renders NO fixed
+  // top header, so the old WebAppHeader offset is a phantom gap above every app
+  // screen — zero it out. (The feed self-balances its own -78/+78 so it stays
+  // flush either way.) Mobile keeps only notch clearance.
+  content: { paddingTop: 0 },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  contentMobile: { paddingTop: "calc(56px + env(safe-area-inset-top))" as any },
+  contentMobile: { paddingTop: "env(safe-area-inset-top)" as any },
   // Public marketing chrome (GlassHeader floats taller): ~100px clearance.
   contentPublic: { paddingTop: 100 },
 });

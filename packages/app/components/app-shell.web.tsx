@@ -35,7 +35,10 @@ import Logo from "@dvnt/app/components/logo";
 import { WebTabBar } from "./web-tab-bar";
 
 const ACCENT = "#379ED8"; // teal-blue (refined brand)
-const HEADER_FONT = "Republica-Minor"; // matches the marketing header nav (FAQ, Privacy…)
+const HEADER_FONT = "Republica-Minor"; // the display font (Create CTA)
+// Nav items use a crisp upright system sans — the display font reads slanted and
+// hard on the eye at nav size.
+const MENU_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
 // Create button — same flowing-gradient-ring + pulsing-glow + hover treatment as
 // the marketing Login button (HeaderLoginButton.web), so the two read as one
@@ -127,10 +130,10 @@ export function AppShell({
           // White text in both states (active reads via weight + tint + accent
           // icon); inactive is a hair softer so the active row still leads.
           color: active ? "#FFFFFF" : "rgba(255,255,255,0.92)",
-          fontFamily: HEADER_FONT,
-          fontWeight: active ? 700 : 500,
-          fontSize: 16,
-          letterSpacing: 0.4,
+          fontFamily: MENU_FONT,
+          fontWeight: active ? 700 : 600,
+          fontSize: 15.5,
+          letterSpacing: 0.2,
           cursor: "pointer",
           border: "none",
           transition: "background 140ms ease, color 140ms ease",
