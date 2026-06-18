@@ -33,6 +33,7 @@ import {
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import Logo from "@dvnt/app/components/logo";
 import { WebTabBar } from "./web-tab-bar.web";
+import { WebTopBar } from "./web-top-bar.web";
 
 const ACCENT = "#379ED8"; // teal-blue (refined brand)
 const HEADER_FONT = "Republica-Minor"; // the display font (Create CTA)
@@ -79,10 +80,12 @@ export function AppShell({
   const pathname = usePathname() ?? "/";
   const username = useAuthStore((s) => s.user?.username);
 
-  // Phones keep their bottom tab bar — the rail is web/desktop-only.
+  // Phones: sticky DVNT header on top + the bottom tab bar (the rail is
+  // web/desktop-only). The logged-in app had no top chrome on mobile before.
   if (width < 768) {
     return (
       <>
+        <WebTopBar />
         {children}
         <WebTabBar />
       </>
