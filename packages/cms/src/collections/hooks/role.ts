@@ -19,6 +19,59 @@ async function appPool(): Promise<any> {
   return pool
 }
 
+// Editable profile fields mirrored onto Members → write back to public.users.
+// Payload field name → public.users column.
+const PROFILE_COLUMNS: Record<string, string> = {
+  firstName: 'first_name',
+  lastName: 'last_name',
+  bio: 'bio',
+  location: 'location',
+  website: 'website',
+  gender: 'gender',
+}
+
+export const onMemberProfileChange: CollectionAfterChangeHook = async ({
+  doc,
+  previousDoc,
+  operation,
+  req,
+  context,
+}) => {
+  if (operation !== 'update') return doc
+  // The sync writes these FROM public.users; skip the echo.
+  if ((context as any)?.skipRoleWriteBack) return doc
+  const appUserId = doc?.appUserId
+  if (!appUserId) return doc
+
+  const sets: string[] = []
+  const vals: any[] = []
+  let i = 1
+  for (const [field, col] of Object.entries(PROFILE_COLUMNS)) {
+    if ((doc as any)[field] !== (previousDoc as any)?.[field]) {
+      sets.push(`${col} = $${i++}`)
+      vals.push((doc as any)[field] ?? null)
+    }
+  }
+  if (!sets.length) return doc
+
+  const p = await appPool()
+  if (!p) {
+    req.payload?.logger?.warn?.('[member] APP_DATABASE_URL not set — cannot write profile back')
+    return doc
+  }
+  vals.push(Number(appUserId))
+  try {
+    await p.query(
+      `update public.users set ${sets.join(', ')}, updated_at = now() where id = $${i}`,
+      vals,
+    )
+    req.payload?.logger?.info?.(`[member] wrote ${sets.length} profile field(s) to users.id=${appUserId}`)
+  } catch (e: any) {
+    req.payload?.logger?.error?.(`[member] profile write-back failed for ${appUserId}: ${e?.message}`)
+  }
+  return doc
+}
+
 export const onMemberRoleChange: CollectionAfterChangeHook = async ({
   doc,
   previousDoc,

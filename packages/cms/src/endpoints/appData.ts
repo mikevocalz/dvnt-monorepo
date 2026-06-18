@@ -327,7 +327,8 @@ export const appSyncEndpoint: Endpoint = {
       // ── Members ──────────────────────────────────────────────────────────
       const avatarSel = 'coalesce(am.sizes_thumbnail_url, am.thumbnail_u_r_l, am.url) as avatar_url'
       const users = await app.query(
-        `select u.id, u.auth_id, u.username, u.email, u.banned_at, u.role, ${avatarSel}
+        `select u.id, u.auth_id, u.username, u.email, u.banned_at, u.role,
+                u.first_name, u.last_name, u.bio, u.location, u.website, u.gender, ${avatarSel}
            from public.users u
            left join public.media am on am.id = u.avatar_id`,
       )
@@ -346,6 +347,13 @@ export const appSyncEndpoint: Endpoint = {
           // write-back hook keeps CMS edits → public.users.role, so this stays in
           // sync; skip the echo write-back during sync.
           role: u.role || 'Basic',
+          // Editable app-profile fields (write back via onMemberProfileChange).
+          firstName: u.first_name || undefined,
+          lastName: u.last_name || undefined,
+          bio: u.bio || undefined,
+          location: u.location || undefined,
+          website: u.website || undefined,
+          gender: u.gender || undefined,
         }
         const existing = await payload.find({
           collection: 'members', where: { appUserId: { equals: appUserId } }, limit: 1, overrideAccess: true,

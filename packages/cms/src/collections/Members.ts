@@ -6,7 +6,7 @@
 import type { CollectionConfig } from 'payload'
 import { canModerate, isAdminPlus, fieldAdminPlus } from '../access/roles'
 import { onStatusChange } from './hooks/moderation'
-import { onMemberRoleChange } from './hooks/role'
+import { onMemberRoleChange, onMemberProfileChange } from './hooks/role'
 
 // App role values — MUST match public.enum_users_role exactly (the write-back
 // hook casts these straight into that enum).
@@ -36,7 +36,7 @@ export const Members: CollectionConfig = {
     listSearchableFields: ['username', 'email'],
   },
   hooks: {
-    afterChange: [onStatusChange, onMemberRoleChange],
+    afterChange: [onStatusChange, onMemberRoleChange, onMemberProfileChange],
   },
   fields: [
     { name: 'username', type: 'text', index: true, required: true },
@@ -56,11 +56,19 @@ export const Members: CollectionConfig = {
         description: "App role — saving updates the user's role in the app and grants CMS access for Moderator/Admin/Super-Admin.",
       },
     },
+    // ── Editable app-profile fields — saving writes back to public.users
+    //    (onMemberProfileChange). Editable by moderators+ (CS edits).
+    { name: 'firstName', type: 'text', admin: { description: 'App profile first name. Saving updates the app.' } },
+    { name: 'lastName', type: 'text' },
+    { name: 'bio', type: 'textarea' },
+    { name: 'location', type: 'text' },
+    { name: 'website', type: 'text' },
+    { name: 'gender', type: 'text' },
     {
       name: 'avatarUrl',
       type: 'text',
       label: 'Avatar',
-      admin: { components: { Cell: '@dvnt/cms/components/AvatarCell' } },
+      admin: { components: { Cell: '@dvnt/cms/components/AvatarCell' }, description: 'Current app avatar URL (read-only here; image replace coming next).' },
     },
     // Link back to the app's auth/profiles row so a ban can revoke app sessions.
     { name: 'appUserId', type: 'text', index: true, admin: { description: 'Supabase/Better Auth user id' } },
