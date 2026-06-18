@@ -40,12 +40,17 @@ const ROOM_UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function resolveCreatedRoomId(room: unknown): string {
-  const candidate = room as { id?: unknown; uuid?: unknown } | null;
-  const ids = [candidate?.id, candidate?.uuid]
+  const candidate = room as
+    | { id?: unknown; uuid?: unknown; internalId?: unknown }
+    | null;
+  const ids = [candidate?.uuid, candidate?.id, candidate?.internalId]
     .filter((id): id is string | number => id != null)
     .map((id) => String(id));
 
-  return ids.find((id) => ROOM_UUID_REGEX.test(id)) ?? "";
+  // Prefer a real UUID, but NEVER abort if the response shape differs — the
+  // room route + video_join_room both accept the integer id too. Returning ""
+  // here used to throw and strand the user on the create screen.
+  return ids.find((id) => ROOM_UUID_REGEX.test(id)) ?? ids[0] ?? "";
 }
 
 // Rounded-SQUARE avatar (never circular, per DVNT rule).
@@ -220,9 +225,9 @@ export function SneakyLynkCreateScreen() {
 
       const roomId = resolveCreatedRoomId(result.data.room);
 
-      if (!ROOM_UUID_REGEX.test(roomId)) {
-        console.error("[CreateLynk] Invalid room id from create response:", result.data);
-        throw new Error("Created Lynk did not return a valid room id");
+      if (!roomId) {
+        console.error("[CreateLynk] No room id in create response:", result.data);
+        throw new Error("Created Lynk did not return a room id");
       }
 
       addRoom({
@@ -255,7 +260,19 @@ export function SneakyLynkCreateScreen() {
 
       showToast("success", "Lynk Created", "Your Lynk is now live!");
       didStartNavigation = true;
-      router.push(`/feed/sneaky-lynk/room/${roomId}?${qs}`);
+      const target = `/feed/sneaky-lynk/room/${roomId}?${qs}`;
+      router.push(target);
+      // Hard-navigation safety net: in this ssr:false dynamic route the SPA
+      // push has been getting swallowed (create screen stays put, button reverts
+      // to "Start Lynk"). If we're still on /sneaky-lynk/create shortly after,
+      // force a full navigation so the host ALWAYS lands in their new room.
+      if (typeof window !== "undefined") {
+        setTimeout(() => {
+          if (window.location.pathname.includes("/sneaky-lynk/create")) {
+            window.location.assign(target);
+          }
+        }, 700);
+      }
     } catch (error) {
       console.error("[CreateLynk] Error:", error);
       const message =
