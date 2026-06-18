@@ -6,7 +6,7 @@
 import type { CollectionConfig } from 'payload'
 import { canModerate, isAdminPlus, fieldAdminPlus } from '../access/roles'
 import { onStatusChange } from './hooks/moderation'
-import { onMemberRoleChange, onMemberProfileChange } from './hooks/role'
+import { onMemberRoleChange, onMemberProfileChange, onMemberAvatarChange } from './hooks/role'
 
 // App role values — MUST match public.enum_users_role exactly (the write-back
 // hook casts these straight into that enum).
@@ -36,7 +36,7 @@ export const Members: CollectionConfig = {
     listSearchableFields: ['username', 'email'],
   },
   hooks: {
-    afterChange: [onStatusChange, onMemberRoleChange, onMemberProfileChange],
+    afterChange: [onStatusChange, onMemberRoleChange, onMemberProfileChange, onMemberAvatarChange],
   },
   fields: [
     { name: 'username', type: 'text', index: true, required: true },
@@ -68,7 +68,16 @@ export const Members: CollectionConfig = {
       name: 'avatarUrl',
       type: 'text',
       label: 'Avatar',
-      admin: { components: { Cell: '@dvnt/cms/components/AvatarCell' }, description: 'Current app avatar URL (read-only here; image replace coming next).' },
+      admin: { components: { Cell: '@dvnt/cms/components/AvatarCell' }, description: 'Current app avatar URL (read-only — use “Replace avatar” below to change).', readOnly: true },
+    },
+    // Drag a new image here to replace the user's profile picture. On save the
+    // image is published to public.media and public.users.avatar_id is repointed.
+    {
+      name: 'avatarUpload',
+      type: 'upload',
+      relationTo: 'media',
+      label: 'Replace avatar',
+      admin: { description: 'Drag/drop a new image to set as this user’s profile picture.' },
     },
     // Link back to the app's auth/profiles row so a ban can revoke app sessions.
     { name: 'appUserId', type: 'text', index: true, admin: { description: 'Supabase/Better Auth user id' } },

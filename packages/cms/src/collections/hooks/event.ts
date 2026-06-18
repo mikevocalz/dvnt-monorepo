@@ -28,6 +28,49 @@ const FIELD_MAP: Array<[string, string, (v: any) => any]> = [
   ['capacity', 'max_attendees', (v) => (v == null ? null : Number(v))],
 ]
 
+// Flyer/cover replace: a new image uploaded to Events `coverUpload` is published
+// to public.media and public.events.cover_image_id is repointed.
+const relId = (v: any): number | undefined => {
+  if (v == null) return undefined
+  return Number(typeof v === 'object' ? v.id : v)
+}
+
+export const onEventCoverChange: CollectionAfterChangeHook = async ({
+  doc,
+  previousDoc,
+  operation,
+  req,
+  context,
+}) => {
+  if (operation !== 'update') return doc
+  if ((context as any)?.skipEventWriteBack) return doc
+  const uploadId = relId((doc as any).coverUpload)
+  const prevUploadId = relId((previousDoc as any)?.coverUpload)
+  if (!uploadId || uploadId === prevUploadId) return doc
+  const appEventId = doc?.appEventId
+  if (!appEventId) return doc
+
+  let media: any = typeof (doc as any).coverUpload === 'object' ? (doc as any).coverUpload : null
+  if (!media?.url) {
+    media = await req.payload.findByID({ collection: 'media', id: uploadId, overrideAccess: true }).catch(() => null)
+  }
+  if (!media?.url) return doc
+  const origin = (process.env.BLOG_ORIGIN || process.env.NEXT_PUBLIC_SERVER_URL || '').replace(/\/$/, '')
+  const url = /^https?:\/\//.test(media.url) ? media.url : `${origin}${media.url}`
+
+  const p = await appPool()
+  if (!p) return doc
+  try {
+    const ins = await p.query(`insert into public.media (url) values ($1) returning id`, [url])
+    const mediaId = ins.rows[0]?.id
+    await p.query(`update public.events set cover_image_id = $1, updated_at = now() where id = $2`, [mediaId, Number(appEventId)])
+    req.payload?.logger?.info?.(`[event] flyer replaced for events.id=${appEventId} -> media ${mediaId}`)
+  } catch (e: any) {
+    req.payload?.logger?.error?.(`[event] flyer replace failed for ${appEventId}: ${e?.message}`)
+  }
+  return doc
+}
+
 export const onEventChange: CollectionAfterChangeHook = async ({
   doc,
   previousDoc,

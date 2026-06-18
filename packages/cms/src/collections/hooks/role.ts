@@ -19,6 +19,54 @@ async function appPool(): Promise<any> {
   return pool
 }
 
+// Avatar replace: when a new image is uploaded to the Members `avatarUpload`
+// field, copy its URL into public.media and repoint public.users.avatar_id, so
+// the app shows the new profile picture. Also refreshes the CMS display URL.
+const relId = (v: any): number | undefined => {
+  if (v == null) return undefined
+  return Number(typeof v === 'object' ? v.id : v)
+}
+
+export const onMemberAvatarChange: CollectionAfterChangeHook = async ({
+  doc,
+  previousDoc,
+  operation,
+  req,
+  context,
+}) => {
+  if (operation !== 'update') return doc
+  if ((context as any)?.skipRoleWriteBack) return doc
+  const uploadId = relId((doc as any).avatarUpload)
+  const prevUploadId = relId((previousDoc as any)?.avatarUpload)
+  if (!uploadId || uploadId === prevUploadId) return doc
+  const appUserId = doc?.appUserId
+  if (!appUserId) return doc
+
+  // Resolve the uploaded media's URL (populated relation or a lookup).
+  let media: any = typeof (doc as any).avatarUpload === 'object' ? (doc as any).avatarUpload : null
+  if (!media?.url) {
+    media = await req.payload.findByID({ collection: 'media', id: uploadId, overrideAccess: true }).catch(() => null)
+  }
+  if (!media?.url) return doc
+  const origin = (process.env.BLOG_ORIGIN || process.env.NEXT_PUBLIC_SERVER_URL || '').replace(/\/$/, '')
+  const url = /^https?:\/\//.test(media.url) ? media.url : `${origin}${media.url}`
+
+  const p = await appPool()
+  if (!p) return doc
+  try {
+    const ins = await p.query(`insert into public.media (url) values ($1) returning id`, [url])
+    const mediaId = ins.rows[0]?.id
+    await p.query(`update public.users set avatar_id = $1, updated_at = now() where id = $2`, [mediaId, Number(appUserId)])
+    // Refresh the CMS display field directly (same DB, payload schema) — avoids
+    // Payload afterChange recursion.
+    await p.query(`update payload.members set avatar_url = $1, updated_at = now() where id = $2`, [url, doc.id])
+    req.payload?.logger?.info?.(`[member] avatar replaced for users.id=${appUserId} -> media ${mediaId}`)
+  } catch (e: any) {
+    req.payload?.logger?.error?.(`[member] avatar replace failed for ${appUserId}: ${e?.message}`)
+  }
+  return doc
+}
+
 // Editable profile fields mirrored onto Members → write back to public.users.
 // Payload field name → public.users column.
 const PROFILE_COLUMNS: Record<string, string> = {

@@ -3,7 +3,7 @@
 // Moderators get read-only (events aren't a moderation surface).
 import type { CollectionConfig } from 'payload'
 import { isAdminPlus, canModerate } from '../access/roles'
-import { onEventChange } from './hooks/event'
+import { onEventChange, onEventCoverChange } from './hooks/event'
 
 export const Events: CollectionConfig = {
   slug: 'events',
@@ -16,7 +16,7 @@ export const Events: CollectionConfig = {
   },
   admin: { useAsTitle: 'title', defaultColumns: ['title', 'status', 'startsAt', 'host'] },
   // Saving writes the editable fields back to the live app event (public.events).
-  hooks: { afterChange: [onEventChange] },
+  hooks: { afterChange: [onEventChange, onEventCoverChange] },
   fields: [
     { name: 'title', type: 'text', index: true, required: true },
     // Stable key back to the live app event (public.events.id) — the sync upserts
@@ -28,6 +28,15 @@ export const Events: CollectionConfig = {
       options: ['draft', 'published', 'cancelled', 'ended'].map((v) => ({ label: v, value: v })),
     },
     { name: 'description', type: 'textarea', admin: { description: 'Event description. Saving updates the app.' } },
+    // Drag a new image to replace the event flyer/cover (-> public.media,
+    // repoints public.events.cover_image_id).
+    {
+      name: 'coverUpload',
+      type: 'upload',
+      relationTo: 'media',
+      label: 'Replace flyer / cover',
+      admin: { description: 'Drag/drop a new flyer image to set as this event’s cover.' },
+    },
     { name: 'startsAt', type: 'date' },
     { name: 'endsAt', type: 'date' },
     { name: 'capacity', type: 'number' },
