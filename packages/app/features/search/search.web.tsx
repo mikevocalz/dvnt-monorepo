@@ -228,15 +228,15 @@ function DiscoverProfiles({ users }: { users: DiscoverDTO["users"] }) {
                 alt={user.username}
                 className="h-16 w-16 rounded-xl object-cover bg-white/10"
               />
-              <div className="mt-2 flex items-center gap-1 px-2">
-                <span className="truncate text-sm font-semibold text-white">
+              <div className="mt-2 flex w-full items-center justify-center gap-1 px-2">
+                <span className="min-w-0 truncate text-sm font-semibold text-white">
                   {user.name}
                 </span>
                 {user.verified ? (
-                  <BadgeCheck size={12} color="#FF6DC1" fill="#FF6DC1" />
+                  <BadgeCheck size={12} color="#FF6DC1" fill="#FF6DC1" className="shrink-0" />
                 ) : null}
               </div>
-              <span className="truncate text-xs text-white/60">
+              <span className="block max-w-full truncate px-2 text-xs text-white/60">
                 @{user.username}
               </span>
               {user.bio ? (
