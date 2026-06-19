@@ -671,6 +671,18 @@ export const eventsApi = {
       const authId = await getCurrentUserAuthId();
       if (!authId) throw new Error("Not authenticated");
 
+      // The insert runs under RLS as `authenticated` (policy
+      // events_insert_authenticated). Bridge the Better Auth session into a
+      // Supabase JWT first via setSession — without it the client is `anon`,
+      // which lacks INSERT on events and fails with
+      // "permission denied for table events". (Mirrors updateEvent below.)
+      try {
+        const { ensureSupabaseJwt } = await import("../auth/supabase-jwt");
+        await ensureSupabaseJwt();
+      } catch {
+        // Non-fatal: fall through with the current session.
+      }
+
       // Use authId for host_id (text column)
       const insertPayload: Record<string, any> = {
         [DB.events.hostId]: authId,
