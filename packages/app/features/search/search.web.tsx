@@ -122,7 +122,7 @@ function PostTile({ post }: { post: Post }) {
           src={cover}
           alt={post.caption ?? ""}
           loading="lazy"
-          className="h-full w-full object-cover"
+          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-white/6">
@@ -205,9 +205,14 @@ function DiscoverProfiles({ users }: { users: DiscoverDTO["users"] }) {
   const router = useRouter();
   return (
     <section className="py-4">
-      <div className="mb-4 flex items-center gap-2 px-1">
-        <UserPlus size={20} color={CYAN} />
-        <h2 className="text-lg font-bold text-white">Discover New Profiles</h2>
+      <div className="mb-4 flex items-center gap-2.5 px-1">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-400/12 text-cyan-300">
+          <UserPlus size={18} />
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-[17px] font-bold leading-tight text-white">Discover New Profiles</h2>
+          <p className="text-xs text-white/45">People to follow on DVNT</p>
+        </div>
       </div>
 
       {users.length === 0 ? (
@@ -220,7 +225,7 @@ function DiscoverProfiles({ users }: { users: DiscoverDTO["users"] }) {
             <button
               key={user.id}
               onClick={() => router.push(`/profile/${user.username}`)}
-              className="flex w-[140px] shrink-0 flex-col items-center rounded-2xl border border-white/[0.06] bg-[rgba(30,30,30,0.8)] py-4"
+              className="flex w-[140px] shrink-0 flex-col items-center rounded-2xl border border-white/[0.06] bg-[rgba(30,30,30,0.8)] py-4 transition hover:border-cyan-400/30 hover:bg-[rgba(40,40,46,0.9)] active:scale-[0.98]"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -476,9 +481,14 @@ export function SearchScreen() {
             <DiscoverProfiles users={discoverData.users ?? []} />
             {discoverPosts.length > 0 ? (
               <section className="pt-3">
-                <div className="mb-3 flex items-center gap-2 px-1">
-                  <Compass size={20} color={CYAN} />
-                  <h2 className="text-lg font-bold text-white">Explore</h2>
+                <div className="mb-4 flex items-center gap-2.5 px-1">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-400/12 text-cyan-300">
+                    <Compass size={18} />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="text-[17px] font-bold leading-tight text-white">Explore</h2>
+                    <p className="text-xs text-white/45">Fresh posts from the community</p>
+                  </div>
                 </div>
                 <PostGrid posts={discoverPosts} columns={columns} />
               </section>
@@ -498,9 +508,11 @@ function EmptyState({
   text: string;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      {icon}
-      <p className="mt-4 text-white/60">{text}</p>
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/8 bg-white/[0.03]">
+        {icon}
+      </div>
+      <p className="mt-4 max-w-[260px] text-sm text-white/55">{text}</p>
     </div>
   );
 }
