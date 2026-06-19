@@ -16,6 +16,7 @@
  * top-padding still lives in each page/layout.
  */
 import dynamic from 'next/dynamic';
+import { useEffect } from 'react';
 import { usePathname } from 'solito/navigation';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
 import { AppShell } from '@dvnt/app/components/app-shell';
@@ -57,6 +58,23 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? '/';
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
+
+  // Supabase JWT bridge for the WEB app. Mobile does this in its Expo Router
+  // _layout; the web never did, so its supabase client stayed `anon` and EVERY
+  // direct write (events, stories, messages, follows, tags…) failed with
+  // "permission denied for table …". Mint the authenticated JWT once signed in,
+  // and refresh on an interval so it stays fresh across a long-lived tab.
+  // Additive + silent — never blocks anything.
+  useEffect(() => {
+    if (!hasHydrated || !isAuthenticated) return;
+    const ensure = () =>
+      import('@dvnt/app/lib/auth/supabase-jwt')
+        .then((m) => m.ensureSupabaseJwt())
+        .catch(() => {});
+    ensure();
+    const t = setInterval(ensure, 4 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [hasHydrated, isAuthenticated]);
 
   // Auth flow renders without site chrome.
   if (pathname.startsWith('/auth')) return <>{children}</>;
