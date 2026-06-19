@@ -6,6 +6,7 @@
  */
 
 import * as LegacyFileSystem from "expo-file-system/legacy";
+import { Platform } from "react-native";
 import { getAuthToken } from "@dvnt/app/lib/auth-client";
 
 const FileSystem = LegacyFileSystem;
@@ -187,6 +188,57 @@ export async function uploadToServer(
         filename: "",
         error: "Not authenticated — cannot upload",
       };
+    }
+
+    // ── Web: native FileSystem.uploadAsync doesn't exist in the browser. Fetch
+    //    the blob from the (blob:/data:/http) URI and POST it to the same
+    //    media-upload Edge Function as multipart FormData — identical contract
+    //    (field "file" + kind/mime params), so the server side is unchanged.
+    if (Platform.OS === "web") {
+      try {
+        const resp = await fetch(uri);
+        if (!resp.ok) throw new Error(`Could not read selected media (${resp.status})`);
+        const blob = await resp.blob();
+        const mime = blob.type || getMimeFromUri(uri);
+        const kind = folderToKind(folder, mime);
+        const filename = `upload_${Date.now()}.${getExtension(uri, mime)}`;
+        onProgress?.({ loaded: 10, total: 100, percentage: 10 });
+        const form = new FormData();
+        form.append("file", blob, filename);
+        form.append("kind", kind);
+        form.append("mime", mime);
+        const res = await fetch(MEDIA_UPLOAD_URL, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${authToken}`, apikey: SUPABASE_ANON_KEY },
+          body: form,
+          signal: AbortSignal.timeout(120_000),
+        });
+        const body = await res.json().catch(() => ({}) as any);
+        if (res.status === 200 && body?.ok) {
+          onProgress?.({ loaded: 100, total: 100, percentage: 100 });
+          return {
+            success: true,
+            url: body.media.url,
+            path: body.media.key || "",
+            filename: body.media.key?.split("/").pop() || filename,
+          };
+        }
+        return {
+          success: false,
+          url: "",
+          path: "",
+          filename: "",
+          error: body?.error || `Upload failed (status ${res.status})`,
+        };
+      } catch (e) {
+        return {
+          success: false,
+          url: "",
+          path: "",
+          filename: "",
+          error: e instanceof Error ? e.message : "Web upload failed",
+        };
+      }
     }
 
     // Determine mime type and kind (mime-aware so videos get post-video, not post-image)

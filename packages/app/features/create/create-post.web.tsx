@@ -334,7 +334,7 @@ export function CreatePostScreen() {
 
       <div className="mx-auto w-full max-w-2xl px-4 pb-32">
         {/* Post-type switch */}
-        <div className="mt-4 flex gap-2.5 rounded-2xl border border-white/8 bg-[#0E1320] p-1.5">
+        <div className="mt-4 flex gap-1.5 sm:gap-2.5 rounded-2xl border border-white/8 bg-[#0E1320] p-1.5">
           {[
             { key: "media" as const, label: "Media", icon: ImageIcon, description: "Photos or video" },
             { key: "text" as const, label: "Text", icon: TypeIcon, description: "Text only" },
@@ -345,18 +345,18 @@ export function CreatePostScreen() {
               <button
                 key={option.key}
                 onClick={() => handleSetPostKind(option.key)}
-                className={`flex-1 rounded-xl px-2 py-3 text-left border ${
+                className={`flex-1 min-w-0 rounded-xl px-2 py-2.5 sm:py-3 text-left border ${
                   isActive ? "bg-cyan-500/16 border-cyan-400/40" : "border-transparent"
                 }`}
               >
-                <span className="flex items-center gap-2">
-                  <Icon size={18} className={isActive ? "text-cyan-300" : "text-white/45"} />
-                  <span className={`text-[15px] font-bold ${isActive ? "text-white" : "text-white/75"}`}>
+                <span className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                  <Icon size={18} className={`shrink-0 ${isActive ? "text-cyan-300" : "text-white/45"}`} />
+                  <span className={`truncate text-sm sm:text-[15px] font-bold ${isActive ? "text-white" : "text-white/75"}`}>
                     {option.label}
                   </span>
                 </span>
                 <span
-                  className={`mt-2 block text-xs leading-4 ${
+                  className={`mt-1.5 sm:mt-2 block truncate text-[11px] sm:text-xs leading-4 ${
                     isActive ? "text-white/80" : "text-white/45"
                   }`}
                 >
