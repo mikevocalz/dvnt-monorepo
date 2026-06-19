@@ -80,17 +80,12 @@ export function AppShell({
   const pathname = usePathname() ?? "/";
   const username = useAuthStore((s) => s.user?.username);
 
-  // Phones: sticky DVNT header on top + the bottom tab bar (the rail is
-  // web/desktop-only). The logged-in app had no top chrome on mobile before.
-  if (width < 768) {
-    return (
-      <>
-        <WebTopBar />
-        {children}
-        <WebTabBar />
-      </>
-    );
-  }
+  // Phones get a sticky DVNT header + bottom tab bar; desktop gets the rail.
+  // CRITICAL: render ONE tree across the 768px breakpoint with {children} always
+  // in the SAME <main> slot, so resizing across the breakpoint does NOT remount
+  // the page. (It used to early-return a different tree → every resize remounted
+  // children, which disconnected a live Sneaky Lynk room mid-call.)
+  const isMobile = width < 768;
 
   const expanded = width >= 1024; // rail shows labels
   // The right aside is reserved but currently empty — only carve out its column
@@ -156,16 +151,25 @@ export function AppShell({
 
   return (
     <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: showAside
-          ? `${railW}px minmax(0, 1fr) 320px`
-          : `${railW}px minmax(0, 1fr)`,
-        minHeight: "100dvh",
-        background: "#06070D",
-      }}
+      style={
+        isMobile
+          ? { minHeight: "100dvh", background: "#06070D" }
+          : {
+              display: "grid",
+              gridTemplateColumns: showAside
+                ? `${railW}px minmax(0, 1fr) 320px`
+                : `${railW}px minmax(0, 1fr)`,
+              minHeight: "100dvh",
+              background: "#06070D",
+            }
+      }
     >
-      {/* ── Left rail (liquid glass) ── */}
+      {/* ── Chrome slot 0: mobile DVNT header OR desktop liquid-glass rail.
+           {children} below ALWAYS stays in the same <main> slot so resizing
+           across the breakpoint never remounts the page. ── */}
+      {isMobile ? (
+        <WebTopBar />
+      ) : (
       <nav
         aria-label="Primary"
         style={{
@@ -262,6 +266,7 @@ export function AppShell({
           </span>
         </button>
       </nav>
+      )}
 
       {/* ── Center column ── fills the available track (IG/X width), the inner
            screens cap themselves (the feed grid is responsive). overflowX hidden
@@ -277,8 +282,10 @@ export function AppShell({
         {children}
       </main>
 
-      {/* ── Right aside (reserved, empty-safe) ── */}
-      {showAside ? (
+      {/* ── Chrome slot 2: mobile bottom tab bar OR desktop right aside ── */}
+      {isMobile ? (
+        <WebTabBar />
+      ) : showAside ? (
         <aside
           aria-label="Contextual"
           style={{
