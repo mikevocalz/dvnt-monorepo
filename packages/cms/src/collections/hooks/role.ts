@@ -4,6 +4,17 @@
 // the Better-Auth SSO strategy, grants/revokes CMS access). Members link to the
 // app user by `appUserId` = public.users.id (the integer PK, as text).
 import type { CollectionAfterChangeHook } from 'payload'
+import { forceSuperAdminByEmail } from '../../access/roles'
+
+// App role (public.enum_users_role / Members.role) → CMS role (admin_users).
+// Basic / anything else → null = not staff (revoke console access).
+const CMS_ROLE_BY_MEMBER: Record<string, 'super_admin' | 'admin' | 'moderator'> = {
+  'Super-Admin': 'super_admin',
+  Admin: 'admin',
+  Moderator: 'moderator',
+}
+const randomSecret = () =>
+  Array.from({ length: 48 }, () => 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 62)]).join('')
 
 // Lazily-created write pool to the app DB (public schema). Separate from the
 // read-only appData pool by design.
@@ -135,21 +146,55 @@ export const onMemberRoleChange: CollectionAfterChangeHook = async ({
   const appUserId = doc?.appUserId
   if (!appUserId || !doc?.role) return doc
 
+  // 1) Write the app role back to public.users (the SSO source of truth).
   const p = await appPool()
   if (!p) {
     req.payload?.logger?.warn?.('[role] APP_DATABASE_URL not set — cannot write role back')
-    return doc
+  } else {
+    try {
+      await p.query(
+        `update public.users
+           set role = $1::public.enum_users_role, updated_at = now()
+         where id = $2`,
+        [doc.role, Number(appUserId)],
+      )
+      req.payload?.logger?.info?.(`[role] public.users.id=${appUserId} -> ${doc.role}`)
+    } catch (e: any) {
+      req.payload?.logger?.error?.(`[role] write-back failed for ${appUserId}: ${e?.message}`)
+    }
   }
+
+  // 2) Eagerly create/update (or revoke) the admin_users record so the appointee
+  //    shows up in the Admin Users list IMMEDIATELY — without waiting for them to
+  //    log into /admin (where the SSO strategy would otherwise lazily provision
+  //    it). This is what makes "set a role in the Members list" actually grant a
+  //    visible console seat. Demotion to Basic removes the seat.
   try {
-    await p.query(
-      `update public.users
-         set role = $1::public.enum_users_role, updated_at = now()
-       where id = $2`,
-      [doc.role, Number(appUserId)],
-    )
-    req.payload?.logger?.info?.(`[role] public.users.id=${appUserId} -> ${doc.role}`)
+    const email = String(doc.email || '').toLowerCase()
+    if (email) {
+      const cmsRole = forceSuperAdminByEmail(email) ?? CMS_ROLE_BY_MEMBER[String(doc.role)] ?? null
+      const found = await req.payload.find({
+        collection: 'admin-users', where: { email: { equals: email } }, limit: 1, overrideAccess: true,
+      })
+      if (cmsRole) {
+        const data = { role: cmsRole, name: doc.username || email, avatarUrl: doc.avatarUrl || undefined }
+        if (found.docs[0]) {
+          await req.payload.update({ collection: 'admin-users', id: found.docs[0].id, data, overrideAccess: true })
+        } else {
+          await req.payload.create({
+            collection: 'admin-users',
+            data: { email, ...data, password: randomSecret() } as any,
+            overrideAccess: true,
+          })
+        }
+        req.payload?.logger?.info?.(`[role] admin_users seat for ${email} -> ${cmsRole}`)
+      } else if (found.docs[0]) {
+        await req.payload.delete({ collection: 'admin-users', id: found.docs[0].id, overrideAccess: true })
+        req.payload?.logger?.info?.(`[role] revoked admin_users seat for ${email}`)
+      }
+    }
   } catch (e: any) {
-    req.payload?.logger?.error?.(`[role] write-back failed for ${appUserId}: ${e?.message}`)
+    req.payload?.logger?.error?.(`[role] admin_users sync failed: ${e?.message}`)
   }
   return doc
 }
