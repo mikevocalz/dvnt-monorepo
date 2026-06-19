@@ -310,7 +310,6 @@ export function CreatePostScreen() {
     }
   };
 
-  const theme = TEXT_POST_THEMES[textTheme] ?? TEXT_POST_THEMES.graphite;
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -520,24 +519,17 @@ export function CreatePostScreen() {
               })}
             </div>
 
-            {/* Themed slide editor — raw textarea over the gradient */}
-            <div
-              className="mt-3 rounded-2xl border p-4"
-              style={{
-                backgroundImage: `linear-gradient(150deg, ${theme.gradient.join(", ")})`,
-                borderColor: theme.border,
-              }}
-            >
-              <textarea
-                value={activeTextSlide?.content ?? ""}
-                onChange={(e) => updateTextSlide(activeTextSlideIndex, e.target.value)}
-                placeholder="Speak your mind…"
-                maxLength={TEXT_POST_MAX_LENGTH}
-                rows={6}
-                className="w-full resize-none bg-transparent text-[18px] leading-7 outline-none placeholder:text-white/45"
-                style={{ color: theme.textPrimary }}
-              />
-            </div>
+            {/* Plain editor — matches the mobile composer (white text on the dark
+                screen, no themed box; the selected theme styles the PUBLISHED
+                card, shown in the feed/detail, not the input). */}
+            <textarea
+              value={activeTextSlide?.content ?? ""}
+              onChange={(e) => updateTextSlide(activeTextSlideIndex, e.target.value)}
+              placeholder="Speak your mind…"
+              maxLength={TEXT_POST_MAX_LENGTH}
+              rows={6}
+              className="mt-3 w-full resize-none bg-transparent text-white text-[18px] leading-7 outline-none placeholder:text-white/45"
+            />
             <p
               className="mt-2 text-right text-xs"
               style={{
