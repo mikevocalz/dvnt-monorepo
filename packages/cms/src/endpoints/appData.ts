@@ -131,6 +131,7 @@ export const appEventsEndpoint: Endpoint = {
     const rows = await p.query(
       `select e.id, e.title, e.visibility, e.start_date, e.total_attendees,
               e.max_attendees, e.location_name, e.location, e.price,
+              (select count(*)::int from public.tickets t where t.event_id = e.id) as ticket_count,
               nullif(coalesce(e.cover_image_url, e.flyer_image_url, e.image), '') as flyer_url,
               coalesce(h.username, e.host_id) as host_name
          from public.events e
@@ -151,7 +152,7 @@ export const appEventsEndpoint: Endpoint = {
       flyerUrl: r.flyer_url || undefined,
       capacity: Number(r.max_attendees ?? 0),
       attendees: Number(r.total_attendees ?? 0),
-      ticketsSold: Number(r.total_attendees ?? 0),
+      ticketsSold: Number(r.ticket_count ?? 0),
     }))
     return Response.json(wrap(docs, total.rows[0]?.c ?? docs.length, page, limit))
   },

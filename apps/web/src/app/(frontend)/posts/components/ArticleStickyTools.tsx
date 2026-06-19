@@ -224,7 +224,10 @@ const tocItem: React.CSSProperties = {
 
 const mobileTocBar: React.CSSProperties = {
   position: 'fixed',
-  bottom: 24,
+  // Sit ABOVE the app's bottom tab bar (WebTabBar ≈ 70px + safe-area, at bottom:2)
+  // when the blog is viewed inside the signed-in AppShell; safe-area-aware so it
+  // still clears the home indicator for logged-out (no tab bar) readers.
+  bottom: 'calc(env(safe-area-inset-bottom) + 86px)',
   left: '50%',
   transform: 'translateX(-50%)',
   display: 'flex',
@@ -263,7 +266,8 @@ const mobileShareBtn: React.CSSProperties = {
 
 const mobileDrawer: React.CSSProperties = {
   position: 'fixed',
-  bottom: 80,
+  // Open above the (now raised) mobile TOC bar.
+  bottom: 'calc(env(safe-area-inset-bottom) + 146px)',
   left: 16,
   right: 16,
   maxHeight: '55vh',
