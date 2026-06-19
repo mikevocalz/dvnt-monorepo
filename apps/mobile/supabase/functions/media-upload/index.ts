@@ -124,7 +124,12 @@ async function sleep(ms: number): Promise<void> {
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      // Browser (web) clients need this on the actual response, not just the
+      // OPTIONS preflight, or the fetch is blocked even when the upload succeeds.
+      "Access-Control-Allow-Origin": "*",
+    },
   });
 }
 
@@ -142,7 +147,7 @@ Deno.serve(async (req) => {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, DELETE, OPTIONS",
         "Access-Control-Allow-Headers":
-          "Authorization, Content-Type, x-file-name, x-mime, x-kind, x-duration-sec, x-width, x-height, x-keys",
+          "Authorization, apikey, Content-Type, x-file-name, x-mime, x-kind, x-duration-sec, x-width, x-height, x-keys",
       },
     });
   }
