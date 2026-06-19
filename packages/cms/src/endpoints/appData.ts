@@ -236,10 +236,28 @@ export const appEventUpdateEndpoint: Endpoint = {
 }
 
 // Promote an app user (public.users) to a console role. super_admin only.
-// Copies their existing Payload-format hash/salt into payload.admin_users so
-// they sign in with the SAME password they already use in the app — no reset.
-// Mirrors scripts/promote-admin.ts, exposed as a UI action.
-const ROLES = ['super_admin', 'admin', 'moderator']
+//
+// This drives the path the whole RBAC is built around (see betterAuthStrategy):
+//   1) set public.users.role to the matching app role — this is the source of
+//      truth the SSO strategy reads, and it takes effect app-side immediately.
+//   2) provision the payload.admin_users row so they appear on the Team list
+//      and can log in. If the app user has a Payload-format password (legacy
+//      email+password accounts), copy its hash/salt so email+password login
+//      works too; otherwise provision via the Local API with a random secret —
+//      they sign into /admin through their existing app (Better Auth) session,
+//      exactly like the SSO strategy's auto-provision. Critically this means a
+//      SOCIAL-login user (Google/Apple, no stored password — the majority) can
+//      now be granted a console role, which the old password-copy path rejected.
+const ROLES = ['super_admin', 'admin', 'moderator'] as const
+// CMS role → public.enum_users_role (must match Members.MEMBER_ROLES exactly).
+const APP_ROLE_BY_CMS: Record<string, string> = {
+  super_admin: 'Super-Admin',
+  admin: 'Admin',
+  moderator: 'Moderator',
+}
+const randomSecret = () =>
+  Array.from({ length: 48 }, () => 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 62)]).join('')
+
 export const appPromoteEndpoint: Endpoint = {
   path: '/app/promote',
   method: 'post',
@@ -251,11 +269,10 @@ export const appPromoteEndpoint: Endpoint = {
     const userId = body.userId != null ? String(body.userId) : ''
     let role = String(body.role ?? 'moderator')
     if (!userId) return Response.json({ errors: [{ message: 'userId is required' }] }, { status: 400 })
-    if (!ROLES.includes(role)) return Response.json({ errors: [{ message: 'invalid role' }] }, { status: 400 })
+    if (!(ROLES as readonly string[]).includes(role)) return Response.json({ errors: [{ message: 'invalid role' }] }, { status: 400 })
 
     const app = await appPool()
-    const adm = await adminPool()
-    if (!app || !adm) return Response.json({ errors: [{ message: 'DB unavailable' }] }, { status: 503 })
+    if (!app) return Response.json({ errors: [{ message: 'App DB unavailable' }] }, { status: 503 })
 
     const avatarSel = 'coalesce(am.sizes_thumbnail_url, am.thumbnail_u_r_l, am.url) as avatar_url'
     const r = await app.query(
@@ -267,35 +284,62 @@ export const appPromoteEndpoint: Endpoint = {
     )
     const u = r.rows[0]
     if (!u) return Response.json({ errors: [{ message: 'app user not found' }] }, { status: 404 })
-    if (!u.hash || !u.salt) {
-      return Response.json(
-        { errors: [{ message: 'This user signs in socially (no password set), so a console password can’t be reused.' }] },
-        { status: 422 },
-      )
-    }
+    if (!u.email) return Response.json({ errors: [{ message: 'app user has no email' }] }, { status: 422 })
 
     const email = String(u.email).toLowerCase()
     // Pinned canonical accounts are always super_admin.
     role = forceSuperAdminByEmail(email) ?? role
+    const appRole = APP_ROLE_BY_CMS[role]
     const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || u.email
     const avatarUrl = u.avatar_url || null
+    const hasPassword = Boolean(u.hash && u.salt)
 
     try {
-      const existing = await adm.query(`select id from payload.admin_users where lower(email) = $1 limit 1`, [email])
-      if (existing.rows[0]) {
-        await adm.query(
-          `update payload.admin_users
-              set role=$1, name=$2, avatar_url=$3, hash=$4, salt=$5, updated_at=now() where id=$6`,
-          [role, name, avatarUrl, u.hash, u.salt, existing.rows[0].id],
-        )
+      // 1) Source of truth: the app role. Drives SSO access + app-side role.
+      await app.query(
+        `update public.users set role = $1::public.enum_users_role, updated_at = now() where id = $2`,
+        [appRole, userId],
+      )
+
+      // 2) Provision the console account.
+      if (hasPassword) {
+        // Legacy password account — copy hash/salt so email+password login works.
+        const adm = await adminPool()
+        if (!adm) return Response.json({ errors: [{ message: 'Console DB unavailable' }] }, { status: 503 })
+        const existing = await adm.query(`select id from payload.admin_users where lower(email) = $1 limit 1`, [email])
+        if (existing.rows[0]) {
+          await adm.query(
+            `update payload.admin_users set role=$1, name=$2, avatar_url=$3, hash=$4, salt=$5, updated_at=now() where id=$6`,
+            [role, name, avatarUrl, u.hash, u.salt, existing.rows[0].id],
+          )
+        } else {
+          await adm.query(
+            `insert into payload.admin_users (email, role, name, avatar_url, hash, salt, created_at, updated_at)
+             values ($1, $2, $3, $4, $5, $6, now(), now())`,
+            [email, role, name, avatarUrl, u.hash, u.salt],
+          )
+        }
       } else {
-        await adm.query(
-          `insert into payload.admin_users (email, role, name, avatar_url, hash, salt, created_at, updated_at)
-           values ($1, $2, $3, $4, $5, $6, now(), now())`,
-          [email, role, name, avatarUrl, u.hash, u.salt],
-        )
+        // Social-login account (no stored password) — provision via the Local
+        // API (Payload hashes a random secret); they sign in via their app
+        // session through the SSO strategy. Idempotent on email.
+        const found = await req.payload.find({
+          collection: 'admin-users', where: { email: { equals: email } }, limit: 1, overrideAccess: true,
+        })
+        if (found.docs[0]) {
+          await req.payload.update({
+            collection: 'admin-users', id: found.docs[0].id,
+            data: { role, name, avatarUrl }, overrideAccess: true,
+          })
+        } else {
+          await req.payload.create({
+            collection: 'admin-users',
+            data: { email, name, role, avatarUrl, password: randomSecret() } as any,
+            overrideAccess: true,
+          })
+        }
       }
-      return Response.json({ ok: true, email, role, name, avatarUrl })
+      return Response.json({ ok: true, email, role, name, avatarUrl, loginMethod: hasPassword ? 'password' : 'app-session' })
     } catch (e: any) {
       return Response.json({ errors: [{ message: e?.message ?? 'promote failed' }] }, { status: 500 })
     }

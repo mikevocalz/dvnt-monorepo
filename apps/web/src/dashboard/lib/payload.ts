@@ -7,6 +7,8 @@
 export type Role = 'super_admin' | 'admin' | 'moderator'
 
 const BASE = process.env.NEXT_PUBLIC_PAYLOAD_URL || ''
+const REQUEST_TIMEOUT_MS = 10_000
+const READ_RETRY_DELAY_MS = 300
 
 type Query = Record<string, string | number | undefined>
 
@@ -25,24 +27,68 @@ export class ApiError extends Error {
   }
 }
 
-async function req<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}/payload-api${path}`, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-    ...init,
-  })
-  if (!res.ok) {
-    // Surface the server's reason (Payload returns `{ errors: [{ message }] }`).
-    let message = `${res.status} ${res.statusText}`
-    try {
-      const body = await res.json()
-      message = body?.errors?.[0]?.message || body?.message || message
-    } catch {
-      /* non-JSON body */
-    }
-    throw new ApiError(res.status, message)
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+async function fetchWithTimeout(path: string, init?: RequestInit) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const onAbort = () => controller.abort()
+
+  init?.signal?.addEventListener('abort', onAbort, { once: true })
+
+  try {
+    return await fetch(`${BASE}/payload-api${path}`, {
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+      ...init,
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timeout)
+    init?.signal?.removeEventListener('abort', onAbort)
   }
-  return res.status === 204 ? (undefined as T) : res.json()
+}
+
+async function req<T = any>(path: string, init?: RequestInit): Promise<T> {
+  const method = init?.method?.toUpperCase() ?? 'GET'
+  const canRetry = method === 'GET'
+  let lastError: unknown
+
+  for (let attempt = 0; attempt <= (canRetry ? 1 : 0); attempt += 1) {
+    try {
+      const res = await fetchWithTimeout(path, init)
+
+      if (!res.ok) {
+        // Surface the server's reason (Payload returns `{ errors: [{ message }] }`).
+        let message = `${res.status} ${res.statusText}`
+        try {
+          const body = await res.json()
+          message = body?.errors?.[0]?.message || body?.message || message
+        } catch {
+          /* non-JSON body */
+        }
+
+        if (canRetry && attempt === 0 && [502, 503, 504].includes(res.status)) {
+          await sleep(READ_RETRY_DELAY_MS)
+          continue
+        }
+
+        throw new ApiError(res.status, message)
+      }
+
+      return res.status === 204 ? (undefined as T) : res.json()
+    } catch (error) {
+      lastError = error
+      if (!canRetry || attempt > 0) break
+      await sleep(READ_RETRY_DELAY_MS)
+    }
+  }
+
+  if (lastError instanceof DOMException && lastError.name === 'AbortError') {
+    throw new ApiError(408, 'Request timed out')
+  }
+
+  throw lastError
 }
 
 export type Paginated<T> = {
@@ -106,9 +152,10 @@ export const payload = {
     updateEvent: (id: string, patch: Record<string, unknown>) =>
       req<{ doc: any }>(`/app/events/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     stats: () => req<{ members: number; banned: number; events: number; openReports: number; underReview: number }>('/app/stats'),
-    // Grant an app user a console role, reusing their existing app password.
+    // Grant an app user a console role. Sets their app role (SSO source of truth)
+    // and provisions the console account — works for social-login users too.
     promote: (userId: string, role: Role) =>
-      req<{ ok: boolean; email: string; role: Role; name: string; avatarUrl?: string | null }>('/app/promote', {
+      req<{ ok: boolean; email: string; role: Role; name: string; avatarUrl?: string | null; loginMethod: 'password' | 'app-session' }>('/app/promote', {
         method: 'POST',
         body: JSON.stringify({ userId, role }),
       }),
