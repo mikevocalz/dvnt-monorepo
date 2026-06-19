@@ -28,7 +28,7 @@ export type PostAuthor = {
   role?: string
   bio?: string
   avatar?: PostMedia
-  socials?: { instagram?: string; twitter?: string; tiktok?: string; website?: string }
+  socials?: { instagram?: string; twitter?: string; tiktok?: string; onlyfans?: string; website?: string }
   profileUrl?: string
 }
 
@@ -166,6 +166,7 @@ function mapAuthor(a: any): PostAuthor | null {
       instagram: a.socials?.instagram ?? undefined,
       twitter: a.socials?.twitter ?? undefined,
       tiktok: a.socials?.tiktok ?? undefined,
+      onlyfans: a.socials?.onlyfans ?? undefined,
       website: a.socials?.website ?? undefined,
     },
     profileUrl: a.profileUrl ?? undefined,

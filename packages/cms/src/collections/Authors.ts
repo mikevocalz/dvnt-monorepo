@@ -83,11 +83,13 @@ export const Authors: CollectionConfig = {
     {
       name: 'socials',
       type: 'group',
+      admin: { description: 'Shown as links on the author byline. Handles can include or omit the leading @.' },
       fields: [
-        { name: 'instagram', type: 'text' },
-        { name: 'twitter', type: 'text' },
-        { name: 'tiktok', type: 'text' },
-        { name: 'website', type: 'text' },
+        { name: 'instagram', type: 'text', admin: { description: 'Handle, e.g. dvnt or @dvnt' } },
+        { name: 'twitter', type: 'text', label: 'Twitter / X', admin: { description: 'Handle, e.g. dvnt' } },
+        { name: 'tiktok', type: 'text', admin: { description: 'Handle, e.g. dvnt' } },
+        { name: 'onlyfans', type: 'text', label: 'OnlyFans', admin: { description: 'Handle, e.g. dvnt' } },
+        { name: 'website', type: 'text', label: 'Website / external link', admin: { description: 'Full URL incl. https://' } },
       ],
     },
     { name: 'profileUrl', type: 'text', admin: { description: 'Link to author profile page if external' } },
