@@ -15,7 +15,10 @@ export default function TicketQRField(props: any) {
 
   React.useEffect(() => {
     if (!token) return
-    QRCode.toString(String(token), { type: 'svg', errorCorrectionLevel: 'H', margin: 1, width: 220 })
+    // qrcode ships no types; cast so its toString(text, opts) isn't read as
+    // Object.prototype.toString (which the strict web build flags).
+    ;(QRCode as any)
+      .toString(String(token), { type: 'svg', errorCorrectionLevel: 'H', margin: 1, width: 220 })
       .then(setSvg)
       .catch(() => setSvg(''))
   }, [token])
