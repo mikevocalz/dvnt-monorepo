@@ -31,10 +31,12 @@
     "overrides": {
       "react": "19.2.3",
       "react-dom": "19.2.3",
-      "react-native": "0.85.3",
+      "react-native": "0.86.0",
+      "react-native-reanimated": "4.4.1",
+      "react-native-worklets": "0.9.2",
       "react-native-web": "0.21.2",
       "@expo/dom-webview": "56.0.5",
-      "hermes-compiler": "250829098.0.10",
+      "hermes-compiler": "250829098.0.14",
       "react-native-nitro-modules": "0.35.6",
       "lightningcss": "1.30.1"
     },

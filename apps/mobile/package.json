@@ -2,6 +2,15 @@
   "name": "mobile",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "expo": {
+    "install": {
+      "exclude": [
+        "react-native",
+        "react-native-reanimated",
+        "react-native-worklets"
+      ]
+    }
+  },
   "scripts": {
     "dev": "expo start --clear --dev-client",
     "start": "expo start --clear --dev-client",
@@ -124,7 +133,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-i18next": "^17.0.3",
-    "react-native": "0.85.3",
+    "react-native": "0.86.0",
     "react-native-animated-glow": "^3.0.1",
     "react-native-callkeep": "^4.3.12",
     "react-native-compressor": "1.16.0",
@@ -140,7 +149,7 @@
     "react-native-nitro-modules": "^0.35.7",
     "react-native-pager-view": "8.0.1",
     "react-native-qrcode-svg": "6.3.21",
-    "react-native-reanimated": "4.3.1",
+    "react-native-reanimated": "4.4.1",
     "react-native-redraw": "^0.0.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screen-transitions": "^3.3.0",
@@ -156,7 +165,7 @@
     "react-native-web": "^0.21.2",
     "react-native-webview": "13.16.1",
     "react-native-wgpu": "^0.5.11",
-    "react-native-worklets": "0.8.3",
+    "react-native-worklets": "0.9.2",
     "react-native-youtube-bridge": "^2.2.0",
     "sonner-native": "^0.24.0",
     "tailwind-merge": "^3.0.2",
