@@ -12,7 +12,8 @@
  *         attempt so we can log/moderate it.
  * Android — FLAG_SECURE prevents screenshots AND screen recordings at the
  *            window level. The camera/recorder API returns a black frame.
- *            addScreenshotListener() is NOT supported on Android.
+ *            addScreenshotListener() is registered where the OS/library can
+ *            emit events, but FLAG_SECURE is the actual blocker.
  *
  * USAGE:
  *   // In any Sneaky Lynk screen:
@@ -145,7 +146,7 @@ export function useSneakyLynkCaptureProtection(
     if (_activeCount === 1) _enableProtection();
 
     let screenshotSub: ReturnType<typeof addScreenshotListener> | null = null;
-    if (Platform.OS === "ios") {
+    if (Platform.OS === "ios" || Platform.OS === "android") {
       try {
         screenshotSub = addScreenshotListener(() => {
           if (__DEV__) {

@@ -86,12 +86,16 @@ export function CaptureNotificationBanner() {
   const iconColor = current.isSelf ? colors.primary : colors.destructive;
 
   const title = current.isSelf
-    ? isRecording && current.kind === "recording_start"
+    ? current.kind === "recording_start"
       ? "You're recording"
-      : "You took a screenshot"
-    : isRecording && current.kind === "recording_start"
+      : current.kind === "recording_stop"
+        ? "Recording stopped"
+        : "You took a screenshot"
+    : current.kind === "recording_start"
       ? `${current.actorUsername} is recording`
-      : `${current.actorUsername} took a screenshot`;
+      : current.kind === "recording_stop"
+        ? `${current.actorUsername} stopped recording`
+        : `${current.actorUsername} took a screenshot`;
 
   const body = current.isSelf
     ? "Everyone in the room was notified."

@@ -40,6 +40,7 @@ import { getLynkRoomLowercaseName } from "@dvnt/app/lib/branding/lynk-branding";
 import {
   useSneakyLynkCaptureStore,
   type CaptureEvent,
+  type CaptureKind,
 } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
 
 interface Params {
@@ -70,6 +71,8 @@ interface ReturnShape {
   /** Call this the moment a local screenshot is detected. Drives the
    *  local confirmation toast AND broadcasts to the rest of the room. */
   notifyLocalScreenshot: () => void;
+  /** Same path for web/native capture signals that are not screenshots. */
+  notifyLocalCapture: (kind: CaptureKind) => void;
 }
 
 const BANNER_DISMISS_MS = 6000;
@@ -91,6 +94,9 @@ export function useSneakyLynkCaptureBroadcast({
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const cancelledRef = useRef(false);
+  const lastLocalEventRef = useRef<{ kind: CaptureKind; at: number } | null>(
+    null,
+  );
 
   // Stash the latest action refs so notifyLocalScreenshot below never
   // captures stale Zustand setters.
@@ -146,7 +152,7 @@ export function useSneakyLynkCaptureBroadcast({
       };
       actionsRef.current.recordCapture(event);
 
-      if (event.kind === "screenshot") {
+      if (event.kind === "screenshot" || Platform.OS === "web") {
         setTimeout(() => {
           if (cancelledRef.current) return;
           actionsRef.current.clearCapture();
@@ -171,28 +177,34 @@ export function useSneakyLynkCaptureBroadcast({
     };
   }, [roomId, localUserId, reset]);
 
-  const notifyLocalScreenshot = useCallback(() => {
+  const notifyLocalCapture = useCallback((kind: CaptureKind = "screenshot") => {
     if (cancelledRef.current) return;
     if (!localUserId) return;
+    const now = Date.now();
+    const last = lastLocalEventRef.current;
+    if (last?.kind === kind && now - last.at < 2500) return;
+    lastLocalEventRef.current = { kind, at: now };
 
     const event: CaptureEvent = {
-      kind: "screenshot",
+      kind,
       actorId: localUserId,
       actorUsername: localUsername || "You",
-      at: Date.now(),
+      at: now,
       isSelf: true,
     };
 
-    // Render the local "You took a screenshot" confirmation instantly.
+    // Render the local confirmation instantly.
     actionsRef.current.recordCapture(event);
-    setTimeout(() => {
-      if (cancelledRef.current) return;
-      actionsRef.current.clearCapture();
-    }, BANNER_DISMISS_MS);
-    setTimeout(() => {
-      if (cancelledRef.current) return;
-      actionsRef.current.clearPulse(localUserId);
-    }, TILE_PULSE_MS);
+    if (event.kind === "screenshot" || Platform.OS === "web") {
+      setTimeout(() => {
+        if (cancelledRef.current) return;
+        actionsRef.current.clearCapture();
+      }, BANNER_DISMISS_MS);
+      setTimeout(() => {
+        if (cancelledRef.current) return;
+        actionsRef.current.clearPulse(localUserId);
+      }, TILE_PULSE_MS);
+    }
 
     // Fan-out. If the user is anonymous, broadcast a generic attribution
     // so the privacy signal still reaches the room without outing them.
@@ -206,7 +218,7 @@ export function useSneakyLynkCaptureBroadcast({
         type: "broadcast",
         event: "capture",
         payload: {
-          kind: "screenshot",
+          kind,
           actorId: localUserId,
           actorUsername: broadcastUsername,
           at: event.at,
@@ -232,11 +244,16 @@ export function useSneakyLynkCaptureBroadcast({
         realUsername: dmRealUsername,
         anonLabel: broadcastUsername,
         roomTitle,
+        kind,
       });
     }
   }, [attributable, localUserId, localUsername]);
 
-  return { notifyLocalScreenshot };
+  const notifyLocalScreenshot = useCallback(() => {
+    notifyLocalCapture("screenshot");
+  }, [notifyLocalCapture]);
+
+  return { notifyLocalScreenshot, notifyLocalCapture };
 }
 
 /**
@@ -252,11 +269,13 @@ async function _notifyHostViaChat({
   realUsername,
   anonLabel,
   roomTitle,
+  kind,
 }: {
   hostUserId: string;
   realUsername: string;
   anonLabel: string;
   roomTitle?: string;
+  kind: CaptureKind;
 }): Promise<void> {
   try {
     // `getOrCreateConversation` returns the conversation id directly
@@ -269,12 +288,15 @@ async function _notifyHostViaChat({
     const roomLabel = roomTitle
       ? `your ${getLynkRoomLowercaseName()} "${roomTitle}"`
       : `your ${getLynkRoomLowercaseName()}`;
+    const action =
+      kind === "recording_start" ? "started screen recording" : "took a screenshot";
+    const icon = kind === "recording_start" ? "🔴" : "📸";
     // Only append the anon-label clause when the identity was hidden —
     // i.e. the broadcast used a different name than the real username.
     const content =
       anonLabel === realUsername
-        ? `📸 @${realUsername} took a screenshot in ${roomLabel}.`
-        : `📸 @${realUsername} took a screenshot in ${roomLabel} (shown to the room as "${anonLabel}").`;
+        ? `${icon} @${realUsername} ${action} in ${roomLabel}.`
+        : `${icon} @${realUsername} ${action} in ${roomLabel} (shown to the room as "${anonLabel}").`;
 
     await messagesApi.sendMessage({
       conversationId,
@@ -286,6 +308,7 @@ async function _notifyHostViaChat({
         realUsername,
         anonLabel,
         roomTitle: roomTitle ?? null,
+        captureKind: kind,
         at: Date.now(),
       },
     });

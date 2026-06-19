@@ -20,7 +20,8 @@ export type SecureCaptureEventName =
   | "secure_capture_print_attempt"
   | "secure_capture_copy_attempt"
   | "secure_capture_context_menu_attempt"
-  | "secure_capture_keyboard_shortcut_attempt";
+  | "secure_capture_keyboard_shortcut_attempt"
+  | "secure_capture_recording_suspected";
 
 export interface SecureCaptureContextValue {
   platform: SecureCapturePlatform;

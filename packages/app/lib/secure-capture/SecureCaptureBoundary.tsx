@@ -16,6 +16,7 @@ import { SneakyLynkWatermarkOverlay } from "./SneakyLynkWatermarkOverlay";
 import {
   shouldEnableWebSecureCapture,
   useSecureCaptureGuard,
+  type SecureCaptureAttemptKind,
 } from "./useSecureCaptureGuard";
 
 export interface SecureCaptureBoundaryProps {
@@ -30,6 +31,10 @@ export interface SecureCaptureBoundaryProps {
   blackoutOnVisibilityHidden?: boolean;
   watermark?: boolean;
   logEvents?: boolean;
+  onCaptureAttempt?: (
+    kind: SecureCaptureAttemptKind,
+    eventName: SecureCaptureEventName,
+  ) => void;
 }
 
 function defaultLogEvent(
@@ -62,6 +67,7 @@ function SecureCaptureBoundaryInner({
   blackoutOnVisibilityHidden = true,
   watermark = true,
   logEvents = true,
+  onCaptureAttempt,
 }: SecureCaptureBoundaryProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const context = useSecureCaptureContext();
@@ -87,6 +93,7 @@ function SecureCaptureBoundaryInner({
     blackoutOnVisibilityHidden,
     logEvents,
     onLogEvent: context.logEvent ?? defaultLogEvent,
+    onCaptureAttempt,
   });
 
   if (!protectionEnabled) {
