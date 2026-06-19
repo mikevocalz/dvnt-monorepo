@@ -141,34 +141,38 @@ export const onMemberRoleChange: CollectionAfterChangeHook = async ({
   if (operation !== 'update') return doc
   // The sync sets role FROM public.users.role; skip the echo write-back.
   if ((context as any)?.skipRoleWriteBack) return doc
-  if (doc?.role === previousDoc?.role) return doc
 
   const appUserId = doc?.appUserId
-  if (!appUserId || !doc?.role) return doc
 
-  // 1) Write the app role back to public.users (the SSO source of truth).
-  const p = await appPool()
-  if (!p) {
-    req.payload?.logger?.warn?.('[role] APP_DATABASE_URL not set — cannot write role back')
-  } else {
-    try {
-      await p.query(
-        `update public.users
-           set role = $1::public.enum_users_role, updated_at = now()
-         where id = $2`,
-        [doc.role, Number(appUserId)],
-      )
-      req.payload?.logger?.info?.(`[role] public.users.id=${appUserId} -> ${doc.role}`)
-    } catch (e: any) {
-      req.payload?.logger?.error?.(`[role] write-back failed for ${appUserId}: ${e?.message}`)
+  // 1) Write the app role back to public.users (the SSO source of truth) — ONLY
+  //    when the role actually changed, to avoid needless writes on unrelated
+  //    profile/status edits.
+  if (doc?.role && doc.role !== previousDoc?.role && appUserId) {
+    const p = await appPool()
+    if (!p) {
+      req.payload?.logger?.warn?.('[role] APP_DATABASE_URL not set — cannot write role back')
+    } else {
+      try {
+        await p.query(
+          `update public.users
+             set role = $1::public.enum_users_role, updated_at = now()
+           where id = $2`,
+          [doc.role, Number(appUserId)],
+        )
+        req.payload?.logger?.info?.(`[role] public.users.id=${appUserId} -> ${doc.role}`)
+      } catch (e: any) {
+        req.payload?.logger?.error?.(`[role] write-back failed for ${appUserId}: ${e?.message}`)
+      }
     }
   }
 
-  // 2) Eagerly create/update (or revoke) the admin_users record so the appointee
-  //    shows up in the Admin Users list IMMEDIATELY — without waiting for them to
-  //    log into /admin (where the SSO strategy would otherwise lazily provision
-  //    it). This is what makes "set a role in the Members list" actually grant a
-  //    visible console seat. Demotion to Basic removes the seat.
+  // 2) Reconcile the admin_users seat on EVERY save (idempotent), NOT only when
+  //    the role changed. This is the fix for "I granted them but they don't show
+  //    in Admin Users": a member appointed BEFORE this hook existed (or whose
+  //    seat was never created) gets it created simply by re-saving them — no role
+  //    change required. The seat shows in the Admin Users list immediately
+  //    (instead of waiting for the SSO strategy to lazily provision it on first
+  //    /admin login). A member at Basic (cmsRole null) has any seat removed.
   try {
     const email = String(doc.email || '').toLowerCase()
     if (email) {
