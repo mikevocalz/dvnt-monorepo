@@ -14,7 +14,7 @@ export const Events: CollectionConfig = {
     create: isAdminPlus,
     delete: isAdminPlus,
   },
-  admin: { useAsTitle: 'title', defaultColumns: ['title', 'status', 'startsAt', 'host'] },
+  admin: { useAsTitle: 'title', defaultColumns: ['title', 'status', 'startsAt', 'host', 'tickets'] },
   // Saving writes the editable fields back to the live app event (public.events).
   hooks: { afterChange: [onEventChange, onEventCoverChange] },
   fields: [
@@ -22,6 +22,14 @@ export const Events: CollectionConfig = {
     // Stable key back to the live app event (public.events.id) — the sync upserts
     // on this so re-running never duplicates. Read-only; set by the sync.
     { name: 'appEventId', type: 'text', index: true, admin: { position: 'sidebar', readOnly: true, description: 'Live app event id' } },
+    // List-only column: live ticket count that links to this event's tickets
+    // (the filtered Tickets list, where each ticket's QR renders).
+    {
+      name: 'tickets',
+      type: 'ui',
+      label: 'Tickets',
+      admin: { components: { Cell: '@dvnt/cms/components/TicketsLinkCell' } },
+    },
     {
       name: 'status',
       type: 'select',
