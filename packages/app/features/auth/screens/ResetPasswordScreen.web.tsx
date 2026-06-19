@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useForm } from '@tanstack/react-form';
-import { useRouter } from 'solito/navigation';
+import { useRouter, useSearchParams } from 'solito/navigation';
 import { toast } from 'sonner';
 import { Button } from '../../../components/ui/button';
 import { FormInput } from '../../../components/form';
@@ -17,17 +17,28 @@ export function ResetPasswordScreen() {
   // Next app uses Solito/Next routing (no TanStack RouterProvider).
   const router = useRouter();
   const navigate = ({ to }: { to: string }) => router.push(to);
+  // Recovery token from the email link (?token=…). Web reset is TOKEN-BASED —
+  // the link is first-party and carries the token; we do NOT rely on a session
+  // cookie (which Better Auth sets on the Supabase domain, not the app domain).
+  const search = useSearchParams();
+  const token = search?.get('token') ?? undefined;
 
   useEffect(() => {
+    // A token in the URL is all we need — show the form immediately.
+    if (token) {
+      setStatus('ready');
+      return;
+    }
+    // No token → fall back to the legacy session check.
     authClient.getSession().then(({ data }: any) => setStatus(data ? 'ready' : 'invalid')).catch(() => setStatus('invalid'));
-  }, []);
+  }, [token]);
 
   const form = useForm({
     defaultValues: { password: '', confirmPassword: '' },
     onSubmit: async ({ value }) => {
       setIsSubmitting(true);
       try {
-        const response = await submitPasswordReset(value.password);
+        const response = await submitPasswordReset(value.password, token);
         if ((response as any)?.error) { toast.error('Reset failed', { description: (response as any).error.message || 'Could not update password.' }); return; }
         setStatus('success');
         toast.success('Password updated', { description: 'Your new password is set.' });

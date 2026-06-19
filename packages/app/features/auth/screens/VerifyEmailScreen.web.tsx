@@ -3,7 +3,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { useRouter } from 'solito/navigation';
 import { toast } from 'sonner';
 import { Button } from '../../../components/ui/button';
-import { authClient, resendVerificationEmail } from '../../../lib/auth-client';
+import { authClient, resendVerificationEmail, submitEmailVerification } from '../../../lib/auth-client';
 import { Check, Mail, AlertCircle } from 'lucide-react';
 import { AUTH_PRIMARY_COLOR as P, AUTH_DESTRUCTIVE_COLOR as D } from './AuthScreens.shared';
 
@@ -20,12 +20,24 @@ export function VerifyEmailScreen() {
     const token = params.get('token');
     const verify = async () => {
       if (token) {
+        const onVerified = () => {
+          setStatus('success');
+          toast.success('Email verified', { description: 'Your email has been confirmed' });
+          setTimeout(() => navigate({ to: '/story' }), 2000);
+        };
+        // Token-based verification (cookie-independent) — same reason as reset.
+        try {
+          const res = await submitEmailVerification(token);
+          if (!(res as any)?.error) {
+            onVerified();
+            return;
+          }
+        } catch {}
+        // Legacy fallback: maybe a session was already established.
         try {
           const { data: session } = await authClient.getSession() as any;
           if (session?.user?.emailVerified) {
-            setStatus('success');
-            toast.success('Email verified', { description: 'Your email has been confirmed' });
-            setTimeout(() => navigate({ to: '/story' }), 2000);
+            onVerified();
             return;
           }
         } catch {}
