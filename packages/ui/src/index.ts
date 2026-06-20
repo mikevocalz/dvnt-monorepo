@@ -70,6 +70,11 @@ export { Skeleton } from './Skeleton';
 export { Switch } from './Switch';
 export { Tabs } from './Tabs';
 export { Text } from './Text';
+export { VenueSearchInput } from './VenueSearchInput';
+export type {
+  VenuePrediction,
+  VenueSearchInputProps,
+} from './VenueSearchInput';
 export { cn } from './utils';
 
 // ── Form scaffolding (Phase 0) — platform-resolved web/native variants ───────
