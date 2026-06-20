@@ -22,6 +22,11 @@ import {
 // sizes with tracking, so use the system sans here.
 const DISPLAY = 'var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
+// Hide Founders Circle on /pricing until partnership benefits are secured.
+const VISIBLE_MEMBERSHIP_PLAN_KEYS = MEMBERSHIP_PLAN_KEYS.filter(
+  (key) => key !== 'dvnt_founders_circle',
+);
+
 function priceLabel(cents: number) {
   if (cents === 0) return '$0';
   const dollars = cents / 100;
@@ -90,7 +95,7 @@ export function PricingPage() {
 
         <section style={{ padding: '28px 24px 8px' }}>
           <div style={membershipGrid}>
-            {MEMBERSHIP_PLAN_KEYS.map((key) => {
+            {VISIBLE_MEMBERSHIP_PLAN_KEYS.map((key) => {
               const p = PLANS[key];
               return (
                 <article
