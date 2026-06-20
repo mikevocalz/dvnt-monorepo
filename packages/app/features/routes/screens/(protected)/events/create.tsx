@@ -84,35 +84,9 @@ import {
 type VisibilityOption = "public" | "private" | "link_only";
 type AgeRestriction = "none" | "18+" | "21+";
 
-export const EVENT_TYPE_LABELS: Record<string, string> = {
-  virtual_session: "Virtual Session",
-  party: "Party",
-  picnic: "Picnic",
-  game_night: "Game Night",
-  panel: "Panel",
-  happy_hour: "Happy Hour",
-  wine_down: "Wine Down",
-  kickback: "Kickback",
-  ball: "Ball",
-  kiki: "Kiki",
-  pool_party: "Pool Party",
-  spoken_word: "Spoken Word",
-  open_mic: "Open Mic",
-  karaoke: "Karaoke",
-  bike_ride: "Bike Ride",
-  walk_run: "Walk / Run",
-  fitness_training: "Fitness Training",
-  yoga: "Yoga",
-  meditation: "Meditation",
-  bate_session: "Bate Session",
-  sex_party: "Sex Party",
-  kink_fetish_party: "Kink / Fetish Party",
-  training: "Training",
-  cooking_class: "Cooking Class",
-  mixology: "Mixology",
-  dance_class: "Dance Class",
-  other: "Other",
-};
+// Canonical Event Type taxonomy lives in the shared form core (one schema,
+// two layouts). Re-exported for existing importers of this screen.
+export { EVENT_TYPE_LABELS } from "@dvnt/app/features/events/create/event-form";
 
 interface TicketTier {
   id: string;

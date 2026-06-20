@@ -46,6 +46,8 @@ interface LocationData {
   latitude?: number;
   longitude?: number;
   placeId?: string;
+  /** Formatted street address (from Places `formattedAddress`) → location_address. */
+  address?: string;
 }
 
 interface CoOrganizer {
@@ -373,8 +375,8 @@ export const useCreateEventStore = create<CreateEventState>()(
       canProceed: () => {
         const s = get();
         switch (s.currentStep) {
-          case 0: // Info
-            return s.title.trim().length > 0;
+          case 0: // Info — Title + Event Type are required to proceed
+            return s.title.trim().length > 0 && s.eventType != null;
           case 1: // Media
             return true;
           case 2: // Venue
@@ -427,8 +429,12 @@ export const useCreateEventStore = create<CreateEventState>()(
         ticketTiers: state.ticketTiers,
         coOrganizers: state.coOrganizers,
         flyerImage: state.flyerImage,
+        flyerMediaType: state.flyerMediaType,
         eventType: state.eventType,
         disclaimers: state.disclaimers,
+        isNsfw: state.isNsfw,
+        // Resume on the step the user left off (was always reopening at Info).
+        currentStep: state.currentStep,
       }),
     },
   ),

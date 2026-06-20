@@ -695,9 +695,13 @@ export const eventsApi = {
         ["images"]: eventData.images || [],
         [DB.events.youtubeVideoUrl]: eventData.youtubeVideoUrl || null,
         [DB.events.price]: eventData.price || 0,
-        [DB.events.maxAttendees]: eventData.maxAttendees,
         [DB.events.isOnline]: eventData.isOnline || false,
       };
+
+      // Guard: never insert max_attendees as `undefined`/NaN (it's the one
+      // formerly-unconditional field). Only set a real capacity.
+      if (eventData.maxAttendees != null && Number.isFinite(Number(eventData.maxAttendees)))
+        insertPayload[DB.events.maxAttendees] = Number(eventData.maxAttendees);
 
       // V2 fields (additive — only set if provided)
       if (eventData.locationLat != null)
@@ -711,8 +715,14 @@ export const eventsApi = {
       if (eventData.locationType)
         insertPayload.location_type = eventData.locationType;
       insertPayload.visibility = normalizeVisibility(eventData.visibility);
-      if (eventData.eventCategory)
-        insertPayload.category = eventData.eventCategory;
+      // `events` has a `category` column but NO `event_type` column, so the
+      // structured Event Type persists here. Prefer event_type over the legacy
+      // tag-derived `category` and the older `eventCategory` alias. (Previously
+      // this read only `eventCategory`, which the form never set → category and
+      // the entire Event Type picker were silently dropped on every create.)
+      const resolvedCategory =
+        eventData.event_type || eventData.category || eventData.eventCategory;
+      if (resolvedCategory) insertPayload.category = resolvedCategory;
       if (eventData.ageRestriction)
         insertPayload.age_restriction = eventData.ageRestriction;
       if (eventData.endDate) insertPayload.end_date = eventData.endDate;

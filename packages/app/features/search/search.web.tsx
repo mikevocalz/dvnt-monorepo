@@ -373,8 +373,10 @@ export function SearchScreen() {
   const trendingTags = useMemo(() => {
     const counts = new Map<string, number>();
     for (const p of discoverPosts) {
-      for (const tag of p.tags ?? []) {
-        const t = String(tag).replace(/^#/, "").trim().toLowerCase();
+      // Posts carry hashtags inside the caption (no structured tags field).
+      const matches = p.caption?.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+      for (const tag of matches) {
+        const t = tag.replace(/^#/, "").trim().toLowerCase();
         if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
       }
     }
