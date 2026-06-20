@@ -1,8 +1,26 @@
 # Event Creation — Audit, Diagnosis & Proposal (PROMPT 20)
 
-**Status:** Phase 0 (audit) + Phase 1 (proposal) complete — **awaiting sign-off before Phase 2 build.**
+**Status:** ✅ Phases 0–2 complete. Signed off 2026-06-20 (web = multi-section
+page + sticky preview · recurring deferred · required = Title·Type·Date/Start·Location-or-Online).
+Built + shipped on branch `prompt20-event-creation` (typecheck 13/13, verify:parity clean).
 **Date:** 2026-06-20
 **Scope:** Unified event-creation flow across mobile (Expo) + web (Next).
+
+> ### What shipped (Phase 2)
+> - **Shared core** `packages/app/features/events/create/event-form.ts` — one
+>   schema/validation/payload builder for both platforms.
+> - **Data-drop fixes (both):** Event Type now persists to `category`; structured
+>   `location_address` captured; `max_attendees` never inserted as undefined;
+>   draft persists `flyerMediaType`/`isNsfw`/`currentStep` (resumes on the right step).
+> - **Web rebuilt** to parity: real CDN upload (was a dead blob URL), creates a
+>   ticket type for ticketed events (was none), Stripe + $2 guards, and the full
+>   field set (type/age/spicy/dress/door/lineup/perks/tags/YouTube/disclaimers).
+> - **Mobile UX:** virtual-event location dead-end fixed; Event Type required;
+>   blocked "Next" now explains itself.
+> - **Web follow-ups (queued):** multi-tier ticket editor + co-organizer search
+>   (present on mobile; single-tier ticketing fully works on web).
+> - **Deferred:** recurring events (the one genuinely-unmodeled field; needs a
+>   migration + occurrence materialization).
 
 > The ask: *"make creating events easy."* The owner is unsure exactly what's wrong — it may be design, there may be missing fields. So this is **audit → diagnose with evidence → propose → sign off → build**, not a blind redesign.
 
