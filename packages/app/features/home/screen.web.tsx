@@ -170,7 +170,10 @@ export function HomeScreen() {
     <div
       ref={parentRef}
       className="overflow-y-auto bg-[#02030A]"
-      style={{ height: "100dvh", marginTop: `calc((${headerOffset}) * -1)` }}
+      // The scroller is pulled UP by -headerOffset to slide under the glass
+      // header, so it must be that much TALLER or its bottom ends headerOffset
+      // above the viewport bottom — leaving a black strip on desktop.
+      style={{ height: `calc(100dvh + ${headerOffset})`, marginTop: `calc((${headerOffset}) * -1)` }}
     >
       <div
         className="mx-auto w-full"
