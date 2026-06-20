@@ -27,6 +27,15 @@ if (!supabaseAnonKey) {
   );
 }
 
+// createClient throws "supabaseKey is required" on an empty key, which aborts
+// the ENTIRE Next.js static export on environments where the Supabase env isn't
+// present at build time (e.g. Vercel Preview — the DB/anon vars are
+// Production-only). Construct with a harmless placeholder instead: requests made
+// with it simply fail and our data-fetchers already degrade to empty, so a
+// missing key yields an empty page rather than a broken build. Production builds
+// (real key present) are unaffected.
+const clientKey = supabaseAnonKey || "anon-key-unset-at-build";
+
 // SSR-safe: on the Next.js server `localStorage` is undefined. Guard every
 // access so supabase's session bootstrap / auto-refresh tick can't crash the
 // render with "Cannot read properties of undefined (reading 'getItem')".
@@ -42,7 +51,7 @@ const LocalStorageAdapter = {
   },
 };
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient(supabaseUrl, clientKey, {
   auth: {
     storage: LocalStorageAdapter,
     autoRefreshToken: true,

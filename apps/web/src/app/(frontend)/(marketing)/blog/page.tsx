@@ -25,13 +25,25 @@ export default async function BlogIndexPage({
   const { category, page: pageStr } = await searchParams
   const page = parseInt(pageStr ?? '1', 10)
 
-  const [featured, editorsPicks, trending, categories, posts] = await Promise.all([
-    fetchFeaturedPost(),
-    fetchEditorsPicks(4),
-    fetchTrending(5),
-    fetchCategories(),
-    fetchPostsIndex({ page, limit: 12, category }),
-  ])
+  // Degrade gracefully: a data-source failure (e.g. missing Supabase/Payload env
+  // on a Preview build, or a transient outage) renders the empty state instead
+  // of aborting the whole static export / 500-ing the page.
+  let featured: BlogPostCard | null = null
+  let editorsPicks: BlogPostCard[] = []
+  let trending: BlogPostCard[] = []
+  let categories: BlogCategory[] = []
+  let posts: Awaited<ReturnType<typeof fetchPostsIndex>> = { docs: [], totalPages: 1, page }
+  try {
+    ;[featured, editorsPicks, trending, categories, posts] = await Promise.all([
+      fetchFeaturedPost(),
+      fetchEditorsPicks(4),
+      fetchTrending(5),
+      fetchCategories(),
+      fetchPostsIndex({ page, limit: 12, category }),
+    ])
+  } catch (err) {
+    console.error('[blog] index data unavailable:', err)
+  }
 
   return (
     <div style={shell}>
@@ -257,7 +269,7 @@ function CategoryPill({ category }: { category: BlogCategory }) {
       href={`/blog?category=${category.slug}`}
       style={{
         display: 'inline-block', textDecoration: 'none',
-        padding: '3px 10px', borderRadius: 999,
+        padding: '3px 10px', borderRadius: 7,
         border: `1px solid ${accent}44`, background: `${accent}18`,
         color: accent, fontSize: 10, fontFamily: MONO,
         fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase',
@@ -363,7 +375,7 @@ const heroDek: React.CSSProperties = {
 }
 const eyebrow: React.CSSProperties = { color: '#3FDCFF', fontSize: 10, fontFamily: MONO, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' }
 const editorialBadge: React.CSSProperties = {
-  padding: '3px 10px', borderRadius: 999, border: '1px solid rgba(255,91,252,0.35)',
+  padding: '3px 10px', borderRadius: 7, border: '1px solid rgba(255,91,252,0.35)',
   background: 'rgba(255,91,252,0.12)', color: '#FF5BFC',
   fontSize: 10, fontFamily: MONO, fontWeight: 700, letterSpacing: 1.5,
 }
@@ -427,7 +439,7 @@ const hzTitle: React.CSSProperties = {
 const bylineRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 'auto' }
 const avatarStack: React.CSSProperties = { display: 'flex', alignItems: 'center' }
 const avatarWrap: React.CSSProperties = {
-  width: 24, height: 24, borderRadius: 12, overflow: 'hidden',
+  width: 24, height: 24, borderRadius: 7, overflow: 'hidden',
   border: '1.5px solid rgba(255,255,255,0.14)', flexShrink: 0,
 }
 const avatarImg: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover' }
@@ -470,7 +482,7 @@ const emptySub: React.CSSProperties = { margin: 0, color: 'rgba(245,245,244,0.35
 
 // Pagination
 const pagerBtn: React.CSSProperties = {
-  padding: '8px 20px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.12)',
+  padding: '8px 20px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.12)',
   background: GLASS, color: '#FAFAF9', textDecoration: 'none',
   fontSize: 13, fontFamily: MONO, fontWeight: 600, letterSpacing: 0.5,
 }
