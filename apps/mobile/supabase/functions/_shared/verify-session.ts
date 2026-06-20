@@ -65,7 +65,25 @@ const ALLOWED_ORIGINS = [
   "http://localhost:8081", // Expo dev server
   "http://localhost:19006", // Expo web
   "https://dvnt.app", // Future web domain
+  "https://dvntapp.live", // Production web (custom domain)
+  "https://www.dvntapp.live",
+  "https://dvnt-blog.vercel.app", // Production web (Vercel)
 ];
+
+// Also allow Vercel preview deploys + the custom domain by host suffix — the
+// JWT mint still requires a valid Better Auth session token, so this is just
+// defense-in-depth, not the security boundary.
+const ALLOWED_ORIGIN_SUFFIXES = [".vercel.app", ".dvntapp.live"];
+
+function isAllowedOrigin(origin: string): boolean {
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  try {
+    const host = new URL(origin).hostname;
+    return ALLOWED_ORIGIN_SUFFIXES.some((s) => host.endsWith(s));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Build CORS headers, reflecting the request Origin only if it's allowed.
@@ -77,7 +95,7 @@ export function corsHeaders(req?: Request): Record<string, string> {
   // No Origin = native client or server-to-server — allow
   const allowOrigin = !origin
     ? "*"
-    : ALLOWED_ORIGINS.includes(origin)
+    : isAllowedOrigin(origin)
       ? origin
       : ALLOWED_ORIGINS[0]; // Fallback for rejected origins (browser will block)
 

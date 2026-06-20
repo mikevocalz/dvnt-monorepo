@@ -245,6 +245,10 @@ const nextConfig: NextConfig = {
       // these; webpack must too). Values come from apps/web/.env via process.env.
       new webpack.DefinePlugin({
         __DEV__: JSON.stringify(process.env.NODE_ENV !== 'production'),
+        // webpack 5 dropped the automatic Node `global` shim. RN/worklets code
+        // that references bare `global` otherwise throws "global is not defined"
+        // and blanks the whole app. Map it to globalThis (Metro/Vite do this too).
+        global: 'globalThis',
         'process.env.EXPO_OS': JSON.stringify('web'),
         'process.env.EXPO_PUBLIC_SUPABASE_URL': JSON.stringify(
           process.env.EXPO_PUBLIC_SUPABASE_URL ?? '',
