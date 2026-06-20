@@ -368,6 +368,22 @@ export function SearchScreen() {
   );
   const userResults: any[] = searchData?.users?.docs ?? [];
 
+  // Trending tags derived from the (NSFW-filtered) discover posts — tap to
+  // explore that hashtag. Hidden when there are no tags to surface.
+  const trendingTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of discoverPosts) {
+      for (const tag of p.tags ?? []) {
+        const t = String(tag).replace(/^#/, "").trim().toLowerCase();
+        if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([t]) => t);
+  }, [discoverPosts]);
+
   const handleQueryChange = (text: string) => {
     setSearchQuery(text);
     searchDebouncer.maybeExecute(text);
@@ -478,7 +494,48 @@ export function SearchScreen() {
           <SearchLoading />
         ) : (
           <>
+            {/* Page identity */}
+            <div className="mb-5 px-1">
+              <h1 className="text-2xl font-extrabold tracking-tight text-white">
+                Explore
+              </h1>
+              <p className="mt-1 text-sm text-white/50">
+                Discover people, posts, and what&apos;s trending on DVNT.
+              </p>
+            </div>
+
+            {/* Trending tags */}
+            {trendingTags.length > 0 ? (
+              <section className="mb-6">
+                <div className="mb-3 flex items-center gap-2.5 px-1">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FF5BFC]/14 text-[#FF8BE3]">
+                    <Hash size={18} />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="text-[17px] font-bold leading-tight text-white">
+                      Trending
+                    </h2>
+                    <p className="text-xs text-white/45">Tap a tag to dive in</p>
+                  </div>
+                </div>
+                <div className="no-scrollbar flex gap-2 overflow-x-auto px-1 pb-1">
+                  {trendingTags.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => handleQueryChange(`#${t}`)}
+                      className="shrink-0 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/85 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-white active:scale-95"
+                    >
+                      #{t}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {/* Discover people */}
             <DiscoverProfiles users={discoverData.users ?? []} />
+
+            {/* Explore grid (NSFW already filtered out of discoverPosts) */}
             {discoverPosts.length > 0 ? (
               <section className="pt-3">
                 <div className="mb-4 flex items-center gap-2.5 px-1">
@@ -486,12 +543,23 @@ export function SearchScreen() {
                     <Compass size={18} />
                   </span>
                   <div className="min-w-0">
-                    <h2 className="text-[17px] font-bold leading-tight text-white">Explore</h2>
-                    <p className="text-xs text-white/45">Fresh posts from the community</p>
+                    <h2 className="text-[17px] font-bold leading-tight text-white">
+                      Fresh Posts
+                    </h2>
+                    <p className="text-xs text-white/45">From across the community</p>
                   </div>
                 </div>
                 <PostGrid posts={discoverPosts} columns={columns} />
               </section>
+            ) : null}
+
+            {/* Nothing to show */}
+            {(discoverData.users?.length ?? 0) === 0 &&
+            discoverPosts.length === 0 ? (
+              <EmptyState
+                icon={<Compass size={48} color="#666" />}
+                text="Nothing to explore yet — check back soon."
+              />
             ) : null}
           </>
         )}
