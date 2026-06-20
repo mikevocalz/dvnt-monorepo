@@ -329,6 +329,25 @@ export function useSneakyLynkRoom(
     };
   }, [roomId, userId]);
 
+  // Presence heartbeat: while connected, refresh our membership freshness every
+  // 30s so video_list_rooms knows the room is genuinely live. Without this, a
+  // host who closes the tab/app without a clean leave keeps the room showing
+  // "LIVE" for hours (the freshness window). When heartbeats stop, the room goes
+  // dark within ~90s.
+  useEffect(() => {
+    if (!roomId || connectionState !== "connected") return;
+    let alive = true;
+    const beat = () => {
+      if (alive) void sneakyLynkApi.heartbeat(roomId).catch(() => {});
+    };
+    beat();
+    const id = setInterval(beat, 30_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [roomId, connectionState]);
+
   // Handle app state changes for token refresh
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
