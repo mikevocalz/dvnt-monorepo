@@ -308,6 +308,12 @@ function AuthorCard({ author, role }: { author: PostAuthor; role: string }) {
             {author.socials.twitter && (
               <a href={`https://x.com/${author.socials.twitter.replace('@', '')}`} style={socialLink as any} target="_blank" rel="noopener noreferrer">X</a>
             )}
+            {author.socials.tiktok && (
+              <a href={`https://tiktok.com/@${author.socials.tiktok.replace('@', '')}`} style={socialLink as any} target="_blank" rel="noopener noreferrer">TikTok</a>
+            )}
+            {author.socials.onlyfans && (
+              <a href={`https://onlyfans.com/${author.socials.onlyfans.replace('@', '')}`} style={socialLink as any} target="_blank" rel="noopener noreferrer">OnlyFans ↗</a>
+            )}
             {author.socials.website && (
               <a href={author.socials.website} style={socialLink as any} target="_blank" rel="noopener noreferrer">Web ↗</a>
             )}

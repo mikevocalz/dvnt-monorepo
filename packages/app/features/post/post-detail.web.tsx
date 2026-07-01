@@ -46,10 +46,8 @@ import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
 import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog, Drawer } from "@dvnt/ui";
 import { postsApi } from "@dvnt/app/lib/api/posts";
-import {
-  resolveTextPostPresentation,
-  TEXT_POST_THEMES,
-} from "@dvnt/app/lib/posts/text-post";
+import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
+import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
 
 const VIDEO_URL_RE = /post-video|\.mp4(\?|$)|\.mov(\?|$)|\.m3u8(\?|$)|\.webm(\?|$)/i;
 
@@ -187,8 +185,6 @@ export function PostDetailScreen() {
     typeof post.comments === "number"
       ? post.comments
       : post.comments?.length ?? 0;
-  const theme =
-    TEXT_POST_THEMES[post.textTheme ?? "graphite"] ?? TEXT_POST_THEMES.graphite;
   const metaLine =
     (post.timeAgo ?? "") + (post.location ? ` · ${post.location}` : "");
 
@@ -226,18 +222,14 @@ export function PostDetailScreen() {
         </header>
 
         {isText ? (
-          <div
-            className="flex items-center justify-center p-8 min-h-[60vh]"
-            style={{
-              backgroundImage: `linear-gradient(150deg, ${theme.gradient.join(", ")})`,
-            }}
-          >
-            <span
-              className="text-center text-xl font-semibold leading-snug whitespace-pre-wrap"
-              style={{ color: theme.textPrimary }}
-            >
-              {textPresentation.previewText || post.caption}
-            </span>
+          // Shared surface so the detail view matches mobile (DVNT badge, glow,
+          // subtitle, exact gradient) — was a bare gradient div.
+          <div className="px-3 py-2">
+            <TextPostSurface
+              text={textPresentation.previewText || post.caption || ""}
+              theme={post.textTheme}
+              variant="detail"
+            />
           </div>
         ) : (
           <MediaCarousel media={media} caption={post.caption ?? ""} />

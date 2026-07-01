@@ -8,6 +8,7 @@ import type {
 } from "./SecureCaptureProvider";
 
 export type SecureCaptureBlackoutReason = "blur" | "hidden" | "print" | null;
+export type SecureCaptureAttemptKind = "screenshot" | "recording_start";
 
 export interface SecureCaptureGuardOptions extends SecureCaptureEventContext {
   enabled: boolean;
@@ -19,6 +20,10 @@ export interface SecureCaptureGuardOptions extends SecureCaptureEventContext {
   onLogEvent?: (
     eventName: SecureCaptureEventName,
     context: SecureCaptureEventContext,
+  ) => void;
+  onCaptureAttempt?: (
+    kind: SecureCaptureAttemptKind,
+    eventName: SecureCaptureEventName,
   ) => void;
 }
 
@@ -72,6 +77,7 @@ export function useSecureCaptureGuard({
   blackoutOnVisibilityHidden = true,
   logEvents = true,
   onLogEvent,
+  onCaptureAttempt,
 }: SecureCaptureGuardOptions): SecureCaptureGuardState {
   const [blackoutReason, setBlackoutReason] =
     useState<SecureCaptureBlackoutReason>(null);
@@ -87,6 +93,13 @@ export function useSecureCaptureGuard({
       onLogEvent?.(eventName, eventContext);
     },
     [eventContext, logEvents, onLogEvent],
+  );
+
+  const notifyCaptureAttempt = useCallback(
+    (kind: SecureCaptureAttemptKind, eventName: SecureCaptureEventName) => {
+      onCaptureAttempt?.(kind, eventName);
+    },
+    [onCaptureAttempt],
   );
 
   const clearBlackout = useCallback(() => setBlackoutReason(null), []);
@@ -107,6 +120,7 @@ export function useSecureCaptureGuard({
       event.preventDefault();
       event.stopPropagation();
       log(eventName);
+      notifyCaptureAttempt("screenshot", eventName);
       if (blackout) setBlackoutReason(blackout);
     };
 
@@ -121,17 +135,20 @@ export function useSecureCaptureGuard({
     const onVisibilityChange = () => {
       if (document.visibilityState !== "hidden" || !blackoutOnVisibilityHidden) return;
       log("secure_capture_visibility_hidden");
+      notifyCaptureAttempt("recording_start", "secure_capture_visibility_hidden");
       setBlackoutReason("hidden");
     };
     const onBlur = () => {
       if (!blackoutOnBlur) return;
       log("secure_capture_blur");
+      notifyCaptureAttempt("recording_start", "secure_capture_blur");
       setBlackoutReason("blur");
     };
     const onFocus = () => setBlackoutReason(null);
     const onBeforePrint = (event: Event) => {
       event.preventDefault();
       log("secure_capture_print_attempt");
+      notifyCaptureAttempt("screenshot", "secure_capture_print_attempt");
       setBlackoutReason("print");
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -147,11 +164,12 @@ export function useSecureCaptureGuard({
       if (!scoped || !isSecureCaptureShortcut(event)) return;
       event.preventDefault();
       event.stopPropagation();
-      log(
+      const eventName =
         event.key.toLowerCase() === "p"
           ? "secure_capture_print_attempt"
-          : "secure_capture_keyboard_shortcut_attempt",
-      );
+          : "secure_capture_keyboard_shortcut_attempt";
+      log(eventName);
+      notifyCaptureAttempt("screenshot", eventName);
       if (event.key.toLowerCase() === "p") {
         setBlackoutReason("print");
       }
@@ -187,6 +205,7 @@ export function useSecureCaptureGuard({
     blackoutOnVisibilityHidden,
     enabled,
     log,
+    notifyCaptureAttempt,
     rootRef,
   ]);
 

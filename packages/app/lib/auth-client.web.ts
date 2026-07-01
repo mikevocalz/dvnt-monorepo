@@ -23,8 +23,9 @@ type BetterAuthRecoveryClient = typeof authClient & {
   // /request-password-reset, so the deprecated forgetPassword alias 404s.
   requestPasswordReset?: (args: { email: string; redirectTo: string }) => Promise<{ error?: { message?: string } | null }>;
   forgetPassword?: (args: { email: string; redirectTo: string }) => Promise<{ error?: { message?: string } | null }>;
-  resetPassword?: (args: { newPassword: string }) => Promise<{ error?: { message?: string } | null }>;
+  resetPassword?: (args: { newPassword: string; token?: string }) => Promise<{ error?: { message?: string } | null }>;
   sendVerificationEmail?: (args: { email: string }) => Promise<{ error?: { message?: string } | null }>;
+  verifyEmail?: (args: { query: { token: string } }) => Promise<{ data?: { status?: boolean } | null; error?: { message?: string } | null }>;
 };
 
 const recoveryClient = authClient as BetterAuthRecoveryClient;
@@ -43,9 +44,21 @@ export async function requestPasswordReset(email: string) {
   return fn({ email, redirectTo: AUTH_RECOVERY_REDIRECT });
 }
 
-export async function submitPasswordReset(newPassword: string) {
+export async function submitPasswordReset(newPassword: string, token?: string) {
   if (!recoveryClient.resetPassword) throw new Error("Password reset not available");
-  return recoveryClient.resetPassword({ newPassword });
+  // Web reset is TOKEN-BASED: the email link carries ?token= and we complete
+  // the reset with it directly (no session cookie, which Better Auth sets on the
+  // Supabase domain — not the app domain).
+  return recoveryClient.resetPassword(
+    token ? { newPassword, token } : { newPassword },
+  );
+}
+
+/** Token-based email verification (web) — completes with the ?token= from the
+ *  email link instead of relying on a cross-domain session cookie. */
+export async function submitEmailVerification(token: string) {
+  if (!recoveryClient.verifyEmail) throw new Error("Email verification not available");
+  return recoveryClient.verifyEmail({ query: { token } });
 }
 
 export async function resendVerificationEmail(email: string) {

@@ -84,35 +84,11 @@ import {
 type VisibilityOption = "public" | "private" | "link_only";
 type AgeRestriction = "none" | "18+" | "21+";
 
-export const EVENT_TYPE_LABELS: Record<string, string> = {
-  virtual_session: "Virtual Session",
-  party: "Party",
-  picnic: "Picnic",
-  game_night: "Game Night",
-  panel: "Panel",
-  happy_hour: "Happy Hour",
-  wine_down: "Wine Down",
-  kickback: "Kickback",
-  ball: "Ball",
-  kiki: "Kiki",
-  pool_party: "Pool Party",
-  spoken_word: "Spoken Word",
-  open_mic: "Open Mic",
-  karaoke: "Karaoke",
-  bike_ride: "Bike Ride",
-  walk_run: "Walk / Run",
-  fitness_training: "Fitness Training",
-  yoga: "Yoga",
-  meditation: "Meditation",
-  bate_session: "Bate Session",
-  sex_party: "Sex Party",
-  kink_fetish_party: "Kink / Fetish Party",
-  training: "Training",
-  cooking_class: "Cooking Class",
-  mixology: "Mixology",
-  dance_class: "Dance Class",
-  other: "Other",
-};
+// Canonical Event Type taxonomy lives in the shared form core (one schema,
+// two layouts). Imported for local use here and re-exported for existing
+// importers of this screen.
+import { EVENT_TYPE_LABELS } from "@dvnt/app/features/events/create/event-form";
+export { EVENT_TYPE_LABELS };
 
 interface TicketTier {
   id: string;
@@ -409,7 +385,10 @@ function CreateEventScreenContent() {
     });
   };
 
-  const isValid = title.trim() && location.trim();
+  // Unified required set (PROMPT 20): Title · Event Type · a location OR online.
+  // Virtual events no longer dead-end on the location requirement.
+  const isValid =
+    !!title.trim() && !!eventType && (!!location.trim() || isOnline);
 
   const handleSubmit = async () => {
     // Prevent double submission
@@ -419,11 +398,20 @@ function CreateEventScreenContent() {
     }
 
     if (!title.trim()) {
-      showToast("error", "Error", "Please enter an event title");
+      showToast("error", "Add a title", "Please enter an event title");
       return;
     }
-    if (!location.trim()) {
-      showToast("error", "Error", "Please enter a location");
+    if (!eventType) {
+      showToast("error", "Pick a type", "Choose what kind of event this is");
+      return;
+    }
+    // Honor virtual events — an online event doesn't need a typed location.
+    if (!isOnline && !location.trim()) {
+      showToast(
+        "error",
+        "Add a location",
+        "Enter a venue, or switch the event to online",
+      );
       return;
     }
 
@@ -624,6 +612,7 @@ function CreateEventScreenContent() {
         locationLat: locationData?.latitude,
         locationLng: locationData?.longitude,
         locationName: locationData?.name,
+        locationAddress: locationData?.address,
         locationType: isOnline ? "virtual" : "physical",
         isOnline,
         ticketingEnabled,
@@ -1147,7 +1136,15 @@ function CreateEventScreenContent() {
                   placeholder="Search venue or address"
                   onLocationSelect={(data: LocationData) => {
                     setLocation(data.name);
-                    setLocationData(data);
+                    // Map the Places result's formattedAddress → address so the
+                    // structured street address reaches events.location_address.
+                    setLocationData({
+                      name: data.name,
+                      latitude: data.latitude,
+                      longitude: data.longitude,
+                      placeId: data.placeId,
+                      address: data.formattedAddress,
+                    });
                   }}
                   onTextChange={(text: string) => {
                     // Keep step validation in sync with inline typing.
@@ -2585,7 +2582,32 @@ function CreateEventScreenContent() {
         {currentStep < totalSteps - 1 ? (
           <Pressable
             onPress={() => {
-              if (canProceed()) nextStep();
+              if (canProceed()) {
+                nextStep();
+                return;
+              }
+              // Tell the user WHY Next is blocked instead of silently dimming.
+              if (currentStep === 0) {
+                showToast(
+                  "error",
+                  "Almost there",
+                  !title.trim()
+                    ? "Add an event title to continue"
+                    : "Pick an event type to continue",
+                );
+              } else if (currentStep === 2) {
+                showToast(
+                  "error",
+                  "Add a location",
+                  "Enter a venue, or switch the event to online",
+                );
+              } else if (currentStep === 4) {
+                showToast(
+                  "error",
+                  "Accept the agreement",
+                  "You must accept the ticketing agreement to continue",
+                );
+              }
             }}
             className="flex-row items-center gap-1.5 px-6 py-3 rounded-full"
             style={{

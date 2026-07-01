@@ -6,12 +6,15 @@ import {
   TouchableOpacity,
   RefreshControl,
   StyleSheet,
-  FlatList,
   Alert,
   useWindowDimensions,
   type ViewStyle,
   type TextStyle,
 } from "react-native";
+import {
+  LegendList,
+  type LegendListRenderItemProps,
+} from "@dvnt/app/components/list";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -422,25 +425,38 @@ function ConversationList({
   currentUser: ReturnType<typeof useAuthStore.getState>["user"];
   deletingConversationId?: string | null;
 }) {
-  const renderConversationRow = ({ item }: { item: ConversationItem }) => {
-    return (
-      <ConversationRow
-        item={item}
-        onChatPress={onChatPress}
-        onProfilePress={onProfilePress}
-        onMarkAsRead={onMarkAsRead}
-        onDeleteConversation={onDeleteConversation}
-        currentUser={currentUser}
-        isDeleting={deletingConversationId === item.id}
-      />
-    );
-  };
+  const renderConversationRow = useCallback(
+    ({ item }: LegendListRenderItemProps<ConversationItem>) => {
+      return (
+        <ConversationRow
+          item={item}
+          onChatPress={onChatPress}
+          onProfilePress={onProfilePress}
+          onMarkAsRead={onMarkAsRead}
+          onDeleteConversation={onDeleteConversation}
+          currentUser={currentUser}
+          isDeleting={deletingConversationId === item.id}
+        />
+      );
+    },
+    [
+      currentUser,
+      deletingConversationId,
+      onChatPress,
+      onDeleteConversation,
+      onMarkAsRead,
+      onProfilePress,
+    ],
+  );
+
+  const keyExtractor = useCallback((item: ConversationItem) => item.id, []);
 
   return (
-    <FlatList
+    <LegendList
       data={conversations}
-      keyExtractor={(item) => item.id}
+      keyExtractor={keyExtractor}
       renderItem={renderConversationRow}
+      estimatedItemSize={88}
       refreshControl={
         <RefreshControl
           refreshing={isRefreshing}
@@ -451,7 +467,7 @@ function ConversationList({
       contentContainerStyle={[
         conversationListStyles.listContent,
         conversations.length === 0 && conversationListStyles.listContentEmpty,
-      ]}
+      ] as any}
       ListEmptyComponent={
         <EmptyState
           icon={emptyIcon}

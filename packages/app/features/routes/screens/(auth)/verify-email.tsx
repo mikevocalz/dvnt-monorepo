@@ -3,7 +3,11 @@ import { View, Text } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Button } from "@dvnt/app/components/ui/button";
 import { router, useGlobalSearchParams } from "expo-router";
-import { authClient, resendVerificationEmail } from "@dvnt/app/lib/auth-client";
+import {
+  authClient,
+  resendVerificationEmail,
+  submitEmailVerification,
+} from "@dvnt/app/lib/auth-client";
 import { Check, Mail, AlertCircle } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -31,20 +35,30 @@ export default function VerifyEmailScreen() {
       // If we have a token param, Better Auth's expo client should have
       // already handled the callback. Check if the session is now verified.
       if (params.token) {
-        console.log("[VerifyEmail] Token detected, checking verification...");
+        console.log("[VerifyEmail] Token detected, verifying...");
+        const onVerified = () => {
+          setStatus("success");
+          showToast("success", "Email Verified", "Your email has been confirmed");
+          setTimeout(() => {
+            router.replace("/(protected)/(tabs)" as any);
+          }, 2000);
+        };
+        // Web: complete verification with the token directly (cookie-independent).
+        try {
+          const res = await submitEmailVerification(params.token);
+          if (!res?.error) {
+            console.log("[VerifyEmail] Email verified via token");
+            onVerified();
+            return;
+          }
+        } catch (err) {
+          console.error("[VerifyEmail] Token verify error:", err);
+        }
+        // Native / legacy: the expo client may have verified via session.
         try {
           const { data: session } = await authClient.getSession();
           if (session?.user?.emailVerified) {
-            console.log("[VerifyEmail] Email verified successfully");
-            setStatus("success");
-            showToast(
-              "success",
-              "Email Verified",
-              "Your email has been confirmed",
-            );
-            setTimeout(() => {
-              router.replace("/(protected)/(tabs)" as any);
-            }, 2000);
+            onVerified();
             return;
           }
         } catch (err) {

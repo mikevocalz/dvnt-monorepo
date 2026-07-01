@@ -2,10 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
-  FlatList,
   ActivityIndicator,
   TextInput,
 } from "react-native";
+import {
+  LegendList,
+  type LegendListRef,
+  type LegendListRenderItemProps,
+} from "@dvnt/app/components/list";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
@@ -76,7 +80,7 @@ function RepliesScreenContent() {
   const user = useAuthStore((state) => state.user);
   const showToast = useUIStore((state) => state.showToast);
   const inputRef = useRef<TextInput>(null);
-  const listRef = useRef<FlatList<Comment> | null>(null);
+  const listRef = useRef<LegendListRef>(null);
 
   const [replyText, setReplyText] = useState("");
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
@@ -111,11 +115,18 @@ function RepliesScreenContent() {
     }
 
     requestAnimationFrame(() => {
-      listRef.current?.scrollToIndex({
-        index: targetIndex,
-        animated: true,
-        viewPosition: 0.2,
-      });
+      try {
+        listRef.current?.scrollToIndex({
+          index: targetIndex,
+          animated: true,
+          viewPosition: 0.2,
+        });
+      } catch {
+        listRef.current?.scrollToOffset({
+          offset: Math.max(targetIndex, 0) * 180,
+          animated: true,
+        });
+      }
     });
   }, [focusCommentId, parentComment?.id, replies]);
 
@@ -221,6 +232,22 @@ function RepliesScreenContent() {
     [router],
   );
 
+  const keyExtractor = useCallback((item: Comment) => item.id, []);
+
+  const renderReply = useCallback(
+    ({ item }: LegendListRenderItemProps<Comment>) => (
+      <CommentRow
+        comment={mapComment(item)}
+        postId={postId || ""}
+        variant="reply"
+        isHighlighted={item.id === focusCommentId}
+        onReply={handleReply}
+        onProfilePress={handleProfilePress}
+      />
+    ),
+    [focusCommentId, handleProfilePress, handleReply, postId],
+  );
+
   const handleSend = useCallback(() => {
     if (!replyText.trim() || !postId || !parentComment) return;
     if (!user?.username) {
@@ -314,21 +341,15 @@ function RepliesScreenContent() {
           </Text>
         </View>
       ) : (
-        <FlatList
+        <LegendList
           ref={listRef}
           data={replies}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={{ padding: 16, gap: 12 }}
+          keyExtractor={keyExtractor}
+          renderItem={renderReply}
+          estimatedItemSize={180}
+          contentContainerStyle={{ padding: 16, gap: 12 } as any}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          onScrollToIndexFailed={({ index }) => {
-            requestAnimationFrame(() => {
-              listRef.current?.scrollToOffset({
-                offset: Math.max(index, 0) * 180,
-                animated: true,
-              });
-            });
-          }}
           ListHeaderComponent={
             <View style={{ marginBottom: 12, gap: 12 }}>
               <Text
@@ -375,16 +396,6 @@ function RepliesScreenContent() {
               </Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <CommentRow
-              comment={mapComment(item)}
-              postId={postId || ""}
-              variant="reply"
-              isHighlighted={item.id === focusCommentId}
-              onReply={handleReply}
-              onProfilePress={handleProfilePress}
-            />
-          )}
         />
       )}
     </View>

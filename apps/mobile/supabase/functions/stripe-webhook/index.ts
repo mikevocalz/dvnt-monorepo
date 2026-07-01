@@ -1323,35 +1323,42 @@ Deno.serve(async (req: Request) => {
             typeof sub.customer === "string"
               ? sub.customer
               : sub.customer?.id || null;
-          const { error: memErr } = await supabase
-            .from("membership_subscriptions")
-            .upsert(
-              {
-                user_id: hostId,
-                product_family: productFamily || "dvnt_membership",
-                plan_key: planKey,
-                status: sub.status,
-                stripe_subscription_id: sub.id,
-                stripe_price_id: memPriceId,
-                stripe_customer_id: customerId,
-                current_period_start: sub.current_period_start
-                  ? new Date(sub.current_period_start * 1000).toISOString()
-                  : null,
-                current_period_end: sub.current_period_end
-                  ? new Date(sub.current_period_end * 1000).toISOString()
-                  : null,
-                cancel_at_period_end: sub.cancel_at_period_end || false,
-                canceled_at: sub.canceled_at
-                  ? new Date(sub.canceled_at * 1000).toISOString()
-                  : null,
-                last_synced_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: "user_id" },
-            );
+          // Monotonic upsert via RPC — refuses to overwrite a row whose
+          // `last_event_at` is already newer than this event. Closes the
+          // I5 race where a late/replayed canceled lands after active.
+          const { data: memApplied, error: memErr } = await supabase.rpc(
+            "upsert_membership_subscription",
+            {
+              p_user_id: hostId,
+              p_rail: "web_stripe",
+              p_product_family: productFamily || "dvnt_membership",
+              p_plan_key: planKey,
+              p_status: sub.status,
+              p_provider_ref: sub.id,
+              p_stripe_customer_id: customerId,
+              p_stripe_subscription_id: sub.id,
+              p_stripe_price_id: memPriceId,
+              p_current_period_start: sub.current_period_start
+                ? new Date(sub.current_period_start * 1000).toISOString()
+                : null,
+              p_current_period_end: sub.current_period_end
+                ? new Date(sub.current_period_end * 1000).toISOString()
+                : null,
+              p_cancel_at_period_end: sub.cancel_at_period_end || false,
+              p_canceled_at: sub.canceled_at
+                ? new Date(sub.canceled_at * 1000).toISOString()
+                : null,
+              p_event_created_at: new Date(event.created * 1000).toISOString(),
+            },
+          );
           if (memErr) {
             console.error("[stripe-webhook] membership upsert error:", memErr);
             throw memErr;
+          }
+          if (memApplied === false) {
+            console.log(
+              `[stripe-webhook] stale event skipped for ${hostId} (event.created=${event.created})`,
+            );
           }
           // Audit + idempotency (unique on stripe_event_id).
           await supabase.from("membership_subscription_events").upsert(

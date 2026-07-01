@@ -13,7 +13,12 @@ const corsHeaders = {
 };
 
 type ErrorCode = "unauthorized" | "validation_error" | "internal_error";
+// Fallback window for clients that don't send presence heartbeats yet (no
+// last_seen_at): assume a member could still be live for a long session.
 const OPEN_MEMBER_FRESHNESS_MS = 12 * 60 * 60 * 1000;
+// Tight window for clients that DO heartbeat (last_seen_at present): if they
+// stop pinging (~30s cadence) the room reads dead within ~90s.
+const HEARTBEAT_FRESHNESS_MS = 90 * 1000;
 
 interface ApiResponse<T = unknown> {
   ok: boolean;
@@ -75,6 +80,7 @@ function buildRoomParticipantStats(
     role?: string | null;
     status?: string | null;
     joined_at?: string | null;
+    last_seen_at?: string | null;
     left_at?: string | null;
   }>,
   nowMs: number,
@@ -98,11 +104,19 @@ function buildRoomParticipantStats(
 
     stats[member.room_id].historicalCount += 1;
 
+    // Heartbeating clients carry last_seen_at → tight window. Others fall back
+    // to joined_at on the lenient window (no regression for not-yet-updated apps).
+    const lastSeenMs = member.last_seen_at ? Date.parse(member.last_seen_at) : NaN;
     const joinedAtMs = member.joined_at ? Date.parse(member.joined_at) : NaN;
+    const hasHeartbeat = Number.isFinite(lastSeenMs);
+    const freshMs = hasHeartbeat ? lastSeenMs : joinedAtMs;
+    const freshWindow = hasHeartbeat
+      ? HEARTBEAT_FRESHNESS_MS
+      : OPEN_MEMBER_FRESHNESS_MS;
     const isActive =
       member.status === "active" &&
-      Number.isFinite(joinedAtMs) &&
-      nowMs - joinedAtMs <= OPEN_MEMBER_FRESHNESS_MS;
+      Number.isFinite(freshMs) &&
+      nowMs - freshMs <= freshWindow;
 
     if (isActive) {
       stats[member.room_id].activeCount += 1;
@@ -267,7 +281,7 @@ Deno.serve(async (req) => {
     if (roomIds.length > 0) {
       const { data: members } = await supabase
         .from("video_room_members")
-        .select("room_id, user_id, role, status, joined_at, left_at")
+        .select("room_id, user_id, role, status, joined_at, last_seen_at, left_at")
         .in("room_id", roomIds);
 
       roomStats = buildRoomParticipantStats(members || [], nowMs);

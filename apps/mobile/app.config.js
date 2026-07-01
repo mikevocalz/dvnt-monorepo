@@ -268,7 +268,12 @@ export default {
     plugins: [
       // Links native targets (Apple Watch app + watch complication) outside /ios
       // via CNG. Auto-discovers apps/mobile/targets/*/expo-target.config.js.
-      "@bacons/apple-targets",
+      // TEMPORARILY DISABLED for the SDK 56 production build: the watch
+      // complication App ID (com.dvnt.app.watchkitapp.complication) isn't
+      // registerable on the Individual Apple team, which blocked credential
+      // setup. The watch app was held-back anyway (PROMPT 7). Re-enable once the
+      // watch App IDs are registered on the Apple Developer portal.
+      // "@bacons/apple-targets",
       "./plugins/disable-user-script-sandboxing",
       "./plugins/with-app-controller-init",
       // Install NSSetUncaughtExceptionHandler EARLY so it's the first

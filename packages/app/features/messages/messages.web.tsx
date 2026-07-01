@@ -202,9 +202,15 @@ function SneakyLynkTab() {
                   (r.listeners != null ? ` · ${r.listeners} listening` : "")}
               </span>
             </span>
-            <span className="flex items-center gap-1 rounded-full bg-[#FF5BFC]/18 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-[#FFC7FB]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#FF5BFC]" /> live
-            </span>
+            {r.isLive === false || r.status === "ended" ? (
+              <span className="flex items-center gap-1 rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white/45">
+                <span className="h-1.5 w-1.5 rounded-full bg-white/35" /> ended
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 rounded-full bg-[#FF5BFC]/18 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-[#FFC7FB]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#FF5BFC]" /> live
+              </span>
+            )}
           </button>
         ))}
       </div>

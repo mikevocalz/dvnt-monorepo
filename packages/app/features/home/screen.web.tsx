@@ -27,10 +27,8 @@ import {
   type StoryViewerGroup,
 } from "@dvnt/app/lib/stores/story-viewer-store";
 import { StoryViewerOverlay } from "@dvnt/app/components/story-viewer-overlay.web";
-import {
-  resolveTextPostPresentation,
-  TEXT_POST_THEMES,
-} from "@dvnt/app/lib/posts/text-post";
+import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
+import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
 import type { Post } from "@dvnt/app/lib/types";
 
 const GAP = 10;
@@ -172,7 +170,10 @@ export function HomeScreen() {
     <div
       ref={parentRef}
       className="overflow-y-auto bg-[#02030A]"
-      style={{ height: "100dvh", marginTop: `calc((${headerOffset}) * -1)` }}
+      // The scroller is pulled UP by -headerOffset to slide under the glass
+      // header, so it must be that much TALLER or its bottom ends headerOffset
+      // above the viewport bottom — leaving a black strip on desktop.
+      style={{ height: `calc(100dvh + ${headerOffset})`, marginTop: `calc((${headerOffset}) * -1)` }}
     >
       <div
         className="mx-auto w-full"
@@ -268,8 +269,6 @@ function MasonryCell({
   const textPreview = isText
     ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
     : "";
-  const theme =
-    TEXT_POST_THEMES[post.textTheme ?? "graphite"] ?? TEXT_POST_THEMES.graphite;
 
   // Instagram-style URL: /feed/{username}/post/{id} (Solito routing).
   const open = () =>
@@ -284,20 +283,14 @@ function MasonryCell({
       role="button"
     >
       {isText ? (
-        <div
-          className="flex items-center justify-center p-4"
-          style={{
-            height: fallbackHeight,
-            backgroundImage: `linear-gradient(150deg, ${theme.gradient.join(", ")})`,
-          }}
-        >
-          <span
-            className="text-center text-sm font-semibold leading-snug line-clamp-9"
-            style={{ color: theme.textPrimary }}
-          >
-            {textPreview || post.caption || ""}
-          </span>
-        </div>
+        // Real shared surface (gradient + DVNT badge + glow + subtitle) so web
+        // text posts match mobile exactly — was a bare gradient div before.
+        <TextPostSurface
+          text={textPreview || post.caption || ""}
+          theme={post.textTheme}
+          variant="grid"
+          style={{ minHeight: fallbackHeight, height: fallbackHeight }}
+        />
       ) : liveVideoUrl ? (
         // Live Photo / animated video — auto-playing muted loop.
         <video

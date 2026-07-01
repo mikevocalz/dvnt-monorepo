@@ -2,10 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
-  FlatList,
   ActivityIndicator,
   TextInput,
 } from "react-native";
+import {
+  LegendList,
+  type LegendListRef,
+  type LegendListRenderItemProps,
+} from "@dvnt/app/components/list";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
@@ -81,7 +85,7 @@ function CommentsScreenContent() {
   const showToast = useUIStore((state) => state.showToast);
   const inputRef = useRef<TextInput>(null);
   const redirectedReplyRef = useRef(false);
-  const listRef = useRef<FlatList<Comment> | null>(null);
+  const listRef = useRef<LegendListRef>(null);
 
   const [commentText, setCommentText] = useState("");
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
@@ -194,6 +198,30 @@ function CommentsScreenContent() {
     [router],
   );
 
+  const keyExtractor = useCallback((item: Comment) => item.id, []);
+
+  const renderComment = useCallback(
+    ({ item }: LegendListRenderItemProps<Comment>) => (
+      <ThreadedComment
+        postId={postId || ""}
+        comment={mapCommentTree(item)}
+        isHighlighted={item.id === commentId}
+        onReply={handleReply}
+        onViewAllReplies={handleViewReplies}
+        onProfilePress={handleProfilePress}
+        maxVisibleReplies={0}
+        showAllReplies={false}
+      />
+    ),
+    [
+      commentId,
+      handleProfilePress,
+      handleReply,
+      handleViewReplies,
+      postId,
+    ],
+  );
+
   const handleSend = useCallback(() => {
     if (!commentText.trim() || !postId) return;
     if (!user?.username) {
@@ -259,11 +287,18 @@ function CommentsScreenContent() {
     }
 
     requestAnimationFrame(() => {
-      listRef.current?.scrollToIndex({
-        index: targetIndex,
-        animated: true,
-        viewPosition: 0.15,
-      });
+      try {
+        listRef.current?.scrollToIndex({
+          index: targetIndex,
+          animated: true,
+          viewPosition: 0.15,
+        });
+      } catch {
+        listRef.current?.scrollToOffset({
+          offset: Math.max(targetIndex, 0) * 180,
+          animated: true,
+        });
+      }
     });
   }, [commentId, comments]);
 
@@ -319,33 +354,15 @@ function CommentsScreenContent() {
           </Text>
         </View>
       ) : (
-        <FlatList
+        <LegendList
           ref={listRef}
           data={comments}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={{ padding: 16, gap: 12 }}
+          keyExtractor={keyExtractor}
+          renderItem={renderComment}
+          estimatedItemSize={180}
+          contentContainerStyle={{ padding: 16, gap: 12 } as any}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          onScrollToIndexFailed={({ index }) => {
-            requestAnimationFrame(() => {
-              listRef.current?.scrollToOffset({
-                offset: Math.max(index, 0) * 180,
-                animated: true,
-              });
-            });
-          }}
-          renderItem={({ item }) => (
-            <ThreadedComment
-              postId={postId || ""}
-              comment={mapCommentTree(item)}
-              isHighlighted={item.id === commentId}
-              onReply={handleReply}
-              onViewAllReplies={handleViewReplies}
-              onProfilePress={handleProfilePress}
-              maxVisibleReplies={0}
-              showAllReplies={false}
-            />
-          )}
         />
       )}
     </View>

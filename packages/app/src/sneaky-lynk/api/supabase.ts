@@ -193,6 +193,14 @@ export const sneakyLynkApi = {
   },
 
   /**
+   * Presence heartbeat — keeps this member's freshness current so the room
+   * reads as genuinely live. Called on a 30s interval while connected.
+   */
+  async heartbeat(roomId: string): Promise<ApiResponse<{ ok: boolean }>> {
+    return callEdgeFunction("video_heartbeat", { roomId });
+  },
+
+  /**
    * Raise/lower hand
    */
   async toggleHand(

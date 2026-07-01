@@ -26,7 +26,10 @@ export function TeamScreen() {
     setMsg(null)
     try {
       const res = await grant.mutateAsync({ userId: String(picked.id), role })
-      setMsg({ kind: 'ok', text: `${res.name} is now ${roleLabel(res.role)}. They sign in with their app password.` })
+      const how = res.loginMethod === 'password'
+        ? 'They sign in to the console with their app password.'
+        : 'They sign in to /admin with their existing app login (Google/Apple).'
+      setMsg({ kind: 'ok', text: `${res.name} is now ${roleLabel(res.role)}. ${how}` })
       setPicked(null)
     } catch (e: any) {
       // ApiError carries the server's reason (e.g. social-only account).

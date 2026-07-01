@@ -1,4 +1,6 @@
 import { default as default_3245a2a2b01636659cb10cfa6576da43 } from '@dvnt/cms/components/AvatarCell'
+import { default as default_0c31c3f77c53b1834442b1a64f6def36 } from '@dvnt/cms/components/TicketsLinkCell'
+import { default as default_1a14ef5d8c2bad13ca2191e1bfe7dca9 } from '@dvnt/cms/components/TicketQRField'
 import { RscEntryLexicalCell as RscEntryLexicalCell_44fe37237e0ebf4470c9990d8cb7b07e } from '@payloadcms/richtext-lexical/rsc'
 import { RscEntryLexicalField as RscEntryLexicalField_44fe37237e0ebf4470c9990d8cb7b07e } from '@payloadcms/richtext-lexical/rsc'
 import { LexicalDiffComponent as LexicalDiffComponent_44fe37237e0ebf4470c9990d8cb7b07e } from '@payloadcms/richtext-lexical/rsc'
@@ -36,6 +38,8 @@ import { CollectionCards as CollectionCards_ab83ff7e88da8d3530831f296ec4756a } f
 /** @type import('payload').ImportMap */
 export const importMap = {
   "@dvnt/cms/components/AvatarCell#default": default_3245a2a2b01636659cb10cfa6576da43,
+  "@dvnt/cms/components/TicketsLinkCell#default": default_0c31c3f77c53b1834442b1a64f6def36,
+  "@dvnt/cms/components/TicketQRField#default": default_1a14ef5d8c2bad13ca2191e1bfe7dca9,
   "@payloadcms/richtext-lexical/rsc#RscEntryLexicalCell": RscEntryLexicalCell_44fe37237e0ebf4470c9990d8cb7b07e,
   "@payloadcms/richtext-lexical/rsc#RscEntryLexicalField": RscEntryLexicalField_44fe37237e0ebf4470c9990d8cb7b07e,
   "@payloadcms/richtext-lexical/rsc#LexicalDiffComponent": LexicalDiffComponent_44fe37237e0ebf4470c9990d8cb7b07e,

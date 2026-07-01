@@ -37,6 +37,14 @@ export const Tickets: CollectionConfig = {
     { name: 'guestEmail', type: 'email', admin: { position: 'sidebar' } },
     { name: 'purchasedAt', type: 'date', admin: { position: 'sidebar', readOnly: true } },
     { name: 'qrToken', type: 'text', admin: { position: 'sidebar', readOnly: true, description: 'Scan token (read-only).' } },
+    // Renders the scannable QR from qrToken (client-side; the token never leaves
+    // the browser). Read-only — synced from the live app.
+    {
+      name: 'qr',
+      type: 'ui',
+      label: 'QR code',
+      admin: { components: { Field: '@dvnt/cms/components/TicketQRField' } },
+    },
     // Stable key back to public.tickets.id — sync upserts on this.
     { name: 'appTicketId', type: 'text', index: true, admin: { position: 'sidebar', readOnly: true } },
   ],

@@ -122,7 +122,7 @@ function PostTile({ post }: { post: Post }) {
           src={cover}
           alt={post.caption ?? ""}
           loading="lazy"
-          className="h-full w-full object-cover"
+          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-white/6">
@@ -205,9 +205,14 @@ function DiscoverProfiles({ users }: { users: DiscoverDTO["users"] }) {
   const router = useRouter();
   return (
     <section className="py-4">
-      <div className="mb-4 flex items-center gap-2 px-1">
-        <UserPlus size={20} color={CYAN} />
-        <h2 className="text-lg font-bold text-white">Discover New Profiles</h2>
+      <div className="mb-4 flex items-center gap-2.5 px-1">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-400/12 text-cyan-300">
+          <UserPlus size={18} />
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-[17px] font-bold leading-tight text-white">Discover New Profiles</h2>
+          <p className="text-xs text-white/45">People to follow on DVNT</p>
+        </div>
       </div>
 
       {users.length === 0 ? (
@@ -220,7 +225,7 @@ function DiscoverProfiles({ users }: { users: DiscoverDTO["users"] }) {
             <button
               key={user.id}
               onClick={() => router.push(`/profile/${user.username}`)}
-              className="flex w-[140px] shrink-0 flex-col items-center rounded-2xl border border-white/[0.06] bg-[rgba(30,30,30,0.8)] py-4"
+              className="flex w-[140px] shrink-0 flex-col items-center rounded-2xl border border-white/[0.06] bg-[rgba(30,30,30,0.8)] py-4 transition hover:border-cyan-400/30 hover:bg-[rgba(40,40,46,0.9)] active:scale-[0.98]"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -228,15 +233,15 @@ function DiscoverProfiles({ users }: { users: DiscoverDTO["users"] }) {
                 alt={user.username}
                 className="h-16 w-16 rounded-xl object-cover bg-white/10"
               />
-              <div className="mt-2 flex items-center gap-1 px-2">
-                <span className="truncate text-sm font-semibold text-white">
+              <div className="mt-2 flex w-full items-center justify-center gap-1 px-2">
+                <span className="min-w-0 truncate text-sm font-semibold text-white">
                   {user.name}
                 </span>
                 {user.verified ? (
-                  <BadgeCheck size={12} color="#FF6DC1" fill="#FF6DC1" />
+                  <BadgeCheck size={12} color="#FF6DC1" fill="#FF6DC1" className="shrink-0" />
                 ) : null}
               </div>
-              <span className="truncate text-xs text-white/60">
+              <span className="block max-w-full truncate px-2 text-xs text-white/60">
                 @{user.username}
               </span>
               {user.bio ? (
@@ -363,6 +368,24 @@ export function SearchScreen() {
   );
   const userResults: any[] = searchData?.users?.docs ?? [];
 
+  // Trending tags derived from the (NSFW-filtered) discover posts — tap to
+  // explore that hashtag. Hidden when there are no tags to surface.
+  const trendingTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of discoverPosts) {
+      // Posts carry hashtags inside the caption (no structured tags field).
+      const matches = p.caption?.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+      for (const tag of matches) {
+        const t = tag.replace(/^#/, "").trim().toLowerCase();
+        if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([t]) => t);
+  }, [discoverPosts]);
+
   const handleQueryChange = (text: string) => {
     setSearchQuery(text);
     searchDebouncer.maybeExecute(text);
@@ -473,15 +496,72 @@ export function SearchScreen() {
           <SearchLoading />
         ) : (
           <>
+            {/* Page identity */}
+            <div className="mb-5 px-1">
+              <h1 className="text-2xl font-extrabold tracking-tight text-white">
+                Explore
+              </h1>
+              <p className="mt-1 text-sm text-white/50">
+                Discover people, posts, and what&apos;s trending on DVNT.
+              </p>
+            </div>
+
+            {/* Trending tags */}
+            {trendingTags.length > 0 ? (
+              <section className="mb-6">
+                <div className="mb-3 flex items-center gap-2.5 px-1">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FF5BFC]/14 text-[#FF8BE3]">
+                    <Hash size={18} />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="text-[17px] font-bold leading-tight text-white">
+                      Trending
+                    </h2>
+                    <p className="text-xs text-white/45">Tap a tag to dive in</p>
+                  </div>
+                </div>
+                <div className="no-scrollbar flex gap-2 overflow-x-auto px-1 pb-1">
+                  {trendingTags.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => handleQueryChange(`#${t}`)}
+                      className="shrink-0 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/85 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-white active:scale-95"
+                    >
+                      #{t}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {/* Discover people */}
             <DiscoverProfiles users={discoverData.users ?? []} />
+
+            {/* Explore grid (NSFW already filtered out of discoverPosts) */}
             {discoverPosts.length > 0 ? (
               <section className="pt-3">
-                <div className="mb-3 flex items-center gap-2 px-1">
-                  <Compass size={20} color={CYAN} />
-                  <h2 className="text-lg font-bold text-white">Explore</h2>
+                <div className="mb-4 flex items-center gap-2.5 px-1">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-400/12 text-cyan-300">
+                    <Compass size={18} />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="text-[17px] font-bold leading-tight text-white">
+                      Fresh Posts
+                    </h2>
+                    <p className="text-xs text-white/45">From across the community</p>
+                  </div>
                 </div>
                 <PostGrid posts={discoverPosts} columns={columns} />
               </section>
+            ) : null}
+
+            {/* Nothing to show */}
+            {(discoverData.users?.length ?? 0) === 0 &&
+            discoverPosts.length === 0 ? (
+              <EmptyState
+                icon={<Compass size={48} color="#666" />}
+                text="Nothing to explore yet — check back soon."
+              />
             ) : null}
           </>
         )}
@@ -498,9 +578,11 @@ function EmptyState({
   text: string;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      {icon}
-      <p className="mt-4 text-white/60">{text}</p>
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/8 bg-white/[0.03]">
+        {icon}
+      </div>
+      <p className="mt-4 max-w-[260px] text-sm text-white/55">{text}</p>
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
   Plus,
   Type as TypeIcon,
   Image as ImageIcon,
+  CalendarPlus,
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
@@ -310,7 +311,6 @@ export function CreatePostScreen() {
     }
   };
 
-  const theme = TEXT_POST_THEMES[textTheme] ?? TEXT_POST_THEMES.graphite;
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -334,29 +334,38 @@ export function CreatePostScreen() {
 
       <div className="mx-auto w-full max-w-2xl px-4 pb-32">
         {/* Post-type switch */}
-        <div className="mt-4 flex gap-2.5 rounded-2xl border border-white/8 bg-[#0E1320] p-1.5">
+        <div className="mt-4 flex gap-1.5 sm:gap-2.5 rounded-2xl border border-white/8 bg-[#0E1320] p-1.5">
           {[
             { key: "media" as const, label: "Media", icon: ImageIcon, description: "Photos or video" },
             { key: "text" as const, label: "Text", icon: TypeIcon, description: "Text only" },
+            { key: "event" as const, label: "Event", icon: CalendarPlus, description: "Party, meetup, etc." },
           ].map((option) => {
             const Icon = option.icon;
             const isActive = postKind === option.key;
             return (
               <button
                 key={option.key}
-                onClick={() => handleSetPostKind(option.key)}
-                className={`flex-1 rounded-xl px-2 py-3 text-left border ${
+                onClick={() => {
+                  if (option.key === "event") {
+                    // Web parity with mobile: Event tab navigates out to the
+                    // dedicated events flow rather than setting postKind.
+                    router.push("/feed/events/create");
+                    return;
+                  }
+                  handleSetPostKind(option.key);
+                }}
+                className={`flex-1 min-w-0 rounded-xl px-2 py-2.5 sm:py-3 text-left border ${
                   isActive ? "bg-cyan-500/16 border-cyan-400/40" : "border-transparent"
                 }`}
               >
-                <span className="flex items-center gap-2">
-                  <Icon size={18} className={isActive ? "text-cyan-300" : "text-white/45"} />
-                  <span className={`text-[15px] font-bold ${isActive ? "text-white" : "text-white/75"}`}>
+                <span className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                  <Icon size={18} className={`shrink-0 ${isActive ? "text-cyan-300" : "text-white/45"}`} />
+                  <span className={`truncate text-sm sm:text-[15px] font-bold ${isActive ? "text-white" : "text-white/75"}`}>
                     {option.label}
                   </span>
                 </span>
                 <span
-                  className={`mt-2 block text-xs leading-4 ${
+                  className={`mt-1.5 sm:mt-2 block truncate text-[11px] sm:text-xs leading-4 ${
                     isActive ? "text-white/80" : "text-white/45"
                   }`}
                 >
@@ -520,24 +529,17 @@ export function CreatePostScreen() {
               })}
             </div>
 
-            {/* Themed slide editor — raw textarea over the gradient */}
-            <div
-              className="mt-3 rounded-2xl border p-4"
-              style={{
-                backgroundImage: `linear-gradient(150deg, ${theme.gradient.join(", ")})`,
-                borderColor: theme.border,
-              }}
-            >
-              <textarea
-                value={activeTextSlide?.content ?? ""}
-                onChange={(e) => updateTextSlide(activeTextSlideIndex, e.target.value)}
-                placeholder="Speak your mind…"
-                maxLength={TEXT_POST_MAX_LENGTH}
-                rows={6}
-                className="w-full resize-none bg-transparent text-[18px] leading-7 outline-none placeholder:text-white/45"
-                style={{ color: theme.textPrimary }}
-              />
-            </div>
+            {/* Plain editor — matches the mobile composer (white text on the dark
+                screen, no themed box; the selected theme styles the PUBLISHED
+                card, shown in the feed/detail, not the input). */}
+            <textarea
+              value={activeTextSlide?.content ?? ""}
+              onChange={(e) => updateTextSlide(activeTextSlideIndex, e.target.value)}
+              placeholder="Speak your mind…"
+              maxLength={TEXT_POST_MAX_LENGTH}
+              rows={6}
+              className="mt-3 w-full resize-none bg-transparent text-white text-[18px] leading-7 outline-none placeholder:text-white/45"
+            />
             <p
               className="mt-2 text-right text-xs"
               style={{

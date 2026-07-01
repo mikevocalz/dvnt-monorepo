@@ -53,11 +53,14 @@ import {
   Hand,
   Users,
   EyeOff,
+  Camera as CameraIcon,
+  CircleDot,
   PhoneOff,
   MessageCircle,
   Send,
   Crown,
   UserX,
+  UserMinus,
   VolumeX,
   Clock,
   X,
@@ -72,6 +75,7 @@ import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
 import { videoApi } from "@dvnt/app/src/video/api";
 import { useRoomReactions } from "@dvnt/app/src/sneaky-lynk/hooks/useRoomReactions";
+import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureBroadcast";
 import {
   fetchRoomComments,
   postRoomComment,
@@ -81,6 +85,7 @@ import {
 import type { SneakyUser } from "@dvnt/app/src/sneaky-lynk/types";
 import { useRoomStore } from "@dvnt/app/src/sneaky-lynk/stores/room-store";
 import { useLynkHistoryStore } from "@dvnt/app/src/sneaky-lynk/stores/lynk-history-store";
+import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
 import { SecureCaptureBoundary } from "@dvnt/app/lib/secure-capture";
 import { useRoomUIStore } from "./room-ui-store";
 
@@ -214,6 +219,7 @@ type Tile = {
   avatar?: string;
   isLocal: boolean;
   isHost: boolean;
+  isCoHost: boolean;
   videoStream: MediaStream | null;
   isCameraOn: boolean;
   isMicOn: boolean;
@@ -423,6 +429,45 @@ function ConnectionBanner({ status }: { status: string }) {
     >
       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
       {reconnecting ? "Reconnecting…" : "Connection lost"}
+    </div>
+  );
+}
+
+function CaptureNotificationBannerWeb() {
+  const current = useSneakyLynkCaptureStore((s) => s.currentCapture);
+  if (!current) return null;
+
+  const isRecording = current.kind === "recording_start";
+  const isSelf = current.isSelf;
+  const iconClass = isSelf ? "text-[#3FDCFF]" : "text-[#FC253A]";
+  const shellClass = isSelf
+    ? "border-[#3FDCFF]/35 bg-[#08131a]/95"
+    : "border-[#FC253A]/40 bg-[#16070b]/95";
+  const title = isSelf
+    ? isRecording
+      ? "Screen recording detected"
+      : "Screenshot attempt blocked"
+    : isRecording
+      ? `${current.actorUsername} may be recording`
+      : `${current.actorUsername} attempted a screenshot`;
+  const body = isSelf ? "Everyone in the room was notified." : "The room was notified.";
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none absolute inset-x-0 top-0 z-[70] flex justify-center px-4"
+      style={{ paddingTop: "calc(env(safe-area-inset-top) + 14px)" }}
+    >
+      <div className={`flex max-w-[92vw] items-center gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-xl ${shellClass}`}>
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/8 ${iconClass}`}>
+          {isRecording ? <CircleDot size={17} /> : <CameraIcon size={17} />}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-bold text-white">{title}</span>
+          <span className="mt-0.5 block text-xs font-medium text-white/60">{body}</span>
+        </span>
+      </div>
     </div>
   );
 }
@@ -682,6 +727,7 @@ function ParticipantsPanel({
   isHost,
   localUserId,
   onPromote,
+  onDemote,
   onKick,
   onMute,
 }: {
@@ -691,6 +737,7 @@ function ParticipantsPanel({
   isHost: boolean;
   localUserId: string | undefined;
   onPromote: (userId: string) => void;
+  onDemote: (userId: string) => void;
   onKick: (userId: string) => void;
   onMute: (userId: string) => void;
 }) {
@@ -734,7 +781,16 @@ function ParticipantsPanel({
                   >
                     <MicOff size={14} />
                   </button>
-                  {m.role !== "co-host" ? (
+                  {m.role === "co-host" ? (
+                    <button
+                      type="button"
+                      onClick={() => onDemote(m.userId)}
+                      aria-label="Demote to listener"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                    >
+                      <UserMinus size={14} />
+                    </button>
+                  ) : (
                     <button
                       type="button"
                       onClick={() => onPromote(m.userId)}
@@ -743,7 +799,7 @@ function ParticipantsPanel({
                     >
                       <Crown size={14} />
                     </button>
-                  ) : null}
+                  )}
                   <button
                     type="button"
                     onClick={() => onKick(m.userId)}
@@ -814,8 +870,8 @@ function TimeUpDialog({
 }) {
   if (!open) return null;
   return (
-    <div className="absolute inset-0 z-[60] flex items-end justify-center bg-black/70 sm:items-center">
-      <div className="w-full max-w-md rounded-t-3xl bg-[#0b0d14] px-6 pb-10 pt-7 sm:rounded-3xl">
+    <div className="absolute inset-0 z-[60] flex items-end justify-center bg-black/90 px-3 pb-[calc(env(safe-area-inset-bottom)+80px)] sm:items-center sm:px-0 sm:pb-0">
+      <div className="w-full max-w-md rounded-3xl bg-[#0b0d14] px-6 pb-8 pt-7">
         <span
           className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full"
           style={{ backgroundColor: `${PURPLE}20` }}
@@ -842,6 +898,42 @@ function TimeUpDialog({
         >
           Leave Lynk
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Stage tile (one participant). `large` = featured host/co-host (wide,
+//    top-of-stage); otherwise a compact square in the grid below. ─────────────
+function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
+  return (
+    <div
+      className={`relative overflow-hidden rounded-2xl border border-white/8 bg-white/[0.04] ${
+        large ? "aspect-video" : "aspect-square"
+      }`}
+    >
+      {tile.isCameraOn && tile.videoStream ? (
+        <VideoTile
+          stream={tile.videoStream}
+          muted={tile.isLocal}
+          mirror={tile.isLocal}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center">
+          <SquareAvatar uri={tile.avatar} name={tile.name} size={large ? 104 : 72} />
+        </div>
+      )}
+      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5">
+        <span className="truncate text-xs font-medium">
+          {tile.name}
+          {tile.isHost ? " · host" : tile.isCoHost ? " · co-host" : ""}
+        </span>
+        {tile.isMicOn ? (
+          <Mic size={12} className="text-white/80 shrink-0" />
+        ) : (
+          <MicOff size={12} className="text-white/50 shrink-0" />
+        )}
       </div>
     </div>
   );
@@ -903,6 +995,7 @@ function RoomInner({
   const closeHandQueue = useRoomStore((s) => s.closeHandQueue);
   const raisedHandOrder = useRoomStore((s) => s.raisedHandOrder);
   const promoteListener = useRoomStore((s) => s.promoteListener);
+  const removeCoHost = useRoomStore((s) => s.removeCoHost);
 
   // Web UI/connection phase store (no useState).
   const phase = useRoomUIStore((s) => s.phase);
@@ -942,6 +1035,7 @@ function RoomInner({
   const micRef = useRef(microphone);
   micRef.current = microphone;
   const isHostRef = useRef(isCreator);
+  const isCoHostRef = useRef(false);
   // Per-MOUNT join guard. Must be a local ref, NOT the global store's
   // `initStarted`: RoomInner is a child of SneakyLynkRoomScreen, and React runs
   // child effects before parent effects, so this effect would read a STALE
@@ -965,6 +1059,15 @@ function RoomInner({
   const { reactions, sendReaction } = useRoomReactions({ roomId: id, currentUser });
   const { comments, send: sendChat } = useRoomChat(id, currentUser);
   const members = useRoomMembersSync(id, authUser?.id);
+  const captureBroadcast = useSneakyLynkCaptureBroadcast({
+    roomId: id,
+    roomTitle: roomSnapshot?.title || paramTitle || undefined,
+    localUserId: currentUser.id,
+    localUsername: currentUser.displayName || currentUser.username,
+    hostUserId: roomSnapshot?.host?.id,
+    attributable: !currentUser.isAnonymous,
+    realUsername: authUser?.username ?? undefined,
+  });
 
   useEjectWatcher(id, authUser?.id, (reason) => {
     try {
@@ -1027,6 +1130,7 @@ function RoomInner({
         fishjamRoomId: room.fishjamRoomId,
       });
       isHostRef.current = peer.role === "host";
+      isCoHostRef.current = peer.role === "co-host";
 
       setPhase("connecting");
       try {
@@ -1228,6 +1332,24 @@ function RoomInner({
     [id, promoteListener, showToast],
   );
 
+  // Demote a co-host back to listener — the inverse of promote.
+  const demote = useCallback(
+    (userId: string) => {
+      removeCoHost();
+      void (async () => {
+        const res = await videoApi.changeRole({
+          roomId: id,
+          targetUserId: userId,
+          newRole: "participant",
+        });
+        if (!res.ok) {
+          showToast("error", "Couldn't demote", res.error?.message || "Try again.");
+        }
+      })();
+    },
+    [id, removeCoHost, showToast],
+  );
+
   const kick = useCallback(
     (userId: string) => {
       void (async () => {
@@ -1282,6 +1404,7 @@ function RoomInner({
       avatar: meta?.avatar,
       isLocal: false,
       isHost: meta?.role === "host",
+      isCoHost: meta?.role === "co-host",
       videoStream: cam?.stream ?? null,
       isCameraOn: !!(cam?.stream || cam?.track || cam?.trackId),
       isMicOn: !!(mic?.stream || mic?.track || mic?.trackId),
@@ -1294,12 +1417,18 @@ function RoomInner({
     avatar: joinAnonymous ? undefined : authUser?.avatar || undefined,
     isLocal: true,
     isHost: isHostRef.current,
+    isCoHost: isCoHostRef.current,
     videoStream: localStream,
     isCameraOn,
     isMicOn,
   };
 
   const stageTiles = [localTile, ...remoteTiles];
+  // The host (and any co-hosts) own the top of the stage — large and prominent;
+  // everyone else with a tile sits in the smaller grid beneath. Falls back to a
+  // uniform grid if somehow no host/co-host tile is present.
+  const featuredTiles = stageTiles.filter((t) => t.isHost || t.isCoHost);
+  const otherTiles = stageTiles.filter((t) => !t.isHost && !t.isCoHost);
   const roomTitle = roomSnapshot?.title || paramTitle || getLynkDisplayName();
   const participantCount = stageTiles.length;
 
@@ -1369,11 +1498,13 @@ function RoomInner({
       mode="sneaky-lynk"
       blackoutOnBlur
       blackoutOnVisibilityHidden
-      watermark={phase === "connected"}
+      watermark={false}
       logEvents
+      onCaptureAttempt={(kind) => captureBroadcast.notifyLocalCapture(kind)}
     >
       <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white">
       <ConnectionBanner status={connecting ? "connecting" : peerStatus} />
+      <CaptureNotificationBannerWeb />
 
       {/* Header */}
       <header
@@ -1409,7 +1540,15 @@ function RoomInner({
           {showTimer ? (
             <WebRoomTimer
               startedAt={timerStartedAt}
-              onTimeUp={() => setShowTimeUp(true)}
+              onTimeUp={() => {
+                setShowTimeUp(true);
+                // Free session is over — stop broadcasting so no camera/mic keeps
+                // running behind the upgrade sheet.
+                cameraRef.current.stopCamera();
+                micRef.current.stopMicrophone();
+                setCameraOn(false);
+                setMicOn(false);
+              }}
             />
           ) : null}
           {isHost && raisedHandCount > 0 ? (
@@ -1450,40 +1589,26 @@ function RoomInner({
         </div>
       ) : (
         <>
-          {/* Speaker / video stage */}
-          <section className="flex-1 overflow-y-auto px-4 py-2">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {stageTiles.map((tile) => (
-                <div
-                  key={tile.key}
-                  className="relative aspect-square overflow-hidden rounded-2xl bg-white/[0.04] border border-white/8"
-                >
-                  {tile.isCameraOn && tile.videoStream ? (
-                    <VideoTile
-                      stream={tile.videoStream}
-                      muted={tile.isLocal}
-                      mirror={tile.isLocal}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center">
-                      <SquareAvatar uri={tile.avatar} name={tile.name} size={72} />
-                    </div>
-                  )}
-                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5">
-                    <span className="truncate text-xs font-medium">
-                      {tile.name}
-                      {tile.isHost ? " · host" : ""}
-                    </span>
-                    {tile.isMicOn ? (
-                      <Mic size={12} className="text-white/80 shrink-0" />
-                    ) : (
-                      <MicOff size={12} className="text-white/50 shrink-0" />
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+          {/* Speaker / video stage — host (+ co-hosts) own the top, large. */}
+          <section className="flex-1 space-y-3 overflow-y-auto px-4 py-2">
+            {featuredTiles.length > 0 ? (
+              <div
+                className={`mx-auto grid w-full max-w-2xl gap-3 ${
+                  featuredTiles.length === 1 ? "grid-cols-1" : "grid-cols-2"
+                }`}
+              >
+                {featuredTiles.map((tile) => (
+                  <StageTile key={tile.key} tile={tile} large />
+                ))}
+              </div>
+            ) : null}
+            {otherTiles.length > 0 ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {otherTiles.map((tile) => (
+                  <StageTile key={tile.key} tile={tile} />
+                ))}
+              </div>
+            ) : null}
           </section>
 
           {/* Listener row — TanStack Virtual (horizontal) */}
@@ -1590,6 +1715,7 @@ function RoomInner({
         isHost={isHost}
         localUserId={authUser?.id}
         onPromote={promote}
+        onDemote={demote}
         onKick={kick}
         onMute={muteOne}
       />
@@ -1693,12 +1819,32 @@ function PreJoinScreen({
               role="switch"
               aria-checked={joinAnonymous}
               onClick={() => setJoinAnonymous(!joinAnonymous)}
-              className="relative w-12 h-7 rounded-full transition-colors shrink-0"
-              style={{ backgroundColor: joinAnonymous ? ROSE : "#374151" }}
+              style={{
+                position: "relative",
+                width: 48,
+                height: 28,
+                flexShrink: 0,
+                padding: 0,
+                border: "none",
+                borderRadius: 9999,
+                cursor: "pointer",
+                backgroundColor: joinAnonymous ? ROSE : "#374151",
+                transition: "background-color 140ms ease",
+              }}
             >
               <span
-                className="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-transform"
-                style={{ transform: joinAnonymous ? "translateX(20px)" : "translateX(2px)" }}
+                style={{
+                  position: "absolute",
+                  top: 4,
+                  left: 4,
+                  width: 20,
+                  height: 20,
+                  borderRadius: 9999,
+                  backgroundColor: "#fff",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.35)",
+                  transition: "transform 140ms ease",
+                  transform: joinAnonymous ? "translateX(20px)" : "translateX(0px)",
+                }}
               />
             </button>
           </div>

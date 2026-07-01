@@ -671,6 +671,18 @@ export const eventsApi = {
       const authId = await getCurrentUserAuthId();
       if (!authId) throw new Error("Not authenticated");
 
+      // The insert runs under RLS as `authenticated` (policy
+      // events_insert_authenticated). Bridge the Better Auth session into a
+      // Supabase JWT first via setSession — without it the client is `anon`,
+      // which lacks INSERT on events and fails with
+      // "permission denied for table events". (Mirrors updateEvent below.)
+      try {
+        const { ensureSupabaseJwt } = await import("../auth/supabase-jwt");
+        await ensureSupabaseJwt();
+      } catch {
+        // Non-fatal: fall through with the current session.
+      }
+
       // Use authId for host_id (text column)
       const insertPayload: Record<string, any> = {
         [DB.events.hostId]: authId,
@@ -683,9 +695,13 @@ export const eventsApi = {
         ["images"]: eventData.images || [],
         [DB.events.youtubeVideoUrl]: eventData.youtubeVideoUrl || null,
         [DB.events.price]: eventData.price || 0,
-        [DB.events.maxAttendees]: eventData.maxAttendees,
         [DB.events.isOnline]: eventData.isOnline || false,
       };
+
+      // Guard: never insert max_attendees as `undefined`/NaN (it's the one
+      // formerly-unconditional field). Only set a real capacity.
+      if (eventData.maxAttendees != null && Number.isFinite(Number(eventData.maxAttendees)))
+        insertPayload[DB.events.maxAttendees] = Number(eventData.maxAttendees);
 
       // V2 fields (additive — only set if provided)
       if (eventData.locationLat != null)
@@ -699,8 +715,14 @@ export const eventsApi = {
       if (eventData.locationType)
         insertPayload.location_type = eventData.locationType;
       insertPayload.visibility = normalizeVisibility(eventData.visibility);
-      if (eventData.eventCategory)
-        insertPayload.category = eventData.eventCategory;
+      // `events` has a `category` column but NO `event_type` column, so the
+      // structured Event Type persists here. Prefer event_type over the legacy
+      // tag-derived `category` and the older `eventCategory` alias. (Previously
+      // this read only `eventCategory`, which the form never set → category and
+      // the entire Event Type picker were silently dropped on every create.)
+      const resolvedCategory =
+        eventData.event_type || eventData.category || eventData.eventCategory;
+      if (resolvedCategory) insertPayload.category = resolvedCategory;
       if (eventData.ageRestriction)
         insertPayload.age_restriction = eventData.ageRestriction;
       if (eventData.endDate) insertPayload.end_date = eventData.endDate;
@@ -713,6 +735,11 @@ export const eventsApi = {
       if (eventData.perks) insertPayload.perks = eventData.perks;
       if (eventData.flyerImageUrl)
         insertPayload.flyer_image_url = eventData.flyerImageUrl;
+      // Video flyer: when present, plays in feed; static contexts use the
+      // flyer image as poster (no separate poster column — flyer image
+      // IS the poster). Column shipped by the 20260613004000 migration.
+      if (eventData.videoFlyerUrl)
+        insertPayload.video_flyer_url = eventData.videoFlyerUrl;
       if (eventData.nsfw != null) insertPayload.nsfw = eventData.nsfw;
 
       const { data, error } = await supabase

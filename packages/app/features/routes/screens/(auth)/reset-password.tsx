@@ -30,6 +30,16 @@ export default function ResetPasswordScreen() {
   useEffect(() => {
     const validateResetState = async () => {
       try {
+        // Web: the email link carries the recovery token in ?token= — that's
+        // all we need (token-based reset; no session/cookie, which never worked
+        // cross-domain on web). Show the form immediately.
+        if (params.token) {
+          setStatus("ready");
+          AppTrace.trace("RECOVERY", "reset_link_ready");
+          return;
+        }
+
+        // Native / legacy: the link established a recovery session.
         const session = await getSession();
         if (session) {
           setStatus("ready");
@@ -59,7 +69,7 @@ export default function ResetPasswordScreen() {
       AppTrace.trace("RECOVERY", "reset_submit_started");
 
       try {
-        const response = await submitPasswordReset(value.password);
+        const response = await submitPasswordReset(value.password, params.token);
 
         if (response?.error) {
           AppTrace.warn("RECOVERY", "reset_submit_failed", {
