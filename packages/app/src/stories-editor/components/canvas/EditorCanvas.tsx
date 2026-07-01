@@ -16,6 +16,7 @@
 // ============================================================
 
 import React, { useMemo, useRef } from "react";
+import { Platform } from "react-native";
 import {
   Canvas,
   useImage,
@@ -702,12 +703,36 @@ const TextElementRenderer: React.FC<{
           : undefined,
     };
 
-    const builder = Skia.ParagraphBuilder.Make({
+    // Pass the platform FontMgr so Skia's shaper can fall back to system
+    // emoji + CJK + other glyph coverage that isn't in the custom font.
+    // Without this, ParagraphBuilder uses an empty font collection: emoji
+    // characters render as `.notdef` (tofu boxes) OR the layout collapses
+    // (getLongestLine returns 0), which is what breaks the editor when a
+    // user adds an emoji to a text overlay.
+    // Include an explicit emoji font in the family list so Skia looks
+    // there first for the emoji glyphs (system fallback is inconsistent
+    // across Android versions).
+    const paragraphStyle = {
       textAlign: toParagraphAlign(textAlign),
       textStyle,
+    };
+    const emojiFontFamily = Platform.select({
+      ios: "Apple Color Emoji",
+      android: "Noto Color Emoji",
+      default: undefined,
     });
+    const shapedTextStyle = {
+      ...textStyle,
+      fontFamilies: emojiFontFamily
+        ? [...(textStyle.fontFamilies ?? []), emojiFontFamily]
+        : textStyle.fontFamilies,
+    };
+    const builder = Skia.ParagraphBuilder.Make(
+      paragraphStyle,
+      Skia.TypefaceFontProvider.Make(),
+    );
 
-    builder.pushStyle(textStyle);
+    builder.pushStyle(shapedTextStyle);
     builder.addText(content);
     builder.pop();
 
