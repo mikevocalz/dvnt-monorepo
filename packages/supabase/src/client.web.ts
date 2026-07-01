@@ -2,6 +2,23 @@ import { createClient } from "@supabase/supabase-js";
 
 const FALLBACK_SUPABASE_URL = "https://npfjanxturvmjyevoyfo.supabase.co";
 
+// Fallback anon key for the SAME public project as FALLBACK_SUPABASE_URL.
+// This is intentionally the browser-facing "anon" JWT — it is designed to
+// be embedded in a client bundle and is protected server-side by RLS. It
+// is NOT a service_role key and does not grant any privilege beyond what
+// an unauthenticated visitor has.
+//
+// Why we ship it as a constant: on Vercel the NEXT_PUBLIC_* Supabase env
+// vars were never configured, so every build inlined the empty-key
+// placeholder ("anon-key-unset-at-build") into the client bundle. Every
+// browser-side supabase call then silently failed — publishing a story,
+// creating a post, and creating an event all appeared to "not do
+// anything" because the writes never reached the DB. Committing the
+// public anon key as a build-time fallback closes this class of
+// deployment misconfiguration without giving up any secret material.
+const FALLBACK_SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmphbnh0dXJ2bWp5ZXZveWZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg0MjA0MjMsImV4cCI6MjA4Mzk5NjQyM30.v88MMGqv2db8hn8llr5aToKbKUDOHz-AxZbZYA5RLGM";
+
 // Web reads import.meta.env.VITE_* first, then falls back to EXPO_PUBLIC_*
 // (injected into the bundle via Vite `define`) so existing .env keys keep
 // working. (PROMPT 0 §3.)
@@ -30,22 +47,12 @@ const rawAnonKey =
 const supabaseAnonKey =
   typeof rawAnonKey === "string" && rawAnonKey.startsWith("eyJ")
     ? rawAnonKey
-    : "";
+    : FALLBACK_SUPABASE_ANON_KEY;
 
-if (!supabaseAnonKey) {
-  console.error(
-    "[Supabase] anon key missing! Set VITE_SUPABASE_ANON_KEY or EXPO_PUBLIC_SUPABASE_ANON_KEY in .env",
-  );
-}
-
-// createClient throws "supabaseKey is required" on an empty key, which aborts
-// the ENTIRE Next.js static export on environments where the Supabase env isn't
-// present at build time (e.g. Vercel Preview — the DB/anon vars are
-// Production-only). Construct with a harmless placeholder instead: requests made
-// with it simply fail and our data-fetchers already degrade to empty, so a
-// missing key yields an empty page rather than a broken build. Production builds
-// (real key present) are unaffected.
-const clientKey = supabaseAnonKey || "anon-key-unset-at-build";
+// Fall back cleanly to the committed anon key rather than a placeholder
+// string that trips supabase-js at runtime — writes and reads keep
+// working even when the env var isn't wired.
+const clientKey = supabaseAnonKey;
 
 // SSR-safe: on the Next.js server `localStorage` is undefined. Guard every
 // access so supabase's session bootstrap / auto-refresh tick can't crash the
