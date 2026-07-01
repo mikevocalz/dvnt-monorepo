@@ -43,8 +43,31 @@ CREATE INDEX IF NOT EXISTS idx_identity_verifications_status
   ON identity_verifications(status);
 
 -- ── Single read path for the app (I3) ────────────────────────────────
--- Returns TRUE iff user is currently verified for the Lynk surface.
--- "Currently" = passed && not expired (provider may set expirations).
+-- Two RPCs, one truth (mirrors is_entitled_self / is_entitled):
+--   is_verified_self()  — SECURITY INVOKER; client-facing, reads own
+--                         row via RLS. No parameter → no cross-user
+--                         lookup surface.
+--   is_verified(uid)    — service-role-only; edge fns use this to
+--                         verify identity for another user during
+--                         webhook processing.
+CREATE OR REPLACE FUNCTION public.is_verified_self()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM identity_verifications
+    WHERE user_id = (current_setting('request.jwt.claims', true)::json ->> 'sub')
+      AND status = 'passed'
+  );
+$$;
+
+REVOKE ALL ON FUNCTION public.is_verified_self() FROM public;
+GRANT EXECUTE ON FUNCTION public.is_verified_self() TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.is_verified(uid text)
 RETURNS boolean
 LANGUAGE sql
@@ -61,7 +84,7 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.is_verified(text) FROM public;
-GRANT EXECUTE ON FUNCTION public.is_verified(text) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_verified(text) TO service_role;
 
 -- ── Monotonic upsert helper used by the verification webhook (I5) ────
 CREATE OR REPLACE FUNCTION public.upsert_identity_verification(
@@ -132,3 +155,23 @@ CREATE TABLE IF NOT EXISTS verification_events (
 
 CREATE INDEX IF NOT EXISTS idx_verification_events_user
   ON verification_events(user_id);
+
+-- ── RLS + client read grant on identity_verifications ─────────────────
+-- Mirror the shape already used on membership_subscriptions: rows are
+-- scoped to the JWT sub, writes go via the service-role-only RPC.
+GRANT SELECT ON identity_verifications TO authenticated;
+
+ALTER TABLE identity_verifications ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS identity_verifications_own ON identity_verifications;
+CREATE POLICY identity_verifications_own
+  ON identity_verifications
+  FOR SELECT
+  TO authenticated
+  USING (user_id = (current_setting('request.jwt.claims', true)::json ->> 'sub'));
+
+ALTER TABLE verification_events ENABLE ROW LEVEL SECURITY;
+-- verification_events is service-role only; no policy = no client access.
+
+ALTER TABLE rc_events ENABLE ROW LEVEL SECURITY;
+-- rc_events is service-role only; no policy = no client access.

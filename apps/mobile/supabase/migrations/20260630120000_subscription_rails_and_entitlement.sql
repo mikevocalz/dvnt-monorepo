@@ -30,11 +30,41 @@ CREATE INDEX IF NOT EXISTS idx_membership_subs_provider_ref
   ON membership_subscriptions(provider_ref);
 
 -- ── Single entitlement resolver (I3) ────────────────────────────────
--- Returns the active plan_key for `uid`, or null.
--- "Active" = status in ('active','trialing') and inside the paid window,
--- OR status='past_due' and still inside the dunning grace window.
--- Security-definer so callers can rely on it under RLS without leaking
--- the row body.
+-- Two RPCs, one truth:
+--   is_entitled_self()   — SECURITY INVOKER; the client reads their own
+--                          row via RLS. Silences the Supabase
+--                          `authenticated_security_definer_function_executable`
+--                          advisor and prevents any cross-user lookup by
+--                          construction (no parameter to pass another uid).
+--   is_entitled(uid)     — service-role-only; edge functions use this
+--                          during webhook reconciliation to check a
+--                          different user's entitlement. GRANTED ONLY
+--                          to service_role so a signed-in client cannot
+--                          enumerate other users' plan tiers.
+CREATE OR REPLACE FUNCTION public.is_entitled_self()
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+  SELECT plan_key
+  FROM membership_subscriptions
+  WHERE user_id = (current_setting('request.jwt.claims', true)::json ->> 'sub')
+    AND (
+      (status IN ('active','trialing')
+        AND (current_period_end IS NULL OR current_period_end > now()))
+      OR (status = 'past_due'
+        AND grace_period_ends_at IS NOT NULL
+        AND grace_period_ends_at > now())
+    )
+  ORDER BY current_period_end DESC NULLS LAST
+  LIMIT 1;
+$$;
+
+REVOKE ALL ON FUNCTION public.is_entitled_self() FROM public;
+GRANT EXECUTE ON FUNCTION public.is_entitled_self() TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.is_entitled(uid text)
 RETURNS text
 LANGUAGE sql
@@ -57,7 +87,7 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.is_entitled(text) FROM public;
-GRANT EXECUTE ON FUNCTION public.is_entitled(text) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_entitled(text) TO service_role;
 
 -- ── Monotonic upsert helper used by both webhooks (I5) ─────────────
 -- A delayed/replayed event with an older `event_created_at` is a no-op:
