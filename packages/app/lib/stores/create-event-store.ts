@@ -94,6 +94,10 @@ interface DraftFields {
   coOrganizers: CoOrganizer[];
   flyerImage: string | null;
   flyerMediaType: "image" | "video";
+  // Fallback still image shown when the primary flyer is a video and the
+  // player can't autoplay (RSC, low-power mode, accessibility prefs). Only
+  // consulted when `flyerMediaType === "video"`. Optional.
+  flyerFallbackImage: string | null;
   eventType: EventType | null;
   disclaimers: string;
   isNsfw: boolean;
@@ -151,6 +155,7 @@ interface CreateEventActions {
   ) => void;
   setFlyerImage: (v: string | null) => void;
   setFlyerMediaType: (v: "image" | "video") => void;
+  setFlyerFallbackImage: (v: string | null) => void;
   setEventType: (v: EventType | null) => void;
   setDisclaimers: (v: string) => void;
   setIsNsfw: (v: boolean) => void;
@@ -222,6 +227,7 @@ const DRAFT_DEFAULTS: DraftFields = {
   coOrganizers: [],
   flyerImage: null,
   flyerMediaType: "image",
+  flyerFallbackImage: null,
   eventType: null,
   disclaimers: "",
   isNsfw: false,
@@ -283,6 +289,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         set((s) => ({ ticketTiers: resolve(v, s.ticketTiers) })),
       setFlyerImage: (v) => set({ flyerImage: v }),
       setFlyerMediaType: (v) => set({ flyerMediaType: v }),
+      setFlyerFallbackImage: (v) => set({ flyerFallbackImage: v }),
       setEventType: (v) => set({ eventType: v }),
       setDisclaimers: (v) => set({ disclaimers: v }),
       setIsNsfw: (v) => set({ isNsfw: v }),
@@ -430,6 +437,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         coOrganizers: state.coOrganizers,
         flyerImage: state.flyerImage,
         flyerMediaType: state.flyerMediaType,
+        flyerFallbackImage: state.flyerFallbackImage,
         eventType: state.eventType,
         disclaimers: state.disclaimers,
         isNsfw: state.isNsfw,

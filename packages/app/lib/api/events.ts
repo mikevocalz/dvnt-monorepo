@@ -735,6 +735,11 @@ export const eventsApi = {
       if (eventData.perks) insertPayload.perks = eventData.perks;
       if (eventData.flyerImageUrl)
         insertPayload.flyer_image_url = eventData.flyerImageUrl;
+      // Video flyer: when present, plays in feed; static contexts use the
+      // flyer image as poster (no separate poster column — flyer image
+      // IS the poster). Column shipped by the 20260613004000 migration.
+      if (eventData.videoFlyerUrl)
+        insertPayload.video_flyer_url = eventData.videoFlyerUrl;
       if (eventData.nsfw != null) insertPayload.nsfw = eventData.nsfw;
 
       const { data, error } = await supabase

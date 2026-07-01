@@ -90,6 +90,13 @@ export const useAuthStore = create<AuthStore>()(
         console.log("[AuthStore] setUser:", user?.id || "null");
         const status: AuthStatus = user ? "authenticated" : "unauthenticated";
         set({ user, isAuthenticated: !!user, authStatus: status });
+        // Bind RC identity to DVNT user_id so the RC webhook never lands an
+        // anonymous app_user_id (I1). Lazy-required + idempotent — safe to
+        // call from a build without the native module linked.
+        if (user?.id) {
+          const { loginRC } = require("@/lib/billing/revenuecat");
+          void loginRC(user.id);
+        }
       },
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
@@ -111,6 +118,12 @@ export const useAuthStore = create<AuthStore>()(
         } catch (error) {
           console.error("[AuthStore] logout error:", error);
         }
+        // Detach RC identity so the next sign-in on this device doesn't
+        // inherit the previous user's RC state.
+        try {
+          const { logoutRC } = require("@/lib/billing/revenuecat");
+          await logoutRC();
+        } catch (_) {}
         // End iOS Live Activity so it doesn't linger after sign-out
         const {
           endLiveActivity,

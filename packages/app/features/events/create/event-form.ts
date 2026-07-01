@@ -183,8 +183,15 @@ export interface BuiltEventMedia {
   image?: string;
   /** Additional images as [{ type:"image", url }]. */
   images?: { type: string; url: string }[];
-  /** Flyer (portrait photo/video) URL. */
+  /** Still flyer image URL (3:5). This single field serves both as the
+   *  flyer in static contexts (wallet pass, OG image, ICS share) AND as
+   *  the poster/fallback when a video flyer is also set. There is no
+   *  separate `videoPosterUrl` — flyer = poster. */
   flyerImageUrl?: string;
+  /** Video flyer URL — hero, autoplay-muted in feed. Priority over the
+   *  still flyer for display when both are set. Static contexts always
+   *  use `flyerImageUrl` (never the video). */
+  videoFlyerUrl?: string;
 }
 
 export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {}) {
@@ -204,6 +211,7 @@ export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {})
     image: media.image,
     images: media.images,
     flyerImageUrl: media.flyerImageUrl,
+    videoFlyerUrl: media.videoFlyerUrl,
     youtubeVideoUrl: d.youtubeUrl.trim() || undefined,
     locationLat: d.locationData?.latitude,
     locationLng: d.locationData?.longitude,

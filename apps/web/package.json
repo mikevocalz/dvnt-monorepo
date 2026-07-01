@@ -17,8 +17,8 @@
   },
   "dependencies": {
     "@dvnt/api": "workspace:*",
-    "@dvnt/cms": "workspace:*",
     "@dvnt/app": "workspace:*",
+    "@dvnt/cms": "workspace:*",
     "@dvnt/core": "workspace:*",
     "@dvnt/functions": "workspace:*",
     "@dvnt/observability": "workspace:*",
@@ -60,7 +60,8 @@
     "resend": "^6.12.4",
     "sharp": "0.34.2",
     "sonner": "^1.7.4",
-    "tailwind-scrollbar": "^4.0.2"
+    "tailwind-scrollbar": "^4.0.2",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

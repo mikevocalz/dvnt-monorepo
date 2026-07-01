@@ -25,6 +25,7 @@ import {
   Plus,
   Type as TypeIcon,
   Image as ImageIcon,
+  CalendarPlus,
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
@@ -337,13 +338,22 @@ export function CreatePostScreen() {
           {[
             { key: "media" as const, label: "Media", icon: ImageIcon, description: "Photos or video" },
             { key: "text" as const, label: "Text", icon: TypeIcon, description: "Text only" },
+            { key: "event" as const, label: "Event", icon: CalendarPlus, description: "Party, meetup, etc." },
           ].map((option) => {
             const Icon = option.icon;
             const isActive = postKind === option.key;
             return (
               <button
                 key={option.key}
-                onClick={() => handleSetPostKind(option.key)}
+                onClick={() => {
+                  if (option.key === "event") {
+                    // Web parity with mobile: Event tab navigates out to the
+                    // dedicated events flow rather than setting postKind.
+                    router.push("/feed/events/create");
+                    return;
+                  }
+                  handleSetPostKind(option.key);
+                }}
                 className={`flex-1 min-w-0 rounded-xl px-2 py-2.5 sm:py-3 text-left border ${
                   isActive ? "bg-cyan-500/16 border-cyan-400/40" : "border-transparent"
                 }`}

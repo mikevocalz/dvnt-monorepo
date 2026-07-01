@@ -16,7 +16,7 @@
  * Known web follow-ups (present on mobile, queued next): multi-tier ticket
  * editor and co-organizer search. Single-tier ticketing is fully wired here.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "solito/navigation";
 import {
   Calendar,
@@ -26,6 +26,8 @@ import {
   X,
   ChevronDown,
   Plus,
+  Trash2,
+  Search,
 } from "lucide-react";
 import { VenueSearchInput } from "@dvnt/ui";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
@@ -36,6 +38,8 @@ import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { usersApi } from "@dvnt/app/lib/api/users";
+import { eventsApi } from "@dvnt/app/lib/api/events";
 import {
   EVENT_TYPE_OPTIONS,
   SUGGESTED_TAGS,
@@ -168,38 +172,116 @@ export function CreateEventScreen() {
       // file picker — fetchable in-session — which uploadToServer turns into a
       // real media-upload URL. (Previously the blob URL was sent verbatim and
       // never resolved server-side.) Already-http URLs pass through untouched.
-      let image: string | undefined;
-      const cover = s.flyerImage;
-      if (cover && /^(blob:|data:|file:)/i.test(cover)) {
-        const up = await uploadToServer(cover, "events");
+      // Upload the primary flyer slot (image OR video). Already-hosted
+      // URLs pass through; blob:/data:/file: URLs are uploaded fresh.
+      const uploadIfLocal = async (url: string | null | undefined) => {
+        if (!url) return undefined;
+        if (!/^(blob:|data:|file:)/i.test(url)) return url;
+        const up = await uploadToServer(url, "events");
         if (!up.success || !up.url) {
           throw new Error(
-            up.error || "Couldn't upload the cover image. Re-select it and try again.",
+            up.error || "Couldn't upload an image. Re-select it and try again.",
           );
         }
-        image = up.url;
-      } else if (cover) {
-        image = cover;
+        return up.url;
+      };
+
+      const primaryUrl = await uploadIfLocal(s.flyerImage);
+      // Fallback (poster) image: present when the primary is a video AND
+      // the user uploaded a separate still. Stored in flyerFallbackImage.
+      const posterUrl = await uploadIfLocal(s.flyerFallbackImage);
+
+      // Map the two-slot store into the persistence fields. Video flyer
+      // wins for display; the still flyer IS the poster for static
+      // contexts (wallet pass, OG, .ics) — single column, no
+      // separate poster.
+      const isVideoPrimary = s.flyerMediaType === "video" && !!primaryUrl;
+      const videoFlyerUrl = isVideoPrimary ? primaryUrl : undefined;
+      const flyerImageUrl = isVideoPrimary ? posterUrl ?? undefined : primaryUrl;
+      const image = flyerImageUrl ?? primaryUrl;
+
+      // Secondary gallery (`eventImages`). Upload any locally-picked blobs;
+      // pass already-uploaded URLs through. A single failed image fails the
+      // publish — silently dropping an image the user explicitly added is
+      // worse than asking them to retry.
+      const galleryUrls: string[] = [];
+      for (const url of s.eventImages) {
+        if (/^(blob:|data:|file:)/i.test(url)) {
+          const up = await uploadToServer(url, "events");
+          if (!up.success || !up.url) {
+            throw new Error(
+              up.error || "Couldn't upload an additional image. Re-select it and try again.",
+            );
+          }
+          galleryUrls.push(up.url);
+        } else {
+          galleryUrls.push(url);
+        }
       }
 
-      const payload = buildEventInsert(s, { image, flyerImageUrl: image });
+      const payload = buildEventInsert(s, {
+        image,
+        flyerImageUrl,
+        videoFlyerUrl,
+        images: galleryUrls.map((url) => ({ type: "image", url })),
+      });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const created = await createEvent.mutateAsync(payload as any);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const id = (created as any)?.id;
 
-      // Create a ticket type so the event is actually purchasable/RSVP-able.
-      // (Web previously wrote only a flat price and created no ticket type.)
+      // Create ticket types so the event is actually purchasable/RSVP-able.
+      // Multi-tier branch wins when the user added explicit tiers;
+      // otherwise we keep the single-price-into-one-tier fallback so a
+      // user who never opened the tier editor still publishes correctly.
       if (s.ticketingEnabled && id) {
-        const priceCents = Math.round((parseFloat(s.ticketPrice) || 0) * 100);
-        const qty = s.maxAttendees ? parseInt(s.maxAttendees, 10) : 200;
-        await ticketTypesApi.create({
-          eventId: String(id),
-          name: priceCents === 0 ? "Free" : "General Admission",
-          priceCents,
-          quantityTotal: qty,
-          maxPerUser: 4,
-        });
+        if (s.ticketTiers.length > 0) {
+          // Best-effort sequential creation — failing one tier shouldn't
+          // silently swallow the rest, so any error propagates to the
+          // catch below and the user is told to retry.
+          for (const tier of s.ticketTiers) {
+            await ticketTypesApi.create({
+              eventId: String(id),
+              name: tier.name || "General Admission",
+              priceCents: tier.priceCents,
+              quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
+              maxPerUser:
+                tier.maxPerUser > 0 ? tier.maxPerUser : s.simpleMaxPerUser,
+            });
+          }
+        } else {
+          const priceCents = Math.round((parseFloat(s.ticketPrice) || 0) * 100);
+          const qty = s.maxAttendees ? parseInt(s.maxAttendees, 10) : 200;
+          await ticketTypesApi.create({
+            eventId: String(id),
+            name: priceCents === 0 ? "Free" : "General Admission",
+            priceCents,
+            quantityTotal: qty,
+            maxPerUser: s.simpleMaxPerUser > 0 ? s.simpleMaxPerUser : 4,
+          });
+        }
+      }
+
+      // Invite each co-organizer. Failure to invite one shouldn't roll back
+      // the event — the organizer can retry from the dashboard — so we log
+      // and toast a soft warning instead of throwing.
+      if (id && s.coOrganizers.length > 0) {
+        const failed: string[] = [];
+        for (const co of s.coOrganizers) {
+          try {
+            await eventsApi.addCoOrganizer(String(id), co.username, "editor");
+          } catch (err) {
+            console.warn("[create-event] addCoOrganizer failed", co.username, err);
+            failed.push(co.username);
+          }
+        }
+        if (failed.length > 0) {
+          showToast(
+            "warning",
+            "Some co-organizers weren't invited",
+            `Retry from the event dashboard: ${failed.map((u) => "@" + u).join(", ")}.`,
+          );
+        }
       }
 
       s.resetDraft();
@@ -216,11 +298,40 @@ export function CreateEventScreen() {
     }
   };
 
-  const onCoverPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Two-slot flyer model. The video slot is the priority — when both are
+  // present, video plays and the image is the still-fallback (poster).
+  // Uploading a video AFTER an image promotes it to primary automatically;
+  // the previously-picked image stays as the fallback. Uploading an image
+  // when a video is already set lands it in the fallback slot. Uploading an
+  // image when there's no video makes it the primary.
+  const onVideoFlyerPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    s.setFlyerMediaType(file.type.startsWith("video/") ? "video" : "image");
+    if (!file.type.startsWith("video/")) return;
+    // If an image had been picked as primary, demote it to the fallback
+    // slot so the user doesn't lose it.
+    if (s.flyerImage && s.flyerMediaType === "image" && !s.flyerFallbackImage) {
+      s.setFlyerFallbackImage(s.flyerImage);
+    }
     s.setFlyerImage(URL.createObjectURL(file));
+    s.setFlyerMediaType("video");
+    e.currentTarget.value = "";
+  };
+
+  const onImageFlyerPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return;
+    const url = URL.createObjectURL(file);
+    if (s.flyerMediaType === "video" && s.flyerImage) {
+      // Video is in the primary slot — this image becomes the fallback.
+      s.setFlyerFallbackImage(url);
+    } else {
+      // No video present — image takes the primary slot.
+      s.setFlyerImage(url);
+      s.setFlyerMediaType("image");
+    }
+    e.currentTarget.value = "";
   };
 
   const isVideo = s.flyerMediaType === "video";
@@ -346,44 +457,151 @@ export function CreateEventScreen() {
             </Section>
 
             <Section title="Media">
-              <label className="flex flex-col items-center justify-center gap-2 h-44 rounded-xl border border-dashed border-white/20 bg-white/[0.03] cursor-pointer text-white/55 overflow-hidden">
-                {s.flyerImage ? (
-                  isVideo ? (
-                    <video
-                      src={s.flyerImage}
-                      className="w-full h-full object-cover rounded-xl"
-                      muted
-                      playsInline
+              {/* Two flyer slots: video is priority. When both are filled,
+                  the video plays and the image is the still-fallback /
+                  poster. When only one is filled, that one is the flyer. */}
+              <div className="grid grid-cols-2 gap-3">
+                {/* Video flyer (priority). */}
+                <div className="flex flex-col gap-1.5">
+                  <span className={labelCls}>Video flyer (priority)</span>
+                  <label className="relative flex h-40 cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-dashed border-white/20 bg-white/[0.03] text-white/55">
+                    {isVideo && s.flyerImage ? (
+                      <video
+                        src={s.flyerImage}
+                        className="absolute inset-0 h-full w-full object-cover"
+                        muted
+                        playsInline
+                      />
+                    ) : (
+                      <>
+                        <ImagePlus size={22} />
+                        <span className="text-xs">Upload .mp4 / .mov</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept="video/*"
+                      className="hidden"
+                      onChange={onVideoFlyerPick}
                     />
-                  ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={s.flyerImage}
-                      alt=""
-                      className="w-full h-full object-cover rounded-xl"
+                  </label>
+                  {isVideo && s.flyerImage ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Promote the fallback (if any) into the primary
+                        // slot when the video is removed — user keeps any
+                        // still they uploaded.
+                        if (s.flyerFallbackImage) {
+                          s.setFlyerImage(s.flyerFallbackImage);
+                          s.setFlyerMediaType("image");
+                          s.setFlyerFallbackImage(null);
+                        } else {
+                          s.setFlyerImage(null);
+                          s.setFlyerMediaType("image");
+                        }
+                      }}
+                      className="self-start text-xs text-white/50 flex items-center gap-1"
+                    >
+                      <X size={12} /> Remove video
+                    </button>
+                  ) : null}
+                </div>
+
+                {/* Image flyer (primary fallback). */}
+                <div className="flex flex-col gap-1.5">
+                  <span className={labelCls}>Flyer image</span>
+                  <label className="relative flex h-40 cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-dashed border-white/20 bg-white/[0.03] text-white/55">
+                    {(() => {
+                      const url = isVideo ? s.flyerFallbackImage : s.flyerImage;
+                      return url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={url}
+                          alt=""
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
+                      ) : (
+                        <>
+                          <ImagePlus size={22} />
+                          <span className="text-xs">Upload image</span>
+                        </>
+                      );
+                    })()}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={onImageFlyerPick}
                     />
-                  )
-                ) : (
-                  <>
-                    <ImagePlus size={26} />
-                    <span className="text-sm">Upload cover image or video</span>
-                  </>
-                )}
-                <input
-                  type="file"
-                  accept="image/*,video/*"
-                  className="hidden"
-                  onChange={onCoverPick}
-                />
-              </label>
-              {s.flyerImage ? (
-                <button
-                  onClick={() => s.setFlyerImage(null)}
-                  className="self-start text-xs text-white/50 flex items-center gap-1"
-                >
-                  <X size={12} /> Remove cover
-                </button>
-              ) : null}
+                  </label>
+                  {(isVideo ? s.flyerFallbackImage : s.flyerImage) ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isVideo) {
+                          s.setFlyerFallbackImage(null);
+                        } else {
+                          s.setFlyerImage(null);
+                        }
+                      }}
+                      className="self-start text-xs text-white/50 flex items-center gap-1"
+                    >
+                      <X size={12} /> Remove image
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* Secondary image gallery. Mirrors mobile's `eventImages[]`.
+                  Selecting files immediately previews via blob URLs; the
+                  publish flow uploads each blob to the CDN. */}
+              <Field label="Additional images (optional)">
+                <div className="flex flex-wrap gap-2">
+                  {s.eventImages.map((url, idx) => (
+                    <div
+                      key={`${url}-${idx}`}
+                      className="relative h-20 w-20 overflow-hidden rounded-xl bg-white/5"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          s.setEventImages(s.eventImages.filter((_, i) => i !== idx))
+                        }
+                        className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black"
+                        aria-label="Remove image"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                  <label className="flex h-20 w-20 cursor-pointer items-center justify-center rounded-xl border border-dashed border-white/20 bg-white/[0.03] text-white/55 hover:bg-white/[0.06]">
+                    <Plus size={18} />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        const files = e.target.files;
+                        if (!files || files.length === 0) return;
+                        const urls = Array.from(files).map((f) =>
+                          URL.createObjectURL(f),
+                        );
+                        s.setEventImages([...s.eventImages, ...urls]);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+              </Field>
+
               <Field label="YouTube video (optional)">
                 <input
                   className={inputCls}
@@ -408,30 +626,82 @@ export function CreateEventScreen() {
               </label>
               {s.ticketingEnabled ? (
                 <>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Price (USD)" error={errors.price}>
-                      <input
-                        className={inputCls}
-                        inputMode="decimal"
-                        placeholder="0.00"
-                        value={s.ticketPrice}
-                        onChange={(e) => s.setTicketPrice(e.target.value)}
-                      />
-                    </Field>
-                    <Field label="Capacity">
-                      <input
-                        className={inputCls}
-                        inputMode="numeric"
-                        placeholder="Unlimited"
-                        value={s.maxAttendees}
-                        onChange={(e) => s.setMaxAttendees(e.target.value)}
-                      />
-                    </Field>
-                  </div>
-                  <p className="text-xs text-white/40">
-                    Paid tickets must be at least $2.00. Need tiers, add-ons or
-                    promo codes? Use the mobile app for now.
-                  </p>
+                  {s.ticketTiers.length === 0 ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="Price (USD)" error={errors.price}>
+                          <input
+                            className={inputCls}
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            value={s.ticketPrice}
+                            onChange={(e) => s.setTicketPrice(e.target.value)}
+                          />
+                        </Field>
+                        <Field label="Capacity">
+                          <input
+                            className={inputCls}
+                            inputMode="numeric"
+                            placeholder="Unlimited"
+                            value={s.maxAttendees}
+                            onChange={(e) => s.setMaxAttendees(e.target.value)}
+                          />
+                        </Field>
+                      </div>
+                      <p className="text-xs text-white/40">
+                        Paid tickets must be at least $2.00.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Seed the array with one tier carrying the
+                          // current single-tier values; users keep their
+                          // typed price/capacity instead of losing it.
+                          const priceCents = Math.round(
+                            (parseFloat(s.ticketPrice) || 0) * 100,
+                          );
+                          const quantity =
+                            parseInt(s.maxAttendees, 10) > 0
+                              ? parseInt(s.maxAttendees, 10)
+                              : 0;
+                          s.setTicketTiers([
+                            {
+                              id: `tier-${Date.now()}`,
+                              name: "General Admission",
+                              category: "admission",
+                              priceCents,
+                              quantity,
+                              maxPerUser: s.simpleMaxPerUser,
+                              description: "",
+                              saleStart: "",
+                              saleEnd: "",
+                            },
+                          ]);
+                        }}
+                        className="self-start text-xs font-semibold text-cyan-300 hover:text-cyan-200"
+                      >
+                        + Switch to multiple tiers
+                      </button>
+                    </>
+                  ) : (
+                    <TicketTiersEditor />
+                  )}
+
+                  <Field label="Max tickets per person">
+                    <input
+                      className={inputCls}
+                      inputMode="numeric"
+                      placeholder="4"
+                      value={String(s.simpleMaxPerUser)}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        s.setSimpleMaxPerUser(
+                          Number.isFinite(n) && n > 0 ? n : 1,
+                        );
+                      }}
+                    />
+                  </Field>
+
                   {hasPaidTier(s) ? (
                     <label className="flex items-start gap-2 text-sm text-white/75 mt-1">
                       <input
@@ -498,6 +768,13 @@ export function CreateEventScreen() {
               </label>
             </Section>
 
+            <Section
+              title="Co-organizers"
+              subtitle="People who can manage this event with you."
+            >
+              <CoOrganizersField />
+            </Section>
+
             {/* Advanced — progressive disclosure */}
             <button
               onClick={() => setShowAdvanced((v) => !v)}
@@ -526,6 +803,48 @@ export function CreateEventScreen() {
                         #{t}
                       </button>
                     ))}
+                    {s.tags
+                      .filter((t) => !(SUGGESTED_TAGS as readonly string[]).includes(t))
+                      .map((t) => (
+                        <span
+                          key={`custom-${t}`}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#3FDCFF] px-3 text-sm font-semibold text-black"
+                        >
+                          #{t}
+                          <button
+                            type="button"
+                            onClick={() => s.toggleTag(t)}
+                            aria-label={`Remove ${t}`}
+                            className="text-black/70 hover:text-black"
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      ))}
+                  </div>
+                  {/* Custom tag input — mirrors mobile's `customTag`
+                      field + addCustomTag(). Lowercases + dedups inside
+                      the store. */}
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      className={`${inputCls} flex-1`}
+                      placeholder="Add a custom tag…"
+                      value={s.customTag}
+                      onChange={(e) => s.setCustomTag(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          s.addCustomTag();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => s.addCustomTag()}
+                      className="h-11 rounded-xl bg-white/8 px-4 text-sm font-semibold text-white/80 hover:bg-white/12"
+                    >
+                      Add
+                    </button>
                   </div>
                 </Field>
                 <Field label="Dress code">
@@ -726,4 +1045,264 @@ function slugifyTitle(t: string): string {
     .split("-")
     .slice(0, 6)
     .join("-");
+}
+
+// ── TicketTiersEditor ───────────────────────────────────────────────
+// Per-tier name / price / quantity / per-user cap / sale window.
+// Mirrors the mobile multi-tier UI; stays inside the existing Section.
+function TicketTiersEditor() {
+  const ticketTiers = useCreateEventStore((st) => st.ticketTiers);
+  const setTicketTiers = useCreateEventStore((st) => st.setTicketTiers);
+  const update = (idx: number, patch: Partial<typeof ticketTiers[number]>) =>
+    setTicketTiers((cur) => cur.map((t, i) => (i === idx ? { ...t, ...patch } : t)));
+  const remove = (idx: number) =>
+    setTicketTiers((cur) => cur.filter((_, i) => i !== idx));
+  const add = () =>
+    setTicketTiers((cur) => [
+      ...cur,
+      {
+        id: `tier-${Date.now()}-${cur.length}`,
+        name: `Tier ${cur.length + 1}`,
+        category: "admission",
+        priceCents: 0,
+        quantity: 0,
+        maxPerUser: 4,
+        description: "",
+        saleStart: "",
+        saleEnd: "",
+      },
+    ]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {ticketTiers.map((tier, idx) => (
+        <div
+          key={tier.id}
+          className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 flex flex-col gap-2"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <input
+              className="flex-1 h-9 rounded-lg bg-white/8 px-2 text-sm font-semibold text-white outline-none"
+              value={tier.name}
+              placeholder="Tier name"
+              onChange={(e) => update(idx, { name: e.target.value })}
+            />
+            <button
+              type="button"
+              onClick={() => remove(idx)}
+              aria-label="Remove tier"
+              className="text-white/40 hover:text-white/80"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <input
+              className="h-9 rounded-lg bg-white/8 px-2 text-sm text-white outline-none"
+              inputMode="decimal"
+              placeholder="Price USD"
+              value={tier.priceCents > 0 ? (tier.priceCents / 100).toString() : ""}
+              onChange={(e) => {
+                const dollars = parseFloat(e.target.value);
+                update(idx, {
+                  priceCents: Number.isFinite(dollars) ? Math.round(dollars * 100) : 0,
+                });
+              }}
+            />
+            <input
+              className="h-9 rounded-lg bg-white/8 px-2 text-sm text-white outline-none"
+              inputMode="numeric"
+              placeholder="Quantity"
+              value={tier.quantity > 0 ? String(tier.quantity) : ""}
+              onChange={(e) => {
+                const n = parseInt(e.target.value, 10);
+                update(idx, { quantity: Number.isFinite(n) && n > 0 ? n : 0 });
+              }}
+            />
+            <input
+              className="h-9 rounded-lg bg-white/8 px-2 text-sm text-white outline-none"
+              inputMode="numeric"
+              placeholder="Max/person"
+              value={tier.maxPerUser > 0 ? String(tier.maxPerUser) : ""}
+              onChange={(e) => {
+                const n = parseInt(e.target.value, 10);
+                update(idx, { maxPerUser: Number.isFinite(n) && n > 0 ? n : 1 });
+              }}
+            />
+          </div>
+          <input
+            className="h-9 rounded-lg bg-white/8 px-2 text-xs text-white outline-none"
+            placeholder="Description (optional)"
+            value={tier.description}
+            onChange={(e) => update(idx, { description: e.target.value })}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[11px] text-white/55">
+              Sales start
+              <input
+                type="datetime-local"
+                className="mt-1 h-9 w-full rounded-lg bg-white/8 px-2 text-xs text-white outline-none"
+                value={tier.saleStart ? toLocalInput(tier.saleStart) : ""}
+                onChange={(e) =>
+                  update(idx, { saleStart: e.target.value ? fromLocalInput(e.target.value) : "" })
+                }
+              />
+            </label>
+            <label className="text-[11px] text-white/55">
+              Sales end
+              <input
+                type="datetime-local"
+                className="mt-1 h-9 w-full rounded-lg bg-white/8 px-2 text-xs text-white outline-none"
+                value={tier.saleEnd ? toLocalInput(tier.saleEnd) : ""}
+                onChange={(e) =>
+                  update(idx, { saleEnd: e.target.value ? fromLocalInput(e.target.value) : "" })
+                }
+              />
+            </label>
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={add}
+        className="self-start inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.04] px-3 h-9 text-xs font-semibold text-white/85 hover:bg-white/10"
+      >
+        <Plus size={14} /> Add tier
+      </button>
+    </div>
+  );
+}
+
+// ── CoOrganizersField ───────────────────────────────────────────────
+// Debounced user search + click-to-add + remove chip. Reuses the same
+// usersApi.searchUsers the mobile screen uses, so the result shape is
+// identical and the store's `addCoOrganizer` just consumes it.
+function CoOrganizersField() {
+  const coOrganizers = useCreateEventStore((st) => st.coOrganizers);
+  const addCoOrganizer = useCreateEventStore((st) => st.addCoOrganizer);
+  const removeCoOrganizer = useCreateEventStore((st) => st.removeCoOrganizer);
+  const search = useCreateEventStore((st) => st.coOrganizerSearch);
+  const setSearch = useCreateEventStore((st) => st.setCoOrganizerSearch);
+  const results = useCreateEventStore((st) => st.coOrganizerResults);
+  const setResults = useCreateEventStore((st) => st.setCoOrganizerResults);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ponytail: native setTimeout debounce. Adding @tanstack/react-pacer
+  // here is YAGNI for a single 300ms input.
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (search.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const { docs } = await usersApi.searchUsers(search.trim(), 6);
+        setResults(
+          (docs || []).map((u: any) => ({
+            id: u.id,
+            authId: u.authId,
+            username: u.username,
+            avatar: u.avatar,
+            name: u.name ?? "",
+          })),
+        );
+      } catch {
+        setResults([]);
+      }
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [search, setResults]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="relative">
+        <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-[#111] px-3 h-11">
+          <Search size={16} className="text-white/40" />
+          <input
+            className="flex-1 bg-transparent text-sm text-white placeholder:text-white/40 outline-none"
+            value={search}
+            placeholder="Search by username"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setResults([]);
+              }}
+              className="text-white/40 hover:text-white/80"
+              aria-label="Clear"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+        </div>
+        {results.length > 0 ? (
+          <div className="absolute left-0 right-0 mt-1 z-10 max-h-56 overflow-auto rounded-2xl border border-white/10 bg-[#0E1320] shadow-xl">
+            {results
+              .filter((u) => !coOrganizers.some((c) => c.id === u.id))
+              .map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  onClick={() => {
+                    addCoOrganizer({
+                      id: u.id,
+                      authId: u.authId,
+                      username: u.username,
+                      avatar: u.avatar,
+                    });
+                    setSearch("");
+                    setResults([]);
+                  }}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-white/5"
+                >
+                  {u.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={u.avatar}
+                      alt=""
+                      className="h-7 w-7 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="h-7 w-7 rounded-full bg-white/10" />
+                  )}
+                  <span className="text-sm text-white">@{u.username}</span>
+                </button>
+              ))}
+          </div>
+        ) : null}
+      </div>
+      {coOrganizers.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {coOrganizers.map((c) => (
+            <span
+              key={c.id}
+              className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-white"
+            >
+              @{c.username}
+              <button
+                type="button"
+                onClick={() => removeCoOrganizer(c.id)}
+                aria-label={`Remove ${c.username}`}
+                className="text-white/60 hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-white/45">
+          Type a username to search. Co-organizers can edit this event and view
+          its dashboard.
+        </p>
+      )}
+    </div>
+  );
 }
