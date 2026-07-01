@@ -435,6 +435,7 @@ function TextOverlay({
       }}
     >
       <span
+        dir="ltr"
         className="whitespace-pre-wrap break-words font-bold leading-tight"
         style={{
           color: element.color,
@@ -442,6 +443,11 @@ function TextOverlay({
           textAlign: element.textAlign,
           display: "block",
           letterSpacing: element.letterSpacing ?? 0,
+          // Force logical-left → logical-right; some browser/OS locale
+          // combinations were rendering the overlay backwards when
+          // inheriting a right-to-left context from an ancestor.
+          direction: "ltr",
+          unicodeBidi: "plaintext",
         }}
       >
         {element.content || " "}
@@ -550,6 +556,7 @@ function TextEditPanel({ element }: { element: TextElement }) {
   return (
     <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col gap-3">
       <textarea
+        dir="ltr"
         value={element.content}
         onChange={(e) =>
           useEditorStore.getState().updateElement(element.id, {
@@ -558,6 +565,7 @@ function TextEditPanel({ element }: { element: TextElement }) {
         }
         rows={2}
         placeholder="Type something…"
+        style={{ direction: "ltr", unicodeBidi: "plaintext" }}
         className="w-full resize-none rounded-xl bg-black/40 border border-white/10 px-3 py-2 text-white text-sm outline-none focus:border-[#3FDCFF]"
       />
 
