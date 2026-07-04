@@ -179,6 +179,19 @@ export function LoginScreen() {
             <Button onPress={form.handleSubmit} disabled={isSubmitting} loading={isSubmitting}>
               {isSubmitting ? 'Signing in...' : 'Sign in'}
             </Button>
+
+            <View style={styles.dividerRow}>
+              <View style={styles.divider} />
+              <Text style={styles.or}>Or</Text>
+              <View style={styles.divider} />
+            </View>
+
+            <View style={styles.signupRow}>
+              <Text style={styles.muted}>Don't have an account?</Text>
+              <Pressable onPress={() => router.push('/auth/signup')}>
+                <Text style={[styles.link, styles.signupLink, { color: P }]}>Sign up</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </ScrollView>

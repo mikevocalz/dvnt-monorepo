@@ -678,7 +678,13 @@ export const eventsApi = {
       // "permission denied for table events". (Mirrors updateEvent below.)
       try {
         const { ensureSupabaseJwt } = await import("../auth/supabase-jwt");
-        await ensureSupabaseJwt();
+        // ponytail: bound the best-effort JWT bridge so publish can never hang
+        // on it. Whatever wins the race, we fall through with the current
+        // session — this call is already declared non-fatal above.
+        await Promise.race([
+          ensureSupabaseJwt(),
+          new Promise((resolve) => setTimeout(resolve, 10000)),
+        ]);
       } catch {
         // Non-fatal: fall through with the current session.
       }

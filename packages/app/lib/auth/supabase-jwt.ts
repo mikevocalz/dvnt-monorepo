@@ -114,21 +114,33 @@ async function mintRemote(): Promise<MintedJwt | null> {
       "https://npfjanxturvmjyevoyfo.supabase.co";
     const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || "";
 
-    const res = await fetch(
-      `${supabaseUrl}/functions/v1/mint-supabase-jwt`,
-      {
-        method: "POST",
-        headers: {
-          // x-auth-token avoids the Supabase gateway rejecting a
-          // non-JWT in Authorization (the verify-session helper
-          // accepts both).
-          "x-auth-token": token,
-          apikey: anonKey,
-          "Content-Type": "application/json",
+    // ponytail: hard timeout so a hung/cold-starting mint edge fn can't freeze
+    // callers. This runs on the publish path (createEvent awaits it) — a
+    // never-resolving fetch here shows as "stuck on publishing" on web+mobile.
+    // On abort we fall through to null → anon-only, exactly like any mint error.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let res: Response;
+    try {
+      res = await fetch(
+        `${supabaseUrl}/functions/v1/mint-supabase-jwt`,
+        {
+          method: "POST",
+          headers: {
+            // x-auth-token avoids the Supabase gateway rejecting a
+            // non-JWT in Authorization (the verify-session helper
+            // accepts both).
+            "x-auth-token": token,
+            apikey: anonKey,
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+          signal: controller.signal,
         },
-        body: "{}",
-      },
-    );
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!res.ok) {
       // 503 = bridge intentionally disabled (no JWT secret); silent fallback.
