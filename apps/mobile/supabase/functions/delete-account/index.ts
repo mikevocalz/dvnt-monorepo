@@ -5,16 +5,26 @@
  * Body: { confirm: true }
  *
  * Permanently deletes the authenticated user's account:
- *   1. Cancels active Stripe subscriptions
- *   2. Anonymizes financial records (orders, payouts) — required for bookkeeping
- *   3. Deletes social content (posts, comments, stories, follows)
- *   4. Deletes tickets, transfers, holds
- *   5. Deletes organizer data (branding, connect account)
- *   6. Deletes Stripe customer
- *   7. Anonymizes the users row
- *   8. Deletes Better Auth sessions + user record
+ *   1. Cancels active Stripe subscriptions + deletes Stripe customer
+ *   2. Refunds/voids tickets; anonymizes financial records (orders, payouts) —
+ *      kept for bookkeeping
+ *   3. Deletes social content (posts, comments, messages, likes, follows, …)
+ *   4. Deletes verification + push + settings rows
+ *   5. Anonymizes the users row
+ *   6. Deletes Better Auth sessions + account + user record
  *
  * Apple App Store requires account deletion capability.
+ *
+ * ⚠ DUAL-ID SCHEMA — this app keys rows two different ways and getting it wrong
+ * silently deletes NOTHING (supabase-js returns {error} without throwing):
+ *   - INTEGER app users.id  → posts.author_id, comments.author_id, messages,
+ *     likes, comment_likes, event_likes, event_reviews, follows, notifications,
+ *     blocks, conversation_reads, story_views, push_tokens.
+ *     conversations_rels.users_id is TEXT but stores the app id as a string.
+ *   - TEXT Better Auth id   → stories.author_id, events.host_id, tickets,
+ *     orders, payouts, organizer_*, stripe_customers, sneaky_subscriptions,
+ *     event_rsvps, video_*, call_signals, verification_*, identity_verifications.
+ * Column types verified against the live schema 2026-07-03.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -129,258 +139,205 @@ Deno.serve(async (req: Request) => {
     const deletedAt = new Date().toISOString();
     const anonymizedId = `deleted_${userId.slice(0, 8)}`;
 
+    // The integer app-users id — REQUIRED for every social table below.
     const { data: appUserRow } = await supabase
       .from("users")
       .select("id")
       .eq("auth_id", userId)
       .maybeSingle();
-    const appUserId = appUserRow?.id ?? null;
+    const appUserId: number | null = appUserRow?.id ?? null;
 
     // ── 1. Cancel active Stripe subscriptions ─────────────────
-    if (STRIPE_SECRET_KEY) {
-      try {
-        const { data: stripeCustomer } = await supabase
-          .from("stripe_customers")
-          .select("stripe_customer_id")
-          .eq("user_id", userId)
-          .single();
+    try {
+      const { data: stripeCustomer } = await supabase
+        .from("stripe_customers")
+        .select("stripe_customer_id")
+        .eq("user_id", userId)
+        .single();
 
-        if (stripeCustomer?.stripe_customer_id) {
-          // List active subscriptions
-          const subs = await stripeGet(
-            `/subscriptions?customer=${stripeCustomer.stripe_customer_id}&status=active`,
-          );
-
-          for (const sub of subs.data || []) {
-            await stripePost(`/subscriptions/${sub.id}`, {
-              cancel_at_period_end: "false",
-              // Immediate cancel
-            });
-            // Actually cancel immediately
-            await fetch(`https://api.stripe.com/v1/subscriptions/${sub.id}`, {
-              method: "DELETE",
-              headers: {
-                Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
-              },
-            });
-            console.log(`[delete-account] Cancelled subscription ${sub.id}`);
-          }
-
-          // Delete the Stripe customer (removes payment methods, etc.)
-          await fetch(
-            `https://api.stripe.com/v1/customers/${stripeCustomer.stripe_customer_id}`,
-            {
-              method: "DELETE",
-              headers: {
-                Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
-              },
-            },
-          );
-          console.log(
-            `[delete-account] Deleted Stripe customer ${stripeCustomer.stripe_customer_id}`,
-          );
+      if (stripeCustomer?.stripe_customer_id) {
+        const subs = await stripeGet(
+          `/subscriptions?customer=${stripeCustomer.stripe_customer_id}&status=active`,
+        );
+        for (const sub of subs.data || []) {
+          await stripePost(`/subscriptions/${sub.id}`, {
+            cancel_at_period_end: "false",
+          });
+          await fetch(`https://api.stripe.com/v1/subscriptions/${sub.id}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` },
+          });
+          console.log(`[delete-account] Cancelled subscription ${sub.id}`);
         }
-      } catch (err) {
-        console.error("[delete-account] Stripe cleanup error:", err);
-        // Continue with account deletion even if Stripe fails
+        await fetch(
+          `https://api.stripe.com/v1/customers/${stripeCustomer.stripe_customer_id}`,
+          {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` },
+          },
+        );
+        console.log(
+          `[delete-account] Deleted Stripe customer ${stripeCustomer.stripe_customer_id}`,
+        );
       }
+    } catch (err) {
+      console.error("[delete-account] Stripe cleanup error:", err);
+      // Continue with account deletion even if Stripe fails.
     }
 
-    // ── 2. Cancel active Sneaky Lynk subscriptions in DB ──────
+    // ── 2. Cancel active Sneaky Lynk subscriptions (auth-id) ──
     await supabase
       .from("sneaky_subscriptions")
       .update({ status: "canceled", updated_at: deletedAt })
       .eq("host_id", userId)
       .in("status", ["active", "trialing", "past_due"]);
 
-    // ── 3. Anonymize financial records (keep for bookkeeping) ─
-    // Orders: anonymize user_id but keep financial data intact
+    // ── 3. Anonymize financial records (auth-id, kept for books) ─
     await supabase
       .from("orders")
       .update({ user_id: anonymizedId, updated_at: deletedAt })
       .eq("user_id", userId);
-
-    // Refund requests: anonymize
     await supabase
       .from("refund_requests")
       .update({ user_id: anonymizedId })
       .eq("user_id", userId);
-
-    // Payouts: anonymize host_id
     await supabase
       .from("payouts")
       .update({ host_id: anonymizedId })
       .eq("host_id", userId);
 
-    // ── 4. Delete tickets and related data ────────────────────
-    // Cancel pending transfers involving this user
+    // ── 4. Tickets, transfers, holds (auth-id) ────────────────
     await supabase
       .from("ticket_transfers")
       .update({ status: "cancelled", resolved_at: deletedAt })
       .eq("from_user_id", userId)
       .eq("status", "pending");
-
     await supabase
       .from("ticket_transfers")
       .update({ status: "cancelled", resolved_at: deletedAt })
       .eq("to_user_id", userId)
       .eq("status", "pending");
 
-    // Refund paid tickets via Stripe before voiding. A payment intent can back
-    // multiple tickets, so refund each PI once and then update all matching
-    // ticket rows for this account.
-    if (STRIPE_SECRET_KEY) {
-      try {
-        const { data: activeTickets } = await supabase
-          .from("tickets")
-          .select("id, stripe_payment_intent_id, purchase_amount_cents")
-          .eq("user_id", userId)
-          .eq("status", "active")
-          .not("stripe_payment_intent_id", "is", null)
-          .gt("purchase_amount_cents", 0);
+    try {
+      const { data: activeTickets } = await supabase
+        .from("tickets")
+        .select("id, stripe_payment_intent_id, purchase_amount_cents")
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .not("stripe_payment_intent_id", "is", null)
+        .gt("purchase_amount_cents", 0);
 
-        const paymentIntents = [
-          ...new Set(
-            (activeTickets || [])
-              .map((ticket) => ticket.stripe_payment_intent_id)
-              .filter(Boolean),
-          ),
-        ];
+      const paymentIntents = [
+        ...new Set(
+          (activeTickets || [])
+            .map((t) => t.stripe_payment_intent_id)
+            .filter(Boolean),
+        ),
+      ];
 
-        for (const paymentIntentId of paymentIntents) {
-          const ticketIds = (activeTickets || [])
-            .filter(
-              (ticket) => ticket.stripe_payment_intent_id === paymentIntentId,
-            )
-            .map((ticket) => String(ticket.id));
-
-          try {
-            const refund = await stripeRefund({
-              payment_intent: paymentIntentId,
-              refund_application_fee: "true",
-              reverse_transfer: "true",
-              reason: "requested_by_customer",
-              "metadata[triggered_by]": "account_deletion",
-              "metadata[triggered_by_auth_id]": userId,
-              "metadata[ticket_ids]": ticketIds.join(","),
-            });
-
-            if (refund.error) {
-              console.error(
-                "[delete-account] Stripe ticket refund error:",
-                refund.error,
-              );
-              continue;
-            }
-
-            if (refund.id) {
-              const { error: ticketUpdateErr } = await supabase
-                .from("tickets")
-                .update({ status: "refunded", user_id: anonymizedId })
-                .eq("user_id", userId)
-                .eq("stripe_payment_intent_id", paymentIntentId);
-              if (ticketUpdateErr) {
-                console.error(
-                  "[delete-account] Failed to mark refunded tickets:",
-                  ticketUpdateErr,
-                );
-              }
-              console.log(
-                `[delete-account] Refunded tickets ${ticketIds.join(",")} via ${refund.id}`,
-              );
-            }
-          } catch (refundErr) {
-            console.error(
-              `[delete-account] Failed to refund payment_intent ${paymentIntentId}:`,
-              refundErr,
+      for (const paymentIntentId of paymentIntents) {
+        const ticketIds = (activeTickets || [])
+          .filter((t) => t.stripe_payment_intent_id === paymentIntentId)
+          .map((t) => String(t.id));
+        try {
+          const refund = await stripeRefund({
+            payment_intent: paymentIntentId,
+            refund_application_fee: "true",
+            reverse_transfer: "true",
+            reason: "requested_by_customer",
+            "metadata[triggered_by]": "account_deletion",
+            "metadata[triggered_by_auth_id]": userId,
+            "metadata[ticket_ids]": ticketIds.join(","),
+          });
+          if (refund.error) {
+            console.error("[delete-account] Stripe ticket refund error:", refund.error);
+            continue;
+          }
+          if (refund.id) {
+            await supabase
+              .from("tickets")
+              .update({ status: "refunded", user_id: anonymizedId })
+              .eq("user_id", userId)
+              .eq("stripe_payment_intent_id", paymentIntentId);
+            console.log(
+              `[delete-account] Refunded tickets ${ticketIds.join(",")} via ${refund.id}`,
             );
           }
+        } catch (refundErr) {
+          console.error(
+            `[delete-account] Failed to refund payment_intent ${paymentIntentId}:`,
+            refundErr,
+          );
         }
-      } catch (err) {
-        console.error("[delete-account] Ticket refund loop error:", err);
       }
+    } catch (err) {
+      console.error("[delete-account] Ticket refund loop error:", err);
     }
 
-    // Void all remaining (non-refunded) tickets
     await supabase
       .from("tickets")
       .update({ status: "void", user_id: anonymizedId })
       .eq("user_id", userId)
       .neq("status", "refunded");
-
-    // Expire active holds
     await supabase
       .from("ticket_holds")
       .update({ status: "expired" })
       .eq("user_id", userId)
       .eq("status", "active");
 
-    // ── 5. Delete social content ──────────────────────────────
-    // Delete comments (before posts, since comments may reference posts)
-    await supabase.from("comments").delete().eq("user_id", userId);
+    // ── 5. Social content (INTEGER app-users id) ──────────────
+    // These ALL key on the integer app id, not the auth id.
+    if (appUserId !== null) {
+      // Posts first — with the post_id FKs now ON DELETE CASCADE, this also
+      // removes comments/bookmarks/likes/media/tags on the user's posts.
+      await supabase.from("posts").delete().eq("author_id", appUserId);
+      // The user's own comments (on anyone's posts) + their likes.
+      await supabase.from("comments").delete().eq("author_id", appUserId);
+      await supabase.from("comment_likes").delete().eq("user_id", appUserId);
+      await supabase.from("likes").delete().eq("user_id", appUserId);
+      await supabase.from("event_likes").delete().eq("user_id", appUserId);
+      await supabase.from("event_reviews").delete().eq("user_id", appUserId);
+      // Direct messages (their sent messages; other party's stay).
+      await supabase.from("messages").delete().eq("sender_id", appUserId);
+      await supabase.from("conversation_reads").delete().eq("user_id", appUserId);
+      await supabase.from("conversations_rels").delete().eq("users_id", String(appUserId));
+      // Graph.
+      await supabase.from("follows").delete().eq("follower_id", appUserId);
+      await supabase.from("follows").delete().eq("following_id", appUserId);
+      await supabase.from("blocks").delete().eq("blocker_id", appUserId);
+      await supabase.from("blocks").delete().eq("blocked_id", appUserId);
+      // Notifications where they are recipient or actor.
+      await supabase.from("notifications").delete().eq("recipient_id", appUserId);
+      await supabase.from("notifications").delete().eq("actor_id", appUserId);
+      // Stories they viewed + their push tokens.
+      await supabase.from("story_views").delete().eq("user_id", appUserId);
+      await supabase.from("push_tokens").delete().eq("user_id", appUserId);
+    } else {
+      console.warn(`[delete-account] no app users row for ${userId} — skipped social content`);
+    }
 
-    // Delete comment likes
-    await supabase.from("comment_likes").delete().eq("user_id", userId);
-
-    // Delete post likes
-    await supabase.from("likes").delete().eq("user_id", userId);
-
-    // Delete event likes
-    await supabase.from("event_likes").delete().eq("user_id", userId);
-
-    // Delete posts (cascade will handle post_media, post_tags)
-    await supabase.from("posts").delete().eq("user_id", userId);
-
-    // Delete stories
-    await supabase.from("stories").delete().eq("user_id", userId);
-
-    // Delete follows (both directions)
-    await supabase.from("follows").delete().eq("follower_id", userId);
-    await supabase.from("follows").delete().eq("following_id", userId);
-
-    // Delete blocks (both directions)
-    await supabase.from("blocks").delete().eq("blocker_id", userId);
-    await supabase.from("blocks").delete().eq("blocked_id", userId);
-
-    // Delete notifications
-    await supabase.from("notifications").delete().eq("user_id", userId);
-    await supabase.from("notifications").delete().eq("actor_id", userId);
-
-    // Delete event RSVPs
+    // ── 6. Content + events keyed by the auth id (TEXT) ───────
+    await supabase.from("stories").delete().eq("author_id", userId);
     await supabase.from("event_rsvps").delete().eq("user_id", userId);
 
-    // Delete event reviews
-    await supabase.from("event_reviews").delete().eq("user_id", userId);
-
-    // ── 6. Delete video/room data ─────────────────────────────
-    // Leave active rooms
+    // ── 7. Video/room data (auth-id) ──────────────────────────
     await supabase
       .from("video_room_members")
       .update({ status: "left" })
       .eq("user_id", userId)
       .eq("status", "active");
-
-    // Delete room tokens
     await supabase.from("video_room_tokens").delete().eq("user_id", userId);
 
     const { data: hostedRooms } = await supabase
       .from("video_rooms")
       .select("id")
       .eq("created_by", userId);
-    const hostedRoomIds = (hostedRooms || []).map((room) => room.id);
-
-    // End any rooms hosted by the deleting user so participants are not
-    // stranded in an ownerless private video session.
+    const hostedRoomIds = (hostedRooms || []).map((r) => r.id);
     await supabase
       .from("video_rooms")
-      .update({
-        status: "ended",
-        ended_at: deletedAt,
-        updated_at: deletedAt,
-      })
+      .update({ status: "ended", ended_at: deletedAt, updated_at: deletedAt })
       .eq("created_by", userId)
       .eq("status", "open");
-
     if (hostedRoomIds.length > 0) {
       await supabase
         .from("video_room_members")
@@ -389,37 +346,30 @@ Deno.serve(async (req: Request) => {
         .eq("status", "active");
     }
 
-    // ── 7. Delete organizer data ──────────────────────────────
-    // Cancel active promotion campaigns
+    // ── 8. Organizer data (auth-id) ───────────────────────────
     await supabase
       .from("event_spotlight_campaigns")
       .update({ status: "cancelled" })
       .eq("organizer_id", userId)
       .in("status", ["active", "pending"]);
-
-    // Delete organizer branding
     await supabase.from("organizer_branding").delete().eq("host_id", userId);
-
-    // Note: organizer_accounts row kept (Stripe Connect account persists for payout history)
-    // but anonymize the host_id
+    // Keep organizer_accounts (Stripe Connect payout history) but anonymize.
     await supabase
       .from("organizer_accounts")
       .update({ host_id: anonymizedId, updated_at: deletedAt })
       .eq("host_id", userId);
 
-    // ── 8. Delete Stripe customer mapping ─────────────────────
+    // ── 9. Mappings, settings, verification (auth-id) ─────────
     await supabase.from("stripe_customers").delete().eq("user_id", userId);
-
-    // Delete sneaky customers mapping
-    await supabase.from("sneaky_customers").delete().eq("user_id", userId);
-
-    // ── 9. Delete user settings ───────────────────────────────
     await supabase.from("user_settings").delete().eq("user_id", userId);
-
-    // ── 10. Delete verification requests ──────────────────────
     await supabase.from("verification_requests").delete().eq("user_id", userId);
+    await supabase.from("verification_events").delete().eq("user_id", userId);
+    await supabase.from("identity_verifications").delete().eq("user_id", userId);
+    await supabase.from("call_signals").delete().eq("caller_id", userId);
+    await supabase.from("call_signals").delete().eq("callee_id", userId);
 
-    // ── 11. Anonymize the users row ───────────────────────────
+    // ── 10. Anonymize the users row ───────────────────────────
+    // NOTE: column is avatar_id (there is no avatar_url); no `name` column.
     await supabase
       .from("users")
       .update({
@@ -428,7 +378,7 @@ Deno.serve(async (req: Request) => {
         first_name: "Deleted",
         last_name: "User",
         bio: null,
-        avatar_url: null,
+        avatar_id: null,
         location: null,
         website: null,
         links: null,
@@ -440,17 +390,7 @@ Deno.serve(async (req: Request) => {
       })
       .eq("auth_id", userId);
 
-    // ── 12. Delete call signals ───────────────────────────────
-    await supabase.from("call_signals").delete().eq("caller_id", userId);
-    await supabase.from("call_signals").delete().eq("callee_id", userId);
-
-    // Deregister standard and VoIP push tokens. push_tokens.user_id is the
-    // integer users.id, not the Better Auth auth_id used by most app rows.
-    if (appUserId !== null) {
-      await supabase.from("push_tokens").delete().eq("user_id", appUserId);
-    }
-
-    // ── 13. Revoke Apple Sign In token (required by App Store) ─
+    // ── 11. Revoke Apple Sign In token (required by App Store) ─
     try {
       const { data: appleAccount } = await supabase
         .from("account")
@@ -458,24 +398,19 @@ Deno.serve(async (req: Request) => {
         .eq("userId", userId)
         .eq("provider", "apple")
         .single();
-
       if (appleAccount?.refresh_token) {
         await revokeAppleToken(appleAccount.refresh_token, APPLE_CLIENT_ID);
         console.log(`[delete-account] Apple token revoked for ${userId}`);
       }
     } catch (err) {
       console.error("[delete-account] Apple revocation check failed:", err);
-      // Continue with deletion even if revocation fails
     }
 
-    // ── 14. Delete Better Auth sessions + account ─────────────
-    // Delete all sessions for this user
+    // ── 12. Delete Better Auth sessions + account + user ──────
+    // account / session / passkey cascade off the user row, but delete
+    // explicitly so a failed cascade can't strand credentials.
     await supabase.from("session").delete().eq("userId", userId);
-
-    // Delete Better Auth accounts (social logins)
     await supabase.from("account").delete().eq("userId", userId);
-
-    // Delete Better Auth user record
     await supabase.from("user").delete().eq("id", userId);
 
     console.log(`[delete-account] Account deletion complete for ${userId}`);
