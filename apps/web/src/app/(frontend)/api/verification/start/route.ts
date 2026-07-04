@@ -1,27 +1,17 @@
-// POST /api/verification/start — open a Persona Hosted Flow link for the
-// current user and (importantly for I1) write the identity_verifications
+// POST /api/verification/start — open a Didit hosted verification session for
+// the current user and (importantly for I1) write the identity_verifications
 // row BEFORE returning the URL.
 //
-// v0 path uses the GENERIC template-id link:
-//   https://inquiry.withpersona.com/verify
-//     ?inquiry-template-id=<itmpl_*>
-//     &reference-id=<dvnt_user_id>
-//     &redirect-uri=<our return url>
-//
-// Verified surface (from the public hosted-flow doc):
-//   - The verify URL host and path.
-//   - `inquiry-template-id` (itmpl_*) and `inquiry-id` (inq_*) are the two
-//     accepted ways to pin a flow.
-//   - `reference-id` is the optional parameter we use to bind the inquiry
-//     back to our user_id when the webhook lands.
-//
-// Trade-off / upgrade path:
-//   The generic template-id link does client-side inquiry creation —
-//   reloading the link creates a duplicate inquiry. Acceptable for v0
-//   because (a) we dedup on `provider_ref` at webhook time and (b) the
-//   monotonic guard means the latest terminal event wins. When we
-//   verify the Persona REST surface, upgrade to server-side
-//   `POST /api/v1/inquiries` and switch to a one-shot `inquiry-id`.
+// Didit (free KYC) contract — verified against the official demo
+// (github.com/didit-protocol/didit-full-demo, src/app/api/verification/route.ts):
+//   POST {DIDIT_BASE_URL}/v3/session/
+//     header: X-API-Key: <DIDIT_API_KEY>
+//     body:   { workflow_id, vendor_data, callback }
+//     -> 201 { session_id, url, status, ... }
+//   `vendor_data` is our own user_id — it round-trips back on the webhook so we
+//   can bind the decision to the DVNT user (I1). `url` is the hosted flow we
+//   redirect the user to. Server-side session create means no duplicate-session
+//   problem (unlike Persona's client-side template link).
 
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
@@ -30,8 +20,9 @@ import { verifyAppUser, getAppDbPool } from '@/lib/verifyAppUser'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const PERSONA_TEMPLATE_ID = process.env.PERSONA_TEMPLATE_ID ?? ''
-const PERSONA_VERIFY_URL = 'https://inquiry.withpersona.com/verify'
+const DIDIT_API_KEY = process.env.DIDIT_API_KEY ?? ''
+const DIDIT_WORKFLOW_ID = process.env.DIDIT_WORKFLOW_ID ?? ''
+const DIDIT_BASE_URL = (process.env.DIDIT_BASE_URL ?? 'https://verification.didit.me').replace(/\/$/, '')
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000').replace(/\/$/, '')
 
 const SESSION_COOKIE_NAMES = ['dvnt-session', 'better-auth.session_token', 'session_token']
@@ -48,7 +39,7 @@ async function readSessionToken(req: Request): Promise<string | null> {
 }
 
 export async function POST(req: Request) {
-  if (!PERSONA_TEMPLATE_ID) {
+  if (!DIDIT_API_KEY || !DIDIT_WORKFLOW_ID) {
     return NextResponse.json({ error: 'Verification not configured' }, { status: 500 })
   }
 
@@ -64,29 +55,64 @@ export async function POST(req: Request) {
   }
   const returnPath = body.returnPath?.startsWith('/') ? body.returnPath : '/verification/complete'
 
-  // I1 — pre-create the row (status='pending') so a webhook arriving
-  // before the user finishes still has a deterministic user_id mapping.
-  // provider_ref stays null until we either (a) parse it out of the
-  // webhook payload or (b) upgrade to server-side inquiry create.
+  // Create the Didit session first — we need session_id to store as provider_ref.
+  // ponytail: hard timeout so a hung Didit API can't freeze the verify UX
+  // (mirrors the JWT-bridge fix).
+  let session: { session_id?: string; url?: string; status?: string }
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+    let res: Response
+    try {
+      res = await fetch(`${DIDIT_BASE_URL}/v3/session/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': DIDIT_API_KEY,
+        },
+        body: JSON.stringify({
+          workflow_id: DIDIT_WORKFLOW_ID,
+          vendor_data: user.id,
+          callback: `${SITE_URL}${returnPath}`,
+        }),
+        signal: controller.signal,
+      })
+    } finally {
+      clearTimeout(timeout)
+    }
+    session = (await res.json()) as { session_id?: string; url?: string; status?: string }
+    if (!res.ok || !session?.url || !session?.session_id) {
+      const msg =
+        (session as { message?: string; error?: string; detail?: string })?.message ??
+        (session as { error?: string })?.error ??
+        (session as { detail?: string })?.detail ??
+        `Didit session create failed (${res.status})`
+      console.error('[verification/start] Didit error:', msg)
+      return NextResponse.json({ error: msg }, { status: 502 })
+    }
+  } catch (err) {
+    console.error('[verification/start] Didit request failed:', err)
+    return NextResponse.json({ error: 'Verification provider unavailable' }, { status: 502 })
+  }
+
+  // I1 — pre-create the row (status='pending') keyed to session_id so the
+  // webhook (which echoes vendor_data + session_id) always has a deterministic
+  // user_id mapping. Never reopen a terminal state.
   const pool = getAppDbPool()
   await pool.query(
-    `insert into identity_verifications (user_id, provider, status, last_event_at)
-     values ($1, 'persona', 'pending', now())
+    `insert into identity_verifications (user_id, provider, provider_ref, status, last_event_at)
+     values ($1, 'didit', $2, 'pending', now())
      on conflict (user_id) do update set
-       provider = 'persona',
+       provider = 'didit',
+       provider_ref = $2,
        status = case
          when identity_verifications.status in ('passed','failed','expired')
            then identity_verifications.status   -- never reopen a terminal state
            else 'pending'
        end,
        updated_at = now()`,
-    [user.id],
+    [user.id, session.session_id],
   )
 
-  const verifyUrl = new URL(PERSONA_VERIFY_URL)
-  verifyUrl.searchParams.set('inquiry-template-id', PERSONA_TEMPLATE_ID)
-  verifyUrl.searchParams.set('reference-id', user.id)
-  verifyUrl.searchParams.set('redirect-uri', `${SITE_URL}${returnPath}`)
-
-  return NextResponse.json({ url: verifyUrl.toString() })
+  return NextResponse.json({ url: session.url })
 }
