@@ -69,12 +69,18 @@ const LocalStorageAdapter = {
   },
 };
 
+// Better Auth owns sign-in; the supabase-jwt bridge owns minting/refresh/storage
+// of the bridged JWT (it calls setSession with a sentinel refresh_token). So we
+// must NOT let supabase-js auto-refresh: on web its GoTrue refresh grabs the
+// navigator.locks lock, fails forever against the bogus refresh token, and every
+// supabase.from(...) then blocks on that lock — which showed up as event publish
+// hanging on "Publishing…". Match the native client: we own refresh.
 export const supabase = createClient(supabaseUrl, clientKey, {
   auth: {
     storage: LocalStorageAdapter,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true,
+    autoRefreshToken: false,
+    persistSession: false,
+    detectSessionInUrl: false,
   },
 });
 
