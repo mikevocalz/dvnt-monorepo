@@ -1,3 +1,10 @@
+# mint-supabase-jwt runs BEFORE the client has a Supabase JWT (it bridges the
+# Better Auth session → a minted JWT). It authenticates itself via x-auth-token,
+# so the gateway must NOT require a JWT — else it 401s before the fn runs and the
+# web client stays anon (event/post inserts denied). Keep this false.
+[functions.mint-supabase-jwt]
+verify_jwt = false
+
 [functions.auth]
 verify_jwt = false
 
