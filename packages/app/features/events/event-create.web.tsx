@@ -128,6 +128,23 @@ export function CreateEventScreen() {
   const errors: EventFormErrors = attempted ? validation.errors : {};
 
   const publish = async () => {
+    // DIAGNOSTIC: label every awaited step so an infinite "Publishing…" becomes
+    // a 20s error naming the exact stalling call (upload / create-event / ticket).
+    // Also a hard backstop against any single hung network call.
+    const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> => {
+      // eslint-disable-next-line no-console
+      console.log(`[publish] → ${label}`);
+      return Promise.race([
+        p.then((v) => {
+          // eslint-disable-next-line no-console
+          console.log(`[publish] ✓ ${label}`);
+          return v;
+        }),
+        new Promise<T>((_r, rej) =>
+          setTimeout(() => rej(new Error(`stalled at: ${label} (${ms / 1000}s)`)), ms),
+        ),
+      ]);
+    };
     setAttempted(true);
     const { ok, errors: errs } = validateEventDraft(s);
     if (!ok) {
@@ -141,7 +158,7 @@ export function CreateEventScreen() {
     // Paid events need a connected Stripe payout account (same gate as mobile).
     if (hasPaidTier(s)) {
       try {
-        const status = await organizerApi.getStatus();
+        const status = await withTimeout(organizerApi.getStatus(), 15000, "payout-status");
         const ready =
           status.connected &&
           status.charges_enabled === true &&
@@ -177,7 +194,7 @@ export function CreateEventScreen() {
       const uploadIfLocal = async (url: string | null | undefined) => {
         if (!url) return undefined;
         if (!/^(blob:|data:|file:)/i.test(url)) return url;
-        const up = await uploadToServer(url, "events");
+        const up = await withTimeout(uploadToServer(url, "events"), 30000, "upload-flyer");
         if (!up.success || !up.url) {
           throw new Error(
             up.error || "Couldn't upload an image. Re-select it and try again.",
@@ -207,7 +224,7 @@ export function CreateEventScreen() {
       const galleryUrls: string[] = [];
       for (const url of s.eventImages) {
         if (/^(blob:|data:|file:)/i.test(url)) {
-          const up = await uploadToServer(url, "events");
+          const up = await withTimeout(uploadToServer(url, "events"), 30000, "upload-gallery");
           if (!up.success || !up.url) {
             throw new Error(
               up.error || "Couldn't upload an additional image. Re-select it and try again.",
@@ -226,7 +243,11 @@ export function CreateEventScreen() {
         images: galleryUrls.map((url) => ({ type: "image", url })),
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const created = await createEvent.mutateAsync(payload as any);
+      const created = await withTimeout(
+        createEvent.mutateAsync(payload as any),
+        20000,
+        "create-event-insert",
+      );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const id = (created as any)?.id;
 
@@ -240,25 +261,33 @@ export function CreateEventScreen() {
           // silently swallow the rest, so any error propagates to the
           // catch below and the user is told to retry.
           for (const tier of s.ticketTiers) {
-            await ticketTypesApi.create({
-              eventId: String(id),
-              name: tier.name || "General Admission",
-              priceCents: tier.priceCents,
-              quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
-              maxPerUser:
-                tier.maxPerUser > 0 ? tier.maxPerUser : s.simpleMaxPerUser,
-            });
+            await withTimeout(
+              ticketTypesApi.create({
+                eventId: String(id),
+                name: tier.name || "General Admission",
+                priceCents: tier.priceCents,
+                quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
+                maxPerUser:
+                  tier.maxPerUser > 0 ? tier.maxPerUser : s.simpleMaxPerUser,
+              }),
+              15000,
+              "ticket-type",
+            );
           }
         } else {
           const priceCents = Math.round((parseFloat(s.ticketPrice) || 0) * 100);
           const qty = s.maxAttendees ? parseInt(s.maxAttendees, 10) : 200;
-          await ticketTypesApi.create({
-            eventId: String(id),
-            name: priceCents === 0 ? "Free" : "General Admission",
-            priceCents,
-            quantityTotal: qty,
-            maxPerUser: s.simpleMaxPerUser > 0 ? s.simpleMaxPerUser : 4,
-          });
+          await withTimeout(
+            ticketTypesApi.create({
+              eventId: String(id),
+              name: priceCents === 0 ? "Free" : "General Admission",
+              priceCents,
+              quantityTotal: qty,
+              maxPerUser: s.simpleMaxPerUser > 0 ? s.simpleMaxPerUser : 4,
+            }),
+            15000,
+            "ticket-type",
+          );
         }
       }
 
