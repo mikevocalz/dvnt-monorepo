@@ -399,6 +399,45 @@ export const eventsApi = {
   },
 
   /**
+   * Get events HOSTED by a given user (their auth_id). Public — used by the
+   * "More events" → host profile Events section. Only that host's events
+   * (host_id match), newest first. Readable by anon via events RLS.
+   */
+  async getEventsByHost(hostAuthId: string, limit: number = 50) {
+    try {
+      if (!hostAuthId) return [];
+      const { data, error } = await supabase
+        .from(DB.events.table)
+        .select("*")
+        .eq(DB.events.hostId, hostAuthId)
+        .order(DB.events.startDate, { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+
+      const mapped = (data || []).map((event: any) => {
+        const dateParts = formatEventDate(event[DB.events.startDate]);
+        return {
+          id: String(event[DB.events.id]),
+          title: event[DB.events.title],
+          description: event[DB.events.description],
+          ...dateParts,
+          location: event[DB.events.location],
+          image: resolveEventImage(event),
+          flyerVideoUrl: resolveFlyerVideoUrl(event),
+          price: Number(event[DB.events.price]) || 0,
+          attendees: Number(event[DB.events.totalAttendees]) || 0,
+          status: event.status || undefined,
+          cancelledAt: event.cancelled_at || undefined,
+        };
+      });
+      return enrichEventsWithTierPrices(mapped);
+    } catch (error) {
+      console.error("[Events] getEventsByHost error:", error);
+      return [];
+    }
+  },
+
+  /**
    * Get past events
    */
   async getPastEvents(limit: number = 20) {

@@ -22,10 +22,11 @@ import { useCallback, useEffect, useMemo } from "react";
 import { useWindowDimensions } from "react-native";
 import { useParams, useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, MoreHorizontal, Share2, Grid, X } from "lucide-react";
+import { ArrowLeft, MoreHorizontal, Share2, Grid, X, CalendarDays } from "lucide-react";
 import { useUser } from "@dvnt/app/lib/hooks/use-user";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
 import { useProfilePosts } from "@dvnt/app/lib/hooks/use-posts";
+import { useUserEvents } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -45,6 +46,18 @@ function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+// Mirror of event-create's slugifyTitle so /events/[slug] resolves the target.
+function eventSlug(title: string): string {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/['"]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .split("-")
+    .slice(0, 6)
+    .join("-");
 }
 
 export function UserProfileScreen() {
@@ -74,6 +87,12 @@ export function UserProfileScreen() {
   const { data: userPostsRaw = [], isLoading: isLoadingPosts } = useProfilePosts(
     safeUsername || "",
   );
+
+  // Events this user is HOSTING — powers the "More events" section. host_id is
+  // the auth_id; disabled until it resolves.
+  const hostAuthId =
+    (userData as any)?.authId ?? (userData as any)?.auth_id ?? null;
+  const { data: hostEvents = [] } = useUserEvents(hostAuthId);
 
   const visibleUserPosts = useMemo(
     () =>
@@ -301,6 +320,50 @@ export function UserProfileScreen() {
             <Share2 size={20} color="#fff" />
           </button>
         </div>
+
+        {/* Events hosted by this user — the "More events" surface. */}
+        {hostEvents.length > 0 ? (
+          <section className="mt-5">
+            <div className="flex items-center gap-2 mb-3">
+              <CalendarDays size={18} color="#fff" />
+              <h2 className="text-white text-base font-bold">
+                Events{" "}
+                <span className="text-white/40 font-medium">
+                  ({hostEvents.length})
+                </span>
+              </h2>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {hostEvents.map((ev: any) => (
+                <button
+                  key={ev.id}
+                  onClick={() => router.push(`/events/${eventSlug(ev.title)}`)}
+                  className="text-left rounded-xl overflow-hidden border border-white/10 bg-white/[0.03] hover:border-white/25 transition-colors"
+                >
+                  <div className="aspect-[4/5] bg-white/5">
+                    {ev.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={ev.image}
+                        alt={ev.title}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : null}
+                  </div>
+                  <div className="p-2">
+                    <p className="text-white text-sm font-semibold truncate">
+                      {ev.title}
+                    </p>
+                    <p className="text-white/45 text-xs truncate">
+                      {[ev.month, ev.date].filter(Boolean).join(" ")}
+                      {ev.location ? ` · ${ev.location}` : ""}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {/* Tab bar — single grid tab (matches native) */}
         <div className="mt-4 flex border-b border-white/10">

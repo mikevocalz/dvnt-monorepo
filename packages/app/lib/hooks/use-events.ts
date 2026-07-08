@@ -256,6 +256,19 @@ export function useMyEvents() {
   });
 }
 
+// Fetch events HOSTED by a given user (auth_id) — powers the "More events"
+// section on another host's profile. Disabled until an id is available.
+export function useUserEvents(hostAuthId: string | null | undefined) {
+  return useQuery({
+    queryKey: [...eventKeys.all, "byHost", hostAuthId ?? ""] as const,
+    queryFn: () => eventsApiClient.getEventsByHost(String(hostAuthId)),
+    enabled: !!hostAuthId,
+    staleTime: STALE_TIMES.events,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: Platform.OS === "web",
+  });
+}
+
 // Fetch upcoming events
 export function useUpcomingEvents() {
   return useQuery({
