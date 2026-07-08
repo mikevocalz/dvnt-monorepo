@@ -14,6 +14,7 @@ import {
   MoreHorizontal,
   Share2,
   X,
+  CalendarDays,
 } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
@@ -29,6 +30,7 @@ import { Skeleton } from "@dvnt/app/components/ui/skeleton";
 import { useCallback, memo, useState, useMemo, useEffect, useRef } from "react";
 import { useUser, useFollow } from "@dvnt/app/lib/hooks";
 import { useProfilePosts } from "@dvnt/app/lib/hooks/use-posts";
+import { useUserEvents } from "@dvnt/app/lib/hooks/use-events";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
 import { usersApi } from "@dvnt/app/lib/api/users";
@@ -420,6 +422,13 @@ function UserProfileScreenComponent() {
   // Fetch user posts — fires in parallel with user query (no waterfall)
   const { data: userPostsRaw = [], isLoading: isLoadingPosts } =
     useProfilePosts(safeUsername || "");
+
+  // Events HOSTED by this user — the "More events" surface (host_id = auth_id).
+  const hostAuthId =
+    (resolvedUserData as any)?.authId ??
+    (resolvedUserData as any)?.auth_id ??
+    null;
+  const { data: hostEvents = [] } = useUserEvents(hostAuthId);
 
   // Transform to masonry grid tiles
   const visibleUserPosts = useMemo(
@@ -1071,6 +1080,53 @@ function UserProfileScreenComponent() {
             <Grid size={24} color={colors.foreground} />
           </Pressable>
         </View>
+
+        {/* Events hosted by this user — the "More events" surface. */}
+        {hostEvents.length > 0 ? (
+          <View className="px-4 mt-4 mb-2">
+            <View className="flex-row items-center mb-3" style={{ gap: 8 }}>
+              <CalendarDays size={18} color="#fff" />
+              <Text className="text-white text-base font-bold">
+                Events{" "}
+                <Text className="text-white/40 font-medium">
+                  ({hostEvents.length})
+                </Text>
+              </Text>
+            </View>
+            <View className="flex-row flex-wrap" style={{ marginHorizontal: -4 }}>
+              {(hostEvents as any[]).map((ev) => (
+                <Pressable
+                  key={ev.id}
+                  onPress={() => router.push(`/events/${ev.id}`)}
+                  style={{ width: "33.33%", padding: 4 }}
+                >
+                  <View className="rounded-xl overflow-hidden border border-white/10 bg-white/5">
+                    <Image
+                      source={{ uri: ev.image }}
+                      style={{ width: "100%", aspectRatio: 0.8 }}
+                      contentFit="cover"
+                    />
+                    <View className="p-2">
+                      <Text
+                        numberOfLines={1}
+                        className="text-white text-xs font-semibold"
+                      >
+                        {ev.title}
+                      </Text>
+                      <Text
+                        numberOfLines={1}
+                        className="text-white/45"
+                        style={{ fontSize: 11 }}
+                      >
+                        {[ev.month, ev.date].filter(Boolean).join(" ")}
+                      </Text>
+                    </View>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         {/* Posts Grid — Masonry */}
         {isLoading || isLoadingPosts ? (
