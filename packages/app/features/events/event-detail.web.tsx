@@ -532,7 +532,7 @@ export function EventDetailScreen() {
                   <MenuItem
                     Icon={Pencil}
                     label="Edit event"
-                    onClick={() => router.push(`/events/${slug}/edit`)}
+                    onClick={() => router.push(`/feed/events/${eventId}/edit`)}
                   />
                 ) : null}
                 {/* 6. PROMOTION — host-only; opens the promotion sheet store. */}

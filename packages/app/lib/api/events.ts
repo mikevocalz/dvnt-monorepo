@@ -868,6 +868,9 @@ export const eventsApi = {
         updateData[DB.events.isOnline] = updates.isOnline;
       if (updates.flyerImageUrl !== undefined)
         updateData[DB.events.flyerImageUrl] = updates.flyerImageUrl || null;
+      // Gallery images — the editor sends `images` (jsonb array of {url}); it was
+      // previously dropped here, so edits to the gallery never saved.
+      if (updates.images !== undefined) updateData.images = updates.images;
 
       // Ensure the Supabase JWT bridge is attached so PostgREST sees
       // us as `authenticated` (not `anon`) — RLS on events_update_own
