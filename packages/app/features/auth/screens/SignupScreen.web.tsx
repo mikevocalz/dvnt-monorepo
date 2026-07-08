@@ -33,7 +33,7 @@ export function SignupScreen() {
         setIsSubmitting(true);
         try {
           const { data, error } = await signUp.email({ email: value.email, password: value.password, name: value.username });
-          if (error) throw new Error((error as any).message || 'Signup failed');
+          if (error) throw Object.assign(new Error((error as any).message || 'Signup failed'), { code: (error as any).code });
           if (data?.user) {
             let profile: any;
             try { profile = await syncAuthUser(); } catch { profile = await auth.getProfile(data.user.id, data.user.email); }
@@ -41,7 +41,12 @@ export function SignupScreen() {
             navigate({ to: '/auth/verify-email' });
           }
         } catch (err: any) {
-          toast.error('Signup failed', { description: err?.message || 'Something went wrong.' });
+          const isBeta = err?.code === 'BETA_ONLY' || /beta users access only/i.test(err?.message || '');
+          if (isBeta) {
+            toast.error('Beta Users Access Only', { description: 'This email isn’t on the beta list yet.' });
+          } else {
+            toast.error('Signup failed', { description: err?.message || 'Something went wrong.' });
+          }
           setActiveStep(1);
         }
         setIsSubmitting(false);

@@ -297,6 +297,28 @@ async function getAuth() {
       databaseHooks: {
         user: {
           create: {
+            // BETA GATE. Runs before the user row is created for EVERY signup
+            // method (email/password AND OAuth). Rejects emails not on the
+            // allowlist so the auth record is never minted (hard, server-side
+            // gate). Matching is case-insensitive + whitespace-trimmed via the
+            // is_allowlisted SQL fn. Fail-closed: a lookup error blocks the
+            // signup rather than letting a non-allowlisted email through.
+            before: async (user: any) => {
+              const email = String(user?.email ?? "").trim().toLowerCase();
+              const { rows } = await pool.query(
+                "select public.is_allowlisted($1) as ok",
+                [email],
+              );
+              if (!rows?.[0]?.ok) {
+                const { APIError } = await import("npm:better-auth@1.5.5/api");
+                console.log(`[Auth] Beta gate: rejected ${email}`);
+                throw new APIError("FORBIDDEN", {
+                  code: "BETA_ONLY",
+                  message: "Beta Users Access Only",
+                });
+              }
+              return { data: user };
+            },
             // CANONICAL welcome trigger. Fires server-side for EVERY signup
             // method (email/password AND Apple/Google OAuth), so it's the one
             // place welcome is sent. The legacy POST /auth/send-welcome endpoint
