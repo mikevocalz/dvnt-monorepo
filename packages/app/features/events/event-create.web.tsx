@@ -251,11 +251,12 @@ export function CreateEventScreen() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const id = (created as any)?.id;
 
-      // Create ticket types so the event is actually purchasable/RSVP-able.
-      // Multi-tier branch wins when the user added explicit tiers;
-      // otherwise we keep the single-price-into-one-tier fallback so a
-      // user who never opened the tier editor still publishes correctly.
-      if (s.ticketingEnabled && id) {
+      // Every event gets at least one ticket type so it's attendable and the
+      // host sees a ticket. Explicit tiers win; otherwise a single default —
+      // a free "RSVP" when no price is set, else "General Admission". (Was
+      // gated on ticketingEnabled, so plain events published with 0 tickets and
+      // the host "didn't see a ticket".)
+      if (id) {
         if (s.ticketTiers.length > 0) {
           // Best-effort sequential creation — failing one tier shouldn't
           // silently swallow the rest, so any error propagates to the
@@ -280,7 +281,7 @@ export function CreateEventScreen() {
           await withTimeout(
             ticketTypesApi.create({
               eventId: String(id),
-              name: priceCents === 0 ? "Free" : "General Admission",
+              name: priceCents === 0 ? "RSVP" : "General Admission",
               priceCents,
               quantityTotal: qty,
               maxPerUser: s.simpleMaxPerUser > 0 ? s.simpleMaxPerUser : 4,
