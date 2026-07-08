@@ -566,6 +566,10 @@ export const eventsApi = {
           followersCount: host.followers_count || 0,
         },
         coOrganizer: null,
+        // Timezone display: venue zone + online flag drive event-local vs
+        // viewer-local formatting on the detail screen.
+        event_tz: ev.event_tz ?? null,
+        isOnline: ev.is_online ?? false,
         // V2 fields
         locationLat:
           ev.location_lat != null ? Number(ev.location_lat) : undefined,
@@ -747,6 +751,17 @@ export const eventsApi = {
       // formerly-unconditional field). Only set a real capacity.
       if (eventData.maxAttendees != null && Number.isFinite(Number(eventData.maxAttendees)))
         insertPayload[DB.events.maxAttendees] = Number(eventData.maxAttendees);
+
+      // IANA timezone for event-local display. Default to the creator's device
+      // zone (usually the venue's), IANA-validated by the events_event_tz check.
+      try {
+        insertPayload.event_tz =
+          eventData.eventTz ||
+          Intl.DateTimeFormat().resolvedOptions().timeZone ||
+          "UTC";
+      } catch {
+        insertPayload.event_tz = "UTC";
+      }
 
       // V2 fields (additive — only set if provided)
       if (eventData.locationLat != null)

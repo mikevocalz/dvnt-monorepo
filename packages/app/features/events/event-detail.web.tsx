@@ -10,6 +10,7 @@ import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter, usePathname } from "solito/navigation";
 import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
+import { formatEventTime } from "@dvnt/app/lib/events/event-time";
 import {
   ArrowLeft,
   MoreHorizontal,
@@ -109,20 +110,20 @@ function timeAgo(iso?: string): string {
 
 const VIDEO_RE = /post-video|flyer-video|\.(mp4|mov|webm)(\?|$)/i;
 
-function fmt(iso?: string): string {
+// Timezone-correct: physical events with a known venue zone render event-local
+// (same door time for everyone); otherwise viewer-local. Always shows a zone
+// abbreviation so "9:00 PM PDT" is never ambiguous. Falls back gracefully when
+// event_tz isn't present yet (older events) → viewer-local.
+function fmt(
+  iso?: string,
+  eventTz?: string | null,
+  isOnline?: boolean | null,
+): string {
   if (!iso) return "Date TBA";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Date TBA";
-  return (
-    d.toLocaleDateString(undefined, {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    }) +
-    " · " +
-    d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-  );
+  const mode = !isOnline && eventTz ? "event-local" : "viewer-local";
+  return formatEventTime(d, eventTz ?? null, mode);
 }
 
 function ytId(url?: string | null): string | null {
@@ -560,7 +561,11 @@ export function EventDetailScreen() {
         <div className="px-4 pt-4">
           <div className="flex items-center gap-1.5 text-[#379ED8] text-sm font-semibold">
             <Calendar size={15} />
-            {fmt(e.date || e.fullDate)}
+            {fmt(
+              e.date || e.fullDate,
+              (e as any).event_tz ?? (e as any).eventTz,
+              (e as any).is_online ?? (e as any).isOnline,
+            )}
           </div>
           <h1 className="text-2xl font-extrabold mt-1 leading-tight">{e.title}</h1>
           {e.location ? (
