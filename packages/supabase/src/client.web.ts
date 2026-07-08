@@ -69,19 +69,26 @@ const LocalStorageAdapter = {
   },
 };
 
-// Better Auth owns sign-in; the supabase-jwt bridge owns minting/refresh/storage
-// of the bridged JWT (it calls setSession with a sentinel refresh_token). So we
-// must NOT let supabase-js auto-refresh: on web its GoTrue refresh grabs the
-// navigator.locks lock, fails forever against the bogus refresh token, and every
-// supabase.from(...) then blocks on that lock — which showed up as event publish
-// hanging on "Publishing…". Match the native client: we own refresh.
+// Better Auth owns sign-in; the supabase-jwt bridge mints a short-lived JWT.
+// We attach it via the `accessToken` option — the supported third-party-auth
+// integration — instead of supabase.auth.setSession().
+//
+// Why not setSession: setSession makes GoTrue validate the token against
+// /auth/v1/user (and, with autoRefresh, hit /token). A BRIDGED token is not a
+// real GoTrue session, so /auth/v1/user returns 400 and supabase-js silently
+// drops the session — every subsequent supabase.from(...) then goes out as
+// `anon`, so INSERTs (authenticated-only, e.g. events) 401 and event publish
+// fails fast. `accessToken` attaches the token per request with NO GoTrue
+// session, NO /auth/v1/user validation, and NO navigator.locks — exactly what a
+// non-Supabase auth source needs. When no token is set we return the anon key
+// so unauthenticated reads still work.
+let _bridgeToken: string | null = null;
+export function setBridgeAccessToken(token: string | null): void {
+  _bridgeToken = token;
+}
+
 export const supabase = createClient(supabaseUrl, clientKey, {
-  auth: {
-    storage: LocalStorageAdapter,
-    autoRefreshToken: false,
-    persistSession: false,
-    detectSessionInUrl: false,
-  },
+  accessToken: async () => _bridgeToken ?? clientKey,
 });
 
-console.log("[Supabase] Web client initialized");
+console.log("[Supabase] Web client initialized (accessToken bridge)");

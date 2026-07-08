@@ -59,4 +59,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+// Native attaches the bridged JWT via supabase.auth.setSession (see the
+// supabase-jwt bridge). This no-op keeps the shared `{ setBridgeAccessToken }`
+// import resolvable on native; only the web client (accessToken option) uses it.
+export function setBridgeAccessToken(_token: string | null): void {}
+
 console.log("[Supabase] Client initialized (anon only)");

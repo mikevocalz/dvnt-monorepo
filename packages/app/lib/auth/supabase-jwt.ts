@@ -25,7 +25,7 @@
 
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { supabase } from "../supabase/client";
+import { supabase, setBridgeAccessToken } from "../supabase/client";
 import { getBetterAuthToken } from "./identity";
 
 const STORAGE_KEY = "dvnt-supabase-jwt-v1";
@@ -180,6 +180,15 @@ async function mintRemote(): Promise<MintedJwt | null> {
  */
 async function attachToSupabaseClient(jwt: MintedJwt | null): Promise<void> {
   try {
+    // Web: feed the token to the client's `accessToken` option. NO setSession —
+    // setSession triggers GoTrue /auth/v1/user validation, which 400s for a
+    // bridged token and drops the session → writes go out as anon → 401. (See
+    // client.web.ts.) Passing null reverts to the anon key.
+    if (Platform.OS === "web") {
+      setBridgeAccessToken(jwt ? jwt.accessToken : null);
+      return;
+    }
+    // Native keeps setSession (no accessToken option there).
     if (jwt) {
       await supabase.auth.setSession({
         access_token: jwt.accessToken,
