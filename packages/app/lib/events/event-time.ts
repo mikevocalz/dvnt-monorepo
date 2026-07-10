@@ -44,18 +44,27 @@ export function formatEventTime(
 
   // event-local → the venue's zone; viewer-local → viewerTz or the device zone
   // (undefined lets Intl use the runtime default = the viewer's device).
-  const timeZone =
+  const tzRaw =
     mode === "event-local" ? eventTz || "UTC" : viewerTz || undefined;
-
-  return new Intl.DateTimeFormat("en-US", {
+  // Guard: an invalid/garbage timeZone makes Intl.DateTimeFormat THROW a
+  // RangeError, which would crash the event screen. Fall back to the device
+  // zone (no timeZone option) rather than throw.
+  const opts: Intl.DateTimeFormatOptions = {
     weekday: "short",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     timeZoneName: "short", // "PDT" / "EDT" — never ambiguous
-    ...(timeZone ? { timeZone } : {}),
-  }).format(d);
+  };
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      ...opts,
+      ...(tzRaw ? { timeZone: tzRaw } : {}),
+    }).format(d);
+  } catch {
+    return new Intl.DateTimeFormat("en-US", opts).format(d);
+  }
 }
 
 // ── Time gates — operate PURELY on UTC instants (never formatted strings) ──

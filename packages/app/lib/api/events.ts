@@ -753,14 +753,18 @@ export const eventsApi = {
         insertPayload[DB.events.maxAttendees] = Number(eventData.maxAttendees);
 
       // IANA timezone for event-local display. Default to the creator's device
-      // zone (usually the venue's), IANA-validated by the events_event_tz check.
+      // zone (usually the venue's). Only send a real, non-empty string — an
+      // empty event_tz is meaningless and (formerly) broke the insert; store
+      // null instead so display falls back to viewer-local.
       try {
-        insertPayload.event_tz =
-          eventData.eventTz ||
-          Intl.DateTimeFormat().resolvedOptions().timeZone ||
-          "UTC";
+        const tz =
+          (typeof eventData.eventTz === "string" && eventData.eventTz.trim()) ||
+          Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (tz && typeof tz === "string" && tz.trim()) {
+          insertPayload.event_tz = tz.trim();
+        }
       } catch {
-        insertPayload.event_tz = "UTC";
+        /* leave event_tz unset (null) — display handles it */
       }
 
       // V2 fields (additive — only set if provided)
