@@ -423,12 +423,55 @@ function StoriesRow() {
                 : "bg-linear-to-tr from-[#3FDCFF] to-[#8A40CF]"
             }`}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={s.avatar}
-              alt={s.username}
-              className="w-full h-full rounded-lg object-cover bg-white/10"
-            />
+            {/* The tile shows the STORY'S media (first frame), not the avatar —
+                thumbnail if present, else the image URL, else a first-frame
+                <video> for videos; avatar only as a last-resort fallback. A
+                small avatar sits in the corner for identity. */}
+            <span className="relative block w-full h-full rounded-lg overflow-hidden bg-white/10">
+              {(() => {
+                const first = (s.items ?? [])[0] as any;
+                const img =
+                  first?.thumbnail ||
+                  (first && first.type !== "video" ? first.url : null);
+                if (img) {
+                  // eslint-disable-next-line @next/next/no-img-element
+                  return (
+                    <img
+                      src={img}
+                      alt={s.username}
+                      className="w-full h-full object-cover"
+                    />
+                  );
+                }
+                if (first?.type === "video" && first.url) {
+                  return (
+                    <video
+                      src={`${first.url}#t=0.1`}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      className="w-full h-full object-cover"
+                    />
+                  );
+                }
+                // eslint-disable-next-line @next/next/no-img-element
+                return (
+                  <img
+                    src={s.avatar}
+                    alt={s.username}
+                    className="w-full h-full object-cover"
+                  />
+                );
+              })()}
+              {s.avatar ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={s.avatar}
+                  alt=""
+                  className="absolute bottom-1 left-1 w-5 h-5 rounded-md object-cover border border-white/80"
+                />
+              ) : null}
+            </span>
           </span>
           <span className="text-white/70 text-[11px] truncate w-[74px] text-center">
             {s.username}
