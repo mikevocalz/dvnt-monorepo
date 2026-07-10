@@ -745,7 +745,20 @@ export function useRsvpEvent() {
       }
       pendingRsvpMutations.add(eventId);
       try {
-        return await eventsApiClient.rsvpEvent(eventId, status);
+        const result = await eventsApiClient.rsvpEvent(eventId, status);
+        // Every "going" RSVP issues a free ticket via the idempotent
+        // issue_rsvp_ticket RPC. Web never did this (only native called it), so
+        // web RSVPs had no ticket. Best-effort: a ticket hiccup must NOT fail or
+        // hang the RSVP — the query invalidation + next RSVP cover stragglers.
+        if (status === "going") {
+          try {
+            const { ticketsApi } = await import("@dvnt/app/lib/api/tickets");
+            await ticketsApi.issueRsvpTicket({ eventId, userId: "" });
+          } catch (e) {
+            console.warn("[useRsvpEvent] ticket issue failed (non-fatal):", e);
+          }
+        }
+        return result;
       } finally {
         pendingRsvpMutations.delete(eventId);
       }
@@ -799,6 +812,9 @@ export function useRsvpEvent() {
       queryClient.invalidateQueries({
         queryKey: [...eventKeys.all, "mine"],
       });
+      // A "going" RSVP now issues a ticket — refresh My Tickets + this event's
+      // ticket so the new ticket shows without a manual reload.
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
     },
   });
 }
