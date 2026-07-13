@@ -7,6 +7,29 @@
 
 import { supabase } from "../supabase/client";
 
+const MUTATION_TIMEOUT_MS = 15000;
+
+async function ensureBridgeAuth(): Promise<void> {
+  try {
+    const { ensureSupabaseJwt } = await import("../auth/supabase-jwt");
+    await Promise.race([
+      ensureSupabaseJwt(),
+      new Promise((resolve) => setTimeout(resolve, 10000)),
+    ]);
+  } catch {
+    // Non-fatal: the DB mutation below still returns the authoritative RLS error.
+  }
+}
+
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal !== "undefined" && "timeout" in AbortSignal) {
+    return AbortSignal.timeout(ms);
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
 export type TicketTypeCategory = "admission" | "product" | "service";
 
 export const TICKET_TYPE_CATEGORIES: Array<{
@@ -69,6 +92,7 @@ export const ticketTypesApi = {
     params: CreateTicketTypeParams,
   ): Promise<TicketTypeRecord | null> {
     try {
+      await ensureBridgeAuth();
       const { data, error } = await supabase
         .from("ticket_types")
         .insert({
@@ -85,13 +109,14 @@ export const ticketTypesApi = {
           is_active: true,
         })
         .select()
+        .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS))
         .single();
 
       if (error) throw error;
       return data;
     } catch (err) {
       console.error("[TicketTypes] create error:", err);
-      return null;
+      throw err;
     }
   },
 
@@ -134,16 +159,18 @@ export const ticketTypesApi = {
     >,
   ): Promise<boolean> {
     try {
+      await ensureBridgeAuth();
       const { error } = await supabase
         .from("ticket_types")
         .update(updates)
-        .eq("id", id);
+        .eq("id", id)
+        .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS));
 
       if (error) throw error;
       return true;
     } catch (err) {
       console.error("[TicketTypes] update error:", err);
-      return false;
+      throw err;
     }
   },
 

@@ -49,6 +49,15 @@ const tierLevelColor: Record<string, string> = {
   table: "#FF5BFC",
 };
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_resolve, reject) =>
+      setTimeout(() => reject(new Error(`stalled at: ${label} (${ms / 1000}s)`)), ms),
+    ),
+  ]);
+}
+
 function Section({
   title,
   children,
@@ -201,7 +210,11 @@ export function EventEditScreen() {
 
       // 1. Event row update — must finish before navigation
       try {
-        await updateEventMutation.mutateAsync({ eventId: id, updates: updateData });
+        await withTimeout(
+          updateEventMutation.mutateAsync({ eventId: id, updates: updateData }),
+          20000,
+          "event-update",
+        );
       } catch (err: any) {
         showToast(
           "error",
@@ -218,26 +231,34 @@ export function EventEditScreen() {
         const maxPerUser = parseInt(tier.maxPerOrder || "4");
 
         if (!tier.id) {
-          await ticketTypesApi.create({
-            eventId: id,
-            name: tier.name || "General Admission",
-            category: tier.category || "admission",
-            description: tier.description || undefined,
-            priceCents,
-            quantityTotal: qty,
-            maxPerUser,
-            saleStart: tier.saleStart || undefined,
-          });
+          await withTimeout(
+            ticketTypesApi.create({
+              eventId: id,
+              name: tier.name || "General Admission",
+              category: tier.category || "admission",
+              description: tier.description || undefined,
+              priceCents,
+              quantityTotal: qty,
+              maxPerUser,
+              saleStart: tier.saleStart || undefined,
+            }),
+            15000,
+            "ticket-type-create",
+          );
         } else {
-          await ticketTypesApi.update(tier.id, {
-            name: tier.name,
-            category: tier.category || "admission",
-            description: tier.description || null,
-            price_cents: priceCents,
-            quantity_total: qty,
-            max_per_user: maxPerUser,
-            sale_start: tier.saleStart || null,
-          });
+          await withTimeout(
+            ticketTypesApi.update(tier.id, {
+              name: tier.name,
+              category: tier.category || "admission",
+              description: tier.description || null,
+              price_cents: priceCents,
+              quantity_total: qty,
+              max_per_user: maxPerUser,
+              sale_start: tier.saleStart || null,
+            }),
+            15000,
+            "ticket-type-update",
+          );
         }
       });
 
@@ -246,7 +267,7 @@ export function EventEditScreen() {
       );
       const removedIds = s.originalTierIds.filter((tid) => !currentIds.has(tid));
       const deactivatePromises = removedIds.map((tid) =>
-        ticketTypesApi.deactivate(tid),
+        withTimeout(ticketTypesApi.deactivate(tid), 15000, "ticket-type-deactivate"),
       );
 
       try {
