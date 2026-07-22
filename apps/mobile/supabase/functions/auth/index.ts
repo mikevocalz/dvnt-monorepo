@@ -18,6 +18,7 @@ import {
   resetPassword as resetPasswordEmail,
   verifyEmailLink,
   accountLinked as accountLinkedEmail,
+  magicLinkEmail,
 } from "../_shared/email/templates.ts";
 import { brandEmailWrapper } from "../_shared/email/wrapper.ts";
 
@@ -180,7 +181,7 @@ async function getAuth() {
     // Import Better Auth + plugins
     const { betterAuth } = await import("npm:better-auth@1.5.5");
     const { expo } = await import("npm:@better-auth/expo@1.5.5");
-    const { username } = await import("npm:better-auth@1.5.5/plugins");
+    const { username, magicLink } = await import("npm:better-auth@1.5.5/plugins");
     // Import npm:pg — Deno supports Node built-ins (node:net, node:tls) needed by pg
     const pgModule = await import("npm:pg@8.13.1");
     const Pool = pgModule.Pool || pgModule.default?.Pool || pgModule.default;
@@ -241,7 +242,33 @@ async function getAuth() {
           .filter(Boolean),
         AUTH_BASE_URL,
       ],
-      plugins: [expo(), username()],
+      plugins: [
+        expo(),
+        username(),
+        // B4: BetterAuth mints/expires/verifies the link token; Resend only
+        // delivers. sendMagicLink signature verified against
+        // better-auth@1.5.5/dist/plugins/magic-link/index.d.mts:35.
+        magicLink({
+          expiresIn: 60 * 15,
+          sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
+            // Better Auth emits {SUPABASE_ORIGIN}/api/auth/magic-link/verify.
+            // For web sign-ins the verify hop must run through the dvntapp.live
+            // /api/auth proxy so the session cookie lands FIRST-party (same
+            // constraint as the Google callback). App-scheme callbacks keep the
+            // original host — the Expo plugin handles the deep link.
+            let sendUrl = url;
+            try {
+              const u = new URL(url);
+              const cb = u.searchParams.get("callbackURL") || "";
+              if (/^https?:\/\/(www\.)?dvntapp\.live/i.test(cb)) {
+                sendUrl = `https://dvntapp.live${u.pathname.replace(/^.*(\/api\/auth\/)/, "/api/auth/")}${u.search}`;
+              }
+            } catch { /* send the original URL */ }
+            const { subject, html } = magicLinkEmail(sendUrl);
+            await sendEmail(email, subject, html);
+          },
+        }),
+      ],
       socialProviders: {
         ...(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET
           ? {

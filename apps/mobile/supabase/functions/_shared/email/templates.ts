@@ -325,6 +325,31 @@ export function welcome(name?: string | null): EmailContent {
 }
 
 /**
+ * magicLinkEmail — one-tap sign-in link (B4). Also powers the guided finish
+ * flow for stalled accounts: the link resumes exactly where they left off.
+ */
+export function magicLinkEmail(url: string): EmailContent {
+  return {
+    subject: `Your ${BRAND.name} sign-in link`,
+    html: brandEmailWrapper(
+      [
+        heading("Pick up where you left off"),
+        paragraph(
+          "Tap the button and you're in — no password needed. The link works once and expires in 15 minutes.",
+        ),
+        button(url, `Open ${BRAND.name}`, { gradient: "brand" }),
+        divider(),
+        paragraph(
+          "Didn't ask for this? You can safely ignore it — nothing happens without the link.",
+          { size: 13, color: COLORS.textMuted, margin: "0" },
+        ),
+      ].join(""),
+      { preheader: `One tap to get back into ${BRAND.name}`, minimalFooter: true },
+    ),
+  };
+}
+
+/**
  * accountLinked — sent when a social sign-in (Google/Apple) is merged into an
  * EXISTING account by matching email. Reassures + gives a security escape hatch.
  */

@@ -5,7 +5,7 @@
  * no @better-auth/expo.
  */
 import { createAuthClient } from "better-auth/react";
-import { usernameClient } from "better-auth/client/plugins";
+import { usernameClient, magicLinkClient } from "better-auth/client/plugins";
 import { passkeyClient } from "@better-auth/passkey/client";
 
 // Same-origin proxy (Next): when EXPO_PUBLIC_AUTH_SAME_ORIGIN is set, point the
@@ -40,7 +40,10 @@ export const authClient = createAuthClient({
   fetchOptions: {
     credentials: "include",
   },
-  plugins: [usernameClient(), passkeyClient()],
+  // magicLinkClient: B4 — signIn.magicLink({ email, callbackURL }) where
+  // callbackURL carries the exact resume step (server plugin registered in
+  // the auth edge fn; BetterAuth owns mint/expiry/verify, Resend delivers).
+  plugins: [usernameClient(), magicLinkClient(), passkeyClient()],
 });
 
 export const { signIn, signUp, signOut, useSession, getSession } = authClient;

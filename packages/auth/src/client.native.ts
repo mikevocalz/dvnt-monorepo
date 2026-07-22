@@ -7,7 +7,7 @@
  */
 import { createAuthClient } from "better-auth/react";
 import { expoClient } from "@better-auth/expo/client";
-import { usernameClient } from "better-auth/client/plugins";
+import { usernameClient, magicLinkClient } from "better-auth/client/plugins";
 import { passkeyClient } from "@better-auth/passkey/client";
 import * as SecureStore from "expo-secure-store";
 
@@ -31,7 +31,7 @@ console.log("[AuthClient] AUTH_BASE_PATH:", AUTH_BASE_PATH);
 export const authClient = createAuthClient({
   baseURL: AUTH_ORIGIN,
   basePath: AUTH_BASE_PATH,
-  plugins: [
+  plugins: [magicLinkClient(), 
     expoClient({
       scheme: "dvnt",
       storagePrefix: "dvnt",
