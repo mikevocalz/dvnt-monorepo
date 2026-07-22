@@ -11,6 +11,7 @@ import { signIn } from "@dvnt/app/lib/auth-client";
 import { auth } from "@dvnt/app/lib/api/auth";
 import { syncAuthUser } from "@dvnt/app/lib/api/privileged";
 import { replayPendingLink } from "@dvnt/app/lib/deep-linking/link-engine";
+import { useOnboardingV2Store } from "@dvnt/app/lib/stores/onboarding-v2-store";
 import { useDeepLinkStore } from "@dvnt/app/lib/stores/deep-link-store";
 import Logo from "@dvnt/app/components/logo";
 import { VideoView, useVideoPlayer } from "expo-video";
@@ -118,6 +119,12 @@ export default function LoginScreen() {
             const pending = useDeepLinkStore.getState().pendingLink;
             if (pending) {
               replayPendingLink();
+            } else if (
+              // B1/B2: first sign-in on this install → welcome flow. The
+              // screen self-skips when the profile already has the data.
+              useOnboardingV2Store.getState().steps["welcome"] !== "done"
+            ) {
+              router.replace("/(protected)/welcome" as any);
             } else {
               router.replace("/(protected)/(tabs)" as any);
             }
