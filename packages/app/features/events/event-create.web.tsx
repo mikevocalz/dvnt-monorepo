@@ -253,42 +253,46 @@ export function CreateEventScreen() {
 
       // Every event gets at least one ticket type so it's attendable and the
       // host sees a ticket. Explicit tiers win; otherwise a single default —
-      // a free "RSVP" when no price is set, else "General Admission". (Was
-      // gated on ticketingEnabled, so plain events published with 0 tickets and
-      // the host "didn't see a ticket".)
+      // a free "RSVP" when no price is set, else "General Admission". Ticket
+      // creation is post-publish setup; if it fails, the event row is already
+      // live and must not be reported as an event publish failure.
+      let ticketSetupFailed = false;
       if (id) {
-        if (s.ticketTiers.length > 0) {
-          // Best-effort sequential creation — failing one tier shouldn't
-          // silently swallow the rest, so any error propagates to the
-          // catch below and the user is told to retry.
-          for (const tier of s.ticketTiers) {
+        try {
+          if (s.ticketTiers.length > 0) {
+            // Sequential creation keeps tier order deterministic.
+            for (const tier of s.ticketTiers) {
+              await withTimeout(
+                ticketTypesApi.create({
+                  eventId: String(id),
+                  name: tier.name || "General Admission",
+                  priceCents: tier.priceCents,
+                  quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
+                  maxPerUser:
+                    tier.maxPerUser > 0 ? tier.maxPerUser : s.simpleMaxPerUser,
+                }),
+                15000,
+                "ticket-type",
+              );
+            }
+          } else {
+            const priceCents = Math.round((parseFloat(s.ticketPrice) || 0) * 100);
+            const qty = s.maxAttendees ? parseInt(s.maxAttendees, 10) : 200;
             await withTimeout(
               ticketTypesApi.create({
                 eventId: String(id),
-                name: tier.name || "General Admission",
-                priceCents: tier.priceCents,
-                quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
-                maxPerUser:
-                  tier.maxPerUser > 0 ? tier.maxPerUser : s.simpleMaxPerUser,
+                name: priceCents === 0 ? "RSVP" : "General Admission",
+                priceCents,
+                quantityTotal: qty,
+                maxPerUser: s.simpleMaxPerUser > 0 ? s.simpleMaxPerUser : 4,
               }),
               15000,
               "ticket-type",
             );
           }
-        } else {
-          const priceCents = Math.round((parseFloat(s.ticketPrice) || 0) * 100);
-          const qty = s.maxAttendees ? parseInt(s.maxAttendees, 10) : 200;
-          await withTimeout(
-            ticketTypesApi.create({
-              eventId: String(id),
-              name: priceCents === 0 ? "RSVP" : "General Admission",
-              priceCents,
-              quantityTotal: qty,
-              maxPerUser: s.simpleMaxPerUser > 0 ? s.simpleMaxPerUser : 4,
-            }),
-            15000,
-            "ticket-type",
-          );
+        } catch (ticketErr) {
+          ticketSetupFailed = true;
+          console.warn("[create-event] ticket setup failed after publish", ticketErr);
         }
       }
 
@@ -315,7 +319,15 @@ export function CreateEventScreen() {
       }
 
       s.resetDraft();
-      showToast("success", "Published", "Your event is live.");
+      if (ticketSetupFailed) {
+        showToast(
+          "warning",
+          "Published",
+          "Your event is live, but ticket setup needs a retry from the event dashboard.",
+        );
+      } else {
+        showToast("success", "Published", "Your event is live.");
+      }
       router.push(id ? `/events/${slug || id}` : "/events");
     } catch (e) {
       showToast(

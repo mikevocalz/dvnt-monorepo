@@ -9,6 +9,7 @@ import {
   getCurrentUserIdSync,
   getCurrentUserAuthId,
 } from "./auth-helper";
+import { invokeEdge } from "./invoke-edge";
 
 /** Safely parse a JSONB array column (handles string, array, or null) */
 function parseJsonbArray(value: unknown): any[] {
@@ -29,16 +30,40 @@ function isVideoUrl(url: string): boolean {
   return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url);
 }
 
+/** True for URLs an <img> can render for OTHER viewers: hosted http(s), not a video file. */
+function isRenderableImageUrl(url: unknown): url is string {
+  return (
+    typeof url === "string" && /^https?:\/\//i.test(url) && !isVideoUrl(url)
+  );
+}
+
 /** Resolve event image URL from multiple DB columns */
 function resolveEventImage(event: any): string {
-  // Priority: cover_image_url > image > cover_image_id (would need join)
-  return event[DB.events.coverImageUrl] || event["image"] || "";
+  // Priority: cover_image_url > image. Skip anything an <img> can't render —
+  // legacy rows persisted blob: object URLs (dead outside the creator's tab)
+  // and video files in the image columns; falling through beats a broken img.
+  const candidates = [event[DB.events.coverImageUrl], event["image"]];
+  for (const c of candidates) {
+    if (isRenderableImageUrl(c)) return c;
+  }
+  return "";
 }
 
 /** Returns the flyer video URL if the flyer is a video, otherwise undefined */
 function resolveFlyerVideoUrl(event: any): string | undefined {
-  const flyerUrl = event[DB.events.flyerImageUrl];
-  return flyerUrl && isVideoUrl(flyerUrl) ? flyerUrl : undefined;
+  // Legacy rows stored the flyer video in image/cover_image_url with
+  // flyer_image_url empty — check those too so the card can play it.
+  const candidates = [
+    event[DB.events.flyerImageUrl],
+    event[DB.events.coverImageUrl],
+    event["image"],
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && /^https?:\/\//i.test(c) && isVideoUrl(c)) {
+      return c;
+    }
+  }
+  return undefined;
 }
 
 function normalizeVisibility(
@@ -211,7 +236,7 @@ export const eventsApi = {
           description: event.description,
           ...dateParts,
           location: event.location,
-          image: event.image || "",
+          image: resolveEventImage(event),
           // Video flyer routes through the resolver — null when the
           // flyer is a static image so the feed card can fall back to
           // event.image cleanly.
@@ -301,7 +326,7 @@ export const eventsApi = {
           description: event.description,
           ...dateParts,
           location: event.location,
-          image: event.image || "",
+          image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           images: parseJsonbArray(event.images),
           youtubeVideoUrl: event.youtube_video_url || null,
@@ -547,7 +572,7 @@ export const eventsApi = {
         description: ev.description,
         ...dateParts,
         location: ev.location,
-        image: ev.image || "",
+        image: resolveEventImage(ev),
         images: parseJsonbArray(ev.images),
         flyerImageUrl: ev.flyer_image_url || null,
         flyerVideoUrl: resolveFlyerVideoUrl(ev) || null,
@@ -711,113 +736,28 @@ export const eventsApi = {
     try {
       console.log("[Events] createEvent");
 
-      const authId = await getCurrentUserAuthId();
-      if (!authId) throw new Error("Not authenticated");
+      const eventTz =
+        typeof eventData.eventTz === "string" && eventData.eventTz.trim()
+          ? eventData.eventTz.trim()
+          : Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-      // The insert runs under RLS as `authenticated` (policy
-      // events_insert_authenticated). Bridge the Better Auth session into a
-      // Supabase JWT first via setSession — without it the client is `anon`,
-      // which lacks INSERT on events and fails with
-      // "permission denied for table events". (Mirrors updateEvent below.)
-      try {
-        const { ensureSupabaseJwt } = await import("../auth/supabase-jwt");
-        // ponytail: bound the best-effort JWT bridge so publish can never hang
-        // on it. Whatever wins the race, we fall through with the current
-        // session — this call is already declared non-fatal above.
-        await Promise.race([
-          ensureSupabaseJwt(),
-          new Promise((resolve) => setTimeout(resolve, 10000)),
-        ]);
-      } catch {
-        // Non-fatal: fall through with the current session.
+      const result = await invokeEdge<{
+        ok: boolean;
+        data?: { event?: Record<string, any> };
+        error?: { code: string; message: string };
+      }>("create-event", { ...eventData, eventTz });
+
+      if (result.error) throw new Error(result.error.message);
+      if (!result.data?.ok || !result.data.data?.event) {
+        throw new Error(result.data?.error?.message || "Failed to create event");
       }
 
-      // Use authId for host_id (text column)
-      const insertPayload: Record<string, any> = {
-        [DB.events.hostId]: authId,
-        [DB.events.title]: eventData.title,
-        [DB.events.description]: eventData.description,
-        [DB.events.startDate]: eventData.date,
-        [DB.events.location]: eventData.location,
-        [DB.events.coverImageUrl]: eventData.image,
-        ["image"]: eventData.image,
-        ["images"]: eventData.images || [],
-        [DB.events.youtubeVideoUrl]: eventData.youtubeVideoUrl || null,
-        [DB.events.price]: eventData.price || 0,
-        [DB.events.isOnline]: eventData.isOnline || false,
-      };
-
-      // Guard: never insert max_attendees as `undefined`/NaN (it's the one
-      // formerly-unconditional field). Only set a real capacity.
-      if (eventData.maxAttendees != null && Number.isFinite(Number(eventData.maxAttendees)))
-        insertPayload[DB.events.maxAttendees] = Number(eventData.maxAttendees);
-
-      // IANA timezone for event-local display. Default to the creator's device
-      // zone (usually the venue's). Only send a real, non-empty string — an
-      // empty event_tz is meaningless and (formerly) broke the insert; store
-      // null instead so display falls back to viewer-local.
-      try {
-        const tz =
-          (typeof eventData.eventTz === "string" && eventData.eventTz.trim()) ||
-          Intl.DateTimeFormat().resolvedOptions().timeZone;
-        if (tz && typeof tz === "string" && tz.trim()) {
-          insertPayload.event_tz = tz.trim();
-        }
-      } catch {
-        /* leave event_tz unset (null) — display handles it */
-      }
-
-      // V2 fields (additive — only set if provided)
-      if (eventData.locationLat != null)
-        insertPayload.location_lat = eventData.locationLat;
-      if (eventData.locationLng != null)
-        insertPayload.location_lng = eventData.locationLng;
-      if (eventData.locationName)
-        insertPayload.location_name = eventData.locationName;
-      if (eventData.locationAddress)
-        insertPayload.location_address = eventData.locationAddress;
-      if (eventData.locationType)
-        insertPayload.location_type = eventData.locationType;
-      insertPayload.visibility = normalizeVisibility(eventData.visibility);
-      // `events` has a `category` column but NO `event_type` column, so the
-      // structured Event Type persists here. Prefer event_type over the legacy
-      // tag-derived `category` and the older `eventCategory` alias. (Previously
-      // this read only `eventCategory`, which the form never set → category and
-      // the entire Event Type picker were silently dropped on every create.)
-      const resolvedCategory =
-        eventData.event_type || eventData.category || eventData.eventCategory;
-      if (resolvedCategory) insertPayload.category = resolvedCategory;
-      if (eventData.ageRestriction)
-        insertPayload.age_restriction = eventData.ageRestriction;
-      if (eventData.endDate) insertPayload.end_date = eventData.endDate;
-      if (eventData.ticketingEnabled != null)
-        insertPayload.ticketing_enabled = eventData.ticketingEnabled;
-      if (eventData.dressCode) insertPayload.dress_code = eventData.dressCode;
-      if (eventData.doorPolicy)
-        insertPayload.door_policy = eventData.doorPolicy;
-      if (eventData.lineup) insertPayload.lineup = eventData.lineup;
-      if (eventData.perks) insertPayload.perks = eventData.perks;
-      if (eventData.flyerImageUrl)
-        insertPayload.flyer_image_url = eventData.flyerImageUrl;
-      // Video flyer: when present, plays in feed; static contexts use the
-      // flyer image as poster (no separate poster column — flyer image
-      // IS the poster). Column shipped by the 20260613004000 migration.
-      if (eventData.videoFlyerUrl)
-        insertPayload.video_flyer_url = eventData.videoFlyerUrl;
-      if (eventData.nsfw != null) insertPayload.nsfw = eventData.nsfw;
-
-      const { data, error } = await supabase
-        .from(DB.events.table)
-        .insert(insertPayload)
-        .select()
-        .single();
-
-      if (error) throw error;
+      const data = result.data.data.event;
 
       console.log("[Events] Event created:", data?.id);
 
       // Extract the flyer's dominant color (skeleton bg) — fire-and-forget.
-      if (data?.id && (insertPayload.flyer_image_url || insertPayload.cover_image_url)) {
+      if (data?.id && (data.flyer_image_url || data.cover_image_url)) {
         void (async () => {
           try {
             const { invokeEdge } = await import("./invoke-edge");
