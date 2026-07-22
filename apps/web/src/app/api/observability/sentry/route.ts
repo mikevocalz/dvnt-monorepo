@@ -30,6 +30,23 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // A9 access control: org metrics are staff-only. Verify the caller's
+  // Payload admin session (payload-token cookie) against the admin-users
+  // auth endpoint — same principal that gates the console/admin.
+  const cookie = req.headers.get("cookie") || "";
+  if (!cookie.includes("payload-token=")) {
+    return NextResponse.json({ error: "staff only" }, { status: 401 });
+  }
+  const me = await fetch(new URL("/api/admin-users/me", req.url), {
+    headers: { cookie },
+    cache: "no-store",
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+  if (!me?.user) {
+    return NextResponse.json({ error: "staff only" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(req.url);
   const path = searchParams.get("path") || "";
   if (!ALLOWED.some((re) => re.test(path))) {

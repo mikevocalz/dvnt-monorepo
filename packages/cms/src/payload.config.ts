@@ -24,7 +24,9 @@ import { Categories } from './collections/Categories'
 import { Authors } from './collections/Authors'
 import { Media } from './collections/Media'
 import { Comments } from './collections/Comments'
+import { SentryAlerts } from './collections/SentryAlerts'
 import { appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint, appVerifyEndpoint } from './endpoints/appData'
+import { sentryWebhookEndpoint } from './endpoints/sentryWebhook'
 import { getServerSideURL } from './utilities/getURL'
 
 const filename = fileURLToPath(import.meta.url)
@@ -76,7 +78,14 @@ export default buildConfig({
       },
       beforeLogin: ['@dvnt/cms/components/BeforeLogin'],
       beforeDashboard: ['@dvnt/cms/components/SyncFromApp'],
-      afterNavLinks: ['@dvnt/cms/components/BackToConsole', '@dvnt/cms/components/KeepNavInteractive'],
+      afterNavLinks: ['@dvnt/cms/components/BackToConsole', '@dvnt/cms/components/ObservabilityNavLink', '@dvnt/cms/components/KeepNavInteractive'],
+      views: {
+        // A9: /admin/observability — live health via the server-side proxy.
+        observability: {
+          Component: '@dvnt/cms/components/ObservabilityView',
+          path: '/observability',
+        },
+      },
     },
     importMap: {
       // Admin component paths above are package specifiers (@dvnt/cms/components/*)
@@ -111,10 +120,10 @@ export default buildConfig({
     api: '/payload-api',
   },
 
-  collections: [AdminUsers, Members, Reports, Events, Tickets, BanList, ModerationActions, Posts, Categories, Authors, Media, Comments],
+  collections: [AdminUsers, Members, Reports, Events, Tickets, BanList, ModerationActions, Posts, Categories, Authors, Media, Comments, SentryAlerts],
 
   // Read-only windows onto the live app DB (real members/events). See appData.ts.
-  endpoints: [appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint, appVerifyEndpoint],
+  endpoints: [sentryWebhookEndpoint, appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint, appVerifyEndpoint],
 
   // Supabase Storage for Media uploads (inert until S3 env is set — see above).
   storage: storageAdapters,
