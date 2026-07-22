@@ -154,3 +154,11 @@ verify_jwt = false
 
 [functions.delete-conversation]
 verify_jwt = false
+
+# A10 probes — public endpoints (no secrets served); Sentry Uptime + pg_cron
+# hit them without a JWT. Pinned so a redeploy can't regress to verify_jwt=true.
+[functions.db-health]
+verify_jwt = false
+
+[functions.cdn-probe]
+verify_jwt = false
