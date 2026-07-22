@@ -89,9 +89,14 @@ export function LoginScreen() {
               followersCount: profile.followersCount,
               followingCount: profile.followingCount,
             });
+            // First login on this browser → welcome flow (identity + location
+            // opt-in). The flow self-skips if the profile already has the data.
+            const welcomeDone =
+              typeof localStorage !== 'undefined' &&
+              !!localStorage.getItem(`dvnt-welcome-${profile.id}`);
             // Honor intent: return to the gated URL the user came from
             // (validated internal-only), else the feed.
-            router.replace(readReturnToFromUrl('/feed'));
+            router.replace(welcomeDone ? readReturnToFromUrl('/feed') : '/auth/welcome');
           } else {
             toast.error('Login Failed', { description: 'Could not load user profile from database' });
           }
@@ -186,6 +191,25 @@ export function LoginScreen() {
               <View style={styles.divider} />
             </View>
 
+            <Pressable
+              onPress={async () => {
+                try {
+                  await (signIn as any).social({
+                    provider: 'google',
+                    callbackURL: '/auth/social-callback',
+                  });
+                } catch (err: any) {
+                  toast.error('Google sign-in failed', {
+                    description: err?.message || 'Please try again or use email.',
+                  });
+                }
+              }}
+              accessibilityRole="button"
+              style={styles.googleButton}
+            >
+              <Text style={styles.googleButtonText}>Continue with Google</Text>
+            </Pressable>
+
             <View style={styles.signupRow}>
               <Text style={styles.muted}>Don't have an account?</Text>
               <Pressable onPress={() => router.push('/auth/signup')}>
@@ -246,6 +270,14 @@ const styles = StyleSheet.create({
   link: { fontSize: 14, fontWeight: '600' },
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   divider: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.15)' },
+  googleButton: {
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleButtonText: { color: '#1f1f1f', fontSize: 15, fontWeight: '700' },
   or: { color: 'rgba(255,255,255,0.6)', fontSize: 12 },
   signupRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
   muted: { color: 'rgba(255,255,255,0.7)' },

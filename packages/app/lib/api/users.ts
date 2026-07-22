@@ -515,6 +515,8 @@ export const usersApi = {
     username?: string;
     pronouns?: string;
     gender?: string;
+    sexuality?: string[];
+    eventAudience?: string;
     bio?: string;
     location?: string;
     name?: string;
@@ -541,6 +543,12 @@ export const usersApi = {
           ? { gender: updates.gender.trim() }
           : {}),
         ...(Array.isArray(updates.links) ? { links: updates.links } : {}),
+        ...(Array.isArray(updates.sexuality)
+          ? { sexuality: updates.sexuality }
+          : {}),
+        ...(updates.eventAudience !== undefined
+          ? { eventAudience: updates.eventAudience }
+          : {}),
       };
 
       const fallbackPayload = {
@@ -562,7 +570,9 @@ export const usersApi = {
         const usedOptionalFields =
           "pronouns" in primaryPayload ||
           "gender" in primaryPayload ||
-          "links" in primaryPayload;
+          "links" in primaryPayload ||
+          "sexuality" in primaryPayload ||
+          "eventAudience" in primaryPayload;
         const shouldRetryBasePayload =
           usedOptionalFields &&
           (errorMessage === "Failed to update profile" ||

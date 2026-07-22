@@ -40,6 +40,8 @@ const AUTH_BASE_URL = SUPABASE_URL; // Origin only — basePath stripping below 
 const OAUTH_CALLBACK_BASE = `${SUPABASE_URL}/functions/v1/auth/api/auth/callback`;
 const APPLE_CLIENT_ID = Deno.env.get("APPLE_CLIENT_ID") || "";
 const APPLE_CLIENT_SECRET = Deno.env.get("APPLE_CLIENT_SECRET") || "";
+const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID") || "";
+const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
 
 // Append the Supabase anon key as a query param so browser-initiated
 // GETs (reset-password, verify-email links from email) pass the gateway
@@ -239,8 +241,25 @@ async function getAuth() {
         AUTH_BASE_URL,
       ],
       plugins: [expo(), username()],
-      socialProviders:
-        APPLE_CLIENT_ID && APPLE_CLIENT_SECRET
+      socialProviders: {
+        ...(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET
+          ? {
+              google: {
+                clientId: GOOGLE_CLIENT_ID,
+                clientSecret: GOOGLE_CLIENT_SECRET,
+                // Web-first: the callback must land on the WEB origin (proxied
+                // to this fn by Next's /api/auth rewrite) so the session cookie
+                // is first-party on dvntapp.live. A supabase.co callback (like
+                // Apple's native flow) would set cookies the browser never
+                // sends back to the app. Must match the URI registered in the
+                // Google Cloud OAuth client.
+                redirectURI:
+                  Deno.env.get("GOOGLE_REDIRECT_URI") ||
+                  "https://dvntapp.live/api/auth/callback/google",
+              },
+            }
+          : {}),
+        ...(APPLE_CLIENT_ID && APPLE_CLIENT_SECRET
           ? {
               apple: {
                 clientId: APPLE_CLIENT_ID,
@@ -258,7 +277,8 @@ async function getAuth() {
                 redirectURI: `${OAUTH_CALLBACK_BASE}/apple`,
               },
             }
-          : undefined,
+          : {}),
+      },
       emailAndPassword: {
         enabled: true,
         minPasswordLength: 8,

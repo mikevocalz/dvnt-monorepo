@@ -11,6 +11,10 @@ interface EditProfileUIState {
   usernameError: string;
   pronouns: string;
   gender: string;
+  /** "I am…" identity tags (multi-select, private filter data). */
+  sexuality: string[];
+  /** "Looking for events w/…" audience preference. */
+  eventAudience: string;
   links: string[];
   newLink: string;
   showPronouns: boolean;
@@ -23,6 +27,9 @@ interface EditProfileUIState {
   setUsernameError: (v: string) => void;
   setPronouns: (v: string) => void;
   setGender: (v: string) => void;
+  toggleSexuality: (v: string) => void;
+  setSexuality: (v: string[]) => void;
+  setEventAudience: (v: string) => void;
   setLinks: (updater: string[] | ((prev: string[]) => string[])) => void;
   setNewLink: (v: string) => void;
   setShowPronouns: (v: boolean) => void;
@@ -35,6 +42,8 @@ interface EditProfileUIState {
     pronouns: string;
     gender: string;
     links: string[];
+    sexuality?: string[];
+    eventAudience?: string;
   }) => void;
   reset: () => void;
 }
@@ -44,6 +53,8 @@ const initial = {
   usernameError: "",
   pronouns: "",
   gender: "",
+  sexuality: [] as string[],
+  eventAudience: "",
   links: [] as string[],
   newLink: "",
   showPronouns: false,
@@ -58,6 +69,14 @@ export const useEditProfileUIStore = create<EditProfileUIState>((set) => ({
   setUsernameError: (usernameError) => set({ usernameError }),
   setPronouns: (pronouns) => set({ pronouns }),
   setGender: (gender) => set({ gender }),
+  toggleSexuality: (v) =>
+    set((s) => ({
+      sexuality: s.sexuality.includes(v)
+        ? s.sexuality.filter((i) => i !== v)
+        : [...s.sexuality, v],
+    })),
+  setSexuality: (sexuality) => set({ sexuality }),
+  setEventAudience: (eventAudience) => set({ eventAudience }),
   setLinks: (updater) =>
     set((s) => ({ links: typeof updater === "function" ? updater(s.links) : updater })),
   setNewLink: (newLink) => set({ newLink }),
@@ -65,7 +84,14 @@ export const useEditProfileUIStore = create<EditProfileUIState>((set) => ({
   setShowGender: (showGender) => set({ showGender }),
   setIsSaving: (isSaving) => set({ isSaving }),
   setNewAvatarUri: (newAvatarUri) => set({ newAvatarUri }),
-  hydrate: ({ username, pronouns, gender, links }) =>
-    set({ username, pronouns, gender, links }),
+  hydrate: ({ username, pronouns, gender, links, sexuality, eventAudience }) =>
+    set({
+      username,
+      pronouns,
+      gender,
+      links,
+      sexuality: sexuality ?? [],
+      eventAudience: eventAudience ?? "",
+    }),
   reset: () => set(initial),
 }));

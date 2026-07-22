@@ -11,6 +11,8 @@ import { useUpdateProfile } from "@dvnt/app/lib/hooks/use-profile";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { appendCacheBuster } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { useEditProfileUIStore } from "@dvnt/app/lib/stores/edit-profile-ui-store";
+import { IDENTITY_OPTIONS, AUDIENCE_OPTIONS } from "@dvnt/app/lib/constants/identity";
+import { supabase } from "@dvnt/app/lib/supabase/client";
 
 const PRONOUNS_OPTIONS = ["He/Him", "She/Her", "They/Them", "He/They", "She/They", "Ze/Zir", "Custom"];
 const GENDER_OPTIONS = ["Male", "Female", "Trans Male", "Trans Female", "Non-binary", "Prefer not to say", "Custom"];
@@ -80,7 +82,25 @@ export function EditProfileScreen() {
         pronouns: typeof user.pronouns === "string" ? user.pronouns : "",
         gender: typeof user.gender === "string" ? user.gender : "",
         links: normalizeLinks((user as any)?.links),
+        sexuality: Array.isArray(user.sexuality) ? user.sexuality : [],
+        eventAudience: user.eventAudience || "",
       });
+      // The auth store only carries sexuality/event_audience after they've
+      // been saved this session — refresh both from the row so the form (and
+      // the dirty baseline) reflect what's actually stored.
+      void supabase
+        .from("users")
+        .select("sexuality, event_audience")
+        .eq("id", Number(user.id))
+        .maybeSingle()
+        .then(({ data }) => {
+          if (!data) return;
+          const sexuality = Array.isArray(data.sexuality) ? data.sexuality : [];
+          const eventAudience = data.event_audience || "";
+          useAuthStore.getState().updateUser({ sexuality, eventAudience });
+          s.setSexuality(sexuality);
+          s.setEventAudience(eventAudience);
+        });
       return;
     }
     s.reset();
@@ -96,6 +116,8 @@ export function EditProfileScreen() {
       s.username !== (user.username || "") ||
       s.pronouns !== (typeof user.pronouns === "string" ? user.pronouns : "") ||
       s.gender !== (typeof user.gender === "string" ? user.gender : "") ||
+      JSON.stringify(s.sexuality) !== JSON.stringify(user.sexuality || []) ||
+      s.eventAudience !== (user.eventAudience || "") ||
       JSON.stringify(s.links) !== JSON.stringify(normalizeLinks((user as any)?.links)) ||
       !!s.newAvatarUri);
   useDirtyGuard(isDirty);
@@ -166,6 +188,8 @@ export function EditProfileScreen() {
         location: editLocation.trim(),
         pronouns: s.pronouns.trim(),
         gender: s.gender.trim(),
+        sexuality: s.sexuality,
+        eventAudience: s.eventAudience,
         ...(avatarUrl ? { avatar: avatarUrl } : {}),
         ...(trimmedUsername !== (user.username || "").toLowerCase() ? { username: trimmedUsername } : {}),
       };
@@ -333,6 +357,41 @@ export function EditProfileScreen() {
                 ))}
               </div>
             ) : null}
+          </FormField>
+
+          <FormField label="I am">
+            <p className="text-xs text-white/40 pb-1">
+              Private — used only to tune your events and feed.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {IDENTITY_OPTIONS.map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => s.toggleSexuality(opt)}
+                  className={`px-3.5 h-9 rounded-xl text-[13px] font-medium ${
+                    s.sexuality.includes(opt) ? "bg-cyan-500 text-white" : "bg-white/8 text-white/85"
+                  }`}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </FormField>
+
+          <FormField label="Looking for events with">
+            <div className="flex flex-wrap gap-2">
+              {AUDIENCE_OPTIONS.map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => s.setEventAudience(opt === s.eventAudience ? "" : opt)}
+                  className={`px-3.5 h-9 rounded-xl text-[13px] font-medium ${
+                    s.eventAudience === opt ? "bg-cyan-500 text-white" : "bg-white/8 text-white/85"
+                  }`}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
           </FormField>
         </div>
 

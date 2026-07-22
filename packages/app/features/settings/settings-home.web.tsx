@@ -23,6 +23,7 @@ import {
   Moon,
   Shield,
   ShieldCheck,
+  Smartphone,
   User,
   UserX,
   X,
@@ -298,6 +299,11 @@ export function SettingsHomeScreen() {
         {/* About DVNT */}
         <SectionLabel>About DVNT</SectionLabel>
         <Card>
+          <NavRow
+            icon={<Smartphone size={20} />}
+            label="Install the app"
+            onClick={go("/settings/install-app")}
+          />
           <NavRow
             icon={<Info size={20} />}
             label="About / Community Focus"

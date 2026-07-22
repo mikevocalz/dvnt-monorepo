@@ -59,6 +59,8 @@ type UpdateProfileInput = {
   location?: string;
   pronouns?: string;
   gender?: string;
+  sexuality?: string[];
+  eventAudience?: string;
   hashtags?: string[];
   username?: string;
 };

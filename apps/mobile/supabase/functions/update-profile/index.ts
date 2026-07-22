@@ -39,6 +39,8 @@ const UpdateProfileSchema = z
     links: z.array(z.string().max(200)).max(4).optional(),
     pronouns: z.string().max(50).optional(),
     gender: z.string().max(50).optional(),
+    sexuality: z.array(z.string().max(30)).max(12).optional(),
+    eventAudience: z.string().max(40).optional(),
   })
   .refine((data) => Object.values(data).some((v) => v !== undefined), {
     message: "At least one field must be provided",
@@ -209,6 +211,12 @@ Deno.serve(async (req) => {
     if (updates.gender !== undefined) {
       updateData.gender = updates.gender;
     }
+    if (updates.sexuality !== undefined) {
+      updateData.sexuality = updates.sexuality;
+    }
+    if (updates.eventAudience !== undefined) {
+      updateData.event_audience = updates.eventAudience;
+    }
 
     // Username change — check uniqueness before updating
     if (updates.username !== undefined) {
@@ -285,6 +293,8 @@ Deno.serve(async (req) => {
         links,
         pronouns,
         gender,
+        sexuality,
+        event_audience,
         verified,
         followers_count,
         following_count,
@@ -416,6 +426,8 @@ Deno.serve(async (req) => {
           links: normalizeLinks(updatedUser.links),
           pronouns: updatedUser.pronouns,
           gender: updatedUser.gender,
+          sexuality: updatedUser.sexuality || [],
+          eventAudience: updatedUser.event_audience,
           avatar: (updatedUser.avatar as any)?.url,
           isVerified: updatedUser.verified || false,
           postsCount: updatedUser.posts_count || 0,
