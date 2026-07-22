@@ -14,6 +14,10 @@ interface EventDetailUiState {
   // Ticket checkout sheet
   checkoutOpen: boolean;
   setCheckoutOpen: (open: boolean) => void;
+
+  /** B3: deferred ID-verification interstitial (age-gated RSVP/tickets). */
+  verifyOpen: boolean;
+  setVerifyOpen: (open: boolean) => void;
   selectedTierId: string | null;
   setSelectedTierId: (id: string | null) => void;
   ticketQty: number;
@@ -60,6 +64,9 @@ export const useEventDetailUiStore = create<EventDetailUiState>((set) => ({
 
   checkoutOpen: false,
   setCheckoutOpen: (checkoutOpen) => set({ checkoutOpen }),
+
+  verifyOpen: false,
+  setVerifyOpen: (verifyOpen) => set({ verifyOpen }),
   selectedTierId: null,
   setSelectedTierId: (selectedTierId) => set({ selectedTierId }),
   ticketQty: 1,
@@ -89,6 +96,7 @@ export const useEventDetailUiStore = create<EventDetailUiState>((set) => ({
   reset: () =>
     set({
       menuOpen: false,
+      verifyOpen: false,
       checkoutOpen: false,
       selectedTierId: null,
       ticketQty: 1,

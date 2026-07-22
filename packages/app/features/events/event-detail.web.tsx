@@ -69,6 +69,12 @@ import { usePromotionStore } from "@dvnt/app/lib/stores/promotion-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useEventDetailUiStore } from "@dvnt/app/lib/stores/event-detail-ui-store";
+import {
+  useAgeVerificationStatus,
+  needsAgeVerification,
+} from "@dvnt/app/lib/hooks/use-age-verification";
+import { VerificationInterstitial } from "@dvnt/app/components/verification-interstitial.web";
+import { onboardingCheckpoint } from "@dvnt/observability/flows";
 import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
 import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog } from "@dvnt/ui";
@@ -229,6 +235,10 @@ export function EventDetailScreen() {
   // ── event-detail UI flags (Zustand, no useState) ─────────────────────
   const checkoutOpen = useEventDetailUiStore((s) => s.checkoutOpen);
   const setCheckoutOpen = useEventDetailUiStore((s) => s.setCheckoutOpen);
+  // B3: deferred ID verification — gate age-restricted RSVP/tickets, never registration.
+  const verifyOpen = useEventDetailUiStore((s) => s.verifyOpen);
+  const setVerifyOpen = useEventDetailUiStore((s) => s.setVerifyOpen);
+  const { data: verificationStatus } = useAgeVerificationStatus();
   const selectedTierId = useEventDetailUiStore((s) => s.selectedTierId);
   const setSelectedTierId = useEventDetailUiStore((s) => s.setSelectedTierId);
   const ticketQty = useEventDetailUiStore((s) => s.ticketQty);
@@ -722,6 +732,19 @@ export function EventDetailScreen() {
                       return;
                     }
                     router.push(loginPathWithReturn(pathname));
+                    return;
+                  }
+                  // B3: first age-gated action triggers the verify interstitial.
+                  if (
+                    needsAgeVerification(
+                      (e as any).ageRestriction,
+                      verificationStatus,
+                    )
+                  ) {
+                    onboardingCheckpoint("verification.triggered", {
+                      surface: "event_detail",
+                    });
+                    setVerifyOpen(true);
                     return;
                   }
                   // Authed: free tier-less event → RSVP; else open checkout.
@@ -1348,6 +1371,13 @@ export function EventDetailScreen() {
       <Lightbox />
       <GuestRsvpSheet />
       <GuestCheckoutSheet />
+      {/* B3: age-gate interstitial (Didit hosted capture). */}
+      <VerificationInterstitial
+        open={verifyOpen}
+        onClose={() => setVerifyOpen(false)}
+        status={verificationStatus}
+        ageLabel={(event as any)?.ageRestriction || "18+"}
+      />
     </div>
   );
 }
