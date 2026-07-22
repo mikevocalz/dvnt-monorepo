@@ -9,6 +9,7 @@
   --dim: rgba(245, 245, 244, 0.78);
   --faint: rgba(245, 245, 244, 0.5);
   --brand: #ff5bfc;
+  --primary: #3ea4e5;
   --cyan: #3fdcff;
   --violet: #8a40cf;
   --danger: #fca5a5;
@@ -129,7 +130,8 @@
 /* Buttons / pills */
 .dv-btn { border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; background: rgba(255, 255, 255, 0.06); color: var(--text); font-family: inherit; }
 .dv-btn:hover { filter: brightness(1.15); }
-.dv-btn--primary { background: var(--brand); border-color: var(--brand); color: #0a0a14; font-weight: 600; }
+/* App CTA gradient — blue is DVNT's primary; magenta stays an accent. */
+.dv-btn--primary { background: linear-gradient(90deg, #379ed8, #874e9f); border-color: transparent; color: #fff; font-weight: 700; }
 .dv-btn--ghost { background: none; border-color: transparent; color: var(--dim); }
 .dv-btn:disabled { opacity: 0.4; cursor: default; }
 .dv-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; position: relative; }

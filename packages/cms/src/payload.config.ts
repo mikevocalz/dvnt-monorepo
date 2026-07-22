@@ -78,8 +78,14 @@ export default buildConfig({
       },
       beforeLogin: ['@dvnt/cms/components/BeforeLogin'],
       beforeDashboard: ['@dvnt/cms/components/SyncFromApp'],
-      afterNavLinks: ['@dvnt/cms/components/BackToConsole', '@dvnt/cms/components/ObservabilityNavLink', '@dvnt/cms/components/KeepNavInteractive'],
+      afterNavLinks: ['@dvnt/cms/components/ObservabilityNavLink', '@dvnt/cms/components/KeepNavInteractive'],
       views: {
+        // ONE portal: the admin homepage IS the ops console (Overview ·
+        // Members · Events · Reports · Health · Team); the sidebar is the
+        // records backend. /console redirects here.
+        dashboard: {
+          Component: '@/dashboard/ConsoleHome',
+        },
         // A9: /admin/observability — live health via the server-side proxy.
         observability: {
           Component: '@dvnt/cms/components/ObservabilityView',

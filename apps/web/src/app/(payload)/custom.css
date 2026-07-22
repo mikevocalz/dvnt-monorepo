@@ -75,9 +75,12 @@ html[data-theme='dark'] {
 /* Primary actions → DVNT magenta. */
 .btn--style-primary,
 button.btn--style-primary {
-  background: var(--dvnt-magenta) !important;
-  border-color: var(--dvnt-magenta) !important;
-  color: #0a0a14 !important;
+  /* The app's CTA gradient (RSVP / Create account) — blue is DVNT's primary;
+   * magenta is an accent, not a button color (design-language audit). */
+  background: linear-gradient(90deg, #379ed8, #874e9f) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  font-weight: 700;
 }
 .btn--style-primary:hover {
   filter: brightness(1.06);
@@ -86,8 +89,8 @@ button.btn--style-primary {
 /* Active nav + links pick up the brand. */
 .nav__link--active,
 .nav__link.active {
-  color: var(--dvnt-magenta) !important;
-  box-shadow: inset 3px 0 0 var(--dvnt-magenta);
+  color: #3ea4e5 !important;
+  box-shadow: inset 3px 0 0 #3ea4e5;
 }
 a:not(.btn):hover {
   color: var(--dvnt-cyan);
@@ -115,17 +118,19 @@ html[data-theme='dark'],
   --ramp-grey-600: #161a28;
   --ramp-grey-500: #232a3b;
 
-  /* Brand → DVNT magenta (primary actions, active nav, focus). */
-  --color-bg-brand: #ff5bfc;
-  --color-bg-brand-hover: #ff74fd;
-  --color-bg-brand-pressed: #e84fe6;
-  --color-bg-brand-secondary: rgba(255, 91, 252, 0.14);
-  --color-bg-brand-tertiary: rgba(255, 91, 252, 0.1);
-  --color-text-brand: #ff5bfc;
-  --color-border-brand: #ff5bfc;
-  --color-bg-selected: rgba(255, 91, 252, 0.16);
-  --color-bg-selected-hover: rgba(255, 91, 252, 0.22);
-  --color-bg-selected-strong: rgba(255, 91, 252, 0.28);
+  /* Brand → the APP's primary blue rgb(62,164,229); selected states tint
+   * blue like the app's chips. Magenta stays an accent (badges, dots) —
+   * matching dvntapp.live, where blue is primary and pink punctuates. */
+  --color-bg-brand: #3ea4e5;
+  --color-bg-brand-hover: #4fb2f0;
+  --color-bg-brand-pressed: #2f8fd0;
+  --color-bg-brand-secondary: rgba(62, 164, 229, 0.14);
+  --color-bg-brand-tertiary: rgba(62, 164, 229, 0.1);
+  --color-text-brand: #3ea4e5;
+  --color-border-brand: #3ea4e5;
+  --color-bg-selected: rgba(62, 164, 229, 0.16);
+  --color-bg-selected-hover: rgba(62, 164, 229, 0.22);
+  --color-bg-selected-strong: rgba(62, 164, 229, 0.28);
 }
 
 /* Deviant gradient wash behind the whole admin shell. */

@@ -28,12 +28,12 @@ import { BoldFeatureClient as BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864
 import { ItalicFeatureClient as ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { default as default_0ccfca3c4dc527a80f5674d21fdb9861 } from '@dvnt/cms/components/Icon'
 import { default as default_e6ec51973242ecc02deba9d3e1f63635 } from '@dvnt/cms/components/Logo'
-import { default as default_20f08b10c0dae90cd957cf30d87bff98 } from '@dvnt/cms/components/BackToConsole'
 import { default as default_ce66db0d635f062c1393c5ec9a235b74 } from '@dvnt/cms/components/ObservabilityNavLink'
 import { default as default_8927304619b103ad9825942558eb3b2b } from '@dvnt/cms/components/KeepNavInteractive'
 import { default as default_bd2eb919a0ef345761afe56bded2090b } from '@dvnt/cms/components/SyncFromApp'
 import { default as default_1ee0f43f5fc02685c2849a5e4ca0319c } from '@dvnt/cms/components/BeforeLogin'
 import { S3ClientUploadHandler as S3ClientUploadHandler_f97aa6c64367fa259c5bc0567239ef24 } from '@payloadcms/storage-s3/client'
+import { default as default_32df30e218d15c2d874f3dcd46aed307 } from '@/dashboard/ConsoleHome'
 import { default as default_d1ea9e0ca107cfedc21644451d39a01b } from '@dvnt/cms/components/ObservabilityView'
 import { CollectionCards as CollectionCards_ab83ff7e88da8d3530831f296ec4756a } from '@payloadcms/ui/rsc'
 
@@ -69,12 +69,12 @@ export const importMap = {
   "@payloadcms/richtext-lexical/client#ItalicFeatureClient": ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@dvnt/cms/components/Icon#default": default_0ccfca3c4dc527a80f5674d21fdb9861,
   "@dvnt/cms/components/Logo#default": default_e6ec51973242ecc02deba9d3e1f63635,
-  "@dvnt/cms/components/BackToConsole#default": default_20f08b10c0dae90cd957cf30d87bff98,
   "@dvnt/cms/components/ObservabilityNavLink#default": default_ce66db0d635f062c1393c5ec9a235b74,
   "@dvnt/cms/components/KeepNavInteractive#default": default_8927304619b103ad9825942558eb3b2b,
   "@dvnt/cms/components/SyncFromApp#default": default_bd2eb919a0ef345761afe56bded2090b,
   "@dvnt/cms/components/BeforeLogin#default": default_1ee0f43f5fc02685c2849a5e4ca0319c,
   "@payloadcms/storage-s3/client#S3ClientUploadHandler": S3ClientUploadHandler_f97aa6c64367fa259c5bc0567239ef24,
+  "@/dashboard/ConsoleHome#default": default_32df30e218d15c2d874f3dcd46aed307,
   "@dvnt/cms/components/ObservabilityView#default": default_d1ea9e0ca107cfedc21644451d39a01b,
   "@payloadcms/ui/rsc#CollectionCards": CollectionCards_ab83ff7e88da8d3530831f296ec4756a
 }
