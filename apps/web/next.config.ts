@@ -140,6 +140,21 @@ const nextConfig: NextConfig = {
   // would 404. Redirect them to the canonical /feed/sneaky-lynk/* route.
   async redirects() {
     return [
+      // Canonical host. Browsing/installing the PWA from the Vercel default
+      // domain names the installed app "dvnt-blog" (Chrome falls back to the
+      // hostname for app identity there). Force everyone onto dvntapp.live.
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'dvnt-blog.vercel.app' }],
+        destination: 'https://dvntapp.live/:path*',
+        permanent: true,
+      },
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'dvnt-blog-mikefacesnys-projects.vercel.app' }],
+        destination: 'https://dvntapp.live/:path*',
+        permanent: true,
+      },
       {
         source: '/sneaky-lynk/:path*',
         destination: '/feed/sneaky-lynk/:path*',
