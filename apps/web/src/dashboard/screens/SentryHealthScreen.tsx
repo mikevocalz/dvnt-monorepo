@@ -68,9 +68,18 @@ export function SentryHealthScreen() {
         <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4">
           <h3 className="text-red-400 font-semibold">Sentry API Error</h3>
           <p className="text-red-300/80 text-sm mt-1">{error}</p>
-          <p className="text-white/50 text-xs mt-2">
-            Set SENTRY_INTERNAL_TOKEN in the server env (never NEXT_PUBLIC_) — the dashboard reads Sentry through the /api/observability proxy.
-          </p>
+          {error?.includes('not configured') ? (
+            <p className="text-white/50 text-xs mt-2">
+              Set SENTRY_INTERNAL_TOKEN in the server env (never NEXT_PUBLIC_) — the dashboard reads Sentry through the /api/observability proxy.
+            </p>
+          ) : (
+            <button
+              onClick={() => loadData()}
+              className="mt-3 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white"
+            >
+              Retry
+            </button>
+          )}
         </div>
       </div>
     );
