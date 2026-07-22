@@ -233,6 +233,28 @@ export const REDACTED_KEYS = new Set([
   'unpublished_body',
   'draftContent',
   'draft_content',
+  // §2.4 identity/demographic denylist — these must never leave the device.
+  'name',
+  'firstName',
+  'first_name',
+  'lastName',
+  'last_name',
+  'dob',
+  'dateOfBirth',
+  'date_of_birth',
+  'address',
+  'gender',
+  'pronouns',
+  'sexuality',
+  'orientation',
+  'eventAudience',
+  'event_audience',
+  'hiv_status',
+  'hivStatus',
+  'answer',
+  'answers',
+  'id_image',
+  'idImage',
 ]);
 
 export const SAFE_EMAIL_DOMAINS = new Set([

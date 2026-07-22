@@ -37,6 +37,7 @@
     "@payloadcms/richtext-lexical": "4.0.0-internal.a0ef1b8",
     "@payloadcms/translations": "4.0.0-internal.a0ef1b8",
     "@payloadcms/ui": "4.0.0-internal.a0ef1b8",
+    "@sentry/nextjs": "^10.67.0",
     "@stripe/react-stripe-js": "^6.6.0",
     "@stripe/stripe-js": "^9.8.0",
     "@tanstack/react-form": "^1.33.0",

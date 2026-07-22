@@ -3,6 +3,7 @@ import path from 'path';
 import type { NextConfig } from 'next';
 import type { Compiler, Compilation } from 'webpack';
 import { withPayload } from '@payloadcms/next/withPayload';
+import { withSentryConfig } from '@sentry/nextjs';
 
 class CopySkiaPlugin {
   apply(compiler: Compiler) {
@@ -288,4 +289,22 @@ const nextConfig: NextConfig = {
 // DefinePlugin) and adds Payload's serverExternalPackages + admin handling.
 // devBundleServerPackages:false keeps Payload's server deps external in dev so
 // the heavy RNW/Skia webpack pipeline doesn't try to bundle pg/sharp/payload.
-export default withPayload(nextConfig, { devBundleServerPackages: false });
+// withSentryConfig wraps LAST so it sees the final config: /monitoring tunnel
+// (ad blockers eat direct beacons → wrong Web Vitals), source-map upload when
+// SENTRY_AUTH_TOKEN is present (silently skipped otherwise), release naming
+// dvnt@<version>+<sha> shared with mobile/edge.
+const gitSha = (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7);
+process.env.SENTRY_RELEASE = `dvnt@${process.env.npm_package_version || '0.1.0'}${gitSha ? `+${gitSha}` : ''}`;
+
+export default withSentryConfig(
+  withPayload(nextConfig, { devBundleServerPackages: false }),
+  {
+    org: '5th-galaxy-studios',
+    project: 'dvnt-web',
+    silent: !process.env.CI,
+    tunnelRoute: '/monitoring',
+    disableLogger: true,
+    widenClientFileUpload: true,
+    release: { name: process.env.SENTRY_RELEASE },
+  },
+);

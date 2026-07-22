@@ -61,6 +61,17 @@ function isSensitiveKey(key: string): boolean {
     (lower.includes('card') && lower !== 'cards') ||
     lower.includes('cvv') ||
     (lower.includes('phone') && lower !== 'phones') ||
+    // §2.4 identity/demographic patterns — never leave the device
+    lower.includes('gender') ||
+    lower.includes('pronoun') ||
+    lower.includes('orientation') ||
+    lower.includes('sexuality') ||
+    lower.includes('identity') ||
+    lower.includes('hiv') ||
+    lower.includes('survey') ||
+    lower.includes('dob') ||
+    lower.includes('birth') ||
+    lower.includes('id_image') ||
     lower.includes('signed_url') ||
     lower.includes('signedurl') ||
     lower.includes('private_note') ||

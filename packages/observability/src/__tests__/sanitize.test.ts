@@ -115,7 +115,8 @@ describe('sanitizeForSentry', () => {
     const result = sanitizeForSentry(input);
     expect(result.userId).toBe('user_123');
     expect(result.password).toBe('[REDACTED]');
-    expect((result.profile as any).name).toBe('Test User');
+    // §2.4 identity denylist: `name` is redacted since PROMPT NN.
+    expect((result.profile as any).name).toBe('[REDACTED]');
     expect((result.profile as any).phoneNumber).toBe('[REDACTED]');
     expect((result.tokens as any).accessToken).toBe('[REDACTED]');
     expect((result.tokens as any).refreshToken).toBe('[REDACTED]');
@@ -190,5 +191,33 @@ describe('createBeforeSend', () => {
 
     const result = beforeSend(event);
     expect(result.user.email).toBe('admin@dvntapp.live');
+  });
+});
+
+// §2.4 acceptance: a poisoned event with email + hiv_status arrives stripped.
+describe('§2.4 identity denylist', () => {
+  it('strips demographic/identity keys and patterns', () => {
+    const result = sanitizeForSentry({
+      email: 'person@example.com',
+      hiv_status: 'positive',
+      gender: 'x',
+      pronouns: 'they/them',
+      sexuality: ['Queer'],
+      eventAudience: 'Everyone',
+      date_of_birth: '1990-01-01',
+      surveyAnswers: { q1: 'yes' },
+      id_image_url: 'https://cdn/x.png',
+      safeCount: 3,
+    });
+    expect(result.hiv_status).toBe('[REDACTED]');
+    expect(result.gender).toBe('[REDACTED]');
+    expect(result.pronouns).toBe('[REDACTED]');
+    expect(result.sexuality).toBe('[REDACTED]');
+    expect(result.eventAudience).toBe('[REDACTED]');
+    expect(result.date_of_birth).toBe('[REDACTED]');
+    expect(result.surveyAnswers).toBe('[REDACTED]');
+    expect(result.id_image_url).toBe('[REDACTED]');
+    expect(String(result.email)).not.toContain('person@example.com');
+    expect(result.safeCount).toBe(3);
   });
 });
