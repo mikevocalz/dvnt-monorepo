@@ -16,7 +16,7 @@
  * top-padding still lives in each page/layout.
  */
 import dynamic from 'next/dynamic';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'solito/navigation';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
 import { AppShell } from '@dvnt/app/components/app-shell';
@@ -60,6 +60,13 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
 
+  // Hydration guard (DVNT-WEB-9): zustand-persist rehydrates from localStorage
+  // synchronously, so a signed-in visitor's FIRST client render could pick the
+  // AppShell branch while the server HTML was the marketing branch — a React
+  // hydration mismatch. First client render must match SSR; swap after mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   // Supabase JWT bridge for the WEB app. Mobile does this in its Expo Router
   // _layout; the web never did, so its supabase client stayed `anon` and EVERY
   // direct write (events, stories, messages, follows, tags…) failed with
@@ -83,7 +90,7 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   // App surfaces show the app chrome once we know the visitor is authed.
   // (WebAppShell still redirects logged-out users away from auth-only surfaces;
   // /events stays public and falls through to the marketing shell below.)
-  if (isAppSurface(pathname) && hasHydrated && isAuthenticated) {
+  if (isAppSurface(pathname) && mounted && hasHydrated && isAuthenticated) {
     // The persistent 3-column shell (PROMPT 13 §1): left rail + center + right
     // aside on desktop, the bottom tab bar on phones. AppShell switches by
     // breakpoint and owns the nav, replacing the old floating header + tab bar.
