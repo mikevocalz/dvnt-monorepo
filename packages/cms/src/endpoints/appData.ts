@@ -361,7 +361,12 @@ export const appSyncEndpoint: Endpoint = {
   path: '/app/sync',
   method: 'post',
   handler: async (req) => {
-    if ((req.user as any)?.role !== 'super_admin') {
+    // Two callers: a super_admin clicking "Sync now" in the dashboard, or the
+    // pg_cron schedule (every 10 min) presenting the shared APP_SYNC_KEY —
+    // the sync is automatic; the button is just an on-demand override.
+    const cronKey = process.env.APP_SYNC_KEY
+    const isCron = Boolean(cronKey && req.headers.get('x-sync-key') === cronKey)
+    if (!isCron && (req.user as any)?.role !== 'super_admin') {
       return Response.json({ errors: [{ message: 'Forbidden' }] }, { status: 403 })
     }
     const app = await appPool()

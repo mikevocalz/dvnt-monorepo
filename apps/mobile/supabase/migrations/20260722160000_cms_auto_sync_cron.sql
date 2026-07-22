@@ -1,0 +1,8 @@
+-- CMS auto-sync (applied 2026-07-22 via psql): pg_cron POSTs the Payload
+-- /app/sync endpoint every 10 minutes with the shared APP_SYNC_KEY header,
+-- so app users/events/tickets appear in the CMS without anyone clicking
+-- "Sync from app". Key value lives in Vercel env + the cron.job command.
+-- select cron.schedule('dvnt-cms-sync', '*/10 * * * *', $$select net.http_post(
+--   url := 'https://dvntapp.live/payload-api/app/sync',
+--   headers := '{"x-sync-key": "<APP_SYNC_KEY>"}'::jsonb,
+--   timeout_milliseconds := 55000)$$);
