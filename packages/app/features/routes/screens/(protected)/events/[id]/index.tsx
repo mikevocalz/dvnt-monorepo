@@ -57,6 +57,12 @@ import { useEventViewStore } from "@dvnt/app/lib/stores/event-store";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import {
+  useAgeVerificationStatus,
+  needsAgeVerification,
+} from "@dvnt/app/lib/hooks/use-age-verification";
+import { VerificationInterstitial } from "@dvnt/app/components/verification-interstitial.native";
+import { onboardingCheckpoint } from "@dvnt/observability/flows";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { useEventDetailScreenStore } from "@dvnt/app/lib/stores/event-detail-screen-store";
 import { normalizeRouteParams } from "@dvnt/app/lib/navigation/route-params";
@@ -758,6 +764,10 @@ function EventDetailScreenContent() {
   // whole event detail screen on every keystroke.
   const isCheckingOut = useEventDetailScreenStore((s) => s.isCheckingOut);
   const setIsCheckingOut = useEventDetailScreenStore((s) => s.setIsCheckingOut);
+  // B3: deferred ID verification — gate age-restricted RSVP/tickets.
+  const verifyOpen = useEventDetailScreenStore((s) => s.verifyOpen);
+  const setVerifyOpen = useEventDetailScreenStore((s) => s.setVerifyOpen);
+  const { data: verificationStatus } = useAgeVerificationStatus();
   const promoCode = useEventDetailScreenStore((s) => s.promoCode);
   const setPromoCode = useEventDetailScreenStore((s) => s.setPromoCode);
 
@@ -796,6 +806,16 @@ function EventDetailScreenContent() {
         showToast("warning", "Event Ended", "This event has already ended.");
         return;
       }
+    }
+
+    // B3: the FIRST age-gated action triggers the verify interstitial —
+    // verified users pass straight through, registration never asks.
+    if (
+      needsAgeVerification((eventData as any).ageRestriction, verificationStatus)
+    ) {
+      onboardingCheckpoint("verification.triggered", { surface: "event_detail" });
+      setVerifyOpen(true);
+      return;
     }
 
     // ── Stripe checkout path (only when real DB ticket tiers exist) ──
@@ -2601,6 +2621,14 @@ function EventDetailScreenContent() {
                 )
             : undefined
         }
+      />
+
+      {/* B3: age-gate interstitial (Didit hosted capture). */}
+      <VerificationInterstitial
+        visible={verifyOpen}
+        onClose={() => setVerifyOpen(false)}
+        status={verificationStatus}
+        ageLabel={(eventData as any)?.ageRestriction || "18+"}
       />
     </View>
   );

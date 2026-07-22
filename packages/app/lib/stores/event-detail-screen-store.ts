@@ -14,6 +14,8 @@ interface EventDetailScreenState {
   showRatingModal: boolean;
   showAttendeesModal: boolean;
   isCheckingOut: boolean;
+  /** B3: deferred ID-verification interstitial (age-gated RSVP/tickets). */
+  verifyOpen: boolean;
   promoCode: string;
   ticketQty: number;
   // Feature: expandable attendees grid
@@ -34,6 +36,7 @@ interface EventDetailScreenState {
   setShowRatingModal: (show: boolean) => void;
   setShowAttendeesModal: (show: boolean) => void;
   setIsCheckingOut: (checking: boolean) => void;
+  setVerifyOpen: (open: boolean) => void;
   setPromoCode: (code: string) => void;
   setTicketQty: (qty: number) => void;
   setAttendeesExpanded: (expanded: boolean) => void;
@@ -52,6 +55,7 @@ const initialState = {
   showRatingModal: false,
   showAttendeesModal: false,
   isCheckingOut: false,
+  verifyOpen: false,
   promoCode: "",
   ticketQty: 1,
   attendeesExpanded: false,
@@ -72,6 +76,7 @@ export const useEventDetailScreenStore = create<EventDetailScreenState>(
     setShowRatingModal: (show) => set({ showRatingModal: show }),
     setShowAttendeesModal: (show) => set({ showAttendeesModal: show }),
     setIsCheckingOut: (checking) => set({ isCheckingOut: checking }),
+    setVerifyOpen: (verifyOpen) => set({ verifyOpen }),
     setPromoCode: (code) => set({ promoCode: code }),
     setTicketQty: (qty) => set({ ticketQty: Math.max(1, qty) }),
     setAttendeesExpanded: (expanded) => set({ attendeesExpanded: expanded }),
