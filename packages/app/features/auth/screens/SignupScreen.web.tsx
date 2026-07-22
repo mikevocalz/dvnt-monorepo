@@ -10,7 +10,29 @@ import { useAuthStore } from '../../../lib/stores/auth-store';
 import { syncAuthUser } from '../../../lib/api/privileged';
 import { auth } from '../../../lib/api/auth';
 import { Check, Mail } from 'lucide-react';
+import { Dialog } from '@dvnt/ui';
+import {
+  TERMS_OF_SERVICE_MD,
+  PRIVACY_POLICY_MD,
+} from '../../../lib/legal/content.generated';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
+
+/** Tiny markdown-to-DOM renderer for the legal popovers (headings/bullets/bold). */
+function LegalDocBody({ md }: { md: string }) {
+  const strip = (s: string) => s.replace(/\*\*(.+?)\*\*/g, '$1');
+  return (
+    <div className="max-h-[60vh] overflow-y-auto pr-2 text-sm leading-6 text-white/75">
+      {md.split('\n').map((line, i) => {
+        if (line.startsWith('### ')) return <h4 key={i} className="mt-4 mb-1 font-bold text-white">{strip(line.slice(4))}</h4>;
+        if (line.startsWith('## ')) return <h3 key={i} className="mt-5 mb-1.5 text-[15px] font-bold text-white">{strip(line.slice(3))}</h3>;
+        if (line.startsWith('# ')) return <h2 key={i} className="mb-2 text-lg font-extrabold text-white">{strip(line.slice(2))}</h2>;
+        if (line.startsWith('- ')) return <p key={i} className="pl-4">• {strip(line.slice(2))}</p>;
+        if (!line.trim()) return <div key={i} className="h-2" />;
+        return <p key={i}>{strip(line)}</p>;
+      })}
+    </div>
+  );
+}
 
 const STEPS = ['User Info', 'Terms', 'Verification'] as const;
 
@@ -18,6 +40,7 @@ export function SignupScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [legalDoc, setLegalDoc] = useState<null | 'terms' | 'privacy'>(null);
   const { setUser } = useAuthStore();
   // Next app uses Solito/Next routing (no TanStack RouterProvider).
   const router = useRouter();
@@ -42,8 +65,18 @@ export function SignupScreen() {
           }
         } catch (err: any) {
           const isBeta = err?.code === 'BETA_ONLY' || /beta users access only/i.test(err?.message || '');
+          const isExisting =
+            err?.code === 'USER_ALREADY_EXISTS' ||
+            /already exists/i.test(err?.message || '');
           if (isBeta) {
             toast.error('Beta Users Access Only', { description: 'This email isn’t on the beta list yet.' });
+          } else if (isExisting) {
+            // Policy, stated plainly: one account per person.
+            toast.error('One account per person', {
+              description:
+                'An account already exists for this email. DVNT allows one account per person — the same email, or the same name and date of birth, can’t register twice. Sign in instead, or use “Email me a sign-in link” on the sign-in page.',
+              duration: 8000,
+            });
           } else {
             toast.error('Signup failed', { description: err?.message || 'Something went wrong.' });
           }
@@ -83,7 +116,25 @@ export function SignupScreen() {
         )}
         {activeStep === 1 && (
           <View style={{ marginTop: 24, gap: 16 }}>
-            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, lineHeight: 21 }}>By continuing you agree to DVNT's Terms of Service and Privacy Policy.</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, lineHeight: 21 }}>
+              By continuing you agree to DVNT's{' '}
+              <Text
+                onPress={() => setLegalDoc('terms')}
+                style={{ color: P, fontWeight: '700', textDecorationLine: 'underline' }}
+                accessibilityRole="button"
+              >
+                Terms of Service
+              </Text>
+              {' '}and{' '}
+              <Text
+                onPress={() => setLegalDoc('privacy')}
+                style={{ color: P, fontWeight: '700', textDecorationLine: 'underline' }}
+                accessibilityRole="button"
+              >
+                Privacy Policy
+              </Text>
+              . Tap either to read it here.
+            </Text>
             <Pressable onPress={() => setAgreedToTerms(!agreedToTerms)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: agreedToTerms ? P : 'rgba(255,255,255,0.3)', backgroundColor: agreedToTerms ? P : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
                 {agreedToTerms && <Check size={12} color="#fff" />}
@@ -103,6 +154,15 @@ export function SignupScreen() {
           {activeStep < 2 && <Button onPress={form.handleSubmit} disabled={isSubmitting} loading={isSubmitting}>{activeStep === 0 ? 'Continue' : 'Create account'}</Button>}
           {activeStep === 2 && <Button onPress={() => navigate({ to: '/auth/login' })}>Go to sign in</Button>}
         </View>
+        {/* Readable legal popovers — you can read what you're agreeing to. */}
+        <Dialog
+          open={legalDoc !== null}
+          onClose={() => setLegalDoc(null)}
+          title={legalDoc === 'privacy' ? 'Privacy Policy' : 'Terms of Service'}
+        >
+          <LegalDocBody md={legalDoc === 'privacy' ? PRIVACY_POLICY_MD : TERMS_OF_SERVICE_MD} />
+        </Dialog>
+
         <View style={{ marginTop: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
           <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 14 }}>Already have an account?</Text>
           <Pressable onPress={() => navigate({ to: '/auth/login' })}>
