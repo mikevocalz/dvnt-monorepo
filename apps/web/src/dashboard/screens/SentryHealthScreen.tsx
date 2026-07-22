@@ -68,7 +68,7 @@ export function SentryHealthScreen() {
         <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4">
           <h3 className="text-red-400 font-semibold">Sentry API Error</h3>
           <p className="text-red-300/80 text-sm mt-1">{error}</p>
-          <p className="text-zinc-500 text-xs mt-2">
+          <p className="text-white/50 text-xs mt-2">
             Set SENTRY_INTERNAL_TOKEN in the server env (never NEXT_PUBLIC_) — the dashboard reads Sentry through the /api/observability proxy.
           </p>
         </div>
@@ -82,7 +82,7 @@ export function SentryHealthScreen() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Sentry Health</h1>
-          <p className="text-zinc-400 text-sm mt-1">
+          <p className="text-white/60 text-sm mt-1">
             App observability, crash tracking, and release health
           </p>
         </div>
@@ -93,8 +93,8 @@ export function SentryHealthScreen() {
               onClick={() => setPeriod(p)}
               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                 period === p
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                  ? 'bg-[#8A40CF] text-white'
+                  : 'bg-white/10 text-white/60 hover:text-white'
               }`}
             >
               {p}
@@ -108,7 +108,7 @@ export function SentryHealthScreen() {
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500" />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#8A40CF]" />
         </div>
       ) : overview ? (
         <>
@@ -162,7 +162,7 @@ export function SentryHealthScreen() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-zinc-800 text-zinc-400">
+                  <tr className="border-b border-white/10 text-white/60">
                     <th className="text-left py-2 px-3">Version</th>
                     <th className="text-left py-2 px-3">Crash-Free</th>
                     <th className="text-left py-2 px-3">New Issues</th>
@@ -173,7 +173,7 @@ export function SentryHealthScreen() {
                 </thead>
                 <tbody>
                   {releases.map((r) => (
-                    <tr key={r.version} className="border-b border-zinc-800/50 text-zinc-300">
+                    <tr key={r.version} className="border-b border-white/10/50 text-white/75">
                       <td className="py-2 px-3 font-mono text-xs">{r.version}</td>
                       <td className="py-2 px-3">
                         <span className={r.crashFreeSessions >= 99 ? 'text-green-400' : r.crashFreeSessions >= 95 ? 'text-yellow-400' : 'text-red-400'}>
@@ -183,7 +183,7 @@ export function SentryHealthScreen() {
                       <td className="py-2 px-3">{r.newIssues}</td>
                       <td className="py-2 px-3">{r.adoptionRate.toFixed(0)}%</td>
                       <td className="py-2 px-3">{r.platform}</td>
-                      <td className="py-2 px-3 text-zinc-500">{new Date(r.dateCreated).toLocaleDateString()}</td>
+                      <td className="py-2 px-3 text-white/50">{new Date(r.dateCreated).toLocaleDateString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -196,7 +196,7 @@ export function SentryHealthScreen() {
             <h2 className="text-lg font-semibold text-white mb-3">Recommended Alerts</h2>
             <div className="space-y-2">
               {RECOMMENDED_ALERTS.map((alert) => (
-                <div key={alert.name} className="rounded-lg border border-zinc-800 p-3 flex items-start gap-3">
+                <div key={alert.name} className="rounded-lg border border-white/10 p-3 flex items-start gap-3">
                   <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                     alert.priority === 'critical' ? 'bg-red-500/20 text-red-400' :
                     alert.priority === 'high' ? 'bg-yellow-500/20 text-yellow-400' :
@@ -206,8 +206,8 @@ export function SentryHealthScreen() {
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium">{alert.name}</p>
-                    <p className="text-zinc-400 text-xs mt-0.5">{alert.description}</p>
-                    <p className="text-zinc-500 text-xs mt-1">Threshold: {alert.threshold}</p>
+                    <p className="text-white/60 text-xs mt-0.5">{alert.description}</p>
+                    <p className="text-white/50 text-xs mt-1">Threshold: {alert.threshold}</p>
                   </div>
                 </div>
               ))}
@@ -235,7 +235,7 @@ function MetricCard({ label, value, color }: { label: string; value: string; col
 
   return (
     <div className={`rounded-lg border p-4 ${colorClasses[color]}`}>
-      <p className="text-zinc-400 text-xs uppercase tracking-wide">{label}</p>
+      <p className="text-white/60 text-xs uppercase tracking-wide">{label}</p>
       <p className={`text-2xl font-bold mt-1 ${textClasses[color]}`}>{value}</p>
     </div>
   );
@@ -243,9 +243,9 @@ function MetricCard({ label, value, color }: { label: string; value: string; col
 
 function MiniMetric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-zinc-800 p-3 text-center">
-      <p className="text-zinc-500 text-xs">{label}</p>
-      <p className={`text-lg font-bold mt-0.5 ${value === 0 ? 'text-zinc-400' : 'text-red-400'}`}>
+    <div className="rounded-lg border border-white/10 p-3 text-center">
+      <p className="text-white/50 text-xs">{label}</p>
+      <p className={`text-lg font-bold mt-0.5 ${value === 0 ? 'text-white/60' : 'text-red-400'}`}>
         {value}
       </p>
     </div>
@@ -256,29 +256,29 @@ function FeatureCard({ card }: { card: FeatureHealthCard }) {
   const healthy = card.errorCount === 0;
 
   return (
-    <div className={`rounded-lg border p-4 ${healthy ? 'border-zinc-800' : 'border-red-500/20 bg-red-500/5'}`}>
+    <div className={`rounded-lg border p-4 ${healthy ? 'border-white/10' : 'border-red-500/20 bg-red-500/5'}`}>
       <div className="flex items-center justify-between">
         <h3 className="text-white font-medium text-sm">{card.displayName}</h3>
         <span className={`w-2 h-2 rounded-full ${healthy ? 'bg-green-400' : 'bg-red-400'}`} />
       </div>
       <div className="mt-2 space-y-1">
         <div className="flex justify-between text-xs">
-          <span className="text-zinc-400">Errors</span>
-          <span className={healthy ? 'text-zinc-300' : 'text-red-400'}>{card.errorCount}</span>
+          <span className="text-white/60">Errors</span>
+          <span className={healthy ? 'text-white/75' : 'text-red-400'}>{card.errorCount}</span>
         </div>
         <div className="flex justify-between text-xs">
-          <span className="text-zinc-400">Affected Users</span>
-          <span className="text-zinc-300">{card.affectedUsers}</span>
+          <span className="text-white/60">Affected Users</span>
+          <span className="text-white/75">{card.affectedUsers}</span>
         </div>
         {card.latestIssue && (
-          <div className="mt-2 pt-2 border-t border-zinc-800">
-            <p className="text-xs text-zinc-400 truncate">{card.latestIssue.title}</p>
+          <div className="mt-2 pt-2 border-t border-white/10">
+            <p className="text-xs text-white/60 truncate">{card.latestIssue.title}</p>
             {card.sentryIssueUrl && (
               <a
                 href={card.sentryIssueUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs text-purple-400 hover:text-purple-300 mt-1 inline-block"
+                className="text-xs text-[#c084fc] hover:text-[#FF5BFC] mt-1 inline-block"
               >
                 View in Sentry →
               </a>
@@ -297,36 +297,36 @@ function InfraCards({ probes }: { probes: any | null }) {
   const cdn = probes?.cdn;
   const pill = (ok: boolean | undefined) =>
     ok === undefined
-      ? 'bg-zinc-700 text-zinc-300'
+      ? 'bg-white/15 text-white/75'
       : ok
         ? 'bg-emerald-500/15 text-emerald-400'
         : 'bg-red-500/15 text-red-400';
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+      <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
         <div className="flex items-center justify-between">
           <h3 className="text-white font-semibold">Database</h3>
           <span className={`px-2 py-0.5 rounded-md text-xs font-semibold ${pill(db?.ok)}`}>
             {db === undefined ? '…' : db?.ok ? 'Healthy' : 'Failing'}
           </span>
         </div>
-        <p className="text-zinc-400 text-sm mt-2">
+        <p className="text-white/60 text-sm mt-2">
           PostgREST round-trip {db?.latencyMs != null ? `${db.latencyMs}ms` : '—'} · probed every
-          minute · dead-man cron monitor <span className="text-zinc-300">db-health</span>
+          minute · dead-man cron monitor <span className="text-white/75">db-health</span>
         </p>
       </div>
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+      <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
         <div className="flex items-center justify-between">
           <h3 className="text-white font-semibold">Bunny CDN</h3>
           <span className={`px-2 py-0.5 rounded-md text-xs font-semibold ${pill(cdn?.ok)}`}>
             {cdn === undefined ? '…' : cdn?.ok ? 'Serving' : 'Failing'}
           </span>
         </div>
-        <p className="text-zinc-400 text-sm mt-2">
+        <p className="text-white/60 text-sm mt-2">
           Edge {cdn?.cdn?.latencyMs != null ? `${cdn.cdn.latencyMs}ms` : '—'} (
           {cdn?.cdn?.cacheStatus ?? '—'}) · origin{' '}
           {cdn?.origin?.latencyMs != null ? `${cdn.origin.latencyMs}ms` : '—'} · canary probed
-          every 5 min · monitor <span className="text-zinc-300">cdn-probe</span>
+          every 5 min · monitor <span className="text-white/75">cdn-probe</span>
         </p>
       </div>
     </div>

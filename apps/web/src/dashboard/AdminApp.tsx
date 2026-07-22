@@ -13,6 +13,7 @@ import { EventsScreen } from './screens/EventsScreen'
 import { EventEditScreen } from './screens/EventEditScreen'
 import { TeamScreen } from './screens/TeamScreen'
 import { SentryHealthScreen } from './screens/SentryHealthScreen'
+import { MessageButtonCommandCenter } from './screens/MessageButtonCommandCenter'
 import './ui.css'
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } })
@@ -92,7 +93,7 @@ function Console({ onSignOut }: { onSignOut: () => void }) {
         {tab === 'overview' && <OverviewScreen />}
         {tab === 'members' && <MembersScreen />}
         {tab === 'reports' && <ReportsScreen />}
-        {tab === 'health' && <SentryHealthScreen />}
+        {tab === 'health' && <HealthTab />}
         {tab === 'team' && isSuperAdmin && <TeamScreen />}
         {tab === 'events' &&
           (editEventId ? (
@@ -114,6 +115,19 @@ function Console({ onSignOut }: { onSignOut: () => void }) {
           onSignOut={() => { onSignOut(); setMenuOpen(false) }}
         />
       )}
+    </>
+  )
+}
+
+function HealthTab() {
+  const [sub, setSub] = useState<'app' | 'msgbtn'>('app')
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 4, padding: '12px 24px 0' }}>
+        <button className={`dv-tab${sub === 'app' ? ' is-active' : ''}`} onClick={() => setSub('app')}>App health</button>
+        <button className={`dv-tab${sub === 'msgbtn' ? ' is-active' : ''}`} onClick={() => setSub('msgbtn')}>Message button</button>
+      </div>
+      {sub === 'app' ? <SentryHealthScreen /> : <MessageButtonCommandCenter />}
     </>
   )
 }
