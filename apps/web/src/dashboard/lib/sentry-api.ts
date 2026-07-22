@@ -25,18 +25,28 @@ import type {
 // server env there — this module previously read NEXT_PUBLIC_SENTRY_AUTH_TOKEN,
 // which would have shipped a token in the client bundle. Org/project slugs are
 // not secrets; committed like the DSNs.
+// Org-level Sentry endpoints (sessions, releases) take numeric project IDs.
+const PROJECT_IDS: Record<string, string> = {
+  'dvnt-web': '4511776642170880',
+  'dvnt-mobile': '4511776736608256',
+  'dvnt-edge': '4511776737722368',
+};
+
 function getConfig() {
   const org = process.env.NEXT_PUBLIC_SENTRY_ORG ?? '5th-galaxy-studios';
   const project = process.env.NEXT_PUBLIC_SENTRY_PROJECT ?? 'dvnt-web';
-  return { org, project };
+  return { org, project, projectId: PROJECT_IDS[project] ?? project };
 }
 
-async function sentryFetch<T>(path: string, params?: Record<string, string>): Promise<T> {
+async function sentryFetch<T>(path: string, params?: Record<string, string | string[]>): Promise<T> {
   const url = new URL('/api/observability/sentry', window.location.origin);
   url.searchParams.set('path', path);
   if (params) {
     for (const [key, value] of Object.entries(params)) {
-      url.searchParams.set(key, value);
+      // Sentry expects REPEATED params (e.g. multiple `field`), not commas.
+      for (const v of Array.isArray(value) ? value : [value]) {
+        url.searchParams.append(key, v);
+      }
     }
   }
 
@@ -56,24 +66,27 @@ async function sentryFetch<T>(path: string, params?: Record<string, string>): Pr
 // ─── Overview ────────────────────────────────────────────────────────────────
 
 export async function fetchCrashFreeMetrics(period: '24h' | '7d' | '30d' = '24h'): Promise<CrashFreeMetrics> {
-  const { org, project } = getConfig();
+  const { org, projectId } = getConfig();
   const statsPeriod = period === '24h' ? '24h' : period === '7d' ? '7d' : '30d';
 
+  // Session-API field names verified live: crash_free_rate(...) is a 0–1
+  // ratio; the old 'crash_free_sessions' field name 400s.
   const data = await sentryFetch<any>(
     `/organizations/${org}/sessions/`,
     {
-      project: project,
-      field: 'crash_free_sessions,crash_free_users,sum(session)',
+      project: projectId,
+      field: ['crash_free_rate(session)', 'crash_free_rate(user)', 'sum(session)', 'count_unique(user)'],
       statsPeriod,
-      groupBy: '',
     },
   );
 
+  const totals = data?.groups?.[0]?.totals ?? {};
+  const rate = (v: unknown) => (typeof v === 'number' ? v * 100 : 100);
   return {
-    crashFreeSessions: data?.groups?.[0]?.totals?.['crash_free_sessions'] ?? 100,
-    crashFreeUsers: data?.groups?.[0]?.totals?.['crash_free_users'] ?? 100,
-    totalSessions: data?.groups?.[0]?.totals?.['sum(session)'] ?? 0,
-    totalUsers: 0,
+    crashFreeSessions: rate(totals['crash_free_rate(session)']),
+    crashFreeUsers: rate(totals['crash_free_rate(user)']),
+    totalSessions: totals['sum(session)'] ?? 0,
+    totalUsers: totals['count_unique(user)'] ?? 0,
     period,
   };
 }
@@ -158,12 +171,12 @@ export async function fetchAllFeatureHealth(period: '24h' | '7d' | '30d' = '7d')
 // ─── Release Health ──────────────────────────────────────────────────────────
 
 export async function fetchReleaseHealth(): Promise<ReleaseHealth[]> {
-  const { org, project } = getConfig();
+  const { org, projectId } = getConfig();
 
   const data = await sentryFetch<any[]>(
     `/organizations/${org}/releases/`,
     {
-      project: project,
+      project: projectId,
       per_page: '10',
       sort: 'date',
       healthStat: 'sessions',
