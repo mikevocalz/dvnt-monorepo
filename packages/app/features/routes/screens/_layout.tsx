@@ -4,6 +4,10 @@ import "../global.css";
 // errors + unhandled Promise rejections, persists to MMKV for the
 // next session to surface. OTA-safe — pure JS.
 import "@dvnt/app/lib/global-error-handler";
+// Sentry boots immediately after the raw JS handler so native crash capture,
+// tracing, and replay are armed before any other side-effect import can run.
+// No-op on web (Next has its own instrumentation files).
+import { bootSentry, wrapRoot } from "@dvnt/app/lib/sentry-boot";
 import "@dvnt/app/lib/query-focus-manager";
 import "@dvnt/app/lib/i18n";
 import "@dvnt/app/lib/ota-bootstrap-log";
@@ -159,7 +163,9 @@ try {
   console.warn("[Boot] onlineManager wiring failed (non-fatal):", e);
 }
 
-export default function RootLayout() {
+bootSentry();
+
+function RootLayout() {
   const { colorScheme } = useColorScheme();
   const loadAuthState = useAuthStore((s) => s.loadAuthState);
   const authStatus = useAuthStore((s) => s.authStatus);
@@ -685,3 +691,6 @@ export default function RootLayout() {
     </OtaRecoveryBoundary>
   );
 }
+
+// Sentry.wrap on native (touch + profiler instrumentation); identity on web.
+export default wrapRoot(RootLayout);

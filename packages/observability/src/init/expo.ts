@@ -35,6 +35,12 @@ export interface ExpoSentryConfig {
   profilesSampleRate?: number;
   /** Enable session replay. Default: false */
   replaysEnabled?: boolean;
+  /** Extra integrations appended to the SDK defaults (router, replay, feedback). */
+  integrations?: unknown[];
+  /** Dynamic sampler — wins over tracesSampleRate when provided. */
+  tracesSampler?: (ctx: { name?: string }) => number;
+  /** Hosts that receive sentry-trace/baggage headers for stitched traces. */
+  tracePropagationTargets?: (string | RegExp)[];
 }
 
 /**
@@ -67,18 +73,23 @@ export function initExpoSentry(Sentry: any, config: ExpoSentryConfig): void {
     release,
     dist: config.buildNumber,
 
-    // Sampling
+    // Sampling — tracesSampler (dynamic, per-flow boost) wins when provided.
     sampleRate: config.sampleRate ?? 1.0,
-    tracesSampleRate: config.tracesSampleRate ?? 0.3,
+    ...(config.tracesSampler
+      ? { tracesSampler: config.tracesSampler }
+      : { tracesSampleRate: config.tracesSampleRate ?? 0.3 }),
     profilesSampleRate: config.profilesSampleRate ?? 0.1,
+    ...(config.tracePropagationTargets
+      ? { tracePropagationTargets: config.tracePropagationTargets }
+      : {}),
 
     // Privacy
     beforeSend: createBeforeSend(),
     beforeSendTransaction: createBeforeSendTransaction(),
 
-    // Integrations
+    // Integrations — SDK defaults plus caller-provided (router, replay, …).
     integrations: (defaults: any[]) => {
-      return defaults;
+      return [...defaults, ...((config.integrations as any[]) ?? [])];
     },
 
     // Tags set on every event
@@ -99,14 +110,21 @@ export function initExpoSentry(Sentry: any, config: ExpoSentryConfig): void {
     // Don't send in development
     enableInExpoDevelopment: false,
 
-    // Attach screenshots on crash
-    attachScreenshot: true,
+    // §2.4: screenshots are NOT masked by the RN SDK — a crash frame can
+    // contain DMs or profile content, so they never leave the device.
+    attachScreenshot: false,
 
-    // Attach view hierarchy for debugging
+    // Attach view hierarchy for debugging (structure only, no pixels/text)
     attachViewHierarchy: true,
 
     // Enable automatic performance instrumentation
     enableAutoPerformanceTracing: true,
+
+    // ANR / app-hang detection (native watchdogs)
+    enableAppHangTracking: true,
+
+    // Taps become spans — dead-tap patterns show up in traces.
+    enableUserInteractionTracing: true,
 
     // Enable Hermes symbolication
     enableHermes: true,

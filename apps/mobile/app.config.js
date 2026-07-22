@@ -266,6 +266,13 @@ export default {
       output: webOutput,
     },
     plugins: [
+      // Sentry (dvnt-mobile): native symbol upload + source maps on EAS builds.
+      // Needs SENTRY_AUTH_TOKEN in EAS secrets for the upload step; builds
+      // succeed without it (stacks stay unsymbolicated until it's added).
+      [
+        "@sentry/react-native/expo",
+        { organization: "5th-galaxy-studios", project: "dvnt-mobile" },
+      ],
       // Links native targets (Apple Watch app + watch complication) outside /ios
       // via CNG. Auto-discovers apps/mobile/targets/*/expo-target.config.js.
       // TEMPORARILY DISABLED for the SDK 56 production build: the watch
