@@ -424,3 +424,17 @@ a:not(.btn):not(.nav__link):hover {
 .dvnt-sync__msg { font-size: 13px; }
 .dvnt-sync__msg--ok { color: #3fdcff; }
 .dvnt-sync__msg--err { color: #fca5a5; }
+
+/* ── Sidebar group labels — DVNT eyebrow treatment ─────────────────────────
+   Collections are grouped (Content / App mirror / Moderation / Observability /
+   Access); style the group toggles like the app's letterspaced eyebrows so the
+   sidebar reads as sections, not a flat list. */
+.nav-group__toggle {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(245, 245, 244, 0.5);
+}
+.nav-group__toggle:hover { color: #3fdcff; }
+.nav-group { margin-bottom: 6px; }
