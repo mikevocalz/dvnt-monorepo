@@ -19,6 +19,7 @@
  * IDEMPOTENT: Uses stripe_events table to deduplicate.
  */
 
+import { withSentry } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computePayoutReleaseAt } from "../_shared/business-days.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
@@ -330,7 +331,7 @@ async function handleCartPaymentIntentSucceeded(
   return true;
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
@@ -1870,4 +1871,4 @@ Deno.serve(async (req: Request) => {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
-});
+}));

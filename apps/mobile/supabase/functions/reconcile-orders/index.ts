@@ -10,6 +10,7 @@
  * Should be called periodically (e.g. every 15 minutes via cron).
  */
 
+import { withSentry } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 
@@ -37,7 +38,7 @@ function json(data: unknown, status = 200) {
   });
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -249,4 +250,4 @@ Deno.serve(async (req: Request) => {
     console.error("[reconcile] Error:", err);
     return json({ error: err.message || "Internal error" }, 500);
   }
-});
+}));

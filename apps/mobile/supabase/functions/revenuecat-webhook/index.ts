@@ -28,6 +28,7 @@
  *   https://www.revenuecat.com/docs/integrations/webhooks/event-types-and-fields
  */
 
+import { withSentry } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -120,7 +121,7 @@ function isAnonRCId(uid: string): boolean {
   return uid.startsWith("$RCAnonymousID:");
 }
 
-Deno.serve(async (req) => {
+Deno.serve(withSentry("revenuecat-webhook", async (req) => {
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405 });
   }
@@ -259,4 +260,4 @@ Deno.serve(async (req) => {
   }
 
   return new Response("ok", { status: 200 });
-});
+}));
