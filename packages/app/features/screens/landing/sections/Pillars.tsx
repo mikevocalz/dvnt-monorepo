@@ -53,12 +53,6 @@ const PILLARS: PillarData[] = [
       { src: "/landing/p3.jpg", alt: "ID & selfie verification — just real people, real connections" },
     ],
   },
-  {
-    eyebrow: "04 — Access",
-    title: "Access looks good on you.",
-    body: "Velvet-rope by design. If you know, you know — and now you have the door.",
-    accent: LANDING_COLORS.violet,
-  },
 ];
 
 function glowBg(accent: string) {
