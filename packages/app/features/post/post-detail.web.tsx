@@ -380,7 +380,8 @@ export function PostDetailScreen() {
             <button
               onClick={() => {
                 setShowMenu(false);
-                router.push(`/edit-post/${id}`);
+                // Web routes are mounted under /feed — /edit-post/:id 404s.
+                router.push(`/feed/edit-post/${id}`);
               }}
               className="flex items-center gap-3 py-3 text-left text-[15px] text-white"
             >
@@ -446,6 +447,12 @@ export function PostDetailScreen() {
         <p className="text-sm leading-5 text-white/60">
           Are you sure you want to delete this post? This can&apos;t be undone.
         </p>
+        {deletePost.isError ? (
+          <p className="mt-2 text-sm leading-5 text-rose-400">
+            {(deletePost.error as Error)?.message || "Failed to delete post"} —
+            try again.
+          </p>
+        ) : null}
       </Dialog>
 
       {/* Who-liked sheet — opened by tapping the like count. */}
