@@ -11,3 +11,4 @@ export * from './sneaky-link';
 export * from './media';
 export * from './moderation';
 export * from './blog';
+export * from './onboarding';

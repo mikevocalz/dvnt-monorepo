@@ -210,6 +210,40 @@ export function LoginScreen() {
               <Text style={styles.googleButtonText}>Continue with Google</Text>
             </Pressable>
 
+            {/* B1/B4: passwordless entry — BetterAuth mints/verifies the link,
+                the social-callback page completes the session + welcome flow. */}
+            <Pressable
+              onPress={async () => {
+                const email = (form.getFieldValue('email') as string | undefined)?.trim();
+                if (!email || !email.includes('@')) {
+                  toast.error('Enter your email above first', {
+                    description: 'We’ll send a one-tap sign-in link to it.',
+                  });
+                  return;
+                }
+                try {
+                  const { error } = await (signIn as any).magicLink({
+                    email,
+                    callbackURL: `${window.location.origin}/auth/social-callback`,
+                  });
+                  if (error) throw new Error(error.message || 'Could not send the link');
+                  toast.success('Link sent', {
+                    description: `Check ${email} — the link signs you in with one tap.`,
+                  });
+                } catch (err: any) {
+                  toast.error('Could not send the link', {
+                    description: err?.message || 'Please try again.',
+                  });
+                }
+              }}
+              accessibilityRole="button"
+              style={{ paddingVertical: 4 }}
+            >
+              <Text style={[styles.link, { color: P, textAlign: 'center', fontSize: 14 }]}>
+                Email me a sign-in link
+              </Text>
+            </Pressable>
+
             <View style={styles.signupRow}>
               <Text style={styles.muted}>Don't have an account?</Text>
               <Pressable onPress={() => router.push('/auth/signup')}>
