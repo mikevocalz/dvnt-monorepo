@@ -77,7 +77,7 @@ function coverFor(post: Post): string {
 }
 
 // ── Post grid tile (Explore / search posts / hashtag) ───────────────
-function PostTile({ post }: { post: Post }) {
+function PostTile({ post, big = false }: { post: Post; big?: boolean }) {
   const router = useRouter();
   const media = post.media?.[0];
   const isVideo = post.type === "video" || media?.type === "video";
@@ -100,7 +100,9 @@ function PostTile({ post }: { post: Post }) {
     <div
       onClick={open}
       role="button"
-      className="group relative aspect-square w-full overflow-hidden rounded-xl bg-white/5 cursor-pointer"
+      className={`group relative w-full overflow-hidden rounded-xl bg-white/5 cursor-pointer ${
+        big ? "col-span-2 row-span-2" : "aspect-square"
+      }`}
     >
       {isText ? (
         <div
@@ -139,63 +141,45 @@ function PostTile({ post }: { post: Post }) {
           )}
         </span>
       ) : null}
+
+      {/* Hover reveal: author handle over a bottom gradient (feed idiom). */}
+      <span className="pointer-events-none absolute inset-x-0 bottom-0 flex h-14 items-end bg-gradient-to-t from-black/70 to-transparent px-2.5 pb-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+        <span className="truncate text-xs font-semibold text-white">
+          @{post.author?.username}
+        </span>
+      </span>
     </div>
   );
 }
 
-// ── Virtualized post grid (TanStack Virtual, lanes = columns) ───────
-function PostGrid({ posts, columns }: { posts: Post[]; columns: number }) {
-  const parentRef = useRef<HTMLDivElement>(null);
-  const rowCount = Math.ceil(posts.length / columns);
-
-  const virtualizer = useVirtualizer({
-    count: rowCount,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 0, // measured below
-    overscan: 6,
-  });
-
-  // Row height = (containerWidth - gaps) / columns (square cells) + gap.
-  useEffect(() => {
-    virtualizer.measure();
-  }, [columns, posts.length, virtualizer]);
-
+/**
+ * Explore/search post grid — plain CSS grid, NOT virtualized.
+ *
+ * The previous TanStack-Virtual version estimated every row at 0 inside a
+ * non-scrolling parent, so getTotalSize() was 0 and the grid painted NOTHING
+ * on web — the "discover renders in-app but not on web" bug. Discover is
+ * bounded (≤40 posts) so a plain grid is correct; same call the feed masonry
+ * made when its virtualizer mis-stacked. (First issue caught by web Sentry.)
+ *
+ * `mosaic` (explore only): dense grid where video/text tiles earn a 2×2 cell
+ * on a cadence — the page's one signature element. Search results stay
+ * uniform squares for scannability.
+ */
+function PostGrid({ posts, mosaic = false }: { posts: Post[]; mosaic?: boolean }) {
   return (
-    <div ref={parentRef} className="w-full">
-      <div
-        className="relative w-full"
-        style={{ height: virtualizer.getTotalSize() }}
-      >
-        {virtualizer.getVirtualItems().map((row) => {
-          const start = row.index * columns;
-          const rowPosts = posts.slice(start, start + columns);
-          return (
-            <div
-              key={row.key}
-              data-index={row.index}
-              ref={virtualizer.measureElement}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                transform: `translateY(${row.start}px)`,
-              }}
-            >
-              <div
-                className="grid gap-1.5 pb-1.5"
-                style={{
-                  gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-                }}
-              >
-                {rowPosts.map((post) => (
-                  <PostTile key={post.id} post={post} />
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <div
+      className="grid grid-cols-3 gap-1.5 md:grid-cols-4"
+      style={mosaic ? { gridAutoFlow: "dense", gridAutoRows: "minmax(0, auto)" } : undefined}
+    >
+      {posts.map((post, i) => {
+        const eyecatcher =
+          post.type === "video" ||
+          post.media?.[0]?.type === "video" ||
+          post.kind === "text";
+        // A big cell roughly every 7 tiles, only for tiles that reward it.
+        const big = mosaic && eyecatcher && i % 7 === 1;
+        return <PostTile key={post.id} post={post} big={big} />;
+      })}
     </div>
   );
 }
@@ -324,11 +308,6 @@ function UserRows({ users }: { users: any[] }) {
   );
 }
 
-function GridColumns(): number {
-  if (typeof window === "undefined") return 3;
-  return window.innerWidth >= 768 ? 4 : 3;
-}
-
 export function SearchScreen() {
   const router = useRouter();
 
@@ -396,8 +375,6 @@ export function SearchScreen() {
     clearSearch();
   };
 
-  const columns = GridColumns();
-
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
       {/* Sticky header with search input */}
@@ -455,7 +432,7 @@ export function SearchScreen() {
                 </p>
               </div>
               {searchResults.length > 0 ? (
-                <PostGrid posts={searchResults} columns={columns} />
+                <PostGrid posts={searchResults} />
               ) : (
                 <EmptyState
                   icon={<Hash size={48} color="#666" />}
@@ -479,7 +456,7 @@ export function SearchScreen() {
                   <h3 className="mb-3 text-base font-semibold text-white">
                     Posts
                   </h3>
-                  <PostGrid posts={searchResults} columns={columns} />
+                  <PostGrid posts={searchResults} />
                 </section>
               ) : null}
 
@@ -551,7 +528,7 @@ export function SearchScreen() {
                     <p className="text-xs text-white/45">From across the community</p>
                   </div>
                 </div>
-                <PostGrid posts={discoverPosts} columns={columns} />
+                <PostGrid posts={discoverPosts} mosaic />
               </section>
             ) : null}
 
