@@ -357,6 +357,26 @@ export const appPromoteEndpoint: Endpoint = {
 // initial status from the app (banned_at → 'banned').
 const eventStatusFromVisibility = (v?: string) => (v === 'public' ? 'published' : 'draft')
 
+
+// Cron-sync cost control: the schedule rewrites every row every 10 minutes,
+// and each Payload update also writes a versions row — pure bloat when
+// nothing changed. Skip updates whose app-sourced fields already match.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function sameAppFields(existing: any, fields: Record<string, any>): boolean {
+  // Payload populates relationships as objects; the sync sends raw ids —
+  // normalize object-with-id down to its id so those compare equal.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const norm = (x: any): any =>
+    x && typeof x === 'object' && !Array.isArray(x) && 'id' in x ? x.id : x
+  for (const [k, v] of Object.entries(fields)) {
+    const a = v === undefined || v === null ? undefined : norm(v)
+    const curRaw = norm(existing?.[k])
+    const b = curRaw === undefined || curRaw === null || curRaw === '' ? undefined : curRaw
+    if (JSON.stringify(a) !== JSON.stringify(b)) return false
+  }
+  return true
+}
+
 export const appSyncEndpoint: Endpoint = {
   path: '/app/sync',
   method: 'post',
@@ -410,9 +430,11 @@ export const appSyncEndpoint: Endpoint = {
         })
         if (existing.docs[0]) {
           // App-sourced fields only — leave moderation `status` untouched.
-          await payload.update({ collection: 'members', id: existing.docs[0].id, data: appFields, overrideAccess: true, context: { skipRoleWriteBack: true } })
+          if (!sameAppFields(existing.docs[0], appFields)) {
+            await payload.update({ collection: 'members', id: existing.docs[0].id, data: appFields, overrideAccess: true, context: { skipRoleWriteBack: true } })
+            mUpdated++
+          }
           userIdToMemberId.set(appUserId, existing.docs[0].id)
-          mUpdated++
         } else {
           const created = await payload.create({
             collection: 'members',
@@ -477,9 +499,11 @@ export const appSyncEndpoint: Endpoint = {
           if (tiers && !(existing.docs[0].ticketTiers?.length)) data.ticketTiers = tiers
           // data is dynamic app-sync payload (Record<string,any>) — cast past
           // Payload's strict create/update data overloads.
-          await payload.update({ collection: 'events', id: existing.docs[0].id, data: data as any, overrideAccess: true, context: { skipEventWriteBack: true } })
+          if (!sameAppFields(existing.docs[0], data)) {
+            await payload.update({ collection: 'events', id: existing.docs[0].id, data: data as any, overrideAccess: true, context: { skipEventWriteBack: true } })
+            eUpdated++
+          }
           eventByAppId.set(appEventId, existing.docs[0].id)
-          eUpdated++
         } else {
           if (tiers) data.ticketTiers = tiers
           const created = await payload.create({ collection: 'events', data: data as any, overrideAccess: true, context: { skipEventWriteBack: true } })
@@ -516,6 +540,7 @@ export const appSyncEndpoint: Endpoint = {
         })
         if (existing.docs[0]) {
           // Preserve CS-edited attendeeName + quantity across re-syncs.
+          if (sameAppFields(existing.docs[0], appFields)) continue
           await payload.update({ collection: 'tickets', id: existing.docs[0].id, data: appFields as any, overrideAccess: true })
           tUpdated++
         } else {
