@@ -228,6 +228,8 @@ export const Posts: CollectionConfig = {
     readVersions: canModerate,
   },
   admin: {
+    group: 'Content',
+    description: 'Blog articles shown on dvntapp.live/posts.',
     useAsTitle: 'title',
     defaultColumns: ['title', 'slug', 'featured', 'editorsPick', '_status', 'publishedAt'],
     livePreview: {

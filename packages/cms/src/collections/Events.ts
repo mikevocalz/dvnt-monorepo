@@ -14,7 +14,9 @@ export const Events: CollectionConfig = {
     create: isAdminPlus,
     delete: isAdminPlus,
   },
-  admin: { useAsTitle: 'title', defaultColumns: ['title', 'status', 'startsAt', 'host', 'tickets'] },
+  admin: {
+    group: 'App mirror — auto-synced',
+    description: 'Live app events, synced every 10 minutes. Edits here update the app.', useAsTitle: 'title', defaultColumns: ['title', 'status', 'startsAt', 'host', 'tickets'] },
   // Saving writes the editable fields back to the live app event (public.events).
   hooks: { afterChange: [onEventChange, onEventCoverChange] },
   fields: [

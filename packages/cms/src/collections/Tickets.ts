@@ -17,6 +17,8 @@ export const Tickets: CollectionConfig = {
     delete: isAdminPlus,
   },
   admin: {
+    group: 'App mirror — auto-synced',
+    description: 'Live app tickets, synced every 10 minutes.',
     useAsTitle: 'attendeeName',
     defaultColumns: ['attendeeName', 'event', 'tier', 'quantity', 'status'],
     listSearchableFields: ['attendeeName', 'guestEmail'],

@@ -12,6 +12,7 @@ import { ReportsScreen } from './screens/ReportsScreen'
 import { EventsScreen } from './screens/EventsScreen'
 import { EventEditScreen } from './screens/EventEditScreen'
 import { TeamScreen } from './screens/TeamScreen'
+import { SentryHealthScreen } from './screens/SentryHealthScreen'
 import './ui.css'
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } })
@@ -19,16 +20,20 @@ const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWin
 const BASE_TABS: [string, string][] = [
   ['overview', 'Overview'],
   ['members', 'Members'],
-  ['reports', 'Reports'],
   ['events', 'Events'],
+  ['reports', 'Reports'],
+  ['health', 'Health'],
 ]
 // Granting console roles is super-admin only, so the Team tab is too.
 const TEAM_TAB: [string, string] = ['team', 'Team']
+// The Payload CMS (/admin) is the RECORDS backend — content + raw data,
+// grouped there as Content / App mirror / Moderation / Observability / Access.
+// The console is where daily work happens; these links jump to the records.
 const CMS_LINKS: [string, string][] = [
   ['Posts', '/admin/collections/posts'],
   ['Comments', '/admin/collections/comments'],
   ['Media', '/admin/collections/media'],
-  ['Categories', '/admin/collections/categories'],
+  ['All records →', '/admin'],
 ]
 
 export function AdminApp() {
@@ -87,6 +92,7 @@ function Console({ onSignOut }: { onSignOut: () => void }) {
         {tab === 'overview' && <OverviewScreen />}
         {tab === 'members' && <MembersScreen />}
         {tab === 'reports' && <ReportsScreen />}
+        {tab === 'health' && <SentryHealthScreen />}
         {tab === 'team' && isSuperAdmin && <TeamScreen />}
         {tab === 'events' &&
           (editEventId ? (
@@ -127,7 +133,7 @@ function Header({ tabs, active, onNav, onSignOut, onOpenMenu }: { tabs: [string,
             </button>
           ))}
           <span className="dv-divider" />
-          <span className="dv-cmslabel">CMS</span>
+          <span className="dv-cmslabel">Records</span>
           {CMS_LINKS.map(([label, href]) => (
             <a key={label} href={href} className="dv-cmslink">{label}</a>
           ))}
@@ -170,7 +176,7 @@ function Drawer({ tabs, active, onClose, onNav, onSignOut }: { tabs: [string, st
             </button>
           ))}
         </nav>
-        <p className="dv-drawer__section">CMS</p>
+        <p className="dv-drawer__section">Records (CMS)</p>
         {CMS_LINKS.map(([label, href]) => (
           <a key={label} href={href} className="dv-drawer__cms">{label}</a>
         ))}

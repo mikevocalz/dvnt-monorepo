@@ -34,9 +34,10 @@ export const Comments: CollectionConfig = {
     delete: canModerate,
   },
   admin: {
+    group: 'Content',
+    description: 'Blog comments and moderation status.',
     useAsTitle: 'id',
     defaultColumns: ['post', 'authorMember', 'status', 'createdAt'],
-    group: 'Blog',
   },
   endpoints: [createCommentEndpoint, reportCommentEndpoint],
   hooks: {

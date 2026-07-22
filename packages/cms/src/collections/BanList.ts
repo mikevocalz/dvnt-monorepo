@@ -15,6 +15,7 @@ export const BanList: CollectionConfig = {
     delete: isSuperAdmin,
   },
   admin: {
+    group: 'Moderation',
     useAsTitle: 'keyHash',
     defaultColumns: ['keyType', 'active', 'member', 'createdAt'],
     description: 'Hashed ban-evasion keys. Managed by moderation hooks; lift a ban by reinstating the member.',

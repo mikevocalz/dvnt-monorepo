@@ -8,7 +8,9 @@ export const Categories: CollectionConfig = {
   slug: 'categories',
   dbName: 'categories',
   access: { read: () => true, create: isAdminPlus, update: isAdminPlus, delete: isAdminPlus },
-  admin: { useAsTitle: 'title', defaultColumns: ['title', 'slug', 'order'] },
+  admin: {
+    group: 'Content',
+    description: 'Blog categories and their accent colors.', useAsTitle: 'title', defaultColumns: ['title', 'slug', 'order'] },
   fields: [
     { name: 'title', type: 'text', required: true },
     ...slugField('title'),

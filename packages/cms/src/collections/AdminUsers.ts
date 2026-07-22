@@ -20,7 +20,9 @@ export const AdminUsers: CollectionConfig = {
     update: ({ req, id }) => req.user?.role === 'super_admin' || req.user?.id === id, // self or super
     delete: isSuperAdmin,
   },
-  admin: { useAsTitle: 'email', defaultColumns: ['email', 'name', 'role'] },
+  admin: {
+    group: 'Access',
+    description: 'Console/CMS staff accounts and roles.', useAsTitle: 'email', defaultColumns: ['email', 'name', 'role'] },
   hooks: {
     beforeChange: [
       ({ data }) => {
