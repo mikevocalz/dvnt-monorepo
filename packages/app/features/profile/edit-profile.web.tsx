@@ -88,6 +88,12 @@ export function EditProfileScreen() {
       // The auth store only carries sexuality/event_audience after they've
       // been saved this session — refresh both from the row so the form (and
       // the dirty baseline) reflect what's actually stored.
+      //
+      // GUARDED: this effect depends on `user`, and updateUser mints a new
+      // user object — an unconditional updateUser here re-ran the effect,
+      // which re-hydrated (wiping whatever the person had typed) and fetched
+      // again, forever. That was the "screen jumping / nothing saves" bug.
+      // Only write back when the row actually differs from the store.
       void supabase
         .from("users")
         .select("sexuality, event_audience")
@@ -97,15 +103,22 @@ export function EditProfileScreen() {
           if (!data) return;
           const sexuality = Array.isArray(data.sexuality) ? data.sexuality : [];
           const eventAudience = data.event_audience || "";
-          useAuthStore.getState().updateUser({ sexuality, eventAudience });
-          s.setSexuality(sexuality);
-          s.setEventAudience(eventAudience);
+          const cur = useAuthStore.getState().user;
+          const changed =
+            !!cur &&
+            (JSON.stringify(cur.sexuality ?? []) !== JSON.stringify(sexuality) ||
+              (cur.eventAudience ?? "") !== eventAudience);
+          if (changed) {
+            useAuthStore.getState().updateUser({ sexuality, eventAudience });
+            s.setSexuality(sexuality);
+            s.setEventAudience(eventAudience);
+          }
         });
       return;
     }
     s.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, setEditName, setEditBio, setEditWebsite, setEditLocation]);
+  }, [user?.id]);
 
   const isDirty =
     !!user &&
