@@ -28,6 +28,15 @@ export function SentryHealthScreen() {
   const [releases, setReleases] = useState<ReleaseHealth[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // A10 cards: DB + CDN probe status via the public probe fan-out (no token).
+  const [probes, setProbes] = useState<any | null>(null);
+
+  useEffect(() => {
+    fetch('/api/observability/probes')
+      .then((r) => r.json())
+      .then(setProbes)
+      .catch(() => setProbes(null));
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -60,7 +69,7 @@ export function SentryHealthScreen() {
           <h3 className="text-red-400 font-semibold">Sentry API Error</h3>
           <p className="text-red-300/80 text-sm mt-1">{error}</p>
           <p className="text-zinc-500 text-xs mt-2">
-            Ensure VITE_SENTRY_ORG, VITE_SENTRY_PROJECT, and VITE_SENTRY_AUTH_TOKEN are set.
+            Set SENTRY_INTERNAL_TOKEN in the server env (never NEXT_PUBLIC_) — the dashboard reads Sentry through the /api/observability proxy.
           </p>
         </div>
       </div>
@@ -93,6 +102,9 @@ export function SentryHealthScreen() {
           ))}
         </div>
       </div>
+
+      {/* A10: infra cards render regardless of Sentry-token state. */}
+      <InfraCards probes={probes} />
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
@@ -273,6 +285,49 @@ function FeatureCard({ card }: { card: FeatureHealthCard }) {
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+/** A10: live DB + CDN status from the probe functions (works without the Sentry token). */
+function InfraCards({ probes }: { probes: any | null }) {
+  const db = probes?.db;
+  const cdn = probes?.cdn;
+  const pill = (ok: boolean | undefined) =>
+    ok === undefined
+      ? 'bg-zinc-700 text-zinc-300'
+      : ok
+        ? 'bg-emerald-500/15 text-emerald-400'
+        : 'bg-red-500/15 text-red-400';
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-white font-semibold">Database</h3>
+          <span className={`px-2 py-0.5 rounded-md text-xs font-semibold ${pill(db?.ok)}`}>
+            {db === undefined ? '…' : db?.ok ? 'Healthy' : 'Failing'}
+          </span>
+        </div>
+        <p className="text-zinc-400 text-sm mt-2">
+          PostgREST round-trip {db?.latencyMs != null ? `${db.latencyMs}ms` : '—'} · probed every
+          minute · dead-man cron monitor <span className="text-zinc-300">db-health</span>
+        </p>
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-white font-semibold">Bunny CDN</h3>
+          <span className={`px-2 py-0.5 rounded-md text-xs font-semibold ${pill(cdn?.ok)}`}>
+            {cdn === undefined ? '…' : cdn?.ok ? 'Serving' : 'Failing'}
+          </span>
+        </div>
+        <p className="text-zinc-400 text-sm mt-2">
+          Edge {cdn?.cdn?.latencyMs != null ? `${cdn.cdn.latencyMs}ms` : '—'} (
+          {cdn?.cdn?.cacheStatus ?? '—'}) · origin{' '}
+          {cdn?.origin?.latencyMs != null ? `${cdn.origin.latencyMs}ms` : '—'} · canary probed
+          every 5 min · monitor <span className="text-zinc-300">cdn-probe</span>
+        </p>
       </div>
     </div>
   );

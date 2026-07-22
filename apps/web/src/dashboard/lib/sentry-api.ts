@@ -20,35 +20,32 @@ import type {
   DashboardFilters,
 } from '@dvnt/observability/dashboard';
 
-const SENTRY_BASE = 'https://sentry.io/api/0';
-
+// A9: all Sentry reads go through the same-origin server proxy
+// (/api/observability/sentry). The internal-integration token lives ONLY in
+// server env there — this module previously read NEXT_PUBLIC_SENTRY_AUTH_TOKEN,
+// which would have shipped a token in the client bundle. Org/project slugs are
+// not secrets; committed like the DSNs.
 function getConfig() {
-  const org = process.env.NEXT_PUBLIC_SENTRY_ORG ?? '';
-  const project = process.env.NEXT_PUBLIC_SENTRY_PROJECT ?? '';
-  const token = process.env.NEXT_PUBLIC_SENTRY_AUTH_TOKEN ?? '';
-  return { org, project, token };
+  const org = process.env.NEXT_PUBLIC_SENTRY_ORG ?? '5th-galaxy-studios';
+  const project = process.env.NEXT_PUBLIC_SENTRY_PROJECT ?? 'dvnt-web';
+  return { org, project };
 }
 
 async function sentryFetch<T>(path: string, params?: Record<string, string>): Promise<T> {
-  const { org, project, token } = getConfig();
-  if (!org || !project || !token) {
-    throw new Error('Sentry API not configured. Set NEXT_PUBLIC_SENTRY_ORG, NEXT_PUBLIC_SENTRY_PROJECT, and NEXT_PUBLIC_SENTRY_AUTH_TOKEN.');
-  }
-
-  const url = new URL(`${SENTRY_BASE}${path}`);
+  const url = new URL('/api/observability/sentry', window.location.origin);
+  url.searchParams.set('path', path);
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value);
     }
   }
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
+  const res = await fetch(url.toString());
+  if (res.status === 503) {
+    throw new Error(
+      'Sentry proxy not configured — set SENTRY_INTERNAL_TOKEN in the server env.',
+    );
+  }
   if (!res.ok) {
     throw new Error(`Sentry API error: ${res.status} ${res.statusText}`);
   }
