@@ -396,6 +396,11 @@ export const appSyncEndpoint: Endpoint = {
     try {
       // ── Members ──────────────────────────────────────────────────────────
       const avatarSel = 'coalesce(am.sizes_thumbnail_url, am.thumbnail_u_r_l, am.url) as avatar_url'
+      // Bulk-read existing docs ONCE per collection (depth 0, no pagination)
+      // instead of a payload.find per row — the reads were the remaining
+      // per-run cost (N ORM queries every 10 minutes).
+      const allMembers = await payload.find({ collection: 'members', limit: 0, pagination: false, depth: 0, overrideAccess: true })
+      const memberByAppId = new Map<string, any>(allMembers.docs.map((d: any) => [String(d.appUserId), d]))
       const users = await app.query(
         `select u.id, u.auth_id, u.username, u.email, u.banned_at, u.role,
                 u.first_name, u.last_name, u.bio, u.location, u.website, u.gender, ${avatarSel}
@@ -425,16 +430,14 @@ export const appSyncEndpoint: Endpoint = {
           website: u.website || undefined,
           gender: u.gender || undefined,
         }
-        const existing = await payload.find({
-          collection: 'members', where: { appUserId: { equals: appUserId } }, limit: 1, overrideAccess: true,
-        })
-        if (existing.docs[0]) {
+        const existingDoc = memberByAppId.get(appUserId)
+        if (existingDoc) {
           // App-sourced fields only — leave moderation `status` untouched.
-          if (!sameAppFields(existing.docs[0], appFields)) {
-            await payload.update({ collection: 'members', id: existing.docs[0].id, data: appFields, overrideAccess: true, context: { skipRoleWriteBack: true } })
+          if (!sameAppFields(existingDoc, appFields)) {
+            await payload.update({ collection: 'members', id: existingDoc.id, data: appFields, overrideAccess: true, context: { skipRoleWriteBack: true } })
             mUpdated++
           }
-          userIdToMemberId.set(appUserId, existing.docs[0].id)
+          userIdToMemberId.set(appUserId, existingDoc.id)
         } else {
           const created = await payload.create({
             collection: 'members',
@@ -466,6 +469,8 @@ export const appSyncEndpoint: Endpoint = {
       }
 
       // ── Events ───────────────────────────────────────────────────────────
+      const allEvents = await payload.find({ collection: 'events', limit: 0, pagination: false, depth: 0, overrideAccess: true })
+      const eventDocByAppId = new Map<string, any>(allEvents.docs.map((d: any) => [String(d.appEventId), d]))
       const events = await app.query(
         `select e.id, e.title, e.description, e.visibility, e.start_date, e.end_date,
                 e.max_attendees, e.location_name, e.location, e.host_id, e.total_attendees
@@ -491,19 +496,17 @@ export const appSyncEndpoint: Endpoint = {
           attendees: Number(e.total_attendees ?? 0),
           ticketsSold: Number(e.total_attendees ?? 0),
         }
-        const existing = await payload.find({
-          collection: 'events', where: { appEventId: { equals: appEventId } }, limit: 1, overrideAccess: true,
-        })
-        if (existing.docs[0]) {
+        const existingDoc = eventDocByAppId.get(appEventId)
+        if (existingDoc) {
           // Populate tiers only if none yet (don't clobber CMS edits to tiers).
-          if (tiers && !(existing.docs[0].ticketTiers?.length)) data.ticketTiers = tiers
+          if (tiers && !(existingDoc.ticketTiers?.length)) data.ticketTiers = tiers
           // data is dynamic app-sync payload (Record<string,any>) — cast past
           // Payload's strict create/update data overloads.
-          if (!sameAppFields(existing.docs[0], data)) {
-            await payload.update({ collection: 'events', id: existing.docs[0].id, data: data as any, overrideAccess: true, context: { skipEventWriteBack: true } })
+          if (!sameAppFields(existingDoc, data)) {
+            await payload.update({ collection: 'events', id: existingDoc.id, data: data as any, overrideAccess: true, context: { skipEventWriteBack: true } })
             eUpdated++
           }
-          eventByAppId.set(appEventId, existing.docs[0].id)
+          eventByAppId.set(appEventId, existingDoc.id)
         } else {
           if (tiers) data.ticketTiers = tiers
           const created = await payload.create({ collection: 'events', data: data as any, overrideAccess: true, context: { skipEventWriteBack: true } })
@@ -514,6 +517,8 @@ export const appSyncEndpoint: Endpoint = {
 
       // ── Tickets (per attendee) ───────────────────────────────────────────
       const STATUSES = new Set(['valid', 'checked_in', 'cancelled', 'refunded', 'transferred', 'pending'])
+      const allTickets = await payload.find({ collection: 'tickets', limit: 0, pagination: false, depth: 0, overrideAccess: true })
+      const ticketByAppId = new Map<string, any>(allTickets.docs.map((d: any) => [String(d.appTicketId), d]))
       const tickets = await app.query(
         `select id, event_id, ticket_type_id, user_id, status, qr_token,
                 checked_in_at, attendee_name, guest_name, guest_email, created_at
@@ -535,13 +540,11 @@ export const appSyncEndpoint: Endpoint = {
           purchasedAt: t.created_at || undefined,
           appTicketId,
         }
-        const existing = await payload.find({
-          collection: 'tickets', where: { appTicketId: { equals: appTicketId } }, limit: 1, overrideAccess: true,
-        })
-        if (existing.docs[0]) {
+        const existingDoc = ticketByAppId.get(appTicketId)
+        if (existingDoc) {
           // Preserve CS-edited attendeeName + quantity across re-syncs.
-          if (sameAppFields(existing.docs[0], appFields)) continue
-          await payload.update({ collection: 'tickets', id: existing.docs[0].id, data: appFields as any, overrideAccess: true })
+          if (sameAppFields(existingDoc, appFields)) continue
+          await payload.update({ collection: 'tickets', id: existingDoc.id, data: appFields as any, overrideAccess: true })
           tUpdated++
         } else {
           await payload.create({
