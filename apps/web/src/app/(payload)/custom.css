@@ -168,10 +168,18 @@ a:not(.btn):not(.nav__link):hover {
    * which collapses the sidebar column to 0 so the nav overlaps the content.
    * Our `.template-default.template-default--nav-hydrated` selector is (0,2,0)
    * and wins — restoring a real sidebar column so nothing overlaps. */
-  .template-default.template-default--nav-hydrated,
+  /* Respect the collapse toggle: only the OPEN state gets the sidebar
+   * column; closed collapses to 0 and hides the nav — previously all
+   * states were forced open, which made the header toggle a dead button. */
   .template-default.template-default--nav-open,
-  .template-default {
+  .template-default:not(.template-default--nav-hydrated) {
     grid-template-columns: var(--nav-width, 275px) auto !important;
+  }
+  .template-default.template-default--nav-hydrated:not(.template-default--nav-open) {
+    grid-template-columns: 0 auto !important;
+  }
+  .template-default.template-default--nav-hydrated:not(.template-default--nav-open) .nav {
+    visibility: hidden;
   }
   /* Sidebar-only chrome: right edge, drop shadow + a specular sheen. */
   .nav {

@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   if (!cookie.includes("payload-token=")) {
     return NextResponse.json({ error: "staff only" }, { status: 401 });
   }
-  const me = await fetch(new URL("/api/admin-users/me", req.url), {
+  const me = await fetch(new URL("/payload-api/admin-users/me", req.url), {
     headers: { cookie },
     cache: "no-store",
   })

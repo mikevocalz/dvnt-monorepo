@@ -16,6 +16,8 @@
   --sans: var(--font-geist-sans), system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   min-height: 100vh;
+  container-type: inline-size;
+  container-name: dv;
   background-color: var(--bg);
   color: var(--text);
   font-family: var(--sans);
@@ -50,7 +52,8 @@
 .dv-logo { display: flex; align-items: center; gap: 10px; margin-right: 26px; flex-shrink: 0; text-decoration: none; }
 .dv-logo img { height: 24px; display: block; }
 .dv-logo span { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 2px; color: var(--brand); text-transform: uppercase; border-left: 1px solid rgba(255, 255, 255, 0.15); padding-left: 10px; }
-.dv-tabs { display: flex; align-items: center; gap: 2px; }
+.dv-tabs { display: flex; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.dv-tabs::-webkit-scrollbar { display: none; }
 .dv-tab { padding: 8px 12px; border-radius: 8px; border: 0; background: none; color: var(--dim); font-size: 14px; cursor: pointer; font-family: inherit; }
 .dv-tab:hover { color: var(--text); }
 .dv-tab.is-active { background: rgba(255, 255, 255, 0.06); color: var(--text); font-weight: 600; }
@@ -201,6 +204,16 @@
 @media (max-width: 960px) {
   .dv-tabs, .dv-signout { display: none; }
   .dv-burger { display: flex; }
+}
+/* Inside /admin the console lives in a narrower column (viewport minus the
+ * 275px sidebar) — media queries measure the WINDOW and misfire there.
+ * Container queries measure the console itself. */
+@container dv (max-width: 960px) {
+  .dv-tabs, .dv-signout { display: none; }
+  .dv-burger { display: flex; }
+}
+@container dv (max-width: 1150px) {
+  .dv-cmslabel, .dv-cmslink { display: none; }
 }
 @media (max-width: 700px) {
   .dv-nav { padding: 12px 16px; }
