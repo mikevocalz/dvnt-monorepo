@@ -3,6 +3,7 @@
  * Delete a post with Better Auth verification
  */
 
+import { withSentry } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
@@ -30,7 +31,7 @@ function errorResponse(code: string, message: string, status = 200): Response {
   return jsonResponse({ ok: false, error: { code, message } }, status);
 }
 
-Deno.serve(async (req) => {
+Deno.serve(withSentry("delete-post", async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST")
@@ -126,4 +127,4 @@ Deno.serve(async (req) => {
     console.error("[Edge:delete-post] Error:", err);
     return errorResponse("internal_error", "An unexpected error occurred");
   }
-});
+}));

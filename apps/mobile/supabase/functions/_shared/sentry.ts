@@ -62,15 +62,34 @@ export function withSentry(
 ): (req: Request) => Promise<Response> {
   ensureInit();
   return async (req: Request): Promise<Response> => {
-    try {
-      return await handler(req);
-    } catch (error) {
-      console.error(`[${functionName}] uncaught:`, error);
-      await captureEdge(error, { function: functionName });
-      return new Response(
-        JSON.stringify({ ok: false, error: { code: "internal_error", message: "Internal error" } }),
-        { status: 500, headers: { "Content-Type": "application/json" } },
-      );
-    }
+    // A5: continue the caller's trace (app/web send sentry-trace + baggage via
+    // tracePropagationTargets) so one user action = one stitched trace
+    // app → edge → DB in the Sentry UI.
+    return await Sentry.continueTrace(
+      {
+        sentryTrace: req.headers.get("sentry-trace") ?? undefined,
+        baggage: req.headers.get("baggage"),
+      },
+      async () => {
+        return await Sentry.startSpan(
+          { name: `${functionName} ${req.method}`, op: "function.supabase" },
+          async () => {
+            try {
+              return await handler(req);
+            } catch (error) {
+              console.error(`[${functionName}] uncaught:`, error);
+              await captureEdge(error, { function: functionName });
+              return new Response(
+                JSON.stringify({
+                  ok: false,
+                  error: { code: "internal_error", message: "Internal error" },
+                }),
+                { status: 500, headers: { "Content-Type": "application/json" } },
+              );
+            }
+          },
+        );
+      },
+    );
   };
 }

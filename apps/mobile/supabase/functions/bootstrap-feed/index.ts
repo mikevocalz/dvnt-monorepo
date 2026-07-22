@@ -12,6 +12,7 @@
  * Client falls back to individual queries if this fails.
  */
 
+import { withSentry } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -183,7 +184,7 @@ async function getAuthoritativeUnreadInboxCount(
   return { count: unreadInboxCount, authoritative: true };
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -526,4 +527,4 @@ Deno.serve(async (req: Request) => {
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
-});
+}));
