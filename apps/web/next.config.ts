@@ -133,6 +133,19 @@ const nextConfig: NextConfig = {
       'https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/auth';
     return [
       { source: '/api/auth/:path*', destination: `${authUrl}/api/auth/:path*` },
+      // Same-origin EDGE-FUNCTION proxy. Browser calls to
+      // supabase.co/functions/v1 are a cross-origin fetch that privacy
+      // extensions / flaky networks can kill outright ("Failed to send a
+      // request to the Edge Function" — seen live on the onboarding save).
+      // The web supabase client rewrites functions URLs to /api/fn/* (see
+      // packages/supabase/src/client.web.ts), making every edge call
+      // first-party — same rationale as the /api/auth proxy above and the
+      // Sentry /monitoring tunnel.
+      {
+        source: '/api/fn/:path*',
+        destination:
+          'https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/:path*',
+      },
     ];
   },
   // The authenticated web app lives under /feed (the AppShell). Native routes

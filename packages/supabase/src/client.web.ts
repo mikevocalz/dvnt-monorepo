@@ -87,8 +87,39 @@ export function setBridgeAccessToken(token: string | null): void {
   _bridgeToken = token;
 }
 
+// Same-origin edge-function proxy (Next only — gated on the same env flag the
+// auth proxy uses; web-vite has no /api/fn rewrite). Cross-origin calls to
+// supabase.co/functions/v1 get killed by privacy extensions / flaky networks
+// as a raw fetch failure ("Failed to send a request to the Edge Function").
+// Rewriting them onto this origin makes every edge call first-party; Next
+// proxies /api/fn/* to the functions host server-side.
+const FN_SAME_ORIGIN =
+  process.env.EXPO_PUBLIC_AUTH_SAME_ORIGIN === "true" &&
+  typeof window !== "undefined";
+const FN_PREFIX = `${supabaseUrl}/functions/v1/`;
+
+const proxiedFetch: typeof fetch = (input, init) => {
+  if (FN_SAME_ORIGIN) {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    if (url.startsWith(FN_PREFIX)) {
+      const proxied = `${window.location.origin}/api/fn/${url.slice(FN_PREFIX.length)}`;
+      if (typeof input === "object" && !(input instanceof URL)) {
+        return fetch(new Request(proxied, input as Request), init);
+      }
+      return fetch(proxied, init);
+    }
+  }
+  return fetch(input as RequestInfo, init);
+};
+
 export const supabase = createClient(supabaseUrl, clientKey, {
   accessToken: async () => _bridgeToken ?? clientKey,
+  global: { fetch: proxiedFetch },
 });
 
 console.log("[Supabase] Web client initialized (accessToken bridge)");

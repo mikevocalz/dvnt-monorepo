@@ -10,6 +10,7 @@ import { usersApi } from '../../../lib/api/users';
 import { citiesApi } from '../../../lib/api/cities';
 import { supabase } from '../../../lib/supabase/client';
 import { IDENTITY_OPTIONS, AUDIENCE_OPTIONS } from '../../../lib/constants/identity';
+import { onboardingCheckpoint, onboardingFailure } from '@dvnt/observability/flows';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
 
 /**
@@ -115,8 +116,12 @@ export function WelcomeScreen() {
         ...(audience ? { eventAudience: audience } : {}),
       });
       updateUser({ sexuality: identity, eventAudience: audience || undefined });
+      onboardingCheckpoint('profile.identity_saved');
       setStep(2);
     } catch (err: any) {
+      // Captured (B5) — a silent toast hid the live "Failed to send a request
+      // to the Edge Function" failure from Sentry entirely.
+      onboardingFailure('profile.identity_saved', err);
       toast.error('Could not save preferences', {
         description: err?.message || 'Please try again.',
       });
