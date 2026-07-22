@@ -324,6 +324,49 @@ export function welcome(name?: string | null): EmailContent {
   };
 }
 
+/**
+ * accountLinked — sent when a social sign-in (Google/Apple) is merged into an
+ * EXISTING account by matching email. Reassures + gives a security escape hatch.
+ */
+export function accountLinked(
+  name: string | null | undefined,
+  opts: { provider?: string; email?: string | null } = {},
+): EmailContent {
+  const who = name ? esc(name) : "there";
+  const provider = esc(opts.provider || "Google");
+  const emailLine = opts.email
+    ? ` (<strong style="color:${COLORS.text}">${esc(opts.email)}</strong>)`
+    : "";
+  return {
+    subject: `Your ${provider} account is now linked to ${BRAND.name}`,
+    html: brandEmailWrapper(
+      [
+        heading("One account, two ways in"),
+        paragraph(`Hey ${who},`),
+        paragraph(
+          `You signed in with ${provider}, and it matched the email on your existing ${BRAND.name} account${emailLine}. We've merged them — same profile, same events, same crew.`,
+        ),
+        card(
+          paragraph(
+            [
+              "• Nothing about your profile or data changed<br/>",
+              `• Sign in with ${provider} or your password — both open the same account<br/>`,
+              "• Your saved events, messages, and follows are right where you left them",
+            ].join(""),
+            { size: 15, color: COLORS.textBody, margin: "0" },
+          ),
+        ),
+        divider(),
+        paragraph(
+          `Wasn't you? <a href="https://dvntapp.live/auth/forgot-password" style="color:${COLORS.text};font-weight:600">Reset your password</a> right away — that locks the account back down.`,
+          { size: 13, color: COLORS.textMuted, margin: "0" },
+        ),
+      ].join(""),
+      { preheader: `Your ${provider} sign-in now opens your ${BRAND.name} account` },
+    ),
+  };
+}
+
 export function resetPassword(url: string): EmailContent {
   return {
     subject: `Reset your ${BRAND.name} password`,

@@ -17,6 +17,7 @@ import {
   welcome as welcomeEmail,
   resetPassword as resetPasswordEmail,
   verifyEmailLink,
+  accountLinked as accountLinkedEmail,
 } from "../_shared/email/templates.ts";
 import { brandEmailWrapper } from "../_shared/email/wrapper.ts";
 
@@ -351,6 +352,46 @@ async function getAuth() {
               const name = user.name || user.email.split("@")[0];
               const { subject, html } = welcomeEmail(name);
               await sendEmail(user.email, subject, html);
+            },
+          },
+        },
+        account: {
+          create: {
+            // MERGE NOTICE. Fires whenever a provider account row is created.
+            // If a SOCIAL account (google/apple) lands on a user who already
+            // has another sign-in method, account linking just merged them —
+            // tell the person by email. Fresh social signups (no prior
+            // account rows) get the welcome email above instead, not this.
+            // Best-effort: an email failure must never block the sign-in.
+            after: async (account: any) => {
+              try {
+                const provider = String(account?.providerId ?? "");
+                if (provider === "credential") return;
+                const { rows: others } = await pool.query(
+                  'select "providerId" from "account" where "userId" = $1 and "id" <> $2 limit 1',
+                  [account.userId, account.id],
+                );
+                if (!others?.length) return; // brand-new social signup
+                const { rows: users } = await pool.query(
+                  'select "name", "email" from "user" where "id" = $1',
+                  [account.userId],
+                );
+                const u = users?.[0];
+                if (!u?.email) return;
+                const providerLabel =
+                  provider.charAt(0).toUpperCase() + provider.slice(1);
+                const name = u.name || String(u.email).split("@")[0];
+                console.log(
+                  `[Auth] ${providerLabel} account merged into existing user ${u.email} — sending notice`,
+                );
+                const { subject, html } = accountLinkedEmail(name, {
+                  provider: providerLabel,
+                  email: u.email,
+                });
+                await sendEmail(u.email, subject, html);
+              } catch (err) {
+                console.error("[Auth] account-linked email failed:", err);
+              }
             },
           },
         },
