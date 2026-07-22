@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getPayload } from "payload";
+import config from "@payload-config";
 
 /**
  * A9 server-side Sentry proxy. The ONLY place the Sentry internal-integration
@@ -30,20 +32,18 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // A9 access control: org metrics are staff-only. Verify the caller's
-  // Payload admin session (payload-token cookie) against the admin-users
-  // auth endpoint — same principal that gates the console/admin.
-  const cookie = req.headers.get("cookie") || "";
-  if (!cookie.includes("payload-token=")) {
-    return NextResponse.json({ error: "staff only" }, { status: 401 });
-  }
-  const me = await fetch(new URL("/payload-api/admin-users/me", req.url), {
-    headers: { cookie },
-    cache: "no-store",
-  })
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null);
-  if (!me?.user) {
+  // A9 access control: org metrics are staff-only. Verify the Payload admin
+  // session IN-PROCESS via the local API — the previous same-origin fetch to
+  // /payload-api/.../me could bounce off Vercel deployment protection and
+  // 401 real admins.
+  try {
+    const payload = await getPayload({ config });
+    const { user } = await payload.auth({ headers: req.headers });
+    if (!user) {
+      return NextResponse.json({ error: "staff only" }, { status: 401 });
+    }
+  } catch (error) {
+    console.error("[observability/sentry] auth check failed:", error);
     return NextResponse.json({ error: "staff only" }, { status: 401 });
   }
 
