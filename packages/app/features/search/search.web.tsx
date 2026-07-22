@@ -39,6 +39,7 @@ import {
   MapPin,
   BadgeCheck,
 } from "lucide-react";
+import { WebAvatar } from "@dvnt/app/components/ui/web-avatar";
 import { useSearchStore } from "@dvnt/app/lib/stores/search-store";
 import {
   useDiscoverData,
@@ -57,12 +58,6 @@ const CDN_URL =
   process.env.NEXT_PUBLIC_BUNNY_CDN_URL ||
   process.env.EXPO_PUBLIC_BUNNY_CDN_URL ||
   "https://dvnt.b-cdn.net";
-
-function getAvatarUrl(avatar: string | null | undefined): string {
-  if (!avatar) return "https://i.pravatar.cc/150?img=0";
-  if (avatar.startsWith("http")) return avatar;
-  return `${CDN_URL}/${avatar}`;
-}
 
 // A still cover for any post type — never a video URL (an <img> can't render mp4).
 const VIDEO_URL_RE =
@@ -211,12 +206,7 @@ function DiscoverProfiles({ users }: { users: DiscoverDTO["users"] }) {
               onClick={() => router.push(`/profile/${user.username}`)}
               className="flex w-[140px] shrink-0 flex-col items-center rounded-2xl border border-white/[0.06] bg-[rgba(30,30,30,0.8)] py-4 transition hover:border-cyan-400/30 hover:bg-[rgba(40,40,46,0.9)] active:scale-[0.98]"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={getAvatarUrl(user.avatar)}
-                alt={user.username}
-                className="h-16 w-16 rounded-xl object-cover bg-white/10"
-              />
+              <WebAvatar avatar={user.avatar} username={user.username} size={64} />
               <div className="mt-2 flex w-full items-center justify-center gap-1 px-2">
                 <span className="min-w-0 truncate text-sm font-semibold text-white">
                   {user.name}
@@ -283,12 +273,7 @@ function UserRows({ users }: { users: any[] }) {
                 onClick={() => router.push(`/profile/${user.username}`)}
                 className="flex w-full items-center gap-3 border-b border-white/8 py-3 text-left active:bg-white/5"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={getAvatarUrl(user.avatar)}
-                  alt={user.username || "User"}
-                  className="h-11 w-11 shrink-0 rounded-xl object-cover bg-white/10"
-                />
+                <WebAvatar avatar={user.avatar} username={user.username} size={44} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold text-white">
                     {user.username}
