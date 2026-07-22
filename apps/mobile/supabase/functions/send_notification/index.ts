@@ -10,6 +10,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import webpush from "npm:web-push@3.6.7";
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const APNS_PRODUCTION_URL = "https://api.push.apple.com";
@@ -297,11 +298,58 @@ Deno.serve(async (req) => {
 
     // Split tokens: VoIP tokens go to APNs, regular tokens go to Expo Push
     const voipTokens = tokens.filter((t) => t.platform === "ios_voip");
-    const expoTokens = tokens.filter((t) => t.platform !== "ios_voip");
+    const webTokens = tokens.filter((t) => t.platform === "web");
+    const expoTokens = tokens.filter(
+      (t) => t.platform !== "ios_voip" && t.platform !== "web",
+    );
 
     let totalSent = 0;
     let totalFailed = 0;
     const allErrors: string[] = [];
+
+    // ── 3z. Web Push (PWA/browser) — VAPID keys live in web_push_keys
+    // (RLS deny-all; only this service-role client can read them). Dead
+    // subscriptions (404/410 from the push service) are pruned.
+    if (webTokens.length > 0) {
+      try {
+        const { data: vapid } = await supabase
+          .from("web_push_keys")
+          .select("public_key, private_key, subject")
+          .eq("id", 1)
+          .single();
+        if (vapid) {
+          webpush.setVapidDetails(vapid.subject, vapid.public_key, vapid.private_key);
+          const webPayload = JSON.stringify({
+            title,
+            body,
+            data: { ...data, url: data?.url || "/feed/activity" },
+          });
+          for (const t of webTokens) {
+            try {
+              const sub = JSON.parse(t.token);
+              await webpush.sendNotification(sub, webPayload, { TTL: 86400 });
+              totalSent++;
+            } catch (err: any) {
+              totalFailed++;
+              const code = err?.statusCode;
+              if (code === 404 || code === 410) {
+                await supabase
+                  .from("push_tokens")
+                  .delete()
+                  .eq("user_id", recipientId)
+                  .eq("token", t.token);
+              } else {
+                allErrors.push(`web: ${code ?? err?.message ?? "send failed"}`);
+              }
+            }
+          }
+        } else {
+          console.error("[send_notification] web_push_keys row missing");
+        }
+      } catch (err) {
+        console.error("[send_notification] web push error:", err);
+      }
+    }
 
     // ── 3a. Send VoIP push via APNs for iOS call notifications ──────────
     if (isCallNotification && voipTokens.length > 0) {
