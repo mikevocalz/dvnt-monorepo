@@ -78,9 +78,9 @@ export function PwaInstallContent({ onDone }: { onDone?: () => void }) {
     <div className="flex flex-col gap-4">
       {/* App-icon tile — the thing you're about to put on your home screen. */}
       <div className="flex items-center gap-3">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-white/12 bg-gradient-to-br from-[#34A2DF]/40 via-[#8A40CF]/30 to-[#FF5BFC]/40">
+        <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-white/12 bg-gradient-to-br from-[#34A2DF]/40 via-[#8A40CF]/30 to-[#FF5BFC]/40">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/dvnt-logo.svg" alt="" className="h-8 w-8" />
+          <img src="/dvnt-logo.svg" alt="" className="h-full w-full object-contain p-1.5" />
         </span>
         <p className="text-sm leading-6 text-white/60">
           Add DVNT to your home screen and it opens full-screen like an app —
