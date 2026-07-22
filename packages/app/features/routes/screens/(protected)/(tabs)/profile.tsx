@@ -30,6 +30,7 @@ import { useMemo, useEffect, useState, useCallback, useRef } from "react";
 import { useBookmarkStore } from "@dvnt/app/lib/stores/bookmark-store";
 import { useProfileStore } from "@dvnt/app/lib/stores/profile-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { ProfileCompletionCard } from "@dvnt/app/components/profile-completion-card.native";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { ProfileSkeleton } from "@dvnt/app/components/skeletons";
@@ -857,6 +858,9 @@ function ProfileScreenContent() {
               </Pressable>
             </Link>
           </View>
+
+          {/* B2: completion ring + checklist (weighted; jumps to edit). */}
+          <ProfileCompletionCard />
         </View>
 
         {/* Tabs */}
