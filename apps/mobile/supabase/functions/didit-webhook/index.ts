@@ -49,7 +49,18 @@ type DiditEvent = {
     id_verification?: {
       date_of_birth?: string | null;
       issuing_country?: string | null;
+      first_name?: string | null;
+      last_name?: string | null;
+      full_name?: string | null;
     };
+    // Newer payloads carry a plural array (docs.didit.me/reference/webhooks).
+    id_verifications?: Array<{
+      date_of_birth?: string | null;
+      issuing_country?: string | null;
+      first_name?: string | null;
+      last_name?: string | null;
+      full_name?: string | null;
+    }>;
   };
 };
 
@@ -224,20 +235,71 @@ Deno.serve(async (req) => {
     return new Response("ok", { status: 200 }); // not a state-moving event
   }
 
-  const dob = ev.decision?.id_verification?.date_of_birth ?? null;
-  const country = ev.decision?.id_verification?.issuing_country ?? null;
+  const idv =
+    ev.decision?.id_verification ?? ev.decision?.id_verifications?.[0] ?? null;
+  const dob = idv?.date_of_birth ?? null;
+  const country = idv?.issuing_country ?? null;
+
+  // One-account-per-person: the same document (normalized name + DOB) may not
+  // verify a second account. Only the sha256 hash is stored — plaintext legal
+  // names never persist. Collisions route to 'review', not auto-fail.
+  const docName = (
+    idv?.full_name ||
+    [idv?.first_name, idv?.last_name].filter(Boolean).join(" ")
+  )
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\s+/g, " ");
+  let identityHash: string | null = null;
+  let finalStatus = nextStatus;
+  let failureCode: string | null = null;
+  let failureMessage: string | null = null;
+  if (nextStatus === "passed" && dob && docName) {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`${docName}|${dob}`),
+    );
+    identityHash = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    const { data: dupes } = await supabase
+      .from("identity_verifications")
+      .select("user_id")
+      .eq("identity_hash", identityHash)
+      .eq("status", "passed")
+      .neq("user_id", referenceId)
+      .limit(1);
+    if (dupes && dupes.length > 0) {
+      console.warn(
+        `[didit-webhook] duplicate identity: session ${sessionId} matches an already-verified account — routing to review`,
+      );
+      finalStatus = "review";
+      failureCode = "duplicate_identity";
+      failureMessage =
+        "This ID is already verified on another DVNT account. One account per person.";
+    }
+  }
 
   const { error: rpcErr } = await supabase.rpc("upsert_identity_verification", {
     p_user_id: referenceId,
     p_provider: "didit",
     p_provider_ref: sessionId,
-    p_status: nextStatus,
+    p_status: finalStatus,
     p_doc_country: country,
     p_date_of_birth: dob,
-    p_failure_code: null,
-    p_failure_message: null,
+    p_failure_code: failureCode,
+    p_failure_message: failureMessage,
     p_event_created_at: new Date(eventTs * 1000).toISOString(),
   });
+
+  if (!rpcErr && identityHash) {
+    await supabase
+      .from("identity_verifications")
+      .update({ identity_hash: identityHash })
+      .eq("user_id", referenceId);
+  }
 
   if (rpcErr) {
     console.error("[didit-webhook] upsert error", rpcErr);
