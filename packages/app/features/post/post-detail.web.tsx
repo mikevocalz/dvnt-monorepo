@@ -36,6 +36,7 @@ import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
 import { useCarouselStore } from "@dvnt/app/lib/stores/carousel-store";
 import { usePostTagsUIStore } from "@dvnt/app/lib/stores/post-tags-store";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
+import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
 import { useReportSheetStore } from "@dvnt/app/lib/stores/report-sheet-store";
 import {
   usePostDetailUIStore,
@@ -283,8 +284,10 @@ export function PostDetailScreen() {
               <span className="font-bold">@{post.author.username}</span>{" "}
               {translatedCaption || post.caption}
             </p>
-            {/* Caption translate toggle — same hook/store native uses. */}
-            {captionText ? (
+            {/* Caption translate toggle — same hook/store native uses. Only
+                shown when the caption is detectably non-English, like the
+                native feed (shouldShowTranslateButton gate). */}
+            {captionText && shouldShowTranslateButton(captionText, "en") ? (
               <button
                 onClick={handleTranslateCaption}
                 className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-[#3FDCFF]"

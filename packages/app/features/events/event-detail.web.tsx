@@ -64,6 +64,7 @@ import {
 } from "@dvnt/app/lib/hooks/use-event-waitlist";
 import { useCreateEventReview } from "@dvnt/app/lib/hooks/use-event-reviews";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
+import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
 import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
 import { usePromotionStore } from "@dvnt/app/lib/stores/promotion-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -395,6 +396,9 @@ export function EventDetailScreen() {
     translate: translateDescription,
     showOriginal: showOriginalDescription,
   } = useContentTranslation(`event-${eventId}-description`, descText, "en");
+  // Only offer translation when the description is detectably non-English —
+  // same gate as the native feed/event cards.
+  const showTranslate = shouldShowTranslateButton(descText, "en");
   const handleToggleTranslate = () => {
     if (isDescriptionTranslated) {
       showOriginalDescription();
@@ -525,7 +529,7 @@ export function EventDetailScreen() {
               <div className="absolute right-3 top-14 z-50 w-48 rounded-xl border border-white/12 bg-[#0b0d16] py-1 shadow-2xl">
                 <MenuItem Icon={Share2} label="Share event" onClick={share} />
                 {/* 5. TRANSLATION — toggle the About copy via useContentTranslation. */}
-                {descText ? (
+                {showTranslate ? (
                   <MenuItem
                     Icon={Languages}
                     label={
@@ -802,13 +806,15 @@ export function EventDetailScreen() {
               <p className="text-white/85 text-[15px] leading-relaxed whitespace-pre-wrap">
                 {isDescriptionTranslated ? translatedDescription : e.description}
               </p>
-              <button
-                onClick={handleToggleTranslate}
-                className="mt-2 inline-flex items-center gap-1.5 text-[#379ED8] text-sm font-medium"
-              >
-                <Languages size={14} />
-                {isDescriptionTranslated ? "Show original" : "Translate"}
-              </button>
+              {showTranslate ? (
+                <button
+                  onClick={handleToggleTranslate}
+                  className="mt-2 inline-flex items-center gap-1.5 text-[#379ED8] text-sm font-medium"
+                >
+                  <Languages size={14} />
+                  {isDescriptionTranslated ? "Show original" : "Translate"}
+                </button>
+              ) : null}
             </Section>
           ) : null}
 
