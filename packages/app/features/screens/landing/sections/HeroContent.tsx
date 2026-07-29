@@ -5,6 +5,7 @@
  */
 import { useEffect } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
+import { useRouter } from "solito/navigation";
 import { H1, P } from "@expo/html-elements";
 import Animated, {
   useAnimatedStyle,
@@ -50,6 +51,7 @@ function Word({ text, index }: { text: string; index: number }) {
 }
 
 export function HeroContent() {
+  const router = useRouter();
   const fade = useSharedValue(0);
   useEffect(() => {
     fade.value = withDelay(
@@ -83,10 +85,19 @@ export function HeroContent() {
         <View style={styles.cta}>
           <Pressable
             accessibilityRole="link"
-            onPress={() => scrollToSection("download")}
+            onPress={() => router.push("/auth/signup")}
             style={styles.primary}
           >
             <Animated.Text style={styles.primaryText}>
+              Sign-Up / Sign-In
+            </Animated.Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="link"
+            onPress={() => scrollToSection("download")}
+            style={styles.ghost}
+          >
+            <Animated.Text style={styles.ghostText}>
               Get the app
             </Animated.Text>
           </Pressable>

@@ -48,9 +48,10 @@ const PILLARS: PillarData[] = [
     title: "Face-to-face. With no audience.",
     body: "Private “Sneaky Link” video rooms for the people you actually trust. ID & selfie verified — no bots, no fake profiles. Discreet by default, intimate on purpose.",
     accent: LANDING_COLORS.purple,
+    // The ID & selfie verification shot (p3) moved up to IdentityStrip —
+    // it leads the page as the most complicated signup requirement.
     images: [
       { src: "/landing/p6.jpg", alt: "Sneaky Link video rooms — face-to-face with no audience" },
-      { src: "/landing/p3.jpg", alt: "ID & selfie verification — just real people, real connections" },
     ],
   },
 ];

@@ -102,6 +102,14 @@ export function IdentityStrip() {
         <p className="dvnt-id-line" style={styles.sub}>
           Events, stories, posts, tickets, and live video — all in one social app.
         </p>
+        {/* Verification explainer leads the promo imagery — it's the most
+            complicated signup requirement, so it comes before the pillars. */}
+        <img
+          className="dvnt-id-line"
+          src="/landing/p3.jpg"
+          alt="ID & selfie verification — no bots, no fake profiles. Just real people, real community, real connections."
+          style={styles.verifyShot}
+        />
       </div>
     </section>
   );
@@ -162,6 +170,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 19,
     lineHeight: 1.5,
     color: "rgba(231,229,228,0.72)",
+  },
+  verifyShot: {
+    display: "block",
+    margin: "44px auto 0",
+    width: "min(380px, 88vw)",
+    aspectRatio: "727 / 900",
+    objectFit: "cover",
+    borderRadius: 20,
+    border: "1px solid rgba(138,64,207,0.33)",
+    boxShadow: "0 18px 60px rgba(138,64,207,0.28)",
   },
   badge: {
     position: "absolute",
