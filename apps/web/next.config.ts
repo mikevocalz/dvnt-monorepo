@@ -30,6 +30,10 @@ class CopySkiaPlugin {
 }
 
 const nextConfig: NextConfig = {
+  // ponytail: dev-only unblock — reanimated 4.4.1's web _updatePropsJS crashes
+  // under React StrictMode's dev double-mount (GlassSurface/GlassHeader).
+  // Real fix: bump react-native-reanimated to 4.5.3, then remove this.
+  reactStrictMode: false,
   // Keep only the genuinely server-only AWS SDK external. Do NOT externalize
   // @payloadcms/storage-s3 / plugin-cloud-storage — they ship the admin's
   // client component (S3ClientUploadHandler, referenced from the import map),
