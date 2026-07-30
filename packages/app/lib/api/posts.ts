@@ -237,12 +237,16 @@ export function transformPost(
     .map(({ sortOrder: _sortOrder, ...item }: any) => item);
 
   // For video posts, use the stored thumbnail image; for images use first media URL
-  // NEVER use a video URL as thumbnail — expo-image can't render it
+  // NEVER use a video URL as thumbnail — expo-image can't render it. This must
+  // catch EVERY video kind: "animated_video" (mime video/mp4+animated) also
+  // carries an .mp4 url and previously leaked it into `thumbnail`, breaking
+  // every <img>/<Image> that consumed it (Explore, Activity, feed grids).
   // Use undefined (not "") when missing — empty string breaks safeGridTile fallback chain
   const firstMedia = media[0];
   const type = firstMedia?.type || "image";
+  const isVideoKind = type === "video" || type === "animated_video";
   const thumbnail =
-    type === "video"
+    isVideoKind
       ? thumbnailEntry?.url || undefined
       : firstMedia?.url || undefined;
   const hasMultipleImages = media.length > 1;

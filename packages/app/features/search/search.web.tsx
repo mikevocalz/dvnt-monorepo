@@ -23,7 +23,7 @@
  * but renders a graceful "open on mobile" notice instead of the native picker.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "solito/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Debouncer } from "@tanstack/pacer";
@@ -78,12 +78,21 @@ function PostTile({ post, big = false }: { post: Post; big?: boolean }) {
   const isVideo = post.type === "video" || media?.type === "video";
   const isCarousel = post.hasMultipleImages || (post.media?.length ?? 0) > 1;
   const isText = post.kind === "text" || (post.textSlides?.length ?? 0) > 0;
-  const cover = coverFor(post);
-  // No still for a video? Paint its first frame via <video preload="metadata">
-  // (#t=0.1 nudges browsers to render the frame, not a black poster). HLS can't
-  // frame-grab without hls.js, so those keep the "No preview" fallback.
-  const videoSrc = isVideo && !cover ? media?.url ?? "" : "";
+  const rawCover = coverFor(post);
+  // A cover URL that 404s would show the browser's broken-image glyph — treat a
+  // load failure as "no cover" and fall through to the video/placeholder path.
+  const [coverFailed, setCoverFailed] = useState(false);
+  const cover = coverFailed ? "" : rawCover;
+  // No still image? If the only media we have is a video, paint its first frame
+  // via <video preload="metadata"> (#t=0.1 nudges the frame, not a black poster).
+  // Gate on the URL being a video — NOT the post.type flag, which is unreliable
+  // (some video posts aren't tagged type:"video"). HLS can't frame-grab without
+  // hls.js, so those keep the "No preview" fallback.
+  const firstMediaUrl = media?.url ?? "";
+  const videoSrc =
+    !cover && VIDEO_URL_RE.test(firstMediaUrl) ? firstMediaUrl : "";
   const canFrameGrab = videoSrc !== "" && !/\.m3u8(\?|$)/i.test(videoSrc);
+  const showVideoBadge = isVideo || canFrameGrab;
 
   const textPreview = isText
     ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
@@ -124,6 +133,7 @@ function PostTile({ post, big = false }: { post: Post; big?: boolean }) {
           src={cover}
           alt={post.caption ?? ""}
           loading="lazy"
+          onError={() => setCoverFailed(true)}
           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
         />
       ) : canFrameGrab ? (
@@ -141,9 +151,9 @@ function PostTile({ post, big = false }: { post: Post; big?: boolean }) {
         </div>
       )}
 
-      {isVideo || isCarousel ? (
+      {showVideoBadge || isCarousel ? (
         <span className="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-lg bg-black/50 backdrop-blur-sm">
-          {isVideo ? (
+          {showVideoBadge ? (
             <Play size={12} color="#fff" fill="#fff" />
           ) : (
             <Grid3x3 size={12} color="#fff" />
