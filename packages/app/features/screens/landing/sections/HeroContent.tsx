@@ -25,8 +25,13 @@ function scrollToSection(id: string) {
   target?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// ponytail: web rests visible (opacity 1). reanimated 4.4.1 mount worklets
+// don't advance on mobile Safari, which stranded the whole hero + CTA at
+// opacity 0; native keeps the entrance. Drop the guard once reanimated is bumped.
+const REST_VISIBLE = Platform.OS === "web" ? 1 : 0;
+
 function Word({ text, index }: { text: string; index: number }) {
-  const t = useSharedValue(0);
+  const t = useSharedValue(REST_VISIBLE);
   useEffect(() => {
     t.value = withDelay(
       200 + index * 140,
@@ -52,7 +57,7 @@ function Word({ text, index }: { text: string; index: number }) {
 
 export function HeroContent() {
   const router = useRouter();
-  const fade = useSharedValue(0);
+  const fade = useSharedValue(REST_VISIBLE);
   useEffect(() => {
     fade.value = withDelay(
       560,
@@ -85,7 +90,7 @@ export function HeroContent() {
         <View style={styles.cta}>
           <Pressable
             accessibilityRole="link"
-            onPress={() => router.push("/auth/signup")}
+            onPress={() => router.push("/auth/login")}
             style={styles.primary}
           >
             <Animated.Text style={styles.primaryText}>
