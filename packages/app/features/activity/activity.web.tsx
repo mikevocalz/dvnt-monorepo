@@ -22,7 +22,7 @@
  * State (active tab) lives in a tiny zustand store (never useState for tab).
  */
 
-import { useEffect, useMemo, useReducer, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { create } from "zustand";
 import { useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -37,6 +37,7 @@ import {
   CheckCheck,
   Calendar,
   Radio,
+  ImageOff,
 } from "lucide-react";
 
 import {
@@ -109,6 +110,51 @@ function avatarUrl(avatar?: string): string {
   if (!avatar) return "/dvnt-email-glyph.png";
   if (avatar.startsWith("http")) return avatar;
   return `${CDN_URL}/${avatar}`;
+}
+
+// A post thumbnail that never shows the browser's broken-image glyph. The
+// backfill stores video URLs as type:"thumbnail" placeholders (notifications.ts),
+// so a plain <img src=video> breaks. Video → first frame via <video>; a genuinely
+// dead URL → neutral placeholder on error. mp4/mov/webm frame-grab; HLS falls
+// back to the placeholder (can't grab without hls.js).
+const THUMB_VIDEO_RE = /post-video|\.mp4(\?|$)|\.mov(\?|$)|\.m3u8(\?|$)|\.webm(\?|$)/i;
+function PostThumb({ src, className }: { src: string; className: string }) {
+  const [errored, setErrored] = useState(false);
+  const isVideo = THUMB_VIDEO_RE.test(src);
+  const canFrameGrab = isVideo && !/\.m3u8(\?|$)/i.test(src);
+  if (src && !errored && isVideo) {
+    return canFrameGrab ? (
+      <video
+        src={`${src}#t=0.1`}
+        muted
+        playsInline
+        preload="metadata"
+        tabIndex={-1}
+        className={className}
+        onError={() => setErrored(true)}
+      />
+    ) : (
+      <span className={`flex items-center justify-center bg-white/8 ${className}`}>
+        <ImageOff size={18} color="#ffffff55" />
+      </span>
+    );
+  }
+  if (src && !errored) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <img
+        src={src}
+        alt=""
+        className={className}
+        onError={() => setErrored(true)}
+      />
+    );
+  }
+  return (
+    <span className={`flex items-center justify-center bg-white/8 ${className}`}>
+      <ImageOff size={18} color="#ffffff55" />
+    </span>
+  );
 }
 
 // ── Web route helpers (clean web routes, NOT native (protected) groups) ──────
@@ -454,10 +500,8 @@ function ActivityRow({
           }}
           className="shrink-0"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <PostThumb
             src={activity.post.thumbnail}
-            alt=""
             className="ml-3 h-12 w-12 rounded-lg object-cover bg-white/10"
           />
         </button>
@@ -569,10 +613,8 @@ function LikedRow({
           className="flex h-[104px] w-[82px] shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/8"
         >
           {item.previewImage ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <PostThumb
               src={item.previewImage}
-              alt=""
               className="h-full w-full object-cover"
             />
           ) : isEvent ? (
