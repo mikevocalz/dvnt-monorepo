@@ -79,6 +79,11 @@ function PostTile({ post, big = false }: { post: Post; big?: boolean }) {
   const isCarousel = post.hasMultipleImages || (post.media?.length ?? 0) > 1;
   const isText = post.kind === "text" || (post.textSlides?.length ?? 0) > 0;
   const cover = coverFor(post);
+  // No still for a video? Paint its first frame via <video preload="metadata">
+  // (#t=0.1 nudges browsers to render the frame, not a black poster). HLS can't
+  // frame-grab without hls.js, so those keep the "No preview" fallback.
+  const videoSrc = isVideo && !cover ? media?.url ?? "" : "";
+  const canFrameGrab = videoSrc !== "" && !/\.m3u8(\?|$)/i.test(videoSrc);
 
   const textPreview = isText
     ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
@@ -119,6 +124,15 @@ function PostTile({ post, big = false }: { post: Post; big?: boolean }) {
           src={cover}
           alt={post.caption ?? ""}
           loading="lazy"
+          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+        />
+      ) : canFrameGrab ? (
+        <video
+          src={`${videoSrc}#t=0.1`}
+          muted
+          playsInline
+          preload="metadata"
+          tabIndex={-1}
           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
         />
       ) : (
