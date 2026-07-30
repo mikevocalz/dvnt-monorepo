@@ -17,14 +17,6 @@ import { EASE_SETTLE, LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
 
 const WORDS = ["connect.", "gather.", "move."];
 
-function scrollToSection(id: string) {
-  if (Platform.OS !== "web") return;
-  const target = (globalThis as typeof globalThis & {
-    document?: Document;
-  }).document?.getElementById(id);
-  target?.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
 // ponytail: web rests visible (opacity 1). reanimated 4.4.1 mount worklets
 // don't advance on mobile Safari, which stranded the whole hero + CTA at
 // opacity 0; native keeps the entrance. Drop the guard once reanimated is bumped.
@@ -97,24 +89,6 @@ export function HeroContent() {
               Sign-Up / Sign-In
             </Animated.Text>
           </Pressable>
-          <Pressable
-            accessibilityRole="link"
-            onPress={() => scrollToSection("download")}
-            style={styles.ghost}
-          >
-            <Animated.Text style={styles.ghostText}>
-              Get the app
-            </Animated.Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="link"
-            onPress={() => scrollToSection("explore")}
-            style={styles.ghost}
-          >
-            <Animated.Text style={styles.ghostText}>
-              Explore the room
-            </Animated.Text>
-          </Pressable>
         </View>
       </Animated.View>
     </View>
@@ -171,12 +145,4 @@ const styles = StyleSheet.create({
     ...GRADIENT_STYLE,
   },
   primaryText: { color: "#0A0118", fontWeight: "800", fontSize: 16 },
-  ghost: {
-    paddingHorizontal: 26,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: LANDING_COLORS.glassBorderStrong,
-  },
-  ghostText: { color: LANDING_COLORS.text, fontWeight: "700", fontSize: 16 },
 });
