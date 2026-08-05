@@ -24,11 +24,22 @@
  *     or permissive RLS on video_room_events.
  *   - Lower latency. Broadcast is in-memory on the realtime server.
  *
+ * ALSO tracks PRESENCE on the same channel: each client publishes its
+ * `Platform.OS`, and the store's `webPeerPresent` flag flips when any
+ * participant is on a browser. Web capture protection is deterrence +
+ * attribution only (no browser equivalent of Android FLAG_SECURE or the
+ * iOS capture blackout), so the room is told when a web client is in it.
+ * Presence rather than broadcast because this is continuous room state,
+ * not an event — a late joiner needs the current answer, not a replay.
+ *
  * NOT in this hook (honest scope):
  *   - Screen RECORDING detection. expo-screen-capture has no recording
  *     event. iOS needs `UIScreen.main.isCaptured`; Android 14+ has
  *     ScreenCaptureCallback; older Android has nothing. Follow-up
- *     native-build commit.
+ *     native-build commit. Web has NO recording signal at all and must
+ *     never allege one — `useSecureCaptureGuard` emits only "screenshot".
+ *   - Any claim of web BLOCKING. The only enforced tier is the app-only
+ *     room gate in the `video_join_room` edge function.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -90,6 +101,9 @@ export function useSneakyLynkCaptureBroadcast({
   const recordCapture = useSneakyLynkCaptureStore((s) => s.recordCapture);
   const clearCapture = useSneakyLynkCaptureStore((s) => s.clearCapture);
   const clearPulse = useSneakyLynkCaptureStore((s) => s.clearPulse);
+  const setWebPeerPresent = useSneakyLynkCaptureStore(
+    (s) => s.setWebPeerPresent,
+  );
   const reset = useSneakyLynkCaptureStore((s) => s.reset);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -102,6 +116,11 @@ export function useSneakyLynkCaptureBroadcast({
   // captures stale Zustand setters.
   const actionsRef = useRef({ recordCapture, clearCapture, clearPulse });
   actionsRef.current = { recordCapture, clearCapture, clearPulse };
+
+  // Same reason as actionsRef: the presence handlers live inside an effect
+  // keyed only on roomId/localUserId, so they must not close over a setter.
+  const setWebPresenceRef = useRef(setWebPeerPresent);
+  setWebPresenceRef.current = setWebPeerPresent;
 
   // Stash the DM-path params so `notifyLocalScreenshot` sees the
   // latest values without re-creating the callback identity every
@@ -125,7 +144,12 @@ export function useSneakyLynkCaptureBroadcast({
     cancelledRef.current = false;
 
     const channel = supabase.channel(`sneaky-capture-${roomId}`, {
-      config: { broadcast: { self: false } },
+      config: {
+        broadcast: { self: false },
+        // Keyed by user so a reconnect replaces the stale entry instead of
+        // leaving a ghost web peer pinning the disclosure chip on.
+        presence: { key: localUserId },
+      },
     });
 
     channel.on("broadcast", { event: "capture" }, (msg) => {
@@ -164,7 +188,33 @@ export function useSneakyLynkCaptureBroadcast({
       }
     });
 
-    channel.subscribe();
+    // ── Platform disclosure ────────────────────────────────────────────────
+    // Every client publishes its runtime; any "web" entry (including our own)
+    // flips the room-wide chip. Self counts on purpose: a web viewer should
+    // see the same honest disclosure everyone else sees about them.
+    const syncWebPresence = () => {
+      if (cancelledRef.current) return;
+      const state = channel.presenceState<{ platform?: string }>();
+      const hasWeb = Object.values(state).some((entries) =>
+        entries.some((entry) => entry.platform === "web"),
+      );
+      setWebPresenceRef.current(hasWeb);
+    };
+
+    channel.on("presence", { event: "sync" }, syncWebPresence);
+    channel.on("presence", { event: "join" }, syncWebPresence);
+    channel.on("presence", { event: "leave" }, syncWebPresence);
+
+    channel.subscribe((status) => {
+      if (status !== "SUBSCRIBED" || cancelledRef.current) return;
+      void channel.track({ platform: Platform.OS }).catch((err) => {
+        // Non-fatal: losing presence only costs the disclosure chip, never
+        // the capture broadcast itself.
+        if (__DEV__) {
+          console.warn("[SneakyLynkCapture] presence track failed:", err);
+        }
+      });
+    });
     channelRef.current = channel;
 
     return () => {

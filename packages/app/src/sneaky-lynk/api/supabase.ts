@@ -3,6 +3,7 @@
  * Calls Supabase Edge Functions for room management
  */
 
+import { Platform } from "react-native";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import type { CreateRoomParams, JoinRoomResponse, SneakyRoom } from "../types";
@@ -117,6 +118,7 @@ export const sneakyLynkApi = {
       hasVideo: params.hasVideo ?? false,
       isPublic: params.isPublic ?? true,
       invitedUserIds: params.invitedUserIds ?? [],
+      appOnly: params.appOnly ?? false,
       maxParticipants: 50,
     });
   },
@@ -124,12 +126,23 @@ export const sneakyLynkApi = {
   /**
    * Join a room and get Fishjam token
    * Uses existing video_join_room Edge Function
+   *
+   * Sends the client platform so the edge function can enforce app-only rooms
+   * BEFORE minting a peer token. `Platform.OS` is "web" under react-native-web,
+   * which is exactly the signal the gate keys off. This is a client-declared
+   * value — see the JoinRoomSchema docstring in
+   * `supabase/functions/video_join_room/index.ts` for the (acknowledged)
+   * spoofing limit.
    */
   async joinRoom(
     roomId: string,
     anonymous = false,
   ): Promise<ApiResponse<JoinRoomResponse>> {
-    return callEdgeFunction("video_join_room", { roomId, anonymous });
+    return callEdgeFunction("video_join_room", {
+      roomId,
+      anonymous,
+      platform: Platform.OS,
+    });
   },
 
   /**

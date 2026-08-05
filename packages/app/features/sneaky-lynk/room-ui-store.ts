@@ -17,6 +17,9 @@ export type RoomPhase =
   | "connecting"
   | "connected"
   | "closed"
+  /** Web client refused a peer token because the room is app-only. Terminal
+   *  on this rail — the only escape is opening the room in the DVNT app. */
+  | "app-only"
   | "error";
 
 interface RoomUIStore {
@@ -53,6 +56,7 @@ interface RoomUIStore {
   setJoinAnonymous: (v: boolean) => void;
   setRoomSnapshot: (v: SneakyRoom | null) => void;
   setClosed: (reason: string) => void;
+  setAppOnly: () => void;
   setError: (message: string) => void;
   setMicOn: (v: boolean) => void;
   setCameraOn: (v: boolean) => void;
@@ -88,6 +92,7 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setJoinAnonymous: (joinAnonymous) => set({ joinAnonymous }),
   setRoomSnapshot: (roomSnapshot) => set({ roomSnapshot }),
   setClosed: (closedReason) => set({ phase: "closed", closedReason }),
+  setAppOnly: () => set({ phase: "app-only" }),
   setError: (errorMessage) => set({ phase: "error", errorMessage }),
   setMicOn: (isMicOn) => set({ isMicOn }),
   setCameraOn: (isCameraOn) => set({ isCameraOn }),

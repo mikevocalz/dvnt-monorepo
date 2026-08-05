@@ -18,6 +18,8 @@ export type SecureCaptureEventName =
   | "secure_capture_blur"
   | "secure_capture_visibility_hidden"
   | "secure_capture_print_attempt"
+  /** PrintScreen `keyup` — the one screenshot action a page actually observes. */
+  | "secure_capture_print_screen_key"
   | "secure_capture_copy_attempt"
   | "secure_capture_context_menu_attempt"
   | "secure_capture_keyboard_shortcut_attempt"

@@ -21,6 +21,12 @@ const CreateRoomSchema = z.object({
   isPublic: z.boolean().default(false),
   invitedUserIds: z.array(z.string().min(1)).max(100).default([]),
   maxParticipants: z.number().int().min(2).max(50).default(10),
+  /**
+   * App-only room: video_join_room refuses to mint a peer token for a web
+   * client. The only ENFORCED tier of Sneaky Lynk capture protection — the web
+   * room's blackout/watermark/shortcut handling is deterrence + attribution.
+   */
+  appOnly: z.boolean().default(false),
 });
 
 type ErrorCode =
@@ -185,8 +191,15 @@ Deno.serve(async (req) => {
       return errorResponse("validation_error", parsed.error.errors[0].message);
     }
 
-    const { title, topic, description, hasVideo, isPublic, invitedUserIds } =
-      parsed.data;
+    const {
+      title,
+      topic,
+      description,
+      hasVideo,
+      isPublic,
+      invitedUserIds,
+      appOnly,
+    } = parsed.data;
     let { maxParticipants } = parsed.data;
     console.log("[video_create_room] Parsed data:", {
       title,
@@ -348,6 +361,7 @@ Deno.serve(async (req) => {
       sweet_spicy_mode: "sweet",
       has_video: hasVideo,
       is_public: isPublic,
+      app_only: appOnly,
       max_participants: maxParticipants,
       participant_count: 1,
       status: "open",
@@ -364,6 +378,23 @@ Deno.serve(async (req) => {
       const fallbackInsert = { ...roomInsert };
       delete (fallbackInsert as { participant_count?: number })
         .participant_count;
+      roomQuery = supabase.from("video_rooms").insert(fallbackInsert).select();
+      const retry = await roomQuery.single();
+      room = retry.data;
+      roomError = retry.error;
+    }
+
+    // Same forward-compat shape as participant_count above: a database that
+    // has not run 20260805120000_video_rooms_app_only.sql yet must still be
+    // able to create rooms. Dropping the column means the room is created
+    // WITHOUT the app-only gate, so say so loudly — a host who asked for
+    // app-only would otherwise silently get a web-joinable room.
+    if (roomError && isMissingColumnError(roomError, "app_only")) {
+      console.error(
+        "[video_create_room] app_only column missing on video_rooms — creating room WITHOUT the app-only gate. Run 20260805120000_video_rooms_app_only.sql.",
+      );
+      const fallbackInsert = { ...roomInsert };
+      delete (fallbackInsert as { app_only?: boolean }).app_only;
       roomQuery = supabase.from("video_rooms").insert(fallbackInsert).select();
       const retry = await roomQuery.single();
       room = retry.data;
@@ -483,6 +514,9 @@ Deno.serve(async (req) => {
           sweetSpicyMode: room.sweet_spicy_mode || "sweet",
           hasVideo: room.has_video || false,
           isPublic: room.is_public,
+          // Reflects what was actually persisted, not what was requested —
+          // the missing-column fallback above can drop the flag.
+          appOnly: room.app_only === true,
           maxParticipants: room.max_participants,
           status: room.status,
           createdAt: room.created_at,

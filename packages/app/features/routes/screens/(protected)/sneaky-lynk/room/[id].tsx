@@ -66,6 +66,7 @@ import type { SneakyRoom, SneakyUser } from "@dvnt/app/src/sneaky-lynk/types";
 import { RoomJoinErrorSheet } from "@dvnt/app/src/sneaky-lynk/ui/RoomJoinErrorSheet";
 import { RoomFullSheet } from "@dvnt/app/src/sneaky-lynk/ui/RoomFullSheet";
 import { CaptureNotificationBanner } from "@dvnt/app/src/sneaky-lynk/ui/CaptureNotificationBanner";
+import { CaptureDisclosureChip } from "@dvnt/app/src/sneaky-lynk/ui/CaptureDisclosureChip";
 import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureBroadcast";
 import {
   classifySneakyLynkError,
@@ -2743,6 +2744,11 @@ function RoomLayout({
               <View style={{ width: 42 }} />
             )}
           </View>
+
+          {/* Standing disclosure — renders only while a web viewer is in the
+              room. Web protection is deterrence + attribution; native runs
+              under FLAG_SECURE / the iOS blackout. Everyone gets told. */}
+          <CaptureDisclosureChip />
         </View>
 
         <View

@@ -13,6 +13,12 @@
  *
  * Known capacity signal: `code: "conflict"`, `message: "Room is full"`
  * (supabase/functions/video_join_room/index.ts:184).
+ *
+ * Known typed sub-reasons carried on `error.detail.reason`:
+ *   "room_full"      — capacity, with { current, max, isHost }
+ *   "invite_only"    — private room, no invite
+ *   "ROOM_APP_ONLY"  — app-only room rejected a web client before minting a
+ *                      peer token (the only ENFORCED capture-protection tier)
  */
 
 export type SneakyLynkErrorReason =
@@ -22,6 +28,8 @@ export type SneakyLynkErrorReason =
   | "forbidden"
   | "not_found"
   | "unauthorized"
+  /** Web client refused a peer token for an app-only room. */
+  | "app_only"
   | "unknown";
 
 /**
@@ -75,6 +83,22 @@ export function classifySneakyLynkError(
   // that haven't been redeployed yet.
   const detailReason =
     typeof detail?.reason === "string" ? detail.reason : null;
+
+  // App-only room. Checked first: it's the one reason that isn't about the
+  // user or the room's state, and it has a dedicated "get the app" surface
+  // rather than a retry. `code` is "forbidden" on the wire (the ErrorCode
+  // union is fixed); ROOM_APP_ONLY is the typed sub-reason, same transport
+  // the capacity flow uses.
+  if (detailReason === "ROOM_APP_ONLY") {
+    return {
+      reason: "app_only",
+      title: "This Lynk is app-only",
+      body: "The host made this room app-only, so it can't be opened in a browser. Open it in the DVNT app to join.",
+      ctaLabel: null,
+      rawMessage: raw,
+    };
+  }
+
   if (
     detailReason === "room_full" ||
     (code === "conflict" && ROOM_FULL_MATCHERS.some((re) => re.test(raw)))

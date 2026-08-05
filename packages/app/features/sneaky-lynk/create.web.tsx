@@ -25,7 +25,17 @@
 
 import { useEffect, useCallback } from "react";
 import { useRouter } from "solito/navigation";
-import { ArrowLeft, Radio, Video, Globe, Lock, UserPlus, X, Plus } from "lucide-react";
+import {
+  ArrowLeft,
+  Radio,
+  Video,
+  Globe,
+  Lock,
+  UserPlus,
+  X,
+  Plus,
+  Smartphone,
+} from "lucide-react";
 import { FormField } from "@dvnt/ui";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -157,6 +167,7 @@ export function SneakyLynkCreateScreen() {
   const description = useCreateLynkStore((s) => s.description);
   const hasVideo = useCreateLynkStore((s) => s.hasVideo);
   const isPublic = useCreateLynkStore((s) => s.isPublic);
+  const appOnly = useCreateLynkStore((s) => s.appOnly);
   const isCreating = useCreateLynkStore((s) => s.isCreating);
   const inviteSearch = useCreateLynkStore((s) => s.inviteSearch);
   const inviteResults = useCreateLynkStore((s) => s.inviteResults);
@@ -165,6 +176,7 @@ export function SneakyLynkCreateScreen() {
   const setDescription = useCreateLynkStore((s) => s.setDescription);
   const setHasVideo = useCreateLynkStore((s) => s.setHasVideo);
   const setIsPublic = useCreateLynkStore((s) => s.setIsPublic);
+  const setAppOnly = useCreateLynkStore((s) => s.setAppOnly);
   const setIsCreating = useCreateLynkStore((s) => s.setIsCreating);
   const setInviteSearch = useCreateLynkStore((s) => s.setInviteSearch);
   const setInviteResults = useCreateLynkStore((s) => s.setInviteResults);
@@ -236,6 +248,7 @@ export function SneakyLynkCreateScreen() {
         description: description.trim(),
         hasVideo,
         isPublic,
+        appOnly,
         invitedUserIds: isPublic ? [] : invitees.map((i) => i.authId),
       });
 
@@ -310,6 +323,7 @@ export function SneakyLynkCreateScreen() {
     description,
     hasVideo,
     isPublic,
+    appOnly,
     invitees,
     authUser,
     addRoom,
@@ -414,6 +428,25 @@ export function SneakyLynkCreateScreen() {
           value={isPublic}
           onChange={setIsPublic}
         />
+
+        {/* App-only toggle — the only ENFORCED capture protection. Everything
+            the web room does (blackout, watermark, shortcut blocking) is
+            deterrence; an app-only room simply never mints a peer token for a
+            browser. */}
+        <ToggleRow
+          icon={<Smartphone size={20} color={ACCENT} />}
+          title="App-only room"
+          subtitle="Web viewers can't join · strongest capture protection"
+          value={appOnly}
+          onChange={setAppOnly}
+        />
+        {appOnly ? (
+          <p className="-mt-2 text-xs leading-5 text-white/50">
+            Everyone joins from the DVNT app, where the OS blacks out
+            screenshots and screen recordings at the system level. Browsers have
+            no equivalent, so they&apos;re turned away before they can connect.
+          </p>
+        ) : null}
 
         {/* Invitees (private only) */}
         {!isPublic ? (

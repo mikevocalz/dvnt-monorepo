@@ -49,11 +49,17 @@ export function VideoTile({
           style={mirrorStyle}
         />
       ) : stream ? (
+        // `disablePictureInPicture` + `controlsList` close the PiP/remote-playback
+        // escape hatch: a floating PiP window renders OUTSIDE any capture
+        // boundary, so it would carry no watermark and no blackout. Deterrence
+        // only — a determined viewer can still re-enable PiP from DevTools.
         <video
           ref={attachVideo}
           autoPlay
           playsInline
           muted={muted}
+          disablePictureInPicture
+          controlsList="nodownload noremoteplayback"
           className={`absolute inset-0 h-full w-full ${fit}`}
           style={mirrorStyle}
         />

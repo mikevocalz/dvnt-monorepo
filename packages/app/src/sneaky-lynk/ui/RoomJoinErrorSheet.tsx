@@ -24,6 +24,7 @@ import {
   Lock,
   UserX,
   LogIn,
+  Smartphone,
 } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import type {
@@ -43,6 +44,12 @@ interface RoomJoinErrorSheetProps {
 function iconFor(reason: SneakyLynkErrorReason, color: string) {
   const common = { size: 28, color };
   switch (reason) {
+    // App-only rooms reject WEB clients, so a native client should never see
+    // this. Handled anyway: the web rail renders its own app-only surface
+    // (with store/deep links), and if the reason ever reaches native we show
+    // a clean state instead of falling through to "Something went wrong".
+    case "app_only":
+      return <Smartphone {...common} />;
     case "room_full":
       return <Users {...common} />;
     case "room_ended":
@@ -77,6 +84,8 @@ export function RoomJoinErrorSheet({
     error?.reason === "rate_limited"
       ? colors.destructive
       : colors.primary;
+  // App-only is a routing fact, not a failure — no retry CTA, close only.
+  const isAppOnly = error?.reason === "app_only";
 
   const handleCta = () => {
     if (!error) return onDismiss();
@@ -126,7 +135,7 @@ export function RoomJoinErrorSheet({
           </Text>
 
           <View style={styles.actions}>
-            {error?.ctaLabel ? (
+            {error?.ctaLabel && !isAppOnly ? (
               <Pressable
                 onPress={handleCta}
                 style={({ pressed }) => [

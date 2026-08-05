@@ -21,11 +21,21 @@
  *     `sneakyLynkApi.endRoom(id)` (host) + `useLynkHistoryStore.endRoom(...)`.
  *   - Hand-raise / chat / eject domain state = the SHARED `useRoomStore`.
  *
- * Web capture protection is deterrence-only: browsers cannot provide the same
- * OS-level secure-screen guarantees as Android FLAG_SECURE or native capture
- * APIs. The live room uses `SecureCaptureBoundary` for practical web controls:
- * anti-capture wrapper, focus/visibility blackout, shortcut/context/copy
- * blocking, and forensic watermarking.
+ * Web capture protection is DETERRENCE + ATTRIBUTION only: browsers offer no
+ * equivalent of Android FLAG_SECURE or the iOS capture blackout, and macOS
+ * screenshots (⌘⇧3/4/5) and Win+Shift+S are invisible to the page. The live
+ * room uses `SecureCaptureBoundary` for what web can actually do: an
+ * anti-capture wrapper, focus/visibility blackout, context/copy/shortcut
+ * blocking, and a forensic watermark that survives into any screenshot.
+ *
+ * Signals are TIERED (`useSecureCaptureGuard`): only PrintScreen keyup,
+ * `beforeprint`, and Cmd/Ctrl+P notify the room. Blur and tab-switch blackout
+ * locally and are never broadcast — a URL-bar click is not a recording, and
+ * alleging one to the whole room (plus the host's DMs) was the bug this
+ * replaced. Web never emits a recording event at all: it cannot detect one.
+ *
+ * The only ENFORCED tier is the app-only room: `video_join_room` refuses to
+ * mint a peer token for a web client, so there is nothing here to protect.
  *
  * Law 3 (web): raw semantic HTML + Tailwind only (NativeWind interop off) — no
  * <View>/<Text>. State = Zustand (`useRoomUIStore` + shared `useRoomStore`, no
@@ -65,6 +75,8 @@ import {
   Clock,
   X,
   Zap,
+  Smartphone,
+  ShieldAlert,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
@@ -73,6 +85,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
+import { classifySneakyLynkError } from "@dvnt/app/src/sneaky-lynk/errors";
 import { videoApi } from "@dvnt/app/src/video/api";
 import { useRoomReactions } from "@dvnt/app/src/sneaky-lynk/hooks/useRoomReactions";
 import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureBroadcast";
@@ -443,13 +456,17 @@ function CaptureNotificationBannerWeb() {
   const shellClass = isSelf
     ? "border-[#3FDCFF]/35 bg-[#08131a]/95"
     : "border-[#FC253A]/40 bg-[#16070b]/95";
+  // Copy stays honest: nothing here is blocked. A screenshot that reaches this
+  // banner already happened — what we do is attribute it. (Recording variants
+  // only ever arrive from a remote NATIVE peer; web cannot detect recording
+  // and never emits it — see `useSecureCaptureGuard`.)
   const title = isSelf
     ? isRecording
-      ? "Screen recording detected"
-      : "Screenshot attempt blocked"
+      ? "You're recording"
+      : "You took a screenshot"
     : isRecording
-      ? `${current.actorUsername} may be recording`
-      : `${current.actorUsername} attempted a screenshot`;
+      ? `${current.actorUsername} is recording`
+      : `${current.actorUsername} took a screenshot`;
   const body = isSelf ? "Everyone in the room was notified." : "The room was notified.";
 
   return (
@@ -469,6 +486,32 @@ function CaptureNotificationBannerWeb() {
         </span>
       </div>
     </div>
+  );
+}
+
+/**
+ * Persistent platform disclosure.
+ *
+ * Web capture protection is deterrence + attribution; native runs under
+ * FLAG_SECURE / the iOS capture blackout. When the room is mixed, everyone —
+ * including the web viewer themselves — is told, because a participant can't
+ * make an informed choice about what to show without knowing which rail the
+ * other people are on. Driven by presence on the `sneaky-capture-<roomId>`
+ * channel (see `useSneakyLynkCaptureBroadcast`), so it tracks the room live
+ * rather than only at join time.
+ */
+function WebViewerDisclosureChip() {
+  const webPeerPresent = useSneakyLynkCaptureStore((s) => s.webPeerPresent);
+  if (!webPeerPresent) return null;
+
+  return (
+    <span
+      role="status"
+      className="flex items-center gap-2 rounded-lg border border-amber-300/35 bg-amber-300/12 px-2.5 py-1.5 text-[11px] font-semibold leading-tight text-amber-100"
+    >
+      <ShieldAlert size={13} className="shrink-0" />
+      Web viewers in room — capture protection limited on web
+    </span>
   );
 }
 
@@ -1009,6 +1052,7 @@ function RoomInner({
   const setPhase = useRoomUIStore((s) => s.setPhase);
   const setRoomSnapshot = useRoomUIStore((s) => s.setRoomSnapshot);
   const setClosed = useRoomUIStore((s) => s.setClosed);
+  const setAppOnlyPhase = useRoomUIStore((s) => s.setAppOnly);
   const setErrorState = useRoomUIStore((s) => s.setError);
   const setMicOn = useRoomUIStore((s) => s.setMicOn);
   const setCameraOn = useRoomUIStore((s) => s.setCameraOn);
@@ -1098,7 +1142,17 @@ function RoomInner({
 
       if (!result.ok || !result.data) {
         const msg = result.error?.message || "Failed to join Lynk";
-        if (isClosedRoomError(msg)) {
+        const classified = classifySneakyLynkError(
+          result.error?.code,
+          msg,
+          result.error?.detail,
+        );
+        // App-only room: the edge function refused a peer token because we're
+        // a browser. Not a failure to retry — a routing fact with its own
+        // surface, so it gets a dedicated phase rather than the error screen.
+        if (classified.reason === "app_only") {
+          setAppOnlyPhase();
+        } else if (isClosedRoomError(msg)) {
           setClosed("This Lynk has ended and can't be reopened.");
         } else {
           setErrorState(msg);
@@ -1444,6 +1498,58 @@ function RoomInner({
   });
 
   // ── Phase gates ────────────────────────────────────────────────────────────
+  // App-only: the edge function refused a peer token because this is a
+  // browser. Terminal on the web rail by design — this is the one place
+  // Sneaky Lynk protection is ENFORCED rather than deterred, so there is no
+  // retry, no fallback view, and nothing to reveal.
+  if (phase === "app-only") {
+    return (
+      <RoomShell title={roomTitle} onBack={() => router.back()}>
+        <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+          <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-[#3FDCFF]/12 text-[#3FDCFF]">
+            <Smartphone size={36} />
+          </span>
+          <h2 className="mb-3 text-2xl font-bold">This Lynk is app-only</h2>
+          <p className="mb-8 max-w-md text-white/60">
+            The host made this room app-only, so it can&apos;t be opened in a
+            browser. In the DVNT app the OS blacks out screenshots and screen
+            recordings at the system level — browsers have no equivalent, which
+            is the whole point of the setting.
+          </p>
+
+          <a
+            href={`dvnt://sneaky-lynk/room/${id}`}
+            className="w-full max-w-xs rounded-full px-6 py-4 text-center font-bold text-black active:scale-95"
+            style={{ backgroundColor: ACCENT }}
+          >
+            Open in the DVNT app
+          </a>
+
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
+            <img
+              src="https://images.squarespace-cdn.com/content/v1/6970176c1abbac076dce861e/984f791e-38da-4c97-bd3d-257a488a1f30/Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.png?format=500w"
+              alt="Download on the App Store"
+              className="h-11 w-auto"
+            />
+            <img
+              src="https://images.squarespace-cdn.com/content/v1/6970176c1abbac076dce861e/f87f69fd-f310-43b4-a8e7-7ba38246bee0/GetItOnGooglePlay_Badge_Web_color_English.png?format=500w"
+              alt="Get it on Google Play"
+              className="h-11 w-auto"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="mt-8 rounded-full bg-white/8 px-6 py-3 text-sm font-semibold active:scale-95"
+          >
+            Back
+          </button>
+        </div>
+      </RoomShell>
+    );
+  }
+
   if (phase === "closed") {
     return (
       <RoomShell title={roomTitle} onBack={() => router.back()}>
@@ -1498,7 +1604,7 @@ function RoomInner({
       mode="sneaky-lynk"
       blackoutOnBlur
       blackoutOnVisibilityHidden
-      watermark={false}
+      watermark
       logEvents
       onCaptureAttempt={(kind) => captureBroadcast.notifyLocalCapture(kind)}
     >
@@ -1581,6 +1687,13 @@ function RoomInner({
           ) : null}
         </span>
       </header>
+
+      {/* Standing disclosure — own row so the copy is never truncated by
+          the three-column header. Renders only while a web viewer is in
+          the room. */}
+      <div className="relative z-10 px-4 pb-1 empty:hidden">
+        <WebViewerDisclosureChip />
+      </div>
 
       {connecting ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4">

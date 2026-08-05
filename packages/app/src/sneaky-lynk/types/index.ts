@@ -87,6 +87,9 @@ export interface JoinRoomResponse {
     description: string;
     sweetSpicyMode?: "sweet" | "spicy";
     hasVideo: boolean;
+    /** App-only room — web clients are refused a peer token by
+     *  `video_join_room`. Absent on backends predating that gate. */
+    appOnly?: boolean;
     fishjamRoomId: string;
   };
   token: string;
@@ -105,6 +108,13 @@ export interface CreateRoomParams {
   hasVideo?: boolean;
   isPublic?: boolean;
   invitedUserIds?: string[];
+  /**
+   * App-only room — web viewers can't join. The only ENFORCED tier of capture
+   * protection: `video_join_room` refuses to mint a peer token for a browser,
+   * so native clients keep their OS-level guarantees (Android FLAG_SECURE,
+   * iOS capture blackout) with no web rail to route around them.
+   */
+  appOnly?: boolean;
 }
 
 export interface EjectPayload {

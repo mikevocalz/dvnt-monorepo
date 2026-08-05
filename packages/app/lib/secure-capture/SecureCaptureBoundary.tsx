@@ -37,6 +37,16 @@ export interface SecureCaptureBoundaryProps {
   ) => void;
 }
 
+/**
+ * Tier A signals (see `secureCaptureKeyTier`) plus the block-only "attempt"
+ * events warrant a warning breadcrumb; ambient focus/visibility churn is
+ * informational noise and must stay at `info` so it doesn't read as an
+ * incident in Sentry.
+ */
+const WARNING_EVENTS = new Set<SecureCaptureEventName>([
+  "secure_capture_print_screen_key",
+]);
+
 function defaultLogEvent(
   eventName: SecureCaptureEventName,
   context: SecureCaptureEventContext,
@@ -51,7 +61,9 @@ function defaultLogEvent(
       userHandle: context.userHandle,
       mode: context.mode,
     },
-    eventName.includes("attempt") ? "warning" : "info",
+    eventName.includes("attempt") || WARNING_EVENTS.has(eventName)
+      ? "warning"
+      : "info",
   );
 }
 
