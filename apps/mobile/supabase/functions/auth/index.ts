@@ -180,9 +180,9 @@ async function getAuth() {
     console.log("[Auth] Initializing Better Auth...");
 
     // Import Better Auth + plugins
-    const { betterAuth } = await import("npm:better-auth@1.5.5");
-    const { expo } = await import("npm:@better-auth/expo@1.5.5");
-    const { username, magicLink } = await import("npm:better-auth@1.5.5/plugins");
+    const { betterAuth } = await import("npm:better-auth@1.6.26");
+    const { expo } = await import("npm:@better-auth/expo@1.6.26");
+    const { username, magicLink } = await import("npm:better-auth@1.6.26/plugins");
     // Import npm:pg — Deno supports Node built-ins (node:net, node:tls) needed by pg
     const pgModule = await import("npm:pg@8.13.1");
     const Pool = pgModule.Pool || pgModule.default?.Pool || pgModule.default;
@@ -248,7 +248,7 @@ async function getAuth() {
         username(),
         // B4: BetterAuth mints/expires/verifies the link token; Resend only
         // delivers. sendMagicLink signature verified against
-        // better-auth@1.5.5/dist/plugins/magic-link/index.d.mts:35.
+        // better-auth@1.6.26/dist/plugins/magic-link/index.d.mts:35.
         magicLink({
           expiresIn: 60 * 15,
           sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
@@ -359,7 +359,7 @@ async function getAuth() {
                 [email],
               );
               if (!rows?.[0]?.ok) {
-                const { APIError } = await import("npm:better-auth@1.5.5/api");
+                const { APIError } = await import("npm:better-auth@1.6.26/api");
                 console.log(`[Auth] Beta gate: rejected ${email}`);
                 throw new APIError("FORBIDDEN", {
                   code: "BETA_ONLY",
@@ -398,7 +398,7 @@ async function getAuth() {
             //
             // VERIFIED-EMAIL CONTRACT (claim_guest_orders): only claim when
             // "emailVerified" is true. Magic-link verification sets it
-            // (better-auth@1.5.5 dist/plugins/magic-link/index.mjs:140-150:
+            // (better-auth@1.6.26 dist/plugins/magic-link/index.mjs:140-150:
             // new users are created with emailVerified: true, existing users
             // are updated to true, then createSession fires this hook).
             // Unverified email/password sign-ins are skipped — fail closed.
@@ -564,7 +564,7 @@ Deno.serve(async (req: Request) => {
   // 15 minutes, so the ticket email can't carry a pre-minted link — this
   // route mints a FRESH one per click through the Better Auth magic-link
   // plugin's server API (auth.api.signInMagicLink — verified against
-  // better-auth@1.5.5 dist/plugins/magic-link/index.d.mts:66-120; BetterAuth
+  // better-auth@1.6.26 dist/plugins/magic-link/index.d.mts:66-120; BetterAuth
   // mints, Resend delivers via the plugin's sendMagicLink above). After the
   // user taps the link, verification marks the email verified, a session is
   // created, and the session.create.after hook claims the guest orders.

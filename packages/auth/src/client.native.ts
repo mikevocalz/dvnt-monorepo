@@ -32,6 +32,8 @@ export const authClient = createAuthClient({
   baseURL: AUTH_ORIGIN,
   basePath: AUTH_BASE_PATH,
   plugins: [magicLinkClient(), 
+    // ponytail: better-auth 1.6 client-plugin shape vs @better-auth/expo .d.ts variance regression
+    // @ts-expect-error — expoClient plugin type vs better-auth 1.6 client shape
     expoClient({
       scheme: "dvnt",
       storagePrefix: "dvnt",

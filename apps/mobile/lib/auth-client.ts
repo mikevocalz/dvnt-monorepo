@@ -34,6 +34,11 @@ export const authClient = createAuthClient({
   baseURL: AUTH_ORIGIN,
   basePath: AUTH_BASE_PATH,
   plugins: [
+    // ponytail: better-auth 1.6 tightened the client plugin shape and
+    // @better-auth/expo's expoClient no longer unifies with it (.d.ts variance
+    // regression upstream). Suppress here to keep full createAuthClient method
+    // inference (casting to BetterAuthClientPlugin instead collapses signIn.*).
+    // @ts-expect-error — expoClient plugin type vs better-auth 1.6 client shape
     expoClient({
       scheme: "dvnt",
       storagePrefix: "dvnt",
