@@ -42,7 +42,7 @@
     "@stripe/stripe-js": "^9.13.0",
     "@tanstack/react-form": "^1.33.0",
     "@tanstack/react-pacer": "^0.22.1",
-    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-table": "^9.1.0",
     "@tanstack/react-virtual": "^3.14.2",
     "graphql": "^16.8.2",
     "graphql-http": "^1.22.4",
@@ -60,7 +60,7 @@
     "react-native-web": "^0.21.2",
     "resend": "^6.18.1",
     "sharp": "0.35.3",
-    "sonner": "^1.7.4",
+    "sonner": "^2.0.7",
     "tailwind-scrollbar": "^4.0.2",
     "zustand": "^5.0.14"
   },
