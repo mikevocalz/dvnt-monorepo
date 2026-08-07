@@ -231,6 +231,16 @@ async function flushPendingScans(): Promise<void> {
 }
 
 /**
+ * Public one-shot flush for the WS-11 scan-queue-flush background job.
+ * Drains pendingScans via `ticketsApi.syncOfflineScans` exactly like the
+ * foreground auto-drain — same retained-on-failure semantics, same in-flight
+ * guard. Idempotent and never throws.
+ */
+export async function flushOfflineScansNow(): Promise<void> {
+  await flushPendingScans();
+}
+
+/**
  * Idempotent bootstrap — call once from the root layout, next to
  * initOutboxDrain(). Registers the scan flush on the shared outbox drain
  * signal (connectivity→online + AppState foreground). Never throws.

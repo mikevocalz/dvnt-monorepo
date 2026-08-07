@@ -47,6 +47,7 @@ const PERSISTED_KEY_PREFIXES = [
   "notifications", // notification list
   "badges", // notification badges
   "events", // events list, my events, liked events
+  "tickets", // holder tickets + QR payloads (ticketKeys.all=["tickets"]) — WS-8 door flow must work cold/offline; refreshed by the WS-11 ticket-freshness background job
   "profilePosts", // user's own posts grid on profile tab
   "bookmarks", // saved/bookmarked post IDs
   "activities", // transformed notification activities for instant notifications tab

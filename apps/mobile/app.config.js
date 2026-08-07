@@ -301,6 +301,12 @@ export default {
       "expo-localization",
       "expo-share-intent",
       "expo-sharing",
+      // WS-11 background tasks. Its config plugin adds the iOS
+      // UIBackgroundModes "processing" entry + the single BGTaskScheduler
+      // permitted identifier ("com.expo.modules.backgroundtask.processing")
+      // that all four DVNT background jobs multiplex under. Android needs no
+      // extra permissions (expo-task-manager ships its receiver + JobService).
+      "expo-background-task",
       "expo-splash-screen",
       "expo-status-bar",
       "expo-web-browser",

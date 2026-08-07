@@ -8,6 +8,7 @@
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 import { getAuthToken } from "@dvnt/app/lib/auth-client";
+import { beginUpload, settleUpload } from "@dvnt/app/lib/media/upload-watchdog-store";
 
 const FileSystem = LegacyFileSystem;
 
@@ -168,7 +169,32 @@ async function ensureFileAccessible(
  * Upload a file via the media-upload Edge Function.
  * Bunny credentials stay server-side.
  */
+/**
+ * Public upload entry point. Wraps the implementation with the WS-10 × WS-11
+ * durable upload-watchdog registry so a crash/kill mid-upload leaves a
+ * persisted trace the background upload-watchdog job can surface for foreground
+ * resume. Recording never affects the upload result (all registry calls swallow
+ * their own errors). See lib/media/upload-watchdog-store.ts for why RN uploads
+ * can't be resumed by the OS.
+ */
 export async function uploadToServer(
+  uri: string,
+  folder: string = "uploads",
+  onProgress?: (progress: UploadProgress) => void,
+  opts?: { blurhash?: string },
+): Promise<ServerUploadResult> {
+  const watchId = beginUpload(uri, folder);
+  try {
+    const result = await uploadToServerImpl(uri, folder, onProgress, opts);
+    settleUpload(watchId, result.success);
+    return result;
+  } catch (e) {
+    settleUpload(watchId, false);
+    throw e;
+  }
+}
+
+async function uploadToServerImpl(
   uri: string,
   folder: string = "uploads",
   onProgress?: (progress: UploadProgress) => void,
