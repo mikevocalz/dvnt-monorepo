@@ -137,6 +137,11 @@ verify_jwt = false
 [functions.guest-checkout]
 verify_jwt = false
 
+# Guest ticket re-request (WS-7): email-only re-delivery, no session. Own
+# rate limits + uniform response inside the fn; never returns ticket data.
+[functions.guest-ticket-lookup]
+verify_jwt = false
+
 # OG/share page — crawlers + anon hit it; gates visibility internally.
 [functions.share-page]
 verify_jwt = false
