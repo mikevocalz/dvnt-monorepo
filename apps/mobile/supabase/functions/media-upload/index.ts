@@ -149,7 +149,7 @@ Deno.serve(async (req) => {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, DELETE, OPTIONS",
         "Access-Control-Allow-Headers":
-          "Authorization, apikey, Content-Type, x-file-name, x-mime, x-kind, x-duration-sec, x-width, x-height, x-keys",
+          "Authorization, apikey, Content-Type, x-file-name, x-mime, x-kind, x-duration-sec, x-width, x-height, x-keys, x-blurhash",
       },
     });
   }
@@ -270,6 +270,10 @@ Deno.serve(async (req) => {
   let durationSec: number | undefined;
   let width: number | undefined;
   let height: number | undefined;
+  // Compact inline fade-in placeholder (base64 WebP micro-preview data URI)
+  // generated client-side (server-upload.ts). Persisted to the historically-NULL
+  // `blurhash` column so surfaces can fade images in with zero CLS.
+  let blurhash: string | undefined;
 
   const contentType = req.headers.get("Content-Type") || "";
 
@@ -305,6 +309,13 @@ Deno.serve(async (req) => {
       if (durationField) durationSec = parseInt(durationField as string, 10);
       if (widthField) width = parseInt(widthField as string, 10);
       if (heightField) height = parseInt(heightField as string, 10);
+
+      // server-upload.ts sends the placeholder as a `blurhash` form field
+      // (web + native). Optional + additive — absent on legacy clients.
+      const blurhashField = formData.get("blurhash");
+      if (typeof blurhashField === "string" && blurhashField.trim()) {
+        blurhash = blurhashField.trim();
+      }
     } else {
       // Raw bytes with headers
       const kindHeader = req.headers.get("x-kind");
@@ -327,6 +338,12 @@ Deno.serve(async (req) => {
       if (durationHeader) durationSec = parseInt(durationHeader, 10);
       if (widthHeader) width = parseInt(widthHeader, 10);
       if (heightHeader) height = parseInt(heightHeader, 10);
+
+      // Raw-bytes transport mirror of the multipart `blurhash` field.
+      const blurhashHeader = req.headers.get("x-blurhash");
+      if (blurhashHeader && blurhashHeader.trim()) {
+        blurhash = blurhashHeader.trim();
+      }
 
       fileBytes = new Uint8Array(await req.arrayBuffer());
     }
@@ -450,6 +467,9 @@ Deno.serve(async (req) => {
     width: width || null,
     height: height || null,
     type: isVideoKind(kind) ? "video" : "image",
+    // Additive: NULL when the client didn't send one (legacy clients, videos,
+    // or failed generation). Backfills the historically-NULL `blurhash` column.
+    blurhash: blurhash || null,
   };
 
   const { data: insertedMedia, error: insertError } = await supabase

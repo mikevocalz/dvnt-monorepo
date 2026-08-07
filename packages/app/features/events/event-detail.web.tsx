@@ -115,6 +115,44 @@ import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
 import "react-lite-youtube-embed/dist/LiteYouTubeEmbed.css";
 import { matchBySlug } from "@dvnt/app/lib/slug";
+import {
+  resolvePosterUrl,
+  resolveRenderableMedia,
+} from "@dvnt/app/lib/media/resolve-renderable";
+
+// Route the event cover flyer through the single render-side resolver — same
+// contract as events-list.web.tsx `flyerFor`: a videoUrl is only handed back
+// when Chrome/Firefox/Edge can actually paint it (QuickTime/.mov dropped), and a
+// posterUrl is NEVER a video URL and is null for HEIC, so those fall through to
+// the empty cover box instead of a broken <img>/<video>. Falls back across
+// flyerVideoUrl → image → coverImageUrl → gallery.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function coverFor(e: any): { videoUrl: string | null; posterUrl: string | null } {
+  const images: any[] = Array.isArray(e?.images) ? e.images : [];
+  const rawVideo =
+    e?.flyerVideoUrl ||
+    (e?.image && VIDEO_RE.test(e.image) ? e.image : null) ||
+    images.find(
+      (m) => resolveRenderableMedia({ url: m?.url, type: m?.type }).kind === "video",
+    )?.url ||
+    null;
+
+  const video = rawVideo
+    ? resolveRenderableMedia({ url: rawVideo, type: "video" })
+    : null;
+  const videoUrl = video && !video.browserUnsupported ? video.videoUrl : null;
+
+  const posterUrl =
+    (video ? video.posterUrl : null) ||
+    resolvePosterUrl({ url: e?.image }) ||
+    resolvePosterUrl({ url: e?.coverImageUrl }) ||
+    images
+      .map((m) => resolvePosterUrl({ url: m?.url, type: m?.type }))
+      .find((u: string | null): u is string => !!u) ||
+    null;
+
+  return { videoUrl, posterUrl };
+}
 
 function Stars({ rating, size = 14 }: { rating: number; size?: number }) {
   return (
@@ -511,8 +549,7 @@ export function EventDetailScreen() {
   if (!e) return <Centered>Event not found</Centered>;
 
   const isHost = !!me && me === e.host?.username;
-  const cover = e.flyerVideoUrl || e.image || e.coverImageUrl;
-  const isVideo = !!e.flyerVideoUrl || (cover && VIDEO_RE.test(cover));
+  const { videoUrl: coverVideoUrl, posterUrl: coverPosterUrl } = coverFor(e);
   const yt = ytId(e.youtubeVideoUrl || e.youtubeUrl);
   const lineup: string[] = Array.isArray(e.lineup) ? e.lineup : [];
   const perks: string[] = Array.isArray(e.perks) ? e.perks : [];
@@ -561,11 +598,14 @@ export function EventDetailScreen() {
   const reviewCount = Number(e.reviewCount) || reviews.length;
   const maxAttendees = Number(e.maxAttendees) || 0;
   const remaining = maxAttendees > 0 ? Math.max(0, maxAttendees - going) : 0;
+  // Gallery photos routed through the resolver: resolvePosterUrl never yields a
+  // video URL and returns null for HEIC/unsupported, so videos + dead Live-Photo
+  // rows drop out honestly (subsumes the old `type !== "video"` + VIDEO_RE guard)
+  // and a browser-safe <img> URL is guaranteed for the rest.
   const gallery: string[] = (Array.isArray(e.images) ? e.images : [])
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .filter((m: any) => m?.url && m?.type !== "video" && !VIDEO_RE.test(m.url))
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((m: any) => m.url);
+    .map((m: any) => resolvePosterUrl({ url: m?.url, type: m?.type }))
+    .filter((u: string | null): u is string => !!u);
   const countdown = (() => {
     const start = new Date(e.date || e.fullDate || "");
     if (Number.isNaN(start.getTime())) return "";
@@ -783,19 +823,19 @@ export function EventDetailScreen() {
       <div className="mx-auto max-w-[680px] pb-28">
         {/* Cover + back + menu */}
         <div className="relative" style={{ backgroundColor: coverColor }}>
-          {cover && isVideo ? (
+          {coverVideoUrl ? (
             <video
-              src={cover}
-              poster={e.image}
+              src={coverVideoUrl}
+              poster={coverPosterUrl ?? undefined}
               autoPlay
               muted
               loop
               playsInline
               className="w-full aspect-video object-cover"
             />
-          ) : cover ? (
+          ) : coverPosterUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={cover} alt={e.title} className="w-full aspect-video object-cover" />
+            <img src={coverPosterUrl} alt={e.title} className="w-full aspect-video object-cover" />
           ) : (
             <div className="w-full aspect-video bg-white/[0.06]" />
           )}
