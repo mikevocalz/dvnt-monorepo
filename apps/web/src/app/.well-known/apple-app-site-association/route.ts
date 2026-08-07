@@ -18,7 +18,16 @@ export function GET() {
             appIDs: ["436WA3W63V.com.dvnt.app"],
             // Open the app for feed content (posts, profiles, stories…); leave
             // marketing (/) and /auth/* to the web.
-            components: [{ "/": "/feed/*", comment: "Feed, posts, profiles" }],
+            //
+            // `/feed` is listed SEPARATELY from `/feed/*`: the wildcard pattern
+            // requires the trailing slash, so a bare https://dvntapp.live/feed
+            // would not match and would open Safari even with the app
+            // installed. The welcome email's CTA points exactly there, so both
+            // forms are claimed.
+            components: [
+              { "/": "/feed", comment: "Feed root (welcome email CTA)" },
+              { "/": "/feed/*", comment: "Feed, posts, profiles" },
+            ],
           },
         ],
       },
