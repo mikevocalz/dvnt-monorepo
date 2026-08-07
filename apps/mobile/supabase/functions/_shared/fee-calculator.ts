@@ -107,6 +107,80 @@ export function computeFees(subtotal: number, qty: number): FeeBreakdown {
   };
 }
 
+/**
+ * ── fee_mode-aware entry point (WS-5 absorb-vs-pass, all rails) ──────
+ *
+ * `events.fee_mode` (live column, default 'pass'):
+ *   pass   → buyer pays the buyer-side fee on top of the ticket price
+ *            (identical numbers to computeFees).
+ *   absorb → the organizer eats the buyer-side fee: the buyer is charged
+ *            exactly the subtotal, DVNT still keeps the FULL platform fee
+ *            (5% + $2/ticket) as application_fee, so the organizer's
+ *            transfer drops to subtotal − application_fee. Falls back to
+ *            'pass' when the platform fee would not fit inside the
+ *            subtotal (organizer transfer would go negative) — mirrors
+ *            the original guest-checkout behavior, which this replaces.
+ *
+ * Invariant preserved in BOTH modes:
+ *   customer_charge_amount == organizer_transfer_amount + application_fee_amount
+ *
+ * The buyer_* fields in the returned breakdown are the EFFECTIVE values
+ * (zeroed in absorb mode) so every rail can write order fee columns
+ * directly from this one result instead of re-branching.
+ */
+
+export type FeeMode = "absorb" | "pass";
+
+export interface ModedFeeBreakdown extends FeeBreakdown {
+  /** Effective mode after the absorb→pass fallback. */
+  fee_mode: FeeMode;
+  /** What the event asked for (before the fallback). */
+  requested_fee_mode: FeeMode;
+}
+
+export function computeFeesWithMode(
+  subtotal: number,
+  qty: number,
+  feeMode?: string | null,
+): ModedFeeBreakdown {
+  const base = computeFees(subtotal, qty);
+  const requested: FeeMode = feeMode === "absorb" ? "absorb" : "pass";
+  // Absorb only works when DVNT's full fee fits inside the subtotal;
+  // otherwise the organizer transfer would go negative → fall back.
+  const absorb =
+    requested === "absorb" && base.application_fee_amount <= subtotal;
+
+  if (!absorb) {
+    return { ...base, fee_mode: "pass", requested_fee_mode: requested };
+  }
+
+  const customer_charge_amount = subtotal;
+  const organizer_transfer_amount = subtotal - base.application_fee_amount;
+
+  // Invariant: what the customer pays equals organizer transfer + DVNT fee
+  const delta =
+    customer_charge_amount -
+    (organizer_transfer_amount + base.application_fee_amount);
+  if (delta !== 0) {
+    throw new Error(
+      `[FeeCalc] INVARIANT VIOLATED (absorb): customer_charge(${customer_charge_amount}) != ` +
+        `transfer(${organizer_transfer_amount}) + app_fee(${base.application_fee_amount}), delta=${delta}`,
+    );
+  }
+
+  return {
+    ...base,
+    // Buyer side is absorbed → effective buyer fee is zero.
+    buyer_pct_fee: 0,
+    buyer_per_ticket_fee: 0,
+    buyer_fee: 0,
+    customer_charge_amount,
+    organizer_transfer_amount,
+    fee_mode: "absorb",
+    requested_fee_mode: requested,
+  };
+}
+
 /** Format cents as a human-readable dollar string, e.g. 399 → "$3.99" */
 export function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;

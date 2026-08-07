@@ -270,7 +270,9 @@ export const hostPayoutsApi = {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (error) throw error;
-      return data?.payout || null;
+      // The detail action returns the payout fields at the top level,
+      // not under a `payout` key.
+      return data || null;
     } catch (err: any) {
       console.error("[Payments] getPayoutDetail error:", err);
       return null;

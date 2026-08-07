@@ -781,6 +781,23 @@ export function EventEditScreen() {
           ) : null}
         </Section>
 
+        {/* Add-on catalog (WS-3) — coat check, merch (size × color), drinks,
+            skip-line… Sold with or without a ticket; per-tier gating uses the
+            event's own tiers. */}
+        <Section title="Add-ons">
+          <p className="text-xs text-white/45 -mt-1">
+            Upsells sold alongside tickets. Already-sold add-ons can&apos;t be
+            deleted — retire them by setting status to Ended.
+          </p>
+          <AddonsEditor
+            addons={s.addons}
+            onChange={s.setAddons}
+            tierOptions={s.ticketTiers
+              .filter((tier) => tier.id)
+              .map((tier) => ({ id: tier.id!, name: tier.name }))}
+          />
+        </Section>
+
         {/* More details */}
         <Section title="More Details">
           <FormField label="YouTube Video URL">

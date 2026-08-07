@@ -31,8 +31,19 @@ export const cartApi = {
     return parseDTO(CartHoldResponseDTO, data);
   },
 
-  async checkout(cartId: string): Promise<CartCheckoutResponse> {
-    const { data, error } = await invokeEdge("cart-checkout", { cartId });
+  async checkout(
+    cartId: string,
+    /**
+     * Promoter attribution code (WS-4) — pending ?ref= from a tracked
+     * share link. Passed by the checkout hook (which knows the cart's
+     * eventId); never affects pricing.
+     */
+    promoterCode?: string | null,
+  ): Promise<CartCheckoutResponse> {
+    const { data, error } = await invokeEdge("cart-checkout", {
+      cartId,
+      ...(promoterCode?.trim() ? { promoterCode: promoterCode.trim() } : {}),
+    });
     if (error) throw new Error(error.message);
     return parseDTO(CartCheckoutResponseDTO, data);
   },

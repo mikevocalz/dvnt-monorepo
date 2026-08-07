@@ -10,6 +10,45 @@ import {
   getCurrentUserAuthId,
 } from "./auth-helper";
 import { invokeEdge } from "./invoke-edge";
+import type { TicketTypeCategory } from "./ticket-types";
+import type { TierType, TierVisibility } from "../tickets/pricing";
+import type { DraftAddon } from "../../features/events/create/addon-form";
+
+/**
+ * A duplicated event's ticket-tier row, shaped for create-event-store's
+ * `setTicketTiers` public setter. Server ids and sold state are stripped —
+ * every row is a NEW unsaved draft (`id` is a local editor key). Prices,
+ * capacity, tier_type, visibility, and the early-bird schedule/allocation
+ * bands are preserved.
+ */
+export interface DuplicateTierDraft {
+  id: string;
+  name: string;
+  category: TicketTypeCategory;
+  priceCents: number;
+  quantity: number;
+  maxPerUser: number;
+  description: string;
+  saleStart: string;
+  saleEnd: string;
+  tierType?: TierType;
+  visibility?: TierVisibility;
+  unlockCode?: string;
+  priceSchedule?: Array<{ effectiveAt: string; priceDollars: string }>;
+  subAllocations?: Array<{ quantity: string; priceDollars: string }>;
+}
+
+/** Tier + add-on clone for a duplicated event (WS-9). */
+export interface DuplicateDraft {
+  ticketTiers: DuplicateTierDraft[];
+  addons: DraftAddon[];
+}
+
+/** Integer cents → the dollar-string the create-event editors expect ("" when null). */
+function centsToDollarsInput(cents: number | null | undefined): string {
+  if (cents == null || !Number.isFinite(cents)) return "";
+  return (cents / 100).toString();
+}
 
 /** Safely parse a JSONB array column (handles string, array, or null) */
 function parseJsonbArray(value: unknown): any[] {
@@ -1277,6 +1316,94 @@ export const eventsApi = {
       );
     }
     return { status: data.status, notified: data.notified || 0 };
+  },
+
+  /**
+   * Build a duplicate draft for an event (WS-9): fetch the source event's
+   * ticket tiers (ticket_types) and add-ons (ticket_addons) and clone them
+   * into create-event-store draft rows. Server ids, quantity_sold, and sold
+   * state are STRIPPED — every row is a fresh unsaved draft. Names, prices,
+   * capacity, max-per-user, sale windows, tier_type, visibility, unlock code,
+   * early-bird schedule/allocation bands, and the full add-on config
+   * (binding, redeemable, variant matrix) are preserved. Add-on per-tier
+   * eligibility (requires_tier_id) is re-pointed from the source ticket_type
+   * uuid to the NEW local tier id, so publish re-links it to the created row.
+   *
+   * The caller prefills the scalar fields via the store's public setters and
+   * applies `ticketTiers` / `addons` through `setTicketTiers` / `setAddons`.
+   * This helper never touches the store — pure data.
+   */
+  async buildDuplicateDraft(eventId: string): Promise<DuplicateDraft> {
+    const [{ ticketTypesApi }, { addonsApi }] = await Promise.all([
+      import("./ticket-types"),
+      import("./addons"),
+    ]);
+    const [sourceTiers, sourceAddons] = await Promise.all([
+      ticketTypesApi.getByEvent(eventId).catch(() => []),
+      addonsApi.getByEvent(eventId).catch(() => []),
+    ]);
+
+    const seed = Date.now();
+    // Source ticket_type uuid → new local tier id, so add-on per-tier
+    // eligibility re-points at the clone (never the original's row).
+    const tierIdMap = new Map<string, string>();
+
+    const ticketTiers: DuplicateTierDraft[] = sourceTiers
+      .filter((t) => t.is_active !== false)
+      .map((t, i) => {
+        const localId = `dup_tier_${seed}_${i}`;
+        tierIdMap.set(String(t.id), localId);
+        return {
+          id: localId, // NEW unsaved id — server id stripped
+          name: t.name || "General Admission",
+          category: t.category,
+          priceCents: t.price_cents ?? 0,
+          // capacity kept; quantity_sold intentionally dropped (fresh row)
+          quantity: t.quantity_total ?? 0,
+          maxPerUser: t.max_per_user ?? 4,
+          description: t.description ?? "",
+          saleStart: t.sale_start ?? "",
+          saleEnd: t.sale_end ?? "",
+          tierType: t.tier_type ?? undefined,
+          visibility: t.tier_visibility ?? undefined,
+          unlockCode: t.unlock_code ?? undefined,
+          priceSchedule: (t.price_schedule ?? []).map((e) => ({
+            effectiveAt: e.effective_at,
+            priceDollars: centsToDollarsInput(e.price_cents),
+          })),
+          subAllocations: (t.sub_allocations ?? []).map((a) => ({
+            quantity: String(a.quantity),
+            priceDollars: centsToDollarsInput(a.price_cents),
+          })),
+        };
+      });
+
+    const addons: DraftAddon[] = sourceAddons.map((a, i) => ({
+      id: `dup_addon_${seed}_${i}`, // NEW unsaved id — dbId stripped
+      name: a.name,
+      description: a.description ?? "",
+      addonType: a.addon_type,
+      bindingMode: a.binding_mode,
+      priceDollars: centsToDollarsInput(a.price_cents),
+      minPriceDollars: centsToDollarsInput(a.min_price_cents),
+      // capacity kept; quantity_sold / quantity_held dropped (fresh row)
+      quantity: a.quantity_total != null ? String(a.quantity_total) : "",
+      requiresTierId: a.requires_tier_id
+        ? (tierIdMap.get(String(a.requires_tier_id)) ?? null)
+        : null,
+      isRedeemable: a.is_redeemable,
+      // Terminal/sold states reset so the clone is buyable; other config kept.
+      status:
+        a.status === "sold_out" || a.status === "ended" ? "on_sale" : a.status,
+      variants: (a.ticket_addon_variants ?? []).map((v) => ({
+        size: v.option_values?.size ?? "",
+        color: v.option_values?.color ?? "",
+        priceDollars: centsToDollarsInput(v.price_cents),
+        quantity: v.quantity_total != null ? String(v.quantity_total) : "",
+      })),
+    }));
+
+    return { ticketTiers, addons };
   },
 
   /**

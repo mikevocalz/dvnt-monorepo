@@ -68,6 +68,16 @@ interface EventDetailUiState {
   translated: boolean;
   setTranslated: (v: boolean) => void;
 
+  // WS-9 host destructive/lifecycle actions — which confirm dialog is open
+  // (null = none). `delete_blocked` is the paid-tickets redirect that routes
+  // the host to Cancel. Business state, so it lives here (never useState).
+  hostAction: null | "cancel" | "postpone" | "resume" | "delete" | "delete_blocked";
+  setHostAction: (
+    a: null | "cancel" | "postpone" | "resume" | "delete" | "delete_blocked",
+  ) => void;
+  hostActionBusy: boolean;
+  setHostActionBusy: (v: boolean) => void;
+
   reset: () => void;
 }
 
@@ -120,6 +130,11 @@ export const useEventDetailUiStore = create<EventDetailUiState>((set) => ({
   translated: false,
   setTranslated: (translated) => set({ translated }),
 
+  hostAction: null,
+  setHostAction: (hostAction) => set({ hostAction }),
+  hostActionBusy: false,
+  setHostActionBusy: (hostActionBusy) => set({ hostActionBusy }),
+
   reset: () =>
     set({
       menuOpen: false,
@@ -141,5 +156,7 @@ export const useEventDetailUiStore = create<EventDetailUiState>((set) => ({
       reviewRating: 5,
       reviewText: "",
       translated: false,
+      hostAction: null,
+      hostActionBusy: false,
     }),
 }));

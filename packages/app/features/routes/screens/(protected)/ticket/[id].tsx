@@ -44,6 +44,8 @@ import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
 import { addToWallet } from "@dvnt/app/src/ticket/helpers";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
+import { addonsApi, type OrderAddonRecord } from "@dvnt/app/lib/api/addons";
+import QRCodeSvg from "react-native-qrcode-svg";
 import { WeatherStrip } from "@dvnt/app/components/events/weather-strip";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 
@@ -142,6 +144,15 @@ function ViewTicketScreenContent() {
   }, [dbTicket?.event_id, dbTicket?.purchase_amount_cents, dbTicket?.status]);
 
   // Upgrade flow lives in app/(protected)/ticket/upgrade/[id].tsx
+
+  // ── Owned add-ons (WS-3) — order_addons via RLS owner read. Holder-side
+  //    display: fulfillment/redeemed state + door QR for redeemables.
+  const { data: myAddons = [] } = useQuery<OrderAddonRecord[]>({
+    queryKey: ["my-order-addons", eventId],
+    enabled: !!eventId,
+    staleTime: 30 * 1000,
+    queryFn: () => addonsApi.getMyAddonsForEvent(eventId),
+  });
 
   // ── Pending-outgoing-transfer lookup for Cancel CTA ──
   const queryClient = useQueryClient();
@@ -586,6 +597,96 @@ function ViewTicketScreenContent() {
             </Pressable>
           )}
 
+          {/* ── 2.8 YOUR ADD-ONS (WS-3, holder-side) ── */}
+          {myAddons.length > 0 && (
+            <View style={ownedAddonStyles.section}>
+              <Text style={ownedAddonStyles.eyebrow}>YOUR ADD-ONS</Text>
+              {myAddons.map((addon) => {
+                const chip =
+                  OWNED_ADDON_CHIP[addon.status] ?? OWNED_ADDON_CHIP.unfulfilled;
+                const name = addon.ticket_addons?.name || "Add-on";
+                const variantName = addon.ticket_addon_variants?.name || null;
+                const showQr =
+                  !!addon.qr_token &&
+                  !!addon.ticket_addons?.is_redeemable &&
+                  addon.status === "unfulfilled";
+                return (
+                  <View key={addon.id} style={ownedAddonStyles.card}>
+                    <View style={ownedAddonStyles.cardRow}>
+                      <View style={ownedAddonStyles.iconWrap}>
+                        <Sparkles size={15} color="rgb(255, 109, 193)" />
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={ownedAddonStyles.name} numberOfLines={1}>
+                          {name}
+                          {variantName ? (
+                            <Text style={ownedAddonStyles.variant}>
+                              {" "}
+                              · {variantName}
+                            </Text>
+                          ) : null}
+                        </Text>
+                        <Text style={ownedAddonStyles.sub} numberOfLines={1}>
+                          {addon.status === "redeemed"
+                            ? "Redeemed"
+                            : addon.ticket_addons?.is_redeemable
+                              ? "Show its code at the door"
+                              : "Pick up / fulfillment at the event"}
+                        </Text>
+                      </View>
+                      {addon.quantity > 1 ? (
+                        <Text style={ownedAddonStyles.qty}>
+                          ×{addon.quantity}
+                        </Text>
+                      ) : null}
+                      <View
+                        style={[
+                          ownedAddonStyles.chip,
+                          { backgroundColor: chip.bg },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            ownedAddonStyles.chipText,
+                            { color: chip.text },
+                          ]}
+                        >
+                          {chip.label}
+                        </Text>
+                      </View>
+                    </View>
+                    {showQr ? (
+                      <View style={ownedAddonStyles.qrRow}>
+                        <View style={ownedAddonStyles.qrBox}>
+                          <QRCodeSvg
+                            value={addon.qr_token as string}
+                            size={84}
+                            color="#FFFFFF"
+                            backgroundColor="transparent"
+                          />
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                          <Text style={ownedAddonStyles.qrEyebrow}>
+                            SCAN AT DOOR
+                          </Text>
+                          <Text
+                            style={ownedAddonStyles.qrToken}
+                            numberOfLines={1}
+                            selectable
+                          >
+                            {(addon.qr_token ?? "")
+                              .slice(0, 16)
+                              .toUpperCase()}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
           {/* ── 3. ACCESS DETAILS ── */}
           <TicketAccessDetails ticket={ticket} />
 
@@ -743,6 +844,109 @@ function ViewTicketScreenContent() {
     </View>
   );
 }
+
+// ── Owned add-on display (WS-3) ──
+const OWNED_ADDON_CHIP: Record<
+  OrderAddonRecord["status"],
+  { bg: string; text: string; label: string }
+> = {
+  unfulfilled: { bg: "rgba(63,220,255,0.14)", text: "#3FDCFF", label: "Ready" },
+  fulfilled: { bg: "rgba(34,197,94,0.14)", text: "#22C55E", label: "Fulfilled" },
+  redeemed: { bg: "rgba(138,64,207,0.16)", text: "#C084FC", label: "Redeemed" },
+  refunded: { bg: "rgba(239,68,68,0.14)", text: "#EF4444", label: "Refunded" },
+};
+
+const ownedAddonStyles = StyleSheet.create({
+  section: {
+    marginBottom: 16,
+    gap: 10,
+  },
+  eyebrow: {
+    marginLeft: 4,
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 2,
+  },
+  card: {
+    borderRadius: 20,
+    borderCurve: "continuous",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    padding: 14,
+    gap: 12,
+  },
+  cardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  iconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 12,
+    borderCurve: "continuous",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  name: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  variant: {
+    color: "rgba(255,255,255,0.55)",
+    fontWeight: "600",
+  },
+  sub: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  qty: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 14,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+  },
+  chip: {
+    borderRadius: 8,
+    borderCurve: "continuous",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  chipText: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  qrRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 12,
+    borderCurve: "continuous",
+    backgroundColor: "#0a0a0a",
+    padding: 12,
+  },
+  qrBox: {
+    padding: 4,
+  },
+  qrEyebrow: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.5,
+  },
+  qrToken: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 10,
+    letterSpacing: 0.5,
+    fontVariant: ["tabular-nums"],
+  },
+});
 
 const styles = StyleSheet.create({
   screen: {

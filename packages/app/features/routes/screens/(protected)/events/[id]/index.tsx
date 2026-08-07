@@ -55,6 +55,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useEventViewStore } from "@dvnt/app/lib/stores/event-store";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
 import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
@@ -79,7 +80,6 @@ import {
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 import { ticketKeys } from "@dvnt/app/lib/hooks/use-tickets";
 import * as WebBrowser from "expo-web-browser";
-import { deleteEvent as deleteEventPrivileged } from "@dvnt/app/lib/api/privileged";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
 import { useCreateEventReview } from "@dvnt/app/lib/hooks/use-event-reviews";
 import { EventRatingModal } from "@dvnt/app/components/event-rating-modal";
@@ -317,7 +317,7 @@ function EventDetailScreenContent() {
   // DEV-only loop detection
   useRenderLoopDetector("EventDetail");
 
-  const rawParams = useLocalSearchParams<{ id: string }>();
+  const rawParams = useLocalSearchParams<{ id: string; ref?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -327,6 +327,19 @@ function EventDetailScreenContent() {
     [rawParams.id],
   );
   const eventId = normalizedParams.id || "";
+
+  // Promoter attribution (WS-4): capture ?ref=CODE from a tracked share
+  // deep link into the MMKV-persisted store so the app-switch to Stripe
+  // can't lose it. Checkout kickoffs forward it as promoter_code;
+  // pricing is never affected.
+  const setPromoterRef = usePromoterRefStore((s) => s.setRef);
+  useEffect(() => {
+    const rawRef = Array.isArray(rawParams.ref)
+      ? rawParams.ref[0]
+      : rawParams.ref;
+    if (eventId && rawRef) setPromoterRef(eventId, String(rawRef));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, rawParams.ref, setPromoterRef]);
 
   // Live updates for this event: a host editing the title/date/price on
   // another device, or another buyer claiming the last tier, reflects
@@ -1240,7 +1253,7 @@ function EventDetailScreenContent() {
           style: "destructive",
           onPress: async () => {
             try {
-              await deleteEventPrivileged(parseInt(eventId));
+              await eventsApi.deleteEvent(eventId);
               queryClient.setQueriesData<any[]>(
                 { queryKey: eventKeys.all },
                 (old) => {

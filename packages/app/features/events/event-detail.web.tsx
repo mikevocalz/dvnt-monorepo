@@ -39,7 +39,17 @@ import {
   Minus,
   Plus,
   Lock,
+  Copy,
+  CalendarX2,
+  RotateCcw,
+  Ban,
+  Trash2,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { eventsApi } from "@dvnt/app/lib/api/events";
+import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
+import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
+import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
 import { useEvents, useEvent, useToggleEventLike, useRsvpEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useEventRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useEventDominantColor } from "@dvnt/app/lib/color/useEventDominantColor";
@@ -84,6 +94,7 @@ import { GuestRsvpSheet } from "./guest-rsvp-sheet.web";
 import { useGuestRsvpStore } from "@dvnt/app/lib/stores/guest-rsvp-store";
 import { GuestCheckoutSheet } from "./guest-checkout-sheet.web";
 import { useGuestCheckoutStore } from "@dvnt/app/lib/stores/guest-checkout-store";
+import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
 import {
   ticketTypesApi,
   type TicketTypeRecord,
@@ -92,7 +103,15 @@ import {
   filterBuyerVisibleTiers,
   tierIsHiddenFromBuyers,
   tierIsLockedForBuyer,
+  effectiveAddonUnitPriceCents,
 } from "@dvnt/app/lib/tickets/pricing";
+import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
+import {
+  AddonUpsellStrip,
+  addonSelectionsTotalCents,
+} from "./addon-upsell.web";
+import { useAddonUpsellStore } from "@dvnt/app/lib/stores/addon-upsell-store";
+import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
 import "react-lite-youtube-embed/dist/LiteYouTubeEmbed.css";
 import { matchBySlug } from "@dvnt/app/lib/slug";
@@ -276,11 +295,34 @@ export function EventDetailScreen() {
   const unlockedTierIds = useEventDetailUiStore((s) => s.unlockedTierIds);
   const addUnlockedTierIds = useEventDetailUiStore((s) => s.addUnlockedTierIds);
   const resetUi = useEventDetailUiStore((s) => s.reset);
+  // WS-9 host lifecycle/destructive action dialogs (Zustand, no useState).
+  const hostAction = useEventDetailUiStore((s) => s.hostAction);
+  const setHostAction = useEventDetailUiStore((s) => s.setHostAction);
+  const hostActionBusy = useEventDetailUiStore((s) => s.hostActionBusy);
+  const setHostActionBusy = useEventDetailUiStore((s) => s.setHostActionBusy);
+  const queryClient = useQueryClient();
 
   // Reset transient flags when leaving the screen.
   useEffect(() => () => resetUi(), [resetUi]);
 
   const eventId = resolvedId ? String(resolvedId) : "";
+
+  // Promoter attribution (WS-4): capture ?ref=CODE from tracked share
+  // links (?promo= is taken by promo codes) into the MMKV/localStorage-
+  // persisted store so the Stripe redirect can't lose it. The checkout
+  // API layer forwards it as promoter_code; pricing is never affected.
+  // Covers /feed/events/[id] AND /public/events/[id] (both render this
+  // screen).
+  const setPromoterRef = usePromoterRefStore((s) => s.setRef);
+  useEffect(() => {
+    if (!eventId || typeof window === "undefined") return;
+    try {
+      const ref = new URLSearchParams(window.location.search).get("ref");
+      if (ref) setPromoterRef(eventId, ref);
+    } catch {
+      /* malformed URL — ignore */
+    }
+  }, [eventId, setPromoterRef]);
 
   // Phase 2 — live propagation: subscribe to this event's row + tier/ticket
   // changes so a host edit (time/venue/price/cancel) reflects here without a
@@ -330,6 +372,17 @@ export function EventDetailScreen() {
   );
   const { mutate: initiateUpgrade, isPending: isUpgradePending } =
     useInitiateUpgrade(eventId);
+
+  // ── 1b. ADD-ONS — catalog for the upsell strip (WS-3). Public read; the
+  //    hold RPC reprices + tier-gates every line server-side, so this list is
+  //    display + preview only.
+  const { data: eventAddons = [] } = useQuery<AddonRecord[]>({
+    queryKey: ["event-addons", eventId],
+    enabled: !!eventId,
+    staleTime: 60 * 1000,
+    queryFn: () => addonsApi.getByEvent(eventId),
+  });
+  const resetAddonSelections = useAddonUpsellStore((s) => s.reset);
 
   // ── 2. WAITLIST — status + join/leave for the selected tier ──────────
   const { data: waitlistStatus } = useEventWaitlistStatus(
@@ -553,6 +606,178 @@ export function EventDetailScreen() {
         ? `https://maps.google.com/?q=${encodeURIComponent(e.location)}`
         : null;
 
+  // ── WS-9 host lifecycle/destructive actions (web parity with the native
+  //    action sheet). Owner-gated (isHost) + status-aware. Cancel loops the
+  //    resumable event-cancel fn via eventsApi.cancelEventWithRefunds;
+  //    Postpone/Resume are reversible; Delete is blocked server-side once
+  //    tickets exist and routes the host to Cancel. ──────────────────────
+  const status: string | undefined = e.status;
+  const isCancelledEvent = status === "cancelled";
+  const isPostponedEvent = status === "postponed";
+
+  // Duplicate → clone scalars + tiers + add-ons into the create-event draft
+  // as fresh unsaved rows, then open the create flow (WS-9, item 2).
+  const handleDuplicate = async () => {
+    setMenuOpen(false);
+    try {
+      const draft = await eventsApi.buildDuplicateDraft(eventId);
+      const store = useCreateEventStore.getState();
+      store.resetDraft();
+      store.setTitle(e.title || "");
+      store.setDescription(e.description || "");
+      store.setLocation(e.location || "");
+      if (e.locationName || e.location) {
+        store.setLocationData({
+          name: e.locationName || e.location || "",
+          latitude: e.locationLat,
+          longitude: e.locationLng,
+          address: e.locationAddress,
+        });
+      }
+      store.setIsOnline(e.locationType === "virtual" || !!e.isOnline);
+      const galleryUrls: string[] = (Array.isArray(e.images) ? e.images : [])
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((m: any) => m?.url)
+        .filter((u: unknown): u is string => typeof u === "string" && u.length > 0);
+      store.setEventImages(galleryUrls);
+      if (e.flyerVideoUrl) {
+        store.setFlyerImage(e.flyerVideoUrl);
+        store.setFlyerMediaType("video");
+        store.setFlyerFallbackImage(e.flyerImageUrl || e.image || null);
+      } else if (e.flyerImageUrl || e.image) {
+        store.setFlyerImage(e.flyerImageUrl || e.image);
+        store.setFlyerMediaType("image");
+      }
+      // Only carry a future date — a duplicated past event must not default
+      // to an unbookable date.
+      const srcDate = e.date || e.fullDate ? new Date(e.date || e.fullDate) : null;
+      if (srcDate && !Number.isNaN(srcDate.getTime()) && srcDate.getTime() > Date.now()) {
+        store.setEventDate(srcDate.toISOString());
+        if (e.endDate) store.setEndDate(e.endDate);
+      }
+      if (e.maxAttendees) store.setMaxAttendees(String(e.maxAttendees));
+      if (e.visibility) store.setVisibility(e.visibility);
+      if (e.ageRestriction) store.setAgeRestriction(e.ageRestriction);
+      store.setIsNsfw(!!e.nsfw);
+      store.setTicketingEnabled(
+        !!e.ticketingEnabled || draft.ticketTiers.length > 0,
+      );
+      store.setDressCode(e.dressCode || "");
+      store.setDoorPolicy(e.doorPolicy || "");
+      store.setLineup(Array.isArray(e.lineup) ? e.lineup : []);
+      store.setPerks(Array.isArray(e.perks) ? e.perks : []);
+      // NEW (WS-9): tiers + add-ons cloned as fresh unsaved draft rows.
+      store.setTicketTiers(draft.ticketTiers);
+      store.setAddons(draft.addons);
+      store.setCurrentStep(0);
+      router.push("/feed/events/create");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err || "");
+      showToast("error", "Couldn't duplicate", msg || "Try again in a moment.");
+    }
+  };
+
+  const handleCancel = async () => {
+    if (hostActionBusy) return;
+    setHostActionBusy(true);
+    try {
+      const result = await eventsApi.cancelEventWithRefunds(eventId);
+      propagateEntity(queryClient, "event", eventId, {
+        status: "cancelled",
+        cancelled_at: new Date().toISOString(),
+      });
+      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      const refundLine =
+        result.refundsIssued > 0
+          ? `${result.refundsIssued} refund${result.refundsIssued === 1 ? "" : "s"} issued.`
+          : "";
+      const failedLine =
+        result.refundsFailed > 0
+          ? ` ${result.refundsFailed} refund${result.refundsFailed === 1 ? "" : "s"} couldn't be processed — re-run Cancel or check the host dashboard.`
+          : "";
+      setHostAction(null);
+      showToast(
+        result.refundsFailed > 0 ? "warning" : "success",
+        "Event cancelled",
+        `${refundLine}${failedLine}`.trim() || "Done.",
+      );
+      router.back();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err || "");
+      showToast("error", "Couldn't cancel", msg || "Try again in a moment.");
+    } finally {
+      setHostActionBusy(false);
+    }
+  };
+
+  const handlePostpone = async () => {
+    if (hostActionBusy) return;
+    setHostActionBusy(true);
+    try {
+      await eventsApi.postponeEvent(eventId);
+      propagateEntity(queryClient, "event", eventId, { status: "postponed" });
+      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      setHostAction(null);
+      showToast(
+        "success",
+        "Event postponed",
+        "Attendees have been notified. Tickets remain valid.",
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err || "");
+      showToast("error", "Couldn't postpone", msg || "Try again in a moment.");
+    } finally {
+      setHostActionBusy(false);
+    }
+  };
+
+  const handleResume = async () => {
+    if (hostActionBusy) return;
+    setHostActionBusy(true);
+    try {
+      await eventsApi.resumeEvent(eventId);
+      propagateEntity(queryClient, "event", eventId, { status: "active" });
+      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      setHostAction(null);
+      showToast("success", "Event resumed", "You're back on.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err || "");
+      showToast("error", "Couldn't resume", msg || "Try again in a moment.");
+    } finally {
+      setHostActionBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (hostActionBusy) return;
+    setHostActionBusy(true);
+    try {
+      await eventsApi.deleteEvent(eventId);
+      queryClient.setQueriesData<unknown>(
+        { queryKey: eventKeys.all },
+        (old: unknown) =>
+          Array.isArray(old)
+            ? old.filter((ev: any) => String(ev?.id) !== String(eventId))
+            : old,
+      );
+      queryClient.removeQueries({ queryKey: eventKeys.detail(eventId) });
+      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      setHostAction(null);
+      showToast("success", "Event deleted", "");
+      router.back();
+    } catch (err: unknown) {
+      // Server/client guard: paid tickets exist → route to the safe path.
+      const msg = err instanceof Error ? err.message : String(err || "");
+      if (/ticket/i.test(msg)) {
+        setHostAction("delete_blocked");
+        return;
+      }
+      showToast("error", "Couldn't delete", msg || "Try again in a moment.");
+    } finally {
+      setHostActionBusy(false);
+    }
+  };
+
   return (
     <div className="min-h-[100dvh] bg-[#02030A] text-white">
       <div className="mx-auto max-w-[680px] pb-28">
@@ -634,6 +859,59 @@ export function EventDetailScreen() {
                       );
                     }}
                   />
+                ) : null}
+                {/* WS-9 host lifecycle/destructive actions — owner-gated,
+                    status-aware. Confirms route through Zustand dialog state. */}
+                {isHost ? (
+                  <>
+                    <div className="my-1 h-px bg-white/10" />
+                    <MenuItem
+                      Icon={Copy}
+                      label="Duplicate event"
+                      onClick={handleDuplicate}
+                    />
+                    {isPostponedEvent ? (
+                      <MenuItem
+                        Icon={RotateCcw}
+                        label="Resume event"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setHostAction("resume");
+                        }}
+                      />
+                    ) : !isCancelledEvent ? (
+                      <MenuItem
+                        Icon={CalendarX2}
+                        label="Postpone event…"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setHostAction("postpone");
+                        }}
+                      />
+                    ) : null}
+                    {!isCancelledEvent ? (
+                      <MenuItem
+                        Icon={Ban}
+                        label="Cancel event…"
+                        destructive
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setHostAction("cancel");
+                        }}
+                      />
+                    ) : null}
+                    {!isCancelledEvent ? (
+                      <MenuItem
+                        Icon={Trash2}
+                        label="Delete event…"
+                        destructive
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setHostAction("delete");
+                        }}
+                      />
+                    ) : null}
+                  </>
                 ) : null}
                 <MenuItem Icon={Flag} label="Report" onClick={() => setMenuOpen(false)} />
               </div>
@@ -1335,6 +1613,7 @@ export function EventDetailScreen() {
         tier={(liveTicketTypes as TicketTypeRecord[]).find(
           (t) => String(t.id) === String(selectedTierId),
         )}
+        addons={eventAddons}
         qty={ticketQty}
         setQty={setTicketQty}
         promoCode={promoCode}
@@ -1352,6 +1631,62 @@ export function EventDetailScreen() {
             );
             return;
           }
+
+          // Add-ons selected → the MIXED-CART rail (cart store →
+          // cart-create-hold → cart_create_hold RPC holds tier + add-on
+          // inventory atomically; cart-checkout prices server-side). The
+          // single-tier fast path below stays untouched when no add-ons.
+          const upsell = useAddonUpsellStore.getState();
+          const selections =
+            upsell.eventId === eventId ? upsell.selectionList() : [];
+          if (selections.length > 0) {
+            const cartStore = useCartStore.getState();
+            cartStore.startCart(eventId);
+            cartStore.addLineItem(eventId, {
+              category: "admission",
+              tierId: String(tier.id),
+              quantity: ticketQty,
+              unitPriceCents: tier.price_cents,
+              metadata: {
+                tierName: tier.name,
+                eventTitle: e.title ?? "Event",
+              },
+            });
+            for (const sel of selections) {
+              const addon = eventAddons.find((a) => a.id === sel.addonId);
+              if (!addon) continue;
+              const variant = sel.variantId
+                ? addon.ticket_addon_variants?.find(
+                    (v) => v.id === sel.variantId,
+                  )
+                : null;
+              cartStore.addLineItem(eventId, {
+                category: "addon",
+                // DTO back-compat: addon id rides tierId on addon lines.
+                tierId: sel.addonId,
+                addonId: sel.addonId,
+                variantId: sel.variantId ?? undefined,
+                quantity: sel.quantity,
+                unitPriceCents: effectiveAddonUnitPriceCents(
+                  addon.price_cents,
+                  variant?.price_cents,
+                ),
+                metadata: {
+                  name: variant
+                    ? `${addon.name} — ${variant.name}`
+                    : addon.name,
+                  eventTitle: e.title ?? "Event",
+                },
+              });
+            }
+            resetAddonSelections();
+            setCheckoutOpen(false);
+            // Promo codes re-apply on the review screen (cart-checkout
+            // validates them server-side there).
+            router.push("/feed/checkout/review");
+            return;
+          }
+
           const result = await checkout({
             eventId,
             ticketTypeId: String(tier.id),
@@ -1502,6 +1837,167 @@ export function EventDetailScreen() {
         />
       </Dialog>
 
+      {/* WS-9 — Cancel (destructive, auto-refund) confirm. */}
+      <Dialog
+        open={hostAction === "cancel"}
+        onClose={() => {
+          if (!hostActionBusy) setHostAction(null);
+        }}
+        title="Cancel event?"
+        footer={
+          <>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction(null)}
+              className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Keep event
+            </button>
+            <button
+              disabled={hostActionBusy}
+              onClick={handleCancel}
+              className="flex-1 rounded-xl bg-[#FC253A] py-3 font-semibold text-white disabled:opacity-50"
+            >
+              {hostActionBusy ? "Refunding…" : "Cancel & Refund"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-5 text-white/60">
+          Every paid order is automatically refunded (the whole payment,
+          including fees) and every attendee is notified. Guest buyers get an
+          email. This can&apos;t be undone.
+        </p>
+      </Dialog>
+
+      {/* WS-9 — Postpone (reversible, no refunds) confirm. */}
+      <Dialog
+        open={hostAction === "postpone"}
+        onClose={() => {
+          if (!hostActionBusy) setHostAction(null);
+        }}
+        title="Postpone event?"
+        footer={
+          <>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction(null)}
+              className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Not now
+            </button>
+            <button
+              disabled={hostActionBusy}
+              onClick={handlePostpone}
+              className="flex-1 rounded-xl bg-[#F5C518] py-3 font-semibold text-black disabled:opacity-50"
+            >
+              {hostActionBusy ? "Working…" : "Postpone"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-5 text-white/60">
+          Attendees are notified that the event is postponed. Tickets remain
+          valid — no refunds are issued. You can resume any time.
+        </p>
+      </Dialog>
+
+      {/* WS-9 — Resume a postponed event. */}
+      <Dialog
+        open={hostAction === "resume"}
+        onClose={() => {
+          if (!hostActionBusy) setHostAction(null);
+        }}
+        title="Resume event?"
+        footer={
+          <>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction(null)}
+              className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Not now
+            </button>
+            <button
+              disabled={hostActionBusy}
+              onClick={handleResume}
+              className="flex-1 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] py-3 font-semibold text-white disabled:opacity-50"
+            >
+              {hostActionBusy ? "Working…" : "Resume"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-5 text-white/60">
+          The event goes back to active and attendees are notified their tickets
+          are valid as issued.
+        </p>
+      </Dialog>
+
+      {/* WS-9 — Delete (blocked server-side once tickets exist). */}
+      <Dialog
+        open={hostAction === "delete"}
+        onClose={() => {
+          if (!hostActionBusy) setHostAction(null);
+        }}
+        title="Delete event?"
+        footer={
+          <>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction(null)}
+              className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Keep event
+            </button>
+            <button
+              disabled={hostActionBusy}
+              onClick={handleDelete}
+              className="flex-1 rounded-xl bg-[#FC253A] py-3 font-semibold text-white disabled:opacity-50"
+            >
+              {hostActionBusy ? "Deleting…" : "Delete"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-5 text-white/60">
+          This permanently removes the event. Events with paid tickets can&apos;t
+          be deleted — cancel instead, which refunds every attendee.
+        </p>
+      </Dialog>
+
+      {/* WS-9 — Delete blocked (paid tickets) → route the host to Cancel. */}
+      <Dialog
+        open={hostAction === "delete_blocked"}
+        onClose={() => {
+          if (!hostActionBusy) setHostAction(null);
+        }}
+        title="Can't delete — tickets sold"
+        footer={
+          <>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction(null)}
+              className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Keep event
+            </button>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction("cancel")}
+              className="flex-1 rounded-xl bg-[#FC253A] py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Cancel &amp; Refund…
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-5 text-white/60">
+          This event has active tickets. Cancel the event instead — every paid
+          order is refunded and attendees are notified.
+        </p>
+      </Dialog>
+
       <Lightbox />
       <GuestRsvpSheet />
       <GuestCheckoutSheet />
@@ -1529,6 +2025,7 @@ function CheckoutSheet({
   eventId,
   eventTitle,
   tier,
+  addons,
   qty,
   setQty,
   promoCode,
@@ -1541,6 +2038,7 @@ function CheckoutSheet({
   eventId: string;
   eventTitle: string;
   tier: TicketTypeRecord | undefined;
+  addons: AddonRecord[];
   qty: number;
   setQty: (q: number) => void;
   promoCode: string;
@@ -1550,6 +2048,14 @@ function CheckoutSheet({
 }) {
   const maxPer = tier?.max_per_user ?? 6;
   const subtotalCents = (tier?.price_cents ?? 0) * qty;
+
+  // Add-on upsell selections (WS-3) — preview math only; server reprices.
+  const upsellSelections = useAddonUpsellStore((s) =>
+    s.eventId === eventId ? s.selections : undefined,
+  );
+  const selectionList = upsellSelections ? Object.values(upsellSelections) : [];
+  const addonPreviewCents = addonSelectionsTotalCents(addons, selectionList);
+  const hasAddonSelections = selectionList.length > 0;
 
   const appliedPromo = useEventDetailUiStore((s) => s.appliedPromo);
   const setAppliedPromo = useEventDetailUiStore((s) => s.setAppliedPromo);
@@ -1574,7 +2080,7 @@ function CheckoutSheet({
   const discountCents = appliedPromo
     ? computePromoDiscountCents(appliedPromo.type, appliedPromo.value, subtotalCents, qty)
     : 0;
-  const totalCents = Math.max(0, subtotalCents - discountCents);
+  const totalCents = Math.max(0, subtotalCents - discountCents) + addonPreviewCents;
   const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 
   const applyPromo = async () => {
@@ -1671,8 +2177,26 @@ function CheckoutSheet({
           ) : null}
         </div>
 
+        {/* Add-on upsell (WS-3) — eligibility gated by the selected tier;
+            selections become cart line items on the mixed-cart rail. */}
+        {tier ? (
+          <AddonUpsellStrip
+            eventId={eventId}
+            addons={addons}
+            selectedTierIds={new Set([String(tier.id)])}
+          />
+        ) : null}
+
         {/* Price breakdown */}
         <div className="flex flex-col gap-1.5 border-t border-white/10 pt-3">
+          {addonPreviewCents > 0 ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-white/55">Add-ons</span>
+              <span className="font-mono text-sm text-white/80">
+                {money(addonPreviewCents)}
+              </span>
+            </div>
+          ) : null}
           {discountCents > 0 ? (
             <>
               <div className="flex items-center justify-between">
@@ -1700,9 +2224,11 @@ function CheckoutSheet({
         >
           {isCheckingOut
             ? "Processing…"
-            : totalCents
-              ? `Pay ${money(totalCents)}`
-              : "Confirm RSVP"}
+            : hasAddonSelections
+              ? `Review order · ${money(totalCents)}`
+              : totalCents
+                ? `Pay ${money(totalCents)}`
+                : "Confirm RSVP"}
         </button>
       </div>
     </BottomSheet>
@@ -1788,17 +2314,21 @@ function MenuItem({
   Icon,
   label,
   onClick,
+  destructive = false,
 }: {
   Icon: typeof Share2;
   label: string;
   onClick: () => void;
+  destructive?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-white/5"
+      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-white/5 ${
+        destructive ? "text-[#FC253A]" : "text-white"
+      }`}
     >
-      <Icon size={16} color="#fff" />
+      <Icon size={16} color={destructive ? "#FC253A" : "#fff"} />
       {label}
     </button>
   );

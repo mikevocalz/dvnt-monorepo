@@ -2,6 +2,7 @@ import { supabase } from "../supabase/client";
 import { getCurrentUserAuthId } from "./auth-helper";
 import { requireBetterAuthToken } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
+import { getPendingPromoterRef } from "../stores/promoter-ref-store";
 import {
   CartLineRefundResponseDTO,
   parseDTO,
@@ -194,6 +195,10 @@ export const ticketsApi = {
   }> {
     try {
       const token = await requireBetterAuthToken();
+      // Promoter attribution (WS-4): a pending ?ref= from a tracked
+      // share link, MMKV-persisted so the Stripe redirect can't lose
+      // it. Never affects pricing — attribution only.
+      const promoterCode = getPendingPromoterRef(params.eventId);
       const { data, error } = await supabase.functions.invoke(
         "ticket-checkout",
         {
@@ -202,6 +207,7 @@ export const ticketsApi = {
             ticket_type_id: params.ticketTypeId,
             quantity: params.quantity,
             ...(params.promoCode ? { promo_code: params.promoCode } : {}),
+            ...(promoterCode ? { promoter_code: promoterCode } : {}),
           },
           headers: { Authorization: `Bearer ${token}` },
         },
@@ -234,6 +240,9 @@ export const ticketsApi = {
     error?: string;
   }> {
     try {
+      // Promoter attribution (WS-4) — same pending-ref read as the
+      // authed path; guests arriving from tracked links attribute too.
+      const promoterCode = getPendingPromoterRef(params.eventId);
       const { data, error } = await supabase.functions.invoke(
         "ticket-checkout",
         {
@@ -244,6 +253,7 @@ export const ticketsApi = {
             guest_email: params.guestEmail,
             ...(params.guestName ? { guest_name: params.guestName } : {}),
             ...(params.promoCode ? { promo_code: params.promoCode } : {}),
+            ...(promoterCode ? { promoter_code: promoterCode } : {}),
           },
           // No Authorization header — the server only checks for it
           // when guest_email is missing, so this routes to the guest

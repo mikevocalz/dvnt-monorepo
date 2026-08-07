@@ -18,6 +18,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
 import { computeFees } from "../_shared/fee-calculator.ts";
+import {
+  enforceTierVisibility,
+  TIER_VISIBILITY_MESSAGES,
+} from "../_shared/tier-visibility.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -123,7 +127,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Unauthorized" }, 401);
     }
 
-    const { ticket_id, new_ticket_type_id } = await req.json();
+    const { ticket_id, new_ticket_type_id, unlock_code } = await req.json();
     if (!ticket_id || !new_ticket_type_id) {
       return json(
         { error: "ticket_id and new_ticket_type_id are required" },
@@ -168,6 +172,24 @@ Deno.serve(async (req: Request) => {
 
     if (newType.is_active === false) {
       return json({ error: "This tier is not available" }, 400);
+    }
+
+    // ── Tier visibility guard (mirror of cart_create_hold v3) ──
+    // Upgrading INTO a hidden tier is never allowed; a locked tier
+    // requires a valid unlock code. Never echo the code.
+    const visibilityError = await enforceTierVisibility(
+      supabase,
+      newType,
+      unlock_code,
+    );
+    if (visibilityError) {
+      return json(
+        {
+          error: TIER_VISIBILITY_MESSAGES[visibilityError],
+          code: visibilityError,
+        },
+        visibilityError === "tier_hidden" ? 404 : 403,
+      );
     }
 
     // Check availability for the new tier

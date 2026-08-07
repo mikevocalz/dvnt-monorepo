@@ -21,7 +21,15 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeFees } from "../_shared/fee-calculator.ts";
+import { computeFeesWithMode } from "../_shared/fee-calculator.ts";
+import {
+  enforceTierVisibility,
+  TIER_VISIBILITY_MESSAGES,
+} from "../_shared/tier-visibility.ts";
+import {
+  qualifiesForAsyncSettlement,
+  asyncSettlementHoldExpiresAt,
+} from "../_shared/async-settlement.ts";
 import { verifySession } from "../_shared/verify-session.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import {
@@ -102,6 +110,7 @@ Deno.serve(async (req: Request) => {
       quantity = 1,
       promo_code,
       promoter_code,
+      unlock_code,
       guest_email,
       guest_name,
     } = await req.json();
@@ -227,6 +236,27 @@ Deno.serve(async (req: Request) => {
           { status: 400, headers: { "Content-Type": "application/json" } },
         );
       }
+    }
+
+    // ── Tier visibility guard (mirror of cart_create_hold v3) ──
+    // This rail inserts ticket_holds directly, bypassing the RPC's
+    // hidden/locked enforcement — so enforce it here. Never echo the code.
+    const visibilityError = await enforceTierVisibility(
+      supabase,
+      ticketType,
+      unlock_code,
+    );
+    if (visibilityError) {
+      return new Response(
+        JSON.stringify({
+          error: TIER_VISIBILITY_MESSAGES[visibilityError],
+          code: visibilityError,
+        }),
+        {
+          status: visibilityError === "tier_hidden" ? 404 : 403,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
 
     // Check availability (including active holds from other checkouts)
@@ -414,7 +444,7 @@ Deno.serve(async (req: Request) => {
     // Fetch organizer's Stripe account
     const { data: event } = await supabase
       .from("events")
-      .select("host_id")
+      .select("host_id, fee_mode")
       .eq("id", parseInt(event_id))
       .single();
 
@@ -440,29 +470,61 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── Fee structure (v1_250_1pt) ──────────────────────────────
+    // ── Fee structure (v1_250_1pt) — fee_mode-aware (absorb|pass) ──
     const subtotalCents = effectiveSubtotal;
-    const fees = computeFees(subtotalCents, quantity);
+    const fees = computeFeesWithMode(subtotalCents, quantity, event.fee_mode);
 
     const currency = ticketType.currency || "usd";
+
+    // ── Async settlement (ACH + US bank transfer), high-ticket only ──
+    // At/above the threshold, offer us_bank_account + customer_balance
+    // alongside card. These settle in days → the inventory hold below
+    // becomes hold_kind='async_settlement' with a days-scale expiry
+    // (migration 20260806100500's release contract).
+    const asyncSettlement = qualifiesForAsyncSettlement(
+      fees.customer_charge_amount,
+      currency,
+    );
 
     // Create Stripe Checkout Session: two transparent line items
     const params: Record<string, string> = {
       mode: "payment",
       "payment_method_types[0]": "card",
+      ...(asyncSettlement
+        ? {
+            // ACH debit
+            "payment_method_types[1]": "us_bank_account",
+            // Bank transfer (push) into the customer's cash balance —
+            // requires funding_type + regional transfer type, and a
+            // Customer to hold the balance (customer_creation=always).
+            "payment_method_types[2]": "customer_balance",
+            "payment_method_options[customer_balance][funding_type]":
+              "bank_transfer",
+            "payment_method_options[customer_balance][bank_transfer][type]":
+              "us_bank_transfer",
+            customer_creation: "always",
+          }
+        : {}),
       // Line 0: base ticket price
       "line_items[0][price_data][currency]": currency,
       "line_items[0][price_data][unit_amount]":
         ticketType.price_cents.toString(),
       "line_items[0][price_data][product_data][name]": ticketType.name,
       "line_items[0][quantity]": quantity.toString(),
-      // Line 1: DVNT buyer service fee (one lump item)
-      "line_items[1][price_data][currency]": currency,
-      "line_items[1][price_data][unit_amount]": fees.buyer_fee.toString(),
-      "line_items[1][price_data][product_data][name]": "DVNT Service Fee",
-      "line_items[1][price_data][product_data][description]":
-        "2.5% + $1/ticket • Non-refundable",
-      "line_items[1][quantity]": "1",
+      // Line 1: DVNT buyer service fee (one lump item) — only in 'pass'
+      // mode; in 'absorb' the organizer eats it and the buyer pays just
+      // the ticket price.
+      ...(fees.fee_mode !== "absorb"
+        ? {
+            "line_items[1][price_data][currency]": currency,
+            "line_items[1][price_data][unit_amount]": fees.buyer_fee.toString(),
+            "line_items[1][price_data][product_data][name]":
+              "DVNT Service Fee",
+            "line_items[1][price_data][product_data][description]":
+              "2.5% + $1/ticket • Non-refundable",
+            "line_items[1][quantity]": "1",
+          }
+        : {}),
       // Destination charge: DVNT keeps application_fee_amount, rest goes to organizer
       "payment_intent_data[application_fee_amount]":
         fees.application_fee_amount.toString(),
@@ -486,6 +548,7 @@ Deno.serve(async (req: Request) => {
       "metadata[organizer_fee_cents]": fees.organizer_fee.toString(),
       "metadata[dvnt_total_fee_cents]": fees.dvnt_total_fee.toString(),
       "metadata[fee_policy_version]": fees.fee_policy_version,
+      "metadata[fee_mode]": fees.fee_mode,
       ...(promoResult
         ? {
             "metadata[promo_code_id]": promoResult.promo_code_id,
@@ -510,10 +573,16 @@ Deno.serve(async (req: Request) => {
 
     const session = await stripeRequest("/checkout/sessions", params);
 
-    // ── Create inventory hold (10 min TTL, prevents overselling) ──
+    // ── Create inventory hold (prevents overselling) ──────────────
     // For guests we still need an "owner" key — use the email so a
     // single buyer can't double-stack holds with the same address.
-    const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    // Card-only sessions: 10-min TTL (synchronous checkout window).
+    // Async-capable sessions: days-scale hold_kind='async_settlement'
+    // covering the bank settlement window; released early by failure
+    // webhooks, converted on payment, backstopped by reconcile-orders.
+    const holdExpiresAt = asyncSettlement
+      ? asyncSettlementHoldExpiresAt()
+      : new Date(Date.now() + 10 * 60 * 1000).toISOString();
     await supabase.from("ticket_holds").insert({
       user_id: isGuest ? null : user_id,
       guest_email: isGuest ? trimmedGuestEmail : null,
@@ -521,6 +590,7 @@ Deno.serve(async (req: Request) => {
       event_id: parseInt(event_id),
       quantity,
       status: "active",
+      hold_kind: asyncSettlement ? "async_settlement" : "checkout",
       expires_at: holdExpiresAt,
       payment_intent_id: session.id,
     });

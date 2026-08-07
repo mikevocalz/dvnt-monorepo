@@ -212,10 +212,9 @@ export interface PayoutRecord {
   status: PayoutStatus;
   grossCents: number;
   netCents: number;
+  /** Platform fee, derived server-side as grossCents - netCents. */
   feeCents: number;
   releaseAt: string;
-  arrivalDate?: string;
-  bankLast4?: string;
   stripePayoutId?: string;
   createdAt: string;
 }

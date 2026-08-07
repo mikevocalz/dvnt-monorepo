@@ -63,6 +63,7 @@ Deno.serve(async (req: Request) => {
         purchase_amount_cents,
         guest_email,
         guest_name,
+        cart_id,
         ticket_type:ticket_types(name),
         event:events(title, start_date, end_date, location_name, location_address, cover_image_url)
       `,
@@ -82,6 +83,52 @@ Deno.serve(async (req: Request) => {
     const eventRow = Array.isArray((ticket as any).event)
       ? (ticket as any).event[0]
       : (ticket as any).event;
+
+    // WS-3: add-ons purchased in the same cart/order (order_addons, written
+    // by cart_complete_issuance). Scoped by the ticket's cart_id so a guest
+    // sees only THIS order's add-ons, never their add-ons on other events.
+    // camelCase shape matches the guest ticket web view's optional `addons`
+    // array (zero client change). Non-fatal — errors yield an empty list.
+    let addons: {
+      id: string;
+      name: string;
+      variantName: string | null;
+      quantity: number;
+      status: string;
+      isRedeemable: boolean;
+      qrToken: string | null;
+    }[] = [];
+    const cartId = (ticket as any).cart_id ?? null;
+    if (cartId) {
+      const { data: orderAddons, error: addonError } = await supabase
+        .from("order_addons")
+        .select(
+          "id, quantity, status, qr_token, ticket_addons(name, is_redeemable), ticket_addon_variants(name)",
+        )
+        .eq("cart_id", cartId)
+        .order("created_at", { ascending: true });
+      if (addonError) {
+        console.error("[get-guest-ticket] order_addons lookup:", addonError);
+      } else {
+        addons = (orderAddons || []).map((row: any) => {
+          const addonRow = Array.isArray(row.ticket_addons)
+            ? row.ticket_addons[0]
+            : row.ticket_addons;
+          const variantRow = Array.isArray(row.ticket_addon_variants)
+            ? row.ticket_addon_variants[0]
+            : row.ticket_addon_variants;
+          return {
+            id: String(row.id),
+            name: addonRow?.name ?? "Add-on",
+            variantName: variantRow?.name ?? null,
+            quantity: Number(row.quantity || 1),
+            status: row.status,
+            isRedeemable: !!addonRow?.is_redeemable,
+            qrToken: row.qr_token ?? null,
+          };
+        });
+      }
+    }
 
     return jsonResponse({
       ok: true,
@@ -106,6 +153,7 @@ Deno.serve(async (req: Request) => {
             null,
           coverImageUrl: eventRow?.cover_image_url ?? null,
         },
+        addons,
       },
     });
   } catch (err) {

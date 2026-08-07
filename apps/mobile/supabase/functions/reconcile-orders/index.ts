@@ -127,6 +127,14 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
           );
           const cs = await csRes.json();
           piStatus = cs.payment_status || "unknown";
+          // Async settlement (ACH / bank transfer): a COMPLETE session
+          // can stay payment_status='unpaid' for days while funds are in
+          // flight. That is NOT a failure — leave the order pending; the
+          // async_payment_succeeded/failed webhooks (or a later sweep
+          // once the hold's expires_at passes) resolve it.
+          if (piStatus === "unpaid" && cs.status === "complete") {
+            piStatus = "processing";
+          }
         }
 
         // Reconcile based on status

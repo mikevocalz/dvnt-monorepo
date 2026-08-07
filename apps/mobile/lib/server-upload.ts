@@ -171,6 +171,14 @@ export async function uploadToServer(
   uri: string,
   folder: string = "uploads",
   onProgress?: (progress: UploadProgress) => void,
+  opts?: {
+    /**
+     * Compact inline fade-in placeholder (base64 WebP micro-preview, data URI)
+     * generated client-side. Sent alongside the file so the media-upload edge
+     * function can persist it into the historically-NULL `blurhash` column.
+     */
+    blurhash?: string;
+  },
 ): Promise<ServerUploadResult> {
   console.log("[ServerUpload] Starting upload via Edge Function:", {
     uri: uri.substring(0, 60),
@@ -221,6 +229,7 @@ export async function uploadToServer(
         parameters: {
           kind,
           mime,
+          ...(opts?.blurhash ? { blurhash: opts.blurhash } : {}),
         },
         headers: {
           Authorization: `Bearer ${authToken}`,

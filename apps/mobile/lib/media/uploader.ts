@@ -168,6 +168,9 @@ export async function uploadMedia(
       owner_id: userId,
       bucket_name: bucket,
       expires_at: expiresAt,
+      // Compact inline fade-in placeholder (base64 WebP micro-preview). NULL for
+      // videos / when generation failed. Backfills the historically-NULL column.
+      blurhash: media.blurhash ?? null,
     })
     .select()
     .single();
@@ -195,6 +198,7 @@ export async function uploadMedia(
     height: media.height,
     sizeBytes: media.sizeBytes,
     durationSeconds: media.durationSeconds,
+    blurhash: media.blurhash,
   };
 }
 

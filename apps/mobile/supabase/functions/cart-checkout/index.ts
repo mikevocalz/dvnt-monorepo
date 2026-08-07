@@ -10,7 +10,8 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeFees } from "../_shared/fee-calculator.ts";
+import { computeFeesWithMode } from "../_shared/fee-calculator.ts";
+import { qualifiesForAsyncSettlement } from "../_shared/async-settlement.ts";
 import {
   validateAndApplyPromo,
   incrementPromoUsage,
@@ -319,17 +320,20 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const fees = computeFees(effectiveSubtotal, quantity);
-
     const { data: event, error: eventError } = await supabase
       .from("events")
-      .select("id, host_id, title")
+      .select("id, host_id, title, fee_mode")
       .eq("id", cart.event_id)
       .single();
 
     if (eventError || !event?.host_id) {
       return errorResponse("Event not found", 404);
     }
+
+    // fee_mode-aware (absorb|pass): in absorb the buyer is charged just
+    // the subtotal and the organizer's transfer eats the buyer-side fee;
+    // application_fee (DVNT's 5% + $2) is unchanged. Shared entry point.
+    const fees = computeFeesWithMode(effectiveSubtotal, quantity, event.fee_mode);
 
     const { data: organizer, error: organizerError } = await supabase
       .from("organizer_accounts")
@@ -355,11 +359,32 @@ Deno.serve(async (req: Request) => {
       quantity,
     });
 
+    // ── Async settlement (ACH), high-ticket only ──────────────────
+    // At/above the threshold, offer us_bank_account alongside card via an
+    // explicit payment_method_types list (mutually exclusive with
+    // automatic_payment_methods). customer_balance (push bank transfer)
+    // is deliberately NOT offered on this rail: PaymentSheet cannot
+    // render the display_bank_transfer_instructions next_action — it is
+    // Checkout-Session-only (see ticket-checkout). Trade-off: explicit
+    // list drops dashboard-driven BNPL for these orders; at $500+ that
+    // surface is marginal and ACH's lower processing cost wins.
+    // Settlement-window hold extension happens in stripe-webhook's
+    // payment_intent.processing handler (cart_holds keyed by cart_id).
+    const asyncSettlement = qualifiesForAsyncSettlement(
+      fees.customer_charge_amount,
+      currency,
+    );
+
     const piBody: Record<string, string> = {
       amount: fees.customer_charge_amount.toString(),
       currency,
       customer: customerId,
-      "automatic_payment_methods[enabled]": "true",
+      ...(asyncSettlement
+        ? {
+            "payment_method_types[0]": "card",
+            "payment_method_types[1]": "us_bank_account",
+          }
+        : { "automatic_payment_methods[enabled]": "true" }),
       "transfer_data[destination]": organizer.stripe_account_id,
       application_fee_amount: fees.application_fee_amount.toString(),
       "metadata[type]": "cart_checkout",
@@ -373,6 +398,7 @@ Deno.serve(async (req: Request) => {
       "metadata[organizer_fee_cents]": fees.organizer_fee.toString(),
       "metadata[dvnt_total_fee_cents]": fees.dvnt_total_fee.toString(),
       "metadata[fee_policy_version]": fees.fee_policy_version,
+      "metadata[fee_mode]": fees.fee_mode,
       "metadata[event_title]": String(event.title || "").substring(0, 500),
     };
     if (promoResult) {
@@ -478,6 +504,7 @@ Deno.serve(async (req: Request) => {
         discountCents,
         totalCents: fees.customer_charge_amount,
         currency,
+        feeMode: fees.fee_mode,
       },
     });
   } catch (err) {

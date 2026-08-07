@@ -38,6 +38,10 @@ import {
   attendeesToCsv,
   type EventAnalyticsSummary,
 } from "@dvnt/app/lib/api/event-analytics";
+import {
+  promotersApi,
+  type PromoterLeaderboardRow,
+} from "@dvnt/app/lib/api/promoters";
 
 function formatMoney(cents: number): string {
   const dollars = cents / 100;
@@ -128,6 +132,15 @@ function EventAnalyticsContent() {
       enabled: !!eventId,
       staleTime: 30 * 1000,
     });
+
+  // Promoter leaderboard (WS-4) — ranked server-side by NET ledger
+  // earnings (single ledger query). No client re-math beyond formatting.
+  const { data: promoterLeaderboard } = useQuery<PromoterLeaderboardRow[]>({
+    queryKey: ["event-promoter-leaderboard", eventId],
+    queryFn: () => promotersApi.leaderboard(parseInt(eventId, 10)),
+    enabled: !!eventId,
+    staleTime: 30 * 1000,
+  });
 
   const [isExporting, setIsExporting] = React.useState(false);
 
@@ -489,6 +502,65 @@ function EventAnalyticsContent() {
                 </Text>
               </View>
             ))}
+          </View>
+        )}
+
+        {/* ── Promoter leaderboard (WS-4) — ledger-exact ranking ── */}
+        {promoterLeaderboard && promoterLeaderboard.length > 0 && (
+          <View
+            style={[
+              styles.section,
+              { borderColor: colors.border, backgroundColor: colors.card },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+              Promoter leaderboard
+            </Text>
+            {promoterLeaderboard.map((row, i) => (
+              <View key={row.promoterId} style={styles.promoRow}>
+                <View style={styles.promoLeft}>
+                  <Text
+                    style={[
+                      styles.promoUses,
+                      {
+                        color:
+                          i === 0 ? "#F5C518" : colors.mutedForeground,
+                        width: 20,
+                        textAlign: "center",
+                      },
+                    ]}
+                  >
+                    {i + 1}
+                  </Text>
+                  <Text
+                    style={[styles.promoCode, { color: colors.foreground }]}
+                    numberOfLines={1}
+                  >
+                    {row.displayName}
+                  </Text>
+                  <Text
+                    style={[styles.promoDiscount, { color: "#C084FC" }]}
+                  >
+                    {row.code}
+                    {row.status === "paused" ? " · paused" : ""}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.promoUses,
+                    { color: row.earnedCents >= 0 ? "#22c55e" : "#ef4444" },
+                  ]}
+                >
+                  {formatMoney(row.earnedCents)}
+                </Text>
+              </View>
+            ))}
+            <Text
+              style={[styles.footerNote, { color: colors.mutedForeground }]}
+            >
+              Net rev-share earned (earnings − reversals), straight off the
+              promoter ledger.
+            </Text>
           </View>
         )}
 

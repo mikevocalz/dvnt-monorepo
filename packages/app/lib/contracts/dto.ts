@@ -205,12 +205,18 @@ export const CartStatusResponseDTO = z.object({
     z.object({
       id: z.string().uuid(),
       category: LineItemCategoryDTO,
+      // For `addon` lines this carries the ticket_addons id (tier_id is NULL
+      // in the DB row) — same back-compat convention as CartLineItemDTO.
       tierId: z.string().uuid(),
       tierName: z.string(),
       quantity: z.number().int().positive(),
       unitPriceCents: z.number().int().nonnegative(),
       refundedAmountCents: z.number().int().nonnegative(),
       metadata: z.record(z.string(), z.unknown()),
+      /** ticket_addons.id when category === "addon". */
+      addonId: z.string().uuid().nullable().optional(),
+      /** ticket_addon_variants.id for variant lines. */
+      variantId: z.string().uuid().nullable().optional(),
     }),
   ),
   holds: z.object({
@@ -219,6 +225,23 @@ export const CartStatusResponseDTO = z.object({
     items: z.array(z.unknown()),
   }),
   tickets: z.array(MixedTicketDTO),
+  /** Issued order_addons for this cart (optional — older fn versions omit). */
+  addons: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        addon_id: z.string().uuid(),
+        variant_id: z.string().uuid().nullable().optional(),
+        addon_name: z.string(),
+        variant_name: z.string().nullable().optional(),
+        quantity: z.number().int().positive(),
+        unit_price_cents: z.number().int().nonnegative(),
+        status: z.enum(["unfulfilled", "fulfilled", "redeemed", "refunded"]),
+        is_redeemable: z.boolean().optional(),
+        qr_token: z.string().nullable().optional(),
+      }),
+    )
+    .optional(),
   completed: z.boolean(),
 });
 export type CartStatusResponse = z.infer<typeof CartStatusResponseDTO>;

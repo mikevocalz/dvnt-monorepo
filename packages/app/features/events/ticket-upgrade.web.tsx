@@ -28,6 +28,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "solito/navigation";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Check,
@@ -45,6 +46,14 @@ import {
   ticketTypesApi,
   type TicketTypeRecord,
 } from "@dvnt/app/lib/api/ticket-types";
+import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
+import { effectiveAddonUnitPriceCents } from "@dvnt/app/lib/tickets/pricing";
+import {
+  AddonUpsellStrip,
+  addonSelectionsTotalCents,
+} from "./addon-upsell.web";
+import { useAddonUpsellStore } from "@dvnt/app/lib/stores/addon-upsell-store";
+import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -117,6 +126,91 @@ interface EnrichedTier extends TicketTypeRecord {
   perks: string[];
   diffCents: number;
   soldOut: boolean;
+}
+
+/**
+ * Post-purchase add-on offer (WS-3) — the event's add-ons for an OWNED
+ * ticket, respecting requires_tier_id (satisfied by the owned tier). Rides
+ * the EXISTING mixed-cart rail: selections build an add-on-only cart →
+ * /feed/checkout/review → cart-create-hold (RPC v4, 20260806400100, lets an
+ * owned ticket satisfy the tier gate) → cart-checkout prices server-side.
+ * No new server API. Separate from the tier-upgrade payment (ticket-upgrade
+ * edge fn), which takes no add-on params.
+ */
+function PostPurchaseAddons({
+  eventId,
+  ownedTierId,
+  eventTitle,
+}: {
+  eventId: string;
+  ownedTierId: string | null;
+  eventTitle: string;
+}) {
+  const router = useRouter();
+  const { data: addons = [] } = useQuery<AddonRecord[]>({
+    queryKey: ["event-addons", eventId],
+    enabled: !!eventId,
+    staleTime: 60 * 1000,
+    queryFn: () => addonsApi.getByEvent(eventId),
+  });
+  const selections = useAddonUpsellStore((s) =>
+    s.eventId === eventId ? s.selections : undefined,
+  );
+  const selectionList = selections ? Object.values(selections) : [];
+  const totalCents = addonSelectionsTotalCents(addons, selectionList);
+  const resetSelections = useAddonUpsellStore((s) => s.reset);
+
+  const handleAddToOrder = useCallback(() => {
+    if (selectionList.length === 0) return;
+    const cartStore = useCartStore.getState();
+    cartStore.startCart(eventId);
+    for (const sel of selectionList) {
+      const addon = addons.find((a) => a.id === sel.addonId);
+      if (!addon) continue;
+      const variant = sel.variantId
+        ? addon.ticket_addon_variants?.find((v) => v.id === sel.variantId)
+        : null;
+      cartStore.addLineItem(eventId, {
+        category: "addon",
+        // DTO back-compat: addon id rides tierId on addon lines.
+        tierId: sel.addonId,
+        addonId: sel.addonId,
+        variantId: sel.variantId ?? undefined,
+        quantity: sel.quantity,
+        unitPriceCents: effectiveAddonUnitPriceCents(
+          addon.price_cents,
+          variant?.price_cents,
+        ),
+        metadata: {
+          name: variant ? `${addon.name} — ${variant.name}` : addon.name,
+          eventTitle,
+        },
+      });
+    }
+    resetSelections();
+    router.push("/feed/checkout/review");
+  }, [selectionList, addons, eventId, eventTitle, resetSelections, router]);
+
+  return (
+    <div className="mt-6 flex flex-col gap-3">
+      <AddonUpsellStrip
+        eventId={eventId}
+        addons={addons}
+        ownedTierIds={ownedTierId ? new Set([ownedTierId]) : undefined}
+        title="Add to your night"
+      />
+      {selectionList.length > 0 ? (
+        <button
+          type="button"
+          onClick={handleAddToOrder}
+          className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-[#3FDCFF]/40 bg-[#3FDCFF]/10 font-bold text-[#3FDCFF] active:scale-[0.99]"
+        >
+          Add to order · {formatPrice(totalCents)}
+          <ChevronRight size={18} color="#3FDCFF" strokeWidth={2.5} />
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 export function TicketUpgradeScreen() {
@@ -419,7 +513,7 @@ export function TicketUpgradeScreen() {
   if (upgradeOptions.length === 0) {
     return (
       <UpgradeShell onBack={() => router.back()}>
-        <div className="flex flex-col items-center justify-center px-8 py-24 text-center">
+        <div className="flex flex-col items-center justify-center px-8 py-16 text-center">
           <Crown size={48} color="rgba(255,255,255,0.25)" />
           <p className="mt-4 text-xl font-semibold text-white">
             You&apos;re at the top
@@ -428,6 +522,14 @@ export function TicketUpgradeScreen() {
             Your ticket is already the highest available tier for this event.
           </p>
         </div>
+        {/* Top tier still gets the add-on upsell (WS-3). */}
+        <PostPurchaseAddons
+          eventId={String(dbTicket.event_id ?? eventId)}
+          ownedTierId={
+            dbTicket.ticket_type_id ? String(dbTicket.ticket_type_id) : null
+          }
+          eventTitle={dbTicket.event_title || "Event"}
+        />
       </UpgradeShell>
     );
   }
@@ -620,6 +722,15 @@ export function TicketUpgradeScreen() {
             );
           })}
         </div>
+
+        {/* ─── Post-purchase add-on upsell (WS-3) ─── */}
+        <PostPurchaseAddons
+          eventId={String(dbTicket.event_id ?? eventId)}
+          ownedTierId={
+            dbTicket.ticket_type_id ? String(dbTicket.ticket_type_id) : null
+          }
+          eventTitle={dbTicket.event_title || "Event"}
+        />
       </main>
 
       {/* ─── Sticky footer ─── */}

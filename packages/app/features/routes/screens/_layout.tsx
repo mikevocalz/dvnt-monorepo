@@ -25,6 +25,8 @@ import {
   initConnectivity,
   useConnectivityStore,
 } from "@dvnt/app/lib/stores/connectivity-store";
+import { initOutboxDrain } from "@dvnt/app/lib/outbox";
+import { initOfflineScanAutoDrain } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { OfflineBanner } from "@dvnt/app/components/offline-banner";
 import {
   persistOptions,
@@ -145,6 +147,17 @@ try {
   initConnectivity();
 } catch (e) {
   console.warn("[Boot] initConnectivity failed (non-fatal):", e);
+}
+
+// Durable outbox drain (WS-12): flush queued mutations + pending offline
+// scans on connectivity→online and app foreground. Both inits are
+// idempotent and internally defensive — same boot-hardening contract as
+// initConnectivity above.
+try {
+  initOutboxDrain();
+  initOfflineScanAutoDrain();
+} catch (e) {
+  console.warn("[Boot] outbox drain init failed (non-fatal):", e);
 }
 
 // Bridge the Zustand connectivity phase to React Query's onlineManager.

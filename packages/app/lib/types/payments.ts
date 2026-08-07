@@ -198,11 +198,37 @@ export interface Dispute {
 export interface PayoutSummary {
   availableBalanceCents: number;
   pendingBalanceCents: number;
+  /** Amount eligible for instant payout (Stripe balance.instant_available, usd). */
+  instantAvailableCents?: number;
+  /** True when the connected account has an instant-payout-capable card. */
+  instantPayoutEligible?: boolean;
   nextPayoutEstimate?: string;
   currency: string;
   payoutsEnabled: boolean;
   totalPayoutsCents: number;
   totalEventsPaidOut: number;
+}
+
+/** A failed bank payout on the connected account — recovery surface. */
+export interface FailedPayout {
+  id: string;
+  amountCents: number;
+  currency: string;
+  failureCode?: string | null;
+  failureMessage?: string | null;
+  arrivalDate?: string | null;
+  created?: string | null;
+  /** Whether Stripe permits re-attempting this payout after a bank fix. */
+  reconcilable?: boolean;
+}
+
+export interface PayoutActionResult {
+  ok: boolean;
+  eligible?: boolean;
+  message?: string;
+  payoutId?: string;
+  amountCents?: number;
+  arrivalDate?: string | null;
 }
 
 export interface PayoutRecord {
@@ -212,10 +238,9 @@ export interface PayoutRecord {
   status: PayoutStatus;
   grossCents: number;
   netCents: number;
+  /** Platform fee, derived server-side as grossCents - netCents. */
   feeCents: number;
   releaseAt: string;
-  arrivalDate?: string;
-  bankLast4?: string;
   stripePayoutId?: string;
   createdAt: string;
 }

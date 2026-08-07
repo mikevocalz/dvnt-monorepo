@@ -80,6 +80,9 @@ import {
   type TierType,
   type TierVisibility,
 } from "@dvnt/app/lib/tickets/pricing";
+import { addonsApi } from "@dvnt/app/lib/api/addons";
+import { draftAddonToCreateParams } from "@dvnt/app/features/events/create/addon-form";
+import { AddonsEditorNative } from "@dvnt/app/features/events/create/addons-editor.native";
 import { YouTubeEmbed, extractVideoId } from "@dvnt/app/components/youtube-embed";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
@@ -239,6 +242,8 @@ function CreateEventScreenContent() {
   const setPerksInput = useCreateEventStore((s) => s.setPerksInput);
   const ticketTiers = useCreateEventStore((s) => s.ticketTiers);
   const setTicketTiers = useCreateEventStore((s) => s.setTicketTiers);
+  const addons = useCreateEventStore((s) => s.addons);
+  const setAddons = useCreateEventStore((s) => s.setAddons);
   const addLineupItem = useCreateEventStore((s) => s.addLineupItem);
   const addPerk = useCreateEventStore((s) => s.addPerk);
   const coOrganizers = useCreateEventStore((s) => s.coOrganizers);
@@ -656,11 +661,14 @@ function CreateEventScreenContent() {
           console.log("[CreateEvent] Event created successfully:", data);
 
           // Create ticket types if ticketing is enabled
+          // Local editor tier id → created ticket_types uuid, so add-on
+          // per-tier eligibility (requires_tier_id) points at the real row.
+          const createdTierIdByLocalId = new Map<string, string>();
           if (ticketingEnabled && data?.id) {
             if (ticketTiers.length > 0) {
               // Multi-tier: create each tier
               for (const tier of ticketTiers) {
-                await ticketTypesApi.create({
+                const createdTier = await ticketTypesApi.create({
                   eventId: String(data.id),
                   name: tier.name,
                   category: tier.category || "admission",
@@ -678,6 +686,9 @@ function CreateEventScreenContent() {
                   priceSchedule: scheduleRowsToEntries(tier.priceSchedule),
                   subAllocations: bandRowsToSubAllocations(tier.subAllocations),
                 });
+                if (createdTier?.id) {
+                  createdTierIdByLocalId.set(tier.id, String(createdTier.id));
+                }
               }
               console.log(
                 "[CreateEvent] Created",
@@ -701,6 +712,31 @@ function CreateEventScreenContent() {
                 maxPerUser: simpleMaxPerUser || 4,
               });
               console.log("[CreateEvent] Default ticket type created");
+            }
+          }
+
+          // Add-on catalog (WS-3). Post-publish setup like tiers — a
+          // failure never rolls back the live event (host retries from
+          // edit). Serialization to integer cents lives in addon-form.ts;
+          // checkout reprices every line server-side regardless.
+          if (data?.id && addons.length > 0) {
+            for (const [i, draft] of addons.entries()) {
+              const params = draftAddonToCreateParams(
+                draft,
+                String(data.id),
+                (localTierId) =>
+                  createdTierIdByLocalId.get(localTierId) ?? null,
+                i,
+              );
+              if (!params) continue; // unnamed row — nothing to persist
+              try {
+                await addonsApi.create(params);
+              } catch (addonErr) {
+                console.warn(
+                  "[CreateEvent] add-on setup failed after publish",
+                  addonErr,
+                );
+              }
             }
           }
 
@@ -2733,6 +2769,23 @@ function CreateEventScreenContent() {
                   Wallet.
                 </Text>
               </View>
+            </View>
+
+            {/* Add-on catalog (WS-3) — coat check, merch (size × color),
+                drinks, skip-line… per-tier gating via the event's own tiers.
+                Created post-publish alongside tiers (see handleCreateEvent). */}
+            <View className="mt-3">
+              <Text className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                Add-ons (Optional)
+              </Text>
+              <AddonsEditorNative
+                addons={addons}
+                onChange={setAddons}
+                tierOptions={ticketTiers.map((tier) => ({
+                  id: tier.id,
+                  name: tier.name,
+                }))}
+              />
             </View>
 
             {/* Disclaimers */}
