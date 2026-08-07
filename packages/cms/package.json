@@ -19,6 +19,6 @@
     "@payloadcms/db-postgres": "4.0.0-internal.a0ef1b8",
     "@payloadcms/richtext-lexical": "4.0.0-internal.a0ef1b8",
     "payload": "4.0.0-internal.a0ef1b8",
-    "sharp": "0.34.2"
+    "sharp": "0.35.3"
   }
 }

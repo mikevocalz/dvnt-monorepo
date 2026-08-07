@@ -179,9 +179,9 @@ async function getAuth() {
     console.log("[Auth] Initializing Better Auth...");
 
     // Import Better Auth + plugins
-    const { betterAuth } = await import("npm:better-auth@1.5.5");
-    const { expo } = await import("npm:@better-auth/expo@1.5.5");
-    const { username, magicLink } = await import("npm:better-auth@1.5.5/plugins");
+    const { betterAuth } = await import("npm:better-auth@1.6.26");
+    const { expo } = await import("npm:@better-auth/expo@1.6.26");
+    const { username, magicLink } = await import("npm:better-auth@1.6.26/plugins");
     // Import npm:pg — Deno supports Node built-ins (node:net, node:tls) needed by pg
     const pgModule = await import("npm:pg@8.13.1");
     const Pool = pgModule.Pool || pgModule.default?.Pool || pgModule.default;
@@ -247,7 +247,7 @@ async function getAuth() {
         username(),
         // B4: BetterAuth mints/expires/verifies the link token; Resend only
         // delivers. sendMagicLink signature verified against
-        // better-auth@1.5.5/dist/plugins/magic-link/index.d.mts:35.
+        // better-auth@1.6.26/dist/plugins/magic-link/index.d.mts:35.
         magicLink({
           expiresIn: 60 * 15,
           sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
@@ -358,7 +358,7 @@ async function getAuth() {
                 [email],
               );
               if (!rows?.[0]?.ok) {
-                const { APIError } = await import("npm:better-auth@1.5.5/api");
+                const { APIError } = await import("npm:better-auth@1.6.26/api");
                 console.log(`[Auth] Beta gate: rejected ${email}`);
                 throw new APIError("FORBIDDEN", {
                   code: "BETA_ONLY",
