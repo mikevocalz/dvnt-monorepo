@@ -55,6 +55,17 @@ interface CoOrganizer {
   avatar: string;
 }
 
+/** Editor row → `price_schedule` jsonb entry ("price changes to $X at T"). */
+export interface TierScheduleRow {
+  effectiveAt: string; // ISO — when the new price takes effect
+  priceDollars: string;
+}
+/** Editor row → `sub_allocations` jsonb band ("first N tickets at $X"). */
+export interface TierBandRow {
+  quantity: string;
+  priceDollars: string;
+}
+
 interface TicketTier {
   id: string;
   name: string;
@@ -65,6 +76,13 @@ interface TicketTier {
   description: string;
   saleStart: string;
   saleEnd: string;
+  // ── v2 tier model (migration 20260613000000). Optional so drafts persisted
+  //    before this shipped hydrate cleanly from MMKV.
+  tierType?: "ga" | "vip" | "early_bird" | "table_service" | "group_bundle" | "comp" | "donation";
+  visibility?: "public" | "hidden" | "locked";
+  unlockCode?: string;
+  priceSchedule?: TierScheduleRow[];
+  subAllocations?: TierBandRow[];
 }
 
 // Fields that persist as a draft

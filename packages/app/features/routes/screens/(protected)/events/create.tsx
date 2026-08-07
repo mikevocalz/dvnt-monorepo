@@ -70,8 +70,16 @@ import {
   ticketTypesApi,
   type CreateTicketTypeParams,
   TICKET_TYPE_CATEGORIES,
+  TIER_TYPE_OPTIONS,
+  TIER_VISIBILITY_OPTIONS,
   type TicketTypeCategory,
 } from "@dvnt/app/lib/api/ticket-types";
+import {
+  scheduleRowsToEntries,
+  bandRowsToSubAllocations,
+  type TierType,
+  type TierVisibility,
+} from "@dvnt/app/lib/tickets/pricing";
 import { YouTubeEmbed, extractVideoId } from "@dvnt/app/components/youtube-embed";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
@@ -100,6 +108,13 @@ interface TicketTier {
   description: string;
   saleStart: string;
   saleEnd: string;
+  // ── v2 tier model (migration 20260613000000) — optional so drafts
+  //    persisted before this shipped hydrate cleanly from MMKV.
+  tierType?: TierType;
+  visibility?: TierVisibility;
+  unlockCode?: string;
+  priceSchedule?: { effectiveAt: string; priceDollars: string }[];
+  subAllocations?: { quantity: string; priceDollars: string }[];
 }
 
 const WIZARD_STEPS = [
@@ -137,6 +152,11 @@ function CreateEventScreenContent() {
   const [openSalePickerTierId, setOpenSalePickerTierId] = useState<
     string | null
   >(null);
+  // Same pattern for the early-bird schedule rows: `${tierId}:${rowIndex}`
+  // of the row whose "from" DateTimePicker is currently open.
+  const [openScheduleRowKey, setOpenScheduleRowKey] = useState<string | null>(
+    null,
+  );
   const {
     uploadMultiple,
     isUploading: isUploadingMedia,
@@ -650,6 +670,13 @@ function CreateEventScreenContent() {
                   maxPerUser: tier.maxPerUser,
                   saleStart: tier.saleStart || undefined,
                   saleEnd: tier.saleEnd || undefined,
+                  // v2 tier model — visibility, type, early-bird pricing.
+                  tierType: tier.tierType,
+                  tierVisibility: tier.visibility,
+                  unlockCode:
+                    tier.visibility === "locked" ? tier.unlockCode : undefined,
+                  priceSchedule: scheduleRowsToEntries(tier.priceSchedule),
+                  subAllocations: bandRowsToSubAllocations(tier.subAllocations),
                 });
               }
               console.log(
@@ -2224,6 +2251,405 @@ function CreateEventScreenContent() {
                           />
                         </View>
                       )}
+
+                      {/* Tier type — v2 enum (GA / VIP / Early Bird / Table / Group) */}
+                      <Text
+                        className="text-[11px] font-semibold text-muted-foreground mt-3 mb-1 px-1"
+                        style={{ letterSpacing: 0.4 }}
+                      >
+                        TIER TYPE
+                      </Text>
+                      <View className="flex-row gap-2 mb-2">
+                        {TIER_TYPE_OPTIONS.map((option) => {
+                          const selected =
+                            (tier.tierType ?? "ga") === option.value;
+                          return (
+                            <Pressable
+                              key={option.value}
+                              onPress={() =>
+                                setTicketTiers((prev) =>
+                                  prev.map((t) =>
+                                    t.id === tier.id
+                                      ? { ...t, tierType: option.value }
+                                      : t,
+                                  ),
+                                )
+                              }
+                              className="flex-1 rounded-xl px-2 py-2 items-center"
+                              style={{
+                                backgroundColor: selected
+                                  ? colors.foreground
+                                  : colors.muted,
+                              }}
+                            >
+                              <Text
+                                className="text-[11px] font-semibold"
+                                style={{
+                                  color: selected
+                                    ? colors.background
+                                    : colors.mutedForeground,
+                                }}
+                                numberOfLines={1}
+                              >
+                                {option.label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+
+                      {/* Visibility — public / hidden / locked (+ unlock code) */}
+                      <Text
+                        className="text-[11px] font-semibold text-muted-foreground mb-1 px-1"
+                        style={{ letterSpacing: 0.4 }}
+                      >
+                        VISIBILITY
+                      </Text>
+                      <View className="flex-row gap-2 mb-1">
+                        {TIER_VISIBILITY_OPTIONS.map((option) => {
+                          const selected =
+                            (tier.visibility ?? "public") === option.value;
+                          return (
+                            <Pressable
+                              key={option.value}
+                              onPress={() =>
+                                setTicketTiers((prev) =>
+                                  prev.map((t) =>
+                                    t.id === tier.id
+                                      ? { ...t, visibility: option.value }
+                                      : t,
+                                  ),
+                                )
+                              }
+                              className="flex-1 rounded-xl px-2 py-2 items-center"
+                              style={{
+                                backgroundColor: selected
+                                  ? colors.primary
+                                  : colors.muted,
+                              }}
+                            >
+                              <Text
+                                className="text-[11px] font-semibold"
+                                style={{
+                                  color: selected
+                                    ? colors.primaryForeground
+                                    : colors.mutedForeground,
+                                }}
+                                numberOfLines={1}
+                              >
+                                {option.label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                      <Text className="text-[11px] leading-[15px] text-muted-foreground mb-2 px-1">
+                        {
+                          TIER_VISIBILITY_OPTIONS.find(
+                            (o) => o.value === (tier.visibility ?? "public"),
+                          )?.hint
+                        }
+                      </Text>
+                      {tier.visibility === "locked" ? (
+                        <TextInput
+                          className="bg-muted rounded-xl px-4 py-3 text-sm text-foreground mb-2"
+                          placeholder="Unlock code (e.g. FRIENDS25)"
+                          placeholderTextColor={colors.mutedForeground}
+                          autoCapitalize="characters"
+                          autoCorrect={false}
+                          value={tier.unlockCode ?? ""}
+                          onChangeText={(v) =>
+                            setTicketTiers((prev) =>
+                              prev.map((t) =>
+                                t.id === tier.id
+                                  ? { ...t, unlockCode: v.toUpperCase() }
+                                  : t,
+                              ),
+                            )
+                          }
+                        />
+                      ) : null}
+
+                      {/* Early-bird pricing — writes price_schedule +
+                          sub_allocations exactly as the SQL resolver reads. */}
+                      <Text
+                        className="text-[11px] font-semibold mb-1.5 px-1"
+                        style={{ letterSpacing: 0.4, color: "#F5C518" }}
+                      >
+                        EARLY-BIRD PRICING (OPTIONAL)
+                      </Text>
+                      {(tier.priceSchedule ?? []).map((row, ri) => {
+                        const rowKey = `${tier.id}:sched:${ri}`;
+                        return (
+                          <View key={rowKey} className="mb-1.5">
+                            <View className="flex-row items-center gap-2">
+                              <Pressable
+                                onPress={() =>
+                                  setOpenScheduleRowKey(
+                                    openScheduleRowKey === rowKey
+                                      ? null
+                                      : rowKey,
+                                  )
+                                }
+                                className="flex-1 bg-muted rounded-xl px-3 py-2.5"
+                              >
+                                <Text className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                                  Price changes at
+                                </Text>
+                                <Text className="text-sm font-semibold text-foreground">
+                                  {row.effectiveAt
+                                    ? new Date(row.effectiveAt).toLocaleString(
+                                        "en-US",
+                                        {
+                                          month: "short",
+                                          day: "numeric",
+                                          hour: "numeric",
+                                          minute: "2-digit",
+                                        },
+                                      )
+                                    : "Pick a date"}
+                                </Text>
+                              </Pressable>
+                              <View className="w-24 flex-row items-center bg-muted rounded-xl px-3">
+                                <DollarSign
+                                  size={12}
+                                  color={colors.mutedForeground}
+                                />
+                                <TextInput
+                                  className="flex-1 ml-1 py-2.5 text-sm text-foreground"
+                                  placeholder="0"
+                                  placeholderTextColor={colors.mutedForeground}
+                                  keyboardType="decimal-pad"
+                                  value={row.priceDollars}
+                                  onChangeText={(v) =>
+                                    setTicketTiers((prev) =>
+                                      prev.map((t) =>
+                                        t.id === tier.id
+                                          ? {
+                                              ...t,
+                                              priceSchedule: (
+                                                t.priceSchedule ?? []
+                                              ).map((r, i) =>
+                                                i === ri
+                                                  ? { ...r, priceDollars: v }
+                                                  : r,
+                                              ),
+                                            }
+                                          : t,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </View>
+                              <Pressable
+                                onPress={() =>
+                                  setTicketTiers((prev) =>
+                                    prev.map((t) =>
+                                      t.id === tier.id
+                                        ? {
+                                            ...t,
+                                            priceSchedule: (
+                                              t.priceSchedule ?? []
+                                            ).filter((_, i) => i !== ri),
+                                          }
+                                        : t,
+                                    ),
+                                  )
+                                }
+                                hitSlop={10}
+                              >
+                                <X size={14} color={colors.mutedForeground} />
+                              </Pressable>
+                            </View>
+                            {openScheduleRowKey === rowKey && (
+                              <View className="bg-card rounded-xl mt-2 overflow-hidden">
+                                <DateTimePicker
+                                  value={
+                                    row.effectiveAt
+                                      ? new Date(row.effectiveAt)
+                                      : new Date()
+                                  }
+                                  mode="datetime"
+                                  display={
+                                    Platform.OS === "ios"
+                                      ? "spinner"
+                                      : "default"
+                                  }
+                                  minimumDate={new Date()}
+                                  themeVariant="dark"
+                                  style={{ width: "100%" }}
+                                  onChange={(_, picked) => {
+                                    if (Platform.OS === "android") {
+                                      setOpenScheduleRowKey(null);
+                                    }
+                                    if (picked) {
+                                      setTicketTiers((prev) =>
+                                        prev.map((t) =>
+                                          t.id === tier.id
+                                            ? {
+                                                ...t,
+                                                priceSchedule: (
+                                                  t.priceSchedule ?? []
+                                                ).map((r, i) =>
+                                                  i === ri
+                                                    ? {
+                                                        ...r,
+                                                        effectiveAt:
+                                                          picked.toISOString(),
+                                                      }
+                                                    : r,
+                                                ),
+                                              }
+                                            : t,
+                                        ),
+                                      );
+                                    }
+                                  }}
+                                />
+                              </View>
+                            )}
+                          </View>
+                        );
+                      })}
+                      {(tier.subAllocations ?? []).map((row, ri) => (
+                        <View
+                          key={`${tier.id}:band:${ri}`}
+                          className="flex-row items-center gap-2 mb-1.5"
+                        >
+                          <Text className="text-xs text-muted-foreground">
+                            First
+                          </Text>
+                          <TextInput
+                            className="w-16 bg-muted rounded-xl px-3 py-2.5 text-sm text-foreground"
+                            placeholder="N"
+                            placeholderTextColor={colors.mutedForeground}
+                            keyboardType="number-pad"
+                            value={row.quantity}
+                            onChangeText={(v) =>
+                              setTicketTiers((prev) =>
+                                prev.map((t) =>
+                                  t.id === tier.id
+                                    ? {
+                                        ...t,
+                                        subAllocations: (
+                                          t.subAllocations ?? []
+                                        ).map((r, i) =>
+                                          i === ri ? { ...r, quantity: v } : r,
+                                        ),
+                                      }
+                                    : t,
+                                ),
+                              )
+                            }
+                          />
+                          <Text className="text-xs text-muted-foreground">
+                            tickets at
+                          </Text>
+                          <View className="flex-1 flex-row items-center bg-muted rounded-xl px-3">
+                            <DollarSign
+                              size={12}
+                              color={colors.mutedForeground}
+                            />
+                            <TextInput
+                              className="flex-1 ml-1 py-2.5 text-sm text-foreground"
+                              placeholder="0"
+                              placeholderTextColor={colors.mutedForeground}
+                              keyboardType="decimal-pad"
+                              value={row.priceDollars}
+                              onChangeText={(v) =>
+                                setTicketTiers((prev) =>
+                                  prev.map((t) =>
+                                    t.id === tier.id
+                                      ? {
+                                          ...t,
+                                          subAllocations: (
+                                            t.subAllocations ?? []
+                                          ).map((r, i) =>
+                                            i === ri
+                                              ? { ...r, priceDollars: v }
+                                              : r,
+                                          ),
+                                        }
+                                      : t,
+                                  ),
+                                )
+                              }
+                            />
+                          </View>
+                          <Pressable
+                            onPress={() =>
+                              setTicketTiers((prev) =>
+                                prev.map((t) =>
+                                  t.id === tier.id
+                                    ? {
+                                        ...t,
+                                        subAllocations: (
+                                          t.subAllocations ?? []
+                                        ).filter((_, i) => i !== ri),
+                                      }
+                                    : t,
+                                ),
+                              )
+                            }
+                            hitSlop={10}
+                          >
+                            <X size={14} color={colors.mutedForeground} />
+                          </Pressable>
+                        </View>
+                      ))}
+                      <View className="flex-row gap-4 mt-0.5">
+                        <Pressable
+                          onPress={() =>
+                            setTicketTiers((prev) =>
+                              prev.map((t) =>
+                                t.id === tier.id
+                                  ? {
+                                      ...t,
+                                      priceSchedule: [
+                                        ...(t.priceSchedule ?? []),
+                                        { effectiveAt: "", priceDollars: "" },
+                                      ],
+                                    }
+                                  : t,
+                              ),
+                            )
+                          }
+                          hitSlop={8}
+                        >
+                          <Text className="text-[11px] font-semibold text-muted-foreground">
+                            + Price goes up at a date
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() =>
+                            setTicketTiers((prev) =>
+                              prev.map((t) =>
+                                t.id === tier.id
+                                  ? {
+                                      ...t,
+                                      subAllocations: [
+                                        ...(t.subAllocations ?? []),
+                                        { quantity: "", priceDollars: "" },
+                                      ],
+                                    }
+                                  : t,
+                              ),
+                            )
+                          }
+                          hitSlop={8}
+                        >
+                          <Text className="text-[11px] font-semibold text-muted-foreground">
+                            + First N tickets cheaper
+                          </Text>
+                        </Pressable>
+                      </View>
+                      {(tier.priceSchedule ?? []).length > 0 &&
+                      (tier.subAllocations ?? []).length > 0 ? (
+                        <Text className="text-[11px] text-muted-foreground mt-1.5 px-1">
+                          Date-based changes win over quantity bands when both
+                          apply.
+                        </Text>
+                      ) : null}
                     </View>
                   ))}
 
@@ -2242,6 +2668,11 @@ function CreateEventScreenContent() {
                           description: "",
                           saleStart: "",
                           saleEnd: "",
+                          tierType: "ga",
+                          visibility: "public",
+                          unlockCode: "",
+                          priceSchedule: [],
+                          subAllocations: [],
                         },
                       ])
                     }

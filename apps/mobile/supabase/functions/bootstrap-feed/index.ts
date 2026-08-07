@@ -10,10 +10,15 @@
  *
  * This eliminates the N-query waterfall on the feed screen.
  * Client falls back to individual queries if this fails.
+ *
+ * Identity is derived from the verified Better Auth session (x-auth-token /
+ * Authorization header) — never from the request body. Callers without a
+ * valid session get the anonymous public feed with no viewer state.
  */
 
 import { withSentry } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -191,7 +196,7 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, x-auth-token",
       },
     });
   }
@@ -204,45 +209,33 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
 
   try {
     const {
-      user_id,
       cursor = 0,
       limit = PAGE_SIZE,
       include_nsfw = false,
     } = await req.json();
-
-    if (!user_id) {
-      return new Response(JSON.stringify({ error: "Missing user_id" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } },
     });
 
-    // ── Resolve integer users.id from auth_id UUID ────────────────
-    // user_id from client is AppUser.id = Better Auth UUID, NOT integer
+    // ── Identity comes ONLY from the verified Better Auth session ─
+    // Never from the body — this function reads with the service role, so a
+    // client-supplied id would let anyone read another user's viewer state.
+    // No valid session = anonymous viewer (public safe feed, no viewer data).
+    const sessionUserId = await verifySession(supabase, req);
+
+    // ── Resolve integer users.id from the verified auth_id UUID ──
     let intUserId: number | null = null;
     let authUserId: string | null = null;
-    const asInt = parseInt(user_id, 10);
-    if (!isNaN(asInt) && String(asInt) === String(user_id)) {
+    if (sessionUserId) {
       const { data: userRow } = await supabase
         .from("users")
         .select("id, auth_id")
-        .eq("id", asInt)
-        .single();
-      intUserId = userRow?.id ?? asInt;
-      authUserId = userRow?.auth_id ?? null;
-    } else {
-      const { data: userRow } = await supabase
-        .from("users")
-        .select("id, auth_id")
-        .eq("auth_id", user_id)
+        .eq("auth_id", sessionUserId)
         .single();
       intUserId = userRow?.id ?? null;
-      authUserId = userRow?.auth_id ?? user_id;
+      authUserId = userRow?.auth_id ?? sessionUserId;
     }
 
     const unreadMessagesResult = await getAuthoritativeUnreadInboxCount(
@@ -483,7 +476,7 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
     });
 
     // Viewer context
-    const viewerProfile = viewerProfileResult.data;
+    const viewerProfile = viewerProfileResult.data as any;
     const viewerAvatarUrl =
       typeof viewerProfile?.avatar === "object"
         ? viewerProfile?.avatar?.url
@@ -497,7 +490,7 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
       posts: transformedPosts,
       stories,
       viewer: {
-        id: user_id,
+        id: sessionUserId,
         username: viewerProfile?.username || "",
         avatarUrl: viewerAvatarUrl || "",
         unreadMessages: unreadMessagesResult.count || 0,

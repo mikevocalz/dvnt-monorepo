@@ -19,6 +19,7 @@ type MediaKind =
   | "event-image"
   | "event-moment-photo"
   | "event-moment-video"
+  | "event-video"
   | "message-image"
   | "message-video";
 
@@ -63,11 +64,12 @@ const SIZE_LIMITS: Record<MediaKind, number> = {
   "event-image": 5 * 1024 * 1024, // 5 MB
   "event-moment-photo": 10 * 1024 * 1024, // 10 MB
   "event-moment-video": 50 * 1024 * 1024, // 50 MB (30s max)
+  "event-video": 50 * 1024 * 1024, // 50 MB — event flyer/trailer video
   "message-image": 5 * 1024 * 1024, // 5 MB
   "message-video": 12 * 1024 * 1024, // 12 MB
 };
 
-const VIDEO_KINDS: MediaKind[] = ["post-video", "story-video", "message-video", "event-moment-video"];
+const VIDEO_KINDS: MediaKind[] = ["post-video", "story-video", "message-video", "event-moment-video", "event-video"];
 const IMAGE_KINDS: MediaKind[] = [
   "avatar",
   "post-image",

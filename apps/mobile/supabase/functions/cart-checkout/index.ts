@@ -180,6 +180,20 @@ Deno.serve(async (req: Request) => {
         ? String((parsed as Record<string, unknown>).promoCode || "").trim()
         : "";
 
+    // Promoter attribution code (WS-4) — never touches pricing. Stashed
+    // in PI metadata (dvnt_* house key); stripe-webhook records the
+    // attribution + rev-share ledger entry on payment_intent.succeeded.
+    const promoterCodeRaw =
+      parsed && typeof parsed === "object"
+        ? String((parsed as Record<string, unknown>).promoterCode || "")
+            .trim()
+            .toUpperCase()
+            .slice(0, 32)
+        : "";
+    const promoterCode = /^[A-Z0-9_-]{2,32}$/.test(promoterCodeRaw)
+      ? promoterCodeRaw
+      : "";
+
     console.log("[cart-checkout] checkout requested", {
       cartId,
       userId: authId,
@@ -365,6 +379,9 @@ Deno.serve(async (req: Request) => {
       piBody["metadata[promo_code_id]"] = promoResult.promo_code_id;
       piBody["metadata[promo_code]"] = promoResult.code;
       piBody["metadata[discount_cents]"] = discountCents.toString();
+    }
+    if (promoterCode) {
+      piBody["metadata[dvnt_promoter_code]"] = promoterCode;
     }
 
     const pi = await stripeRequest("/payment_intents", piBody, {

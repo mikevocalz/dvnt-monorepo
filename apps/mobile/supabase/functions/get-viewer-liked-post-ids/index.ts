@@ -4,6 +4,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
 const corsHeaders = {
@@ -31,8 +32,6 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const token = authHeader.replace("Bearer ", "");
-
     const body = await req.json().catch(() => ({}));
     const postIds = Array.isArray(body?.postIds) ? body.postIds : [];
     const postIdsInt = postIds
@@ -59,20 +58,16 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
 
-    const { data: sessionData, error: sessionError } = await supabaseAdmin
-      .from("session")
-      .select("userId, expiresAt")
-      .eq("token", token)
-      .single();
-
-    if (sessionError || !sessionData) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabaseAdmin, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return new Response(JSON.stringify({ error: "Session expired" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       return new Response(JSON.stringify({ error: "Invalid session" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if (new Date(sessionData.expiresAt) < new Date()) {
-      return new Response(JSON.stringify({ error: "Session expired" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -80,7 +75,7 @@ Deno.serve(async (req) => {
 
     const userData = await resolveOrProvisionUser(
       supabaseAdmin,
-      sessionData.userId,
+      sessionResult.userId,
       "id",
     );
     if (!userData) {

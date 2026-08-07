@@ -20,6 +20,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { FishjamClient } from "npm:@fishjam-cloud/js-server-sdk";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
@@ -67,13 +68,6 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return err("validation_error", "Method not allowed");
 
   try {
-    const jwt = (
-      req.headers.get("x-auth-token") ||
-      req.headers.get("Authorization")?.replace("Bearer ", "") ||
-      ""
-    ).trim();
-    if (!jwt) return err("unauthorized", "Missing session token");
-
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -84,18 +78,16 @@ Deno.serve(async (req) => {
       managementToken: Deno.env.get("FISHJAM_API_KEY")!,
     });
 
-    // 1. Session
-    const { data: session } = await supabase
-      .from("session")
-      .select("userId, expiresAt")
-      .eq("token", jwt)
-      .order("createdAt", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!session) return err("unauthorized", "Invalid or expired session");
-    if (new Date(session.expiresAt) < new Date())
-      return err("unauthorized", "Session expired");
-    const userId = session.userId as string;
+    // 1. Session (shared helper)
+    const sessionResult = await verifySessionDetailed(supabase, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "missing")
+        return err("unauthorized", "Missing session token");
+      if (sessionResult.reason === "expired")
+        return err("unauthorized", "Session expired");
+      return err("unauthorized", "Invalid or expired session");
+    }
+    const userId = sessionResult.userId as string;
 
     // 2. Input
     let body: unknown;

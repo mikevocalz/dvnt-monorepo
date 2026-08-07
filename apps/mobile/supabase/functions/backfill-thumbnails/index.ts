@@ -28,6 +28,39 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  // ── Auth gate: internal admin job — x-internal-secret required ──────
+  // Report-only today, but keep the gate so re-enabling writes can never
+  // be publicly invocable. Mirrors the payouts-release CRON_SECRET
+  // pattern: fail CLOSED when the env is unset.
+  const internalSecret = Deno.env.get("INTERNAL_FN_SECRET") || "";
+  if (!internalSecret) {
+    console.error(
+      "[backfill-thumbnails] INTERNAL_FN_SECRET not set — rejecting request",
+    );
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: { code: "misconfigured", message: "Misconfigured" },
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+  if ((req.headers.get("x-internal-secret") || "") !== internalSecret) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: { code: "unauthorized", message: "Unauthorized" },
+      }),
+      {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

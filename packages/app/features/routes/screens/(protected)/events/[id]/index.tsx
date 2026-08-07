@@ -64,6 +64,7 @@ import {
 import { VerificationInterstitial } from "@dvnt/app/components/verification-interstitial.native";
 import { onboardingCheckpoint } from "@dvnt/observability/flows";
 import { eventsApi } from "@dvnt/app/lib/api/events";
+import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import { useEventDetailScreenStore } from "@dvnt/app/lib/stores/event-detail-screen-store";
 import { normalizeRouteParams } from "@dvnt/app/lib/navigation/route-params";
 import { routeToProfile } from "@dvnt/app/lib/utils/route-to-profile";
@@ -78,10 +79,7 @@ import {
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 import { ticketKeys } from "@dvnt/app/lib/hooks/use-tickets";
 import * as WebBrowser from "expo-web-browser";
-import {
-  deleteEvent as deleteEventPrivileged,
-  cancelEvent as cancelEventPrivileged,
-} from "@dvnt/app/lib/api/privileged";
+import { deleteEvent as deleteEventPrivileged } from "@dvnt/app/lib/api/privileged";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
 import { useCreateEventReview } from "@dvnt/app/lib/hooks/use-event-reviews";
 import { EventRatingModal } from "@dvnt/app/components/event-rating-modal";
@@ -1110,64 +1108,32 @@ function EventDetailScreenContent() {
     return false;
   }, [user?.id, eventData?.host?.id]);
 
-  const handleDeleteEvent = useCallback(() => {
-    // V2-EVT-01: route through cancel-event when tickets exist; the
-    // server cascades Stripe refunds + notifies attendees + marks the
-    // event status='cancelled' (preserves the row). delete-event is
-    // only safe for never-sold events and the server enforces that
-    // with a `tickets_exist` 409 guard.
+  // ── WS-9 safe destructive flows ──────────────────────────────────
+  // Cancel (auto-refund) / Postpone (reversible, no refunds) / Delete
+  // (blocked while paid tickets exist) each get their own confirmed
+  // path. Server: event-cancel + event-postpone edge fns.
+
+  const handleCancelEvent = useCallback(() => {
     Alert.alert(
       "Cancel Event",
-      "All ticket holders will be refunded and notified. The event will be marked Cancelled. This can't be undone.",
+      "Every paid order is automatically refunded (whole payment, including fees) and every attendee is notified. Guest buyers get an email. This can't be undone.",
       [
         { text: "Keep Event", style: "cancel" },
         {
-          text: "Cancel Event",
+          text: "Cancel & Refund",
           style: "destructive",
           onPress: async () => {
             try {
-              const result = await cancelEventPrivileged(parseInt(eventId));
+              const result = await eventsApi.cancelEventWithRefunds(eventId);
 
-              if (result.affectedTickets === 0) {
-                // No buyers → safe to hard-delete the row + remove from
-                // every list cache. Nothing to communicate to attendees
-                // because there are none.
-                queryClient.setQueriesData<any[]>(
-                  { queryKey: eventKeys.all },
-                  (old) => {
-                    if (!old || !Array.isArray(old)) return old;
-                    return old.filter(
-                      (e: any) => String(e?.id) !== String(eventId),
-                    );
-                  },
-                );
-                try {
-                  await deleteEventPrivileged(parseInt(eventId));
-                } catch (delErr) {
-                  console.warn(
-                    "[EventDetail] follow-up delete refused (race):",
-                    delErr,
-                  );
-                }
-                queryClient.removeQueries({
-                  queryKey: eventKeys.detail(eventId),
-                });
-              } else {
-                // BUYERS EXIST — keep the row visible in every list with
-                // a status='cancelled' label so ticket holders see the
-                // cancellation in context (instead of the event quietly
-                // disappearing from their feed). The cancel-event edge
-                // function already issued refunds + push notifications
-                // to attendees server-side.
-                propagateEntity(queryClient, "event", eventId, {
-                  status: "cancelled",
-                  cancelled_at: new Date().toISOString(),
-                });
-              }
-
-              // Background invalidate so next list focus refetches
-              // authoritative server state (in case anything else changed
-              // server-side as part of the cancel cascade).
+              // Keep the row visible in every list with a
+              // status='cancelled' label so ticket holders see the
+              // cancellation in context (instead of the event quietly
+              // disappearing from their feed).
+              propagateEntity(queryClient, "event", eventId, {
+                status: "cancelled",
+                cancelled_at: new Date().toISOString(),
+              });
               queryClient.invalidateQueries({ queryKey: eventKeys.all });
 
               const refundLine =
@@ -1176,7 +1142,7 @@ function EventDetailScreenContent() {
                   : "";
               const failedLine =
                 result.refundsFailed > 0
-                  ? ` ${result.refundsFailed} refund${result.refundsFailed === 1 ? "" : "s"} still processing — check host dashboard.`
+                  ? ` ${result.refundsFailed} refund${result.refundsFailed === 1 ? "" : "s"} couldn't be processed — re-run Cancel or check the host dashboard.`
                   : "";
               showToast(
                 result.refundsFailed > 0 ? "warning" : "success",
@@ -1197,6 +1163,187 @@ function EventDetailScreenContent() {
       ],
     );
   }, [eventId, queryClient, showToast, router]);
+
+  const handlePostponeEvent = useCallback(() => {
+    Alert.alert(
+      "Postpone Event",
+      "Attendees are notified that the event is postponed. Tickets remain valid — no refunds are issued. You can resume the event any time.",
+      [
+        { text: "Not Now", style: "cancel" },
+        {
+          text: "Postpone",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await eventsApi.postponeEvent(eventId);
+              propagateEntity(queryClient, "event", eventId, {
+                status: "postponed",
+              });
+              queryClient.invalidateQueries({ queryKey: eventKeys.all });
+              showToast(
+                "success",
+                "Event postponed",
+                "Attendees have been notified. Tickets remain valid.",
+              );
+            } catch (err: any) {
+              console.error("[EventDetail] Postpone error:", err);
+              showToast(
+                "error",
+                "Couldn't postpone",
+                err?.message || "Try again in a moment.",
+              );
+            }
+          },
+        },
+      ],
+    );
+  }, [eventId, queryClient, showToast]);
+
+  const handleResumeEvent = useCallback(() => {
+    Alert.alert(
+      "Resume Event",
+      "The event goes back to active and attendees are notified their tickets are valid as issued.",
+      [
+        { text: "Not Now", style: "cancel" },
+        {
+          text: "Resume",
+          onPress: async () => {
+            try {
+              await eventsApi.resumeEvent(eventId);
+              propagateEntity(queryClient, "event", eventId, {
+                status: "active",
+              });
+              queryClient.invalidateQueries({ queryKey: eventKeys.all });
+              showToast("success", "Event resumed", "You're back on.");
+            } catch (err: any) {
+              console.error("[EventDetail] Resume error:", err);
+              showToast(
+                "error",
+                "Couldn't resume",
+                err?.message || "Try again in a moment.",
+              );
+            }
+          },
+        },
+      ],
+    );
+  }, [eventId, queryClient, showToast]);
+
+  const handleDeleteEvent = useCallback(() => {
+    Alert.alert(
+      "Delete Event",
+      "This permanently removes the event. Events with paid tickets can't be deleted — cancel instead, which refunds every attendee.",
+      [
+        { text: "Keep Event", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteEventPrivileged(parseInt(eventId));
+              queryClient.setQueriesData<any[]>(
+                { queryKey: eventKeys.all },
+                (old) => {
+                  if (!old || !Array.isArray(old)) return old;
+                  return old.filter(
+                    (e: any) => String(e?.id) !== String(eventId),
+                  );
+                },
+              );
+              queryClient.removeQueries({
+                queryKey: eventKeys.detail(eventId),
+              });
+              queryClient.invalidateQueries({ queryKey: eventKeys.all });
+              showToast("success", "Event deleted", "");
+              router.back();
+            } catch (err: any) {
+              // Server 409 guard: paid/active tickets exist. Route the
+              // host to the safe path instead of a dead end.
+              const msg = String(err?.message || "");
+              if (/ticket/i.test(msg)) {
+                Alert.alert(
+                  "Can't Delete — Tickets Sold",
+                  "This event has active tickets. Cancel the event instead — every paid order is refunded and attendees are notified.",
+                  [
+                    { text: "Keep Event", style: "cancel" },
+                    {
+                      text: "Cancel & Refund…",
+                      style: "destructive",
+                      onPress: () => handleCancelEvent(),
+                    },
+                  ],
+                );
+                return;
+              }
+              console.error("[EventDetail] Delete error:", err);
+              showToast(
+                "error",
+                "Couldn't delete",
+                msg || "Try again in a moment.",
+              );
+            }
+          },
+        },
+      ],
+    );
+  }, [eventId, queryClient, showToast, router, handleCancelEvent]);
+
+  const handleDuplicateEvent = useCallback(() => {
+    if (!eventData) return;
+    // Prefill the create-event flow through the store's public setters
+    // (never editing the store file). Tier/add-on duplication is left
+    // to the host in the create flow — tier rows carry server ids that
+    // must not be cloned.
+    const store = useCreateEventStore.getState();
+    store.resetDraft();
+    store.setTitle(eventData.title || "");
+    store.setDescription(eventData.description || "");
+    store.setLocation(eventData.location || "");
+    if (eventData.locationName || eventData.location) {
+      store.setLocationData({
+        name: eventData.locationName || eventData.location || "",
+        latitude: eventData.locationLat,
+        longitude: eventData.locationLng,
+        address: (eventData as any).locationAddress,
+      });
+    }
+    store.setIsOnline(eventData.locationType === "virtual");
+    const galleryUrls = (eventData.images || [])
+      .map((img) => img?.url)
+      .filter((u): u is string => typeof u === "string" && u.length > 0);
+    store.setEventImages(galleryUrls);
+    if (eventData.flyerVideoUrl) {
+      store.setFlyerImage(eventData.flyerVideoUrl);
+      store.setFlyerMediaType("video");
+      store.setFlyerFallbackImage(eventData.flyerImageUrl || eventData.image || null);
+    } else if (eventData.flyerImageUrl || eventData.image) {
+      store.setFlyerImage(eventData.flyerImageUrl || eventData.image);
+      store.setFlyerMediaType("image");
+    }
+    // Only carry a date that's still in the future — a duplicated past
+    // event must not default to a date that can't be booked.
+    const srcDate = eventData.date ? new Date(eventData.date) : null;
+    if (srcDate && srcDate.getTime() > Date.now()) {
+      store.setEventDate(srcDate.toISOString());
+      if (eventData.endDate) store.setEndDate(eventData.endDate);
+    }
+    if (eventData.maxAttendees) {
+      store.setMaxAttendees(String(eventData.maxAttendees));
+    }
+    if (eventData.visibility) store.setVisibility(eventData.visibility);
+    if (eventData.ageRestriction) {
+      store.setAgeRestriction(eventData.ageRestriction);
+    }
+    store.setIsNsfw(!!eventData.nsfw);
+    store.setTicketingEnabled(!!eventData.ticketingEnabled);
+    store.setDressCode(eventData.dressCode || "");
+    store.setDoorPolicy(eventData.doorPolicy || "");
+    store.setLineup(eventData.lineup || []);
+    store.setPerks(eventData.perks || []);
+    store.setCurrentStep(0);
+
+    router.push("/(protected)/events/create" as any);
+  }, [eventData, router]);
 
   const handleShare = useCallback(async () => {
     try {
@@ -2574,6 +2721,7 @@ function EventDetailScreenContent() {
         onClose={() => setShowActionSheet(false)}
         isHost={isHost}
         isLiked={isLiked}
+        eventStatus={(eventData as any)?.status}
         onShare={handleShare}
         onToggleLike={handleToggleLike}
         onAddToCalendar={handleAddToCalendar}
@@ -2581,6 +2729,10 @@ function EventDetailScreenContent() {
           router.push(`/(protected)/events/${eventId}/edit` as any)
         }
         onDelete={handleDeleteEvent}
+        onDuplicate={isHost ? handleDuplicateEvent : undefined}
+        onCancelEvent={isHost ? handleCancelEvent : undefined}
+        onPostponeEvent={isHost ? handlePostponeEvent : undefined}
+        onResumeEvent={isHost ? handleResumeEvent : undefined}
         onDashboard={
           isHost
             ? () =>

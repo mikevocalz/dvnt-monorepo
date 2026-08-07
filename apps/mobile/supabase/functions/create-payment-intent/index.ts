@@ -170,11 +170,24 @@ Deno.serve(async (req: Request) => {
       ticket_type_id,
       quantity = 1,
       promo_code,
+      promoter_code,
     } = await req.json();
 
     if (!event_id || !ticket_type_id) {
       return json({ error: "Missing required fields" }, 400);
     }
+
+    // Promoter attribution code (WS-4) — from a tracked ?ref= link.
+    // Never touches pricing; stashed in PI metadata (dvnt_* house key)
+    // so stripe-webhook records attribution + rev-share on
+    // payment_intent.succeeded.
+    const promoterCodeRaw =
+      typeof promoter_code === "string"
+        ? promoter_code.trim().toUpperCase().slice(0, 32)
+        : "";
+    const validPromoterCode = /^[A-Z0-9_-]{2,32}$/.test(promoterCodeRaw)
+      ? promoterCodeRaw
+      : "";
 
     if (!Number.isInteger(quantity) || quantity < 1) {
       return json({ error: "Invalid quantity" }, 400);
@@ -321,6 +334,23 @@ Deno.serve(async (req: Request) => {
               : "Free ticket issued",
           },
         ]);
+
+        // Promoter attribution for free orders — no webhook fires for
+        // a $0 order. Earning is 0 so no ledger row; attribution still
+        // counts toward promoter order stats. Idempotent server-side.
+        if (validPromoterCode) {
+          try {
+            await supabase.rpc("record_promoter_attribution", {
+              p_order_id: freeOrder.id,
+              p_code: validPromoterCode,
+            });
+          } catch (attrErr) {
+            console.error(
+              "[create-payment-intent] free-order promoter attribution failed:",
+              attrErr,
+            );
+          }
+        }
       }
 
       return json({ tickets: issued, free: true });
@@ -411,6 +441,9 @@ Deno.serve(async (req: Request) => {
             "metadata[discount_cents]": discountCents.toString(),
             "metadata[promo_code]": promoResult.code,
           }
+        : {}),
+      ...(validPromoterCode
+        ? { "metadata[dvnt_promoter_code]": validPromoterCode }
         : {}),
     });
 

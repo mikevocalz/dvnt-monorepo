@@ -9,9 +9,14 @@
  * - Viewer's follow state for all actors (for follow-back buttons)
  *
  * Eliminates: useActivitiesQuery + fetchFollowingState + getBadges waterfall.
+ *
+ * Identity is derived from the verified Better Auth session (x-auth-token /
+ * Authorization header) — never from the request body. Notifications are
+ * inherently private: callers without a valid session get 401.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -23,7 +28,8 @@ Deno.serve(async (req: Request) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, x-auth-token",
       },
     });
   }
@@ -35,36 +41,32 @@ Deno.serve(async (req: Request) => {
   const t0 = Date.now();
 
   try {
-    const { user_id, limit = 50 } = await req.json();
-
-    if (!user_id) {
-      return new Response(JSON.stringify({ error: "Missing user_id" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    const { limit = 50 } = await req.json();
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } },
     });
 
-    // ── Resolve integer user_id from auth_id (UUID) or integer string ──
-    // user_id from client is AppUser.id = Better Auth UUID (auth_id), NOT integer
-    let intUserId: number | null = null;
-    const asInt = parseInt(user_id, 10);
-    if (!isNaN(asInt) && String(asInt) === String(user_id)) {
-      // Already an integer string
-      intUserId = asInt;
-    } else {
-      // It's a UUID — resolve via auth_id
-      const { data: userRow } = await supabase
-        .from("users")
-        .select("id")
-        .eq("auth_id", user_id)
-        .single();
-      intUserId = userRow?.id ?? null;
+    // ── Identity from the verified Better Auth session ONLY ───────────
+    // Never from the body — this function reads with the service role, so a
+    // client-supplied id would let anyone read another user's notifications.
+    const sessionUserId = await verifySession(supabase, req);
+    if (!sessionUserId) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
     }
+
+    // Resolve integer users.id from the verified auth_id UUID
+    let intUserId: number | null = null;
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_id", sessionUserId)
+      .single();
+    intUserId = userRow?.id ?? null;
 
     if (!intUserId) {
       return new Response(JSON.stringify({ error: "User not found" }), {

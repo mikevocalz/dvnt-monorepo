@@ -35,8 +35,9 @@ const OTP_TTL_MIN = 10;
 const ISSUE_WINDOW_MIN = 10; // rate-limit window
 const ISSUE_MAX_PER_WINDOW = 5; // codes per destination per window
 const GRANT_TTL_MS = 15 * 60 * 1000;
-const GRANT_SECRET =
-  Deno.env.get("TICKET_HMAC_SECRET") || "dvnt-ticket-hmac-default-key";
+// I6: fail CLOSED — no hardcoded fallback secret. A public default would let
+// anyone forge the grant rsvp-issue-guest trusts. Unset env = reject requests.
+const GRANT_SECRET = Deno.env.get("TICKET_HMAC_SECRET") || "";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -85,6 +86,12 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (!GRANT_SECRET) {
+    console.error(
+      "[rsvp-verify] TICKET_HMAC_SECRET not set — rejecting request",
+    );
+    return err("misconfigured", "Server misconfigured.", 500);
+  }
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,

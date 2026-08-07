@@ -70,6 +70,16 @@ Deno.serve(async (req) => {
     const attendeeNames: string[] = Array.isArray(body.attendee_names)
       ? body.attendee_names.slice(0, quantity).map((n: unknown) => (n == null ? "" : String(n).trim()))
       : [];
+    // Promoter attribution code (WS-4) — from a tracked ?ref= link or
+    // manual entry. Never touches pricing; stashed in Stripe metadata so
+    // stripe-webhook can record attribution + rev-share when paid.
+    const promoterCodeRaw =
+      typeof body.promoter_code === "string"
+        ? body.promoter_code.trim().toUpperCase().slice(0, 32)
+        : "";
+    const promoterCode = /^[A-Z0-9_-]{2,32}$/.test(promoterCodeRaw)
+      ? promoterCodeRaw
+      : "";
 
     if (!EMAIL_RE.test(guestEmail)) return err("invalid_email", "Enter a valid email.");
     if (!Number.isFinite(eventId) || !ticketTypeId) return err("invalid_request", "Missing event or tier.");
@@ -185,6 +195,14 @@ Deno.serve(async (req) => {
       ...(attendeeNames.some((n) => n)
         ? { "metadata[attendee_names]": JSON.stringify(attendeeNames) }
         : {}),
+      // Promoter attribution — house dvnt_* metadata key (session +
+      // PI copies, mirroring the fee metadata duplication below).
+      ...(promoterCode
+        ? {
+            "metadata[dvnt_promoter_code]": promoterCode,
+            "payment_intent_data[metadata][dvnt_promoter_code]": promoterCode,
+          }
+        : {}),
       // Destination charge → organizer's connected account; DVNT keeps the fee.
       "payment_intent_data[transfer_data][destination]": organizer.stripe_account_id,
       "payment_intent_data[application_fee_amount]": String(fees.application_fee_amount),
@@ -220,6 +238,39 @@ Deno.serve(async (req) => {
       status: "active",
       expires_at: new Date(Date.now() + 31 * 60 * 1000).toISOString(),
     });
+
+    // Create the order row in payment_pending, keyed to the Checkout
+    // Session — mirrors ticket-checkout. Previously this rail created no
+    // order until reconciliation, which meant the webhook's
+    // orders-by-session lookup (status flip + promoter attribution) had
+    // nothing to attach to. Fee columns are server-truth from computeFees;
+    // in absorb mode the buyer-side fee is zeroed (organizer eats it) and
+    // total is just the subtotal.
+    const { error: guestOrderError } = await supabase.from("orders").insert({
+      user_id: null,
+      guest_email: guestEmail,
+      type: "event_ticket",
+      status: "payment_pending",
+      quantity,
+      subtotal_cents: fees.subtotal,
+      platform_fee_cents: fees.dvnt_total_fee,
+      total_cents: absorb ? fees.subtotal : fees.customer_charge_amount,
+      buyer_pct_fee_cents: absorb ? 0 : fees.buyer_pct_fee,
+      buyer_per_ticket_fee_cents: absorb ? 0 : fees.buyer_per_ticket_fee,
+      buyer_fee_cents: absorb ? 0 : fees.buyer_fee,
+      org_pct_fee_cents: fees.org_pct_fee,
+      org_per_ticket_fee_cents: fees.org_per_ticket_fee,
+      organizer_fee_cents: fees.organizer_fee,
+      dvnt_total_fee_cents: fees.dvnt_total_fee,
+      fee_policy_version: fees.fee_policy_version,
+      event_id: eventId,
+      stripe_checkout_session_id: session.id,
+    });
+    if (guestOrderError) {
+      // Non-fatal: the Stripe session is already live. Log loudly —
+      // reconciliation can still repair the order later.
+      console.error("[guest-checkout] order insert failed:", guestOrderError);
+    }
 
     return json({ ok: true, url: session.url });
   } catch (e) {

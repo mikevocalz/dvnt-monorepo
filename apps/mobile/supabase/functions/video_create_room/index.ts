@@ -4,6 +4,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
@@ -141,7 +142,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    const jwt = authHeader.replace("Bearer ", "");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -150,28 +150,22 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
 
-    // Verify Better Auth session via direct DB lookup
+    // Verify Better Auth session via shared helper
     console.log("[video_create_room] Looking up session...");
-    const { data: session, error: sessionError } = await supabase
-      .from("session")
-      .select("id, token, userId, expiresAt")
-      .eq("token", jwt)
-      .single();
-
-    if (sessionError || !session) {
-      console.error(
-        "[video_create_room] Auth error: no valid session",
-        sessionError,
-      );
+    const sessionResult = await verifySessionDetailed(supabase, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
+      console.error("[video_create_room] Auth error: no valid session");
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    console.log("[video_create_room] Session found, userId:", session.userId);
+    console.log(
+      "[video_create_room] Session found, userId:",
+      sessionResult.userId,
+    );
 
-    if (new Date(session.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
-
-    const userId = session.userId;
+    const userId = sessionResult.userId;
 
     // Parse and validate input
     let body: unknown;

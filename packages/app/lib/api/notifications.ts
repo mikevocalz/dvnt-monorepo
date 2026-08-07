@@ -102,6 +102,15 @@ function resolveEventImage(event: Record<string, unknown>): string {
     typeof event.cover_image_url === "string" ? event.cover_image_url : "";
   if (coverImageUrl) return coverImageUrl;
 
+  // flyer_image_url is the primary artwork for most events and was not being
+  // consulted here, so notification/liked-activity thumbnails came back empty
+  // for them. Skipped when it points at a video — this value feeds an <img>.
+  const flyerImageUrl =
+    typeof event.flyer_image_url === "string" ? event.flyer_image_url : "";
+  if (flyerImageUrl && !/\.(mp4|mov|m4v|webm|avi)(\?|#|$)/i.test(flyerImageUrl)) {
+    return flyerImageUrl;
+  }
+
   const images = parseJsonbArray(event.images);
   for (const image of images) {
     if (typeof image === "string" && image.trim()) return image.trim();
@@ -620,12 +629,23 @@ export const notificationsApi = {
       if (eventIds.length > 0) {
         const { data: eventRows } = await supabase
           .from("events")
-          .select("id, title, cover_image_url")
+          .select("id, title, cover_image_url, flyer_image_url")
           .in("id", eventIds);
         for (const e of eventRows || []) {
+          // Most events keep their artwork in flyer_image_url, not
+          // cover_image_url, so notification thumbnails were coming back null.
+          // Video flyers are skipped — this feeds an <img>.
+          const flyer = (e as any).flyer_image_url;
+          const flyerIsImage =
+            typeof flyer === "string" &&
+            !!flyer &&
+            !/\.(mp4|mov|m4v|webm|avi)(\?|#|$)/i.test(flyer);
           eventMap.set(String((e as any).id), {
             title: (e as any).title || null,
-            cover: (e as any).cover_image_url || null,
+            cover:
+              (e as any).cover_image_url ||
+              (flyerIsImage ? flyer : null) ||
+              null,
           });
         }
       }

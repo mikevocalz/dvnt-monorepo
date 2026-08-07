@@ -18,6 +18,11 @@
  * We expose `isOnline()` as a module-level synchronous getter so code
  * paths outside React (mutation onMutate / onError handlers, chat store,
  * etc.) can check connectivity without subscribing.
+ *
+ * WEB (WS-12): in a browser environment the same store API is fed by
+ * `navigator.onLine` + window "online"/"offline" events instead of
+ * expo-network. Background Sync API deliberately NOT used — the outbox
+ * (lib/outbox) drains on these events while the page is alive.
  */
 
 import { create } from "zustand";
@@ -165,13 +170,56 @@ function applyNetworkEvent(isConnected: boolean, isReachable: boolean | undefine
 }
 
 /**
+ * True when running in a real browser (Next.js client / RN Web). React
+ * Native's Hermes global has no `document`, so this cleanly separates the
+ * two runtimes without importing react-native (this module must stay
+ * importable under plain node for tests).
+ */
+function isBrowserEnvironment(): boolean {
+  return (
+    typeof document !== "undefined" &&
+    typeof window !== "undefined" &&
+    typeof window.addEventListener === "function" &&
+    typeof navigator !== "undefined" &&
+    "onLine" in navigator
+  );
+}
+
+/**
  * Subscribe once at app boot. Safe to call multiple times — only the
  * first call attaches the listener. Call from the app root layout.
+ * On web this module self-initializes at import (see bottom of file).
  */
 export function initConnectivity() {
   if (_subscribed) return;
   _subscribed = true;
 
+  // ── Web branch ────────────────────────────────────────────────────────
+  // navigator.onLine + online/offline events. Deterministic and dependency-
+  // free — we do NOT rely on expo-network's web shim. Same debounce path
+  // (applyNetworkEvent) so the flap behavior matches native.
+  if (isBrowserEnvironment()) {
+    try {
+      const onOnline = () => applyNetworkEvent(true, true);
+      const onOffline = () => applyNetworkEvent(false, false);
+      window.addEventListener("online", onOnline);
+      window.addEventListener("offline", onOffline);
+      _unsubscribe = () => {
+        window.removeEventListener("online", onOnline);
+        window.removeEventListener("offline", onOffline);
+      };
+      // Seed from the current browser belief.
+      applyNetworkEvent(navigator.onLine, navigator.onLine);
+    } catch (e) {
+      console.warn(
+        "[Connectivity] web init failed — staying optimistic-online:",
+        e,
+      );
+    }
+    return;
+  }
+
+  // ── Native branch (expo-network) ──────────────────────────────────────
   // All expo-network access is wrapped in try/catch + null-guards
   // because this function is called from module-scope in _layout.tsx
   // and must never throw. A throw here crashes startup before React
@@ -248,4 +296,17 @@ export function isOnline(): boolean {
  */
 export function isOffline(): boolean {
   return useConnectivityStore.getState().phase === "offline";
+}
+
+// ─── Web self-init ──────────────────────────────────────────────────────────
+// Native boots via the explicit initConnectivity() call in the root layout
+// (expo-router). The Next.js web app never runs that layout, so on web we
+// attach the (safe, synchronous) browser listeners at module import —
+// idempotent via the same _subscribed guard. Guarded so SSR/node never runs it.
+if (isBrowserEnvironment()) {
+  try {
+    initConnectivity();
+  } catch {
+    // Never let module eval throw — optimistic-online fallback.
+  }
 }

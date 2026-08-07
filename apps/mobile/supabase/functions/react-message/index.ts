@@ -5,6 +5,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
 const corsHeaders = {
@@ -42,8 +43,6 @@ Deno.serve(async (req) => {
     if (!authHeader?.startsWith("Bearer ")) {
       return errorResponse("unauthorized", "Missing authorization token");
     }
-    const token = authHeader.replace("Bearer ", "");
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -52,21 +51,16 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${serviceKey}` } },
     });
 
-    // Verify Better Auth session via direct DB lookup
-    const { data: sessionData, error: sessionError } = await supabaseAdmin
-      .from("session")
-      .select("id, token, userId, expiresAt")
-      .eq("token", token)
-      .single();
-
-    if (sessionError || !sessionData) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabaseAdmin, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    if (new Date(sessionData.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
 
-    const authUserId = sessionData.userId;
+    const authUserId = sessionResult.userId;
 
     const { messageId, emoji } = await req.json();
     if (!messageId || !emoji) {

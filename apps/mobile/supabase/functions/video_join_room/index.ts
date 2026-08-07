@@ -4,6 +4,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
@@ -110,7 +111,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    const jwt = authHeader.replace("Bearer ", "");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const fishjamAppId = Deno.env.get("FISHJAM_APP_ID")!;
@@ -125,21 +125,16 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
 
-    // Verify Better Auth session via direct DB lookup
-    const { data: session, error: sessionError } = await supabase
-      .from("session")
-      .select("id, token, userId, expiresAt")
-      .eq("token", jwt)
-      .single();
-
-    if (sessionError || !session) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabase, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    if (new Date(session.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
 
-    const userId = session.userId;
+    const userId = sessionResult.userId;
 
     // Parse input
     let body: unknown;
@@ -293,7 +288,7 @@ Deno.serve(async (req) => {
         max: room.max_participants,
         // Was the user requesting this join the host? Lets the client
         // show an upgrade CTA for hosts vs a wait-notify UX for viewers.
-        isHost: session.userId === room.host_id,
+        isHost: userId === room.host_id,
       });
     }
 

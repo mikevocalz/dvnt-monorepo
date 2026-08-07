@@ -7,6 +7,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
@@ -123,8 +124,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    const token = authHeader.replace("Bearer ", "");
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!supabaseUrl || !supabaseServiceKey) {
@@ -137,22 +136,16 @@ Deno.serve(async (req) => {
 
     console.log("[Edge:update-profile] Received request with token");
 
-    // 2. Verify Better Auth session
-    // Verify Better Auth session via direct DB lookup
-    const { data: sessionData, error: sessionError } = await supabaseAdmin
-      .from("session")
-      .select("id, token, userId, expiresAt")
-      .eq("token", token)
-      .single();
-
-    if (sessionError || !sessionData) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabaseAdmin, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    if (new Date(sessionData.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
 
-    const authUserId = sessionData.userId;
+    const authUserId = sessionResult.userId;
     console.log(
       "[Edge:update-profile] Authenticated user auth_id:",
       authUserId,

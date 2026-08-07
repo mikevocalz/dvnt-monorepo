@@ -101,9 +101,26 @@ Deno.serve(async (req: Request) => {
       ticket_type_id,
       quantity = 1,
       promo_code,
+      promoter_code,
       guest_email,
       guest_name,
     } = await req.json();
+
+    // ── Promoter attribution code (WS-4) ──────────────────────
+    // Arrives from a tracked share link (?ref=CODE) or manual entry.
+    // Distinct from promo codes: it never changes the price — it only
+    // attributes the order to an event promoter for rev-share. We
+    // validate shape here and stash it in Stripe metadata; the
+    // stripe-webhook records the attribution when the order flips paid
+    // (record_promoter_attribution is idempotent + validates the code
+    // against event_promoters server-side).
+    const trimmedPromoterCode =
+      typeof promoter_code === "string"
+        ? promoter_code.trim().toUpperCase().slice(0, 32)
+        : "";
+    const validPromoterCode = /^[A-Z0-9_-]{2,32}$/.test(trimmedPromoterCode)
+      ? trimmedPromoterCode
+      : "";
 
     // ── Session auth — required UNLESS guest_email is provided ──
     const user_id = await verifySession(supabase, req);
@@ -355,6 +372,25 @@ Deno.serve(async (req: Request) => {
         .select("id")
         .single();
 
+      // Promoter attribution for free orders — no Stripe webhook will
+      // fire, so record it here. Earning is 0 (organizer nets $0 on a
+      // free ticket) so no ledger entry is written; the attribution
+      // still counts toward the promoter's order stats. Idempotent on
+      // order_id inside the SECURITY DEFINER fn.
+      if (freeOrder?.id && validPromoterCode) {
+        try {
+          await supabase.rpc("record_promoter_attribution", {
+            p_order_id: freeOrder.id,
+            p_code: validPromoterCode,
+          });
+        } catch (attrErr) {
+          console.error(
+            "[ticket-checkout] free-order promoter attribution failed:",
+            attrErr,
+          );
+        }
+      }
+
       if (freeOrder?.id) {
         await supabase.from("order_timeline").insert([
           { order_id: freeOrder.id, type: "created", label: "Order created" },
@@ -456,6 +492,12 @@ Deno.serve(async (req: Request) => {
             "metadata[discount_cents]": discountCents.toString(),
             "metadata[promo_code]": promoResult.code,
           }
+        : {}),
+      // Promoter attribution — house dvnt_* metadata key. Read by
+      // stripe-webhook on checkout.session.completed to record the
+      // attribution + rev-share ledger entry after payment confirms.
+      ...(validPromoterCode
+        ? { "metadata[dvnt_promoter_code]": validPromoterCode }
         : {}),
       // Stripe Tax: automatic collection
       "automatic_tax[enabled]": "true",

@@ -66,7 +66,7 @@ Deno.serve(async (req: Request) => {
     const { data: lineItems, error: lineItemsError } = await supabase
       .from("cart_line_items")
       .select(
-        "id, category, tier_id, quantity, unit_price_cents, refunded_amount_cents, metadata, ticket_types(name, price_cents, category)",
+        "id, category, tier_id, addon_id, variant_id, quantity, unit_price_cents, refunded_amount_cents, metadata, ticket_types(name, price_cents, category), ticket_addons(name)",
       )
       .eq("cart_id", cartId)
       .order("created_at", { ascending: true });
@@ -106,6 +106,23 @@ Deno.serve(async (req: Request) => {
       return errorResponse("Could not load issued tickets", 500);
     }
 
+    // Issued add-ons for this cart (order_addons rows written by
+    // cart_complete_issuance). Non-fatal: an error yields an empty list so
+    // ticket recovery still works.
+    const { data: orderAddons, error: orderAddonsError } = await supabase
+      .from("order_addons")
+      .select(
+        "id, addon_id, variant_id, quantity, unit_price_cents, status, qr_token, ticket_addons(name, is_redeemable), ticket_addon_variants(name)",
+      )
+      .eq("cart_id", cartId)
+      .order("created_at", { ascending: true });
+    if (orderAddonsError) {
+      console.error(
+        "[get-cart-status] order_addons lookup failed",
+        orderAddonsError,
+      );
+    }
+
     const activeHoldExpiresAt = activeHolds?.[0]?.expires_at ?? null;
     const issuedTickets = (tickets || []).map((ticket: any) => ({
       ...ticket,
@@ -133,12 +150,22 @@ Deno.serve(async (req: Request) => {
       lineItems: (lineItems || []).map((item: any) => ({
         id: item.id,
         category: item.category,
-        tierId: item.tier_id,
-        tierName: item.ticket_types?.name || "General",
+        // Addon lines have tier_id NULL — the DTO's back-compat convention
+        // carries the addon id on tierId with addonId set explicitly too.
+        tierId: item.tier_id ?? item.addon_id,
+        tierName:
+          item.ticket_types?.name || item.ticket_addons?.name || "General",
         quantity: item.quantity,
-        unitPriceCents: item.ticket_types?.price_cents ?? item.unit_price_cents,
+        // Held addon lines carry the server-priced unit_price_cents (variant
+        // override resolved by cart_create_hold); tier lines prefer the live
+        // tier price as before.
+        unitPriceCents: item.addon_id
+          ? item.unit_price_cents
+          : (item.ticket_types?.price_cents ?? item.unit_price_cents),
         refundedAmountCents: item.refunded_amount_cents,
         metadata: item.metadata || {},
+        addonId: item.addon_id ?? null,
+        variantId: item.variant_id ?? null,
       })),
       holds: {
         active: (activeHolds || []).length > 0,
@@ -146,6 +173,18 @@ Deno.serve(async (req: Request) => {
         items: activeHolds || [],
       },
       tickets: issuedTickets,
+      addons: (orderAddons || []).map((row: any) => ({
+        id: row.id,
+        addon_id: row.addon_id,
+        variant_id: row.variant_id ?? null,
+        addon_name: row.ticket_addons?.name || "Add-on",
+        variant_name: row.ticket_addon_variants?.name ?? null,
+        quantity: row.quantity,
+        unit_price_cents: row.unit_price_cents,
+        status: row.status,
+        is_redeemable: !!row.ticket_addons?.is_redeemable,
+        qr_token: row.qr_token ?? null,
+      })),
       completed: cart.status === "completed",
     });
   } catch (err) {

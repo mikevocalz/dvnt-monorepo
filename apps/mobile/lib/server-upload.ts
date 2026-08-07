@@ -85,6 +85,7 @@ function folderToKind(folder: string, mime?: string): string {
     stories: "story-video",
     chat: "message-video",
     uploads: "post-video",
+    events: "event-video",
     "event-moments": "event-moment-video",
   };
 

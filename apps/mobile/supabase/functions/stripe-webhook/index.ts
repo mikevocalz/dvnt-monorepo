@@ -5,6 +5,7 @@
  *   - checkout.session.completed → issue tickets OR grant sneaky access
  *   - payment_intent.succeeded → native PaymentSheet ticket issuance
  *   - payment_intent.payment_failed → release holds, mark order failed
+ *   - payment_intent.processing → record async-settlement provenance on order
  *   - charge.refunded → mark ticket refunded
  *   - charge.dispute.created → flag payout on_hold
  *   - charge.dispute.closed → resolve dispute, update order/payout
@@ -32,6 +33,7 @@ import {
 } from "../_shared/send-resend-email.ts";
 import { voidWalletPass } from "../_shared/wallet-push.ts";
 import { incrementPromoUsage } from "../_shared/apply-promo-code.ts";
+import { computeFees } from "../_shared/fee-calculator.ts";
 
 const STRIPE_WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET") || "";
 const STRIPE_WEBHOOK_SECRET_CONNECT =
@@ -232,6 +234,162 @@ async function prepareCartTicketRows(
   return preparedRows;
 }
 
+// ── Promoter economy (WS-4) ──────────────────────────────────────────
+// LEDGER BASE (documented decision): a promoter's earning is
+//   floor(locked_rev_share_bps × organizer_transfer_amount / 10000)
+// where organizer_transfer_amount = order.subtotal_cents −
+// order.organizer_fee_cents — i.e. the organizer-side NET the connected
+// account actually receives for the destination charge (see
+// _shared/fee-calculator.ts: organizer_transfer_amount = subtotal −
+// organizer_fee). Buyer-side fees and the application fee never reach
+// the organizer, so the promoter's cut comes out of the organizer's
+// net, never DVNT's fee or the gross charge. Integer cents only.
+//
+// Both writes are idempotent (attribution on order_id, ledger on
+// (order_id, entry_type)) so webhook replays can never double-pay.
+// Failures here are logged and swallowed — promoter bookkeeping must
+// never fail ticket issuance or the webhook 200.
+async function recordPromoterEarning(
+  supabase: any,
+  orderId: string | null | undefined,
+  promoterCode: string | null | undefined,
+): Promise<void> {
+  if (!orderId || !promoterCode) return;
+  try {
+    const { data: attr, error: attrError } = await supabase.rpc(
+      "record_promoter_attribution",
+      { p_order_id: orderId, p_code: promoterCode },
+    );
+    if (attrError) {
+      console.error("[stripe-webhook] promoter attribution error:", attrError);
+      return;
+    }
+    if (!attr?.ok) {
+      // promoter_not_found / order_not_found — invalid or paused code;
+      // nothing to ledger.
+      console.log(
+        `[stripe-webhook] promoter attribution skipped (${attr?.error || "unknown"}) for order ${orderId}`,
+      );
+      return;
+    }
+
+    // Locked share single source of truth = the attribution row (the
+    // RPC returns the promoter's CURRENT bps on an idempotent replay,
+    // which may have been edited since the order locked).
+    const { data: locked } = await supabase
+      .from("promoter_attributions")
+      .select("promoter_id, locked_rev_share_bps")
+      .eq("order_id", orderId)
+      .maybeSingle();
+    if (!locked?.promoter_id) return;
+
+    const { data: order } = await supabase
+      .from("orders")
+      .select("subtotal_cents, organizer_fee_cents, quantity")
+      .eq("id", orderId)
+      .maybeSingle();
+    if (!order) return;
+
+    // Organizer-side net (see LEDGER BASE above). If the fee columns
+    // are missing (legacy rows) recompute from the canonical calculator.
+    let organizerNet: number | null = null;
+    if (
+      Number.isInteger(order.subtotal_cents) &&
+      Number.isInteger(order.organizer_fee_cents)
+    ) {
+      organizerNet = order.subtotal_cents - order.organizer_fee_cents;
+    } else if (
+      Number.isInteger(order.subtotal_cents) &&
+      order.subtotal_cents > 0
+    ) {
+      try {
+        organizerNet = computeFees(
+          order.subtotal_cents,
+          Number.isInteger(order.quantity) && order.quantity > 0
+            ? order.quantity
+            : 1,
+        ).organizer_transfer_amount;
+      } catch {
+        organizerNet = null;
+      }
+    }
+    if (organizerNet == null || organizerNet <= 0) return;
+
+    const earningCents = Math.floor(
+      (organizerNet * locked.locked_rev_share_bps) / 10000,
+    );
+    if (!Number.isInteger(earningCents) || earningCents <= 0) return;
+
+    const { data: ledger, error: ledgerError } = await supabase.rpc(
+      "record_promoter_ledger_entry",
+      {
+        p_promoter_id: locked.promoter_id,
+        p_order_id: orderId,
+        p_entry_type: "earning",
+        p_amount_cents: earningCents,
+        p_currency: "usd",
+        p_stripe_transfer_id: null,
+      },
+    );
+    if (ledgerError) {
+      console.error("[stripe-webhook] promoter ledger error:", ledgerError);
+      return;
+    }
+    console.log(
+      `[stripe-webhook] promoter earning ${ledger?.applied ? "recorded" : "already recorded"}: order ${orderId}, ${earningCents}¢ @ ${locked.locked_rev_share_bps}bps`,
+    );
+  } catch (err) {
+    console.error("[stripe-webhook] recordPromoterEarning failed:", err);
+  }
+}
+
+// Reverse a promoter earning on refund / transfer reversal. Full
+// clawback by design: the uniq (order_id, entry_type) constraint allows
+// exactly one reversal row per order, so even a partial refund reverses
+// the entire earning — conservative (a promoter is never overpaid on a
+// disputed/refunded order) and idempotent on webhook replay.
+async function recordPromoterReversal(
+  supabase: any,
+  orderId: string | null | undefined,
+  stripeTransferId: string | null = null,
+): Promise<void> {
+  if (!orderId) return;
+  try {
+    const { data: earning } = await supabase
+      .from("promoter_ledger_entries")
+      .select("promoter_id, amount_cents, currency")
+      .eq("order_id", orderId)
+      .eq("entry_type", "earning")
+      .maybeSingle();
+    if (!earning || !Number.isInteger(earning.amount_cents)) return;
+    if (earning.amount_cents <= 0) return;
+
+    const { error: reversalError } = await supabase.rpc(
+      "record_promoter_ledger_entry",
+      {
+        p_promoter_id: earning.promoter_id,
+        p_order_id: orderId,
+        p_entry_type: "reversal",
+        p_amount_cents: -earning.amount_cents,
+        p_currency: earning.currency || "usd",
+        p_stripe_transfer_id: stripeTransferId,
+      },
+    );
+    if (reversalError) {
+      console.error(
+        "[stripe-webhook] promoter reversal error:",
+        reversalError,
+      );
+      return;
+    }
+    console.log(
+      `[stripe-webhook] promoter reversal recorded for order ${orderId} (−${earning.amount_cents}¢)`,
+    );
+  } catch (err) {
+    console.error("[stripe-webhook] recordPromoterReversal failed:", err);
+  }
+}
+
 async function handleCartPaymentIntentSucceeded(
   supabase: any,
   pi: any,
@@ -321,6 +479,13 @@ async function handleCartPaymentIntentSucceeded(
         detail: `${issuanceResult.issuedCount} ticket(s) issued`,
       },
     ]);
+
+    // Promoter attribution + rev-share earning (WS-4) — idempotent.
+    await recordPromoterEarning(
+      supabase,
+      orderRow.id,
+      metadata.dvnt_promoter_code || null,
+    );
   }
 
   console.log("[stripe-webhook] Cart issuance complete", {
@@ -607,6 +772,15 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
                 detail: `${quantity} ticket(s) issued`,
               },
             ]);
+
+            // Promoter attribution + rev-share earning (WS-4) —
+            // idempotent on replay (attribution keyed on order_id,
+            // ledger on (order_id, entry_type)).
+            await recordPromoterEarning(
+              supabase,
+              orderRow.id,
+              metadata.dvnt_promoter_code || null,
+            );
           }
 
           console.log(
@@ -853,6 +1027,14 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
                 detail: `${piQuantity} ticket(s) issued`,
               },
             ]);
+
+            // Promoter attribution + rev-share earning (WS-4) —
+            // idempotent on replay.
+            await recordPromoterEarning(
+              supabase,
+              piOrderRow.id,
+              piMetadata.dvnt_promoter_code || null,
+            );
           }
 
           console.log(
@@ -999,6 +1181,52 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         console.log(
           "[stripe-webhook] Payment failed, hold released for PI:",
           failedPi.id,
+        );
+        break;
+      }
+
+      case "payment_intent.processing": {
+        // Async payment methods (e.g. bank debits) confirm now and settle
+        // later. Defensive plumbing only — no new payment method is enabled
+        // here. The order stays `payment_pending` (holds untouched); a later
+        // payment_intent.succeeded / payment_failed resolves it. We record
+        // provenance so a multi-day settlement window doesn't strand the
+        // order silently. Replay-safe via the stripe_events dedup above.
+        const processingPi = event.data.object;
+        const processingMetadata = processingPi.metadata || {};
+
+        const { data: processingOrder } =
+          processingMetadata.type === "cart_checkout" &&
+          processingMetadata.cart_id
+            ? await supabase
+                .from("orders")
+                .select("id")
+                .eq("cart_id", processingMetadata.cart_id)
+                .eq("status", "payment_pending")
+                .maybeSingle()
+            : await supabase
+                .from("orders")
+                .select("id")
+                .eq("stripe_payment_intent_id", processingPi.id)
+                .eq("status", "payment_pending")
+                .maybeSingle();
+
+        if (processingOrder) {
+          // `payment_authorized` is the closest type permitted by the
+          // order_timeline CHECK (20260310_payments_ui_tables.sql); a
+          // dedicated `payment_processing` type needs a CHECK-widening
+          // migration.
+          await supabase.from("order_timeline").insert({
+            order_id: processingOrder.id,
+            type: "payment_authorized",
+            label: "Payment processing",
+            detail: `Async payment method submitted; awaiting settlement (PI ${processingPi.id})`,
+          });
+        }
+
+        console.log(
+          "[stripe-webhook] Payment processing (async settlement pending):",
+          processingPi.id,
         );
         break;
       }
@@ -1213,6 +1441,10 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
               })
               .eq("order_id", refundedOrder.id)
               .eq("status", "pending");
+
+            // Promoter rev-share reversal (WS-4) — full clawback of the
+            // order's earning, idempotent via (order_id, 'reversal').
+            await recordPromoterReversal(supabase, refundedOrder.id);
           }
 
           console.log(
@@ -1388,6 +1620,29 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
 
         const stripePriceId = sub.items?.data?.[0]?.price?.id || null;
 
+        // Inline monotonic guard (I5) — sneaky_subscriptions has no
+        // `last_event_at` column (needs the orders-guard migration to adopt
+        // the upsert_membership_subscription RPC pattern). Best available
+        // ordering signal: this event's Stripe `created` timestamp vs the
+        // row's `updated_at` (written as now() on every webhook write). Skip
+        // the upsert when the stored row was written after this event was
+        // created — i.e. a late/replayed event must not clobber newer state.
+        const { data: existingSneaky } = await supabase
+          .from("sneaky_subscriptions")
+          .select("updated_at")
+          .eq("host_id", hostId)
+          .maybeSingle();
+        if (
+          existingSneaky?.updated_at &&
+          new Date(existingSneaky.updated_at).getTime() >
+            event.created * 1000
+        ) {
+          console.log(
+            `[stripe-webhook] stale sneaky subscription event skipped for host ${hostId} (event.created=${event.created})`,
+          );
+          break;
+        }
+
         const { error: subError } = await supabase
           .from("sneaky_subscriptions")
           .upsert(
@@ -1465,15 +1720,59 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             updated_at: new Date().toISOString(),
           })
           .eq("stripe_subscription_id", canceledSub.id);
-        await supabase
+
+        // Membership cancel goes through the guarded upsert RPC (I5) so a
+        // late/replayed `deleted` can never clobber a newer subscription
+        // state. Look up the existing row to preserve the identity/plan
+        // fields the RPC requires; no row = nothing to cancel (same no-op
+        // as the previous direct update).
+        const { data: canceledMemSub } = await supabase
           .from("membership_subscriptions")
-          .update({
-            status: "canceled",
-            canceled_at: new Date().toISOString(),
-            last_synced_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("stripe_subscription_id", canceledSub.id);
+          .select(
+            "user_id, rail, product_family, plan_key, provider_ref, stripe_customer_id, stripe_price_id",
+          )
+          .eq("stripe_subscription_id", canceledSub.id)
+          .maybeSingle();
+
+        if (canceledMemSub) {
+          const { data: memApplied, error: memErr } = await supabase.rpc(
+            "upsert_membership_subscription",
+            {
+              p_user_id: canceledMemSub.user_id,
+              p_rail: canceledMemSub.rail,
+              p_product_family: canceledMemSub.product_family,
+              p_plan_key: canceledMemSub.plan_key,
+              p_status: "canceled",
+              p_provider_ref: canceledMemSub.provider_ref,
+              p_stripe_customer_id: canceledMemSub.stripe_customer_id,
+              p_stripe_subscription_id: canceledSub.id,
+              p_stripe_price_id: canceledMemSub.stripe_price_id,
+              p_current_period_start: canceledSub.current_period_start
+                ? new Date(canceledSub.current_period_start * 1000).toISOString()
+                : null,
+              p_current_period_end: canceledSub.current_period_end
+                ? new Date(canceledSub.current_period_end * 1000).toISOString()
+                : null,
+              p_cancel_at_period_end: canceledSub.cancel_at_period_end || false,
+              p_canceled_at: canceledSub.canceled_at
+                ? new Date(canceledSub.canceled_at * 1000).toISOString()
+                : new Date().toISOString(),
+              p_event_created_at: new Date(event.created * 1000).toISOString(),
+            },
+          );
+          if (memErr) {
+            console.error(
+              "[stripe-webhook] membership cancel upsert error:",
+              memErr,
+            );
+            throw memErr;
+          }
+          if (memApplied === false) {
+            console.log(
+              `[stripe-webhook] stale subscription.deleted skipped for ${canceledMemSub.user_id} (event.created=${event.created})`,
+            );
+          }
+        }
 
         if (cancelHostId) {
           console.log(
@@ -1513,26 +1812,64 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             .eq("stripe_subscription_id", subId)
             .not("grace_period_ends_at", "is", null);
 
-          // Same grace handling for DVNT membership subscriptions.
-          await supabase
+          // Same grace handling for DVNT membership subscriptions — the
+          // status flip goes through the guarded upsert RPC (I5) so a
+          // replayed failure can't roll back a newer state (e.g. a
+          // recovered/active row). Existing fields are read back and passed
+          // through unchanged; only status + last_event_at move.
+          const { data: failedMemSub } = await supabase
             .from("membership_subscriptions")
-            .update({
-              status: "past_due",
-              grace_period_ends_at: gracePeriodEndsAt,
-              last_synced_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
+            .select(
+              "user_id, rail, product_family, plan_key, provider_ref, stripe_customer_id, stripe_price_id, current_period_start, current_period_end, cancel_at_period_end, canceled_at",
+            )
             .eq("stripe_subscription_id", subId)
-            .is("grace_period_ends_at", null);
-          await supabase
-            .from("membership_subscriptions")
-            .update({
-              status: "past_due",
-              last_synced_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("stripe_subscription_id", subId)
-            .not("grace_period_ends_at", "is", null);
+            .maybeSingle();
+
+          if (failedMemSub) {
+            const { data: memApplied, error: memErr } = await supabase.rpc(
+              "upsert_membership_subscription",
+              {
+                p_user_id: failedMemSub.user_id,
+                p_rail: failedMemSub.rail,
+                p_product_family: failedMemSub.product_family,
+                p_plan_key: failedMemSub.plan_key,
+                p_status: "past_due",
+                p_provider_ref: failedMemSub.provider_ref,
+                p_stripe_customer_id: failedMemSub.stripe_customer_id,
+                p_stripe_subscription_id: subId,
+                p_stripe_price_id: failedMemSub.stripe_price_id,
+                p_current_period_start: failedMemSub.current_period_start,
+                p_current_period_end: failedMemSub.current_period_end,
+                p_cancel_at_period_end:
+                  failedMemSub.cancel_at_period_end || false,
+                p_canceled_at: failedMemSub.canceled_at,
+                p_event_created_at: new Date(
+                  event.created * 1000,
+                ).toISOString(),
+              },
+            );
+            if (memErr) {
+              console.error(
+                "[stripe-webhook] membership past_due upsert error:",
+                memErr,
+              );
+              throw memErr;
+            }
+            if (memApplied === false) {
+              console.log(
+                `[stripe-webhook] stale invoice.payment_failed skipped for ${failedMemSub.user_id} (event.created=${event.created})`,
+              );
+            } else {
+              // grace_period_ends_at is outside the RPC's column set — set
+              // it only on first failure (stays put once set), and only
+              // when the guarded upsert actually applied.
+              await supabase
+                .from("membership_subscriptions")
+                .update({ grace_period_ends_at: gracePeriodEndsAt })
+                .eq("stripe_subscription_id", subId)
+                .is("grace_period_ends_at", null);
+            }
+          }
 
           console.log(
             `[stripe-webhook] Invoice payment failed for subscription ${subId} (grace until ${gracePeriodEndsAt})`,
@@ -1722,6 +2059,49 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         const transferEventId = transferMeta.event_id
           ? parseInt(transferMeta.event_id)
           : null;
+
+        // Promoter rev-share reversal (WS-4). Destination-charge
+        // transfers are auto-created by Stripe with source_transaction
+        // = the charge — resolve charge → payment_intent → order, then
+        // write the (idempotent) reversal row. Independent of the
+        // payout-transfer branch below (payouts-release transfers carry
+        // event_id metadata but no source_transaction).
+        if (transfer.source_transaction) {
+          try {
+            const chargeRes = await fetch(
+              `https://api.stripe.com/v1/charges/${transfer.source_transaction}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${Deno.env.get("STRIPE_SECRET_KEY") || ""}`,
+                },
+              },
+            );
+            const sourceCharge = await chargeRes.json();
+            const sourcePiId =
+              typeof sourceCharge?.payment_intent === "string"
+                ? sourceCharge.payment_intent
+                : sourceCharge?.payment_intent?.id;
+            if (sourcePiId) {
+              const { data: reversedOrder } = await supabase
+                .from("orders")
+                .select("id")
+                .eq("stripe_payment_intent_id", sourcePiId)
+                .maybeSingle();
+              if (reversedOrder?.id) {
+                await recordPromoterReversal(
+                  supabase,
+                  reversedOrder.id,
+                  transfer.id,
+                );
+              }
+            }
+          } catch (revErr) {
+            console.error(
+              "[stripe-webhook] transfer.reversed promoter reversal failed:",
+              revErr,
+            );
+          }
+        }
 
         if (transferEventId) {
           // Put payout back on hold

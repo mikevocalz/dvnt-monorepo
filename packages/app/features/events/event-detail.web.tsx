@@ -84,7 +84,15 @@ import { GuestRsvpSheet } from "./guest-rsvp-sheet.web";
 import { useGuestRsvpStore } from "@dvnt/app/lib/stores/guest-rsvp-store";
 import { GuestCheckoutSheet } from "./guest-checkout-sheet.web";
 import { useGuestCheckoutStore } from "@dvnt/app/lib/stores/guest-checkout-store";
-import type { TicketTypeRecord } from "@dvnt/app/lib/api/ticket-types";
+import {
+  ticketTypesApi,
+  type TicketTypeRecord,
+} from "@dvnt/app/lib/api/ticket-types";
+import {
+  filterBuyerVisibleTiers,
+  tierIsHiddenFromBuyers,
+  tierIsLockedForBuyer,
+} from "@dvnt/app/lib/tickets/pricing";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
 import "react-lite-youtube-embed/dist/LiteYouTubeEmbed.css";
 import { matchBySlug } from "@dvnt/app/lib/slug";
@@ -256,6 +264,17 @@ export function EventDetailScreen() {
   const setReviewText = useEventDetailUiStore((s) => s.setReviewText);
   const translated = useEventDetailUiStore((s) => s.translated);
   const setTranslated = useEventDetailUiStore((s) => s.setTranslated);
+  // Locked-tier unlock ("Have a code?") — validation is server-side only.
+  const unlockOpen = useEventDetailUiStore((s) => s.unlockOpen);
+  const setUnlockOpen = useEventDetailUiStore((s) => s.setUnlockOpen);
+  const unlockCodeInput = useEventDetailUiStore((s) => s.unlockCodeInput);
+  const setUnlockCodeInput = useEventDetailUiStore((s) => s.setUnlockCodeInput);
+  const unlockError = useEventDetailUiStore((s) => s.unlockError);
+  const setUnlockError = useEventDetailUiStore((s) => s.setUnlockError);
+  const unlockBusy = useEventDetailUiStore((s) => s.unlockBusy);
+  const setUnlockBusy = useEventDetailUiStore((s) => s.setUnlockBusy);
+  const unlockedTierIds = useEventDetailUiStore((s) => s.unlockedTierIds);
+  const addUnlockedTierIds = useEventDetailUiStore((s) => s.addUnlockedTierIds);
   const resetUi = useEventDetailUiStore((s) => s.reset);
 
   // Reset transient flags when leaving the screen.
@@ -412,6 +431,27 @@ export function EventDetailScreen() {
   // ── 6. PROMOTION — open the promote-event sheet (host only) ──────────
   const openPromotionSheet = usePromotionStore((s) => s.openSheet);
 
+  // ── 7. LOCKED TIERS — "Have a code?" unlock. The code is validated
+  //    SERVER-side (ticketTypesApi.unlockTier → `unlock-ticket-tier` edge fn,
+  //    a payments-wave seam); we never compare against a fetched unlock_code.
+  const unlockedSet = new Set(unlockedTierIds);
+  const handleUnlockSubmit = async () => {
+    const code = unlockCodeInput.trim();
+    if (!code || unlockBusy || !eventId) return;
+    setUnlockBusy(true);
+    setUnlockError(null);
+    const { tierIds, error } = await ticketTypesApi.unlockTier(eventId, code);
+    setUnlockBusy(false);
+    if (error || tierIds.length === 0) {
+      setUnlockError(error || "That code didn't unlock a tier.");
+      return;
+    }
+    addUnlockedTierIds(tierIds);
+    setUnlockOpen(false);
+    setUnlockCodeInput("");
+    showToast("success", "Unlocked", "A hidden tier is now available.");
+  };
+
   const resolving =
     (isLoading && !listEvent) || !slugIndex || (!!resolvedId && !full);
   if (!e && resolving) return <Centered>Loading…</Centered>;
@@ -426,6 +466,35 @@ export function EventDetailScreen() {
   const tags: string[] = Array.isArray(e.tags) ? e.tags : [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tiers: any[] = Array.isArray(e.ticketTiers) ? e.ticketTiers : [];
+  // Buyer-facing tier visibility (v2 tier model): hidden tiers NEVER render;
+  // locked tiers collapse into the "Have a code?" affordance until the server
+  // unlocks them. Live ticket_types rows are authoritative for the flags; the
+  // event payload's copy is the fallback for older aggregates.
+  const liveList = liveTicketTypes as TicketTypeRecord[];
+  const liveById = (tid: unknown) =>
+    liveList.find((lt) => String(lt.id) === String(tid));
+  const buyerVisibleTiers = tiers.filter((t) => {
+    const live = liveById(t.id);
+    const vis = {
+      id: live?.id ?? t.id,
+      tier_visibility:
+        live?.tier_visibility ?? t.tier_visibility ?? t.tierVisibility ?? null,
+    };
+    return (
+      !tierIsHiddenFromBuyers(vis) && !tierIsLockedForBuyer(vis, unlockedSet)
+    );
+  });
+  const hasLockedTiers =
+    liveList.some((t) => t.is_active && tierIsLockedForBuyer(t, unlockedSet)) ||
+    tiers.some((t) =>
+      tierIsLockedForBuyer(
+        {
+          id: t.id,
+          tier_visibility: t.tier_visibility ?? t.tierVisibility ?? null,
+        },
+        unlockedSet,
+      ),
+    );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const attendeeAvatars: any[] = Array.isArray(e.attendeeAvatars)
     ? e.attendeeAvatars
@@ -643,9 +712,12 @@ export function EventDetailScreen() {
 
           {/* CTA — drives the real checkout / view-ticket / waitlist flow. */}
           {(() => {
-            const sellableTiers = (liveTicketTypes as TicketTypeRecord[]).filter(
-              (t) => t.is_active,
-            );
+            // Buyer-visible only: hidden tiers never sell here, locked tiers
+            // join once the server unlocks them (v2 tier model).
+            const sellableTiers = filterBuyerVisibleTiers(
+              liveList.filter((t) => t.is_active),
+              unlockedSet,
+            ).visible;
             const allSoldOut =
               sellableTiers.length > 0 &&
               sellableTiers.every(
@@ -897,10 +969,10 @@ export function EventDetailScreen() {
               ticket_types query (useTicketTypes) is the source of truth for
               sold-out + the real UUID id checkout needs; falls back to the
               event payload tiers for display only. */}
-          {tiers.length > 0 ? (
+          {buyerVisibleTiers.length > 0 || hasLockedTiers ? (
             <Section title="Tickets">
               <div className="flex flex-col gap-2">
-                {tiers.map((t, i) => {
+                {buyerVisibleTiers.map((t, i) => {
                   const price =
                     t.price != null
                       ? t.price
@@ -972,6 +1044,62 @@ export function EventDetailScreen() {
                     </button>
                   );
                 })}
+
+                {/* Locked tiers — "Have a code?" affordance. The code goes to
+                    the server for validation; on success the unlocked tier(s)
+                    appear in the list above. Never a client-side comparison. */}
+                {hasLockedTiers ? (
+                  <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-4">
+                    {!unlockOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUnlockError(null);
+                          setUnlockOpen(true);
+                        }}
+                        className="flex w-full items-center gap-2 text-left text-sm font-medium text-white/70 hover:text-white"
+                      >
+                        <Lock size={14} color="#F5C518" />
+                        Have a code? Unlock a hidden tier
+                      </button>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <span className="flex items-center gap-2 text-sm font-medium text-white/85">
+                          <Lock size={14} color="#F5C518" /> Enter your access
+                          code
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            value={unlockCodeInput}
+                            onChange={(ev) =>
+                              setUnlockCodeInput(ev.target.value.toUpperCase())
+                            }
+                            onKeyDown={(ev) => {
+                              if (ev.key === "Enter") {
+                                ev.preventDefault();
+                                void handleUnlockSubmit();
+                              }
+                            }}
+                            placeholder="ACCESS CODE"
+                            autoCapitalize="characters"
+                            className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 font-mono text-sm uppercase tracking-widest text-white placeholder:text-white/30 outline-none focus:border-[#F5C518]/60"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void handleUnlockSubmit()}
+                            disabled={unlockBusy || !unlockCodeInput.trim()}
+                            className="h-10 shrink-0 rounded-xl border border-[#F5C518]/40 bg-[#F5C518]/10 px-4 text-sm font-semibold text-[#F5C518] disabled:opacity-40"
+                          >
+                            {unlockBusy ? "…" : "Unlock"}
+                          </button>
+                        </div>
+                        {unlockError ? (
+                          <p className="text-sm text-[#FC253A]">{unlockError}</p>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             </Section>
           ) : null}

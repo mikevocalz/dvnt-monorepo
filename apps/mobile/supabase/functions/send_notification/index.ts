@@ -215,6 +215,43 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+    // ── Auth gate: internal callers ONLY ────────────────────────────────
+    // This function takes an arbitrary recipient userId + arbitrary content,
+    // so a session-user path can never be safe — anyone could push arbitrary
+    // notifications to anyone. Every legitimate caller is server-side:
+    //   1. DB trigger (call_signals → pg_net, scripts/apply-call-push-trigger.sh)
+    //      sends `Authorization: Bearer <service_role key>`.
+    //   2. Edge fns (_shared/notify-event-organizers.ts,
+    //      _shared/notify-waitlisters.ts, video_create_room) send the same.
+    // Accept the service-role bearer, or an x-internal-secret header matching
+    // INTERNAL_FN_SECRET (fail CLOSED if that env var is unset).
+    const authHeader = req.headers.get("Authorization") || "";
+    const bearer = authHeader.replace("Bearer ", "").trim();
+    const isServiceRole =
+      bearer.length > 0 &&
+      supabaseServiceKey.length > 0 &&
+      bearer === supabaseServiceKey;
+
+    if (!isServiceRole) {
+      const internalSecret = Deno.env.get("INTERNAL_FN_SECRET") || "";
+      if (!internalSecret) {
+        console.error(
+          "[send_notification] INTERNAL_FN_SECRET not set and caller is not service-role — rejecting request",
+        );
+        return new Response(JSON.stringify({ error: "Misconfigured" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const provided = req.headers.get("x-internal-secret") || "";
+      if (provided !== internalSecret) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
