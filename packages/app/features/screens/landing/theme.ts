@@ -7,8 +7,6 @@
  * scattering hex literals. Mirrors the de-facto app palette (see logo.web.tsx,
  * ticket/ui/TicketHeroCard.tsx).
  */
-import { Easing } from "react-native-reanimated";
-
 export const LANDING_COLORS = {
   /** Near-black canvas. */
   bg: "#02030A",
@@ -52,9 +50,12 @@ export const LANDING_GRADIENTS = {
 
 /**
  * Signature easing — the cinematic "settle" curve used across the page
- * (header glass, section entrances). Matches the spec's bezier(0.22,1,0.36,1).
+ * (header glass, section entrances), bezier(0.22,1,0.36,1). The Reanimated
+ * `Easing` version lives in theme-motion.ts so importing the tokens here never
+ * loads react-native-reanimated on web (the `/` web path is Reanimated-free —
+ * DVNT-WEB-6). Web consumers use this CSS string.
  */
-export const EASE_SETTLE = Easing.bezier(0.22, 1, 0.36, 1);
+export const EASE_SETTLE_CSS = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 /** Header turn-to-glass thresholds (px of scroll). Hysteresis avoids flicker. */
 export const HEADER = {

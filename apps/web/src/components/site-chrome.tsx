@@ -10,7 +10,8 @@
  *  - authed app surfaces, logged in  → app WebAppHeader + WebTabBar (like the feed), no marketing footer
  *  - everything else                 → marketing GlassHeader + Footer (turn-to-glass on /)
  *
- * GlassHeader/Footer are browser-only (Reanimated) so they're loaded ssr:false,
+ * GlassHeader/Footer resolve their web forks (CSS transitions / plain views —
+ * no Reanimated on the marketing path, DVNT-WEB-6) and stay ssr:false,
  * matching how the marketing pages always loaded them. WebAppHeader/WebTabBar
  * SSR fine. The header/footer are position:fixed / in-flow respectively; content
  * top-padding still lives in each page/layout.
@@ -101,9 +102,10 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Marketing / landing / public + logged-out app surfaces. The Reanimated
-  // header/footer are each boundaried so a resize-time worklet crash remounts
-  // only that piece — the page content between them is never blanked.
+  // Marketing / landing / public + logged-out app surfaces. The header/footer
+  // are each boundaried so a render crash remounts only that piece — the page
+  // content between them is never blanked. (They no longer run Reanimated;
+  // the old resize-time worklet crash class is gone — DVNT-WEB-6.)
   return (
     <>
       <ChromeErrorBoundary label="header">

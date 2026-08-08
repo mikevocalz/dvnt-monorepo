@@ -2,9 +2,8 @@
  * Footer — semantic landmark with store badges, wordmark, and nav. Real
  * anchors (@expo/html-elements A) on web; accessible on native.
  */
-import { Platform, StyleSheet, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { A, Footer as FooterTag, Nav } from "@expo/html-elements";
-import Animated from "react-native-reanimated";
 import Logo from "@dvnt/app/components/logo";
 import { LANDING_COLORS } from "../theme";
 
@@ -18,10 +17,10 @@ const LINKS = [
 function StoreBadge({ store }: { store: "App Store" | "Google Play" }) {
   return (
     <View style={styles.badge}>
-      <Animated.Text style={styles.badgeKicker}>
+      <Text style={styles.badgeKicker}>
         {store === "App Store" ? "Download on the" : "Get it on"}
-      </Animated.Text>
-      <Animated.Text style={styles.badgeName}>{store}</Animated.Text>
+      </Text>
+      <Text style={styles.badgeName}>{store}</Text>
     </View>
   );
 }
@@ -32,9 +31,9 @@ export function Footer() {
       <View style={styles.top}>
         <View style={styles.brandCol}>
           <Logo width={120} height={47} />
-          <Animated.Text style={styles.tagline}>
+          <Text style={styles.tagline}>
             connect. gather. move.
-          </Animated.Text>
+          </Text>
         </View>
 
         <View style={styles.badges}>
@@ -46,13 +45,13 @@ export function Footer() {
       <View style={styles.divider} />
 
       <View style={styles.bottom}>
-        <Animated.Text style={styles.copy}>
+        <Text style={styles.copy}>
           © 2026 DVNT. Move culture on your own terms.
-        </Animated.Text>
+        </Text>
         <Nav style={styles.nav}>
           {LINKS.map((l) => (
             <A key={l.label} href={l.href} style={styles.link}>
-              <Animated.Text style={styles.linkText}>{l.label}</Animated.Text>
+              <Text style={styles.linkText}>{l.label}</Text>
             </A>
           ))}
         </Nav>

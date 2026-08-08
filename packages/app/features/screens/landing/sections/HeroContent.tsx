@@ -1,7 +1,7 @@
 /**
- * Shared hero copy + kinetic entrance, used by both Hero.web and Hero.native.
+ * Hero copy + kinetic entrance — NATIVE (web resolves HeroContent.web.tsx).
  * Words fade/rise in on mount via a worklet timeline (mount-driven shared
- * values rather than layout-animation `entering`, which is flaky on RN-web).
+ * values rather than layout-animation `entering`).
  */
 import { useEffect } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
@@ -13,14 +13,14 @@ import Animated, {
   withDelay,
   withTiming,
 } from "react-native-reanimated";
-import { EASE_SETTLE, LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
+import { LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
+import { EASE_SETTLE } from "../theme-motion";
 
 const WORDS = ["connect.", "gather.", "move."];
 
-// ponytail: web rests visible (opacity 1). reanimated 4.4.1 mount worklets
-// don't advance on mobile Safari, which stranded the whole hero + CTA at
-// opacity 0; native keeps the entrance. Drop the guard once reanimated is bumped.
-const REST_VISIBLE = Platform.OS === "web" ? 1 : 0;
+// NATIVE-ONLY: web resolves HeroContent.web.tsx (static, no Reanimated —
+// DVNT-WEB-6). Native keeps the worklet entrance from opacity 0.
+const REST_VISIBLE = 0;
 
 function Word({ text, index }: { text: string; index: number }) {
   const t = useSharedValue(REST_VISIBLE);

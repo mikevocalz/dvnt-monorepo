@@ -33,7 +33,8 @@ import { GlassSurface } from "../components/GlassSurface";
 import { HeaderLoginButton } from "./HeaderLoginButton";
 import { HeaderDrawer } from "./HeaderDrawer";
 import { clientNav } from "./client-nav";
-import { EASE_SETTLE, HEADER, LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
+import { HEADER, LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
+import { EASE_SETTLE } from "../theme-motion";
 
 const NAV = [
   { label: "Home", href: "/" },

@@ -5,7 +5,6 @@
  * animate the glass *amount* rather than toggling a class.
  */
 import { View } from "react-native";
-import Animated from "react-native-reanimated";
 import { LANDING_COLORS } from "../theme";
 import type { GlassSurfaceProps } from "./GlassSurface.types";
 
@@ -42,8 +41,10 @@ export function GlassSurface({
         style,
       ]}
     >
-      {/* Animated tint — header drives this alpha for the turn-to-glass. */}
-      <Animated.View
+      {/* Tint overlay — the header transitions this alpha (plain CSS
+          transition styles) for the turn-to-glass. No Reanimated on web:
+          its worklets must never run on the public landing path (DVNT-WEB-6). */}
+      <View
         pointerEvents="none"
         style={[
           { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
