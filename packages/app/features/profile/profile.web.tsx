@@ -33,6 +33,7 @@ import {
   Heart,
   ChevronRight,
   LayoutDashboard,
+  Settings,
 } from "lucide-react";
 import { useBootstrapProfile } from "@dvnt/app/lib/hooks/use-bootstrap-profile";
 import {
@@ -300,11 +301,16 @@ export function ProfileScreen() {
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
-        <span className="w-9" />
         <h1 className="text-[17px] font-semibold truncate">
           @{displayUsername || "profile"}
         </h1>
-        <span className="w-9" />
+        <button
+          onClick={() => router.push("/settings")}
+          aria-label="Settings"
+          className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-white/10"
+        >
+          <Settings size={20} color="#f5f5f4" />
+        </button>
       </div>
 
       <div className="mx-auto w-full max-w-2xl px-4 pb-24">
