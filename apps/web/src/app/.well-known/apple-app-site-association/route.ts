@@ -27,10 +27,26 @@ export function GET() {
             components: [
               { "/": "/feed", comment: "Feed root (welcome email CTA)" },
               { "/": "/feed/*", comment: "Feed, posts, profiles" },
+              { "/": "/e/*", comment: "Event share grammar (App Clip parity)" },
+              { "/": "/events/*", comment: "Event pages" },
+              { "/": "/u/*", comment: "Profile share grammar" },
+              {
+                "/": "/tickets/guest/*",
+                comment: "Guest ticket links (share grammar)",
+              },
+              {
+                "/": "/public/tickets/guest/*",
+                comment: "Guest ticket links (webhook-emitted spelling)",
+              },
             ],
           },
         ],
       },
+      // App Clip invocations (flyer QR → ticket, shared event, guest-list
+      // claim, add-me profile card). The clip target itself ships with the
+      // apple-targets re-enable; claiming the domain now costs nothing and
+      // must propagate through Apple's CDN before first use.
+      appclips: { apps: ["436WA3W63V.com.dvnt.app.Clip"] },
       // webcredentials lets the app autofill passwords saved for the domain.
       webcredentials: { apps: ["436WA3W63V.com.dvnt.app"] },
     },

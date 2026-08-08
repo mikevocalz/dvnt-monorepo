@@ -66,7 +66,14 @@ export default {
       // targets (mirrors the with-development-team plugin's teamId).
       appleTeamId: "436WA3W63V",
       icon: "./assets/images/ios-icon.png",
-      associatedDomains: ["applinks:dvntapp.live", "applinks:www.dvntapp.live"],
+      associatedDomains: [
+        "applinks:dvntapp.live",
+        "applinks:www.dvntapp.live",
+        // App Clip invocation domains (Apple Surfaces WS-3). Harmless before
+        // the clip target exists; required before its first invocation.
+        "appclips:dvntapp.live",
+        "appclips:www.dvntapp.live",
+      ],
       deploymentTarget: "17.0",
       // App Group for the iPhone-side ExtensionStorage write (watch reads its own
       // group over WCSession — App Group containers are per-device).
