@@ -3,9 +3,10 @@
  *
  * Fetches a canary object through the pull zone AND directly from storage
  * origin; records both latencies + the cdn cache-status header. Alert
- * conditions are computed HERE and emitted as Sentry events (Sentry cannot
- * poll Bunny natively): edge slower than origin, persistent cache MISS,
- * non-200 from the pull zone. Ensures the canary exists by uploading it via
+ * conditions are computed HERE (Sentry cannot poll Bunny natively): non-200
+ * from the pull zone, edge slower than origin. Each run reports exactly one
+ * Sentry outcome — cron check-in status on check-in runs, an error event only
+ * on bare runs — never both. Ensures the canary exists by uploading it via
  * the storage API on first run (BUNNY_ACCESS_KEY is already in the edge env
  * for media-upload; never in any client bundle).
  */
@@ -79,22 +80,38 @@ Deno.serve(
         )
       : null;
 
+    // "Edge slower than origin" is telemetry, not an exception (DVNT-EDGE-1):
+    // it flips the check-in to error status + a structured log, never an event.
+    const edgeSlow =
+      cdn.status === 200 &&
+      origin !== null &&
+      origin.status === 200 &&
+      cdn.latencyMs > origin.latencyMs * 2 &&
+      cdn.latencyMs > 500;
+
     const result = {
-      ok: cdn.status === 200,
+      ok: cdn.status === 200 && !edgeSlow,
+      edgeSlow,
       cdn,
       origin,
     };
 
-    // Alert conditions, computed here (Sentry can't poll Bunny):
-    if (cdn.status !== 200) {
+    // Alert conditions, computed here (Sentry can't poll Bunny). One outcome,
+    // one spend: a check-in run reports failure via the check-in's error
+    // status below; only a bare (non-check-in) run spends an error event.
+    if (cdn.status !== 200 && !checkInId) {
       await captureEdge(new Error(`cdn-probe: pull zone returned ${cdn.status}`), {
         function: "cdn-probe",
       });
-    } else if (origin && origin.status === 200 && cdn.latencyMs > origin.latencyMs * 2 && cdn.latencyMs > 500) {
-      await captureEdge(
-        new Error(`cdn-probe: edge slower than origin (${cdn.latencyMs}ms vs ${origin.latencyMs}ms)`),
-        { function: "cdn-probe" },
-      );
+    }
+    if (edgeSlow) {
+      console.warn(JSON.stringify({
+        probe: "cdn-probe",
+        alert: "edge_slower_than_origin",
+        cdnLatencyMs: cdn.latencyMs,
+        originLatencyMs: origin!.latencyMs,
+        cacheStatus: cdn.cacheStatus,
+      }));
     }
 
     if (checkInId) {

@@ -1,5 +1,22 @@
 import * as Sentry from "@sentry/nextjs";
-import { createBeforeSend, createBeforeSendTransaction } from "@dvnt/observability/sanitize";
+import { createBeforeSend, createBeforeSendTransaction, isEventClamped } from "@dvnt/observability/sanitize";
+
+// Noise that must never spend quota (DVNT-WEB-A: Safari extension bridge).
+const IGNORED_ERROR_PATTERNS = [/webkit\.messageHandlers/];
+
+// Logged-out visitors on the landing page produce the least actionable
+// replays. Auth persists as the zustand `auth-storage` localStorage key
+// (packages/app/lib/utils/storage.ts clearAuthStorage) — absence of the key,
+// or a persisted state without isAuthenticated, means logged out.
+function isLoggedOutLandingSession(): boolean {
+  try {
+    if (typeof window === "undefined" || window.location.pathname !== "/") return false;
+    const raw = window.localStorage.getItem("auth-storage");
+    return !raw || !raw.includes('"isAuthenticated":true');
+  } catch {
+    return false;
+  }
+}
 
 // Browser init — runs once per pageload (Next instrumentation-client convention).
 Sentry.init({
@@ -13,7 +30,20 @@ Sentry.init({
   sendDefaultPii: false,
   integrations: [
     // §2.4: full masking, no unmask lists.
-    Sentry.replayIntegration({ maskAllText: true, blockAllMedia: true }),
+    Sentry.replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+      // Gate which errors may trigger an error-replay at all; returning false
+      // skips replaysOnErrorSampleRate for that error
+      // (verified: @sentry-internal/replay build/npm/types/types/replay.d.ts:186).
+      beforeErrorSampling: (event) => {
+        if (isEventClamped(event)) return false;
+        const msg = String(event.exception?.values?.[0]?.value ?? event.message ?? "");
+        if (IGNORED_ERROR_PATTERNS.some((p) => p.test(msg))) return false;
+        if (isLoggedOutLandingSession()) return false;
+        return true;
+      },
+    }),
   ],
   tracesSampler: (ctx) => {
     const name = ctx.name || "";
@@ -26,7 +56,13 @@ Sentry.init({
     /npfjanxturvmjyevoyfo\.supabase\.co/,
   ],
   replaysSessionSampleRate: 0.05,
-  replaysOnErrorSampleRate: 1.0,
+  // 1.0 → 0.2: error-replays are the most expensive artifact; beforeErrorSampling
+  // above already filters clamped/ignored/anonymous-landing errors before this
+  // rate applies.
+  replaysOnErrorSampleRate: 0.2,
+  // Dropped by eventFiltersIntegration before any quota spend
+  // (verified: @sentry/core build/types/types/options.d.ts:314).
+  ignoreErrors: IGNORED_ERROR_PATTERNS,
   beforeSend: createBeforeSend(),
   beforeSendTransaction: createBeforeSendTransaction(),
 });

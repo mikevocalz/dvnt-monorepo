@@ -12,6 +12,10 @@ Sentry.init({
   release: process.env.SENTRY_RELEASE,
   sendDefaultPii: false,
   tracesSampleRate: 0.15,
+  // DVNT-WEB-A: Safari extension bridge noise. Dropped by
+  // eventFiltersIntegration before any quota spend
+  // (verified: @sentry/core build/types/types/options.d.ts:314).
+  ignoreErrors: [/webkit\.messageHandlers/],
   beforeSend: createBeforeSend(),
   beforeSendTransaction: createBeforeSendTransaction(),
 });

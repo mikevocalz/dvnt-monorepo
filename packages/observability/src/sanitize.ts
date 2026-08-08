@@ -155,10 +155,111 @@ export function sanitizeHeaders(headers: Record<string, string>): Record<string,
   return result;
 }
 
+// ─── Per-Session Fingerprint Clamp ───────────────────────────────────────────
+//
+// Budget guard: one bug must never be able to flood the Sentry quota again.
+// After CLAMP_LIMIT error events share a fingerprint key within one session,
+// further events for that key are dropped client-side (beforeSend returns
+// null) and ONE summary breadcrumb is attached to the next event that does go
+// out, so triage can see suppression happened.
+//
+// Fingerprint derivation — client-side events don't carry server-assigned
+// fingerprints, so we derive one deterministically from what every error
+// event has: `type|message(first 120 chars)|filename:function` of the TOP
+// stack frame. Sentry orders `exception.values[0].stacktrace.frames`
+// oldest-call-first, so the top (innermost) frame is the LAST array element.
+// Same bug → same key across occurrences; distinct bugs practically never
+// collide. Message-only events key on the message; events with neither an
+// exception nor a message are never clamped.
+//
+// State is a module-level Map: per-page-session in the browser, per-isolate on
+// server/edge (no window/document references — safe on every runtime). The
+// map is wiped if it ever tracks an implausible number of distinct keys, which
+// bounds memory on long-lived server processes.
+
+const DEFAULT_CLAMP_LIMIT = 5;
+const MAX_TRACKED_FINGERPRINTS = 1000;
+
+const clampCounts = new Map<string, number>();
+const clampedKeys = new Set<string>();
+let pendingClampBreadcrumbs: Array<Record<string, unknown>> = [];
+
+/** Deterministic per-bug key. See derivation comment above. */
+export function deriveFingerprintKey(event: any): string {
+  const exception = event?.exception?.values?.[0];
+  const type = exception?.type ?? 'Error';
+  const message = String(exception?.value ?? event?.message ?? '').slice(0, 120);
+  const frames = exception?.stacktrace?.frames;
+  const top = Array.isArray(frames) && frames.length > 0 ? frames[frames.length - 1] : undefined;
+  const frame = top ? `${top.filename ?? '?'}:${top.function ?? '?'}` : 'noframe';
+  return `${type}|${message}|${frame}`;
+}
+
+/** True when an event's derived fingerprint has hit the clamp — used by the
+ *  replay integration's beforeErrorSampling to skip error-replay capture. */
+export function isEventClamped(event: any): boolean {
+  return clampedKeys.has(deriveFingerprintKey(event));
+}
+
+/** Reset clamp state. Exposed for tests. */
+export function resetFingerprintClamp(): void {
+  clampCounts.clear();
+  clampedKeys.clear();
+  pendingClampBreadcrumbs = [];
+}
+
+/**
+ * Returns null (drop) when this event's fingerprint is over budget.
+ * Otherwise attaches any pending clamp-summary breadcrumbs and returns the event.
+ */
+function applyFingerprintClamp(event: any, limit: number): any {
+  // Only clamp real error events — never transactions/sessions, and never
+  // events with nothing to derive a fingerprint from.
+  const hasException = Boolean(event?.exception?.values?.length);
+  if (event?.type || (!hasException && !event?.message)) return event;
+
+  const key = deriveFingerprintKey(event);
+  const count = (clampCounts.get(key) ?? 0) + 1;
+  if (clampCounts.size >= MAX_TRACKED_FINGERPRINTS && !clampCounts.has(key)) {
+    resetFingerprintClamp();
+  }
+  clampCounts.set(key, count);
+
+  if (count > limit) {
+    if (!clampedKeys.has(key)) {
+      clampedKeys.add(key);
+      pendingClampBreadcrumbs.push({
+        category: 'observability.clamp',
+        message: `clamped fingerprint ${key} after ${limit} events`,
+        level: 'warning',
+        type: 'default',
+        timestamp: Date.now() / 1000,
+      });
+    }
+    return null;
+  }
+
+  if (pendingClampBreadcrumbs.length > 0) {
+    event.breadcrumbs = [...(event.breadcrumbs ?? []), ...pendingClampBreadcrumbs];
+    pendingClampBreadcrumbs = [];
+  }
+  return event;
+}
+
 // ─── Sentry beforeSend Event Processor ───────────────────────────────────────
 
-export function createBeforeSend() {
+export interface BeforeSendOptions {
+  /** Max error events per derived fingerprint per session. Default: 5. */
+  clampLimit?: number;
+}
+
+export function createBeforeSend(options?: BeforeSendOptions) {
+  const clampLimit = options?.clampLimit ?? DEFAULT_CLAMP_LIMIT;
+
   return function beforeSend(event: any, hint?: any): any {
+    // Budget clamp first — a dropped event needs no sanitization.
+    if (applyFingerprintClamp(event, clampLimit) === null) return null;
+
     // Sanitize request data
     if (event.request) {
       if (event.request.headers) {
