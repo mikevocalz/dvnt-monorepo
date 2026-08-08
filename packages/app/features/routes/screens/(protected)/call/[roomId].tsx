@@ -7,7 +7,7 @@
  * 3. Delegates ALL rendering to CallScreen orchestrator
  *
  * All UI logic, stage rendering, and controls live in
- * src/features/calls/ui/ — this file is intentionally minimal.
+ * features/calls/ui/ — this file is intentionally minimal.
  */
 
 import { useEffect, useRef } from "react";
@@ -17,7 +17,7 @@ import { useVideoCall, type CallType } from "@dvnt/app/lib/hooks/use-video-call"
 import { useMediaPermissions } from "@dvnt/app/features/video/hooks/useMediaPermissions";
 import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
 import { CT } from "@dvnt/app/features/services/calls/callTrace";
-import { CallScreen } from "@dvnt/app/src/features/calls/ui/CallScreen";
+import { CallScreen } from "@dvnt/app/features/calls/ui/CallScreen";
 
 export default function VideoCallScreen() {
   const {

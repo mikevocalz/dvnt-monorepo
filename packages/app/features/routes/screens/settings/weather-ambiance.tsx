@@ -6,7 +6,7 @@ import { CloudRain, Snowflake, Sun } from "lucide-react-native";
 import { useLayoutEffect } from "react";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { Switch } from "@dvnt/app/components/ui/switch";
-import { useWeatherFXStore } from "@dvnt/app/src/features/weatherfx/WeatherFXStore";
+import { useWeatherFXStore } from "@dvnt/app/features/weatherfx/WeatherFXStore";
 export default function WeatherAmbianceScreen() {
   const router = useRouter();
   const navigation = useNavigation();

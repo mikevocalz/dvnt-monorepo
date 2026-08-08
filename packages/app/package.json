@@ -71,6 +71,36 @@
       "import": "./features/services/index.ts",
       "default": "./features/services/index.ts"
     },
+    "./features/calls": {
+      "types": "./features/calls/index.ts",
+      "react-native": "./features/calls/index.ts",
+      "import": "./features/calls/index.ts",
+      "default": "./features/calls/index.ts"
+    },
+    "./features/likes": {
+      "types": "./features/likes/index.ts",
+      "react-native": "./features/likes/index.ts",
+      "import": "./features/likes/index.ts",
+      "default": "./features/likes/index.ts"
+    },
+    "./features/posts": {
+      "types": "./features/posts/index.ts",
+      "react-native": "./features/posts/index.ts",
+      "import": "./features/posts/index.ts",
+      "default": "./features/posts/index.ts"
+    },
+    "./features/weatherfx": {
+      "types": "./features/weatherfx/index.ts",
+      "react-native": "./features/weatherfx/index.ts",
+      "import": "./features/weatherfx/index.ts",
+      "default": "./features/weatherfx/index.ts"
+    },
+    "./features/weatheraudio": {
+      "types": "./features/weatheraudio/index.ts",
+      "react-native": "./features/weatheraudio/index.ts",
+      "import": "./features/weatheraudio/index.ts",
+      "default": "./features/weatheraudio/index.ts"
+    },
     "./features/story/screens/StoryScreen": {
       "types": "./features/story/screens/StoryScreen.d.ts",
       "react-native": "./features/story/screens/StoryScreen.native.tsx",

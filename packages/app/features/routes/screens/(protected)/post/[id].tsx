@@ -96,7 +96,7 @@ import {
 import {
   useLikesSheet,
   fireLikesTap,
-} from "@dvnt/app/src/features/likes/LikesSheetController";
+} from "@dvnt/app/features/likes/LikesSheetController";
 import { normalizePost } from "@dvnt/app/lib/normalization/safe-entity";
 import { validatePostParams } from "@dvnt/app/lib/validation/post-params";
 import { resolveRenderableTextPostPresentation } from "@dvnt/app/lib/posts/text-post";

@@ -47,7 +47,7 @@ import {
 import {
   useLikesSheet,
   fireLikesTap,
-} from "@dvnt/app/src/features/likes/LikesSheetController";
+} from "@dvnt/app/features/likes/LikesSheetController";
 import { PostActionSheet } from "@dvnt/app/components/post-action-sheet";
 import { useReportSheetStore } from "@dvnt/app/lib/stores/report-sheet-store";
 import { ShareToInboxSheet } from "@dvnt/app/components/share-to-inbox-sheet";

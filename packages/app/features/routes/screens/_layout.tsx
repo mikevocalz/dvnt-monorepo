@@ -63,7 +63,7 @@ import { setQueryClient } from "@dvnt/app/lib/auth-client";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { FeedSkeleton } from "@dvnt/app/components/skeletons";
 import { enforceListPolicy } from "@dvnt/app/lib/guards/list-guard";
-import { LikesSheetProvider } from "@dvnt/app/src/features/likes/LikesSheetController";
+import { LikesSheetProvider } from "@dvnt/app/features/likes/LikesSheetController";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { Dimensions } from "react-native";
 import { BiometricLock } from "@dvnt/app/components/BiometricLock";

@@ -2,7 +2,7 @@
 
 import { useRouter } from "solito/navigation";
 import { CloudRain, Snowflake, Sun, X } from "lucide-react";
-import { useWeatherFXStore } from "@dvnt/app/src/features/weatherfx/WeatherFXStore";
+import { useWeatherFXStore } from "@dvnt/app/features/weatherfx/WeatherFXStore";
 
 /**
  * Weather Ambiance settings — web (Phase 1 port of native
