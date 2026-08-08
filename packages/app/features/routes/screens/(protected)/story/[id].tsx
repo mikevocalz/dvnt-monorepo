@@ -70,11 +70,11 @@ import {
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { storyTagsApi, type StoryTag } from "@dvnt/app/lib/api/stories";
 import type { Story, StoryAnimatedGifOverlay, StoryOverlay } from "@dvnt/app/lib/types";
-import { getImageStickerSourceById } from "@dvnt/app/src/stories-editor/constants";
+import { getImageStickerSourceById } from "@dvnt/app/features/stories-editor/constants";
 import {
   getSystemFontWeight,
   shouldUseSystemFontFallback,
-} from "@dvnt/app/src/stories-editor/utils/text-support";
+} from "@dvnt/app/features/stories-editor/utils/text-support";
 
 const { width, height } = Dimensions.get("window");
 const LONG_PRESS_DELAY = 300;

@@ -40,7 +40,7 @@ import {
 import { AppState, type AppStateStatus } from "react-native";
 import { videoApi } from "../api";
 import { useVideoRoomStore } from "../stores/video-room-store";
-import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
+import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import type {
   ConnectionState,
   Participant,

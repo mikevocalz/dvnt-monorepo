@@ -6,7 +6,7 @@ import { X, RefreshCw } from "lucide-react";
 import { CameraCapture } from "@dvnt/ui";
 import type { CameraType } from "expo-camera";
 import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
-import type { CapturedMedia } from "@dvnt/app/src/camera";
+import type { CapturedMedia } from "@dvnt/app/features/camera";
 
 /**
  * Camera screen — web port of `app/(protected)/camera.tsx`.

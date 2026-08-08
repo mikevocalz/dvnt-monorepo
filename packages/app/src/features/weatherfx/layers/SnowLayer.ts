@@ -4,7 +4,7 @@
  * Slower fall speed, larger particles, horizontal wobble.
  * Compute shader simulates, render shader draws soft point sprites.
  */
-import { GpuRuntime } from "@dvnt/app/src/gpu/GpuRuntime";
+import { GpuRuntime } from "@dvnt/app/features/gpu/GpuRuntime";
 import type { LayerUniforms } from "../weatherTypes";
 
 const MAX_PARTICLES = 400;

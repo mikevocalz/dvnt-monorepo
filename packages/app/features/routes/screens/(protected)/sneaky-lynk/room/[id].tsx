@@ -81,7 +81,7 @@ import { useRoomStore } from "@dvnt/app/src/sneaky-lynk/stores/room-store";
 import { useLynkHistoryStore } from "@dvnt/app/src/sneaky-lynk/stores/lynk-history-store";
 import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
-import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
+import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import { shareUrl } from "@dvnt/app/lib/deep-linking/share-link";
 import {
   DVNTLiquidGlass,

@@ -47,7 +47,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { videoApi } from "@dvnt/app/features/video/api";
 import { callSignalsApi } from "@dvnt/app/lib/api/call-signals";
 import { supabase } from "@dvnt/app/lib/supabase/client";
-import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
+import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import {
   startOutgoingCall,
   reportOutgoingCallConnected,
@@ -56,8 +56,8 @@ import {
   persistCallMapping,
   clearCallMapping,
   setMuted as callKeepSetMuted,
-} from "@dvnt/app/src/services/callkeep";
-import { lockMuteEcho } from "@dvnt/app/src/services/callkeep/useCallKeepCoordinator";
+} from "@dvnt/app/features/services/callkeep";
+import { lockMuteEcho } from "@dvnt/app/features/services/callkeep/useCallKeepCoordinator";
 import { useChatStore } from "@dvnt/app/lib/stores/chat-store";
 import {
   useVideoRoomStore,
@@ -68,7 +68,7 @@ import {
   type RecipientInfo,
 } from "@dvnt/app/features/video/stores/video-room-store";
 import type { Participant } from "@dvnt/app/features/video/types";
-import { CT } from "@dvnt/app/src/services/calls/callTrace";
+import { CT } from "@dvnt/app/features/services/calls/callTrace";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 
 // Re-export for consumers

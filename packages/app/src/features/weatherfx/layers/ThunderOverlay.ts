@@ -5,7 +5,7 @@
  * based on thunderChance. Uses a simple fullscreen quad shader.
  * Never constant — randomised timing with natural decay curve.
  */
-import { GpuRuntime } from "@dvnt/app/src/gpu/GpuRuntime";
+import { GpuRuntime } from "@dvnt/app/features/gpu/GpuRuntime";
 import type { LayerUniforms } from "../weatherTypes";
 
 const UNIFORM_SIZE = 32;

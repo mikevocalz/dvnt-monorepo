@@ -38,13 +38,13 @@ import { ArrowLeft, Check, RotateCcw } from "lucide-react-native";
 // NOTE: Do NOT use GestureHandlerRootView here — the root _layout.tsx already provides it.
 // Nesting GestureHandlerRootView causes native crashes on iOS.
 import { useColorScheme } from "@dvnt/app/lib/hooks";
-import { ImageCropView, type ViewRefs } from "@dvnt/app/src/crop/ImageCropView";
+import { ImageCropView, type ViewRefs } from "@dvnt/app/features/crop/ImageCropView";
 import {
   CROP_ASPECT_RATIO,
   consumePendingCrop,
   getImageDimensions,
   type CropState,
-} from "@dvnt/app/src/crop/crop-utils";
+} from "@dvnt/app/features/crop/crop-utils";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
 import {
@@ -52,9 +52,9 @@ import {
   editReducer,
   getAspectRatioValue,
   type EditState,
-} from "@dvnt/app/src/crop/edit-state";
-import { EditToolbar } from "@dvnt/app/src/crop/EditToolbar";
-import { exportImage } from "@dvnt/app/src/crop/export-pipeline";
+} from "@dvnt/app/features/crop/edit-state";
+import { EditToolbar } from "@dvnt/app/features/crop/EditToolbar";
+import { exportImage } from "@dvnt/app/features/crop/export-pipeline";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const FRAME_WIDTH = SCREEN_WIDTH;

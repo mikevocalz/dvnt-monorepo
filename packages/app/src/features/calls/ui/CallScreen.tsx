@@ -23,8 +23,8 @@ import {
 import { useVideoCall } from "@dvnt/app/lib/hooks/use-video-call";
 import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
-import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
-import { CT } from "@dvnt/app/src/services/calls/callTrace";
+import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
+import { CT } from "@dvnt/app/features/services/calls/callTrace";
 import {
   deriveCallUiMode,
   getStatusLabel,

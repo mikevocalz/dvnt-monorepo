@@ -4,7 +4,7 @@
  * Uses a compute shader for particle simulation and a render pipeline
  * for drawing stretched line particles. All buffers pre-allocated.
  */
-import { GpuRuntime } from "@dvnt/app/src/gpu/GpuRuntime";
+import { GpuRuntime } from "@dvnt/app/features/gpu/GpuRuntime";
 import type { LayerUniforms } from "../weatherTypes";
 
 // ── Constants ───────────────────────────────────────────────────────

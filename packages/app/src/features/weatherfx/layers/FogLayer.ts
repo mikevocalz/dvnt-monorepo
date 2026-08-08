@@ -4,7 +4,7 @@
  * Uses a single fullscreen quad with a fragment shader that generates
  * procedural value noise for fog density. No particle buffer needed.
  */
-import { GpuRuntime } from "@dvnt/app/src/gpu/GpuRuntime";
+import { GpuRuntime } from "@dvnt/app/features/gpu/GpuRuntime";
 import type { LayerUniforms } from "../weatherTypes";
 
 const UNIFORM_SIZE = 48;

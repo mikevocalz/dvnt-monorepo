@@ -58,7 +58,7 @@ import { useStoryEditorResultStore } from "@dvnt/app/lib/stores/story-editor-res
 import type { StoryAnimatedGifOverlay, StoryOverlay } from "@dvnt/app/lib/types";
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import { DVNTGifView } from "@dvnt/app/components/media/DVNTGifView";
-import { getImageStickerSourceById } from "@dvnt/app/src/stories-editor/constants";
+import { getImageStickerSourceById } from "@dvnt/app/features/stories-editor/constants";
 
 function StoryVideoPreview({ uri }: { uri: string }) {
   const [isPlaying, setIsPlaying] = useState(false);

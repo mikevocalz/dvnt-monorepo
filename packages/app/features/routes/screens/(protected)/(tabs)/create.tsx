@@ -48,7 +48,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { UserMentionAutocomplete } from "@dvnt/app/components/ui/user-mention-autocomplete";
 import { Switch } from "react-native";
 import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
-import { setPendingCrop } from "@dvnt/app/src/crop/crop-utils";
+import { setPendingCrop } from "@dvnt/app/features/crop/crop-utils";
 import { TextPostSlidesComposer } from "@dvnt/app/components/post/TextPostSlidesComposer";
 import {
   TEXT_POST_MAX_LENGTH,

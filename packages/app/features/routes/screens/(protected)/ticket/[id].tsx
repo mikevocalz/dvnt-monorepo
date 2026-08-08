@@ -39,9 +39,9 @@ import {
   TicketQRCode,
   TicketAccessDetails,
   TicketActionsBar,
-} from "@dvnt/app/src/ticket/ui";
+} from "@dvnt/app/features/ticket/ui";
 import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
-import { addToWallet } from "@dvnt/app/src/ticket/helpers";
+import { addToWallet } from "@dvnt/app/features/ticket/helpers";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
 import { WeatherStrip } from "@dvnt/app/components/events/weather-strip";

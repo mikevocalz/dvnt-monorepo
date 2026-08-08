@@ -18,7 +18,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { X, Check } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
-import { useStickerStore } from "@dvnt/app/src/stickers/stores/sticker-store";
+import { useStickerStore } from "@dvnt/app/features/stickers/stores/sticker-store";
 import { StickerSheetContent } from "./StickerSheetContent";
 
 interface StickerPickerSheetProps {

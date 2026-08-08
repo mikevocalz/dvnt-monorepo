@@ -24,11 +24,11 @@ import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { CT } from "@dvnt/app/src/services/calls/callTrace";
+import { CT } from "@dvnt/app/features/services/calls/callTrace";
 import {
   showIncomingCall,
   persistCallMapping,
-} from "@dvnt/app/src/services/callkeep/callkeep";
+} from "@dvnt/app/features/services/callkeep/callkeep";
 
 // Dynamically import expo-notifications to avoid native module errors
 let Notifications: typeof import("expo-notifications") | null = null;

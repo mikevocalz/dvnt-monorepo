@@ -26,7 +26,7 @@ import {
   getItemPreviewUri,
   klipySearch,
   type KlipyItem,
-} from "@dvnt/app/src/stickers/api/klipy";
+} from "@dvnt/app/features/stickers/api/klipy";
 import { GLASS_SURFACE, GLASS_TEXT_COLORS } from "@dvnt/app/lib/ui/glass";
 import type { StickerInsertOptions } from "../../types";
 

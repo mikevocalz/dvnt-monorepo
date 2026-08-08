@@ -11,7 +11,7 @@
 
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import { CameraScreen, type CapturedMedia } from "@dvnt/app/src/camera";
+import { CameraScreen, type CapturedMedia } from "@dvnt/app/features/camera";
 import * as ImagePicker from "expo-image-picker";
 import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
 

@@ -30,8 +30,8 @@ import {
   backToForeground,
 } from "./callkeep";
 import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
-import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
-import { CT } from "@dvnt/app/src/services/calls/callTrace";
+import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
+import { CT } from "@dvnt/app/features/services/calls/callTrace";
 
 // Track active signal so we can update its status on answer/decline
 const _activeSignals = new Map<string, CallSignal>();

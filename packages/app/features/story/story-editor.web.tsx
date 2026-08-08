@@ -28,15 +28,15 @@ import { X, Type, Check, Trash2 } from "lucide-react";
 import {
   useEditorStore,
   useSelectedElement,
-} from "@dvnt/app/src/stories-editor/stores/editor-store";
+} from "@dvnt/app/features/stories-editor/stores/editor-store";
 import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
-} from "@dvnt/app/src/stories-editor/constants";
+} from "@dvnt/app/features/stories-editor/constants";
 import type {
   TextElement,
   StickerElement,
-} from "@dvnt/app/src/stories-editor/types";
+} from "@dvnt/app/features/stories-editor/types";
 import { useStoryFlowStore } from "@dvnt/app/lib/stores/story-flow-store";
 import { useStoryEditorResultStore } from "@dvnt/app/lib/stores/story-editor-result-store";
 import type {

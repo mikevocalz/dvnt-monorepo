@@ -4,7 +4,7 @@
  */
 
 import { create } from "zustand";
-import type { CapturedMedia } from "@dvnt/app/src/camera";
+import type { CapturedMedia } from "@dvnt/app/features/camera";
 
 interface CameraResultState {
   result: CapturedMedia | null;

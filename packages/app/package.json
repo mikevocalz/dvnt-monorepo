@@ -17,6 +17,60 @@
       "import": "./features/video/index.ts",
       "default": "./features/video/index.ts"
     },
+    "./features/stories-editor": {
+      "types": "./features/stories-editor/index.ts",
+      "react-native": "./features/stories-editor/index.ts",
+      "import": "./features/stories-editor/index.ts",
+      "default": "./features/stories-editor/index.ts"
+    },
+    "./features/stickers": {
+      "types": "./features/stickers/index.ts",
+      "react-native": "./features/stickers/index.ts",
+      "import": "./features/stickers/index.ts",
+      "default": "./features/stickers/index.ts"
+    },
+    "./features/crop": {
+      "types": "./features/crop/index.ts",
+      "react-native": "./features/crop/index.ts",
+      "import": "./features/crop/index.ts",
+      "default": "./features/crop/index.ts"
+    },
+    "./features/watch": {
+      "types": "./features/watch/index.ts",
+      "react-native": "./features/watch/index.ts",
+      "import": "./features/watch/index.ts",
+      "default": "./features/watch/index.ts"
+    },
+    "./features/live-surface": {
+      "types": "./features/live-surface/index.ts",
+      "react-native": "./features/live-surface/index.ts",
+      "import": "./features/live-surface/index.ts",
+      "default": "./features/live-surface/index.ts"
+    },
+    "./features/camera": {
+      "types": "./features/camera/index.ts",
+      "react-native": "./features/camera/index.ts",
+      "import": "./features/camera/index.ts",
+      "default": "./features/camera/index.ts"
+    },
+    "./features/gpu": {
+      "types": "./features/gpu/index.ts",
+      "react-native": "./features/gpu/index.ts",
+      "import": "./features/gpu/index.ts",
+      "default": "./features/gpu/index.ts"
+    },
+    "./features/ticket": {
+      "types": "./features/ticket/index.ts",
+      "react-native": "./features/ticket/index.ts",
+      "import": "./features/ticket/index.ts",
+      "default": "./features/ticket/index.ts"
+    },
+    "./features/services": {
+      "types": "./features/services/index.ts",
+      "react-native": "./features/services/index.ts",
+      "import": "./features/services/index.ts",
+      "default": "./features/services/index.ts"
+    },
     "./features/story/screens/StoryScreen": {
       "types": "./features/story/screens/StoryScreen.d.ts",
       "react-native": "./features/story/screens/StoryScreen.native.tsx",

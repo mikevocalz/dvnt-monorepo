@@ -17,7 +17,7 @@ import { useState } from "react";
 import { View, Text, Pressable, StyleSheet, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMicrophone } from "@fishjam-cloud/react-native-client";
-import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
+import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import type { CallUiMode } from "./deriveCallUiMode";
 import type { Participant } from "@dvnt/app/features/video/types";
 

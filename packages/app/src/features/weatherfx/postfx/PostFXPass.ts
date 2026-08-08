@@ -4,7 +4,7 @@
  * Single fullscreen quad. All effects controlled by uniforms.
  * Can be entirely disabled by flags (low power, reduce motion).
  */
-import { GpuRuntime } from "@dvnt/app/src/gpu/GpuRuntime";
+import { GpuRuntime } from "@dvnt/app/features/gpu/GpuRuntime";
 import { WeatherEffect } from "../weatherTypes";
 
 const UNIFORM_SIZE = 48;

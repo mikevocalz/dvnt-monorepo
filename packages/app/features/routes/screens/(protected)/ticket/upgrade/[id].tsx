@@ -44,7 +44,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { ticketTypesApi, type TicketTypeRecord } from "@dvnt/app/lib/api/ticket-types";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
-import { addToWallet } from "@dvnt/app/src/ticket/helpers";
+import { addToWallet } from "@dvnt/app/features/ticket/helpers";
 import type { Ticket, TicketTierLevel } from "@dvnt/app/lib/stores/ticket-store";
 import type { TicketRecord } from "@dvnt/app/lib/api/tickets";
 

@@ -16,8 +16,8 @@
  */
 import React, { useEffect, useRef } from "react";
 import { View, StyleSheet, AccessibilityInfo, Platform } from "react-native";
-import { GpuRuntime, isWebGPUAvailable } from "@dvnt/app/src/gpu/GpuRuntime";
-import { WorkletRenderLoop } from "@dvnt/app/src/gpu/WorkletRenderLoop";
+import { GpuRuntime, isWebGPUAvailable } from "@dvnt/app/features/gpu/GpuRuntime";
+import { WorkletRenderLoop } from "@dvnt/app/features/gpu/WorkletRenderLoop";
 import { useWeatherFXStore } from "./WeatherFXStore";
 import {
   WeatherEffect,

@@ -5,7 +5,7 @@
  * Every lifecycle step includes: sessionId, callUUID, userId, roomId, state, ts.
  *
  * Usage:
- *   import { CT } from '@dvnt/app/src/services/calls/callTrace';
+ *   import { CT } from '@dvnt/app/features/services/calls/callTrace';
  *   CT.trace('CALLKEEP', 'answerPressed', { callUUID, roomId });
  *   CT.warn('AUDIO', 'speakerFailed', { error: e.message });
  *   CT.error('FISHJAM', 'joinCrash', { roomId, error: e.message });

@@ -16,7 +16,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoCall, type CallType } from "@dvnt/app/lib/hooks/use-video-call";
 import { useMediaPermissions } from "@dvnt/app/features/video/hooks/useMediaPermissions";
 import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
-import { CT } from "@dvnt/app/src/services/calls/callTrace";
+import { CT } from "@dvnt/app/features/services/calls/callTrace";
 import { CallScreen } from "@dvnt/app/src/features/calls/ui/CallScreen";
 
 export default function VideoCallScreen() {

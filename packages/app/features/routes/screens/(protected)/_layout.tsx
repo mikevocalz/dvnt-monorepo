@@ -6,8 +6,8 @@ import { Settings } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { TabHeaderLogo, TabHeaderRight } from "@dvnt/app/components/tab-header";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { useCallKeepCoordinator } from "@dvnt/app/src/services/callkeep";
-import { NotificationListener } from "@dvnt/app/src/services/callkeep/NotificationListener";
+import { useCallKeepCoordinator } from "@dvnt/app/features/services/callkeep";
+import { NotificationListener } from "@dvnt/app/features/services/callkeep/NotificationListener";
 import { usePresenceManager } from "@dvnt/app/lib/hooks/use-presence";
 import {
   registerForPushNotificationsAsync,
@@ -16,7 +16,7 @@ import {
 import {
   registerVoipPushToken,
   saveVoipTokenToBackend,
-} from "@dvnt/app/src/services/callkeep/voipPushService";
+} from "@dvnt/app/features/services/callkeep/voipPushService";
 import { useBootPrefetch } from "@dvnt/app/lib/hooks/use-boot-prefetch";
 import { useEventsFeedRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useAppResume } from "@dvnt/app/lib/hooks/use-app-resume";
@@ -28,10 +28,10 @@ import { useWeatherFXStore } from "@dvnt/app/src/features/weatherfx/WeatherFXSto
 // import { WeatherGPUEngine } from "@dvnt/app/src/features/weatherfx/WeatherGPUEngine";
 import { WeatherReanimatedOverlay } from "@dvnt/app/src/features/weatherfx/WeatherReanimatedOverlay";
 import { useEventsTabVisibility } from "@dvnt/app/src/features/weatherfx/hooks/useEventsTabVisibility";
-// import { isWebGPUAvailable } from "@dvnt/app/src/gpu/GpuRuntime";
-import { useLiveSurface } from "@dvnt/app/src/live-surface";
-import { useWatchTicketSync } from "@dvnt/app/src/watch/use-watch-ticket-sync";
-import { useWatchBroadcastSync } from "@dvnt/app/src/watch/use-watch-broadcast-sync";
+// import { isWebGPUAvailable } from "@dvnt/app/features/gpu/GpuRuntime";
+import { useLiveSurface } from "@dvnt/app/features/live-surface";
+import { useWatchTicketSync } from "@dvnt/app/features/watch/use-watch-ticket-sync";
+import { useWatchBroadcastSync } from "@dvnt/app/features/watch/use-watch-broadcast-sync";
 import { TransitionStack as Stack } from "@dvnt/app/lib/navigation/transition-stack";
 import {
   dvntEventTransition,

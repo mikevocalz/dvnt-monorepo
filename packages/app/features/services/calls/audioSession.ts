@@ -35,7 +35,7 @@
 import { NativeEventEmitter, NativeModules, Platform } from "react-native";
 import InCallManager from "react-native-incall-manager";
 import { RTCAudioSession } from "@fishjam-cloud/react-native-webrtc";
-import { CT } from "@dvnt/app/src/services/calls/callTrace";
+import { CT } from "@dvnt/app/features/services/calls/callTrace";
 
 // ── Internal state ──────────────────────────────────────────────────
 
