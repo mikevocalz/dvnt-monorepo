@@ -10,7 +10,7 @@
  * NOTE on the transport: PROMPT 6 specifies `@dvnt/network apiFetch`, but every
  * Edge Function in this app is invoked through `supabase.functions.invoke` +
  * `requireBetterAuthToken()` (the calling feature included — see
- * `src/video/api.ts`). We reuse THAT seam verbatim to share a shape with the
+ * `features/video/api.ts`). We reuse THAT seam verbatim to share a shape with the
  * calling feature rather than introduce a second, drifting auth path. Better-Auth
  * token refresh is owned by `requireBetterAuthToken`; MoQ-token refresh (on the
  * 1h expiry) is owned here.

@@ -14,8 +14,8 @@ import { useEffect, useRef } from "react";
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoCall, type CallType } from "@dvnt/app/lib/hooks/use-video-call";
-import { useMediaPermissions } from "@dvnt/app/src/video/hooks/useMediaPermissions";
-import { useVideoRoomStore } from "@dvnt/app/src/video/stores/video-room-store";
+import { useMediaPermissions } from "@dvnt/app/features/video/hooks/useMediaPermissions";
+import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
 import { CT } from "@dvnt/app/src/services/calls/callTrace";
 import { CallScreen } from "@dvnt/app/src/features/calls/ui/CallScreen";
 

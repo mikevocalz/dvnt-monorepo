@@ -16,8 +16,8 @@ import type {
   CallPhase,
   CallRole,
   CallType,
-} from "@dvnt/app/src/video/stores/video-room-store";
-import type { ConnectionState } from "@dvnt/app/src/video/types";
+} from "@dvnt/app/features/video/stores/video-room-store";
+import type { ConnectionState } from "@dvnt/app/features/video/types";
 
 export type CallUiMode =
   | "CALLER_DIALING"

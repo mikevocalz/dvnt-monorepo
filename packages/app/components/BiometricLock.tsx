@@ -25,7 +25,7 @@ import Constants from "expo-constants";
 import { Fingerprint, AlertCircle } from "lucide-react-native";
 import { Motion } from "@legendapp/motion";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
-import { useVideoRoomStore } from "@dvnt/app/src/video/stores/video-room-store";
+import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
 
 const BIOMETRIC_ENABLED_KEY = "biometric_auth_enabled";
 const DEV_BIOMETRIC_BYPASS =

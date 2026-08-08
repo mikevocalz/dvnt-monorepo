@@ -42,7 +42,7 @@ import {
   useMicrophone,
   useInitializeDevices,
 } from "@fishjam-cloud/react-native-client";
-import { useVideoRoom } from "@dvnt/app/src/video/hooks/useVideoRoom";
+import { useVideoRoom } from "@dvnt/app/features/video/hooks/useVideoRoom";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import {
@@ -75,7 +75,7 @@ import {
   getSneakyUserLabel,
   normalizeSneakyAnonLabel,
 } from "@dvnt/app/src/sneaky-lynk/ui/user-labels";
-import { videoApi } from "@dvnt/app/src/video/api";
+import { videoApi } from "@dvnt/app/features/video/api";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useRoomStore } from "@dvnt/app/src/sneaky-lynk/stores/room-store";
 import { useLynkHistoryStore } from "@dvnt/app/src/sneaky-lynk/stores/lynk-history-store";
@@ -781,7 +781,7 @@ function LocalRoom({
     const devices = cameraRef.current.cameraDevices || [];
     const nextFacing = isFrontCamera ? "back" : "front";
 
-    // See the matching comment in src/video/hooks/useVideoRoom.ts —
+    // See the matching comment in features/video/hooks/useVideoRoom.ts —
     // the track's `_switchCamera()` is deprecated AND buggy for us
     // because Fishjam starts cameras by deviceId (facingMode left
     // undefined). Always use `selectCamera(deviceId)` directly.

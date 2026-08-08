@@ -24,8 +24,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { create } from "zustand";
 import { Radio, Users, Lock, Plus, X } from "lucide-react";
-import { videoApi } from "@dvnt/app/src/video/api";
-import type { VideoRoom } from "@dvnt/app/src/video/types";
+import { videoApi } from "@dvnt/app/features/video/api";
+import type { VideoRoom } from "@dvnt/app/features/video/types";
 
 const ACCENT = "#3FDCFF";
 const ROW_HEIGHT = 92; // 80px card + 12px gap

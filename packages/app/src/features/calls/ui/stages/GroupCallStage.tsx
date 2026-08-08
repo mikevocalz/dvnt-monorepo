@@ -12,7 +12,7 @@ import { RTCView } from "@fishjam-cloud/react-native-client";
 import type { MediaStream } from "@fishjam-cloud/react-native-webrtc";
 import { Image } from "expo-image";
 import { CameraOff, MicOff, Users } from "lucide-react-native";
-import type { Participant } from "@dvnt/app/src/video/types";
+import type { Participant } from "@dvnt/app/features/video/types";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const GRID_GAP = 12;

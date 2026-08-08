@@ -11,6 +11,12 @@
       "import": "./index.ts",
       "default": "./index.ts"
     },
+    "./features/video": {
+      "types": "./features/video/index.ts",
+      "react-native": "./features/video/index.ts",
+      "import": "./features/video/index.ts",
+      "default": "./features/video/index.ts"
+    },
     "./features/story/screens/StoryScreen": {
       "types": "./features/story/screens/StoryScreen.d.ts",
       "react-native": "./features/story/screens/StoryScreen.native.tsx",

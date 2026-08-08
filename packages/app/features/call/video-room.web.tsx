@@ -45,11 +45,11 @@ import {
   SwitchCamera,
   Users,
 } from "lucide-react";
-import { videoApi } from "@dvnt/app/src/video/api";
+import { videoApi } from "@dvnt/app/features/video/api";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { useVideoRoomStore } from "@dvnt/app/src/video/stores/video-room-store";
-import type { Participant } from "@dvnt/app/src/video/types";
+import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
+import type { Participant } from "@dvnt/app/features/video/types";
 
 const ACCENT = "#3FDCFF";
 

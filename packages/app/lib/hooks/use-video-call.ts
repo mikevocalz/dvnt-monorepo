@@ -44,7 +44,7 @@ import {
   usePeers,
 } from "@fishjam-cloud/react-native-client";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { videoApi } from "@dvnt/app/src/video/api";
+import { videoApi } from "@dvnt/app/features/video/api";
 import { callSignalsApi } from "@dvnt/app/lib/api/call-signals";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
@@ -66,8 +66,8 @@ import {
   type CallRole,
   type CallDirection,
   type RecipientInfo,
-} from "@dvnt/app/src/video/stores/video-room-store";
-import type { Participant } from "@dvnt/app/src/video/types";
+} from "@dvnt/app/features/video/stores/video-room-store";
+import type { Participant } from "@dvnt/app/features/video/types";
 import { CT } from "@dvnt/app/src/services/calls/callTrace";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 

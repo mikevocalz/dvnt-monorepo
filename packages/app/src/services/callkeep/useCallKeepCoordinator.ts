@@ -29,7 +29,7 @@ import {
   clearCallMapping,
   backToForeground,
 } from "./callkeep";
-import { useVideoRoomStore } from "@dvnt/app/src/video/stores/video-room-store";
+import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
 import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
 import { CT } from "@dvnt/app/src/services/calls/callTrace";
 

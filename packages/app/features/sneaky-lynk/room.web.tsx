@@ -73,7 +73,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
-import { videoApi } from "@dvnt/app/src/video/api";
+import { videoApi } from "@dvnt/app/features/video/api";
 import { useRoomReactions } from "@dvnt/app/src/sneaky-lynk/hooks/useRoomReactions";
 import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureBroadcast";
 import {

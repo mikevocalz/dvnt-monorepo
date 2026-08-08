@@ -21,7 +21,7 @@ import {
   BottomSheetView,
 } from "@gorhom/bottom-sheet";
 import { useVideoCall } from "@dvnt/app/lib/hooks/use-video-call";
-import { useVideoRoomStore } from "@dvnt/app/src/video/stores/video-room-store";
+import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
 import { CT } from "@dvnt/app/src/services/calls/callTrace";
@@ -43,7 +43,7 @@ import {
   PermsDeniedStage,
 } from "./stages/TerminalStages";
 import { DevHud } from "./DevHud";
-import { ConnectionBanner } from "@dvnt/app/src/video/ui/ConnectionBanner";
+import { ConnectionBanner } from "@dvnt/app/features/video/ui/ConnectionBanner";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
