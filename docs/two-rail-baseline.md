@@ -106,3 +106,25 @@ Guidelines current as of the June 8, 2026 revision (which didn't touch 3.1.x —
 4. Read §5 when it lands and make the external-purchase-link call.
 
 **Agent-autonomous scope once approved:** WS-4 webhook fixes are shovel-ready from §3 (TRANSFER, processed_at marker, invoice.paid membership recovery, pause_collection, payment_action_required, RC grace persistence) — each with replay tests per I2/I5. WS-1 paywall work additionally needs the RC plugin + dashboard catalog.
+
+---
+
+## 7 · RC-dashboard catalog lane (unblocked & executed 2026-08-08)
+
+The RevenueCat MCP is live. The dashboard was **empty** (project `proj2d562840` "DVNT", one auto-created Test Store app). The catalog was built via MCP to match the code's plan keys:
+
+| Object | Value |
+|---|---|
+| Apps | `appbcb533145a` DVNT iOS (`com.dvnt.app`) · `app4d0e345777` DVNT Android (`com.dvnt.app`) · `appc63d7dd1e2` Test Store |
+| Products (iOS + Test) | store identifiers **exactly** `dvnt_core`, `dvnt_insider`, `dvnt_vip`, `dvnt_founders_circle` |
+| Products (Play) | `dvnt_core:monthly`, `dvnt_insider:monthly`, `dvnt_vip:monthly`, `dvnt_founders_circle:monthly` — Google mandates `subscriptionId:basePlanId` |
+| Entitlement | `dvnt_membership` — attached to all 12 products |
+| Offering | `default` (current), packages `core` / `insider` / `vip` / `founders_circle`, each carrying its iOS+Play+Test products |
+| SDK keys | in `apps/mobile/.env` as `EXPO_PUBLIC_REVENUECAT_IOS_KEY` / `_ANDROID_KEY` (public keys, client-safe) |
+
+**Finding that upgraded §2's recommendation to a defect:** Play's mandatory `subscriptionId:basePlanId` identifier means the RC webhook's `product_id` arrives as `dvnt_core:monthly` on Android — the identity-passthrough at `revenuecat-webhook/index.ts` would violate the `membership_plans` FK on every Android purchase. The `RC_PRODUCT_TO_PLAN_KEY` mapping (with `:basePlanId` normalization) is therefore required for correctness, not hygiene.
+
+**Left for Mike (dashboard, not MCP-able):**
+1. App Store Connect API key + in-app-purchase key on the iOS app (`app_store_connect_api_key_configured: false`), and Play service-account credentials on the Android app — required before store sync / production events.
+2. Test Store product price points (the v2 price-point API rejected all documented payload shapes; 30-second dashboard task). UI prices render from `plans.ts` regardless.
+3. Create the matching IAPs in App Store Connect (`dvnt_core` … at $25/$50/$75/$150 monthly) and the Play subscriptions (`dvnt_core` + base plan `monthly`, …) once store credentials are wired.
