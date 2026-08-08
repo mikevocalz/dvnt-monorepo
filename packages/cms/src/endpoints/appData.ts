@@ -5,6 +5,7 @@
 // moderation/CMS tables on its own connection. Strictly SELECT; never writes to
 // the app's `public` schema. Staff-auth gated.
 import type { Endpoint } from 'payload'
+import type { AdminUser } from '../payload-types'
 import { forceSuperAdminByEmail } from '../access/roles'
 
 // Separate, lazily-created read-only pool to the app DB (direct connection).
@@ -330,7 +331,7 @@ export const appPromoteEndpoint: Endpoint = {
         if (found.docs[0]) {
           await req.payload.update({
             collection: 'admin-users', id: found.docs[0].id,
-            data: { role, name, avatarUrl }, overrideAccess: true,
+            data: { role: role as AdminUser['role'], name, avatarUrl }, overrideAccess: true,
           })
         } else {
           await req.payload.create({
