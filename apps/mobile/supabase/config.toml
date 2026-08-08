@@ -302,3 +302,8 @@ verify_jwt = false
 [functions.video_toggle_hand]
 verify_jwt = false
 
+
+# RevenueCat posts Authorization: Bearer <webhook secret> (not a JWT); the fn
+# does its own constant-time secret auth (I4). Gateway JWT check must stay off.
+[functions.revenuecat-webhook]
+verify_jwt = false
