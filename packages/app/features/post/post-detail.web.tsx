@@ -197,21 +197,27 @@ export function PostDetailScreen() {
           <button onClick={() => router.back()} aria-label="Back">
             <ArrowLeft size={22} color="#fff" />
           </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={post.author.avatar}
-            alt=""
-            className="w-10 h-10 rounded-xl object-cover bg-white/10"
-          />
-          <div className="flex flex-col leading-tight">
-            <span className="font-bold text-[15px]">
-              @{post.author.username}
-              {post.author.verified ? " ✓" : ""}
-            </span>
-            {metaLine ? (
-              <span className="text-white/45 text-xs">{metaLine}</span>
-            ) : null}
-          </div>
+          <button
+            onClick={() => router.push(`/feed/${post.author.username}`)}
+            className="flex items-center gap-3 text-left"
+            aria-label={`View @${post.author.username}'s profile`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={post.author.avatar}
+              alt=""
+              className="w-10 h-10 rounded-xl object-cover bg-white/10"
+            />
+            <div className="flex flex-col leading-tight">
+              <span className="font-bold text-[15px]">
+                @{post.author.username}
+                {post.author.verified ? " ✓" : ""}
+              </span>
+              {metaLine ? (
+                <span className="text-white/45 text-xs">{metaLine}</span>
+              ) : null}
+            </div>
+          </button>
           {/* ⋯ overflow menu — opens the action Drawer. */}
           <button
             onClick={() => setShowMenu(true)}
@@ -281,7 +287,12 @@ export function PostDetailScreen() {
         {post.caption ? (
           <div className="px-4 pb-3">
             <p className="text-[15px] leading-relaxed">
-              <span className="font-bold">@{post.author.username}</span>{" "}
+              <button
+                onClick={() => router.push(`/feed/${post.author.username}`)}
+                className="font-bold"
+              >
+                @{post.author.username}
+              </button>{" "}
               {translatedCaption || post.caption}
             </p>
             {/* Caption translate toggle — same hook/store native uses. Only
