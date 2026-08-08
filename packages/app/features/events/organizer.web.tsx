@@ -36,6 +36,7 @@ import {
   CheckCircle,
   Clock,
   CloudUpload,
+  Megaphone,
   QrCode,
   Settings,
   Tag,
@@ -517,6 +518,18 @@ export function EventOrganizerScreen() {
             >
               <User size={16} color="#EAB308" />
               Staff
+            </button>
+          </div>
+
+          {/* Sub-tool nav: Promoters (WS-4 — tracked links + rev share) */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => router.push(`/feed/events/${eventId}/promoters`)}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/6 py-3 text-[13px] font-semibold text-white active:bg-white/8"
+            >
+              <Megaphone size={16} color="#C084FC" />
+              Promoters
             </button>
           </div>
         </div>

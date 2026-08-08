@@ -1,6 +1,14 @@
 /**
  * Offline Scanner Utilities
  *
+ * @deprecated WS-8/WS-12 — this is the OLDER, duplicative offline-scan
+ * path (own MMKV id "offline-scanner"). The maintained primitive is
+ * `lib/stores/offline-checkin-store.ts` (MMKV-persisted Zustand: token
+ * allowlist + pendingScans queue, auto-drained on connectivity→online /
+ * app foreground via the shared outbox drain signal — see `lib/outbox`).
+ * Do not add new call sites; fold remaining consumers onto the store,
+ * then delete this file.
+ *
  * Allows organizers to download an HMAC-hashed allowlist of tickets
  * for offline validation at the door. Uses MMKV for secure local storage.
  *

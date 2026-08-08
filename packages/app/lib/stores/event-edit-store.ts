@@ -10,9 +10,25 @@
 
 import { create } from "zustand";
 import type { TicketTypeCategory } from "@dvnt/app/lib/api/ticket-types";
+import type { TierType, TierVisibility } from "@dvnt/app/lib/tickets/pricing";
+import {
+  newDraftAddon,
+  type DraftAddon,
+} from "@dvnt/app/features/events/create/addon-form";
 
 export const TIER_LEVELS = ["free", "ga", "vip", "table"] as const;
 export type TierLevel = (typeof TIER_LEVELS)[number];
+
+/** Editor row → `price_schedule` jsonb entry ("price changes to $X at T"). */
+export interface TierScheduleRow {
+  effectiveAt: string; // ISO — when the new price takes effect
+  priceDollars: string;
+}
+/** Editor row → `sub_allocations` jsonb band ("first N tickets at $X"). */
+export interface TierBandRow {
+  quantity: string;
+  priceDollars: string;
+}
 
 export interface LocalTicketTier {
   id?: string; // undefined = new (not yet saved)
@@ -25,6 +41,12 @@ export interface LocalTicketTier {
   description: string;
   isActive: boolean;
   saleStart: string; // ISO string. Empty = opens immediately on publish.
+  // ── v2 tier model (migration 20260613000000)
+  tierType: TierType;
+  visibility: TierVisibility;
+  unlockCode: string;
+  priceSchedule: TierScheduleRow[];
+  subAllocations: TierBandRow[];
 }
 
 interface EventEditState {
@@ -48,9 +70,13 @@ interface EventEditState {
   flyerMediaType: "image" | "video";
   eventImages: string[];
   ticketTiers: LocalTicketTier[];
+  /** Add-on catalog working copy (WS-3). requiresTierId = ticket_types uuid. */
+  addons: DraftAddon[];
 
   // Bookkeeping
   originalTierIds: string[];
+  /** DB ids of the add-ons loaded at hydrate — save() diffs against these. */
+  originalAddonIds: string[];
   hydratedId: string | null;
 
   // Field setters
@@ -78,6 +104,12 @@ interface EventEditState {
   removeTier: (idx: number) => void;
   updateTier: (idx: number, patch: Partial<LocalTicketTier>) => void;
 
+  // Add-on ops
+  addAddon: () => void;
+  removeAddon: (idx: number) => void;
+  updateAddon: (idx: number, patch: Partial<DraftAddon>) => void;
+  setAddons: (v: DraftAddon[] | ((prev: DraftAddon[]) => DraftAddon[])) => void;
+
   hydrate: (data: Partial<EventEditState> & { hydratedId: string }) => void;
   reset: () => void;
 }
@@ -102,7 +134,9 @@ const initial = {
   flyerMediaType: "image" as "image" | "video",
   eventImages: [] as string[],
   ticketTiers: [] as LocalTicketTier[],
+  addons: [] as DraftAddon[],
   originalTierIds: [] as string[],
+  originalAddonIds: [] as string[],
   hydratedId: null as string | null,
 };
 
@@ -143,6 +177,11 @@ export const useEventEditStore = create<EventEditState>((set) => ({
           description: "",
           isActive: true,
           saleStart: "",
+          tierType: "ga",
+          visibility: "public",
+          unlockCode: "",
+          priceSchedule: [],
+          subAllocations: [],
         },
       ],
     })),
@@ -155,6 +194,18 @@ export const useEventEditStore = create<EventEditState>((set) => ({
       if (patch.tier === "free") next[idx].priceDollars = "0";
       return { ticketTiers: next };
     }),
+
+  addAddon: () => set((s) => ({ addons: [...s.addons, newDraftAddon()] })),
+  removeAddon: (idx) =>
+    set((s) => ({ addons: s.addons.filter((_, i) => i !== idx) })),
+  updateAddon: (idx, patch) =>
+    set((s) => {
+      const next = [...s.addons];
+      next[idx] = { ...next[idx], ...patch };
+      return { addons: next };
+    }),
+  setAddons: (v) =>
+    set((s) => ({ addons: typeof v === "function" ? v(s.addons) : v })),
 
   hydrate: (data) => set({ ...initial, ...data }),
   reset: () => set({ ...initial }),

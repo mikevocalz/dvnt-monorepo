@@ -34,7 +34,20 @@ import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import { useCreateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { usePlacesAutocomplete } from "@dvnt/app/lib/hooks/use-places-autocomplete";
 import type { PlacesLocationData } from "@dvnt/app/lib/places/types";
-import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
+import {
+  ticketTypesApi,
+  TIER_TYPE_OPTIONS,
+  TIER_VISIBILITY_OPTIONS,
+} from "@dvnt/app/lib/api/ticket-types";
+import {
+  scheduleRowsToEntries,
+  bandRowsToSubAllocations,
+  type TierType,
+  type TierVisibility,
+} from "@dvnt/app/lib/tickets/pricing";
+import { addonsApi } from "@dvnt/app/lib/api/addons";
+import { draftAddonToCreateParams } from "@dvnt/app/features/events/create/addon-form";
+import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -257,12 +270,15 @@ export function CreateEventScreen() {
       // creation is post-publish setup; if it fails, the event row is already
       // live and must not be reported as an event publish failure.
       let ticketSetupFailed = false;
+      // Local editor tier id → created ticket_types uuid, so add-on per-tier
+      // eligibility (requires_tier_id) can point at the real row.
+      const createdTierIdByLocalId = new Map<string, string>();
       if (id) {
         try {
           if (s.ticketTiers.length > 0) {
             // Sequential creation keeps tier order deterministic.
             for (const tier of s.ticketTiers) {
-              await withTimeout(
+              const createdTier = await withTimeout(
                 ticketTypesApi.create({
                   eventId: String(id),
                   name: tier.name || "General Admission",
@@ -270,10 +286,20 @@ export function CreateEventScreen() {
                   quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
                   maxPerUser:
                     tier.maxPerUser > 0 ? tier.maxPerUser : s.simpleMaxPerUser,
+                  // v2 tier model — visibility, type, early-bird pricing.
+                  tierType: tier.tierType,
+                  tierVisibility: tier.visibility,
+                  unlockCode:
+                    tier.visibility === "locked" ? tier.unlockCode : undefined,
+                  priceSchedule: scheduleRowsToEntries(tier.priceSchedule),
+                  subAllocations: bandRowsToSubAllocations(tier.subAllocations),
                 }),
                 15000,
                 "ticket-type",
               );
+              if (createdTier?.id) {
+                createdTierIdByLocalId.set(tier.id, String(createdTier.id));
+              }
             }
           } else {
             const priceCents = Math.round((parseFloat(s.ticketPrice) || 0) * 100);
@@ -293,6 +319,31 @@ export function CreateEventScreen() {
         } catch (ticketErr) {
           ticketSetupFailed = true;
           console.warn("[create-event] ticket setup failed after publish", ticketErr);
+        }
+
+        // Add-on catalog (WS-3). Post-publish setup like tiers: a failure
+        // never rolls back the live event — the host retries from edit.
+        // Prices serialize to integer cents in addon-form.ts; the checkout
+        // server reprices every line under lock regardless.
+        if (s.addons.length > 0) {
+          try {
+            for (const [i, draft] of s.addons.entries()) {
+              const params = draftAddonToCreateParams(
+                draft,
+                String(id),
+                (localTierId) => createdTierIdByLocalId.get(localTierId) ?? null,
+                i,
+              );
+              if (!params) continue; // unnamed row — nothing to persist
+              await withTimeout(addonsApi.create(params), 15000, "ticket-addon");
+            }
+          } catch (addonErr) {
+            ticketSetupFailed = true;
+            console.warn(
+              "[create-event] add-on setup failed after publish",
+              addonErr,
+            );
+          }
         }
       }
 
@@ -717,6 +768,11 @@ export function CreateEventScreen() {
                               description: "",
                               saleStart: "",
                               saleEnd: "",
+                              tierType: "ga",
+                              visibility: "public",
+                              unlockCode: "",
+                              priceSchedule: [],
+                              subAllocations: [],
                             },
                           ]);
                         }}
@@ -763,6 +819,20 @@ export function CreateEventScreen() {
                   ) : null}
                 </>
               ) : null}
+            </Section>
+
+            <Section
+              title="Add-ons"
+              subtitle="Upsells sold with (or without) a ticket — coat check, merch, drinks, skip-line."
+            >
+              <AddonsEditor
+                addons={s.addons}
+                onChange={s.setAddons}
+                tierOptions={s.ticketTiers.map((tier) => ({
+                  id: tier.id,
+                  name: tier.name,
+                }))}
+              />
             </Section>
 
             <Section title="Visibility & audience">
@@ -1112,6 +1182,11 @@ function TicketTiersEditor() {
         description: "",
         saleStart: "",
         saleEnd: "",
+        tierType: "ga" as TierType,
+        visibility: "public" as TierVisibility,
+        unlockCode: "",
+        priceSchedule: [],
+        subAllocations: [],
       },
     ]);
 
@@ -1201,6 +1276,206 @@ function TicketTiersEditor() {
                 }
               />
             </label>
+          </div>
+
+          {/* Tier type — v2 enum (GA / VIP / Early Bird / Table / Group). */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-white/55">Tier type</span>
+            <div className="flex gap-1.5">
+              {TIER_TYPE_OPTIONS.map((o) => {
+                const selected = (tier.tierType ?? "ga") === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => update(idx, { tierType: o.value })}
+                    className={`flex-1 h-8 rounded-lg text-[11px] font-semibold uppercase tracking-wide border ${
+                      selected
+                        ? "bg-white text-black border-transparent"
+                        : "bg-transparent text-white/50 border-white/12 hover:text-white/80"
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Visibility — public / hidden / locked (+ unlock code). */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-white/55">Visibility</span>
+            <div className="flex gap-1.5">
+              {TIER_VISIBILITY_OPTIONS.map((o) => {
+                const selected = (tier.visibility ?? "public") === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => update(idx, { visibility: o.value })}
+                    className={`flex-1 h-8 rounded-lg text-[11px] font-semibold border ${
+                      selected
+                        ? "bg-[#3FDCFF] text-black border-transparent"
+                        : "bg-transparent text-white/50 border-white/12 hover:text-white/80"
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-white/40">
+              {
+                TIER_VISIBILITY_OPTIONS.find(
+                  (o) => o.value === (tier.visibility ?? "public"),
+                )?.hint
+              }
+            </p>
+            {tier.visibility === "locked" ? (
+              <input
+                className="h-9 rounded-lg bg-white/8 px-2 font-mono text-xs uppercase tracking-widest text-white outline-none placeholder:normal-case placeholder:tracking-normal placeholder:font-sans"
+                placeholder="Unlock code (e.g. FRIENDS25)"
+                value={tier.unlockCode ?? ""}
+                onChange={(e) =>
+                  update(idx, { unlockCode: e.target.value.toUpperCase() })
+                }
+              />
+            ) : null}
+          </div>
+
+          {/* Early-bird pricing — writes ticket_types.price_schedule +
+              sub_allocations exactly as the SQL resolver reads them. */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#F5C518]">
+              Early-bird pricing (optional)
+            </span>
+            {(tier.priceSchedule ?? []).map((row, ri) => (
+              <div key={`sched-${ri}`} className="flex items-center gap-2">
+                <span className="text-[11px] text-white/55 shrink-0">From</span>
+                <input
+                  type="datetime-local"
+                  className="h-9 flex-1 min-w-0 rounded-lg bg-white/8 px-2 text-xs text-white outline-none"
+                  value={row.effectiveAt ? toLocalInput(row.effectiveAt) : ""}
+                  onChange={(e) =>
+                    update(idx, {
+                      priceSchedule: (tier.priceSchedule ?? []).map((r, i) =>
+                        i === ri
+                          ? { ...r, effectiveAt: e.target.value ? fromLocalInput(e.target.value) : "" }
+                          : r,
+                      ),
+                    })
+                  }
+                />
+                <span className="text-[11px] text-white/55 shrink-0">price $</span>
+                <input
+                  className="h-9 w-20 rounded-lg bg-white/8 px-2 font-mono text-xs text-white outline-none"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={row.priceDollars}
+                  onChange={(e) =>
+                    update(idx, {
+                      priceSchedule: (tier.priceSchedule ?? []).map((r, i) =>
+                        i === ri ? { ...r, priceDollars: e.target.value } : r,
+                      ),
+                    })
+                  }
+                />
+                <button
+                  type="button"
+                  aria-label="Remove price change"
+                  onClick={() =>
+                    update(idx, {
+                      priceSchedule: (tier.priceSchedule ?? []).filter((_, i) => i !== ri),
+                    })
+                  }
+                  className="text-white/40 hover:text-white/80"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            {(tier.subAllocations ?? []).map((row, ri) => (
+              <div key={`band-${ri}`} className="flex items-center gap-2">
+                <span className="text-[11px] text-white/55 shrink-0">First</span>
+                <input
+                  className="h-9 w-16 rounded-lg bg-white/8 px-2 font-mono text-xs text-white outline-none"
+                  inputMode="numeric"
+                  placeholder="N"
+                  value={row.quantity}
+                  onChange={(e) =>
+                    update(idx, {
+                      subAllocations: (tier.subAllocations ?? []).map((r, i) =>
+                        i === ri ? { ...r, quantity: e.target.value } : r,
+                      ),
+                    })
+                  }
+                />
+                <span className="text-[11px] text-white/55 shrink-0">
+                  tickets at $
+                </span>
+                <input
+                  className="h-9 w-20 rounded-lg bg-white/8 px-2 font-mono text-xs text-white outline-none"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={row.priceDollars}
+                  onChange={(e) =>
+                    update(idx, {
+                      subAllocations: (tier.subAllocations ?? []).map((r, i) =>
+                        i === ri ? { ...r, priceDollars: e.target.value } : r,
+                      ),
+                    })
+                  }
+                />
+                <button
+                  type="button"
+                  aria-label="Remove quantity band"
+                  onClick={() =>
+                    update(idx, {
+                      subAllocations: (tier.subAllocations ?? []).filter((_, i) => i !== ri),
+                    })
+                  }
+                  className="text-white/40 hover:text-white/80"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  update(idx, {
+                    priceSchedule: [
+                      ...(tier.priceSchedule ?? []),
+                      { effectiveAt: "", priceDollars: "" },
+                    ],
+                  })
+                }
+                className="text-[11px] font-semibold text-white/60 hover:text-white"
+              >
+                + Price goes up at a date
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  update(idx, {
+                    subAllocations: [
+                      ...(tier.subAllocations ?? []),
+                      { quantity: "", priceDollars: "" },
+                    ],
+                  })
+                }
+                className="text-[11px] font-semibold text-white/60 hover:text-white"
+              >
+                + First N tickets cheaper
+              </button>
+            </div>
+            {(tier.priceSchedule ?? []).length > 0 &&
+            (tier.subAllocations ?? []).length > 0 ? (
+              <p className="text-[11px] text-white/40">
+                Date-based changes win over quantity bands when both apply.
+              </p>
+            ) : null}
           </div>
         </div>
       ))}

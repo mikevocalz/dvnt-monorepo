@@ -21,6 +21,7 @@ import {
   magicLinkEmail,
 } from "../_shared/email/templates.ts";
 import { brandEmailWrapper } from "../_shared/email/wrapper.ts";
+import { checkRateLimit } from "../_shared/rate-limit.ts";
 
 // ─── Env ────────────────────────────────────────────────────────────────────
 const DATABASE_URL = Deno.env.get("DATABASE_URL") || "";
@@ -382,6 +383,62 @@ async function getAuth() {
             },
           },
         },
+        session: {
+          create: {
+            // GUEST → ACCOUNT CLAIM (WS-7/13). Fires on EVERY session
+            // establishment (email/password, OAuth, magic-link verify), so a
+            // guest who signs in by any method inherits their guest orders.
+            // Hook name + payload verified against the installed
+            // @better-auth/core@1.5.5 source:
+            //   dist/types/init-options.d.mts:1097-1112 —
+            //   session.create.after?: (session: Session & Record<string,
+            //   unknown>, context: GenericEndpointContext | null) => Promise<void>
+            // The Session payload carries userId (not the user), so we read
+            // email + emailVerified from the "user" row ourselves.
+            //
+            // VERIFIED-EMAIL CONTRACT (claim_guest_orders): only claim when
+            // "emailVerified" is true. Magic-link verification sets it
+            // (better-auth@1.6.26 dist/plugins/magic-link/index.mjs:140-150:
+            // new users are created with emailVerified: true, existing users
+            // are updated to true, then createSession fires this hook).
+            // Unverified email/password sign-ins are skipped — fail closed.
+            //
+            // claim_guest_orders is idempotent (matches user_id IS NULL only),
+            // so firing on every sign-in is safe. Best-effort: a claim
+            // failure must NEVER block auth.
+            after: async (session: any) => {
+              try {
+                const userId = String(session?.userId ?? "");
+                if (!userId) return;
+                const { rows } = await pool.query(
+                  'select "email", "emailVerified" from "user" where "id" = $1',
+                  [userId],
+                );
+                const u = rows?.[0];
+                if (!u?.email || !u.emailVerified) return;
+                const { rows: claimed } = await pool.query(
+                  "select public.claim_guest_orders($1, $2) as result",
+                  [userId, u.email],
+                );
+                const result = claimed?.[0]?.result;
+                if (
+                  result?.ok &&
+                  (Number(result.ordersClaimed) > 0 ||
+                    Number(result.ticketsClaimed) > 0)
+                ) {
+                  console.log(
+                    `[Auth] Guest claim: re-parented ${result.ordersClaimed} order(s) + ${result.ticketsClaimed} ticket(s) onto user ${userId}`,
+                  );
+                }
+              } catch (err) {
+                console.error(
+                  "[Auth] guest claim failed (non-blocking):",
+                  err,
+                );
+              }
+            },
+          },
+        },
         account: {
           create: {
             // MERGE NOTICE. Fires whenever a provider account row is created.
@@ -498,6 +555,83 @@ Deno.serve(async (req: Request) => {
         status: 200,
         headers: { ...corsFor(req), "Content-Type": "application/json" },
       },
+    );
+  }
+
+  // Guest → account claim entry point (WS-7/13). The "Add to my account" CTA
+  // in guest ticket emails points here (via the dvntapp.live /api/auth proxy,
+  // so the eventual session cookie lands first-party). Magic-link tokens live
+  // 15 minutes, so the ticket email can't carry a pre-minted link — this
+  // route mints a FRESH one per click through the Better Auth magic-link
+  // plugin's server API (auth.api.signInMagicLink — verified against
+  // better-auth@1.6.26 dist/plugins/magic-link/index.d.mts:66-120; BetterAuth
+  // mints, Resend delivers via the plugin's sendMagicLink above). After the
+  // user taps the link, verification marks the email verified, a session is
+  // created, and the session.create.after hook claims the guest orders.
+  //
+  // Enumeration-safe: the response is identical whether or not the email has
+  // tickets or an account. Rate-limited per email and per IP.
+  if (
+    (path === "/auth/api/auth/guest-claim" || path === "/auth/guest-claim") &&
+    req.method === "GET"
+  ) {
+    const claimPage = (title: string, bodyText: string) =>
+      new Response(
+        brandEmailWrapper(
+          `<h1 style="margin:0 0 12px;font-size:24px;color:#ffffff">${title}</h1><p style="margin:0;font-size:15px;line-height:1.6;color:#b8b8c2">${bodyText}</p>`,
+          { preheader: title },
+        ),
+        {
+          status: 200,
+          headers: { ...corsFor(req), "Content-Type": "text/html; charset=utf-8" },
+        },
+      );
+
+    const email = (url.searchParams.get("email") || "").trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+      return claimPage(
+        "That link looks incomplete",
+        "We couldn't read the email address on this link. Open the ticket email again and tap the button once more.",
+      );
+    }
+
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const emailRl = checkRateLimit(email, "guest-claim", {
+      maxRequests: 3,
+      windowMs: 10 * 60_000,
+    });
+    const ipRl = checkRateLimit(ip, "guest-claim-ip", {
+      maxRequests: 20,
+      windowMs: 10 * 60_000,
+    });
+    if (!emailRl.allowed || !ipRl.allowed) {
+      return claimPage(
+        "Hold on a moment",
+        "We recently sent a sign-in link to this address. Check your inbox (and spam), or try again in a few minutes.",
+      );
+    }
+
+    try {
+      const auth = await getAuth();
+      // Fixed callback — never taken from the query string (open-redirect
+      // hygiene). Lands on the web my-tickets surface with a first-party
+      // session; the claim already ran server-side in the session hook.
+      await auth.api.signInMagicLink({
+        body: {
+          email,
+          callbackURL: "https://dvntapp.live/feed/events/my-tickets",
+        },
+        headers: req.headers,
+      });
+    } catch (err) {
+      // Same response on failure — no enumeration signal. Log for ops.
+      console.error("[Auth] guest-claim magic-link mint failed:", err);
+    }
+
+    return claimPage(
+      "Check your email",
+      `If tickets or an account exist for <strong style="color:#ffffff">${email.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</strong>, a secure one-time sign-in link is on its way. It expires in 15 minutes. You can close this tab.`,
     );
   }
 

@@ -9,6 +9,9 @@ import {
   Share2,
   Heart,
   CalendarPlus,
+  CalendarClock,
+  Copy,
+  Ban,
   Pencil,
   Trash2,
   Flag,
@@ -28,11 +31,23 @@ interface EventActionSheetProps {
   onClose: () => void;
   isHost: boolean;
   isLiked: boolean;
+  /** events.status — drives Postpone vs Resume + hides lifecycle
+   * actions once the event is cancelled. */
+  eventStatus?: string;
   onShare: () => void;
   onToggleLike: () => void;
   onAddToCalendar: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  /** Prefill the create flow from this event (WS-9 duplicate). */
+  onDuplicate?: () => void;
+  /** Cancel with automatic refunds (WS-9) — destructive, confirmed
+   * by the caller before any server call. */
+  onCancelEvent?: () => void;
+  /** Reversible postpone — no refunds, tickets stay valid. */
+  onPostponeEvent?: () => void;
+  /** postponed → active. */
+  onResumeEvent?: () => void;
   onDashboard?: () => void;
   onScanner?: () => void;
   onStaff?: () => void;
@@ -48,11 +63,16 @@ export function EventActionSheet({
   onClose,
   isHost,
   isLiked,
+  eventStatus,
   onShare,
   onToggleLike,
   onAddToCalendar,
   onEdit,
   onDelete,
+  onDuplicate,
+  onCancelEvent,
+  onPostponeEvent,
+  onResumeEvent,
   onDashboard,
   onScanner,
   onStaff,
@@ -77,7 +97,14 @@ export function EventActionSheet({
     [onClose],
   );
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => [isHost ? "72%" : "45%"], [isHost]);
+  const isCancelled = eventStatus === "cancelled";
+  const isPostponed = eventStatus === "postponed";
+  // Hosts get lifecycle rows (duplicate / postpone / cancel) on top of
+  // the management rows — the sheet needs the extra height.
+  const snapPoints = useMemo(
+    () => [isHost ? (isCancelled ? "72%" : "85%") : "45%"],
+    [isHost, isCancelled],
+  );
 
   useEffect(() => {
     if (visible) {
@@ -153,6 +180,21 @@ export function EventActionSheet({
                 <Text style={styles.rowSubtext}>Update details, images, date & time</Text>
               </View>
             </Pressable>
+
+            {onDuplicate && (
+              <Pressable
+                onPress={() => runAfterClose(onDuplicate)}
+                style={styles.row}
+              >
+                <View style={[styles.iconCircle, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
+                  <Copy size={20} color="#fff" />
+                </View>
+                <View style={styles.rowTextWrap}>
+                  <Text style={styles.rowText}>Duplicate Event</Text>
+                  <Text style={styles.rowSubtext}>Start a new event from this one</Text>
+                </View>
+              </Pressable>
+            )}
 
             {onDashboard && (
               <Pressable
@@ -310,10 +352,62 @@ export function EventActionSheet({
           </View>
         </Pressable>
 
-        {/* Destructive actions */}
+        {/* Destructive / lifecycle actions. Confirmation dialogs live
+            with the callers — every handler here is pre-confirmation. */}
         {isHost && (
           <>
             <View style={styles.divider} />
+
+            {/* Postpone ⇄ Resume — reversible, never on a cancelled event */}
+            {!isCancelled && isPostponed && onResumeEvent && (
+              <Pressable
+                onPress={() => runAfterClose(onResumeEvent)}
+                style={styles.row}
+              >
+                <View style={[styles.iconCircle, { backgroundColor: "rgba(34,197,94,0.12)" }]}>
+                  <CalendarClock size={20} color="#22C55E" />
+                </View>
+                <View style={styles.rowTextWrap}>
+                  <Text style={styles.rowText}>Resume Event</Text>
+                  <Text style={styles.rowSubtext}>Set it back to active — attendees are notified</Text>
+                </View>
+              </Pressable>
+            )}
+            {!isCancelled && !isPostponed && onPostponeEvent && (
+              <Pressable
+                onPress={() => runAfterClose(onPostponeEvent)}
+                style={styles.row}
+              >
+                <View style={[styles.iconCircle, { backgroundColor: "rgba(245,158,11,0.12)" }]}>
+                  <CalendarClock size={20} color="#f59e0b" />
+                </View>
+                <View style={styles.rowTextWrap}>
+                  <Text style={styles.rowText}>Postpone Event…</Text>
+                  <Text style={styles.rowSubtext}>Tickets stay valid — no refunds issued</Text>
+                </View>
+              </Pressable>
+            )}
+
+            {/* Cancel with auto-refund — the safe destructive path */}
+            {!isCancelled && onCancelEvent && (
+              <Pressable
+                onPress={() => runAfterClose(onCancelEvent)}
+                style={styles.row}
+              >
+                <View style={[styles.iconCircle, { backgroundColor: "rgba(239,68,68,0.12)" }]}>
+                  <Ban size={20} color="#ef4444" />
+                </View>
+                <View style={styles.rowTextWrap}>
+                  <Text style={[styles.rowText, { color: "#ef4444" }]}>
+                    Cancel Event…
+                  </Text>
+                  <Text style={styles.rowSubtext}>
+                    Refunds every paid order & notifies attendees
+                  </Text>
+                </View>
+              </Pressable>
+            )}
+
             <Pressable
               onPress={() => runAfterClose(onDelete)}
               style={styles.row}
@@ -324,6 +418,9 @@ export function EventActionSheet({
               <View style={styles.rowTextWrap}>
                 <Text style={[styles.rowText, { color: "#ef4444" }]}>
                   Delete Event
+                </Text>
+                <Text style={styles.rowSubtext}>
+                  Only possible with no paid tickets — cancel instead
                 </Text>
               </View>
             </Pressable>

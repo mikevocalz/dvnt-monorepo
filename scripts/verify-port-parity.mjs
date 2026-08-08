@@ -48,6 +48,7 @@ const WEB_NATIVE_SOURCE_MAP = {
   "events/organizer.web.tsx": "(protected)/events/[id]/organizer.tsx",
   "events/analytics.web.tsx": "(protected)/events/[id]/analytics.tsx",
   "events/staff.web.tsx": "(protected)/events/[id]/staff.tsx",
+  "events/promoters.web.tsx": "(protected)/events/[id]/promoters.tsx",
   "events/promo-codes.web.tsx": "(protected)/events/[id]/promo-codes.tsx",
   "events/scanner.web.tsx": "(protected)/events/[id]/scanner.tsx",
   "events/event-edit.web.tsx": "(protected)/events/[id]/edit.tsx",
@@ -160,6 +161,16 @@ const KNOWN_WEB_DEBT = {
   "messages/chat.web.tsx": {
     phase: "P5 media",
     items: new Set(["feed-post-store", "useFeedPostUIStore"]),
+  },
+  // events/event-detail.web.tsx — WS-9 debt: native detail gained a
+  // "Duplicate event" action that prefills create-event-store; the web
+  // fork's inline action menu is owned by the events-premium web lane
+  // and picks this up when it adopts the WS-9 lifecycle actions
+  // (cancel/postpone/duplicate via eventsApi.cancelEventWithRefunds /
+  // postponeEvent / resumeEvent).
+  "events/event-detail.web.tsx": {
+    phase: "WS-9 lifecycle",
+    items: new Set(["create-event-store", "useCreateEventStore"]),
   },
   // sneaky-lynk/room.web.tsx — P6 lynk debt PAID DOWN (Prompt 14): useRoomReactions
   // + room chat + hand-queue + participant moderation + free-host timer/paywall

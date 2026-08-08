@@ -8,9 +8,14 @@
  * - Viewer's RSVP state
  *
  * Eliminates: getEvents + getMyEvents + host lookups + RSVP lookups waterfall.
+ *
+ * Identity is derived from the verified Better Auth session (x-auth-token /
+ * Authorization header) — never from the request body. Events are public, so
+ * anonymous callers still get the event list — just with no viewer RSVP state.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -22,7 +27,8 @@ Deno.serve(async (req: Request) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, x-auth-token",
       },
     });
   }
@@ -34,14 +40,7 @@ Deno.serve(async (req: Request) => {
   const t0 = Date.now();
 
   try {
-    const { user_id, limit = 20 } = await req.json();
-
-    if (!user_id) {
-      return new Response(JSON.stringify({ error: "user_id required" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    const { limit = 20 } = await req.json();
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -158,16 +157,17 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── 4. Get viewer's RSVP state ────────────────────────────────────
-    // Resolve integer users.id — user_id from client is Better Auth UUID
+    // Identity comes ONLY from the verified Better Auth session — never from
+    // the body. This function reads with the service role, so a client-supplied
+    // id would let anyone read another user's RSVP state. No valid session =
+    // anonymous viewer (public events, no viewer RSVP state).
     let intUserId: number | null = null;
-    const asInt = parseInt(user_id, 10);
-    if (!isNaN(asInt) && String(asInt) === String(user_id)) {
-      intUserId = asInt;
-    } else {
+    const sessionUserId = await verifySession(supabase, req);
+    if (sessionUserId) {
       const { data: userRow } = await supabase
         .from("users")
         .select("id")
-        .eq("auth_id", user_id)
+        .eq("auth_id", sessionUserId)
         .single();
       intUserId = userRow?.id ?? null;
     }

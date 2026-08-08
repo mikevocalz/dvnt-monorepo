@@ -99,7 +99,9 @@ Deno.serve(async (req: Request) => {
         .in("role", ["scanner", "editor", "admin"])
         .maybeSingle();
       if (coOrg?.role) {
-        effectiveRole = coOrg.role as typeof effectiveRole;
+        // NB: inside this `!effectiveRole` block `typeof effectiveRole`
+        // narrows to null, so the cast must name the roles explicitly.
+        effectiveRole = coOrg.role as "admin" | "editor" | "scanner";
       }
     }
     if (!effectiveRole) {
@@ -123,7 +125,34 @@ Deno.serve(async (req: Request) => {
       const qrTokens = (data || [])
         .map((t: any) => t.qr_token)
         .filter(Boolean);
-      return jsonResponse({ ok: true, qr_tokens: qrTokens });
+
+      // Add-on allowlist for offline door validation (WS-3 × WS-8):
+      // unredeemed redeemable add-ons carry their own qr_token
+      // (order_addons, 20260613000100). Same no-PII discipline — tokens
+      // only. Display-only extra: never fail the whole download over it.
+      let addonQrTokens: string[] = [];
+      const { data: addonRows, error: addonError } = await supabase
+        .from("order_addons")
+        .select("qr_token")
+        .eq("event_id", eventIdNum)
+        .in("status", ["unfulfilled", "fulfilled"])
+        .not("qr_token", "is", null);
+      if (addonError) {
+        console.error(
+          "[get-event-tickets] offline addon query error:",
+          addonError,
+        );
+      } else {
+        addonQrTokens = (addonRows || [])
+          .map((a: any) => a.qr_token)
+          .filter(Boolean);
+      }
+
+      return jsonResponse({
+        ok: true,
+        qr_tokens: qrTokens,
+        addon_qr_tokens: addonQrTokens,
+      });
     }
 
     // Pagination + status filter + search — server-side per Phase 5

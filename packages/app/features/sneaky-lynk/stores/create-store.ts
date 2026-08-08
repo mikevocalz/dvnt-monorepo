@@ -20,6 +20,9 @@ interface CreateLynkStore {
   description: string;
   hasVideo: boolean;
   isPublic: boolean;
+  /** App-only room — web viewers can't join. The only enforced tier of
+   *  capture protection (see `video_join_room`'s app-only gate). */
+  appOnly: boolean;
   isCreating: boolean;
   inviteSearch: string;
   inviteResults: LynkInvitee[];
@@ -29,6 +32,7 @@ interface CreateLynkStore {
   setDescription: (v: string) => void;
   setHasVideo: (v: boolean) => void;
   setIsPublic: (v: boolean) => void;
+  setAppOnly: (v: boolean) => void;
   setIsCreating: (v: boolean) => void;
   setInviteSearch: (v: string) => void;
   setInviteResults: (v: LynkInvitee[]) => void;
@@ -42,6 +46,7 @@ export const useCreateLynkStore = create<CreateLynkStore>((set) => ({
   description: "",
   hasVideo: false,
   isPublic: true,
+  appOnly: false,
   isCreating: false,
   inviteSearch: "",
   inviteResults: [],
@@ -51,6 +56,7 @@ export const useCreateLynkStore = create<CreateLynkStore>((set) => ({
   setDescription: (description) => set({ description }),
   setHasVideo: (hasVideo) => set({ hasVideo }),
   setIsPublic: (isPublic) => set({ isPublic }),
+  setAppOnly: (appOnly) => set({ appOnly }),
   setIsCreating: (isCreating) => set({ isCreating }),
   setInviteSearch: (inviteSearch) => set({ inviteSearch }),
   setInviteResults: (inviteResults) => set({ inviteResults }),
@@ -74,6 +80,7 @@ export const useCreateLynkStore = create<CreateLynkStore>((set) => ({
       description: "",
       hasVideo: false,
       isPublic: true,
+      appOnly: false,
       isCreating: false,
       inviteSearch: "",
       inviteResults: [],

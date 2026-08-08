@@ -20,3 +20,4 @@ export { VideoThumbnailRow } from "./VideoThumbnailRow";
 export { ChatSheet } from "./ChatSheet";
 export { RoomTimer } from "./RoomTimer";
 export { RemoteAudioLayer } from "./RemoteAudioLayer";
+export { CaptureDisclosureChip } from "./CaptureDisclosureChip";

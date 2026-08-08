@@ -25,6 +25,15 @@ import {
   initConnectivity,
   useConnectivityStore,
 } from "@dvnt/app/lib/stores/connectivity-store";
+import { initOutboxDrain } from "@dvnt/app/lib/outbox";
+import { initOfflineScanAutoDrain } from "@dvnt/app/lib/stores/offline-checkin-store";
+// Importing this module runs its module-scope TaskManager.defineTask() calls
+// (required — defineTask must run in the global scope so a headless background
+// launch can find the task). Registration itself is gated on auth below.
+import {
+  registerBackgroundTasks,
+  unregisterBackgroundTasks,
+} from "@dvnt/app/lib/background-tasks";
 import { OfflineBanner } from "@dvnt/app/components/offline-banner";
 import {
   persistOptions,
@@ -145,6 +154,17 @@ try {
   initConnectivity();
 } catch (e) {
   console.warn("[Boot] initConnectivity failed (non-fatal):", e);
+}
+
+// Durable outbox drain (WS-12): flush queued mutations + pending offline
+// scans on connectivity→online and app foreground. Both inits are
+// idempotent and internally defensive — same boot-hardening contract as
+// initConnectivity above.
+try {
+  initOutboxDrain();
+  initOfflineScanAutoDrain();
+} catch (e) {
+  console.warn("[Boot] outbox drain init failed (non-fatal):", e);
 }
 
 // Bridge the Zustand connectivity phase to React Query's onlineManager.
@@ -271,6 +291,21 @@ function RootLayout() {
       }
     })();
   }, [authStatus, isAuthenticated, userId]);
+
+  // ── Background tasks (WS-11) — register when authenticated ────────────
+  // Opportunistic acceleration only (scan flush, ticket prefetch, upload
+  // watchdog, outbox drain). Gated on a live session: the jobs hit authed
+  // edge fns, so a logged-out device should not wake for them. registration
+  // is idempotent + internally defensive; unregister on sign-out. See the
+  // honest execution-constraints header in lib/background-tasks/index.ts.
+  useEffect(() => {
+    if (authStatus === "loading") return;
+    if (isAuthenticated) {
+      void registerBackgroundTasks();
+    } else {
+      void unregisterBackgroundTasks();
+    }
+  }, [authStatus, isAuthenticated]);
 
   // ── Share Intent — receive content from other apps ──────────────────
   // Initialize push notifications

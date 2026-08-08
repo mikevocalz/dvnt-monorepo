@@ -1,6 +1,26 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 Deno.serve(async (req) => {
+  // ── Auth gate: internal admin job — x-internal-secret required ──────
+  // One-off data-repair job that rewrites tickets.user_id with the service
+  // role. Mirrors the payouts-release CRON_SECRET pattern: fail CLOSED when
+  // the env is unset. (Operator script: scripts/run-ticket-fix.sh — send the
+  // x-internal-secret header there.)
+  const internalSecret = Deno.env.get("INTERNAL_FN_SECRET") || "";
+  if (!internalSecret) {
+    console.error("[fix-tickets] INTERNAL_FN_SECRET not set — rejecting request");
+    return new Response(JSON.stringify({ error: "Misconfigured" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if ((req.headers.get("x-internal-secret") || "") !== internalSecret) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const supabaseClient = createClient(supabaseUrl, supabaseServiceKey, {

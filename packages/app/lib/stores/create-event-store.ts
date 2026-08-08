@@ -8,6 +8,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
+import type { DraftAddon } from "@dvnt/app/features/events/create/addon-form";
 
 type VisibilityOption = "public" | "private" | "link_only";
 type AgeRestriction = "none" | "18+" | "21+";
@@ -57,6 +58,17 @@ interface CoOrganizer {
   avatar: string;
 }
 
+/** Editor row → `price_schedule` jsonb entry ("price changes to $X at T"). */
+export interface TierScheduleRow {
+  effectiveAt: string; // ISO — when the new price takes effect
+  priceDollars: string;
+}
+/** Editor row → `sub_allocations` jsonb band ("first N tickets at $X"). */
+export interface TierBandRow {
+  quantity: string;
+  priceDollars: string;
+}
+
 interface TicketTier {
   id: string;
   name: string;
@@ -67,6 +79,13 @@ interface TicketTier {
   description: string;
   saleStart: string;
   saleEnd: string;
+  // ── v2 tier model (migration 20260613000000). Optional so drafts persisted
+  //    before this shipped hydrate cleanly from MMKV.
+  tierType?: "ga" | "vip" | "early_bird" | "table_service" | "group_bundle" | "comp" | "donation";
+  visibility?: "public" | "hidden" | "locked";
+  unlockCode?: string;
+  priceSchedule?: TierScheduleRow[];
+  subAllocations?: TierBandRow[];
 }
 
 // Fields that persist as a draft
@@ -91,6 +110,9 @@ interface DraftFields {
   lineup: string[];
   perks: string[];
   ticketTiers: TicketTier[];
+  /** Add-on catalog draft (WS-3). requiresTierId references the LOCAL tier
+   *  editor id; resolved to the created ticket_types uuid at publish. */
+  addons: DraftAddon[];
   coOrganizers: CoOrganizer[];
   flyerImage: string | null;
   flyerMediaType: "image" | "video";
@@ -153,6 +175,7 @@ interface CreateEventActions {
   setTicketTiers: (
     v: TicketTier[] | ((prev: TicketTier[]) => TicketTier[]),
   ) => void;
+  setAddons: (v: DraftAddon[] | ((prev: DraftAddon[]) => DraftAddon[])) => void;
   setFlyerImage: (v: string | null) => void;
   setFlyerMediaType: (v: "image" | "video") => void;
   setFlyerFallbackImage: (v: string | null) => void;
@@ -224,6 +247,7 @@ const DRAFT_DEFAULTS: DraftFields = {
   lineup: [],
   perks: [],
   ticketTiers: [],
+  addons: [],
   coOrganizers: [],
   flyerImage: null,
   flyerMediaType: "image",
@@ -287,6 +311,7 @@ export const useCreateEventStore = create<CreateEventState>()(
       setPerks: (v) => set((s) => ({ perks: resolve(v, s.perks) })),
       setTicketTiers: (v) =>
         set((s) => ({ ticketTiers: resolve(v, s.ticketTiers) })),
+      setAddons: (v) => set((s) => ({ addons: resolve(v, s.addons) })),
       setFlyerImage: (v) => set({ flyerImage: v }),
       setFlyerMediaType: (v) => set({ flyerMediaType: v }),
       setFlyerFallbackImage: (v) => set({ flyerFallbackImage: v }),
@@ -434,6 +459,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         lineup: state.lineup,
         perks: state.perks,
         ticketTiers: state.ticketTiers,
+        addons: state.addons,
         coOrganizers: state.coOrganizers,
         flyerImage: state.flyerImage,
         flyerMediaType: state.flyerMediaType,

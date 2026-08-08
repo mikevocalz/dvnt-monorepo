@@ -124,6 +124,12 @@ export function CheckoutSuccessScreen() {
   const coatCheckCount = tickets.filter(
     (ticket) => ticket.category === "coat_check",
   ).length;
+  // Issued add-ons (order_addons via get-cart-status) — WS-3.
+  const issuedAddons = useMemo(
+    () => statusQuery.data?.addons ?? [],
+    [statusQuery.data?.addons],
+  );
+  const addonCount = issuedAddons.reduce((sum, a) => sum + a.quantity, 0);
 
   const handleTicketPress = useCallback(
     (ticket: MixedTicket) => {
@@ -152,6 +158,7 @@ export function CheckoutSuccessScreen() {
           <h1 className="text-2xl font-extrabold text-white">Tickets Ready</h1>
           <p className="mt-1.5 text-sm text-white/60">
             {admissionCount} admission · {coatCheckCount} coat check
+            {addonCount > 0 ? ` · ${addonCount} add-on${addonCount === 1 ? "" : "s"}` : ""}
           </p>
           {effectiveCartId ? (
             <p className="mt-2 font-mono text-[11px] tracking-wide text-white/40">
@@ -197,6 +204,39 @@ export function CheckoutSuccessScreen() {
             ))}
           </div>
         )}
+
+        {/* Issued add-ons (WS-3) — fulfillment/redeem state lives on the
+            ticket screen; this is the purchase confirmation list. */}
+        {issuedAddons.length > 0 ? (
+          <div className="mt-4 flex flex-col gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-white/45">
+              Add-ons
+            </span>
+            {issuedAddons.map((addon) => (
+              <div
+                key={addon.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-white">
+                    {addon.addon_name}
+                    {addon.variant_name ? (
+                      <span className="text-white/55"> · {addon.variant_name}</span>
+                    ) : null}
+                  </p>
+                  <p className="text-xs text-white/45">
+                    {addon.is_redeemable
+                      ? "Scannable at the door — find its code on your ticket"
+                      : "Pick up / fulfillment at the event"}
+                  </p>
+                </div>
+                <span className="shrink-0 font-mono text-sm text-white/70">
+                  ×{addon.quantity}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         {/* CTAs */}
         <div className="mt-8 flex flex-col gap-3">

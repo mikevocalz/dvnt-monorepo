@@ -47,6 +47,7 @@ import {
   type Activity,
   type LikedActivity,
 } from "@dvnt/app/lib/hooks/use-activities-query";
+import { resolveRenderableMedia } from "@dvnt/app/lib/media/resolve-renderable";
 import { useActivityStore } from "@dvnt/app/lib/stores/activity-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
@@ -112,20 +113,38 @@ function avatarUrl(avatar?: string): string {
   return `${CDN_URL}/${avatar}`;
 }
 
-// A post thumbnail that never shows the browser's broken-image glyph. The
-// backfill stores video URLs as type:"thumbnail" placeholders (notifications.ts),
-// so a plain <img src=video> breaks. Video → first frame via <video>; a genuinely
-// dead URL → neutral placeholder on error. mp4/mov/webm frame-grab; HLS falls
-// back to the placeholder (can't grab without hls.js).
-const THUMB_VIDEO_RE = /post-video|\.mp4(\?|$)|\.mov(\?|$)|\.m3u8(\?|$)|\.webm(\?|$)/i;
+// A post thumbnail that never shows the browser's broken-image glyph. Routed
+// through resolveRenderableMedia (the single render-side resolver) so the same
+// MIME→ext→type detection, the "poster is never a video URL" guarantee, and the
+// HEIC/QuickTime browser-unsupported handling apply here instead of a local
+// regex. The activity feed only carries a bare URL string (activity.post
+// .thumbnail), so the resolver decides purely from the URL — which still
+// rescues the ~97 HEIC/.mov Live-Photo rows that the old regex rendered into a
+// dead <img>/<video>. Decodable mp4/webm still frame-grab their first frame via
+// <video>; HLS and browser-unsupported formats fall back to the placeholder.
 function PostThumb({ src, className }: { src: string; className: string }) {
   const [errored, setErrored] = useState(false);
-  const isVideo = THUMB_VIDEO_RE.test(src);
-  const canFrameGrab = isVideo && !/\.m3u8(\?|$)/i.test(src);
-  if (src && !errored && isVideo) {
-    return canFrameGrab ? (
+  const media = resolveRenderableMedia({ url: src });
+
+  const placeholder = (
+    <span className={`flex items-center justify-center bg-white/8 ${className}`}>
+      <ImageOff size={18} color="#ffffff55" />
+    </span>
+  );
+
+  if (!src || errored || media.reason === "no_source") return placeholder;
+
+  if (media.kind === "video") {
+    // Browser-undecodable (QuickTime/.mov) or HLS-only → honest placeholder,
+    // never a spinner on a source Chrome/Firefox/Edge can't paint.
+    const canFrameGrab =
+      !media.browserUnsupported &&
+      !!media.videoUrl &&
+      !/\.m3u8(\?|$)/i.test(media.videoUrl);
+    if (!canFrameGrab) return placeholder;
+    return (
       <video
-        src={`${src}#t=0.1`}
+        src={`${media.videoUrl}#t=0.1`}
         muted
         playsInline
         preload="metadata"
@@ -133,27 +152,19 @@ function PostThumb({ src, className }: { src: string; className: string }) {
         className={className}
         onError={() => setErrored(true)}
       />
-    ) : (
-      <span className={`flex items-center justify-center bg-white/8 ${className}`}>
-        <ImageOff size={18} color="#ffffff55" />
-      </span>
     );
   }
-  if (src && !errored) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return (
-      <img
-        src={src}
-        alt=""
-        className={className}
-        onError={() => setErrored(true)}
-      />
-    );
-  }
+
+  // Image. posterUrl is guaranteed safe for <img> and is null for HEIC/HEIF.
+  if (media.browserUnsupported || !media.posterUrl) return placeholder;
+  // eslint-disable-next-line @next/next/no-img-element
   return (
-    <span className={`flex items-center justify-center bg-white/8 ${className}`}>
-      <ImageOff size={18} color="#ffffff55" />
-    </span>
+    <img
+      src={media.posterUrl}
+      alt=""
+      className={className}
+      onError={() => setErrored(true)}
+    />
   );
 }
 

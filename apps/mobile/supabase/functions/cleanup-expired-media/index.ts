@@ -24,6 +24,28 @@ interface CleanupResult {
 
 // @ts-ignore - Deno runtime
 Deno.serve(async (req: any) => {
+  // ── Auth gate: cron job — x-cron-secret required ────────────────────
+  // Deletes media rows AND storage objects with the service role. Mirrors
+  // the payouts-release CRON_SECRET pattern: fail CLOSED when the env is
+  // unset. The schedule (dashboard / pg_cron) must send this header.
+  // @ts-ignore - Deno runtime
+  const cronSecret = Deno.env.get("CRON_SECRET") || "";
+  if (!cronSecret) {
+    console.error(
+      "[cleanup-expired-media] CRON_SECRET not set — rejecting request",
+    );
+    return new Response(JSON.stringify({ error: "Misconfigured" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if ((req.headers.get("x-cron-secret") || "") !== cronSecret) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const startTime = Date.now();
   const result: CleanupResult = {
     deletedMedia: 0,

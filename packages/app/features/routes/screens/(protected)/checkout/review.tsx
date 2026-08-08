@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
   CreditCard,
@@ -10,6 +11,7 @@ import {
   Plus,
   Shirt,
   ShoppingBag,
+  Sparkles,
   Ticket,
   Trash2,
 } from "lucide-react-native";
@@ -20,6 +22,11 @@ import { calculateCartSubtotalCents } from "@dvnt/app/lib/contracts/invariants";
 import { useMixedCartCheckout } from "@dvnt/app/lib/hooks/use-mixed-cart-checkout";
 import { computeFees, formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
+import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
+import {
+  effectiveAddonUnitPriceCents,
+  filterEligibleAddons,
+} from "@dvnt/app/lib/tickets/pricing";
 
 type ReviewListItem =
   | { type: "header"; key: string; category: LineItemCategory; title: string }
@@ -47,11 +54,21 @@ function metadataText(
 
 function categoryIcon(category: LineItemCategory, color: string) {
   if (category === "coat_check") return <Shirt size={18} color={color} />;
+  if (category === "addon" || category === "product" || category === "service")
+    return <Sparkles size={18} color={color} />;
   return <Ticket size={18} color={color} />;
 }
 
 function buildReviewItems(lineItems: CartLineItem[]): ReviewListItem[] {
-  const categories: LineItemCategory[] = ["admission", "coat_check"];
+  // Add-on lines (WS-3) render in their own group after tickets; legacy
+  // product/service coarse add-ons keep rendering too.
+  const categories: LineItemCategory[] = [
+    "admission",
+    "coat_check",
+    "product",
+    "service",
+    "addon",
+  ];
 
   return categories.flatMap((category) => {
     const lines = lineItems.filter(
@@ -167,6 +184,140 @@ function LineItemRow({
           </Pressable>
         </View>
       </View>
+    </View>
+  );
+}
+
+/**
+ * Review-screen add-on upsell (WS-3): eligible add-ons not yet in the cart get
+ * a one-tap "Add" that writes a cart line item directly (quantity edits happen
+ * on the normal line rows). Eligibility mirrors cart_create_hold — on-sale,
+ * in-stock, requires_tier satisfied by a tier already in this cart. Prices are
+ * preview; the hold RPC reprices server-side.
+ */
+function AddonUpsellSection({
+  eventId,
+  eventTitle,
+}: {
+  eventId: string;
+  eventTitle: string;
+}) {
+  const cart = useCartStore((state) => state.cart);
+  const addLineItem = useCartStore((state) => state.addLineItem);
+  const { data: addons = [] } = useQuery<AddonRecord[]>({
+    queryKey: ["event-addons", eventId],
+    enabled: !!eventId,
+    staleTime: 60 * 1000,
+    queryFn: () => addonsApi.getByEvent(eventId),
+  });
+
+  const lineItems = cart?.lineItems ?? [];
+  const selectedTierIds = new Set(
+    lineItems
+      .filter((li) => li.category !== "addon")
+      .map((li) => String(li.tierId)),
+  );
+  const inCart = new Set(
+    lineItems
+      .filter((li) => li.category === "addon")
+      .map((li) =>
+        li.variantId ? `${li.addonId}:${li.variantId}` : String(li.addonId),
+      ),
+  );
+
+  const rows: Array<{
+    key: string;
+    addon: AddonRecord;
+    variantId: string | null;
+    label: string;
+    sub: string | null;
+    priceCents: number;
+  }> = [];
+  for (const addon of filterEligibleAddons(addons, selectedTierIds)) {
+    if (addon.has_variants) {
+      for (const variant of addon.ticket_addon_variants ?? []) {
+        if (inCart.has(`${addon.id}:${variant.id}`)) continue;
+        rows.push({
+          key: `${addon.id}:${variant.id}`,
+          addon,
+          variantId: variant.id,
+          label: `${addon.name} · ${variant.name}`,
+          sub: null,
+          priceCents: effectiveAddonUnitPriceCents(
+            addon.price_cents,
+            variant.price_cents,
+          ),
+        });
+      }
+    } else if (!inCart.has(addon.id)) {
+      rows.push({
+        key: addon.id,
+        addon,
+        variantId: null,
+        label: addon.name,
+        sub: addon.description,
+        priceCents: addon.price_cents,
+      });
+    }
+  }
+  if (rows.length === 0) return null;
+
+  const add = (addon: AddonRecord, variantId: string | null) => {
+    const variant = variantId
+      ? addon.ticket_addon_variants?.find((v) => v.id === variantId)
+      : null;
+    addLineItem(eventId, {
+      category: "addon",
+      // DTO back-compat: addon id rides tierId on addon lines.
+      tierId: addon.id,
+      addonId: addon.id,
+      variantId: variantId ?? undefined,
+      quantity: 1,
+      unitPriceCents: effectiveAddonUnitPriceCents(
+        addon.price_cents,
+        variant?.price_cents,
+      ),
+      metadata: {
+        name: variant ? `${addon.name} — ${variant.name}` : addon.name,
+        eventTitle,
+      },
+    });
+  };
+
+  return (
+    <View style={upsellStyles.wrap}>
+      <View style={upsellStyles.header}>
+        <Sparkles size={13} color="#FF5BFC" />
+        <Text style={upsellStyles.eyebrow}>Before you pay</Text>
+      </View>
+      {rows.map((row) => (
+        <View key={row.key} style={upsellStyles.row}>
+          <View style={upsellStyles.rowBody}>
+            <Text style={upsellStyles.rowTitle} numberOfLines={1}>
+              {row.label}
+            </Text>
+            {row.sub ? (
+              <Text style={upsellStyles.rowSub} numberOfLines={1}>
+                {row.sub}
+              </Text>
+            ) : null}
+          </View>
+          <Text style={upsellStyles.rowPrice}>
+            {formatCents(row.priceCents)}
+          </Text>
+          <Pressable
+            onPress={() => add(row.addon, row.variantId)}
+            accessibilityRole="button"
+            accessibilityLabel={`Add ${row.label}`}
+            style={({ pressed }) => [
+              upsellStyles.addButton,
+              pressed && { opacity: 0.75 },
+            ]}
+          >
+            <Text style={upsellStyles.addButtonText}>Add</Text>
+          </Pressable>
+        </View>
+      ))}
     </View>
   );
 }
@@ -321,6 +472,18 @@ export default function CartReviewScreen() {
           keyExtractor={(item) => item.key}
           estimatedItemSize={96}
           contentContainerStyle={styles.listContent}
+          ListFooterComponent={
+            cart?.eventId ? (
+              <AddonUpsellSection
+                eventId={cart.eventId}
+                eventTitle={metadataText(
+                  lineItems[0]?.metadata,
+                  ["eventTitle"],
+                  "",
+                )}
+              />
+            ) : null
+          }
         />
       )}
 
@@ -366,6 +529,73 @@ export default function CartReviewScreen() {
     </View>
   );
 }
+
+const upsellStyles = StyleSheet.create({
+  wrap: {
+    marginTop: 12,
+    gap: 8,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  eyebrow: {
+    color: "#CBD5E1",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderCurve: "continuous",
+    backgroundColor: "#111113",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  rowBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rowTitle: {
+    color: "#F8FAFC",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  rowSub: {
+    color: "#94A3B8",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  rowPrice: {
+    color: "#CBD5E1",
+    fontSize: 13,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  addButton: {
+    height: 32,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderCurve: "continuous",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(63,220,255,0.4)",
+    backgroundColor: "rgba(63,220,255,0.1)",
+  },
+  addButtonText: {
+    color: "#3FDCFF",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+});
 
 const styles = StyleSheet.create({
   screen: {

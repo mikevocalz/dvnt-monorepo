@@ -10,10 +10,15 @@ create table if not exists public.onboarding_state (
   updated_at timestamptz not null default now()
 );
 alter table public.onboarding_state enable row level security;
+-- CREATE POLICY has no IF NOT EXISTS; drop-then-create keeps this file
+-- replayable against an environment where it has already run.
+drop policy if exists onboarding_state_own_select on public.onboarding_state;
 create policy onboarding_state_own_select on public.onboarding_state
   for select to authenticated using (auth.uid()::text = auth_id);
+drop policy if exists onboarding_state_own_insert on public.onboarding_state;
 create policy onboarding_state_own_insert on public.onboarding_state
   for insert to authenticated with check (auth.uid()::text = auth_id);
+drop policy if exists onboarding_state_own_update on public.onboarding_state;
 create policy onboarding_state_own_update on public.onboarding_state
   for update to authenticated using (auth.uid()::text = auth_id);
 grant select, insert, update on public.onboarding_state to authenticated;

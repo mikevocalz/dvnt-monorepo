@@ -5,6 +5,7 @@ import { useStripeSafe as useStripe } from "@dvnt/app/lib/safe-native-modules";
 import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
 import { cartApi } from "@dvnt/app/lib/api/cart";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
+import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 
 interface MixedCartCheckoutResult {
@@ -51,7 +52,13 @@ export function useMixedCartCheckout() {
         holdExpiresAt,
       });
 
-      const payment = await cartApi.checkout(cart.cartId);
+      // Promoter attribution (WS-4): pending ?ref= for this cart's
+      // event, MMKV-persisted across the PaymentSheet round-trip.
+      const payment = await cartApi.checkout(
+        cart.cartId,
+        undefined,
+        getPendingPromoterRef(cart.eventId),
+      );
       setPaymentIntent(payment.paymentIntentId);
       AppTrace.trace("CART", "mixed_cart_payment_intent_ready", {
         cartId: cart.cartId,

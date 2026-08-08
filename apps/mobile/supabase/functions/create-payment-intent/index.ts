@@ -12,7 +12,14 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeFees, MIN_TIER_PRICE_CENTS } from "../_shared/fee-calculator.ts";
+import {
+  computeFeesWithMode,
+  MIN_TIER_PRICE_CENTS,
+} from "../_shared/fee-calculator.ts";
+import {
+  enforceTierVisibility,
+  TIER_VISIBILITY_MESSAGES,
+} from "../_shared/tier-visibility.ts";
 import { verifySession } from "../_shared/verify-session.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import {
@@ -170,11 +177,25 @@ Deno.serve(async (req: Request) => {
       ticket_type_id,
       quantity = 1,
       promo_code,
+      promoter_code,
+      unlock_code,
     } = await req.json();
 
     if (!event_id || !ticket_type_id) {
       return json({ error: "Missing required fields" }, 400);
     }
+
+    // Promoter attribution code (WS-4) — from a tracked ?ref= link.
+    // Never touches pricing; stashed in PI metadata (dvnt_* house key)
+    // so stripe-webhook records attribution + rev-share on
+    // payment_intent.succeeded.
+    const promoterCodeRaw =
+      typeof promoter_code === "string"
+        ? promoter_code.trim().toUpperCase().slice(0, 32)
+        : "";
+    const validPromoterCode = /^[A-Z0-9_-]{2,32}$/.test(promoterCodeRaw)
+      ? promoterCodeRaw
+      : "";
 
     if (!Number.isInteger(quantity) || quantity < 1) {
       return json({ error: "Invalid quantity" }, 400);
@@ -190,6 +211,24 @@ Deno.serve(async (req: Request) => {
 
     if (ttError || !ticketType)
       return json({ error: "Ticket type not found for this event" }, 404);
+
+    // ── Tier visibility guard (mirror of cart_create_hold v3) ──
+    // This rail inserts ticket_holds directly, bypassing the RPC's
+    // hidden/locked enforcement — so enforce it here. Never echo the code.
+    const visibilityError = await enforceTierVisibility(
+      supabase,
+      ticketType,
+      unlock_code,
+    );
+    if (visibilityError) {
+      return json(
+        {
+          error: TIER_VISIBILITY_MESSAGES[visibilityError],
+          code: visibilityError,
+        },
+        visibilityError === "tier_hidden" ? 404 : 403,
+      );
+    }
 
     // ── Check availability (including existing holds) ────────
     const remaining =
@@ -321,6 +360,23 @@ Deno.serve(async (req: Request) => {
               : "Free ticket issued",
           },
         ]);
+
+        // Promoter attribution for free orders — no webhook fires for
+        // a $0 order. Earning is 0 so no ledger row; attribution still
+        // counts toward promoter order stats. Idempotent server-side.
+        if (validPromoterCode) {
+          try {
+            await supabase.rpc("record_promoter_attribution", {
+              p_order_id: freeOrder.id,
+              p_code: validPromoterCode,
+            });
+          } catch (attrErr) {
+            console.error(
+              "[create-payment-intent] free-order promoter attribution failed:",
+              attrErr,
+            );
+          }
+        }
       }
 
       return json({ tickets: issued, free: true });
@@ -331,7 +387,7 @@ Deno.serve(async (req: Request) => {
     // Fetch event + organizer
     const { data: event } = await supabase
       .from("events")
-      .select("host_id, title")
+      .select("host_id, title, fee_mode")
       .eq("id", parseInt(event_id))
       .single();
 
@@ -362,7 +418,10 @@ Deno.serve(async (req: Request) => {
         400,
       );
     }
-    const fees = computeFees(subtotalCents, quantity);
+    // fee_mode-aware (absorb|pass): in absorb the buyer is charged just
+    // the subtotal and the organizer's transfer eats the buyer-side fee;
+    // application_fee (DVNT's 5% + $2) is unchanged. Shared entry point.
+    const fees = computeFeesWithMode(subtotalCents, quantity, event.fee_mode);
 
     // ── Get or create Stripe Customer ────────────────────
     const customerId = await getOrCreateCustomer(supabase, user_id);
@@ -404,6 +463,7 @@ Deno.serve(async (req: Request) => {
       "metadata[organizer_fee_cents]": fees.organizer_fee.toString(),
       "metadata[dvnt_total_fee_cents]": fees.dvnt_total_fee.toString(),
       "metadata[fee_policy_version]": fees.fee_policy_version,
+      "metadata[fee_mode]": fees.fee_mode,
       "metadata[event_title]": (event.title || "").substring(0, 500),
       ...(promoResult
         ? {
@@ -411,6 +471,9 @@ Deno.serve(async (req: Request) => {
             "metadata[discount_cents]": discountCents.toString(),
             "metadata[promo_code]": promoResult.code,
           }
+        : {}),
+      ...(validPromoterCode
+        ? { "metadata[dvnt_promoter_code]": validPromoterCode }
         : {}),
     });
 

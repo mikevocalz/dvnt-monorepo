@@ -9,9 +9,15 @@
  * - First page of posts (thumbnails for grid)
  *
  * Eliminates 6+ independent queries on the profile tab.
+ *
+ * Profile data is public, but VIEWER identity (follow-state personalization,
+ * NSFW gate) is derived from the verified Better Auth session (x-auth-token /
+ * Authorization header) only — never from the request body. Anonymous callers
+ * get the public profile with no viewer state and no spicy content.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -24,7 +30,8 @@ Deno.serve(async (req: Request) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, x-auth-token",
       },
     });
   }
@@ -36,7 +43,7 @@ Deno.serve(async (req: Request) => {
   const t0 = Date.now();
 
   try {
-    const { user_id, viewer_id, include_nsfw = false } = await req.json();
+    const { user_id, include_nsfw = false } = await req.json();
 
     if (!user_id) {
       return new Response(JSON.stringify({ error: "Missing user_id" }), {
@@ -73,7 +80,12 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const viewerUserId = await resolveUserId(viewer_id);
+    // Viewer identity comes ONLY from the verified Better Auth session —
+    // never from the body. This function reads with the service role, so a
+    // client-supplied viewer id would let anyone spoof another user's
+    // follow-state and NSFW entitlement. Anonymous = no viewer state.
+    const sessionUserId = await verifySession(supabase, req);
+    const viewerUserId = await resolveUserId(sessionUserId);
     const isOwnProfile = !viewerUserId || viewerUserId === profileUserId;
 
     // ── NSFW follow gate ──────────────────────────────────────────
@@ -142,7 +154,7 @@ Deno.serve(async (req: Request) => {
     ];
 
     // 3. Relationship state (only if viewing another user's profile)
-    if (!isOwnProfile && viewer_id) {
+    if (!isOwnProfile) {
       queries.push(
         supabase
           .from("follows")

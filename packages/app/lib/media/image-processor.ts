@@ -11,6 +11,44 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Crypto from "expo-crypto";
 import { MediaConstraints, ProcessedMedia, ValidationError } from "./types";
 
+/** Micro-preview width in px. ~24px WebP encodes to a few hundred bytes. */
+const PLACEHOLDER_WIDTH = 24;
+
+/**
+ * Compact fade-in placeholder: a tiny WebP micro-preview as a base64 data URI.
+ *
+ * There is NO blurhash/thumbhash encoder in the dependency tree and none may be
+ * added, so this reuses the already-installed expo-image-manipulator to produce
+ * a ~24px inline image instead. It is stored in the media row's `blurhash`
+ * column (the value is a data URI, not a real blurhash string, but it fills the
+ * same "compact inline placeholder" role) and consumed on render: expo-image
+ * accepts it directly as `placeholder={{ uri }}`, and on the web tags it works
+ * as a blurred CSS backdrop the full image fades in over — zero layout shift.
+ *
+ * Returns undefined (never throws) so a placeholder failure can never block an
+ * upload.
+ */
+export async function generateBlurPlaceholder(
+  sourceUri: string,
+): Promise<string | undefined> {
+  try {
+    const tiny = await ImageManipulator.manipulateAsync(
+      sourceUri,
+      [{ resize: { width: PLACEHOLDER_WIDTH } }],
+      {
+        compress: 0.4,
+        format: ImageManipulator.SaveFormat.WEBP,
+        base64: true,
+      },
+    );
+    if (!tiny?.base64) return undefined;
+    return `data:image/webp;base64,${tiny.base64}`;
+  } catch (err) {
+    console.warn("[ImageProcessor] Placeholder generation failed:", err);
+    return undefined;
+  }
+}
+
 /**
  * Process image with optimal compression
  *
@@ -126,10 +164,15 @@ export async function processImage(
     }),
   );
 
+  // Step 8: Compact fade-in placeholder from the DOWNSCALED image (cheap, and
+  // color-accurate to what actually ships). Never blocks the upload.
+  const blurhash = await generateBlurPlaceholder(processed.uri);
+
   console.log("[ImageProcessor] Complete:", {
     size: `${(sizeBytes / 1024).toFixed(2)}KB`,
     dimensions: `${processed.width}x${processed.height}`,
     hash: hash.substring(0, 16),
+    placeholder: blurhash ? `${blurhash.length}B` : "none",
   });
 
   return {
@@ -141,6 +184,7 @@ export async function processImage(
     height: processed.height,
     sizeBytes,
     hash,
+    blurhash,
   };
 }
 

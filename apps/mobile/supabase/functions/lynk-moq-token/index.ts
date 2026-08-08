@@ -26,6 +26,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { FishjamClient } from "npm:@fishjam-cloud/js-server-sdk";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
@@ -95,13 +96,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    const customToken = req.headers.get("x-auth-token");
-    const jwt = (customToken || authHeader?.replace("Bearer ", "") || "").trim();
-    if (!jwt) {
-      return errorResponse("unauthorized", "Missing session token");
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const fishjamId = Deno.env.get("FISHJAM_APP_ID")!;
@@ -112,22 +106,18 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
 
-    // 1. Verify Better-Auth session (direct DB lookup — same as video_join_room)
-    const { data: session } = await supabase
-      .from("session")
-      .select("userId, expiresAt")
-      .eq("token", jwt)
-      .order("createdAt", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!session) {
+    // 1. Verify Better-Auth session (shared helper — same as video_join_room)
+    const sessionResult = await verifySessionDetailed(supabase, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "missing") {
+        return errorResponse("unauthorized", "Missing session token");
+      }
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    if (new Date(session.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
-    const userId = session.userId as string;
+    const userId = sessionResult.userId as string;
 
     // 2. Validate input
     let body: unknown;

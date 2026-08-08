@@ -28,6 +28,81 @@ export interface EmailContent {
   html: string;
 }
 
+// Public web origin for links baked into emails (guest claim CTA, lookups).
+// Mirrors the PUBLIC_SITE_URL convention used by the guest-commerce fns.
+const SITE_URL = (
+  (typeof Deno !== "undefined" && Deno.env.get("PUBLIC_SITE_URL")) ||
+  "https://dvntapp.live"
+).replace(/\/$/, "");
+
+// ─── Calendar helpers (WS-7: add-to-calendar on ticket emails) ───────────────
+
+/** ISO string → UTC basic format for gcal/ics (YYYYMMDDTHHMMSSZ). */
+function calUtc(iso: string): string | null {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+/** Escape text per RFC 5545 (commas, semicolons, backslashes, newlines). */
+function icsEscape(s: string): string {
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r?\n/g, "\\n");
+}
+
+function googleCalendarUrl(opts: {
+  title: string;
+  startIso: string;
+  endIso?: string | null;
+  location?: string | null;
+}): string | null {
+  const start = calUtc(opts.startIso);
+  if (!start) return null;
+  const end =
+    (opts.endIso && calUtc(opts.endIso)) ||
+    // gcal requires a range — default to 3 hours for open-ended events.
+    calUtc(new Date(new Date(opts.startIso).getTime() + 3 * 3600_000).toISOString());
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: opts.title,
+    dates: `${start}/${end}`,
+  });
+  if (opts.location) params.set("location", opts.location);
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function icsDataUrl(opts: {
+  title: string;
+  startIso: string;
+  endIso?: string | null;
+  location?: string | null;
+}): string | null {
+  const start = calUtc(opts.startIso);
+  if (!start) return null;
+  const end =
+    (opts.endIso && calUtc(opts.endIso)) ||
+    calUtc(new Date(new Date(opts.startIso).getTime() + 3 * 3600_000).toISOString());
+  const stamp = calUtc(new Date().toISOString());
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    `PRODID:-//${BRAND.name}//Tickets//EN`,
+    "BEGIN:VEVENT",
+    `UID:${crypto.randomUUID()}@dvntapp.live`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART:${start}`,
+    `DTEND:${end}`,
+    `SUMMARY:${icsEscape(opts.title)}`,
+    ...(opts.location ? [`LOCATION:${icsEscape(opts.location)}`] : []),
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+  return `data:text/calendar;charset=utf-8,${encodeURIComponent(ics)}`;
+}
+
 // ─── verificationCode — the most-sent email, make it the most polished ───────
 
 export function verificationCode(
@@ -70,6 +145,10 @@ export interface TicketLine {
   lookupUrl?: string | null;
   /** Optional per-ticket holder/seat note. */
   note?: string | null;
+  /** Apple/Google Wallet save link — only for account-owned tickets today
+   *  (both wallet fns require an authenticated session; guests get it after
+   *  claiming). Rendered as a small link under the ticket card when set. */
+  walletUrl?: string | null;
 }
 
 export interface TicketConfirmationOpts {
@@ -87,6 +166,16 @@ export interface TicketConfirmationOpts {
   /** "Create an account" nudge for guest checkouts. */
   guestNudge?: boolean;
   toEmail?: string | null;
+  /**
+   * "Add to your account" magic-link claim CTA (WS-7/13). When omitted, a
+   * default is derived for guest emails (guestNudge or any per-ticket
+   * lookupUrl + toEmail): the /api/auth/guest-claim endpoint, which mints a
+   * fresh Better Auth magic link on click — the session-create hook then
+   * re-parents the guest orders. Pass null to suppress entirely.
+   */
+  claimUrl?: string | null;
+  /** Machine-readable event time → renders Google Calendar + .ics links. */
+  calendar?: { startIso: string; endIso?: string | null } | null;
 }
 
 export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
@@ -105,6 +194,12 @@ export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
             align: "center",
           })
         : "";
+      const wallet = t.walletUrl
+        ? paragraph(
+            `<a href="${esc(t.walletUrl)}" style="color:${COLORS.cyan};text-decoration:none">Add to Wallet &rarr;</a>`,
+            { size: 13, align: "center", margin: "10px 0 0" },
+          )
+        : "";
       const body = t.qrToken
         ? [
             `<div style="text-align:center;margin:0 0 12px">${badge}</div>`,
@@ -115,6 +210,7 @@ export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
               lookupUrl: t.lookupUrl,
             }),
             note,
+            wallet,
           ].join("")
         : [
             `<div style="text-align:center;margin:0 0 12px">${badge}</div>`,
@@ -129,6 +225,7 @@ export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
                   { size: 13, align: "center", margin: "10px 0 0" },
                 )
               : "",
+            wallet,
           ].join("");
       return card(body, { accent: theme.accent });
     })
@@ -153,17 +250,81 @@ export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
           )
         : "";
 
-  const nudge = opts.guestNudge
+  // Add-to-calendar row — only when the caller supplies machine-readable
+  // times (dateLine alone is a display string and can't drive gcal/ics).
+  const gcalHref = opts.calendar?.startIso
+    ? googleCalendarUrl({
+        title: opts.eventTitle,
+        startIso: opts.calendar.startIso,
+        endIso: opts.calendar.endIso,
+        location: opts.location,
+      })
+    : null;
+  const icsHref = opts.calendar?.startIso
+    ? icsDataUrl({
+        title: opts.eventTitle,
+        startIso: opts.calendar.startIso,
+        endIso: opts.calendar.endIso,
+        location: opts.location,
+      })
+    : null;
+  const calendarRow =
+    gcalHref || icsHref
+      ? paragraph(
+          [
+            gcalHref
+              ? `<a href="${esc(gcalHref)}" style="color:${COLORS.cyan};text-decoration:none">Add to Google Calendar</a>`
+              : "",
+            gcalHref && icsHref
+              ? `<span style="color:${COLORS.textFaint}">&nbsp;&middot;&nbsp;</span>`
+              : "",
+            icsHref
+              ? `<a href="${esc(icsHref)}" style="color:${COLORS.cyan};text-decoration:none">Download .ics</a>`
+              : "",
+          ].join(""),
+          { size: 13, align: "center", margin: "12px 0 0" },
+        )
+      : "";
+
+  // Guest → account claim CTA (WS-7/13). Derived for guest deliveries when
+  // not explicitly provided: any per-ticket lookupUrl (guest_lookup_token is
+  // guest-only) or guestNudge marks the email as guest-bound. The link mints
+  // a FRESH Better Auth magic link on click (tokens expire in 15 min, so a
+  // pre-minted link in a keep-forever ticket email would be dead on arrival).
+  const isGuest = !!opts.guestNudge || tickets.some((t) => t.lookupUrl);
+  const claimUrl =
+    opts.claimUrl !== undefined
+      ? opts.claimUrl
+      : isGuest && opts.toEmail
+        ? `${SITE_URL}/api/auth/guest-claim?email=${encodeURIComponent(opts.toEmail)}`
+        : null;
+
+  const nudge = claimUrl
     ? [
         divider(),
         paragraph(
-          `Create a ${BRAND.name} account with ${
+          `Add ${multi ? "these tickets" : "this ticket"} to a ${BRAND.name} account with ${
             opts.toEmail ? `<strong style="color:${COLORS.text}">${esc(opts.toEmail)}</strong>` : "this email"
-          } to manage your RSVPs and tickets anytime.`,
-          { size: 13, color: COLORS.textMuted, margin: "0" },
+          } — one tap, no password. Your tickets move with you: wallet passes, transfers, and re-downloads anytime.`,
+          { size: 13, color: COLORS.textMuted },
+        ),
+        button(claimUrl, "Add to my account", { gradient: "brand" }),
+        paragraph(
+          "We'll email you a secure one-time sign-in link. Nothing happens without it.",
+          { size: 12, color: COLORS.textFaint, align: "center", margin: "4px 0 0" },
         ),
       ].join("")
-    : "";
+    : opts.guestNudge
+      ? [
+          divider(),
+          paragraph(
+            `Create a ${BRAND.name} account with ${
+              opts.toEmail ? `<strong style="color:${COLORS.text}">${esc(opts.toEmail)}</strong>` : "this email"
+            } to manage your RSVPs and tickets anytime.`,
+            { size: 13, color: COLORS.textMuted, margin: "0" },
+          ),
+        ].join("")
+      : "";
 
   return {
     subject: multi
@@ -317,7 +478,27 @@ export function welcome(name?: string | null): EmailContent {
             { size: 15, color: COLORS.textBody, margin: "0" },
           ),
         ),
-        button("dvnt://", `Open ${BRAND.name}`, { gradient: "brand" }),
+        // MUST be an https universal link, never the bare `dvnt://` scheme.
+        //
+        // `dvnt://` only resolves on a device with the app installed. For
+        // anyone who signed up in a browser it is a dead button, and mail
+        // clients — Gmail in particular, which rewrites every href through its
+        // own redirector — routinely strip or refuse non-http(s) schemes, so
+        // it could fail even on a phone that has the app. That combination is
+        // what broke the welcome CTA for real signups.
+        //
+        // SITE_URL is registered for App Links / Universal Links on both
+        // platforms (app.config.js: `applinks:dvntapp.live` on iOS,
+        // intentFilters with autoVerify on Android), so https gives us the
+        // behaviour the deep link was reaching for AND a real fallback:
+        // app if installed, website if not, and it survives Gmail.
+        //
+        // /feed specifically, not the root: the AASA deliberately leaves `/`
+        // and `/auth/*` to the web (apps/web/.well-known/apple-app-site-
+        // association), so a root link would never open the app on iOS. /feed
+        // is claimed by both platforms AND renders on the web for anyone
+        // without the app installed.
+        button(`${SITE_URL}/feed`, `Open ${BRAND.name}`, { gradient: "brand" }),
       ].join(""),
       { preheader: `Welcome to ${BRAND.name} — your account is live` },
     ),

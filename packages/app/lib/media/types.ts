@@ -37,6 +37,13 @@ export interface ProcessedMedia {
   hash: string;
   posterUri?: string; // For videos
   pairedVideoUri?: string; // For Live Photos (iOS)
+  /**
+   * Compact inline fade-in placeholder (base64 WebP micro-preview, data URI).
+   * Written to the media row's `blurhash` column so surfaces can fade the full
+   * image in over it with zero CLS. Populated at upload time — see
+   * `generateBlurPlaceholder` in `image-processor.ts`.
+   */
+  blurhash?: string;
 }
 
 export interface UploadedMedia {
@@ -50,6 +57,8 @@ export interface UploadedMedia {
   durationSeconds?: number;
   kind?: MediaKind;
   livePhotoVideoUrl?: string;
+  /** Compact inline fade-in placeholder persisted to the `blurhash` column. */
+  blurhash?: string;
 }
 
 // Hard limits by use case (cost-optimized)

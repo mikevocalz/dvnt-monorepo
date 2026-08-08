@@ -64,6 +64,21 @@ interface GuestTicketData {
       location: string | null;
       coverImageUrl: string | null;
     };
+    /**
+     * SEAM (WS-3): guest-owned add-ons (order_addons matched by guest_email,
+     * service-role read). Rendered when present; the `get-guest-ticket` edge
+     * fn does NOT return them yet and is outside this workstream's fence —
+     * once it adds `addons`, this surface lights up with no client change.
+     */
+    addons?: Array<{
+      id: string;
+      name: string;
+      variantName?: string | null;
+      quantity: number;
+      status: "unfulfilled" | "fulfilled" | "redeemed" | "refunded";
+      isRedeemable?: boolean;
+      qrToken?: string | null;
+    }>;
   };
 }
 
@@ -347,6 +362,48 @@ export function GuestTicketScreen() {
               <span className="truncate font-mono text-[10px] tracking-[0.5px] text-[#666]">
                 {ticket.qrToken}
               </span>
+            </div>
+          ) : null}
+
+          {/* Guest-owned add-ons (WS-3) — renders once get-guest-ticket
+              returns `addons` (see the SEAM note on GuestTicketData). */}
+          {ticket.addons && ticket.addons.length > 0 ? (
+            <div className="mt-4 flex flex-col gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-white/45">
+                Your add-ons
+              </span>
+              {ticket.addons.map((addon) => (
+                <div
+                  key={addon.id}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/4 px-3.5 py-3"
+                >
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-bold text-white">
+                      {addon.name}
+                      {addon.variantName ? (
+                        <span className="font-semibold text-white/55">
+                          {" "}
+                          · {addon.variantName}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="text-xs text-white/45">
+                      {addon.status === "redeemed"
+                        ? "Redeemed"
+                        : addon.status === "refunded"
+                          ? "Refunded"
+                          : addon.isRedeemable
+                            ? "Show its code at the door"
+                            : "Pick up at the event"}
+                    </span>
+                  </span>
+                  {addon.quantity > 1 ? (
+                    <span className="shrink-0 font-mono text-sm font-bold text-white/70">
+                      ×{addon.quantity}
+                    </span>
+                  ) : null}
+                </div>
+              ))}
             </div>
           ) : null}
 

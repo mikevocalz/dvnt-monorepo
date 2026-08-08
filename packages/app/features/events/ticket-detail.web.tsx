@@ -58,6 +58,7 @@ import {
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
+import { addonsApi, type OrderAddonRecord } from "@dvnt/app/lib/api/addons";
 import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
 import type {
   Ticket,
@@ -246,6 +247,15 @@ export function TicketDetailScreen() {
           t.id !== dbTicket.ticket_type_id,
       );
     },
+  });
+
+  // ── Owned add-ons (WS-3) — order_addons via RLS owner read. Holder-side
+  //    display only: fulfillment/redeemed state + door QR for redeemables.
+  const { data: myAddons = [] } = useQuery<OrderAddonRecord[]>({
+    queryKey: ["my-order-addons", eventId],
+    enabled: !!eventId,
+    staleTime: 30 * 1000,
+    queryFn: () => addonsApi.getMyAddonsForEvent(eventId),
   });
 
   // ── Pending outgoing transfer (for Cancel CTA) ──
@@ -847,6 +857,20 @@ export function TicketDetailScreen() {
           </button>
         ) : null}
 
+        {/* ── 2.8 YOUR ADD-ONS (WS-3, holder-side) ── */}
+        {myAddons.length > 0 ? (
+          <section className="mb-4 flex flex-col gap-2.5">
+            <span className="ml-1 text-[11px] font-bold tracking-[2px] text-white/35">
+              YOUR ADD-ONS
+            </span>
+            <div className="flex flex-col gap-2">
+              {myAddons.map((addon) => (
+                <OwnedAddonRow key={addon.id} addon={addon} />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         {/* ── 3. ACCESS DETAILS ── */}
         {hasAccessDetails ? (
           <section className="mb-4 flex flex-col gap-2.5">
@@ -1077,6 +1101,130 @@ export function TicketDetailScreen() {
           )}
         </div>
       </Dialog>
+    </div>
+  );
+}
+
+// ── Owned add-on row (WS-3) — status machine + door QR for redeemables ──
+
+const ADDON_STATUS_CHIP: Record<
+  OrderAddonRecord["status"],
+  { bg: string; text: string; label: string }
+> = {
+  unfulfilled: {
+    bg: "rgba(63,220,255,0.14)",
+    text: "#3FDCFF",
+    label: "Ready",
+  },
+  fulfilled: {
+    bg: "rgba(34,197,94,0.14)",
+    text: "#22C55E",
+    label: "Fulfilled",
+  },
+  redeemed: {
+    bg: "rgba(138,64,207,0.16)",
+    text: "#C084FC",
+    label: "Redeemed",
+  },
+  refunded: {
+    bg: "rgba(239,68,68,0.14)",
+    text: "#EF4444",
+    label: "Refunded",
+  },
+};
+
+function OwnedAddonRow({ addon }: { addon: OrderAddonRecord }) {
+  const chip = ADDON_STATUS_CHIP[addon.status] ?? ADDON_STATUS_CHIP.unfulfilled;
+  const name = addon.ticket_addons?.name || "Add-on";
+  const variantName = addon.ticket_addon_variants?.name || null;
+  const showQr =
+    !!addon.qr_token &&
+    !!addon.ticket_addons?.is_redeemable &&
+    addon.status === "unfulfilled";
+
+  // QR data url for the redeemable add-on's own token (server-issued at
+  // cart_complete_issuance). Query-cached — no useState.
+  const { data: addonQrUrl } = useQuery<string | null>({
+    queryKey: ["addon-qr", addon.qr_token ?? ""],
+    enabled: showQr,
+    staleTime: Infinity,
+    queryFn: async () => {
+      try {
+        return await (
+          QRCode as unknown as {
+            toDataURL: (
+              text: string,
+              opts?: { width?: number; margin?: number },
+            ) => Promise<string>;
+          }
+        ).toDataURL(addon.qr_token as string, { width: 200, margin: 1 });
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  return (
+    <div className="flex flex-col rounded-2xl border border-white/6 bg-white/4 p-3.5">
+      <div className="flex items-center gap-3">
+        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/6">
+          <Sparkles size={15} color="rgb(255,109,193)" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm font-bold text-white">
+            {name}
+            {variantName ? (
+              <span className="font-semibold text-white/55">
+                {" "}
+                · {variantName}
+              </span>
+            ) : null}
+          </span>
+          <span className="text-xs text-white/45">
+            {addon.status === "redeemed" && addon.redeemed_at
+              ? `Redeemed ${formatTime(addon.redeemed_at)}`
+              : addon.ticket_addons?.is_redeemable
+                ? "Show its code at the door"
+                : "Pick up / fulfillment at the event"}
+          </span>
+        </span>
+        {addon.quantity > 1 ? (
+          <span className="shrink-0 font-mono text-sm font-bold text-white/70">
+            ×{addon.quantity}
+          </span>
+        ) : null}
+        <span
+          className="shrink-0 rounded-lg px-2 py-1 text-[10px] font-extrabold tracking-wide"
+          style={{ backgroundColor: chip.bg, color: chip.text }}
+        >
+          {chip.label}
+        </span>
+      </div>
+      {showQr ? (
+        <div className="mt-3 flex items-center gap-3 rounded-xl bg-[#0a0a0a] p-3">
+          {addonQrUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={addonQrUrl}
+              alt={`${name} QR code`}
+              width={92}
+              height={92}
+              className="rounded-lg"
+              style={{ display: "block" }}
+            />
+          ) : (
+            <div className="h-[92px] w-[92px] animate-pulse rounded-lg bg-white/10" />
+          )}
+          <span className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="text-[11px] font-bold tracking-[1.5px] text-white/35">
+              SCAN AT DOOR
+            </span>
+            <span className="truncate font-mono text-[10px] tracking-wide text-white/40">
+              {(addon.qr_token ?? "").slice(0, 16).toUpperCase()}
+            </span>
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

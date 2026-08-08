@@ -4,6 +4,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
@@ -13,9 +14,25 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+/**
+ * `platform` is the CLIENT-DECLARED runtime (React Native `Platform.OS`). It
+ * gates app-only rooms.
+ *
+ * Acknowledged limit: a modified client can send "ios" from a browser, and
+ * there is no server-side way to prove otherwise — a browser presents no
+ * attestable device identity, and the Fishjam peer token is minted before any
+ * media flows. The gate therefore targets HONEST browsers: it stops the normal
+ * web viewer, the shared link, and the casually curious. It is not an
+ * anti-tamper control, and nothing in the product may describe it as one.
+ *
+ * Unknown/absent values are treated as non-web so older clients that predate
+ * this field keep joining (they are all native or web builds that will be
+ * updated; failing them closed would break existing rooms).
+ */
 const JoinRoomSchema = z.object({
   roomId: z.string().uuid(),
   anonymous: z.boolean().optional().default(false),
+  platform: z.string().max(32).optional(),
 });
 
 type ErrorCode =
@@ -94,7 +111,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    const jwt = authHeader.replace("Bearer ", "");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const fishjamAppId = Deno.env.get("FISHJAM_APP_ID")!;
@@ -109,21 +125,16 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
 
-    // Verify Better Auth session via direct DB lookup
-    const { data: session, error: sessionError } = await supabase
-      .from("session")
-      .select("id, token, userId, expiresAt")
-      .eq("token", jwt)
-      .single();
-
-    if (sessionError || !session) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabase, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    if (new Date(session.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
 
-    const userId = session.userId;
+    const userId = sessionResult.userId;
 
     // Parse input
     let body: unknown;
@@ -138,7 +149,8 @@ Deno.serve(async (req) => {
       return errorResponse("validation_error", parsed.error.errors[0].message);
     }
 
-    const { roomId, anonymous } = parsed.data;
+    const { roomId, anonymous, platform } = parsed.data;
+    const isWebClient = platform === "web";
 
     // Rate limit check
     const { data: canJoin } = await supabase.rpc("check_rate_limit", {
@@ -175,6 +187,31 @@ Deno.serve(async (req) => {
 
     if (room.status !== "open") {
       return errorResponse("conflict", "Room is no longer open");
+    }
+
+    // ── App-only gate ────────────────────────────────────────────────────────
+    // The ONLY enforced capture protection. Everything the web room does
+    // (blackout, watermark, shortcut blocking) is deterrence; here we simply
+    // never mint a token, so there is nothing for a browser to render.
+    //
+    // Placed before the ban/capacity/membership checks so a rejected web
+    // client learns only "this room is app-only" and nothing about the room's
+    // roster. `app_only` may be absent on a database that has not run
+    // 20260805120000_video_rooms_app_only.sql yet — `=== true` treats that as
+    // "not app-only" rather than throwing.
+    if (room.app_only === true && isWebClient) {
+      console.log(
+        `[video_join_room] Rejected web join to app-only room ${roomId}`,
+      );
+      return errorResponse(
+        "forbidden",
+        "This Lynk is app-only",
+        // Typed sub-reason, transported the same way `room_full` is (see
+        // classifySneakyLynkError, which prefers detail.reason over message
+        // matching). Kept out of the ErrorCode union so existing consumers of
+        // that contract are unaffected.
+        { reason: "ROOM_APP_ONLY" },
+      );
     }
 
     const internalRoomId = room.id;
@@ -251,7 +288,7 @@ Deno.serve(async (req) => {
         max: room.max_participants,
         // Was the user requesting this join the host? Lets the client
         // show an upgrade CTA for hosts vs a wait-notify UX for viewers.
-        isHost: session.userId === room.host_id,
+        isHost: userId === room.host_id,
       });
     }
 
@@ -561,6 +598,10 @@ Deno.serve(async (req) => {
           internalId: room.id,
           title: room.title,
           sweetSpicyMode: room.sweet_spicy_mode || "sweet",
+          // Exposed so a joined client can reflect the setting (e.g. a host
+          // badge). The disclosure chip does NOT read it — that is driven by
+          // live presence, and an app-only room simply never has a web peer.
+          appOnly: room.app_only === true,
           fishjamRoomId,
         },
         token: fishjamToken,

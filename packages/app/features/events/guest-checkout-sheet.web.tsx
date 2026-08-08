@@ -10,6 +10,7 @@ import { useEffect } from "react";
 import { Minus, Plus, Lock } from "lucide-react";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useGuestCheckoutStore } from "@dvnt/app/lib/stores/guest-checkout-store";
+import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -63,6 +64,9 @@ export function GuestCheckoutSheet() {
       }
     }
     s.patch({ loading: true, error: null });
+    // Promoter attribution (WS-4): pending ?ref= from a tracked share
+    // link — persisted so the Stripe redirect can't lose it.
+    const promoterCode = getPendingPromoterRef(s.eventId);
     const { data, error } = await supabase.functions.invoke("guest-checkout", {
       body: {
         event_id: Number(s.eventId),
@@ -71,6 +75,7 @@ export function GuestCheckoutSheet() {
         guest_email: email,
         guest_name: s.name.trim() || undefined,
         ...(collectNames ? { attendee_names: s.attendeeNames.slice(0, s.quantity) } : {}),
+        ...(promoterCode ? { promoter_code: promoterCode } : {}),
       },
     });
     let url: string | undefined;

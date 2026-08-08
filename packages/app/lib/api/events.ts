@@ -10,6 +10,45 @@ import {
   getCurrentUserAuthId,
 } from "./auth-helper";
 import { invokeEdge } from "./invoke-edge";
+import type { TicketTypeCategory } from "./ticket-types";
+import type { TierType, TierVisibility } from "../tickets/pricing";
+import type { DraftAddon } from "../../features/events/create/addon-form";
+
+/**
+ * A duplicated event's ticket-tier row, shaped for create-event-store's
+ * `setTicketTiers` public setter. Server ids and sold state are stripped —
+ * every row is a NEW unsaved draft (`id` is a local editor key). Prices,
+ * capacity, tier_type, visibility, and the early-bird schedule/allocation
+ * bands are preserved.
+ */
+export interface DuplicateTierDraft {
+  id: string;
+  name: string;
+  category: TicketTypeCategory;
+  priceCents: number;
+  quantity: number;
+  maxPerUser: number;
+  description: string;
+  saleStart: string;
+  saleEnd: string;
+  tierType?: TierType;
+  visibility?: TierVisibility;
+  unlockCode?: string;
+  priceSchedule?: Array<{ effectiveAt: string; priceDollars: string }>;
+  subAllocations?: Array<{ quantity: string; priceDollars: string }>;
+}
+
+/** Tier + add-on clone for a duplicated event (WS-9). */
+export interface DuplicateDraft {
+  ticketTiers: DuplicateTierDraft[];
+  addons: DraftAddon[];
+}
+
+/** Integer cents → the dollar-string the create-event editors expect ("" when null). */
+function centsToDollarsInput(cents: number | null | undefined): string {
+  if (cents == null || !Number.isFinite(cents)) return "";
+  return (cents / 100).toString();
+}
 
 /** Safely parse a JSONB array column (handles string, array, or null) */
 function parseJsonbArray(value: unknown): any[] {
@@ -39,10 +78,26 @@ function isRenderableImageUrl(url: unknown): url is string {
 
 /** Resolve event image URL from multiple DB columns */
 function resolveEventImage(event: any): string {
-  // Priority: cover_image_url > image. Skip anything an <img> can't render —
-  // legacy rows persisted blob: object URLs (dead outside the creator's tab)
-  // and video files in the image columns; falling through beats a broken img.
-  const candidates = [event[DB.events.coverImageUrl], event["image"]];
+  // Priority: cover_image_url > flyer_image_url > image. Skip anything an <img>
+  // can't render — legacy rows persisted blob: object URLs (dead outside the
+  // creator's tab) and video files in the image columns; falling through beats
+  // a broken img.
+  //
+  // flyer_image_url is the one that matters in practice and was missing here:
+  // get_events_home returns `image: ""` and a null cover_image_url for events
+  // whose art lives in flyer_image_url, so this fell through to "" and the card
+  // rendered NOTHING. That is the whole of "no images in events" — the flyer is
+  // the primary artwork for an event, and it was the only column not consulted.
+  // (Checked after cover_image_url so an explicitly-set cover still wins.)
+  //
+  // A flyer can legitimately be a VIDEO — some rows point at a post-video path.
+  // isRenderableImageUrl rejects those, and resolveFlyerVideoUrl below picks
+  // them up instead, so a video flyer never reaches an <img>.
+  const candidates = [
+    event[DB.events.coverImageUrl],
+    event[DB.events.flyerImageUrl],
+    event["image"],
+  ];
   for (const c of candidates) {
     if (isRenderableImageUrl(c)) return c;
   }
@@ -1043,6 +1098,31 @@ export const eventsApi = {
         throw new Error("You are not the host of this event");
       }
 
+      // WS-9 guard — FIRST step of the cascade: never hard-delete an
+      // event that has taken money that wasn't returned. Any
+      // non-terminal ticket carrying a Stripe payment intent means the
+      // host must Cancel instead (event-cancel edge fn refunds every
+      // paid order + notifies attendees). Server-side delete-event has
+      // the same 409 guard; this stops the client-cascade path too.
+      // Fail CLOSED: if the count can't be read, refuse the delete.
+      const { count: paidCount, error: paidErr } = await supabase
+        .from("tickets")
+        .select("id", { count: "exact", head: true })
+        .eq("event_id", eventIdInt)
+        .in("status", ["active", "transfer_pending", "scanned"])
+        .not("stripe_payment_intent_id", "is", null);
+      if (paidErr) {
+        console.error("[Events] deleteEvent paid-ticket check failed:", paidErr);
+        throw new Error(
+          "Couldn't verify ticket sales for this event. Try again in a moment.",
+        );
+      }
+      if ((paidCount ?? 0) > 0) {
+        throw new Error(
+          "This event has paid tickets. Cancel the event instead — attendees are refunded and notified automatically.",
+        );
+      }
+
       // Collect all image URLs for CDN cleanup
       const imageUrls: string[] = [];
       const coverImage = event[DB.events.coverImageUrl] || event["image"];
@@ -1124,6 +1204,206 @@ export const eventsApi = {
       console.error("[Events] deleteEvent error:", error?.message || error);
       throw error;
     }
+  },
+
+  /**
+   * Cancel an event with automatic refunds (WS-9). Calls the
+   * event-cancel edge fn, which flips status→'cancelled', closes the
+   * waitlist, refunds every paid order (whole-PI, idempotent), voids
+   * free tickets, notifies attendees, and emails guest orders. Refunds
+   * run in server-side batches — this loops until the server reports
+   * done, so a large event resumes transparently. Safe to re-call.
+   */
+  async cancelEventWithRefunds(
+    eventId: string,
+    reason?: string,
+  ): Promise<{
+    refundsIssued: number;
+    refundsFailed: number;
+    freeTicketsVoided: number;
+    guestEmailsSent: number;
+    notified: number;
+    done: boolean;
+  }> {
+    const totals = {
+      refundsIssued: 0,
+      refundsFailed: 0,
+      freeTicketsVoided: 0,
+      guestEmailsSent: 0,
+      notified: 0,
+      done: false,
+    };
+    // 40 passes × 25 orders = 1,000 orders per user action; anything
+    // bigger keeps state server-side and finishes on the next call.
+    const MAX_PASSES = 40;
+    for (let pass = 0; pass < MAX_PASSES; pass++) {
+      const { data, error } = await invokeEdge<{
+        ok: boolean;
+        done: boolean;
+        refundsIssued: number;
+        refundsFailed: number;
+        freeTicketsVoided: number;
+        guestEmailsSent: number;
+        notified: number;
+        remainingOrders: number;
+        error?: { message: string };
+      }>("event-cancel", { eventId: parseInt(eventId), reason });
+      if (error || !data?.ok) {
+        throw new Error(
+          error?.message ||
+            (data as any)?.error?.message ||
+            "Cancel failed",
+        );
+      }
+      totals.refundsIssued += data.refundsIssued || 0;
+      totals.refundsFailed += data.refundsFailed || 0;
+      totals.freeTicketsVoided += data.freeTicketsVoided || 0;
+      totals.guestEmailsSent += data.guestEmailsSent || 0;
+      totals.notified += data.notified || 0;
+      if (data.done) {
+        totals.done = true;
+        break;
+      }
+      // Stripe refused some refunds this pass and nothing else is
+      // pending → retrying immediately would spin on the same orders.
+      if (data.refundsFailed > 0 && data.remainingOrders <= data.refundsFailed) {
+        break;
+      }
+    }
+    return totals;
+  },
+
+  /**
+   * Postpone an active event (WS-9). Reversible via resumeEvent. No
+   * refunds — tickets stay valid; the server notifies attendees +
+   * emails guest orders. (Host-policy refund windows are WS-5 work.)
+   */
+  async postponeEvent(
+    eventId: string,
+    note?: string,
+  ): Promise<{ status: string; notified: number }> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      status: string;
+      notified: number;
+      error?: { message: string };
+    }>("event-postpone", {
+      eventId: parseInt(eventId),
+      action: "postpone",
+      note,
+    });
+    if (error || !data?.ok) {
+      throw new Error(
+        error?.message || (data as any)?.error?.message || "Postpone failed",
+      );
+    }
+    return { status: data.status, notified: data.notified || 0 };
+  },
+
+  /** Flip a postponed event back to active (WS-9). */
+  async resumeEvent(
+    eventId: string,
+  ): Promise<{ status: string; notified: number }> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      status: string;
+      notified: number;
+      error?: { message: string };
+    }>("event-postpone", { eventId: parseInt(eventId), action: "resume" });
+    if (error || !data?.ok) {
+      throw new Error(
+        error?.message || (data as any)?.error?.message || "Resume failed",
+      );
+    }
+    return { status: data.status, notified: data.notified || 0 };
+  },
+
+  /**
+   * Build a duplicate draft for an event (WS-9): fetch the source event's
+   * ticket tiers (ticket_types) and add-ons (ticket_addons) and clone them
+   * into create-event-store draft rows. Server ids, quantity_sold, and sold
+   * state are STRIPPED — every row is a fresh unsaved draft. Names, prices,
+   * capacity, max-per-user, sale windows, tier_type, visibility, unlock code,
+   * early-bird schedule/allocation bands, and the full add-on config
+   * (binding, redeemable, variant matrix) are preserved. Add-on per-tier
+   * eligibility (requires_tier_id) is re-pointed from the source ticket_type
+   * uuid to the NEW local tier id, so publish re-links it to the created row.
+   *
+   * The caller prefills the scalar fields via the store's public setters and
+   * applies `ticketTiers` / `addons` through `setTicketTiers` / `setAddons`.
+   * This helper never touches the store — pure data.
+   */
+  async buildDuplicateDraft(eventId: string): Promise<DuplicateDraft> {
+    const [{ ticketTypesApi }, { addonsApi }] = await Promise.all([
+      import("./ticket-types"),
+      import("./addons"),
+    ]);
+    const [sourceTiers, sourceAddons] = await Promise.all([
+      ticketTypesApi.getByEvent(eventId).catch(() => []),
+      addonsApi.getByEvent(eventId).catch(() => []),
+    ]);
+
+    const seed = Date.now();
+    // Source ticket_type uuid → new local tier id, so add-on per-tier
+    // eligibility re-points at the clone (never the original's row).
+    const tierIdMap = new Map<string, string>();
+
+    const ticketTiers: DuplicateTierDraft[] = sourceTiers
+      .filter((t) => t.is_active !== false)
+      .map((t, i) => {
+        const localId = `dup_tier_${seed}_${i}`;
+        tierIdMap.set(String(t.id), localId);
+        return {
+          id: localId, // NEW unsaved id — server id stripped
+          name: t.name || "General Admission",
+          category: t.category,
+          priceCents: t.price_cents ?? 0,
+          // capacity kept; quantity_sold intentionally dropped (fresh row)
+          quantity: t.quantity_total ?? 0,
+          maxPerUser: t.max_per_user ?? 4,
+          description: t.description ?? "",
+          saleStart: t.sale_start ?? "",
+          saleEnd: t.sale_end ?? "",
+          tierType: t.tier_type ?? undefined,
+          visibility: t.tier_visibility ?? undefined,
+          unlockCode: t.unlock_code ?? undefined,
+          priceSchedule: (t.price_schedule ?? []).map((e) => ({
+            effectiveAt: e.effective_at,
+            priceDollars: centsToDollarsInput(e.price_cents),
+          })),
+          subAllocations: (t.sub_allocations ?? []).map((a) => ({
+            quantity: String(a.quantity),
+            priceDollars: centsToDollarsInput(a.price_cents),
+          })),
+        };
+      });
+
+    const addons: DraftAddon[] = sourceAddons.map((a, i) => ({
+      id: `dup_addon_${seed}_${i}`, // NEW unsaved id — dbId stripped
+      name: a.name,
+      description: a.description ?? "",
+      addonType: a.addon_type,
+      bindingMode: a.binding_mode,
+      priceDollars: centsToDollarsInput(a.price_cents),
+      minPriceDollars: centsToDollarsInput(a.min_price_cents),
+      // capacity kept; quantity_sold / quantity_held dropped (fresh row)
+      quantity: a.quantity_total != null ? String(a.quantity_total) : "",
+      requiresTierId: a.requires_tier_id
+        ? (tierIdMap.get(String(a.requires_tier_id)) ?? null)
+        : null,
+      isRedeemable: a.is_redeemable,
+      // Terminal/sold states reset so the clone is buyable; other config kept.
+      status:
+        a.status === "sold_out" || a.status === "ended" ? "on_sale" : a.status,
+      variants: (a.ticket_addon_variants ?? []).map((v) => ({
+        size: v.option_values?.size ?? "",
+        color: v.option_values?.color ?? "",
+        priceDollars: centsToDollarsInput(v.price_cents),
+        quantity: v.quantity_total != null ? String(v.quantity_total) : "",
+      })),
+    }));
+
+    return { ticketTiers, addons };
   },
 
   /**

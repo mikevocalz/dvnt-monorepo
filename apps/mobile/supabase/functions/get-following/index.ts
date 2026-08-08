@@ -4,6 +4,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
 const corsHeaders = {
@@ -69,29 +70,22 @@ Deno.serve(async (req) => {
     });
 
     let viewerFollowingIds: number[] = [];
-    const authHeader = req.headers.get("Authorization");
-    if (authHeader?.startsWith("Bearer ")) {
-      const token = authHeader.replace("Bearer ", "");
-      const { data: sessionData } = await supabaseAdmin
-        .from("session")
-        .select("userId, expiresAt")
-        .eq("token", token)
-        .single();
-      if (sessionData && new Date(sessionData.expiresAt) >= new Date()) {
-        const userData = await resolveOrProvisionUser(
-          supabaseAdmin,
-          sessionData.userId,
-          "id",
+    // Optional viewer auth via shared helper (failure = anonymous, not an error)
+    const viewerAuthId = await verifySession(supabaseAdmin, req);
+    if (viewerAuthId) {
+      const userData = await resolveOrProvisionUser(
+        supabaseAdmin,
+        viewerAuthId,
+        "id",
+      );
+      if (userData) {
+        const { data: followingData } = await supabaseAdmin
+          .from("follows")
+          .select("following_id")
+          .eq("follower_id", userData.id);
+        viewerFollowingIds = (followingData || []).map(
+          (f: any) => f.following_id,
         );
-        if (userData) {
-          const { data: followingData } = await supabaseAdmin
-            .from("follows")
-            .select("following_id")
-            .eq("follower_id", userData.id);
-          viewerFollowingIds = (followingData || []).map(
-            (f: any) => f.following_id,
-          );
-        }
       }
     }
 

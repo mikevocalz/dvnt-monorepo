@@ -2,14 +2,16 @@
  * Edge Function: get-post-likers
  * Fetch all users who liked a post. Uses service role to bypass RLS
  * (Better Auth doesn't set auth.uid(), so client queries may miss rows).
+ * Requires a verified Better Auth session (x-auth-token / Authorization).
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-auth-token",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -75,6 +77,16 @@ Deno.serve(async (req) => {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
+
+    // Require a verified Better Auth session — this function reads with the
+    // service role (and reconciles likes_count), so it must never be open.
+    const authUserId = await verifySession(supabaseAdmin, req);
+    if (!authUserId) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const { data, error } = await supabaseAdmin
       .from("likes")

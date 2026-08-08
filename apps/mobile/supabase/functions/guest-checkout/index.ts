@@ -14,7 +14,14 @@
  * Deno env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, PUBLIC_SITE_URL.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeFees, MIN_TIER_PRICE_CENTS } from "../_shared/fee-calculator.ts";
+import {
+  computeFeesWithMode,
+  MIN_TIER_PRICE_CENTS,
+} from "../_shared/fee-calculator.ts";
+import {
+  enforceTierVisibility,
+  TIER_VISIBILITY_MESSAGES,
+} from "../_shared/tier-visibility.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -70,6 +77,16 @@ Deno.serve(async (req) => {
     const attendeeNames: string[] = Array.isArray(body.attendee_names)
       ? body.attendee_names.slice(0, quantity).map((n: unknown) => (n == null ? "" : String(n).trim()))
       : [];
+    // Promoter attribution code (WS-4) — from a tracked ?ref= link or
+    // manual entry. Never touches pricing; stashed in Stripe metadata so
+    // stripe-webhook can record attribution + rev-share when paid.
+    const promoterCodeRaw =
+      typeof body.promoter_code === "string"
+        ? body.promoter_code.trim().toUpperCase().slice(0, 32)
+        : "";
+    const promoterCode = /^[A-Z0-9_-]{2,32}$/.test(promoterCodeRaw)
+      ? promoterCodeRaw
+      : "";
 
     if (!EMAIL_RE.test(guestEmail)) return err("invalid_email", "Enter a valid email.");
     if (!Number.isFinite(eventId) || !ticketTypeId) return err("invalid_request", "Missing event or tier.");
@@ -95,13 +112,30 @@ Deno.serve(async (req) => {
     const { data: tier } = await supabase
       .from("ticket_types")
       .select(
-        "id, event_id, name, price_cents, is_active, status, sale_start, sale_end, quantity_total, quantity_sold, quantity_held, max_per_user, tier_visibility",
+        "id, event_id, name, price_cents, is_active, status, sale_start, sale_end, quantity_total, quantity_sold, quantity_held, max_per_user, tier_visibility, unlock_code, unlocks_after_tier_id",
       )
       .eq("id", ticketTypeId)
       .single();
     if (!tier || tier.event_id !== eventId) return err("tier_not_found", "Ticket type not found.", 404);
     if (tier.is_active === false || tier.status === "paused" || tier.status === "ended")
       return err("tier_unavailable", "That ticket isn't on sale.");
+
+    // Tier visibility guard (mirror of cart_create_hold v3) — this rail
+    // inserts ticket_holds directly, bypassing the RPC's hidden/locked
+    // enforcement. hidden → never purchasable; locked → requires a valid
+    // unlock code (or the gating tier being sold out). Never echo the code.
+    const visibilityError = await enforceTierVisibility(
+      supabase,
+      tier,
+      body.unlock_code,
+    );
+    if (visibilityError) {
+      return err(
+        visibilityError,
+        TIER_VISIBILITY_MESSAGES[visibilityError],
+        visibilityError === "tier_hidden" ? 404 : 403,
+      );
+    }
     if (tier.price_cents <= 0) return err("not_paid", "This is a free RSVP event.");
     const now = Date.now();
     if (tier.sale_start && new Date(tier.sale_start).getTime() > now)
@@ -154,11 +188,12 @@ Deno.serve(async (req) => {
     if (tier.price_cents < MIN_TIER_PRICE_CENTS) {
       return err("price_too_low", "This ticket is priced below the $2.00 minimum for fees.");
     }
-    const fees = computeFees(subtotal, quantity);
     // fee_mode: 'pass' (default) → buyer pays the buyer-side fee; 'absorb' →
-    // organizer eats it (buyer pays just the ticket), but only when the platform
-    // fee still fits inside the subtotal (else fall back to pass).
-    const absorb = ev.fee_mode === "absorb" && fees.application_fee_amount <= subtotal;
+    // organizer eats it (buyer pays just the ticket), with automatic fallback
+    // to pass when the platform fee doesn't fit inside the subtotal. Shared
+    // entry point — same branch on every rail.
+    const fees = computeFeesWithMode(subtotal, quantity, ev.fee_mode);
+    const absorb = fees.fee_mode === "absorb";
 
     // Hosted Checkout Session. Metadata mirrors what stripe-webhook reads for
     // guest event_ticket issuance (user_id omitted → treated as a guest).
@@ -185,6 +220,14 @@ Deno.serve(async (req) => {
       ...(attendeeNames.some((n) => n)
         ? { "metadata[attendee_names]": JSON.stringify(attendeeNames) }
         : {}),
+      // Promoter attribution — house dvnt_* metadata key (session +
+      // PI copies, mirroring the fee metadata duplication below).
+      ...(promoterCode
+        ? {
+            "metadata[dvnt_promoter_code]": promoterCode,
+            "payment_intent_data[metadata][dvnt_promoter_code]": promoterCode,
+          }
+        : {}),
       // Destination charge → organizer's connected account; DVNT keeps the fee.
       "payment_intent_data[transfer_data][destination]": organizer.stripe_account_id,
       "payment_intent_data[application_fee_amount]": String(fees.application_fee_amount),
@@ -193,9 +236,10 @@ Deno.serve(async (req) => {
       "payment_intent_data[metadata][ticket_type_id]": ticketTypeId,
       "payment_intent_data[metadata][guest_email]": guestEmail,
       "payment_intent_data[metadata][subtotal_cents]": String(fees.subtotal),
-      "payment_intent_data[metadata][buyer_fee_cents]": String(absorb ? 0 : fees.buyer_fee),
+      // buyer_fee is the EFFECTIVE fee (already 0 in absorb mode).
+      "payment_intent_data[metadata][buyer_fee_cents]": String(fees.buyer_fee),
       "payment_intent_data[metadata][organizer_fee_cents]": String(fees.organizer_fee),
-      "payment_intent_data[metadata][fee_mode]": absorb ? "absorb" : "pass",
+      "payment_intent_data[metadata][fee_mode]": fees.fee_mode,
     };
     // In pass mode the buyer covers the buyer-side fee as a second line item;
     // in absorb mode there's no extra line (they pay just the ticket).
@@ -220,6 +264,41 @@ Deno.serve(async (req) => {
       status: "active",
       expires_at: new Date(Date.now() + 31 * 60 * 1000).toISOString(),
     });
+
+    // Create the order row in payment_pending, keyed to the Checkout
+    // Session — mirrors ticket-checkout. Previously this rail created no
+    // order until reconciliation, which meant the webhook's
+    // orders-by-session lookup (status flip + promoter attribution) had
+    // nothing to attach to. Fee columns are server-truth from computeFees;
+    // in absorb mode the buyer-side fee is zeroed (organizer eats it) and
+    // total is just the subtotal.
+    const { error: guestOrderError } = await supabase.from("orders").insert({
+      user_id: null,
+      guest_email: guestEmail,
+      type: "event_ticket",
+      status: "payment_pending",
+      quantity,
+      subtotal_cents: fees.subtotal,
+      platform_fee_cents: fees.dvnt_total_fee,
+      // Moded breakdown: customer_charge == subtotal and buyer_* == 0 in
+      // absorb mode, so the columns can be written straight through.
+      total_cents: fees.customer_charge_amount,
+      buyer_pct_fee_cents: fees.buyer_pct_fee,
+      buyer_per_ticket_fee_cents: fees.buyer_per_ticket_fee,
+      buyer_fee_cents: fees.buyer_fee,
+      org_pct_fee_cents: fees.org_pct_fee,
+      org_per_ticket_fee_cents: fees.org_per_ticket_fee,
+      organizer_fee_cents: fees.organizer_fee,
+      dvnt_total_fee_cents: fees.dvnt_total_fee,
+      fee_policy_version: fees.fee_policy_version,
+      event_id: eventId,
+      stripe_checkout_session_id: session.id,
+    });
+    if (guestOrderError) {
+      // Non-fatal: the Stripe session is already live. Log loudly —
+      // reconciliation can still repair the order later.
+      console.error("[guest-checkout] order insert failed:", guestOrderError);
+    }
 
     return json({ ok: true, url: session.url });
   } catch (e) {
