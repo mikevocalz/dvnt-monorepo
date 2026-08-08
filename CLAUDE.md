@@ -4,6 +4,9 @@ Read [AGENTS.md](./AGENTS.md). Everything that governs this build-out lives ther
 engineering bar, fixed stack, two-rail architecture, the six invariants, the four
 constraints, deliverables D0–D7, and the gate sequence G1–G6.
 
+For code structure (feature anatomy, the VideoTile component pattern, store rules,
+and the module boundaries the lint enforces) see [docs/code-standards.md](./docs/code-standards.md).
+
 Operating rules summarised:
 - TS clean (`npx tsc --noEmit`) is the floor.
 - Verified APIs only. Read source/docs before generating. If a webhook field cannot be

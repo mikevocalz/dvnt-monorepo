@@ -1,7 +1,7 @@
 "use client";
 
 import TrueSheetNavigator from "@dvnt/app/components/navigation/true-sheet-navigator";
-import { CommentSheet } from "@dvnt/app/src/components/sheets/AppSheet";
+import { CommentSheet } from "@dvnt/app/components/sheets/AppSheet";
 
 export default function CommentsLayout() {
   return (

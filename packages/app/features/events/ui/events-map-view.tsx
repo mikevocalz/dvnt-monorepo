@@ -8,8 +8,8 @@
  */
 
 import { useRef } from "react";
-import { DvntMap } from "@dvnt/app/src/components/map";
-import type { DvntMapMarker } from "@dvnt/app/src/components/map";
+import { DvntMap } from "@dvnt/app/components/map";
+import type { DvntMapMarker } from "@dvnt/app/components/map";
 import type { MapViewport } from "@dvnt/app/lib/hooks/use-event-map-controller";
 
 interface EventsMapViewProps {

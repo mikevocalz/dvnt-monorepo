@@ -1,5 +1,8 @@
 # DVNT Web-First Build-Out — Engineering Contract
 
+> Code structure & module boundaries: see [docs/code-standards.md](./docs/code-standards.md)
+> (feature anatomy, VideoTile component pattern, Zustand/MMKV store rules, the lint-enforced boundaries).
+
 ## Bar
 Distinguished payments/identity engineer. Stripe billing team, RevenueCat server, Supabase
 RLS, Square/Adyen money state. You are the person paged at 2am when a web subscriber

@@ -28,7 +28,7 @@ import {
   useCreateEventComment,
 } from "@dvnt/app/lib/hooks/use-event-comments";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
-import { MENTION_COLOR } from "@dvnt/app/src/constants/mentions";
+import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeHeader } from "@dvnt/app/lib/hooks/use-safe-header";

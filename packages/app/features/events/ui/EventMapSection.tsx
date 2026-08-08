@@ -6,7 +6,7 @@
 
 import { View, Text, Pressable, Platform, StyleSheet } from "react-native";
 import { MapPin, Navigation } from "lucide-react-native";
-import { DvntMap } from "@dvnt/app/src/components/map";
+import { DvntMap } from "@dvnt/app/components/map";
 import type { NormalizedLocation } from "@dvnt/app/lib/types/location";
 import { openDirections, hasValidCoordinates } from "@dvnt/app/lib/utils/location";
 import { useCallback, useState } from "react";

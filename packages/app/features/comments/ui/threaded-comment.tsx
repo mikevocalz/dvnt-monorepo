@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Heart } from "lucide-react-native";
 import { UserAvatar } from "@dvnt/app/components/ui/avatar";
 import { useCommentLikeState } from "@dvnt/app/lib/hooks/use-comment-like-state";
-import { MENTION_COLOR } from "@dvnt/app/src/constants/mentions";
+import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 
 function renderCommentText(
   text: string,

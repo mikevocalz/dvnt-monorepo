@@ -53,7 +53,7 @@ import { useColorScheme, useMediaPicker } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 // Popover removed — inline expanding pickers used instead
-import { DvntMap } from "@dvnt/app/src/components/map";
+import { DvntMap } from "@dvnt/app/components/map";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { Motion } from "@legendapp/motion";
 import { Badge } from "@dvnt/app/components/ui/badge";

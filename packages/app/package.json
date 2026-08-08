@@ -179,12 +179,6 @@
       "import": "./lib/*",
       "default": "./lib/*"
     },
-    "./src/*": {
-      "types": "./src/*",
-      "react-native": "./src/*",
-      "import": "./src/*",
-      "default": "./src/*"
-    },
     "./assets/*": {
       "react-native": "./assets/*",
       "import": "./assets/*",

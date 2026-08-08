@@ -27,7 +27,7 @@ import {
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
-import { DvntMap } from "@dvnt/app/src/components/map";
+import { DvntMap } from "@dvnt/app/components/map";
 import { LegendList } from "@dvnt/app/components/list";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import type { NormalizedLocation } from "@dvnt/app/lib/types/location";

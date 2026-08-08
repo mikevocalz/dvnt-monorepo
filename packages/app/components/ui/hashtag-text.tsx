@@ -7,7 +7,7 @@
 import { Text, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { useMemo } from "react";
-import { MENTION_COLOR, HASHTAG_COLOR } from "@dvnt/app/src/constants/mentions";
+import { MENTION_COLOR, HASHTAG_COLOR } from "@dvnt/app/lib/constants/mentions";
 
 interface HashtagTextProps {
   text: string;

@@ -15,7 +15,7 @@ import { useMemo, useRef, useEffect, useState, useCallback } from "react";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { geocodeAddress } from "@dvnt/app/lib/utils/geocode";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
-import type { DvntMapMarker } from "@dvnt/app/src/components/map";
+import type { DvntMapMarker } from "@dvnt/app/components/map";
 
 // ── Haversine distance ────────────────────────────────────────────────────────
 

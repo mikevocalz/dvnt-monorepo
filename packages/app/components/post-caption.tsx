@@ -17,7 +17,7 @@
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import { useMemo } from "react";
-import { MENTION_COLOR, HASHTAG_COLOR } from "@dvnt/app/src/constants/mentions";
+import { MENTION_COLOR, HASHTAG_COLOR } from "@dvnt/app/lib/constants/mentions";
 
 // CRITICAL: Explicit colors - NEVER rely on theme inheritance
 const CAPTION_TEXT_COLOR = "#FFFFFF";

@@ -31,7 +31,7 @@ import { usersApi } from "@dvnt/app/lib/api/users";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
 import { useEventCommentMentionStore } from "@dvnt/app/lib/stores/event-comment-mention-store";
-import { MENTION_COLOR } from "@dvnt/app/src/constants/mentions";
+import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 
 const ESTIMATED_ROW = 88;
 

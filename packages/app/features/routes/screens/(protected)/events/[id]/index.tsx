@@ -92,7 +92,7 @@ import { useSaleNotifyStore } from "@dvnt/app/lib/stores/sale-notify-store";
 import { SafeCalendar as Calendar } from "@dvnt/app/lib/safe-native-modules";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
-import { MENTION_COLOR } from "@dvnt/app/src/constants/mentions";
+import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 import { usePromotionStore } from "@dvnt/app/lib/stores/promotion-store";
 import { PromoteEventSheet } from "@dvnt/app/features/events/ui/promote-event-sheet";
 import {

@@ -62,7 +62,7 @@ import { useChatScreenStore } from "@dvnt/app/lib/stores/chat-screen-store";
 import { normalizeChatParams } from "@dvnt/app/lib/navigation/chat-routes";
 import { messagesApiClient } from "@dvnt/app/lib/api/messages";
 import { useConversationResolution } from "@dvnt/app/lib/hooks/use-conversation-resolution";
-import { MENTION_COLOR } from "@dvnt/app/src/constants/mentions";
+import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 import { messageKeys, useRefreshMessageCounts } from "@dvnt/app/lib/hooks/use-messages";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { useQueryClient } from "@tanstack/react-query";
