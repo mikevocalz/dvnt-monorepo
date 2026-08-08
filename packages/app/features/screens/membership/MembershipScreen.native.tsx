@@ -66,7 +66,7 @@ const C = {
 const WEB_BASE =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ((globalThis as any)?.process?.env?.EXPO_PUBLIC_WEB_URL as string) ||
-  "https://dvnt.app";
+  "https://dvntapp.live";
 
 const ANDROID_PACKAGE = "com.dvnt.app";
 

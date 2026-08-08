@@ -29,7 +29,7 @@ export interface MembershipScreenProps {
 const WEB_BASE =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ((globalThis as any)?.process?.env?.EXPO_PUBLIC_WEB_URL as string) ||
-  "https://dvnt.app";
+  "https://dvntapp.live";
 
 const C = {
   bg: "#02030A",
@@ -48,11 +48,17 @@ function price(cents: number) {
 }
 
 async function openPricing(planKey?: PlanKey) {
-  const url = `${WEB_BASE}/pricing${planKey ? `?plan=${planKey}` : ""}`;
+  const path = `/pricing${planKey ? `?plan=${planKey}` : ""}`;
   if (Platform.OS === "web") {
-    (globalThis as typeof globalThis & { open?: (u: string) => void }).open?.(url);
+    // Same origin, same tab — never depend on WEB_BASE resolving on web
+    // (EXPO_PUBLIC_WEB_URL isn't in the Next build; the old absolute URL
+    // pointed at the dvnt.app fallback, a dead domain).
+    (globalThis as typeof globalThis & { location?: Location }).location?.assign(
+      path,
+    );
     return;
   }
+  const url = `${WEB_BASE}${path}`;
   try {
     const WebBrowser = await import("expo-web-browser");
     await WebBrowser.openBrowserAsync(url);
