@@ -75,8 +75,15 @@ export function UserProfileScreen() {
   const setMenuOpen = useProfileScreenUIStore((s) => s.setMenuOpen);
   const avatarViewerOpen = useProfileScreenUIStore((s) => s.avatarViewerOpen);
   const setAvatarViewerOpen = useProfileScreenUIStore((s) => s.setAvatarViewerOpen);
+  const userProfileTab = useProfileScreenUIStore((s) => s.userProfileTab);
+  const setUserProfileTab = useProfileScreenUIStore((s) => s.setUserProfileTab);
 
   const safeUsername = username.length > 0 ? username : null;
+
+  // The tab store is global — don't carry one profile's tab onto another.
+  useEffect(() => {
+    setUserProfileTab("posts");
+  }, [safeUsername, setUserProfileTab]);
   const isOwnProfile = currentUser?.username === safeUsername;
 
   // Canonical user read by username (matches native useUser).
@@ -321,73 +328,99 @@ export function UserProfileScreen() {
           </button>
         </div>
 
-        {/* Events hosted by this user — the "More events" surface. */}
-        {hostEvents.length > 0 ? (
-          <section className="mt-5">
-            <div className="flex items-center gap-2 mb-3">
-              <CalendarDays size={18} color="#fff" />
-              <h2 className="text-white text-base font-bold">
-                Events{" "}
-                <span className="text-white/40 font-medium">
-                  ({hostEvents.length})
-                </span>
-              </h2>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {hostEvents.map((ev: any) => (
-                <button
-                  key={ev.id}
-                  onClick={() => router.push(`/events/${eventSlug(ev.title)}`)}
-                  className="text-left rounded-xl overflow-hidden border border-white/10 bg-white/[0.03] hover:border-white/25 transition-colors"
-                >
-                  <div className="aspect-[4/5] bg-white/5">
-                    {ev.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={ev.image}
-                        alt={ev.title}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : null}
-                  </div>
-                  <div className="p-2">
-                    <p className="text-white text-sm font-semibold truncate">
-                      {ev.title}
-                    </p>
-                    <p className="text-white/45 text-xs truncate">
-                      {[ev.month, ev.date].filter(Boolean).join(" ")}
-                      {ev.location ? ` · ${ev.location}` : ""}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {/* Tab bar — single grid tab (matches native) */}
+        {/* Tab bar — Posts grid + hosted Events, mirroring the logged-in
+            profile's tab pattern (events sits right after the images tab). */}
         <div className="mt-4 flex border-b border-white/10">
-          <span className="flex flex-1 items-center justify-center border-b-2 border-white py-3">
-            <Grid size={22} color="#fff" />
-          </span>
+          <button
+            onClick={() => setUserProfileTab("posts")}
+            aria-label="Posts"
+            className={`flex flex-1 items-center justify-center border-b-2 py-3 ${
+              userProfileTab === "posts" ? "border-white" : "border-transparent"
+            }`}
+          >
+            <Grid size={22} color={userProfileTab === "posts" ? "#fff" : "#737373"} />
+          </button>
+          <button
+            onClick={() => setUserProfileTab("events")}
+            aria-label="Events"
+            className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 py-3 ${
+              userProfileTab === "events" ? "border-white" : "border-transparent"
+            }`}
+          >
+            <CalendarDays
+              size={22}
+              color={userProfileTab === "events" ? "#fff" : "#737373"}
+            />
+            {hostEvents.length > 0 ? (
+              <span
+                className={`text-xs font-semibold ${
+                  userProfileTab === "events" ? "text-white" : "text-white/45"
+                }`}
+              >
+                {hostEvents.length}
+              </span>
+            ) : null}
+          </button>
         </div>
 
-        {/* Posts grid */}
-        <div className="pt-2">
-          {isLoading || isLoadingPosts ? (
-            <GridSkeleton winW={winW} />
-          ) : (
-            <ProfileMasonryGrid
-              data={userPosts}
-              username={safeUsername}
-              ListEmptyComponent={
-                <div className="flex flex-col items-center justify-center py-16">
-                  <p className="text-white/55">No posts yet</p>
-                </div>
-              }
-            />
-          )}
-        </div>
+        {userProfileTab === "events" ? (
+          /* Events hosted by this user — was the inline "More events" strip. */
+          <div className="pt-3">
+            {hostEvents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16">
+                <CalendarDays size={48} className="text-white/30" />
+                <p className="mt-4 text-base text-white/55">No events yet</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {hostEvents.map((ev: any) => (
+                  <button
+                    key={ev.id}
+                    onClick={() => router.push(`/events/${eventSlug(ev.title)}`)}
+                    className="text-left rounded-xl overflow-hidden border border-white/10 bg-white/[0.03] hover:border-white/25 transition-colors"
+                  >
+                    <div className="aspect-[4/5] bg-white/5">
+                      {ev.image ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={ev.image}
+                          alt={ev.title}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : null}
+                    </div>
+                    <div className="p-2">
+                      <p className="text-white text-sm font-semibold truncate">
+                        {ev.title}
+                      </p>
+                      <p className="text-white/45 text-xs truncate">
+                        {[ev.month, ev.date].filter(Boolean).join(" ")}
+                        {ev.location ? ` · ${ev.location}` : ""}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Posts grid */
+          <div className="pt-2">
+            {isLoading || isLoadingPosts ? (
+              <GridSkeleton winW={winW} />
+            ) : (
+              <ProfileMasonryGrid
+                data={userPosts}
+                username={safeUsername}
+                ListEmptyComponent={
+                  <div className="flex flex-col items-center justify-center py-16">
+                    <p className="text-white/55">No posts yet</p>
+                  </div>
+                }
+              />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Action sheet (more menu) */}
