@@ -3,7 +3,7 @@ import { useSafeHeader } from "@dvnt/app/lib/hooks/use-safe-header";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useLayoutEffect, useEffect, useRef } from "react";
 import { EditorScreen } from "@dvnt/app/features/stories-editor";
-import { useEditorStore } from "@dvnt/app/features/stories-editor/stores/editor-store";
+import { useEditorStore } from "@dvnt/app/features/stories-editor";
 import type { EditorMode } from "@dvnt/app/features/stories-editor";
 import { useStoryFlowStore } from "@dvnt/app/lib/stores/story-flow-store";
 import { useStoryEditorResultStore } from "@dvnt/app/lib/stores/story-editor-result-store";

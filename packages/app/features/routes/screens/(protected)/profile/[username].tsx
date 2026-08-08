@@ -41,8 +41,8 @@ import { Avatar, AvatarSizes } from "@dvnt/app/components/ui/avatar";
 import { resolveAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { Image } from "expo-image";
 import { Debouncer } from "@tanstack/react-pacer";
-import { ProfileMasonryGrid } from "@dvnt/app/features/profile/ui/ProfileMasonryGrid";
-import { ProfilePronounsPill } from "@dvnt/app/features/profile/ui/ProfilePronounsPill";
+import { ProfileMasonryGrid } from "@dvnt/app/features/profile";
+import { ProfilePronounsPill } from "@dvnt/app/features/profile";
 import {
   safeGridTiles,
   type SafeGridTile,

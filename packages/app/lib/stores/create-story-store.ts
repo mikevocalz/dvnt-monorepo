@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { TaggedUser } from "@dvnt/app/features/stories/ui/story-tag-picker";
+import type { TaggedUser } from "@dvnt/app/features/stories";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
 
 interface CreateStoryState {

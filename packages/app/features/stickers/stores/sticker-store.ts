@@ -5,7 +5,7 @@
  */
 
 import { create } from "zustand";
-import type { KlipyTab } from "@dvnt/app/features/stickers/api/klipy";
+import type { KlipyTab } from "../api/klipy";
 
 const MAX_RECENTS = 30;
 

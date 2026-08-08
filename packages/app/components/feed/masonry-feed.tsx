@@ -57,7 +57,7 @@ import type { Event } from "@dvnt/app/lib/hooks/use-events";
 import type { Post } from "@dvnt/app/lib/types";
 import { useFeedScrollStore } from "@dvnt/app/lib/stores/feed-scroll-store";
 import * as Haptics from "expo-haptics";
-import { TextPostSurface } from "@dvnt/app/features/post/ui/TextPostSurface";
+import { TextPostSurface } from "@dvnt/app/features/post";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import {
   extractFeedImageUrls,

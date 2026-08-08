@@ -31,8 +31,8 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
-import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk/stores/lynk-history-store";
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
+import { useLynkHistoryStore } from "../stores/lynk-history-store";
+import { sneakyLynkApi } from "../api/supabase";
 import { useCreateLynkStore } from "../stores/create-store";
 
 const ACCENT = "#FC253A";

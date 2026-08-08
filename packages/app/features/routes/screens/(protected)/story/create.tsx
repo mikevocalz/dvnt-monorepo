@@ -49,7 +49,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSafeHeader } from "@dvnt/app/lib/hooks/use-safe-header";
-import { StoryTagPicker } from "@dvnt/app/features/stories/ui/story-tag-picker";
+import { StoryTagPicker } from "@dvnt/app/features/stories";
 import { storyTagsApi } from "@dvnt/app/lib/api/stories";
 // generateVideoThumbnail disabled — expo-video-thumbnails hangs on iOS 26.3
 import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";

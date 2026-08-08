@@ -66,7 +66,7 @@ import {
   type CallRole,
   type CallDirection,
   type RecipientInfo,
-} from "@dvnt/app/features/video/stores/video-room-store";
+} from "@dvnt/app/features/video";
 import type { Participant } from "@dvnt/app/features/video/types";
 import { CT } from "@dvnt/app/features/services/calls/callTrace";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";

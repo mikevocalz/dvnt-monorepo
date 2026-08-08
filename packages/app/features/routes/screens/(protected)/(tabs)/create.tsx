@@ -40,7 +40,7 @@ import { postTagsApi } from "@dvnt/app/lib/api/post-tags";
 import {
   TagPeopleSheet,
   type TagCandidate,
-} from "@dvnt/app/features/tags/ui/TagPeopleSheet";
+} from "@dvnt/app/features/tags";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
@@ -49,7 +49,7 @@ import { UserMentionAutocomplete } from "@dvnt/app/components/ui/user-mention-au
 import { Switch } from "react-native";
 import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
 import { setPendingCrop } from "@dvnt/app/features/crop/crop-utils";
-import { TextPostSlidesComposer } from "@dvnt/app/features/post/ui/TextPostSlidesComposer";
+import { TextPostSlidesComposer } from "@dvnt/app/features/post";
 import {
   TEXT_POST_MAX_LENGTH,
   serializeTextSlidesForMutation,

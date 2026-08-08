@@ -31,7 +31,7 @@ import { DVNTLivePhotoView } from "@dvnt/app/components/media/DVNTLivePhotoView"
 import { navigateToPost } from "@dvnt/app/lib/routes/post-routes";
 import { getVideoThumbnail } from "@dvnt/app/lib/media/getVideoThumbnail";
 import { LegendList } from "@dvnt/app/components/list";
-import { TextPostSurface } from "@dvnt/app/features/post/ui/TextPostSurface";
+import { TextPostSurface } from "@dvnt/app/features/post";
 import { postsApi } from "@dvnt/app/lib/api/posts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────

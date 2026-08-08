@@ -25,6 +25,7 @@
 import { useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "solito/navigation";
 import { X, Type, Check, Trash2 } from "lucide-react";
+// eslint-disable-next-line no-restricted-imports -- deep store import: the stories-editor barrel re-exports EditorScreen (RN-only File.uri typing) which breaks apps/web's DOM-lib typecheck; route the store deep to keep web green.
 import {
   useEditorStore,
   useSelectedElement,

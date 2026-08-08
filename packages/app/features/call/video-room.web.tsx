@@ -48,7 +48,7 @@ import {
 import { videoApi } from "@dvnt/app/features/video/api";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
+import { useVideoRoomStore } from "@dvnt/app/features/video";
 import type { Participant } from "@dvnt/app/features/video/types";
 
 const ACCENT = "#3FDCFF";

@@ -1,7 +1,7 @@
 import { Stack, useRouter } from "expo-router";
 import { FishjamProvider } from "@fishjam-cloud/react-native-client";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
+import { useVideoRoomStore } from "@dvnt/app/features/video";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 
 const FISHJAM_APP_ID = resolveFishjamAppId();

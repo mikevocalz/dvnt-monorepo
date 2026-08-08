@@ -15,7 +15,7 @@ import { useOnboardingV2Store } from "@dvnt/app/lib/stores/onboarding-v2-store";
 import { useDeepLinkStore } from "@dvnt/app/lib/stores/deep-link-store";
 import Logo from "@dvnt/app/components/logo";
 import { VideoView, useVideoPlayer } from "expo-video";
-import { AppleButton } from "@dvnt/app/features/auth/ui/apple-button";
+import { AppleButton } from "@dvnt/app/features/auth";
 import { LinearGradient } from "expo-linear-gradient";
 import { useVideoLifecycle, logVideoHealth } from "@dvnt/app/lib/video-lifecycle";
 

@@ -22,7 +22,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useComments, useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
-import { ThreadedComment } from "@dvnt/app/features/comments/ui/threaded-comment";
+import { ThreadedComment } from "./ui/threaded-comment";
 
 const ESTIMATED_ROW = 140;
 

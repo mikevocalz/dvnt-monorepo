@@ -49,7 +49,7 @@ import { usersApi } from "@dvnt/app/lib/api/users";
 import { Badge } from "@dvnt/app/components/ui/badge";
 import { useQueryClient } from "@tanstack/react-query";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import { ProfileMasonryGrid } from "@dvnt/app/features/profile/ui/ProfileMasonryGrid";
+import { ProfileMasonryGrid } from "@dvnt/app/features/profile";
 import { normalizeArray } from "@dvnt/app/lib/normalization/safe-entity";
 import {
   safeProfile,
@@ -60,8 +60,8 @@ import {
   type SafeGridTile,
 } from "@dvnt/app/lib/utils/safe-profile-mappers";
 import { appendCacheBuster, getAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
-import { ProfileScreenGuard } from "@dvnt/app/features/profile/ui/ProfileScreenGuard";
-import { ProfilePronounsPill } from "@dvnt/app/features/profile/ui/ProfilePronounsPill";
+import { ProfileScreenGuard } from "@dvnt/app/features/profile";
+import { ProfilePronounsPill } from "@dvnt/app/features/profile";
 
 // mapPostToGridTile is now replaced by safeGridTiles from safe-profile-mappers.ts
 

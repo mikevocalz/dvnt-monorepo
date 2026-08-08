@@ -72,19 +72,19 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
+import { sneakyLynkApi } from "../api/supabase";
 import { videoApi } from "@dvnt/app/features/video/api";
-import { useRoomReactions } from "@dvnt/app/features/sneaky-lynk/hooks/useRoomReactions";
-import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/features/sneaky-lynk/hooks/useSneakyLynkCaptureBroadcast";
+import { useRoomReactions } from "../hooks/useRoomReactions";
+import { useSneakyLynkCaptureBroadcast } from "../hooks/useSneakyLynkCaptureBroadcast";
 import {
   fetchRoomComments,
   postRoomComment,
   subscribeToRoomComments,
   type RoomComment,
-} from "@dvnt/app/features/sneaky-lynk/api/comments";
+} from "../api/comments";
 import type { SneakyUser } from "@dvnt/app/features/sneaky-lynk/types";
-import { useRoomStore } from "@dvnt/app/features/sneaky-lynk/stores/room-store";
-import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk/stores/lynk-history-store";
+import { useRoomStore } from "../stores/room-store";
+import { useLynkHistoryStore } from "../stores/lynk-history-store";
 import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
 import { SecureCaptureBoundary } from "@dvnt/app/lib/secure-capture";
 import { useRoomUIStore } from "../stores/room-ui-store";

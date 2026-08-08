@@ -42,7 +42,7 @@ import {
   useMicrophone,
   useInitializeDevices,
 } from "@fishjam-cloud/react-native-client";
-import { useVideoRoom } from "@dvnt/app/features/video/hooks/useVideoRoom";
+import { useVideoRoom } from "@dvnt/app/features/video";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import {
@@ -63,10 +63,10 @@ import {
 } from "@dvnt/app/features/sneaky-lynk/ui";
 import type { VideoParticipant } from "@dvnt/app/features/sneaky-lynk/ui";
 import type { SneakyRoom, SneakyUser } from "@dvnt/app/features/sneaky-lynk/types";
-import { RoomJoinErrorSheet } from "@dvnt/app/features/sneaky-lynk/ui/RoomJoinErrorSheet";
-import { RoomFullSheet } from "@dvnt/app/features/sneaky-lynk/ui/RoomFullSheet";
-import { CaptureNotificationBanner } from "@dvnt/app/features/sneaky-lynk/ui/CaptureNotificationBanner";
-import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/features/sneaky-lynk/hooks/useSneakyLynkCaptureBroadcast";
+import { RoomJoinErrorSheet } from "@dvnt/app/features/sneaky-lynk";
+import { RoomFullSheet } from "@dvnt/app/features/sneaky-lynk";
+import { CaptureNotificationBanner } from "@dvnt/app/features/sneaky-lynk";
+import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/features/sneaky-lynk";
 import {
   classifySneakyLynkError,
   type ClassifiedError,
@@ -74,12 +74,12 @@ import {
 import {
   getSneakyUserLabel,
   normalizeSneakyAnonLabel,
-} from "@dvnt/app/features/sneaky-lynk/ui/user-labels";
+} from "@dvnt/app/features/sneaky-lynk";
 import { videoApi } from "@dvnt/app/features/video/api";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
-import { useRoomStore } from "@dvnt/app/features/sneaky-lynk/stores/room-store";
-import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk/stores/lynk-history-store";
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
+import { useRoomStore } from "@dvnt/app/features/sneaky-lynk";
+import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import { shareUrl } from "@dvnt/app/lib/deep-linking/share-link";
@@ -87,10 +87,10 @@ import {
   DVNTLiquidGlass,
   DVNTLiquidGlassIconButton,
 } from "@dvnt/app/components/media/DVNTLiquidGlass";
-import { useRoomReactions } from "@dvnt/app/features/sneaky-lynk/hooks/useRoomReactions";
-import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk/hooks/useSneakyLynkCaptureProtection";
-import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk/components/SneakySubscriptionModal";
-import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk/components/SneakyPaywallModal";
+import { useRoomReactions } from "@dvnt/app/features/sneaky-lynk";
+import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
+import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
+import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
 import { isFeatureEnabled } from "@dvnt/app/lib/feature-flags";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 

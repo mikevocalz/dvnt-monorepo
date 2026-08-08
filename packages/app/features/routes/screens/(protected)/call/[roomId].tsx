@@ -14,10 +14,10 @@ import { useEffect, useRef } from "react";
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoCall, type CallType } from "@dvnt/app/lib/hooks/use-video-call";
-import { useMediaPermissions } from "@dvnt/app/features/video/hooks/useMediaPermissions";
-import { useVideoRoomStore } from "@dvnt/app/features/video/stores/video-room-store";
+import { useMediaPermissions } from "@dvnt/app/features/video";
+import { useVideoRoomStore } from "@dvnt/app/features/video";
 import { CT } from "@dvnt/app/features/services/calls/callTrace";
-import { CallScreen } from "@dvnt/app/features/calls/ui/CallScreen";
+import { CallScreen } from "@dvnt/app/features/calls";
 
 export default function VideoCallScreen() {
   const {

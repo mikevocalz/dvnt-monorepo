@@ -46,3 +46,13 @@ export * from "./ui";
 // Components — composed containers (paywall / subscription modals).
 export * from "./components/SneakyPaywallModal";
 export * from "./components/SneakySubscriptionModal";
+
+// WS-6 boundary cleanup — deep-import consumers routed through this barrel.
+// Re-exports only (no logic); these ui files were not covered by ./ui.
+export { RoomJoinErrorSheet } from "./ui/RoomJoinErrorSheet";
+export { RoomFullSheet } from "./ui/RoomFullSheet";
+export { CaptureNotificationBanner } from "./ui/CaptureNotificationBanner";
+export {
+  getSneakyUserLabel,
+  normalizeSneakyAnonLabel,
+} from "./ui/user-labels";

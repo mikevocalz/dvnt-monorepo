@@ -49,9 +49,9 @@ import { exportEventAttendeesCsv } from "@dvnt/app/lib/api/privileged";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { BroadcastModal } from "@dvnt/app/features/events/ui/broadcast-modal";
-import { CompTicketsModal } from "@dvnt/app/features/events/ui/comp-tickets-modal";
-import { RefundConfirmModal } from "@dvnt/app/features/events/ui/refund-confirm-modal";
+import { BroadcastModal } from "@dvnt/app/features/events";
+import { CompTicketsModal } from "@dvnt/app/features/events";
+import { RefundConfirmModal } from "@dvnt/app/features/events";
 
 type StatusFilter =
   | "all"

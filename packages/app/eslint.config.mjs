@@ -1,17 +1,11 @@
 // WS-6 boundary / no-cycle lint for @dvnt/app.
 //
 // These rules encode the §4 boundary contract from docs/structure-target.md and
-// the "Boundaries" section of docs/code-standards.md. They are intentionally
-// LANDED AS `warn`, NOT `error`: the deferred deep-import cleanup and the
-// packages/ui component-consolidation sweep (§5) are not done yet, so making
-// these errors today would break `turbo lint` / CI on the pre-existing
-// violations the migration still has to work through.
-//
-// >>> FLIP TO `error` AFTER THE CONSOLIDATION SWEEP <<<
-// Once features expose a single barrel and consumers stop deep-importing feature
-// internals (and cycles are cleared), change the two `"warn"` severities below to
-// `"error"` so the boundary becomes CI-enforced. Track the violation count with
-// `pnpm --filter @dvnt/app lint` — it should reach zero before the flip.
+// the "Boundaries" section of docs/code-standards.md. They are now `error`:
+// the deep-import cleanup is complete — every cross-feature consumer routes
+// through a feature's public barrel and no cycles remain — so the boundary is
+// CI-enforced. Track the violation count with `pnpm --filter @dvnt/app lint`;
+// it must stay at zero.
 //
 // Tooling note: implemented with eslint-plugin-import (already a devDependency)
 // + core no-restricted-imports, resolving the `@dvnt/app/*` alias via
@@ -96,7 +90,7 @@ export default [
       // (a) Cycle ban. Circular imports are the direct symptom of the
       // cross-root tangle WS-6 is unwinding. `ignoreExternal` keeps the graph
       // walk inside the workspace (fast; node_modules cycles are not our bug).
-      "import/no-cycle": ["warn", { ignoreExternal: true }],
+      "import/no-cycle": ["error", { ignoreExternal: true }],
 
       // (c) Features are consumed only via their public barrel
       // (`@dvnt/app/features/<x>`). Deep-importing another feature's internals
@@ -104,7 +98,7 @@ export default [
       // `../`) and app-global namespaces (`@dvnt/app/lib/*`, `@dvnt/ui`) stay
       // legal and are not matched here.
       "no-restricted-imports": [
-        "warn",
+        "error",
         {
           patterns: [
             {

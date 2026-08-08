@@ -27,7 +27,7 @@ import { refreshWeather } from "@dvnt/app/features/weatherfx/WeatherDecisionEngi
 import { useWeatherFXStore } from "@dvnt/app/features/weatherfx/WeatherFXStore";
 // import { WeatherGPUEngine } from "@dvnt/app/features/weatherfx/WeatherGPUEngine";
 import { WeatherReanimatedOverlay } from "@dvnt/app/features/weatherfx/WeatherReanimatedOverlay";
-import { useEventsTabVisibility } from "@dvnt/app/features/weatherfx/hooks/useEventsTabVisibility";
+import { useEventsTabVisibility } from "@dvnt/app/features/weatherfx";
 // import { isWebGPUAvailable } from "@dvnt/app/features/gpu/GpuRuntime";
 import { useLiveSurface } from "@dvnt/app/features/live-surface";
 import { useWatchTicketSync } from "@dvnt/app/features/watch/use-watch-ticket-sync";

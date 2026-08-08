@@ -23,7 +23,7 @@ import {
 } from "react-native";
 import { LegendList } from "@dvnt/app/components/list";
 import { SheetHeader } from "@dvnt/app/components/ui/sheet-header";
-import { CommentComposerFooter } from "@dvnt/app/features/comments/ui/comment-composer-footer";
+import { CommentComposerFooter } from "@dvnt/app/features/comments";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { TrueSheet as TrueSheetComponent, type TrueSheet as TrueSheetType } from "@lodev09/react-native-true-sheet";
 const TrueSheet = TrueSheetComponent as unknown as React.ComponentType<any>;

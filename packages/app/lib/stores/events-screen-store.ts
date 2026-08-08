@@ -1,4 +1,5 @@
 import { create } from "zustand";
+// eslint-disable-next-line no-restricted-imports -- deep type-only import: the events barrel re-exports RN-only UI (VideoPlayer/WhoAllOverThere, EditorScreen-class weight) that breaks apps/web's DOM-lib typecheck when this web-reachable store pulls it; keep the lightweight EventFilter type deep.
 import type { EventFilter } from "@dvnt/app/features/events/ui/filter-pills";
 import type { EventSort } from "@dvnt/app/lib/hooks/use-events";
 

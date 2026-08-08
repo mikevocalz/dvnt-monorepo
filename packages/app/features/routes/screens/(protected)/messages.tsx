@@ -53,10 +53,10 @@ import PagerView from "react-native-pager-view";
 import {
   useLynkHistoryStore,
   type LynkRecord,
-} from "@dvnt/app/features/sneaky-lynk/stores/lynk-history-store";
-import { LiveRoomCard } from "@dvnt/app/features/sneaky-lynk/ui/LiveRoomCard";
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
-import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk/hooks/useSneakyLynkCaptureProtection";
+} from "@dvnt/app/features/sneaky-lynk";
+import { LiveRoomCard } from "@dvnt/app/features/sneaky-lynk";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
+import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { useFocusEffect } from "expo-router";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useScreenTrace } from "@dvnt/app/lib/perf/screen-trace";

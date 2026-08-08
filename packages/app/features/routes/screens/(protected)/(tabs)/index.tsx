@@ -3,7 +3,7 @@ import { Main } from "@expo/html-elements";
 import { Feed } from "@dvnt/app/components/feed/feed";
 import { MasonryFeed } from "@dvnt/app/components/feed/masonry-feed";
 
-import { StoriesBar } from "@dvnt/app/features/stories/ui/stories-bar";
+import { StoriesBar } from "@dvnt/app/features/stories";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import * as Haptics from "expo-haptics";
 import { useCallback, memo } from "react";

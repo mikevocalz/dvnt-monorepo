@@ -16,7 +16,7 @@ import type {
   CallPhase,
   CallRole,
   CallType,
-} from "@dvnt/app/features/video/stores/video-room-store";
+} from "@dvnt/app/features/video";
 import type { ConnectionState } from "@dvnt/app/features/video/types";
 
 export type CallUiMode =

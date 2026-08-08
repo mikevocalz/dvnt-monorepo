@@ -33,8 +33,8 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
-import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk/components/SneakySubscriptionModal";
-import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk/hooks/useSneakyLynkCaptureProtection";
+import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
+import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 
 interface Subscription {

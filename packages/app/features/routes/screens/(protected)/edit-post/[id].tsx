@@ -51,7 +51,7 @@ import {
   type LocationData,
 } from "@dvnt/app/components/ui/location-autocomplete-instagram";
 import { UserMentionAutocomplete } from "@dvnt/app/components/ui/user-mention-autocomplete";
-import { ImageTagger } from "@dvnt/app/features/post/ui/image-tagger";
+import { ImageTagger } from "@dvnt/app/features/post";
 import { usePost, postKeys } from "@dvnt/app/lib/hooks/use-posts";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";

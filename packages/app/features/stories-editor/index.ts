@@ -3,7 +3,7 @@
 // ============================================================
 
 export { EditorScreen } from "./screens/EditorScreen";
-export { useEditorStore } from "./stores/editor-store";
+export { useEditorStore, useSelectedElement } from "./stores/editor-store";
 export type {
   EditorState,
   EditorMode,

@@ -12,8 +12,8 @@ import {
   klipyAutocomplete,
   type KlipyTab,
   type KlipySearchResponse,
-} from "@dvnt/app/features/stickers/api/klipy";
-import { useStickerStore } from "@dvnt/app/features/stickers/stores/sticker-store";
+} from "../api/klipy";
+import { useStickerStore } from "../stores/sticker-store";
 
 const DEBOUNCE_MS = 350;
 

@@ -30,7 +30,7 @@ import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
 import {
   CommentRow,
   type CommentData,
-} from "@dvnt/app/features/comments/ui/threaded-comment";
+} from "./ui/threaded-comment";
 import type { Comment } from "@dvnt/app/lib/types";
 
 const ESTIMATED_ROW = 120;
