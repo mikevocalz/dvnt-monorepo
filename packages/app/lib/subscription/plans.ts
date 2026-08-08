@@ -24,6 +24,13 @@ export interface PlanDef {
   recommended?: boolean;
   /** Name of the server-side env var holding this plan's Stripe price id. */
   stripePriceEnv?: string;
+  /**
+   * RevenueCat product identifier (mobile rail). By contract this equals the
+   * plan key: it is the App Store / Test Store `store_identifier` verbatim,
+   * and the Play `subscriptionId` half of Google's `subscriptionId:basePlanId`
+   * webhook form. See planKeyFromRCProductId for the normalization.
+   */
+  revenueCatProductId?: string;
   /** Short marketing bullets for the paywall UI. */
   bullets: { sneaky: string[]; events: string[] };
   entitlements: PlanEntitlements;
@@ -142,6 +149,7 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     priceCents: 2500,
     positioning: "Become a member.",
     stripePriceEnv: "STRIPE_PRICE_DVNT_CORE",
+    revenueCatProductId: "dvnt_core",
     bullets: {
       sneaky: [
         "Host up to 3 sessions / month",
@@ -171,6 +179,7 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     priceCents: 5000,
     positioning: "Level up your connections.",
     stripePriceEnv: "STRIPE_PRICE_DVNT_INSIDER",
+    revenueCatProductId: "dvnt_insider",
     bullets: {
       sneaky: [
         "All Core features",
@@ -202,6 +211,7 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     positioning: "All access to DVNT Events.",
     recommended: true, // "Most Popular" per product requirement
     stripePriceEnv: "STRIPE_PRICE_DVNT_VIP",
+    revenueCatProductId: "dvnt_vip",
     bullets: {
       sneaky: [
         "Unlimited hosting sessions",
@@ -243,6 +253,7 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     priceCents: 15000,
     positioning: "The ultimate level of access.",
     stripePriceEnv: "STRIPE_PRICE_DVNT_FOUNDERS",
+    revenueCatProductId: "dvnt_founders_circle",
     bullets: {
       sneaky: [
         "Unlimited hosting sessions",
@@ -314,6 +325,55 @@ export const SUBSCRIPTION_PRICE_ENV: Partial<Record<PlanKey, string>> =
       .filter((p) => p.stripePriceEnv)
       .map((p) => [p.key, p.stripePriceEnv as string]),
   );
+
+/**
+ * RC product id → plan key, derived from PLANS (never hand-written). The
+ * RevenueCat webhook keeps a hand-mirrored copy (Deno functions can't import
+ * this package); apps/mobile/supabase/__tests__/rc-product-map.sync.test.ts
+ * asserts the two stay identical.
+ */
+export const RC_PRODUCT_TO_PLAN_KEY: Record<string, PlanKey> =
+  Object.fromEntries(
+    Object.values(PLANS)
+      .filter((p) => p.revenueCatProductId)
+      .map((p) => [p.revenueCatProductId as string, p.key]),
+  );
+
+/**
+ * Resolve a RevenueCat webhook `product_id` to a plan key. The App Store /
+ * Test Store deliver the bare product id (`dvnt_core`); Play delivers
+ * Google's `subscriptionId:basePlanId` form (`dvnt_core:monthly`) — strip
+ * everything from the first `:` before lookup. Unknown products return null:
+ * callers MUST fail closed (I2) — the raw id would violate the
+ * membership_plans FK.
+ */
+export function planKeyFromRCProductId(productId: string): PlanKey | null {
+  const base = productId.split(":", 1)[0];
+  return RC_PRODUCT_TO_PLAN_KEY[base] ?? null;
+}
+
+/** The room-cap slice of a plan's entitlements (null = unlimited). */
+export interface PlanCaps {
+  maxParticipants: number;
+  monthlyHostSessions: number | null;
+  sessionMinutes: number | null;
+}
+
+/**
+ * Per-plan caps, derived from PLANS.entitlements. Server-side mirrors
+ * (e.g. video_create_room's MEMBERSHIP_MAX_PARTICIPANTS) are asserted
+ * against this instead of being trusted on faith.
+ */
+export const PLAN_CAPS: Record<PlanKey, PlanCaps> = Object.fromEntries(
+  Object.values(PLANS).map((p) => [
+    p.key,
+    {
+      maxParticipants: p.entitlements.maxParticipants,
+      monthlyHostSessions: p.entitlements.monthlyHostSessions,
+      sessionMinutes: p.entitlements.sessionMinutes,
+    },
+  ]),
+) as Record<PlanKey, PlanCaps>;
 
 export function getPlan(key: PlanKey): PlanDef {
   return PLANS[key];

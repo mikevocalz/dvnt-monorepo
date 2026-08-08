@@ -311,6 +311,11 @@ export default function SettingsScreenAndroid() {
               onPress={() => router.push("/settings/host-payments" as any)}
             />
             <SettingsListItem
+              icon={<Crown size={22} color="#FF5BFC" />}
+              label="DVNT Membership"
+              onPress={() => router.push("/settings/membership" as any)}
+            />
+            <SettingsListItem
               icon={<Crown size={22} color="#8A40CF" />}
               label="Sneaky Lynk Subscription"
               onPress={() =>

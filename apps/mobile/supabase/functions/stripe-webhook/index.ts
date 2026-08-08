@@ -23,7 +23,7 @@
  * IDEMPOTENT: Uses stripe_events table to deduplicate.
  */
 
-import { withSentry } from "../_shared/sentry.ts";
+import { withSentry, captureEdge } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computePayoutReleaseAt } from "../_shared/business-days.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
@@ -88,6 +88,44 @@ async function upsertOrderMoneyState(
     );
   }
   return applied === true;
+}
+
+/**
+ * Baseline §4 mitigation: one row per user in membership_subscriptions
+ * means a webhook from the other rail silently overwrites `rail` on a
+ * currently-active row. The silent overwrite stays the policy — this alert
+ * (Sentry + console) is the mitigation. Only needed where the incoming rail
+ * is fixed (`web_stripe` on the created/updated path); the cancel /
+ * past_due / invoice.paid membership paths read the existing row and pass
+ * its own rail back, so no flip is possible there. Called only on write
+ * paths; never blocks the write (captureEdge never throws).
+ */
+async function alertIfMembershipRailFlip(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  userId: string,
+  newRail: string,
+  newPlanKey: string,
+  eventType: string,
+  eventId: string,
+): Promise<void> {
+  const { data: existing } = await supabase
+    .from("membership_subscriptions")
+    .select("rail, status, plan_key")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!existing || existing.rail === newRail) return;
+  if (!["active", "trialing", "past_due"].includes(existing.status)) return;
+  const msg =
+    `[rail-flip] user_id=${userId} rail ${existing.rail}→${newRail} ` +
+    `plan_key ${existing.plan_key}→${newPlanKey}`;
+  console.error(msg);
+  await captureEdge(new Error(msg), {
+    function: "stripe-webhook",
+    "webhook.source": "stripe",
+    "event.type": eventType,
+    "event.id": eventId,
+  });
 }
 
 const STRIPE_WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET") || "";
@@ -1840,6 +1878,14 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             typeof sub.customer === "string"
               ? sub.customer
               : sub.customer?.id || null;
+          await alertIfMembershipRailFlip(
+            supabase,
+            hostId,
+            "web_stripe",
+            planKey,
+            event.type,
+            event.id,
+          );
           // Monotonic upsert via RPC — refuses to overwrite a row whose
           // `last_event_at` is already newer than this event. Closes the
           // I5 race where a late/replayed canceled lands after active.

@@ -319,6 +319,12 @@ export default function SettingsScreenIOS() {
             />
             <View className="ml-12 h-px bg-border" />
             <SettingsListItem
+              icon={<Crown size={20} color="#FF5BFC" />}
+              label="DVNT Membership"
+              onPress={() => router.push("/settings/membership" as any)}
+            />
+            <View className="ml-12 h-px bg-border" />
+            <SettingsListItem
               icon={<Crown size={20} color="#8A40CF" />}
               label="Sneaky Lynk Subscription"
               onPress={() =>

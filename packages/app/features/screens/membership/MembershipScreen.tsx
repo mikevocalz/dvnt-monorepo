@@ -1,12 +1,11 @@
 /**
- * Membership / paywall screen (universal).
+ * Membership / paywall screen (web fork — Metro resolves the .native.tsx
+ * sibling on iOS/Android, which sells via IAP).
  *
  * Reads the user's resolved entitlements (useEntitlements) and shows their
  * current plan plus the full tier ladder from the shared subscription model
- * (VIP flagged "Most Popular"). Selling is web-only (reader-app pattern): the
- * upgrade CTA opens the web /pricing page in the browser rather than charging
- * in-app, which keeps the iOS build App-Store compliant. The native app only
- * reads entitlements — it never sells.
+ * (VIP flagged "Most Popular"). On the web, selling stays on the Stripe rail:
+ * the upgrade CTA opens the web /pricing page to complete checkout.
  */
 import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useCallback } from "react";
@@ -18,6 +17,14 @@ import {
   MEMBERSHIP_PLAN_KEYS,
   type PlanKey,
 } from "@dvnt/app/lib/subscription";
+import type { MembershipBilling } from "./billing";
+
+/** Shared signature with the native fork. `billing` is the native IAP seam —
+ *  meaningless on the web (Stripe checkout lives on /pricing), so it is
+ *  accepted and ignored here to keep one contract for importers. */
+export interface MembershipScreenProps {
+  billing?: MembershipBilling | null;
+}
 
 const WEB_BASE =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,7 +62,7 @@ async function openPricing(planKey?: PlanKey) {
   }
 }
 
-export function MembershipScreen() {
+export function MembershipScreen(_props: MembershipScreenProps = {}) {
   const { entitlements, isLoading } = useEntitlements();
   const currentKey = entitlements.planKey;
 

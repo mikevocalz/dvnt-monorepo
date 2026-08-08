@@ -28,7 +28,7 @@
  *   https://www.revenuecat.com/docs/integrations/webhooks/event-types-and-fields
  */
 
-import { withSentry } from "../_shared/sentry.ts";
+import { withSentry, captureEdge } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -71,6 +71,26 @@ type RCEvent = {
   grace_period_expiration_at_ms?: number;
   environment?: "SANDBOX" | "PRODUCTION";
 };
+
+// RC product_id → plan_key. This function is Deno and can't import
+// packages/app, so this MIRRORS RC_PRODUCT_TO_PLAN_KEY in
+// packages/app/lib/subscription/plans.ts; the sync is asserted by
+// apps/mobile/supabase/__tests__/rc-product-map.sync.test.ts.
+const RC_PRODUCT_TO_PLAN_KEY: Record<string, string> = {
+  dvnt_core: "dvnt_core",
+  dvnt_insider: "dvnt_insider",
+  dvnt_vip: "dvnt_vip",
+  dvnt_founders_circle: "dvnt_founders_circle",
+};
+
+// App Store / Test Store deliver the bare product id (`dvnt_core`); Play
+// delivers Google's `subscriptionId:basePlanId` form (`dvnt_core:monthly`)
+// — strip everything from the first `:` before lookup. Unknown → null and
+// the caller fails closed (I2): the raw id must never reach the
+// membership_plans FK.
+function planKeyFromRCProductId(productId: string): string | null {
+  return RC_PRODUCT_TO_PLAN_KEY[productId.split(":", 1)[0]] ?? null;
+}
 
 // Map RC store → our rail enum. STRIPE/PROMOTIONAL/AMAZON/MAC are out of
 // scope for the mobile rail today; reject so the entitlement state can't
@@ -141,6 +161,61 @@ function isAnonRCId(uid: string): boolean {
   // We never auto-provision off an anon id — that's an unmapped purchase
   // and a sev (I1).
   return uid.startsWith("$RCAnonymousID:");
+}
+
+// An unmapped product_id is a config bug (RC dashboard product missing from
+// the plan map), not a transient fault: log loudly, page via Sentry, and let
+// the caller ack 200 without writing state. Fail closed per I2 — never
+// insert a row that would violate the membership_plans FK, and never 500
+// (RC would retry a deterministic failure forever).
+async function reportUnmappedProduct(
+  productId: string,
+  ev: RCEvent,
+): Promise<void> {
+  console.error(
+    `[revenuecat-webhook] unmapped product_id "${productId}" on ${ev.type} ${ev.id} — acked, no state change`,
+  );
+  await captureEdge(
+    new Error(`[revenuecat-webhook] unmapped product_id: ${productId}`),
+    {
+      function: "revenuecat-webhook",
+      "webhook.source": "revenuecat",
+      "event.type": ev.type,
+      "event.id": ev.id,
+    },
+  );
+}
+
+// Baseline §4 mitigation: one row per user means a webhook from the other
+// rail silently overwrites `rail` on a currently-active row. The silent
+// overwrite stays the policy — this alert (Sentry + console) is the
+// mitigation. Called only on write paths so acked no-ops never pay the
+// extra read; never blocks the write (captureEdge never throws).
+async function alertIfRailFlip(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  userId: string,
+  newRail: RCRail,
+  newPlanKey: string,
+  ev: RCEvent,
+): Promise<void> {
+  const { data: existing } = await supabase
+    .from("membership_subscriptions")
+    .select("rail, status, plan_key")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!existing || existing.rail === newRail) return;
+  if (!["active", "trialing", "past_due"].includes(existing.status)) return;
+  const msg =
+    `[rail-flip] user_id=${userId} rail ${existing.rail}→${newRail} ` +
+    `plan_key ${existing.plan_key}→${newPlanKey}`;
+  console.error(msg);
+  await captureEdge(new Error(msg), {
+    function: "revenuecat-webhook",
+    "webhook.source": "revenuecat",
+    "event.type": ev.type,
+    "event.id": ev.id,
+  });
 }
 
 Deno.serve(withSentry("revenuecat-webhook", async (req) => {
@@ -245,6 +320,18 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
   // grant the destination from the source's plan when the event carries no
   // product id of its own.
   if (ev.type === "TRANSFER") {
+    // Resolve the destination plan BEFORE any writes: if the event carries a
+    // product id we can't map, refuse the whole event (no source cancel, no
+    // grant) rather than moving state we can't finish moving.
+    const rawTransferProductId = ev.new_product_id ?? ev.product_id;
+    const mappedTransferPlanKey = rawTransferProductId
+      ? planKeyFromRCProductId(rawTransferProductId)
+      : null;
+    if (rawTransferProductId && !mappedTransferPlanKey) {
+      await reportUnmappedProduct(rawTransferProductId, ev);
+      await markProcessed();
+      return new Response("ok", { status: 200 });
+    }
     const sources = (ev.transferred_from ?? []).filter((u) => !isAnonRCId(u));
     let sourcePlanKey: string | null = null;
     for (const sourceId of sources) {
@@ -279,8 +366,11 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
         return new Response("Server error", { status: 500 });
       }
     }
-    const destPlanKey = ev.new_product_id ?? ev.product_id ?? sourcePlanKey;
+    // sourcePlanKey came out of an FK-validated row, so either branch is a
+    // legal plan_key.
+    const destPlanKey = mappedTransferPlanKey ?? sourcePlanKey;
     if (destPlanKey) {
+      await alertIfRailFlip(supabase, ev.app_user_id, rail, destPlanKey, ev);
       const { error: dstErr } = await supabase.rpc(
         "upsert_membership_subscription",
         {
@@ -325,16 +415,27 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
     return new Response("ok", { status: 200 });
   }
 
-  const planKey = ev.new_product_id ?? ev.product_id;
-  if (!planKey) {
+  const rawProductId = ev.new_product_id ?? ev.product_id;
+  if (!rawProductId) {
     return new Response("Missing product_id", { status: 400 });
   }
+  // Never pass the store's product id through as plan_key: Play delivers
+  // `dvnt_core:monthly`, which would violate the membership_plans FK.
+  const planKey = planKeyFromRCProductId(rawProductId);
+  if (!planKey) {
+    await reportUnmappedProduct(rawProductId, ev);
+    await markProcessed();
+    return new Response("ok", { status: 200 });
+  }
 
-  // For mobile: provider_ref = original_app_user_id + product_id is the
-  // most stable id RC exposes per-subscription (transaction ids change on
-  // renewals). When `original_app_user_id` isn't present we fall back to
-  // app_user_id.
+  // For mobile: provider_ref = original_app_user_id + plan_key (the
+  // normalized product id — stable across stores, unlike Play's
+  // `subscriptionId:basePlanId`) is the most stable id RC exposes
+  // per-subscription (transaction ids change on renewals). When
+  // `original_app_user_id` isn't present we fall back to app_user_id.
   const providerRef = `${ev.original_app_user_id ?? ev.app_user_id}:${planKey}`;
+
+  await alertIfRailFlip(supabase, ev.app_user_id, rail, planKey, ev);
 
   const { data: applied, error: rpcErr } = await supabase.rpc(
     "upsert_membership_subscription",
