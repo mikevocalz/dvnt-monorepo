@@ -96,10 +96,29 @@ type RCEvent = {
 // packages/app/lib/subscription/plans.ts; the sync is asserted by
 // apps/mobile/supabase/__tests__/rc-product-map.sync.test.ts.
 const RC_PRODUCT_TO_PLAN_KEY: Record<string, string> = {
+  sneaky_tier_1: "sneaky_tier_1",
+  sneaky_tier_2: "sneaky_tier_2",
   dvnt_core: "dvnt_core",
   dvnt_insider: "dvnt_insider",
   dvnt_vip: "dvnt_vip",
   dvnt_founders_circle: "dvnt_founders_circle",
+};
+
+// plan_key → product_family. MIRRORS PLAN_FAMILY in
+// packages/app/lib/subscription/plans.ts (same Deno-can't-import reason as
+// above); the sync is asserted by
+// apps/mobile/supabase/__tests__/rc-product-map.sync.test.ts. Every write
+// derives its family from here — never hardcode a family at a call site:
+// the standalone Sneaky tiers land as `sneaky_lynk`, everything else as
+// `dvnt_membership`.
+const FAMILY_BY_PLAN_KEY: Record<string, string> = {
+  free: "dvnt_membership",
+  sneaky_tier_1: "sneaky_lynk",
+  sneaky_tier_2: "sneaky_lynk",
+  dvnt_core: "dvnt_membership",
+  dvnt_insider: "dvnt_membership",
+  dvnt_vip: "dvnt_membership",
+  dvnt_founders_circle: "dvnt_membership",
 };
 
 // App Store / Test Store deliver the bare product id (`dvnt_core`); Play
@@ -357,7 +376,7 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
     for (const sourceId of sources) {
       const { data: row } = await supabase
         .from("membership_subscriptions")
-        .select("plan_key, rail, provider_ref, current_period_start, current_period_end")
+        .select("plan_key, product_family, rail, provider_ref, current_period_start, current_period_end")
         .eq("user_id", sourceId)
         .maybeSingle();
       if (!row || (row.rail !== "ios_iap" && row.rail !== "play_iap")) continue;
@@ -367,7 +386,12 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
         {
           p_user_id: sourceId,
           p_rail: row.rail,
-          p_product_family: "dvnt_membership",
+          // Preserve the SOURCE row's own family (a standalone Sneaky sub
+          // must cancel as sneaky_lynk, not be rewritten to membership).
+          // plan_key is FK-valid so the mirror always covers it; the row's
+          // stored family is the belt-and-suspenders fallback.
+          p_product_family:
+            FAMILY_BY_PLAN_KEY[row.plan_key] ?? row.product_family,
           p_plan_key: row.plan_key,
           p_status: "canceled",
           p_provider_ref: row.provider_ref,
@@ -387,16 +411,17 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
       }
     }
     // sourcePlanKey came out of an FK-validated row, so either branch is a
-    // legal plan_key.
+    // legal plan_key — and therefore always resolves in FAMILY_BY_PLAN_KEY.
     const destPlanKey = mappedTransferPlanKey ?? sourcePlanKey;
-    if (destPlanKey) {
+    const destFamily = destPlanKey ? FAMILY_BY_PLAN_KEY[destPlanKey] : null;
+    if (destPlanKey && destFamily) {
       await alertIfRailFlip(supabase, ev.app_user_id, rail, destPlanKey, ev);
       const { error: dstErr } = await supabase.rpc(
         "upsert_membership_subscription",
         {
           p_user_id: ev.app_user_id,
           p_rail: rail,
-          p_product_family: "dvnt_membership",
+          p_product_family: destFamily,
           p_plan_key: destPlanKey,
           p_status: "active",
           p_provider_ref: `${ev.original_app_user_id ?? ev.app_user_id}:${destPlanKey}`,
@@ -418,6 +443,11 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
         console.error("[revenuecat-webhook] TRANSFER destination upsert error", dstErr);
         return new Response("Server error", { status: 500 });
       }
+    }
+    if (destPlanKey && !destFamily) {
+      // Mirror drift (plan key with no family) — a config bug, not transient.
+      // Fail closed on the grant (I2); the source cancels above still stand.
+      await reportUnmappedProduct(destPlanKey, ev);
     }
     console.log(
       `[revenuecat-webhook] TRANSFER → ${ev.app_user_id} (${sources.length} source(s) canceled)`,
@@ -447,6 +477,15 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
     await markProcessed();
     return new Response("ok", { status: 200 });
   }
+  // Family rides the plan key (sneaky_tier_* → sneaky_lynk, dvnt_* →
+  // dvnt_membership). A mapped plan key without a family is mirror drift —
+  // same fail-closed handling as an unmapped product (I2).
+  const productFamily = FAMILY_BY_PLAN_KEY[planKey];
+  if (!productFamily) {
+    await reportUnmappedProduct(rawProductId, ev);
+    await markProcessed();
+    return new Response("ok", { status: 200 });
+  }
 
   // For mobile: provider_ref = original_app_user_id + plan_key (the
   // normalized product id — stable across stores, unlike Play's
@@ -462,7 +501,7 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
     {
       p_user_id: ev.app_user_id,
       p_rail: rail,
-      p_product_family: "dvnt_membership",
+      p_product_family: productFamily,
       p_plan_key: planKey,
       p_status: transition.status,
       p_provider_ref: providerRef,

@@ -194,6 +194,25 @@ export async function getMembershipPackages(): Promise<RCPackage[]> {
   }
 }
 
+/** Fetch the standalone Sneaky Lynk offering's packages (offering lookup_key
+ *  `sneaky`, packages `tier_1` / `tier_2`). The `sneaky` offering is NOT the
+ *  current offering — fetch it by key from `offerings.all`, never via
+ *  `offerings.current` (that's the `default` membership offering). Returns []
+ *  when RC is unavailable, same degrade as getMembershipPackages. */
+export async function getSneakyPackages(): Promise<RCPackage[]> {
+  const Purchases = getPurchases();
+  if (!Purchases) return [];
+  if (!_configured) configureRevenueCat();
+  if (!_configured) return [];
+  try {
+    const offerings = await Purchases.getOfferings();
+    return offerings.all["sneaky"]?.availablePackages ?? [];
+  } catch (err) {
+    console.warn("[revenuecat] getOfferings (sneaky) failed", err);
+    return [];
+  }
+}
+
 export type PurchaseResult = {
   ok: boolean;
   /** True when the user dismissed the store sheet — not an error. */

@@ -101,6 +101,7 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     priceCents: 999,
     positioning: "Unlimited, small rooms.",
     stripePriceEnv: "STRIPE_PRICE_SNEAKY_TIER_1",
+    revenueCatProductId: "sneaky_tier_1",
     bullets: {
       sneaky: [
         "Unlimited session duration",
@@ -124,6 +125,7 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     priceCents: 1499,
     positioning: "Unlimited, big rooms.",
     stripePriceEnv: "STRIPE_PRICE_SNEAKY_TIER_2",
+    revenueCatProductId: "sneaky_tier_2",
     bullets: {
       sneaky: [
         "Unlimited session duration",
@@ -325,6 +327,16 @@ export const SUBSCRIPTION_PRICE_ENV: Partial<Record<PlanKey, string>> =
       .filter((p) => p.stripePriceEnv)
       .map((p) => [p.key, p.stripePriceEnv as string]),
   );
+
+/**
+ * planKey → product family, derived from PLANS (never hand-written). The
+ * RevenueCat webhook keeps a hand-mirrored copy (FAMILY_BY_PLAN_KEY — Deno
+ * functions can't import this package); the same sync test that guards
+ * RC_PRODUCT_TO_PLAN_KEY asserts the two stay identical.
+ */
+export const PLAN_FAMILY: Record<PlanKey, ProductFamily> = Object.fromEntries(
+  Object.values(PLANS).map((p) => [p.key, p.family]),
+) as Record<PlanKey, ProductFamily>;
 
 /**
  * RC product id → plan key, derived from PLANS (never hand-written). The

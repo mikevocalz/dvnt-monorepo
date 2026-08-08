@@ -92,6 +92,8 @@ import { useRoomReactions } from "@dvnt/app/features/sneaky-lynk";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
 import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
+import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
+import type { SneakyBilling } from "@dvnt/app/features/screens/membership/billing";
 import { isFeatureEnabled } from "@dvnt/app/lib/feature-flags";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 
@@ -400,7 +402,11 @@ function PreJoinScreen({
 
 // ── Router entry point ──────────────────────────────────────────────
 
-function SneakyLynkRoomScreenContent() {
+function SneakyLynkRoomScreenContent({
+  billing = null,
+}: {
+  billing?: SneakyBilling | null;
+}) {
   // Capture protection is mounted INSIDE ServerRoom + LocalRoom, not
   // here, so the local screenshot listener has access to roomId +
   // localUser for room-wide broadcast. Ref counter inside the hook
@@ -509,11 +515,17 @@ function SneakyLynkRoomScreenContent() {
         roomHasVideo={roomHasVideo}
         anonymous={joinAnonymous}
         initialRoom={roomLookup.room}
+        billing={billing}
       />
     );
   }
   return (
-    <LocalRoom id={id} paramTitle={paramTitle} roomHasVideo={roomHasVideo} />
+    <LocalRoom
+      id={id}
+      paramTitle={paramTitle}
+      roomHasVideo={roomHasVideo}
+      billing={billing}
+    />
   );
 }
 
@@ -523,10 +535,12 @@ function LocalRoom({
   id,
   paramTitle,
   roomHasVideo = true,
+  billing = null,
 }: {
   id: string;
   paramTitle?: string;
   roomHasVideo?: boolean;
+  billing?: SneakyBilling | null;
 }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -704,20 +718,17 @@ function LocalRoom({
   }, [router, id, endRoom, reset, storeListeners.length, showToast]);
 
   // Subscription check — determines if the host has a paid plan (timer hidden
-  // for paid hosts; free hosts see the time-up paywall instead of being kicked)
+  // for paid hosts; free hosts see the time-up paywall instead of being kicked).
+  // Sourced from the canonical resolver (useEntitlements) so BOTH rails
+  // (web Stripe + mobile RevenueCat IAP) and BOTH families (standalone Sneaky
+  // tiers + DVNT membership) grant host powers — the legacy direct
+  // sneaky_subscriptions read missed every RC-written row.
   const [showTimesUpPaywall, setShowTimesUpPaywall] = useState(false);
-  const [isPaidHost, setIsPaidHost] = useState(false);
-  useEffect(() => {
-    if (!authUser?.id) return;
-    supabase
-      .from("sneaky_subscriptions")
-      .select("status, plan_id")
-      .eq("host_id", authUser.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setIsPaidHost(data?.status === "active" && data?.plan_id !== "free");
-      });
-  }, [authUser?.id]);
+  const { entitlements, isLoading: entitlementsLoading } = useEntitlements();
+  // Same boolean the legacy check derived (active && plan_id !== "free"):
+  // every paid plan grants unlimited session duration.
+  const isPaidHost =
+    !entitlementsLoading && entitlements.sessionMinutes === null;
 
   const handleTimeUp = useCallback(() => {
     if (isPaidHost) {
@@ -940,10 +951,10 @@ function LocalRoom({
         onClose={() => setShowTimesUpPaywall(false)}
         reason="duration_limit"
         dismissible={false}
-        onSubscribed={() => {
-          setIsPaidHost(true);
-          setShowTimesUpPaywall(false);
-        }}
+        billing={billing}
+        // isPaidHost is derived from useEntitlements — the modal's activation
+        // loop already invalidated the query, so the flag flips on its own.
+        onSubscribed={() => setShowTimesUpPaywall(false)}
       />
     </>
   );
@@ -957,12 +968,14 @@ function ServerRoom({
   roomHasVideo = true,
   anonymous = false,
   initialRoom = null,
+  billing = null,
 }: {
   id: string;
   paramTitle?: string;
   roomHasVideo?: boolean;
   anonymous?: boolean;
   initialRoom?: SneakyRoom | null;
+  billing?: SneakyBilling | null;
 }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -1149,41 +1162,17 @@ function ServerRoom({
   );
   const [showTimesUpPaywall, setShowTimesUpPaywall] = useState(false);
   const [showViewerPaywall, setShowViewerPaywall] = useState(false);
-  const [isPaidHost, setIsPaidHost] = useState(false);
-  const [hostPlanChecked, setHostPlanChecked] = useState(false);
-  useEffect(() => {
-    if (!isHost || !authUser?.id) {
-      setHostPlanChecked(false);
-      setIsPaidHost(false);
-      return;
-    }
-
-    let cancelled = false;
-    setHostPlanChecked(false);
-
-    (async () => {
-      try {
-        const { data } = await supabase
-          .from("sneaky_subscriptions")
-          .select("status, plan_id")
-          .eq("host_id", authUser.id)
-          .maybeSingle();
-
-        if (cancelled) return;
-        setIsPaidHost(data?.status === "active" && data?.plan_id !== "free");
-        setHostPlanChecked(true);
-      } catch (error) {
-        if (cancelled) return;
-        console.warn("[SneakyLynk:Host] Subscription check failed:", error);
-        setIsPaidHost(false);
-        setHostPlanChecked(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isHost, authUser?.id]);
+  // Host plan check — sourced from the canonical resolver (useEntitlements)
+  // so BOTH rails (web Stripe + mobile RevenueCat IAP) and BOTH families
+  // (standalone Sneaky tiers + DVNT membership) grant host powers — the
+  // legacy direct sneaky_subscriptions read missed every RC-written row.
+  // Same booleans as before: isPaidHost (active paid plan → unlimited
+  // duration) and hostPlanChecked (lookup settled — the guards below treat
+  // "unknown" as paid so a slow read can't auto-end a paid host's room).
+  const { entitlements, isLoading: entitlementsLoading } = useEntitlements();
+  const isPaidHost =
+    isHost && !entitlementsLoading && entitlements.sessionMinutes === null;
+  const hostPlanChecked = isHost && !entitlementsLoading;
 
   const reconcileDesiredMedia = useCallback(
     async (reason: "join" | "reconnect" | "foreground") => {
@@ -2229,10 +2218,10 @@ function ServerRoom({
         onClose={() => setShowTimesUpPaywall(false)}
         reason="duration_limit"
         dismissible={false}
-        onSubscribed={() => {
-          setIsPaidHost(true);
-          setShowTimesUpPaywall(false);
-        }}
+        billing={billing}
+        // isPaidHost is derived from useEntitlements — the modal's activation
+        // loop already invalidated the query, so the flag flips on its own.
+        onSubscribed={() => setShowTimesUpPaywall(false)}
       />
 
       <SneakyPaywallModal
@@ -2834,14 +2823,21 @@ function RoomLayout({
   );
 }
 
-export default function SneakyLynkRoomScreen() {
+export default function SneakyLynkRoomScreen({
+  billing = null,
+}: {
+  /** Native RC billing seam, injected by the apps/mobile route file
+   *  (packages/app never imports the RevenueCat wrapper across the app
+   *  boundary — see features/screens/membership/billing.ts). */
+  billing?: SneakyBilling | null;
+}) {
   const router = useRouter();
   return (
     <GlobalErrorBoundary
       screenName="SneakyLynkRoom"
       onGoBack={() => router.back()}
     >
-      <SneakyLynkRoomScreenContent />
+      <SneakyLynkRoomScreenContent billing={billing} />
     </GlobalErrorBoundary>
   );
 }

@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import {
   PLANS,
   PLAN_CAPS,
+  PLAN_FAMILY,
   RC_PRODUCT_TO_PLAN_KEY,
   planKeyFromRCProductId,
 } from "./plans";
@@ -20,25 +21,27 @@ const PAID_MEMBERSHIP_KEYS: PlanKey[] = [
   "dvnt_founders_circle",
 ];
 
-test("RC_PRODUCT_TO_PLAN_KEY covers exactly the four paid membership plans", () => {
+const PAID_SNEAKY_KEYS: PlanKey[] = ["sneaky_tier_1", "sneaky_tier_2"];
+
+const RC_SOLD_KEYS: PlanKey[] = [...PAID_MEMBERSHIP_KEYS, ...PAID_SNEAKY_KEYS];
+
+test("RC_PRODUCT_TO_PLAN_KEY covers exactly the RC-sold plans (membership + sneaky)", () => {
   assert.deepEqual(
     Object.keys(RC_PRODUCT_TO_PLAN_KEY).sort(),
-    [...PAID_MEMBERSHIP_KEYS].sort(),
+    [...RC_SOLD_KEYS].sort(),
   );
   // Contract: revenueCatProductId equals the plan key (iOS/Test Store
   // store_identifier and the Play subscriptionId are both exactly this).
-  for (const key of PAID_MEMBERSHIP_KEYS) {
+  for (const key of RC_SOLD_KEYS) {
     assert.equal(PLANS[key].revenueCatProductId, key);
     assert.equal(RC_PRODUCT_TO_PLAN_KEY[key], key);
   }
-  // Free and standalone Sneaky tiers are NOT sold through RC.
+  // Free is NOT sold through RC.
   assert.equal(PLANS.free.revenueCatProductId, undefined);
-  assert.equal(PLANS.sneaky_tier_1.revenueCatProductId, undefined);
-  assert.equal(PLANS.sneaky_tier_2.revenueCatProductId, undefined);
 });
 
 test("planKeyFromRCProductId: iOS / Test Store bare product ids", () => {
-  for (const key of PAID_MEMBERSHIP_KEYS) {
+  for (const key of RC_SOLD_KEYS) {
     assert.equal(planKeyFromRCProductId(key), key);
   }
 });
@@ -51,6 +54,14 @@ test("planKeyFromRCProductId: Play subscriptionId:basePlanId form", () => {
     planKeyFromRCProductId("dvnt_founders_circle:monthly"),
     "dvnt_founders_circle",
   );
+  assert.equal(
+    planKeyFromRCProductId("sneaky_tier_1:monthly"),
+    "sneaky_tier_1",
+  );
+  assert.equal(
+    planKeyFromRCProductId("sneaky_tier_2:monthly"),
+    "sneaky_tier_2",
+  );
   // Only the first `:` matters — Play base-plan ids can contain more.
   assert.equal(planKeyFromRCProductId("dvnt_vip:monthly:offer"), "dvnt_vip");
 });
@@ -58,9 +69,20 @@ test("planKeyFromRCProductId: Play subscriptionId:basePlanId form", () => {
 test("planKeyFromRCProductId: unknown products resolve to null (fail closed)", () => {
   assert.equal(planKeyFromRCProductId("rc_promo_pack"), null);
   assert.equal(planKeyFromRCProductId("host_25"), null); // legacy sneaky vocab
-  assert.equal(planKeyFromRCProductId("sneaky_tier_1"), null); // not an RC product
+  assert.equal(planKeyFromRCProductId("free"), null); // free is not an RC product
   assert.equal(planKeyFromRCProductId("unknown:monthly"), null);
   assert.equal(planKeyFromRCProductId(""), null);
+});
+
+test("PLAN_FAMILY is derived from PLANS.family for every plan", () => {
+  for (const plan of Object.values(PLANS)) {
+    assert.equal(PLAN_FAMILY[plan.key], plan.family);
+  }
+  // Spot-check the split the webhook mirror relies on.
+  assert.equal(PLAN_FAMILY.sneaky_tier_1, "sneaky_lynk");
+  assert.equal(PLAN_FAMILY.sneaky_tier_2, "sneaky_lynk");
+  assert.equal(PLAN_FAMILY.dvnt_core, "dvnt_membership");
+  assert.equal(PLAN_FAMILY.free, "dvnt_membership");
 });
 
 test("PLAN_CAPS is derived from PLANS.entitlements for every plan", () => {

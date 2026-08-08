@@ -16,7 +16,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { RC_PRODUCT_TO_PLAN_KEY } from "../../../../packages/app/lib/subscription/plans";
+import {
+  PLAN_FAMILY,
+  RC_PRODUCT_TO_PLAN_KEY,
+} from "../../../../packages/app/lib/subscription/plans";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webhookSource = readFileSync(
@@ -24,13 +27,13 @@ const webhookSource = readFileSync(
   "utf8",
 );
 
-function parseWebhookMapLiteral(): Record<string, string> {
+function parseWebhookMapLiteral(name: string): Record<string, string> {
   const match = webhookSource.match(
-    /const RC_PRODUCT_TO_PLAN_KEY[^=]*=\s*\{([\s\S]*?)\};/,
+    new RegExp(`const ${name}[^=]*=\\s*\\{([\\s\\S]*?)\\};`),
   );
   assert.ok(
     match,
-    "RC_PRODUCT_TO_PLAN_KEY literal not found in revenuecat-webhook/index.ts — " +
+    `${name} literal not found in revenuecat-webhook/index.ts — ` +
       "renamed? Update this test alongside it.",
   );
   const out: Record<string, string> = {};
@@ -43,12 +46,31 @@ function parseWebhookMapLiteral(): Record<string, string> {
 }
 
 test("Deno-local RC product map mirrors plans.ts RC_PRODUCT_TO_PLAN_KEY", () => {
-  const webhookMap = parseWebhookMapLiteral();
+  const webhookMap = parseWebhookMapLiteral("RC_PRODUCT_TO_PLAN_KEY");
   assert.ok(
     Object.keys(webhookMap).length > 0,
     "parsed an empty map — regex out of date?",
   );
   assert.deepEqual(webhookMap, RC_PRODUCT_TO_PLAN_KEY);
+});
+
+test("Deno-local family map mirrors plans.ts PLAN_FAMILY", () => {
+  const webhookFamilyMap = parseWebhookMapLiteral("FAMILY_BY_PLAN_KEY");
+  assert.ok(
+    Object.keys(webhookFamilyMap).length > 0,
+    "parsed an empty family map — regex out of date?",
+  );
+  assert.deepEqual(webhookFamilyMap, PLAN_FAMILY);
+});
+
+test("webhook never hardcodes a product family at a call site", () => {
+  // Every upsert must derive p_product_family from FAMILY_BY_PLAN_KEY (or
+  // the source row's stored family in the TRANSFER cancel loop) — a literal
+  // family at a call site is how sneaky purchases got mis-familied.
+  assert.ok(
+    !/p_product_family:\s*["']/.test(webhookSource),
+    "revenuecat-webhook passes a hardcoded p_product_family literal",
+  );
 });
 
 test("webhook derives plan_key via the normalizer, never verbatim", () => {

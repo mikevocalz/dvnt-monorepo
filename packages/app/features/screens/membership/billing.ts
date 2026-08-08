@@ -42,3 +42,19 @@ export interface MembershipBilling {
   ): Promise<MembershipPurchaseResult>;
   restoreMembershipPurchases(): Promise<{ ok: boolean; error?: string }>;
 }
+
+/**
+ * Same seam for the standalone Sneaky Lynk tiers (offering lookup_key
+ * `sneaky`, NOT the current offering). Purchase/restore are the same
+ * RC calls as the membership paywall — `purchaseMembershipPackage` works
+ * for any package — only catalog fetch differs. Injected by the
+ * apps/mobile route files that mount SneakySubscriptionModal natively.
+ */
+export interface SneakyBilling {
+  getSneakyPackages(): Promise<RCPackageLike[]>;
+  purchaseMembershipPackage(
+    pkg: RCPackageLike,
+    opts?: { googleOldProductId?: string | null },
+  ): Promise<MembershipPurchaseResult>;
+  restoreMembershipPurchases(): Promise<{ ok: boolean; error?: string }>;
+}
