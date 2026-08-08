@@ -40,7 +40,7 @@ import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
-import { useSneakyBillingStore } from "./billing-store";
+import { useSneakyBillingStore } from "../stores/billing-store";
 
 const ACCENT = "#3FDCFF";
 

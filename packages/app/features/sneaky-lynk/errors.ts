@@ -6,7 +6,7 @@
  * per reason instead of dumping the raw message. Keeps user copy in
  * ONE place so designers can iterate.
  *
- * Backend error contract (from src/sneaky-lynk/api/supabase.ts):
+ * Backend error contract (from features/sneaky-lynk/api/supabase.ts):
  *   code ∈ "unauthorized" | "forbidden" | "not_found" | "conflict"
  *        | "rate_limited" | "validation_error" | "internal_error"
  *   message: string

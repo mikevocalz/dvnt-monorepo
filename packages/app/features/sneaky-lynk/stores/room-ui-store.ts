@@ -8,7 +8,7 @@
  */
 
 import { create } from "zustand";
-import type { SneakyRoom } from "@dvnt/app/src/sneaky-lynk/types";
+import type { SneakyRoom } from "@dvnt/app/features/sneaky-lynk/types";
 
 export type RoomPhase =
   | "prejoin"

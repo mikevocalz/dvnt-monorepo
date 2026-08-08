@@ -34,7 +34,7 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
-import { useSneakyLynkCaptureProtection } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureProtection";
+import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk/hooks/useSneakyLynkCaptureProtection";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface Plan {

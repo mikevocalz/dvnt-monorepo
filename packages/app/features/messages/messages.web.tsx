@@ -42,7 +42,7 @@ import {
   Radio,
   Plus,
 } from "lucide-react";
-import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { useQuery } from "@tanstack/react-query";
 
 import { messagesApi as messagesApiClient } from "@dvnt/app/lib/api/messages-impl";
