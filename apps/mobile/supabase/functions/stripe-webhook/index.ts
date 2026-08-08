@@ -687,11 +687,26 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
     .single();
 
   if (dupeError?.code === "23505") {
-    console.log("[stripe-webhook] Duplicate event, skipping:", event.id);
-    return new Response(JSON.stringify({ received: true, duplicate: true }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    // Skip ONLY if the first attempt finished. A row with processed_at NULL
+    // means we threw mid-processing and Stripe is retrying — swallowing that
+    // retry would drop the transition permanently (the retry-into-skip trap
+    // noted at the top of this file).
+    const { data: priorEvent } = await supabase
+      .from("stripe_events")
+      .select("processed_at")
+      .eq("event_id", event.id)
+      .maybeSingle();
+    if (priorEvent?.processed_at) {
+      console.log("[stripe-webhook] Duplicate event, skipping:", event.id);
+      return new Response(JSON.stringify({ received: true, duplicate: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    console.log(
+      "[stripe-webhook] Retry of unfinished event, reprocessing:",
+      event.id,
+    );
   }
 
   console.log("[stripe-webhook] Processing:", event.type, event.id);
@@ -1835,7 +1850,10 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
               p_rail: "web_stripe",
               p_product_family: productFamily || "dvnt_membership",
               p_plan_key: planKey,
-              p_status: sub.status,
+              // pause_collection keeps sub.status "active" while invoices
+              // stop — entitlement with no payment. Surface it as past_due
+              // so is_entitled()'s grace clause governs, not a free ride.
+              p_status: sub.pause_collection ? "past_due" : sub.status,
               p_provider_ref: sub.id,
               p_stripe_customer_id: customerId,
               p_stripe_subscription_id: sub.id,
@@ -2051,6 +2069,11 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         break;
       }
 
+      // SCA/3DS: a renewal is stuck awaiting customer action. Same state
+      // move as a payment failure — past_due with grace — so the user gets
+      // a grace window to complete authentication instead of riding
+      // entitled-but-unpaid until the subscription silently lapses.
+      case "invoice.payment_action_required":
       case "invoice.payment_failed": {
         const failedInvoice = event.data.object;
         const subId = failedInvoice.subscription;
@@ -2315,6 +2338,53 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             .eq("stripe_subscription_id", paidSubId)
             .in("status", ["past_due", "active", "trialing"]);
 
+          // Membership rail recovery — clear the grace horizon and confirm
+          // active through the guarded RPC (this handler was sneaky-only;
+          // membership grace was never cleared anywhere).
+          const { data: paidMemSub } = await supabase
+            .from("membership_subscriptions")
+            .select(
+              "user_id, rail, product_family, plan_key, provider_ref, stripe_customer_id, stripe_price_id, current_period_start, current_period_end, cancel_at_period_end, canceled_at",
+            )
+            .eq("stripe_subscription_id", paidSubId)
+            .maybeSingle();
+
+          if (paidMemSub) {
+            const { data: paidApplied, error: paidMemErr } = await supabase.rpc(
+              "upsert_membership_subscription",
+              {
+                p_user_id: paidMemSub.user_id,
+                p_rail: paidMemSub.rail,
+                p_product_family: paidMemSub.product_family,
+                p_plan_key: paidMemSub.plan_key,
+                p_status: "active",
+                p_provider_ref: paidMemSub.provider_ref,
+                p_stripe_customer_id: paidMemSub.stripe_customer_id,
+                p_stripe_subscription_id: paidSubId,
+                p_stripe_price_id: paidMemSub.stripe_price_id,
+                p_current_period_start: paidMemSub.current_period_start,
+                p_current_period_end: paidMemSub.current_period_end,
+                p_cancel_at_period_end:
+                  paidMemSub.cancel_at_period_end || false,
+                p_canceled_at: paidMemSub.canceled_at,
+                p_event_created_at: new Date(event.created * 1000).toISOString(),
+              },
+            );
+            if (paidMemErr) {
+              console.error(
+                "[stripe-webhook] membership invoice.paid upsert error:",
+                paidMemErr,
+              );
+              throw paidMemErr;
+            }
+            if (paidApplied !== false) {
+              await supabase
+                .from("membership_subscriptions")
+                .update({ grace_period_ends_at: null })
+                .eq("stripe_subscription_id", paidSubId);
+            }
+          }
+
           console.log(
             `[stripe-webhook] Invoice paid for subscription ${paidSubId} — grace period cleared`,
           );
@@ -2508,6 +2578,12 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         break;
       }
     }
+    // Completion marker for the dedup check above: a duplicate delivery is
+    // only skippable once this write has happened.
+    await supabase
+      .from("stripe_events")
+      .update({ processed_at: new Date().toISOString() })
+      .eq("event_id", event.id);
   } catch (err) {
     console.error("[stripe-webhook] Processing error:", err);
     return new Response(JSON.stringify({ error: "Processing failed" }), {

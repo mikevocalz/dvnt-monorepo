@@ -49,12 +49,17 @@ type RCEvent = {
     | "PRODUCT_CHANGE"
     | "TRANSFER"
     | "SUBSCRIPTION_PAUSED"
+    | "SUBSCRIPTION_EXTENDED"
+    | "REFUND_REVERSED"
     | "NON_RENEWING_PURCHASE"
     | "TEST";
   event_timestamp_ms: number;
   app_user_id: string;
   original_app_user_id?: string;
   aliases?: string[];
+  // TRANSFER only: RC delivers the event to the destination user; these are
+  // the source App User IDs whose entitlement moved away.
+  transferred_from?: string[];
   store: "APP_STORE" | "PLAY_STORE" | "STRIPE" | "AMAZON" | "MAC_APP_STORE" | "PROMOTIONAL";
   product_id?: string;
   new_product_id?: string;
@@ -89,14 +94,31 @@ function statusFromEvent(
     case "UNCANCELLATION":
     case "PRODUCT_CHANGE":
       return { status: "active", cancelAtPeriodEnd: false };
+    // A store-API extension pushes the period end out; the new
+    // expiration_at_ms rides the normal upsert below.
+    case "SUBSCRIPTION_EXTENDED":
+    // App Store refund reversal: access must be restored.
+    case "REFUND_REVERSED":
+      return { status: "active", cancelAtPeriodEnd: false };
     case "CANCELLATION":
+      // cancel_reason=CUSTOMER_SUPPORT is a refund — access is revoked now,
+      // not at period end. Every other reason keeps entitlement to period
+      // end (EXPIRATION follows and settles it either way).
+      if (ev.cancel_reason === "CUSTOMER_SUPPORT") {
+        return { status: "canceled", cancelAtPeriodEnd: false };
+      }
       return { status: "active", cancelAtPeriodEnd: true };
     case "EXPIRATION":
+      // expiration_reason stays queryable in rc_events.payload.
       return { status: "canceled", cancelAtPeriodEnd: false };
     case "BILLING_ISSUE":
-    case "SUBSCRIPTION_PAUSED":
       return { status: "past_due", cancelAtPeriodEnd: false };
-    // Transfer, non-renewing one-shots, and test events don't move
+    // Play pause is SCHEDULED for period end — the user stays entitled until
+    // EXPIRATION fires. Revoking here (old behavior: past_due) cut paid
+    // users off early. State doesn't move; EXPIRATION settles it.
+    case "SUBSCRIPTION_PAUSED":
+    // Transfer is handled explicitly in the request path (source rows must
+    // be canceled); non-renewing one-shots and test events don't move
     // subscription state in this table.
     case "TRANSFER":
     case "NON_RENEWING_PURCHASE":
@@ -168,15 +190,33 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
     .maybeSingle();
 
   if (dedupErr && dedupErr.code !== "23505") {
-    // 23505 = unique_violation = already processed. Anything else is real.
     console.error("[revenuecat-webhook] dedup insert error", dedupErr);
     return new Response("Server error", { status: 500 });
   }
-  if (!dedupRow && !dedupErr) {
-    // maybeSingle returned no row but no insert error — already processed.
-    console.log(`[revenuecat-webhook] duplicate event ${ev.id} — skipping`);
-    return new Response("ok", { status: 200 });
+  if (!dedupRow) {
+    // Duplicate delivery. Skip ONLY if the first attempt finished — a row
+    // with processed_at NULL means we 500'd mid-processing and RC is
+    // retrying; swallowing that retry would drop the transition for good.
+    const { data: prior } = await supabase
+      .from("rc_events")
+      .select("processed_at")
+      .eq("event_id", ev.id)
+      .maybeSingle();
+    if (prior?.processed_at) {
+      console.log(`[revenuecat-webhook] duplicate event ${ev.id} — skipping`);
+      return new Response("ok", { status: 200 });
+    }
+    console.log(
+      `[revenuecat-webhook] retry of unfinished event ${ev.id} — reprocessing`,
+    );
   }
+
+  const markProcessed = async () => {
+    await supabase
+      .from("rc_events")
+      .update({ processed_at: new Date().toISOString() })
+      .eq("event_id", ev.id);
+  };
 
   // I1 — refuse anonymous app_user_id. The mobile client wires
   // Purchases.logIn(user.id) at sign-in; if we got here without it, the
@@ -195,6 +235,84 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
     console.log(
       `[revenuecat-webhook] store=${ev.store} is not a mobile rail — acked, no state change`,
     );
+    await markProcessed();
+    return new Response("ok", { status: 200 });
+  }
+
+  // TRANSFER: RC notifies the destination user only. With one row per user,
+  // the source users' rows would otherwise stay `active` forever. Cancel
+  // each source row through the same guarded RPC (single write path), then
+  // grant the destination from the source's plan when the event carries no
+  // product id of its own.
+  if (ev.type === "TRANSFER") {
+    const sources = (ev.transferred_from ?? []).filter((u) => !isAnonRCId(u));
+    let sourcePlanKey: string | null = null;
+    for (const sourceId of sources) {
+      const { data: row } = await supabase
+        .from("membership_subscriptions")
+        .select("plan_key, rail, provider_ref, current_period_start, current_period_end")
+        .eq("user_id", sourceId)
+        .maybeSingle();
+      if (!row || (row.rail !== "ios_iap" && row.rail !== "play_iap")) continue;
+      sourcePlanKey = sourcePlanKey ?? row.plan_key;
+      const { error: srcErr } = await supabase.rpc(
+        "upsert_membership_subscription",
+        {
+          p_user_id: sourceId,
+          p_rail: row.rail,
+          p_product_family: "dvnt_membership",
+          p_plan_key: row.plan_key,
+          p_status: "canceled",
+          p_provider_ref: row.provider_ref,
+          p_stripe_customer_id: null,
+          p_stripe_subscription_id: null,
+          p_stripe_price_id: null,
+          p_current_period_start: row.current_period_start,
+          p_current_period_end: row.current_period_end,
+          p_cancel_at_period_end: false,
+          p_canceled_at: new Date(ev.event_timestamp_ms).toISOString(),
+          p_event_created_at: new Date(ev.event_timestamp_ms).toISOString(),
+        },
+      );
+      if (srcErr) {
+        console.error("[revenuecat-webhook] TRANSFER source cancel error", srcErr);
+        return new Response("Server error", { status: 500 });
+      }
+    }
+    const destPlanKey = ev.new_product_id ?? ev.product_id ?? sourcePlanKey;
+    if (destPlanKey) {
+      const { error: dstErr } = await supabase.rpc(
+        "upsert_membership_subscription",
+        {
+          p_user_id: ev.app_user_id,
+          p_rail: rail,
+          p_product_family: "dvnt_membership",
+          p_plan_key: destPlanKey,
+          p_status: "active",
+          p_provider_ref: `${ev.original_app_user_id ?? ev.app_user_id}:${destPlanKey}`,
+          p_stripe_customer_id: null,
+          p_stripe_subscription_id: null,
+          p_stripe_price_id: null,
+          p_current_period_start: ev.purchased_at_ms
+            ? new Date(ev.purchased_at_ms).toISOString()
+            : null,
+          p_current_period_end: ev.expiration_at_ms
+            ? new Date(ev.expiration_at_ms).toISOString()
+            : null,
+          p_cancel_at_period_end: false,
+          p_canceled_at: null,
+          p_event_created_at: new Date(ev.event_timestamp_ms).toISOString(),
+        },
+      );
+      if (dstErr) {
+        console.error("[revenuecat-webhook] TRANSFER destination upsert error", dstErr);
+        return new Response("Server error", { status: 500 });
+      }
+    }
+    console.log(
+      `[revenuecat-webhook] TRANSFER → ${ev.app_user_id} (${sources.length} source(s) canceled)`,
+    );
+    await markProcessed();
     return new Response("ok", { status: 200 });
   }
 
@@ -203,6 +321,7 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
     console.log(
       `[revenuecat-webhook] ${ev.type} does not move subscription state — acked`,
     );
+    await markProcessed();
     return new Response("ok", { status: 200 });
   }
 
@@ -257,7 +376,22 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
     console.log(
       `[revenuecat-webhook] ${ev.type} for ${ev.app_user_id}: ${planKey} ${transition.status} (rail=${rail})`,
     );
+    // Mirror the Stripe rail: BILLING_ISSUE carries RC's grace horizon —
+    // persist it so is_entitled()'s past_due+grace clause can honor it.
+    // First-write only, and only when the guarded upsert actually applied.
+    if (ev.type === "BILLING_ISSUE" && ev.grace_period_expiration_at_ms) {
+      await supabase
+        .from("membership_subscriptions")
+        .update({
+          grace_period_ends_at: new Date(
+            ev.grace_period_expiration_at_ms,
+          ).toISOString(),
+        })
+        .eq("user_id", ev.app_user_id)
+        .is("grace_period_ends_at", null);
+    }
   }
 
+  await markProcessed();
   return new Response("ok", { status: 200 });
 }));
