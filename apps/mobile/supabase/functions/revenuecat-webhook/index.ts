@@ -35,6 +35,25 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const RC_WEBHOOK_SECRET = Deno.env.get("REVENUECAT_WEBHOOK_SECRET") || "";
 
+// Env var first; Vault fallback (set via SQL — the Management API secrets
+// endpoint is closed to this account's token). Cached for the isolate's
+// lifetime; a missing secret in BOTH places still fails closed at 500.
+let _vaultSecret: string | null | undefined;
+async function getWebhookSecret(): Promise<string> {
+  if (RC_WEBHOOK_SECRET) return RC_WEBHOOK_SECRET;
+  if (_vaultSecret !== undefined) return _vaultSecret ?? "";
+  try {
+    // vault schema isn't PostgREST-exposed; go through the service_role-only
+    // definer RPC (migration 20260808220000_rc_webhook_secret_vault_fn).
+    const client = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const { data, error } = await client.rpc("get_rc_webhook_secret");
+    _vaultSecret = error ? null : ((data as string | null) ?? null);
+  } catch {
+    _vaultSecret = null;
+  }
+  return _vaultSecret ?? "";
+}
+
 type RCRail = "ios_iap" | "play_iap";
 
 type RCEvent = {
@@ -223,16 +242,17 @@ Deno.serve(withSentry("revenuecat-webhook", async (req) => {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
-  if (!RC_WEBHOOK_SECRET) {
+  const webhookSecret = await getWebhookSecret();
+  if (!webhookSecret) {
     console.error(
-      "[revenuecat-webhook] REVENUECAT_WEBHOOK_SECRET not configured — rejecting",
+      "[revenuecat-webhook] REVENUECAT_WEBHOOK_SECRET not configured (env or vault) — rejecting",
     );
     return new Response("Server misconfigured", { status: 500 });
   }
 
   // I4 — bearer token verify, fail closed.
   const authHeader = req.headers.get("authorization") || "";
-  const expected = `Bearer ${RC_WEBHOOK_SECRET}`;
+  const expected = `Bearer ${webhookSecret}`;
   if (!safeCompare(authHeader, expected)) {
     return new Response("Unauthorized", { status: 401 });
   }
