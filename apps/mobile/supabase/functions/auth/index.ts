@@ -251,6 +251,12 @@ async function getAuth() {
         // better-auth@1.6.26/dist/plugins/magic-link/index.d.mts:35.
         magicLink({
           expiresIn: 60 * 15,
+          // Login-only. Without this, verifying a link for an unknown email
+          // mints a fresh user (emailVerified:true, no name, no account row,
+          // no Payload profile) — the "@"/"U" ghost cards in Explore.
+          // Signup owns user creation; it provisions the profile + username.
+          // Option verified: better-auth@1.6.26 magic-link/index.d.mts:44.
+          disableSignUp: true,
           sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
             // Better Auth emits {SUPABASE_ORIGIN}/api/auth/magic-link/verify.
             // For web sign-ins the verify hop must run through the dvntapp.live

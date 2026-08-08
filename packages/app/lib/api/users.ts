@@ -698,6 +698,10 @@ export const usersApi = {
         const username = (profile?.[DB.users.username] || "").toLowerCase();
         if (HIDDEN_USERNAMES.includes(name)) return false;
         if (HIDDEN_USERNAMES.includes(username)) return false;
+        // Ghost guard: a BA user with no profile row, no BA username, and no
+        // name has nothing to render (and no profile route to open) — these
+        // are magic-link-minted identities that skipped signup provisioning.
+        if (!username && !u.username && !name) return false;
         return true;
       });
 
