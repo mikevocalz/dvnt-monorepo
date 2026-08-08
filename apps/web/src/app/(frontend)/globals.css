@@ -95,3 +95,12 @@ body {
   font-style: normal;
   font-display: swap;
 }
+/* Hide scrollbars on horizontal strips/carousels (class is used across the
+   shared web screens but was never defined — every strip showed a bar). */
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
