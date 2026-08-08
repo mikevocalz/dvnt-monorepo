@@ -293,6 +293,18 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
       )
       .eq("visibility", "public");
 
+    // Temporary moderation — mirrors packages/app/lib/api/feed-suppression.ts
+    // (Deno can't import it). Self-expires; delete after SUPPRESS_UNTIL.
+    const SUPPRESSED_FEED_AUTHOR_IDS = [30]; // @james_dunn, per Mike 2026-08-08
+    const SUPPRESS_UNTIL = Date.parse("2026-08-29T12:00:00Z");
+    if (Date.now() < SUPPRESS_UNTIL) {
+      postsQuery = postsQuery.not(
+        "author_id",
+        "in",
+        `(${SUPPRESSED_FEED_AUTHOR_IDS.join(",")})`,
+      );
+    }
+
     // Strict spicy contract:
     //   include_nsfw=false → ONLY safe posts (is_nsfw=false OR NULL)
     //   include_nsfw=true  → ONLY spicy posts (is_nsfw=true) from followed authors

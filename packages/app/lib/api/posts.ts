@@ -18,14 +18,7 @@ interface CreatePostResponse {
 
 const PAGE_SIZE = 10;
 
-// Temporary moderation: keep these authors OUT of feed + explore while their
-// profiles stay fully intact (posts remain visibility=public). Self-expires —
-// after SUPPRESS_UNTIL the filter is a no-op and this block can be deleted.
-const SUPPRESSED_FEED_AUTHOR_IDS = [30]; // @james_dunn, per Mike 2026-08-08
-const SUPPRESS_UNTIL = Date.parse("2026-08-29T12:00:00Z");
-function suppressedFeedAuthors(): number[] {
-  return Date.now() < SUPPRESS_UNTIL ? SUPPRESSED_FEED_AUTHOR_IDS : [];
-}
+import { suppressedFeedAuthors } from "./feed-suppression";
 
 interface TextSlidesFunctionResponse {
   ok: boolean;
