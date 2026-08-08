@@ -11,7 +11,7 @@ import type {
   SpotlightCampaign,
   PromotionDuration,
   CampaignPlacement,
-} from "@dvnt/app/src/events/promotion-types";
+} from "@dvnt/app/features/events/promotion-types";
 
 async function getFunctionErrorMessage(
   error: any,

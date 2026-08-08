@@ -26,7 +26,7 @@ import type { Post, Story } from "@dvnt/app/lib/types";
 import type { TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { safeGridTile } from "@dvnt/app/lib/utils/safe-profile-mappers";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import type { EventDetail } from "@dvnt/app/src/events/types";
+import type { EventDetail } from "@dvnt/app/features/events/types";
 
 const DEMO_FEED_POST_ID = "900001";
 const DEMO_MASONRY_POST_ID = "900002";

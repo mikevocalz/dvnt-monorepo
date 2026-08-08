@@ -5,7 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { promotionsApi } from "@dvnt/app/lib/api/promotions";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
-import type { SpotlightItem } from "@dvnt/app/src/events/promotion-types";
+import type { SpotlightItem } from "@dvnt/app/features/events/promotion-types";
 
 export const promotionKeys = {
   all: ["promotions"] as const,

@@ -22,7 +22,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Zap, MapPin, Calendar } from "lucide-react-native";
 import { useRouter } from "expo-router";
-import type { SpotlightItem } from "@dvnt/app/src/events/promotion-types";
+import type { SpotlightItem } from "@dvnt/app/features/events/promotion-types";
 
 // DVNT brand gradient stops for the dots
 const DVNT_DOT_COLORS = ["#8A40CF", "#3FDCFF", "#FF5BFC", "#f59e0b"];

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type {
   CampaignPlacement,
   PromotionDuration,
-} from "@dvnt/app/src/events/promotion-types";
+} from "@dvnt/app/features/events/promotion-types";
 
 interface PromotionSheetState {
   // Bottom sheet visibility

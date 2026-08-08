@@ -29,7 +29,7 @@ import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useTicketTypes } from "@dvnt/app/lib/hooks/use-tickets";
 import { usePublicGateStore } from "@dvnt/app/lib/stores/public-gate-store";
 import { GuestCheckoutSheet } from "@dvnt/app/features/events/ui/GuestCheckoutSheet";
-import { OrganizerCard } from "@dvnt/app/src/events/ui";
+import { OrganizerCard } from "@dvnt/app/features/events/ui";
 
 interface TierLite {
   id: string;

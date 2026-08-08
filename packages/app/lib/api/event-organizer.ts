@@ -11,7 +11,7 @@ import { getCurrentUserIdSync, getCurrentUserId } from "./auth-helper";
 import type {
   EventOrganizer,
   OrganizerSocials,
-} from "../../src/events/types";
+} from "../../features/events/types";
 
 /**
  * Derive Instagram / X / website chips from the user's free-form `links`

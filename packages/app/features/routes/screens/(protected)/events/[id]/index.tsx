@@ -107,12 +107,12 @@ import {
   EventMapSection,
   TicketsOpeningSoonCard,
   OrganizerCard,
-} from "@dvnt/app/src/events/ui";
+} from "@dvnt/app/features/events/ui";
 import type {
   TicketTier,
   EventAttendee,
   EventDetail,
-} from "@dvnt/app/src/events/types";
+} from "@dvnt/app/features/events/types";
 import { YouTubeEmbed } from "@dvnt/app/components/youtube-embed";
 import { EventActionSheet } from "@dvnt/app/features/events/ui/event-action-sheet";
 import { EventEditSheet } from "@dvnt/app/features/events/ui/event-edit-sheet";

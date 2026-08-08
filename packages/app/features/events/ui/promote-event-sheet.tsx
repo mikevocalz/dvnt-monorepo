@@ -61,7 +61,7 @@ import {
   PROMOTION_PRICING,
   type PromotionDuration,
   type CampaignPlacement,
-} from "@dvnt/app/src/events/promotion-types";
+} from "@dvnt/app/features/events/promotion-types";
 
 const PLACEMENTS: {
   id: CampaignPlacement;

@@ -6,7 +6,7 @@
  */
 
 import { create } from "zustand";
-import type { TicketTier } from "@dvnt/app/src/events/types";
+import type { TicketTier } from "@dvnt/app/features/events/types";
 import type { UpgradeTierOption } from "@dvnt/app/lib/hooks/use-ticket-upgrade";
 
 interface EventDetailScreenState {
