@@ -40,7 +40,7 @@ import {
   LocationAutocompleteInstagram,
   type LocationData,
 } from "@dvnt/app/components/ui/location-autocomplete-instagram";
-import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
+import { TextPostSurface } from "@dvnt/app/features/post/ui/TextPostSurface";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import { prefetchImagesBlocking } from "@dvnt/app/lib/perf/image-prefetch";
 

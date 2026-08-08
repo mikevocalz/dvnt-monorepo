@@ -40,7 +40,7 @@ import { Motion } from "@legendapp/motion";
 import { PortalHost } from "@rn-primitives/portal";
 import { ThemeProvider } from "@react-navigation/native";
 import { Toaster } from "sonner-native";
-import { ReportSheet } from "@dvnt/app/components/reports/report-sheet";
+import { ReportSheet } from "@dvnt/app/features/reports/ui/report-sheet";
 import { NAV_THEME } from "@dvnt/app/theme";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -69,7 +69,7 @@ import { Dimensions } from "react-native";
 import { BiometricLock } from "@dvnt/app/components/BiometricLock";
 import { LayoutAnimationConfig } from "react-native-reanimated";
 import { ShareIntentHandler } from "@dvnt/app/components/share-intent-handler";
-import { SpotifyShareSheet } from "@dvnt/app/components/share/spotify-share-sheet";
+import { SpotifyShareSheet } from "@dvnt/app/features/share/ui/spotify-share-sheet";
 import { SafeStripeProvider as StripeProvider } from "@dvnt/app/lib/safe-native-modules";
 import {
   isSafeMode,

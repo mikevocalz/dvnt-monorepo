@@ -53,11 +53,11 @@ import { useBootstrapEvents } from "@dvnt/app/lib/hooks/use-bootstrap-events";
 import { useDeviceLocation } from "@dvnt/app/lib/hooks/use-device-location";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
-import { EventCollectionRow } from "@dvnt/app/components/events/event-collection-row";
-import { EventsMapSheet } from "@dvnt/app/components/events/events-map-sheet";
-import { EventFilterSheet } from "@dvnt/app/components/events/event-filter-sheet";
-import { SpotlightSection } from "@dvnt/app/components/events/spotlight-carousel";
-import { PromoteEventSheet } from "@dvnt/app/components/events/promote-event-sheet";
+import { EventCollectionRow } from "@dvnt/app/features/events/ui/event-collection-row";
+import { EventsMapSheet } from "@dvnt/app/features/events/ui/events-map-sheet";
+import { EventFilterSheet } from "@dvnt/app/features/events/ui/event-filter-sheet";
+import { SpotlightSection } from "@dvnt/app/features/events/ui/spotlight-carousel";
+import { PromoteEventSheet } from "@dvnt/app/features/events/ui/promote-event-sheet";
 import {
   useSpotlightFeed,
   usePromotedEventIds,

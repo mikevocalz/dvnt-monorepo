@@ -42,13 +42,13 @@ import {
   usePostDetailUIStore,
   useLikesSheet,
 } from "@dvnt/app/lib/stores/post-detail-ui-store";
-import { ThreadedComment } from "@dvnt/app/components/comments/threaded-comment";
+import { ThreadedComment } from "@dvnt/app/features/comments/ui/threaded-comment";
 import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
 import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog, Drawer } from "@dvnt/ui";
 import { postsApi } from "@dvnt/app/lib/api/posts";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
-import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
+import { TextPostSurface } from "@dvnt/app/features/post/ui/TextPostSurface";
 
 const VIDEO_URL_RE = /post-video|\.mp4(\?|$)|\.mov(\?|$)|\.m3u8(\?|$)|\.webm(\?|$)/i;
 

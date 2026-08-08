@@ -44,7 +44,7 @@ import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
 import { addToWallet } from "@dvnt/app/features/ticket/helpers";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
-import { WeatherStrip } from "@dvnt/app/components/events/weather-strip";
+import { WeatherStrip } from "@dvnt/app/features/events/ui/weather-strip";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 
 const TIER_ACCENT: Record<TicketTierLevel, string> = {

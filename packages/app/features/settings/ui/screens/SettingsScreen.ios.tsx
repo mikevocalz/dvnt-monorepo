@@ -34,11 +34,11 @@ import {
   MessageCircle,
   Eye,
   EyeOff,
-  X,
   Info,
   CheckCircle,
   ShieldCheck,
   Megaphone,
+  X,
   Bug,
   Trash2,
   Fingerprint,
@@ -46,19 +46,20 @@ import {
   CreditCard,
   Banknote,
   CloudRain,
+  LayoutGrid,
   Crown,
 } from "lucide-react-native";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
-import { SettingsSection } from "@dvnt/app/components/settings/SettingsSection";
-import { SettingsListItem } from "@dvnt/app/components/settings/SettingsListItem";
+import { SettingsSection } from "@dvnt/app/features/settings/ui/SettingsSection";
+import { SettingsListItem } from "@dvnt/app/features/settings/ui/SettingsListItem";
 import { Switch } from "@dvnt/app/components/ui/switch";
 import { deleteAccountPrivileged } from "@dvnt/app/lib/supabase/privileged";
 import { toast } from "sonner-native";
 import { useBiometrics } from "@dvnt/app/lib/hooks/use-biometrics";
 
-export default function SettingsScreenAndroid() {
+export default function SettingsScreenIOS() {
   const router = useRouter();
   const navigation = useNavigation();
   const { colors } = useColorScheme();
@@ -66,6 +67,8 @@ export default function SettingsScreenAndroid() {
   const logout = useAuthStore((s) => s.logout);
   const nsfwEnabled = useAppStore((s) => s.nsfwEnabled);
   const setNsfwEnabled = useAppStore((s) => s.setNsfwEnabled);
+  const feedMode = useAppStore((s) => s.feedMode);
+  const setFeedMode = useAppStore((s) => s.setFeedMode);
 
   // Set up header with useLayoutEffect
   useLayoutEffect(() => {
@@ -261,13 +264,13 @@ export default function SettingsScreenAndroid() {
   };
 
   return (
-    <SafeAreaView edges={["top"]} className="flex-1 bg-background">
+    <SafeAreaView edges={[]} className="flex-1 bg-background">
       <Main className="flex-1">
         <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
-          {/* User Info - Material Design Style */}
+          {/* User Info Card - iOS Style */}
           {user && (
-            <View className="border-b border-border px-4 py-6">
-              <Text className="text-xl font-semibold">{user.name}</Text>
+            <View className="mx-4 mt-4 rounded-lg bg-card p-4">
+              <Text className="text-lg font-semibold">{user.name}</Text>
               <Text className="mt-1 text-sm text-muted-foreground">
                 {user.email}
               </Text>
@@ -277,22 +280,25 @@ export default function SettingsScreenAndroid() {
           {/* Account Settings */}
           <SettingsSection title="Account">
             <SettingsListItem
-              icon={<User size={22} color="#666" />}
+              icon={<User size={20} color="#666" />}
               label="Account Information"
               onPress={() => router.push("/settings/account" as any)}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<Lock size={22} color="#666" />}
+              icon={<Lock size={20} color="#666" />}
               label="Privacy"
               onPress={() => router.push("/settings/privacy" as any)}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<Eye size={22} color="#666" />}
+              icon={<Eye size={20} color="#666" />}
               label="Close Friends"
               onPress={() => router.push("/settings/close-friends" as any)}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<UserX size={22} color="#666" />}
+              icon={<UserX size={20} color="#666" />}
               label="Blocked"
               onPress={() => router.push("/settings/blocked" as any)}
             />
@@ -301,17 +307,19 @@ export default function SettingsScreenAndroid() {
           {/* Payments */}
           <SettingsSection title="Payments">
             <SettingsListItem
-              icon={<CreditCard size={22} color="#8A40CF" />}
+              icon={<CreditCard size={20} color="#8A40CF" />}
               label="Payments"
               onPress={() => router.push("/settings/payments" as any)}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<Banknote size={22} color="#22C55E" />}
+              icon={<Banknote size={20} color="#22C55E" />}
               label="Organizer Payments"
               onPress={() => router.push("/settings/host-payments" as any)}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<Crown size={22} color="#8A40CF" />}
+              icon={<Crown size={20} color="#8A40CF" />}
               label="Sneaky Lynk Subscription"
               onPress={() =>
                 router.push("/(protected)/sneaky-lynk/billing" as any)
@@ -325,14 +333,14 @@ export default function SettingsScreenAndroid() {
               <Pressable
                 onPress={handleToggleBiometric}
                 disabled={isAuthenticating}
-                className="flex-row items-center justify-between px-4 py-3 active:bg-secondary/50"
+                className="flex-row items-center justify-between bg-card px-4 py-3 active:bg-secondary/50"
               >
-                <View className="flex-row items-center gap-3">
+                <View className="flex-1 flex-row items-center gap-3 mr-3">
                   <Fingerprint
-                    size={22}
+                    size={20}
                     color={biometricEnabled ? "#22c55e" : "#666"}
                   />
-                  <View className="flex-1">
+                  <View className="flex-1 shrink">
                     <Text className="text-base text-foreground">
                       {getBiometricName()}
                     </Text>
@@ -343,27 +351,29 @@ export default function SettingsScreenAndroid() {
                     </Text>
                   </View>
                 </View>
-                {isAuthenticating ? (
-                  <Text className="text-sm text-muted-foreground">
-                    Verifying...
-                  </Text>
-                ) : (
-                  <Switch
-                    checked={biometricEnabled}
-                    onCheckedChange={handleToggleBiometric}
-                  />
-                )}
+                <View style={{ minWidth: 40, alignItems: "flex-end" }}>
+                  {isAuthenticating ? (
+                    <Text className="text-sm text-muted-foreground">
+                      Verifying...
+                    </Text>
+                  ) : (
+                    <Switch
+                      checked={biometricEnabled}
+                      onCheckedChange={handleToggleBiometric}
+                    />
+                  )}
+                </View>
               </Pressable>
             ) : (
-              <View className="px-4 py-3">
+              <View className="bg-card px-4 py-3">
                 <View className="flex-row items-center gap-3">
-                  <Fingerprint size={22} color="#999" />
+                  <Fingerprint size={20} color="#999" />
                   <View className="flex-1">
                     <Text className="text-base text-muted-foreground">
                       Biometrics Not Available
                     </Text>
                     <Text className="text-xs text-muted-foreground">
-                      Set up fingerprint or face unlock in device settings
+                      Set up Face ID or Touch ID in device settings
                     </Text>
                   </View>
                 </View>
@@ -374,32 +384,88 @@ export default function SettingsScreenAndroid() {
           {/* Notifications & Interactions */}
           <SettingsSection title="Notifications">
             <SettingsListItem
-              icon={<Bell size={22} color="#666" />}
+              icon={<Bell size={20} color="#666" />}
               label="Push Notifications"
               onPress={() => router.push("/settings/notifications" as any)}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<MessageCircle size={22} color="#666" />}
+              icon={<MessageCircle size={20} color="#666" />}
               label="Messages"
               onPress={() => router.push("/settings/messages" as any)}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<Heart size={22} color="#666" />}
+              icon={<Heart size={20} color="#666" />}
               label="Likes and Comments"
               onPress={() => router.push("/settings/likes-comments" as any)}
             />
           </SettingsSection>
 
           {/* Content & Display */}
-          <SettingsSection title="Content & Display">
+          <SettingsSection title="Content">
             <SettingsListItem
-              icon={<Archive size={22} color="#666" />}
+              icon={<Archive size={20} color="#666" />}
               label="Archived"
               onPress={() => router.push("/settings/archived" as any)}
             />
-            <View className="flex-row items-center justify-between px-4 py-3">
+            <View className="ml-12 h-px bg-border" />
+            <View className="flex-row items-center justify-between bg-card px-4 py-3">
               <View className="flex-row items-center gap-3">
-                <Text style={{ fontSize: 22 }}>😈</Text>
+                <LayoutGrid size={20} color="#666" />
+                <View>
+                  <Text className="text-base text-foreground">Feed Layout</Text>
+                  <Text className="text-xs text-muted-foreground">
+                    Switch between list and grid view
+                  </Text>
+                </View>
+              </View>
+              <View className="flex-row items-center rounded-lg overflow-hidden border border-border">
+                <Pressable
+                  onPress={() => setFeedMode("classic")}
+                  className="px-3 py-1.5"
+                  style={{
+                    backgroundColor:
+                      feedMode === "classic"
+                        ? "rgba(62,164,229,0.2)"
+                        : "transparent",
+                  }}
+                >
+                  <Text
+                    className="text-sm font-medium"
+                    style={{
+                      color: feedMode === "classic" ? "#3EA4E5" : "#888",
+                    }}
+                  >
+                    Feed
+                  </Text>
+                </Pressable>
+                <View className="w-px h-5 bg-border" />
+                <Pressable
+                  onPress={() => setFeedMode("masonry")}
+                  className="px-3 py-1.5"
+                  style={{
+                    backgroundColor:
+                      feedMode === "masonry"
+                        ? "rgba(62,164,229,0.2)"
+                        : "transparent",
+                  }}
+                >
+                  <Text
+                    className="text-sm font-medium"
+                    style={{
+                      color: feedMode === "masonry" ? "#3EA4E5" : "#888",
+                    }}
+                  >
+                    Grid
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+            <View className="ml-12 h-px bg-border" />
+            <View className="flex-row items-center justify-between bg-card px-4 py-3">
+              <View className="flex-row items-center gap-3">
+                <Text style={{ fontSize: 20 }}>😈</Text>
                 <View>
                   <Text className="text-base text-foreground">
                     Show Spicy Content
@@ -411,19 +477,22 @@ export default function SettingsScreenAndroid() {
               </View>
               <Switch checked={nsfwEnabled} onCheckedChange={setNsfwEnabled} />
             </View>
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<CloudRain size={22} color="#8A40CF" />}
+              icon={<CloudRain size={20} color="#8A40CF" />}
               label="Weather Ambiance"
               onPress={() => router.push("/settings/weather-ambiance" as any)}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<Moon size={22} color="#666" />}
+              icon={<Moon size={20} color="#666" />}
               label="Theme"
               value="System"
               onPress={() => router.push("/settings/theme" as any)}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<Globe size={22} color="#666" />}
+              icon={<Globe size={20} color="#666" />}
               label="Language"
               value="English"
               onPress={() => router.push("/settings/language" as any)}
@@ -433,17 +502,19 @@ export default function SettingsScreenAndroid() {
           {/* About DVNT */}
           <SettingsSection title="About DVNT">
             <SettingsListItem
-              icon={<Info size={22} color="#666" />}
+              icon={<Info size={20} color="#666" />}
               label="About / Community Focus"
               onPress={() => router.push("/settings/about")}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<CheckCircle size={22} color="#666" />}
+              icon={<CheckCircle size={20} color="#666" />}
               label="Eligibility Criteria"
               onPress={() => router.push("/settings/eligibility")}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<ShieldCheck size={22} color="#666" />}
+              icon={<ShieldCheck size={20} color="#666" />}
               label="Identity Protection"
               onPress={() => router.push("/settings/identity-protection")}
             />
@@ -452,22 +523,25 @@ export default function SettingsScreenAndroid() {
           {/* Legal & Policies */}
           <SettingsSection title="Legal & Policies">
             <SettingsListItem
-              icon={<Shield size={22} color="#666" />}
+              icon={<Shield size={20} color="#666" />}
               label="Privacy Policy"
               onPress={() => router.push("/settings/privacy-policy")}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<FileText size={22} color="#666" />}
+              icon={<FileText size={20} color="#666" />}
               label="Terms of Service"
               onPress={() => router.push("/settings/terms")}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<FileText size={22} color="#666" />}
+              icon={<FileText size={20} color="#666" />}
               label="Community Standards"
               onPress={() => router.push("/settings/community-guidelines")}
             />
+            <View className="ml-12 h-px bg-border" />
             <SettingsListItem
-              icon={<Megaphone size={22} color="#666" />}
+              icon={<Megaphone size={20} color="#666" />}
               label="Advertising Policy"
               onPress={() => router.push("/settings/ad-policy")}
             />
@@ -476,7 +550,7 @@ export default function SettingsScreenAndroid() {
           {/* Support */}
           <SettingsSection title="Support">
             <SettingsListItem
-              icon={<HelpCircle size={22} color="#666" />}
+              icon={<HelpCircle size={20} color="#666" />}
               label="Help Center / FAQ"
               onPress={() => router.push("/settings/faq")}
             />
@@ -487,12 +561,18 @@ export default function SettingsScreenAndroid() {
             <SettingsSection title="App Updates">
               <Pressable
                 onPress={handleCheckForUpdates}
-                disabled={isCheckingUpdate || isDownloading}
-                className="flex-row items-center justify-between px-4 py-3 active:bg-secondary/50"
+                disabled={
+                  isCheckingUpdate || isDownloading || updateAvailable === false
+                }
+                className={`flex-row items-center justify-between bg-card px-4 py-3 ${
+                  updateAvailable === false
+                    ? "opacity-50"
+                    : "active:bg-secondary/50"
+                }`}
               >
                 <View className="flex-row items-center gap-3">
                   <Download
-                    size={22}
+                    size={20}
                     color={updateAvailable ? "#22c55e" : "#666"}
                   />
                   <View>
@@ -523,7 +603,7 @@ export default function SettingsScreenAndroid() {
           {__DEV__ && (
             <SettingsSection title="Developer">
               <SettingsListItem
-                icon={<Bug size={22} color="#f97316" />}
+                icon={<Bug size={20} color="#f97316" />}
                 label="Network Debug"
                 onPress={() => router.push("/(protected)/debug" as any)}
               />
@@ -535,31 +615,37 @@ export default function SettingsScreenAndroid() {
             <Pressable
               onPress={handleDeleteAccount}
               disabled={isDeleting}
-              className="flex-row items-center gap-3 px-4 py-3 active:bg-secondary/50"
+              className="flex-row items-center gap-3 bg-card px-4 py-3 active:bg-secondary/50"
             >
-              <Trash2 size={22} color="#ef4444" />
+              <Trash2 size={20} color="#ef4444" />
               <Text className="text-base text-destructive">
                 {isDeleting ? "Deleting..." : "Delete Account"}
               </Text>
             </Pressable>
           </SettingsSection>
 
-          {/* Logout Button - Material Design Style */}
-          <View className="px-4 py-6">
+          {/* Logout Button - iOS Style */}
+          <View className="mx-4 mb-4 mt-2 overflow-hidden rounded-lg">
             <Pressable
               onPress={handleLogout}
-              className="flex-row items-center justify-center gap-2 rounded-lg border border-destructive bg-destructive/10 py-3 active:bg-destructive/20"
+              className="flex-row items-center justify-center gap-2 bg-card py-3 active:bg-secondary/50"
             >
               <LogOut size={20} color="#ef4444" />
               <Text className="font-semibold text-destructive">Log Out</Text>
             </Pressable>
           </View>
 
-          {/* App Version */}
-          <View className="items-center pb-8">
-            <Text className="text-xs text-muted-foreground">
-              Version 1.0.0 Build 1
-            </Text>
+          {/* App Version — long-press opens OTA diagnostics */}
+          <View className="items-center pb-8 pt-4">
+            <Pressable
+              onLongPress={() => router.push("/(protected)/debug-ota" as any)}
+              delayLongPress={1000}
+              hitSlop={12}
+            >
+              <Text className="text-xs text-muted-foreground">
+                Version 1.0.0
+              </Text>
+            </Pressable>
           </View>
         </ScrollView>
       </Main>

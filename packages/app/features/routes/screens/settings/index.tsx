@@ -1,9 +1,9 @@
 import { Platform } from "react-native";
 
 const SettingsScreenIOS =
-  require("@dvnt/app/components/settings/screens/SettingsScreen.ios").default;
+  require("@dvnt/app/features/settings/ui/screens/SettingsScreen.ios").default;
 const SettingsScreenAndroid =
-  require("@dvnt/app/components/settings/screens/SettingsScreen.android").default;
+  require("@dvnt/app/features/settings/ui/screens/SettingsScreen.android").default;
 
 const SettingsScreen =
   Platform.OS === "ios" ? SettingsScreenIOS : SettingsScreenAndroid;

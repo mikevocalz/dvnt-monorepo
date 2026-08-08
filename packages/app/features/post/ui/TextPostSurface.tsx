@@ -2,7 +2,7 @@ import { memo } from "react";
 import { View, Text, type StyleProp, type ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { HashtagText } from "@dvnt/app/components/ui/hashtag-text";
-import { TextPostBadgeLogo } from "@dvnt/app/components/post/TextPostBadgeLogo";
+import { TextPostBadgeLogo } from "@dvnt/app/features/post/ui/TextPostBadgeLogo";
 import { resolveTextPostTheme, truncateTextPost } from "@dvnt/app/lib/posts/text-post";
 import type { TextPostThemeKey } from "@dvnt/app/lib/types";
 

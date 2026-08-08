@@ -28,7 +28,7 @@ import {
 } from "@dvnt/app/lib/stores/story-viewer-store";
 import { StoryViewerOverlay } from "@dvnt/app/components/story-viewer-overlay.web";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
-import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
+import { TextPostSurface } from "@dvnt/app/features/post/ui/TextPostSurface";
 import type { Post } from "@dvnt/app/lib/types";
 
 const GAP = 10;

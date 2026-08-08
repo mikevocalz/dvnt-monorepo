@@ -36,7 +36,7 @@ import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { PostDetailSkeleton } from "@dvnt/app/components/skeletons";
 import { usePost, useDeletePost } from "@dvnt/app/lib/hooks/use-posts";
 import { useComments } from "@dvnt/app/lib/hooks/use-comments";
-import { CommentLikeButton } from "@dvnt/app/components/comments/threaded-comment";
+import { CommentLikeButton } from "@dvnt/app/features/comments/ui/threaded-comment";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { useVideoPlayerStore } from "@dvnt/app/lib/stores/video-player-store";
 // STABILIZED: Bookmark state comes from server via useBookmarks hook only
@@ -78,7 +78,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
 import { formatLikeCount } from "@dvnt/app/lib/utils/format-count";
 import { Alert } from "react-native";
-import { TagOverlayViewer } from "@dvnt/app/components/tags/TagOverlayViewer";
+import { TagOverlayViewer } from "@dvnt/app/features/tags/ui/TagOverlayViewer";
 // Galeria's native gestureRecognizer doesn't fire on iOS 26 — the
 // MediaLightbox drop-in matches Galeria's API (urls + .Image namespace)
 // using @gorhom/bottom-sheet, no native dependency. Revert when upstream
@@ -86,7 +86,7 @@ import { TagOverlayViewer } from "@dvnt/app/components/tags/TagOverlayViewer";
 import { MediaLightbox as Galeria } from "@dvnt/app/components/media/MediaLightbox";
 import { usePostTags } from "@dvnt/app/lib/hooks/use-post-tags";
 import { usePostTagsUIStore } from "@dvnt/app/lib/stores/post-tags-store";
-import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
+import { TextPostSurface } from "@dvnt/app/features/post/ui/TextPostSurface";
 import {
   useSharedValue,
   withSpring,

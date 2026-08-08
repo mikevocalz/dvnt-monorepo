@@ -94,7 +94,7 @@ import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-sto
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
 import { MENTION_COLOR } from "@dvnt/app/src/constants/mentions";
 import { usePromotionStore } from "@dvnt/app/lib/stores/promotion-store";
-import { PromoteEventSheet } from "@dvnt/app/components/events/promote-event-sheet";
+import { PromoteEventSheet } from "@dvnt/app/features/events/ui/promote-event-sheet";
 import {
   CountdownTimer,
   GoingAccordion,
@@ -114,17 +114,17 @@ import type {
   EventDetail,
 } from "@dvnt/app/src/events/types";
 import { YouTubeEmbed } from "@dvnt/app/components/youtube-embed";
-import { EventActionSheet } from "@dvnt/app/components/events/event-action-sheet";
-import { EventEditSheet } from "@dvnt/app/components/events/event-edit-sheet";
-import { ShareEventSheet } from "@dvnt/app/components/events/share-event-sheet";
+import { EventActionSheet } from "@dvnt/app/features/events/ui/event-action-sheet";
+import { EventEditSheet } from "@dvnt/app/features/events/ui/event-edit-sheet";
+import { ShareEventSheet } from "@dvnt/app/features/events/ui/share-event-sheet";
 import { DVNTLiquidGlassIconButton } from "@dvnt/app/components/media/DVNTLiquidGlass";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import { TranslateButton } from "@dvnt/app/components/ui/translate-button";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { useTranslation } from "react-i18next";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
-import { UpgradeTierCard } from "@dvnt/app/components/events/UpgradeTierCard";
-import { UpgradeConfirmationSheet } from "@dvnt/app/components/events/UpgradeConfirmationSheet";
+import { UpgradeTierCard } from "@dvnt/app/features/events/ui/UpgradeTierCard";
+import { UpgradeConfirmationSheet } from "@dvnt/app/features/events/ui/UpgradeConfirmationSheet";
 import {
   useTicketUpgradeOptions,
   useInitiateUpgrade,

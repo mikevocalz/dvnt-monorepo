@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { EventFilter } from "@dvnt/app/components/events/filter-pills";
+import type { EventFilter } from "@dvnt/app/features/events/ui/filter-pills";
 import type { EventSort } from "@dvnt/app/lib/hooks/use-events";
 
 interface EventsScreenState {

@@ -28,7 +28,7 @@ import {
   ArrowLeft,
   ArrowRight,
 } from "lucide-react-native";
-import { IdScanTab, FaceScanTab } from "@dvnt/app/components/verification/tabs";
+import { IdScanTab, FaceScanTab } from "@dvnt/app/features/verification/ui/tabs";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { compareFaces } from "@dvnt/app/lib/face-matcher";
 import { compareDOBs } from "@dvnt/app/lib/dob-extractor";

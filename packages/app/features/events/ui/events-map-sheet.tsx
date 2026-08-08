@@ -28,7 +28,7 @@ import { MapPin, X } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useEventMapController } from "@dvnt/app/lib/hooks/use-event-map-controller";
-import { EventsMapView } from "@dvnt/app/components/events/events-map-view";
+import { EventsMapView } from "@dvnt/app/features/events/ui/events-map-view";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
 

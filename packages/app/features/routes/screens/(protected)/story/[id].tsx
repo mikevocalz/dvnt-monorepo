@@ -57,7 +57,7 @@ import {
   storyViewKeys,
 } from "@dvnt/app/lib/hooks/use-stories";
 import { storyViewsApi } from "@dvnt/app/lib/api/stories";
-import { StoryViewersSheet } from "@dvnt/app/components/stories/story-viewers-sheet";
+import { StoryViewersSheet } from "@dvnt/app/features/stories/ui/story-viewers-sheet";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { messagesApiClient } from "@dvnt/app/lib/api/messages";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";

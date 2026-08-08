@@ -46,7 +46,7 @@ import { useEventDominantColor } from "@dvnt/app/lib/color/useEventDominantColor
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { computePromoDiscountCents, promoLabel } from "@dvnt/app/lib/payments/promo-discount";
 import { WhoAllOverThere } from "@dvnt/app/components/event/WhoAllOverThere.web";
-import { WeatherStrip } from "@dvnt/app/components/events/weather-strip.web";
+import { WeatherStrip } from "@dvnt/app/features/events/ui/weather-strip.web";
 import { OrganizerCard } from "@dvnt/app/src/events/ui/OrganizerCard.web";
 import {
   useTicketTypes,
