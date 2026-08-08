@@ -21,6 +21,7 @@ import {
   Flag,
   Languages,
 } from "lucide-react";
+import { UserAvatar } from "@dvnt/app/components/ui/avatar";
 import { usePost, useDeletePost } from "@dvnt/app/lib/hooks/use-posts";
 import { useComments, useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
@@ -202,11 +203,11 @@ export function PostDetailScreen() {
             className="flex items-center gap-3 text-left"
             aria-label={`View @${post.author.username}'s profile`}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={post.author.avatar}
-              alt=""
-              className="w-10 h-10 rounded-xl object-cover bg-white/10"
+            {/* Shared Avatar: same roundedSquare shape the comment rows use. */}
+            <UserAvatar
+              uri={post.author.avatar}
+              username={post.author.username}
+              size={40}
             />
             <div className="flex flex-col leading-tight">
               <span className="font-bold text-[15px]">
