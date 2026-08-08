@@ -72,7 +72,41 @@ export function MembershipScreen(_props: MembershipScreenProps = {}) {
   const { entitlements, isLoading } = useEntitlements();
   const currentKey = entitlements.planKey;
 
-  const onUpgrade = useCallback((k: PlanKey) => openPricing(k), []);
+  // Web sells DIRECTLY via Stripe (two-rail law: Stripe on web, RC on
+  // mobile — the native fork is MembershipScreen.native.tsx). Same call the
+  // /pricing page makes; on failure fall back to /pricing so the user is
+  // never stranded.
+  const onUpgrade = useCallback(async (k: PlanKey) => {
+    if (Platform.OS !== "web") {
+      openPricing(k);
+      return;
+    }
+    try {
+      const { requireBetterAuthToken } = await import(
+        "@dvnt/app/lib/auth/identity"
+      );
+      const { supabase } = await import("@dvnt/app/lib/supabase/client");
+      const token = await requireBetterAuthToken();
+      const { data, error } = await supabase.functions.invoke(
+        "membership-checkout",
+        {
+          body: { plan_key: k },
+          headers: { Authorization: `Bearer ${token}`, "x-auth-token": token },
+        },
+      );
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      if (data?.url) {
+        (globalThis as typeof globalThis & { location?: Location }).location?.assign(
+          data.url,
+        );
+        return;
+      }
+      throw new Error("No checkout URL returned");
+    } catch {
+      openPricing(k);
+    }
+  }, []);
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
@@ -153,8 +187,9 @@ export function MembershipScreen(_props: MembershipScreenProps = {}) {
       })}
 
       <Animated.Text style={styles.fineprint}>
-        Plans are managed on the web. Choosing a plan opens dvnt.app to complete
-        checkout securely.
+        {Platform.OS === "web"
+          ? "Secure checkout via Stripe. Cancel anytime."
+          : "Plans are managed on the web. Choosing a plan opens dvntapp.live to complete checkout securely."}
       </Animated.Text>
     </ScrollView>
   );
