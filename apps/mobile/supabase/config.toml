@@ -167,3 +167,138 @@ verify_jwt = false
 
 [functions.cdn-probe]
 verify_jwt = false
+
+# Better-Auth-token functions gate internally via _shared/verify-session (the
+# app sends its session token in Authorization, which is not a Supabase JWT).
+# 2026-08-08 incident: a bulk redeploy reset every unlisted function to
+# verify_jwt=true and the gateway 401'd all app reads (comments/tickets/
+# profile). Every app-called function MUST be listed here with false.
+[functions.backfill-users]
+verify_jwt = false
+
+[functions.bootstrap-events]
+verify_jwt = false
+
+[functions.bootstrap-feed]
+verify_jwt = false
+
+[functions.bootstrap-messages]
+verify_jwt = false
+
+[functions.bootstrap-notifications]
+verify_jwt = false
+
+[functions.bootstrap-profile]
+verify_jwt = false
+
+[functions.cleanup-expired-media]
+verify_jwt = false
+
+[functions.close-friends]
+verify_jwt = false
+
+[functions.create-payment-intent]
+verify_jwt = false
+
+[functions.event-cancel]
+verify_jwt = false
+
+[functions.event-postpone]
+verify_jwt = false
+
+[functions.fix-tickets]
+verify_jwt = false
+
+[functions.get-event-tickets]
+verify_jwt = false
+
+[functions.get-followers]
+verify_jwt = false
+
+[functions.get-following]
+verify_jwt = false
+
+[functions.get-guest-ticket]
+verify_jwt = false
+
+[functions.get-liked-activity]
+verify_jwt = false
+
+[functions.get-liked-posts]
+verify_jwt = false
+
+[functions.get-post-comments]
+verify_jwt = false
+
+[functions.get-post-likers]
+verify_jwt = false
+
+[functions.get-story-viewers]
+verify_jwt = false
+
+[functions.get-viewer-liked-post-ids]
+verify_jwt = false
+
+[functions.host-payouts]
+verify_jwt = false
+
+[functions.lynk-livestream-token]
+verify_jwt = false
+
+[functions.lynk-moq-token]
+verify_jwt = false
+
+[functions.manage-promoters]
+verify_jwt = false
+
+[functions.mark-read]
+verify_jwt = false
+
+[functions.payouts-release]
+verify_jwt = false
+
+[functions.post-like]
+verify_jwt = false
+
+[functions.post-unlike]
+verify_jwt = false
+
+[functions.react-message]
+verify_jwt = false
+
+[functions.reconcile-orders]
+verify_jwt = false
+
+[functions.send-email]
+verify_jwt = false
+
+[functions.ticket-checkout]
+verify_jwt = false
+
+[functions.ticket-scan]
+verify_jwt = false
+
+[functions.ticket-upgrade]
+verify_jwt = false
+
+[functions.toggle-comment-like]
+verify_jwt = false
+
+[functions.unlock-ticket-tier]
+verify_jwt = false
+
+[functions.user-settings]
+verify_jwt = false
+
+[functions.video_heartbeat]
+verify_jwt = false
+
+[functions.video_list_rooms]
+verify_jwt = false
+
+[functions.video_set_room_mode]
+verify_jwt = false
+
+[functions.video_toggle_hand]
+verify_jwt = false
+
