@@ -60,6 +60,7 @@ interface CreateStoryBody {
     fontSizeRatio?: number;
     maxWidthRatio?: number;
     textAlign?: "left" | "center" | "right";
+    textStyle?: string;
     x: number;
     y: number;
     sizeRatio?: number;
@@ -347,6 +348,7 @@ Deno.serve(async (req) => {
                     fontSizeRatio: overlay.fontSizeRatio ?? 0.11,
                     maxWidthRatio: overlay.maxWidthRatio ?? 0.8,
                     textAlign: overlay.textAlign ?? "center",
+                    textStyle: overlay.textStyle,
                   }
                 : {
                     source: overlay.source === "asset" ? "asset" : "url",

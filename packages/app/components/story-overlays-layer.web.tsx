@@ -92,6 +92,46 @@ export function ws4OverlayTarget(
   return null;
 }
 
+// Must match DEVIANT_GRADIENT in story-editor.web.tsx exactly so the viewer's
+// gradient text renders identically to the editor preview.
+const DEVIANT_GRADIENT =
+  "linear-gradient(100deg, #3FDCFF 0%, #8A40CF 52%, #FF5BFC 100%)";
+
+/**
+ * Port of the editor's `textStyleCss` (packages/app/features/story/
+ * story-editor.web.tsx) so BOTH the create preview and the viewer render the
+ * SAME style preset the editor showed. Returns null when the overlay carries no
+ * recognized preset — the caller then falls back to the plain-text legibility
+ * shadow.
+ */
+function textPresetCss(overlay: {
+  textStyle?: string;
+  color: string;
+}): React.CSSProperties | null {
+  switch (overlay.textStyle) {
+    case "neon":
+      return {
+        textShadow: `0 0 8px ${overlay.color}, 0 0 18px ${overlay.color}`,
+      };
+    case "shadow":
+    case "classic":
+      return { textShadow: "0 2px 6px rgba(0,0,0,0.5)" };
+    case "outline":
+      return { WebkitTextStroke: "2px #FFFFFF" } as React.CSSProperties;
+    case "strong":
+      return { WebkitTextStroke: "1.5px #FFFFFF" } as React.CSSProperties;
+    case "gradient":
+      return {
+        backgroundImage: DEVIANT_GRADIENT,
+        WebkitBackgroundClip: "text",
+        backgroundClip: "text",
+        WebkitTextFillColor: "transparent",
+      } as React.CSSProperties;
+    default:
+      return null;
+  }
+}
+
 function overlayCenterBox(
   x: number,
   y: number,
@@ -213,6 +253,7 @@ export function StoryOverlaysLayer({
         if (overlay.type === "text") {
           const fontSize = `max(18px, ${overlay.fontSizeRatio * overlay.scale * 100}cqw)`;
           const target = interactive ? ws4OverlayTarget(overlay) : null;
+          const presetStyle = textPresetCss(overlay);
           const inner = (
             <span
               style={{
@@ -228,10 +269,15 @@ export function StoryOverlaysLayer({
                 wordBreak: "break-word",
                 borderRadius: overlay.stickerKind ? 999 : 0,
                 padding: overlay.stickerKind ? "0.2em 0.6em" : 0,
-                textShadow:
-                  overlay.stickerKind || overlay.backgroundColor
-                    ? "none"
-                    : "0 1px 4px rgba(0,0,0,0.6)",
+                // A recognized style preset (neon/shadow/classic/outline/strong/
+                // gradient) wins — its CSS mirrors the editor exactly. Only when
+                // there is no preset do we keep the plain-text legibility shadow.
+                ...(presetStyle ?? {
+                  textShadow:
+                    overlay.stickerKind || overlay.backgroundColor
+                      ? "none"
+                      : "0 1px 4px rgba(0,0,0,0.6)",
+                }),
               }}
             >
               {overlay.content}

@@ -248,6 +248,7 @@ function textElementToOverlay(el: TextElement): StoryOverlay {
     fontSizeRatio: el.fontSize / CANVAS_WIDTH,
     maxWidthRatio: el.maxWidth / CANVAS_WIDTH,
     textAlign: el.textAlign,
+    textStyle: el.style,
   };
 }
 
