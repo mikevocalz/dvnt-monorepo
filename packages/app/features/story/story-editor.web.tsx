@@ -716,12 +716,14 @@ function DrawingLayer({
 function useDrag(
   element: { id: string; transform: TextElement["transform"] },
   stageRef: React.RefObject<HTMLDivElement | null>,
+  onTap?: () => void,
 ) {
   const dragRef = useRef<{
     startX: number;
     startY: number;
     originX: number;
     originY: number;
+    moved: boolean;
   } | null>(null);
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -733,6 +735,7 @@ function useDrag(
       startY: e.clientY,
       originX: element.transform.translateX,
       originY: element.transform.translateY,
+      moved: false,
     };
   };
 
@@ -740,6 +743,15 @@ function useDrag(
     const drag = dragRef.current;
     const stage = stageRef.current;
     if (!drag || !stage) return;
+    // Below the tap threshold this is still a tap, not a drag — don't move the
+    // element (a jittery tap shouldn't nudge it out from under the finger).
+    if (
+      !drag.moved &&
+      Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 5
+    ) {
+      return;
+    }
+    drag.moved = true;
     const rect = stage.getBoundingClientRect();
     const dx = ((e.clientX - drag.startX) / rect.width) * CANVAS_WIDTH;
     const dy = ((e.clientY - drag.startY) / rect.height) * CANVAS_HEIGHT;
@@ -752,6 +764,9 @@ function useDrag(
 
   const onPointerUp = (e: React.PointerEvent) => {
     (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+    // A press that never crossed the drag threshold is a tap → activate editing
+    // for this specific item (the element is already selected from pointerDown).
+    if (dragRef.current && !dragRef.current.moved) onTap?.();
     dragRef.current = null;
   };
 
@@ -798,7 +813,11 @@ function TextOverlay({
   selected: boolean;
   interactive: boolean;
 }) {
-  const drag = useDrag(element, stageRef);
+  // Tap a text item → open the Text panel bound to this element (edit its
+  // content / colour / style). It's already selected from pointerDown.
+  const drag = useDrag(element, stageRef, () =>
+    useEditorStore.getState().setMode("text"),
+  );
   const leftPct = (element.transform.translateX / CANVAS_WIDTH) * 100;
   const topPct = (element.transform.translateY / CANVAS_HEIGHT) * 100;
   const fontSizeRatio = element.fontSize / CANVAS_WIDTH;
