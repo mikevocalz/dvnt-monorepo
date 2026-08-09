@@ -31,18 +31,34 @@ let warnedStorage = false;
 let lastTicketsPayload: string | null = null;
 let lastBroadcastsPayload: string | null = null;
 
-/** Lazy, optional require so a missing native module degrades gracefully. */
-function optionalRequire<T = any>(name: string): T | null {
+/**
+ * Lazy, optional requires so a missing native module degrades gracefully.
+ *
+ * These MUST stay as literal strings: Metro resolves requires statically and
+ * rejects `require(someVariable)` outright ("Invalid call ... require(name)"),
+ * which failed the production bundle. A shared helper taking the name as an
+ * argument is exactly the shape that breaks, so each module gets its own.
+ */
+function requireWatchConnectivity<T = any>(): T | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require(name) as T;
+    return require("react-native-watch-connectivity") as T;
+  } catch {
+    return null;
+  }
+}
+
+function requireAppleTargets<T = any>(): T | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require("@bacons/apple-targets") as T;
   } catch {
     return null;
   }
 }
 
 function connectivityModule(): any | null {
-  const mod = optionalRequire("react-native-watch-connectivity");
+  const mod = requireWatchConnectivity<any>();
   if (!mod && !warnedConnectivity) {
     warnedConnectivity = true;
     console.info(
@@ -67,7 +83,7 @@ function pushMergedContext(mod: any): void {
 }
 
 function writeAppGroup(key: string, json: string): void {
-  const mod = optionalRequire("@bacons/apple-targets");
+  const mod = requireAppleTargets<any>();
   const ExtensionStorage = mod?.ExtensionStorage;
   if (!ExtensionStorage) {
     if (!warnedStorage) {
@@ -157,7 +173,7 @@ type EnvelopeGetters = {
  */
 export function registerWatchRequestHandler(getters: EnvelopeGetters): () => void {
   if (Platform.OS !== "ios") return () => {};
-  const mod = optionalRequire("react-native-watch-connectivity");
+  const mod = requireWatchConnectivity<any>();
   if (!mod || typeof mod.watchEvents?.addListener !== "function") return () => {};
 
   const sub = mod.watchEvents.addListener(

@@ -370,17 +370,17 @@ function RootLayout() {
   }, [splashAnimationFinished]);
 
   const [fontsLoaded, fontError] = useFonts({
-    "Inter-Regular": require("../assets/fonts/Inter-Regular.ttf"),
-    "Inter-SemiBold": require("../assets/fonts/Inter-SemiBold.ttf"),
-    "Inter-Bold": require("../assets/fonts/Inter-Bold.ttf"),
-    "SpaceGrotesk-Regular": require("../assets/fonts/SpaceGrotesk-Regular.ttf"),
-    "SpaceGrotesk-SemiBold": require("../assets/fonts/SpaceGrotesk-SemiBold.ttf"),
-    "SpaceGrotesk-Bold": require("../assets/fonts/SpaceGrotesk-Bold.ttf"),
-    "Republica-Minor": require("../assets/fonts/Republica-Minor.ttf"),
-    BraveGates: require("../assets/fonts/BraveGates.ttf"),
-    LightBrighter: require("../assets/fonts/LightBrighter.ttf"),
-    Oasis: require("../assets/fonts/oasis.ttf"),
-    RedHat: require("../assets/fonts/redhat.ttf"),
+    "Inter-Regular": require("@dvnt/app/assets/fonts/Inter-Regular.ttf"),
+    "Inter-SemiBold": require("@dvnt/app/assets/fonts/Inter-SemiBold.ttf"),
+    "Inter-Bold": require("@dvnt/app/assets/fonts/Inter-Bold.ttf"),
+    "SpaceGrotesk-Regular": require("@dvnt/app/assets/fonts/SpaceGrotesk-Regular.ttf"),
+    "SpaceGrotesk-SemiBold": require("@dvnt/app/assets/fonts/SpaceGrotesk-SemiBold.ttf"),
+    "SpaceGrotesk-Bold": require("@dvnt/app/assets/fonts/SpaceGrotesk-Bold.ttf"),
+    "Republica-Minor": require("@dvnt/app/assets/fonts/Republica-Minor.ttf"),
+    BraveGates: require("@dvnt/app/assets/fonts/BraveGates.ttf"),
+    LightBrighter: require("@dvnt/app/assets/fonts/LightBrighter.ttf"),
+    Oasis: require("@dvnt/app/assets/fonts/oasis.ttf"),
+    RedHat: require("@dvnt/app/assets/fonts/redhat.ttf"),
   });
 
   // ── Auth initialization — runs ONCE on mount ──────────────────────────

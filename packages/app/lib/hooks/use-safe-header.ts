@@ -11,7 +11,7 @@
 
 import { useLayoutEffect, useRef } from "react";
 import { useNavigation } from "expo-router";
-import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
+import type { TransitionStackOptions as NativeStackNavigationOptions } from "@dvnt/app/lib/navigation/transition-stack";
 
 function serializeOptions(value: unknown): string {
   try {
