@@ -352,28 +352,19 @@ async function getAuth() {
       databaseHooks: {
         user: {
           create: {
-            // BETA GATE. Runs before the user row is created for EVERY signup
-            // method (email/password AND OAuth). Rejects emails not on the
-            // allowlist so the auth record is never minted (hard, server-side
-            // gate). Matching is case-insensitive + whitespace-trimmed via the
-            // is_allowlisted SQL fn. Fail-closed: a lookup error blocks the
-            // signup rather than letting a non-allowlisted email through.
-            before: async (user: any) => {
-              const email = String(user?.email ?? "").trim().toLowerCase();
-              const { rows } = await pool.query(
-                "select public.is_allowlisted($1) as ok",
-                [email],
-              );
-              if (!rows?.[0]?.ok) {
-                const { APIError } = await import("npm:better-auth@1.6.26/api");
-                console.log(`[Auth] Beta gate: rejected ${email}`);
-                throw new APIError("FORBIDDEN", {
-                  code: "BETA_ONLY",
-                  message: "Beta Users Access Only",
-                });
-              }
-              return { data: user };
-            },
+            // BETA GATE REMOVED 2026-08-09 at Mike's request — signup is now
+            // OPEN to any email. The gate lived here as a `before` hook that
+            // rejected addresses missing from public.allowlisted_emails with
+            // 403 BETA_ONLY, for every signup method (email/password AND OAuth).
+            //
+            // Nothing else was deleted: the allowlisted_emails table and the
+            // is_allowlisted() / hook_restrict_signup_beta() functions are all
+            // still in the database, so re-gating means restoring this block
+            // (git history: the commit that removed it) and redeploying — no
+            // migration needed.
+            //
+            // Client-side BETA_ONLY handling is also still in place
+            // (SignupScreen.web.tsx, SignUpStep2.tsx); it simply never fires now.
             // CANONICAL welcome trigger. Fires server-side for EVERY signup
             // method (email/password AND Apple/Google OAuth), so it's the one
             // place welcome is sent. The legacy POST /auth/send-welcome endpoint
