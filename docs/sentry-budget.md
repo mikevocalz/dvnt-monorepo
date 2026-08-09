@@ -55,3 +55,16 @@ Even doubling every assumption (40 tx/session, 40 spans/tx) lands at ~3.4M — s
 ## 5 · One-line summary
 
 Fix the one bug that is 18× the error quota, filter its replay capture with `beforeErrorSampling` (typings-verified), stop paying error-quota for probe telemetry, wire 50/80% spend notifications at `Settings → Subscription → Manage Spend Notifications`, and the whole org runs at <50% of the free tier — plan/monitor spend (§6 of observability-baseline.md) is then purely about resilience, not survival.
+
+---
+
+## Decision LOCKED (2026-08-08): free Developer tier only — no Team, no PAYG
+
+Mike's call: **cannot afford a paid plan.** This settles the decision menu — stay on the free Developer tier; **no PAYG circuit-breaker** (PAYG requires a paid plan anyway). Consequences, all free-tier-native:
+
+- **Money-job monitoring = dead-man rows, NOT Sentry cron monitors.** Only 1 cron monitor is reserved and `db-health` holds it. The money jobs (`reconcile-orders`, `payouts-release`, cart-hold cleanup, spotlight expiry, `notify-sale-open`) get a `job_heartbeats` table (job name → last_ok_at, last_run_at, last_status) that each job writes on success; the `db-health` probe polls it and raises ONE Sentry error (within the error budget, clamped) when any money job is overdue past its interval + margin. Zero incremental cost, no paid monitors. This is the baseline's documented fallback (§WS-3) and is now the chosen path.
+- **`cdn-probe` demotes off its monitor** — its telemetry is logs/metrics + the dead-man row, freeing intent for `db-health` to stay the single funded monitor.
+- **Sentry surface = the Payload admin dashboard** (`apps/web/src/dashboard/screens/SentryHealthScreen.tsx` + `dashboard/lib/sentry-api.ts`, server-proxied via `/api/observability/sentry` with the internal-integration token). Crash-free / issues / feature-health / release-health / the cron monitors already render there. The dead-man watchdog view belongs here too — extend this screen, not the hosted Sentry UI.
+- **50/80% usage alerts** stay as the free-tier Spend/Usage notifications (dashboard toggle) — they cost nothing and are the early-warning the budget relies on.
+
+The error/replay/span levers above (kill the flood, clamp, replay-gate, tracesSampler map) are what keep the free tier comfortably under 50% — they are now load-bearing, not optional. Observability WS-3/4/5 proceed in this free-tier form (dead-man rows + logs/metrics/spans on the existing free allowances), no plan change required.
