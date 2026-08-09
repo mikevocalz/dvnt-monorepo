@@ -175,11 +175,22 @@ export function StoryCreateScreen() {
         };
       });
 
+      const firstNewIndex = mediaAssets.length;
       const updated = [...mediaAssets, ...next];
       setMediaAssets(updated);
-      setCurrentIndex(mediaAssets.length === 0 ? 0 : mediaAssets.length);
+      setCurrentIndex(firstNewIndex);
+
+      // Adding media opens the v2 editor (full drawing/filters/stickers/text)
+      // for the first new item; it bakes + returns overlays via the result
+      // store, which the consume effect above merges back by index.
+      const first = next[0];
+      if (first) {
+        router.push(
+          `/feed/story/editor?uri=${encodeURIComponent(first.uri)}&type=${first.type}&index=${firstNewIndex}`,
+        );
+      }
     },
-    [mediaAssets, setMediaAssets, setCurrentIndex, showToast],
+    [mediaAssets, setMediaAssets, setCurrentIndex, showToast, router],
   );
 
   const handleRemoveMedia = useCallback(
@@ -446,6 +457,21 @@ export function StoryCreateScreen() {
             >
               <ImageIcon size={48} />
               <span className="text-base">Add media to get started</span>
+            </button>
+          ) : null}
+
+          {/* Re-open the v2 editor for the current item (drawing/filters/etc.) */}
+          {currentAsset ? (
+            <button
+              onClick={() =>
+                router.push(
+                  `/feed/story/editor?uri=${encodeURIComponent(currentAsset.uri)}&type=${currentAsset.type}&index=${currentIndex}`,
+                )
+              }
+              className="absolute top-3 right-3 h-9 px-3 rounded-full flex items-center gap-1.5 text-xs font-semibold text-white"
+              style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)" }}
+            >
+              Edit
             </button>
           ) : null}
 
