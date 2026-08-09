@@ -52,15 +52,24 @@ export function SignupScreen() {
       if (activeStep === 0) { setActiveStep(1); return; }
       if (activeStep === 1) {
         if (!agreedToTerms) { toast.error('Please accept the terms to continue'); return; }
-        setActiveStep(2);
+        // Stay on this step until the account actually exists. This used to
+        // advance to step 3 BEFORE awaiting signUp, so tapping "Create account"
+        // rendered "Check your email — we sent a verification link" instantly,
+        // whatever the server said. A rejected signup (the beta gate, a
+        // duplicate email, a timeout) therefore looked like it had succeeded
+        // and people waited for an email that was never sent. isSubmitting
+        // already drives the button's loading state, so there is no need to
+        // move the stepper to show work is happening.
         setIsSubmitting(true);
         try {
           const { data, error } = await signUp.email({ email: value.email, password: value.password, name: value.username });
           if (error) throw Object.assign(new Error((error as any).message || 'Signup failed'), { code: (error as any).code });
+          if (!data?.user) throw new Error('Could not create account — no user was returned.');
           if (data?.user) {
             let profile: any;
             try { profile = await syncAuthUser(); } catch { profile = await auth.getProfile(data.user.id, data.user.email); }
             if (profile) setUser({ id: profile.id, email: profile.email, username: profile.username, name: profile.name, avatar: profile.avatar || '', bio: profile.bio || '', website: (profile as any).website || '', location: profile.location || '', hashtags: (profile as any).hashtags || [], isVerified: profile.isVerified, postsCount: profile.postsCount, followersCount: profile.followersCount, followingCount: profile.followingCount });
+            setActiveStep(2);
             navigate({ to: '/auth/verify-email' });
           }
         } catch (err: any) {
@@ -80,7 +89,6 @@ export function SignupScreen() {
           } else {
             toast.error('Signup failed', { description: err?.message || 'Something went wrong.' });
           }
-          setActiveStep(1);
         }
         setIsSubmitting(false);
       }
