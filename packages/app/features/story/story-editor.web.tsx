@@ -70,6 +70,7 @@ import {
   Plus,
   Minus,
   RotateCw,
+  ArrowLeft,
 } from "lucide-react";
 // eslint-disable-next-line no-restricted-imports -- deep store import: the stories-editor barrel re-exports EditorScreen (RN-only File.uri typing) which breaks apps/web's DOM-lib typecheck; route the store deep to keep web green.
 import {
@@ -105,6 +106,13 @@ import type {
 } from "@dvnt/app/features/stories-editor/types";
 import { useStoryFlowStore } from "@dvnt/app/lib/stores/story-flow-store";
 import { useStoryEditorResultStore } from "@dvnt/app/lib/stores/story-editor-result-store";
+// WS-4 interactive-sticker value entry: event/ticket search + @mention search.
+// Verified sources — useEventSearch/useMyEvents return the `Event` shape
+// (id/title/image/date/location); searchApi.searchUsers returns
+// { docs: { id, username, avatar, name }[] }.
+import { useQuery } from "@tanstack/react-query";
+import { useEventSearch, useMyEvents } from "@dvnt/app/lib/hooks/use-events";
+import { searchApi } from "@dvnt/app/lib/api/search";
 // Single source of truth for image-sticker web URLs — shared with the story
 // viewer / create-preview overlay renderer so the maps can't drift.
 import { STICKER_WEB_URLS } from "@dvnt/app/components/story-overlays-layer.web";
@@ -1629,6 +1637,12 @@ function StickerPanel() {
   const query = useEditorStore((s) => s.stickerSearchQuery);
   const setQuery = useEditorStore((s) => s.setStickerSearchQuery);
 
+  // Local UI ephemera (per the file's convention): which WS-4 "Tags" sticker is
+  // currently being given a value via the inline sub-panel. null = show the grid.
+  const [activeTag, setActiveTag] = useState<
+    (typeof WS4_STICKERS)[number] | null
+  >(null);
+
   const addSticker = (
     source: string,
     opts: {
@@ -1651,6 +1665,18 @@ function StickerPanel() {
     editor.setMode("idle");
   };
 
+  // Place a WS-4 sticker only once a real value is chosen. `label` is the pill
+  // text the viewer shows; `metadata` carries the deep-link contract exactly as
+  // ws4OverlayTarget (story-overlays-layer.web) reads it.
+  const commitWs4 = (
+    label: string,
+    metadata: Record<string, string>,
+    category: StickerElement["category"],
+  ) => {
+    addSticker(label, { category, label, metadata });
+    setActiveTag(null);
+  };
+
   const tabs: { id: StickerTab; label: string }[] = [
     // "Tags" = the WS-4 interactive stickers (event/ticket/mention/link);
     // the image pack below is the one actually named "DVNT" — don't collide.
@@ -1665,62 +1691,70 @@ function StickerPanel() {
 
   return (
     <Panel title="Stickers">
-      {/* Search */}
-      <div
-        className="flex items-center gap-2 px-3 h-10 rounded-xl mb-3"
-        style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }}
-      >
-        <Search size={16} color="rgba(255,255,255,0.5)" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search stickers…"
-          className="flex-1 bg-transparent text-sm outline-none text-white"
-        />
-      </div>
+      {/* Search + tabs — hidden while entering a WS-4 tag value so the inline
+          picker owns the panel. */}
+      {!activeTag && (
+        <>
+          {/* Search */}
+          <div
+            className="flex items-center gap-2 px-3 h-10 rounded-xl mb-3"
+            style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }}
+          >
+            <Search size={16} color="rgba(255,255,255,0.5)" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search stickers…"
+              className="flex-1 bg-transparent text-sm outline-none text-white"
+            />
+          </div>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 mb-3">
-        {tabs.map((t) => {
-          const active = activeTab === t.id;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setActiveTab(t.id)}
-              className="shrink-0 h-8 px-3 rounded-full text-xs font-semibold"
-              style={{
-                background: active ? "rgba(63,220,255,0.15)" : SURFACE,
-                border: `1px solid ${active ? ACCENT : HAIRLINE}`,
-                color: active ? ACCENT : "#fff",
-              }}
-            >
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
+          {/* Tabs */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 mb-3">
+            {tabs.map((t) => {
+              const active = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveTab(t.id)}
+                  className="shrink-0 h-8 px-3 rounded-full text-xs font-semibold"
+                  style={{
+                    background: active ? "rgba(63,220,255,0.15)" : SURFACE,
+                    border: `1px solid ${active ? ACCENT : HAIRLINE}`,
+                    color: active ? ACCENT : "#fff",
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
-      {/* DVNT-native interactive stickers */}
+      {/* DVNT-native interactive stickers ("Tags") */}
       {activeTab === "dvnt-native" ? (
-        <div className="grid grid-cols-2 gap-2">
-          {WS4_STICKERS.map((s) => (
-            <button
-              key={s.id}
-              onClick={() =>
-                addSticker(s.label, {
-                  category: s.category,
-                  label: s.label,
-                  metadata: s.metadata,
-                })
-              }
-              className="flex items-center gap-2 h-11 px-3 rounded-xl text-sm font-semibold"
-              style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }}
-            >
-              <s.Icon size={16} color={ACCENT} />
-              {s.label}
-            </button>
-          ))}
-        </div>
+        activeTag ? (
+          <Ws4ValuePanel
+            tag={activeTag}
+            onBack={() => setActiveTag(null)}
+            onCommit={commitWs4}
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            {WS4_STICKERS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setActiveTag(s)}
+                className="flex items-center gap-2 h-11 px-3 rounded-xl text-sm font-semibold"
+                style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }}
+              >
+                <s.Icon size={16} color={ACCENT} />
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )
       ) : imagePack ? (
         <div className="grid grid-cols-3 gap-2">
           {imagePack.stickers
@@ -1766,6 +1800,296 @@ function StickerPanel() {
         </div>
       )}
     </Panel>
+  );
+}
+
+// ---- WS-4 "Tags" value-entry inline sub-panels ----
+// Each populates the real metadata a WS-4 sticker deep-links on
+// (ws4OverlayTarget in story-overlays-layer.web reads kind/eventId/username/url)
+// and the pill `label` the viewer renders. No sticker is placed until a value
+// is chosen — no more empty pills.
+
+// Minimal view of the verified Event shape returned by useEventSearch /
+// useMyEvents (id/title/image/date/location all present — see
+// packages/app/lib/hooks/use-events.ts Event interface).
+interface Ws4EventItem {
+  id: string;
+  title: string;
+  image: string;
+  date: string;
+  location: string;
+}
+
+// Minimal view of a searchApi.searchUsers doc (id/username/avatar/name).
+interface Ws4UserItem {
+  id: string;
+  username: string;
+  avatar: string;
+  name: string;
+}
+
+function Ws4EventPicker({ onPick }: { onPick: (e: Ws4EventItem) => void }) {
+  const [q, setQ] = useState("");
+  const term = q.trim();
+  const searching = term.length >= 2;
+  // useEventSearch is enabled only at length >= 2; before that, seed with the
+  // host's own events (the common "I'm going" / promote case).
+  const search = useEventSearch(term);
+  const mine = useMyEvents();
+  const events = ((searching ? search.data : mine.data) ?? []) as Ws4EventItem[];
+  const loading = searching ? search.isLoading : mine.isLoading;
+
+  return (
+    <div>
+      <div
+        className="flex items-center gap-2 px-3 h-10 rounded-xl mb-3"
+        style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }}
+      >
+        <Search size={16} color="rgba(255,255,255,0.5)" />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search events…"
+          autoFocus
+          className="flex-1 bg-transparent text-sm outline-none text-white"
+        />
+      </div>
+      {!searching ? <Label>Your events</Label> : null}
+      {loading ? (
+        <p className="text-sm text-white/50 py-4 text-center">Loading…</p>
+      ) : events.length === 0 ? (
+        <p className="text-sm text-white/50 py-4 text-center">
+          {searching ? "No events found" : "No events yet — type to search"}
+        </p>
+      ) : (
+        <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
+          {events.map((ev) => (
+            <button
+              key={ev.id}
+              onClick={() => onPick(ev)}
+              className="flex items-center gap-3 h-14 px-2 rounded-xl text-left"
+              style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }}
+            >
+              {ev.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={ev.image}
+                  alt=""
+                  className="w-10 h-10 rounded-lg object-cover shrink-0"
+                  draggable={false}
+                />
+              ) : (
+                <div
+                  className="w-10 h-10 rounded-lg shrink-0"
+                  style={{ background: DEVIANT_GRADIENT }}
+                />
+              )}
+              <span className="flex flex-col min-w-0">
+                <span className="text-sm font-semibold text-white truncate">
+                  {ev.title}
+                </span>
+                <span className="text-[11px] text-white/50 truncate">
+                  {[ev.date, ev.location].filter(Boolean).join(" · ")}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Ws4MentionPicker({ onPick }: { onPick: (u: Ws4UserItem) => void }) {
+  const [q, setQ] = useState("");
+  const term = q.trim();
+  const users = useQuery({
+    queryKey: ["ws4-user-search", term] as const,
+    queryFn: () => searchApi.searchUsers(term, 20),
+    enabled: term.length >= 1,
+  });
+  const docs = (users.data?.docs ?? []) as Ws4UserItem[];
+
+  return (
+    <div>
+      <div
+        className="flex items-center gap-2 px-3 h-10 rounded-xl mb-3"
+        style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }}
+      >
+        <AtSign size={16} color="rgba(255,255,255,0.5)" />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search people…"
+          autoFocus
+          className="flex-1 bg-transparent text-sm outline-none text-white"
+        />
+      </div>
+      {users.isLoading ? (
+        <p className="text-sm text-white/50 py-4 text-center">Loading…</p>
+      ) : term.length < 1 ? (
+        <p className="text-sm text-white/50 py-4 text-center">
+          Type a username to search
+        </p>
+      ) : docs.length === 0 ? (
+        <p className="text-sm text-white/50 py-4 text-center">No people found</p>
+      ) : (
+        <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
+          {docs.map((u) => (
+            <button
+              key={u.id}
+              onClick={() => onPick(u)}
+              className="flex items-center gap-3 h-14 px-2 rounded-xl text-left"
+              style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }}
+            >
+              {u.avatar ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={u.avatar}
+                  alt=""
+                  className="w-10 h-10 rounded-xl object-cover shrink-0"
+                  draggable={false}
+                />
+              ) : (
+                <div
+                  className="w-10 h-10 rounded-xl shrink-0 flex items-center justify-center"
+                  style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }}
+                >
+                  <AtSign size={16} color="rgba(255,255,255,0.5)" />
+                </div>
+              )}
+              <span className="flex flex-col min-w-0">
+                <span className="text-sm font-semibold text-white truncate">
+                  @{u.username}
+                </span>
+                {u.name ? (
+                  <span className="text-[11px] text-white/50 truncate">
+                    {u.name}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// http(s)-only; prepend https:// when the user omits a scheme; reject anything
+// that isn't a valid http/https URL.
+function normalizeWs4Url(raw: string): { url: string; host: string } | null {
+  const t = raw.trim();
+  if (!t) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : `https://${t}`;
+  try {
+    const u = new URL(withScheme);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return { url: u.toString(), host: u.hostname };
+  } catch {
+    return null;
+  }
+}
+
+function Ws4LinkPicker({
+  onPick,
+}: {
+  onPick: (url: string, host: string) => void;
+}) {
+  const [raw, setRaw] = useState("");
+  const parsed = normalizeWs4Url(raw);
+  return (
+    <div>
+      <Label>Link URL</Label>
+      <div
+        className="flex items-center gap-2 px-3 h-11 rounded-xl mb-2"
+        style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }}
+      >
+        <LinkIcon size={16} color="rgba(255,255,255,0.5)" />
+        <input
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          placeholder="example.com/tickets"
+          autoFocus
+          inputMode="url"
+          className="flex-1 bg-transparent text-sm outline-none text-white"
+        />
+      </div>
+      {raw.trim() && !parsed ? (
+        <p className="text-[11px] mb-2" style={{ color: DANGER }}>
+          Enter a valid http(s) link
+        </p>
+      ) : null}
+      <button
+        disabled={!parsed}
+        onClick={() => parsed && onPick(parsed.url, parsed.host)}
+        className="w-full h-11 rounded-xl flex items-center justify-center gap-2 font-semibold disabled:opacity-40"
+        style={{ background: DEVIANT_GRADIENT, color: INK }}
+      >
+        <Check size={18} color={INK} /> Add link
+      </button>
+      {parsed ? (
+        <p className="text-[11px] text-white/50 mt-2 text-center">
+          Pill shows: {parsed.host}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function Ws4ValuePanel({
+  tag,
+  onBack,
+  onCommit,
+}: {
+  tag: (typeof WS4_STICKERS)[number];
+  onBack: () => void;
+  onCommit: (
+    label: string,
+    metadata: Record<string, string>,
+    category: StickerElement["category"],
+  ) => void;
+}) {
+  const kind = tag.metadata.kind;
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <button
+          onClick={onBack}
+          aria-label="Back"
+          className="w-8 h-8 rounded-lg flex items-center justify-center active:scale-95"
+          style={{ background: SURFACE }}
+        >
+          <ArrowLeft size={16} color="#fff" />
+        </button>
+        <span className="text-sm font-semibold text-white flex items-center gap-1.5">
+          <tag.Icon size={15} color={ACCENT} /> {tag.label}
+        </span>
+      </div>
+      {kind === "event" || kind === "ticket" ? (
+        <Ws4EventPicker
+          onPick={(ev) =>
+            onCommit(ev.title, { kind, eventId: ev.id }, tag.category)
+          }
+        />
+      ) : kind === "mention" ? (
+        <Ws4MentionPicker
+          onPick={(u) =>
+            onCommit(
+              `@${u.username}`,
+              { kind: "mention", username: u.username },
+              tag.category,
+            )
+          }
+        />
+      ) : (
+        <Ws4LinkPicker
+          onPick={(url, host) =>
+            onCommit(host, { kind: "link", url }, tag.category)
+          }
+        />
+      )}
+    </div>
   );
 }
 
