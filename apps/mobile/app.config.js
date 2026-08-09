@@ -37,7 +37,12 @@ export default {
     runtimeVersion: "1.0.0",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
-    userInterfaceStyle: "automatic",
+    // DVNT is dark-only. "automatic" let every SYSTEM-drawn surface follow the
+    // device: the UITabBar, TrueSheet backgrounds, liquid glass, Alert,
+    // ActionSheet, pickers and the keyboard all rendered light on a phone set
+    // to Light appearance. App-drawn Views were fine (the palette is black in
+    // both schemes), which is why this looked like "some screens are white".
+    userInterfaceStyle: "dark",
     splash: {
       image: "./assets/images/splash-icon.png",
       resizeMode: "contain",
@@ -318,7 +323,22 @@ export default {
       // that all four DVNT background jobs multiplex under. Android needs no
       // extra permissions (expo-task-manager ships its receiver + JobService).
       "expo-background-task",
-      "expo-splash-screen",
+      // Must carry its own config: once this plugin is listed it OWNS the iOS
+      // storyboard and the Android splash colors, and the top-level `splash`
+      // key above is ignored. With no props it generated
+      // systemBackgroundColor (white on a Light device) in
+      // SplashScreen.storyboard and a hardcoded #FFFFFF in Android's
+      // colors.xml — a guaranteed white launch flash on Android and a
+      // conditional one on iOS.
+      [
+        "expo-splash-screen",
+        {
+          image: "./assets/images/splash-icon.png",
+          resizeMode: "contain",
+          backgroundColor: "#000000",
+          dark: { backgroundColor: "#000000" },
+        },
+      ],
       "expo-status-bar",
       "expo-web-browser",
       "@config-plugins/react-native-webrtc",

@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
 import { Heart, Bookmark, Play, Grid3x3, Plus } from "lucide-react";
-import { useInfiniteFeedPosts } from "@dvnt/app/lib/hooks/use-posts";
+import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
 import { useFeedRealtime } from "@dvnt/app/lib/hooks/use-feed-realtime";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { useToggleBookmark } from "@dvnt/app/lib/hooks/use-bookmarks";
@@ -83,6 +83,10 @@ export function HomeScreen() {
     useInfiniteFeedPosts();
   // Live feed: refetch when other users post/delete (web has no pull-to-refresh).
   useFeedRealtime();
+  // Reconcile hearts against the server, the way the native feeds do
+  // (masonry-feed / feed both call this). Without it web had no path to
+  // correct a like made on another device.
+  useSyncLikedPosts();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const posts: Post[] = data?.pages?.flatMap((p: any) => p?.data ?? []) ?? [];

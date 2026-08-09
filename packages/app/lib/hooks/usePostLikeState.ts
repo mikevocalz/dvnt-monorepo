@@ -371,9 +371,16 @@ export function seedLikeState(
 
   const key = likeStateKeys.forPost(viewerId, normalizedPostId);
 
-  // CRITICAL: Only seed if no existing cache — never overwrite optimistic updates
-  const existing = queryClient.getQueryData<LikeState>(key);
-  if (existing) {
+  // Never clobber an optimistic update that is still settling — but only skip
+  // while a like mutation for THIS post is genuinely in flight. The old check
+  // ("does a cache entry exist?") meant any stale entry won forever: this query
+  // is staleTime: Infinity with a queryFn that never hits the network, so once
+  // seeded there was no path back to server truth. On web, where the cache was
+  // also restored from localStorage, that froze hearts and counts across
+  // sessions.
+  const isMutating =
+    queryClient.isMutating({ mutationKey: ["likePost", normalizedPostId] }) > 0;
+  if (isMutating) {
     return;
   }
 

@@ -2,55 +2,48 @@ import { View, Text, ScrollView, Pressable } from "react-native";
 import { Main } from "@expo/html-elements";
 import { useRouter, useNavigation } from "expo-router";
 import { SettingsCloseButton } from "@dvnt/app/components/settings-back-button";
-import { Sun, Moon, Smartphone, Check } from "lucide-react-native";
+import { Moon, Check } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { mmkv } from "@dvnt/app/lib/mmkv-zustand";
 import { useEffect, useState, useLayoutEffect } from "react";
 
-type ThemeOption = "system" | "light" | "dark";
+// DVNT is dark-only. This screen used to offer System / Light / Dark, and
+// picking Light genuinely flipped the app: it set nativewind's scheme, which
+// selected NAV_THEME.light (dark: false), disabling every dark: variant, and
+// persisted to MMKV so it survived restart. Dark is now the only option.
+type ThemeOption = "dark";
 const THEME_STORAGE_KEY = "app_theme_preference";
 
 export default function ThemeScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const { colors, colorScheme, setColorScheme } = useColorScheme();
-  const [selectedTheme, setSelectedTheme] = useState<ThemeOption>("system");
+  const [selectedTheme, setSelectedTheme] = useState<ThemeOption>("dark");
 
+  // Clear any previously stored "light"/"system" preference so an existing
+  // install stops carrying a choice that is no longer honoured.
   useEffect(() => {
-    const stored = mmkv.getString(THEME_STORAGE_KEY);
-    if (stored === "light" || stored === "dark" || stored === "system") {
-      setSelectedTheme(stored);
+    if (mmkv.getString(THEME_STORAGE_KEY) !== "dark") {
+      mmkv.set(THEME_STORAGE_KEY, "dark");
     }
   }, []);
 
   const handleSelectTheme = (theme: ThemeOption) => {
     setSelectedTheme(theme);
     mmkv.set(THEME_STORAGE_KEY, theme);
-    setColorScheme(theme as Parameters<typeof setColorScheme>[0]);
+    setColorScheme();
   };
 
   const themes: {
     id: ThemeOption;
     label: string;
     description: string;
-    Icon: typeof Sun;
+    Icon: typeof Moon;
   }[] = [
-    {
-      id: "system",
-      label: "System",
-      description: "Match your device settings",
-      Icon: Smartphone,
-    },
-    {
-      id: "light",
-      label: "Light",
-      description: "Always use light mode",
-      Icon: Sun,
-    },
     {
       id: "dark",
       label: "Dark",
-      description: "Always use dark mode",
+      description: "DVNT is designed for dark mode",
       Icon: Moon,
     },
   ];

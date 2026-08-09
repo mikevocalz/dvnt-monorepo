@@ -27,7 +27,7 @@ export default function CallLayout() {
       }}
     >
       <FishjamProvider fishjamId={FISHJAM_APP_ID} debug={__DEV__}>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#000" } }} />
       </FishjamProvider>
     </ErrorBoundary>
   );

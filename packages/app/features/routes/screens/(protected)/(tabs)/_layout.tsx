@@ -39,7 +39,15 @@ export default function TabsLayout() {
 
   return (
     <View style={{ flex: 1 }}>
-      <NativeTabs minimizeBehavior="onScrollDown">
+      <NativeTabs
+      minimizeBehavior="onScrollDown"
+      // Dark-only: the underlying UITabBar / BottomNavigationView follows
+      // system appearance unless told otherwise, so it rendered as a light
+      // bar with dark labels on a Light-appearance device.
+      backgroundColor="#000"
+      blurEffect="systemChromeMaterialDark"
+      tintColor="#FFFFFF"
+    >
         {supportsBottomAccessory ? (
           <NativeTabs.BottomAccessory>
             <HomeSpicyToggleAccessory />

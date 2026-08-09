@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "solito/navigation";
-import { Sun, Moon, Smartphone, Check, X } from "lucide-react";
+import { Moon, Check, X } from "lucide-react";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { mmkv } from "@dvnt/app/lib/mmkv-zustand";
 
@@ -17,31 +17,20 @@ import { mmkv } from "@dvnt/app/lib/mmkv-zustand";
  * rounded card rows with a cyan Check on the selected option.
  */
 
-type ThemeOption = "system" | "light" | "dark";
+// Dark-only, matching the native screen (features/routes/screens/settings/theme).
+type ThemeOption = "dark";
 const THEME_STORAGE_KEY = "app_theme_preference";
 
 const themes: {
   id: ThemeOption;
   label: string;
   description: string;
-  Icon: typeof Sun;
+  Icon: typeof Moon;
 }[] = [
-  {
-    id: "system",
-    label: "System",
-    description: "Match your device settings",
-    Icon: Smartphone,
-  },
-  {
-    id: "light",
-    label: "Light",
-    description: "Always use light mode",
-    Icon: Sun,
-  },
   {
     id: "dark",
     label: "Dark",
-    description: "Always use dark mode",
+    description: "DVNT is designed for dark mode",
     Icon: Moon,
   },
 ];
@@ -53,17 +42,11 @@ export function ThemeScreen() {
   // Selection lives in the mmkv store, not local state. Reading `colorScheme`
   // above subscribes this component to the nativewind store so the active row
   // re-renders the moment `setColorScheme` runs.
-  const stored = mmkv.getString(THEME_STORAGE_KEY);
-  const selectedTheme: ThemeOption =
-    stored === "light" || stored === "dark" || stored === "system"
-      ? stored
-      : colorScheme === "light"
-        ? "light"
-        : "dark";
+  const selectedTheme: ThemeOption = "dark";
 
   const handleSelectTheme = (theme: ThemeOption) => {
     mmkv.set(THEME_STORAGE_KEY, theme);
-    setColorScheme(theme as Parameters<typeof setColorScheme>[0]);
+    setColorScheme();
   };
 
   return (

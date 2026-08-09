@@ -17,7 +17,9 @@ export default function VideoLayout() {
         screenOptions={{
           headerShown: false,
           animation: "slide_from_right",
-          contentStyle: { backgroundColor: "rgb(var(--background))" },
+          // Was "rgb(var(--background))" — CSS syntax in a plain RN style
+          // object, which RN cannot parse, so it fell back to the theme.
+          contentStyle: { backgroundColor: "#000" },
         }}
       >
         <Stack.Screen name="rooms" />

@@ -65,6 +65,9 @@ export default function AppSheet({
           detents,
           detentIndex: detents.length - 1,
           cornerRadius,
+          // Dark-only: TrueSheet's native container otherwise falls back to
+          // UIColor.systemBackground, i.e. white on a Light-appearance device.
+          background: "#000",
           grabber: true,
           grabberOptions: GRABBER_OPTIONS,
           scrollable,

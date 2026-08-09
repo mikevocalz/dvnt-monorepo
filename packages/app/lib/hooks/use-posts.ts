@@ -134,11 +134,14 @@ export function useInfiniteFeedPosts({
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage?.nextCursor ?? undefined,
     staleTime: STALE_TIMES.feed,
-    refetchOnMount: false,
-    // Web has no pull-to-refresh, so the feed would otherwise never pick up new
-    // posts within a session. Refetch when the browser tab regains focus (only
-    // when data is already stale, so it's not chatty). Native keeps pull-to-
-    // refresh and its instant back-nav (no focus refetch).
+    // Web MUST revalidate on mount. refetchOnWindowFocus only fires on a
+    // blur→focus round trip, which never happens on the visit that matters —
+    // a cold page load — so the web feed painted a localStorage snapshot that
+    // could be hours old and never refreshed it. Cached pages still render
+    // instantly; the refetch lands in the background (stale-while-revalidate).
+    // Native keeps false: it has pull-to-refresh and instant back-nav.
+    refetchOnMount: Platform.OS === "web" ? "always" : false,
+    // Still useful within a session for tab switching.
     refetchOnWindowFocus: Platform.OS === "web",
   });
 }

@@ -569,9 +569,11 @@ function RootLayout() {
                   client={queryClient}
                   persistOptions={persistOptions}
                 >
-                  <ThemeProvider
-                    value={NAV_THEME[colorScheme === "light" ? "light" : "dark"]}
-                  >
+                  {/* Dark-only: never select NAV_THEME.light. A light nav
+                      theme sets dark:false, which turns off every dark:
+                      variant and flips native surfaces that read
+                      useTheme().dark. */}
+                  <ThemeProvider value={NAV_THEME.dark}>
                     <LikesSheetProvider>
                       <View
                         style={{

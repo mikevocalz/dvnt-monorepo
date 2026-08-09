@@ -8,7 +8,8 @@ export default function AuthLayout() {
 
   return (
     <Stack
-      screenOptions={{ headerShown: false }}
+      // Nested navigators do NOT inherit the root Stack's contentStyle.
+      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#000" } }}
       initialRouteName={hasSeenOnboarding ? "login" : "onboarding"}
     >
       <Stack.Screen name="login" />
