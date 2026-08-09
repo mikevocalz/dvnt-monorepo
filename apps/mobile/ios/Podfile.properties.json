@@ -3,6 +3,7 @@
   "EX_DEV_CLIENT_NETWORK_INSPECTOR": "true",
   "ios.deploymentTarget": "17.0",
   "expo.inlineModules.watchedDirectories": "[]",
+  "expo.inlineModules.xcodeProjectTargets": "{\"mainTarget\":\"DVNT\",\"targets\":[]}",
   "ios.forceStaticLinking": "[]",
   "apple.privacyManifestAggregationEnabled": "true",
   "ios.buildReactNativeFromSource": "true",
