@@ -325,6 +325,27 @@ function assetToUrl(source: string | number): string {
   return "";
 }
 
+// Metro `require()` of the sticker PNGs doesn't resolve to a browser URL in the
+// Next build (assetToUrl returns "" → blank cells), so on web we serve them
+// from apps/web/public/stickers/ and resolve by sticker id. Keep in sync with
+// IMAGE_STICKER_PACKS (packages/app/features/stories-editor/constants).
+const STICKER_WEB_URLS: Record<string, string> = {
+  "dvnt-app": "/stickers/dvnt/DVNT-stickers_APP.png",
+  "dvnt-afterhours": "/stickers/dvnt/DVNT-stickers_AfterHours.png",
+  "dvnt-counterculture": "/stickers/dvnt/DVNT-stickers_CounterCulture.png",
+  "dvnt-dayplay": "/stickers/dvnt/DVNT-stickers_DAYPLAY.png",
+  "dvnt-deviant": "/stickers/dvnt/DVNT-stickers_Deviant.png",
+  "dvnt-energycheck": "/stickers/dvnt/DVNT-stickers_EnergyCheck.png",
+  "dvnt-ftc": "/stickers/dvnt/DVNT-stickers_FTC.png",
+  "dvnt-outside": "/stickers/dvnt/DVNT-stickers_OUTSIDE.png",
+  "dvnt-eatit": "/stickers/dvnt/eat-it.png",
+  "ballroom-chop": "/stickers/ballroom/1-chop.png",
+  "ballroom-serve1": "/stickers/ballroom/serve.png",
+  "ballroom-serve2": "/stickers/ballroom/category-is.png",
+  "ballroom-ate": "/stickers/ballroom/ate-that.png",
+  "ballroom-tea": "/stickers/ballroom/tea.png",
+};
+
 // ============================================================
 // Filter → CSS string for LIVE preview via feColorMatrix + vignette handled
 // separately as an overlay (matches native's separate vignette layer).
@@ -1512,7 +1533,9 @@ function StickerPanel() {
   };
 
   const tabs: { id: StickerTab; label: string }[] = [
-    { id: "dvnt-native", label: "DVNT" },
+    // "Tags" = the WS-4 interactive stickers (event/ticket/mention/link);
+    // the image pack below is the one actually named "DVNT" — don't collide.
+    { id: "dvnt-native", label: "Tags" },
     ...IMAGE_STICKER_PACKS.map((p) => ({ id: p.id, label: p.name })),
     { id: "emoji", label: "Emoji" },
   ];
@@ -1584,7 +1607,7 @@ function StickerPanel() {
           {imagePack.stickers
             .filter((s) => (q ? s.label.toLowerCase().includes(q) : true))
             .map((s) => {
-              const url = assetToUrl(s.source);
+              const url = STICKER_WEB_URLS[s.id] ?? assetToUrl(s.source);
               return (
                 <button
                   key={s.id}
