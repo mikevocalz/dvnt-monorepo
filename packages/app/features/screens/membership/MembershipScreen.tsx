@@ -82,30 +82,27 @@ export function MembershipScreen(_props: MembershipScreenProps = {}) {
       return;
     }
     try {
-      // Byte-for-byte the /pricing page's proven call (raw fetch, anon key in
-      // Authorization, Better Auth session in x-auth-token) — NOT
-      // supabase.functions.invoke, which was silently failing here.
+      // Use supabase.functions.invoke — NOT a raw fetch. A raw cross-origin
+      // fetch to the functions host fails the preflight in browsers ("Failed
+      // to fetch"); invoke sends apikey + handles CORS the way the gateway
+      // expects. This is the exact mechanism the working sneaky-billing web
+      // checkout uses. (The /pricing page's raw-fetch has the same latent
+      // bug — it should move to invoke too.)
       const { requireBetterAuthToken } = await import(
         "@dvnt/app/lib/auth/identity"
       );
-      const authToken = await requireBetterAuthToken();
-      const env = (globalThis as typeof globalThis & {
-        process?: { env?: Record<string, string | undefined> };
-      }).process?.env;
-      const base = env?.EXPO_PUBLIC_SUPABASE_URL;
-      const anon = env?.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-      const res = await fetch(`${base}/functions/v1/membership-checkout`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${anon}`,
-          "x-auth-token": authToken,
+      const { supabase } = await import("@dvnt/app/lib/supabase/client");
+      const token = await requireBetterAuthToken();
+      const { data, error } = await supabase.functions.invoke(
+        "membership-checkout",
+        {
+          body: { plan_key: k },
+          headers: { Authorization: `Bearer ${token}`, "x-auth-token": token },
         },
-        body: JSON.stringify({ plan_key: k }),
-      });
-      const data = (await res.json()) as { url?: string; error?: string };
-      if (data.error) throw new Error(data.error);
-      if (data.url) {
+      );
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      if (data?.url) {
         (globalThis as typeof globalThis & { location?: Location }).location?.assign(
           data.url,
         );

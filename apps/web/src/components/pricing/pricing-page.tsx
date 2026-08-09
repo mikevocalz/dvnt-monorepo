@@ -51,27 +51,28 @@ export function PricingPage() {
     }
     try {
       setPending(planKey);
-      // Web Stripe Checkout via the Supabase edge function (reader-app pattern).
-      // The function authenticates the user from the Better Auth session token in
-      // `x-auth-token` (verifySession); Authorization carries the anon JWT so the
-      // Supabase gateway accepts the request.
+      // Stripe Checkout via supabase.functions.invoke — a raw cross-origin
+      // fetch to the functions host fails the browser preflight ("Failed to
+      // fetch"); invoke sends apikey + handles CORS the gateway expects. The
+      // function reads the Better Auth session from x-auth-token (verifySession).
       const { requireBetterAuthToken } = await import(
         '@dvnt/app/lib/auth/identity'
       );
+      const { supabase } = await import('@dvnt/app/lib/supabase/client');
       const authToken = await requireBetterAuthToken();
-      const base = process.env.EXPO_PUBLIC_SUPABASE_URL;
-      const res = await fetch(`${base}/functions/v1/membership-checkout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          'x-auth-token': authToken,
+      const { data, error } = await supabase.functions.invoke(
+        'membership-checkout',
+        {
+          body: { plan_key: planKey },
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'x-auth-token': authToken,
+          },
         },
-        body: JSON.stringify({ plan_key: planKey }),
-      });
-      const data = (await res.json()) as { url?: string; error?: string };
-      if (data.error) throw new Error(data.error);
-      if (data.url) window.location.href = data.url;
+      );
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      if (data?.url) window.location.href = data.url;
       else throw new Error('No checkout URL returned');
     } catch (e) {
       console.error('[pricing] checkout failed', e);
