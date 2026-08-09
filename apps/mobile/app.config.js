@@ -282,14 +282,16 @@ export default {
       ],
       // Links native targets (Apple Watch app + watch complication) outside /ios
       // via CNG. Auto-discovers apps/mobile/targets/*/expo-target.config.js.
-      // Re-enabled 2026-08-09: Mike confirms the watch App IDs + App Group
-      // (group.com.dvnt.app.watch, com.dvnt.app.watchkitapp[.complication]) are
-      // registered on the Developer portal — the earlier "not registerable on
-      // the Individual team" blocker is resolved. `eas build -p ios` is the
-      // definitive check: it succeeds if registered, else errors naming the
-      // missing App ID (revert this line to disable). Links the watch app +
-      // complication targets under apps/mobile/targets/* via CNG.
-      "@bacons/apple-targets",
+      // DISABLED again 2026-08-09 after running the definitive check. Apple
+      // still refuses both watch App IDs on team 436WA3W63V:
+      //   - com.dvnt.app.watchkitapp.complication → "An App ID with Identifier
+      //     ... is not available" (same blocker as the SDK 56 build in June).
+      //   - com.dvnt.app.watchkitapp → registers, but APP_GROUPS capability
+      //     sync fails (group.com.dvnt.app.watch is not a registered App Group).
+      // Swift sources stay under apps/mobile/targets/* — only the CNG link is
+      // off. Re-enable by uncommenting once BOTH App IDs and the watch App
+      // Group exist in the Developer portal.
+      // "@bacons/apple-targets",
       "./plugins/disable-user-script-sandboxing",
       "./plugins/with-app-controller-init",
       // Install NSSetUncaughtExceptionHandler EARLY so it's the first
@@ -416,13 +418,21 @@ export default {
       // safely ship: the widget-extension target, App Group, aps-environment,
       // and the NSSupportsLiveActivities Info.plist flag. groupIdentifier keeps
       // the existing App Group; enablePushNotifications turns on push-to-start.
-      [
-        "expo-widgets",
-        {
-          groupIdentifier: "group.com.dvnt.app",
-          enablePushNotifications: true,
-        },
-      ],
+      // DISABLED 2026-08-09 for the same reason as @bacons/apple-targets above:
+      // the generated App ID com.dvnt.app.ExpoWidgetsTarget is brand new, and
+      // EAS cannot turn its APP_GROUPS capability on with App-Store-Connect
+      // API-key auth (capability *identifier* syncing needs cookie auth), so
+      // Apple rejects the patch and the build dies at credentials. The main app
+      // com.dvnt.app is unaffected — its App Groups was enabled long ago.
+      // This whole slice is Apple Surfaces WS-1, still at its approval gate.
+      // Re-enable after enabling App Groups on the widget App ID in the portal.
+      // [
+      //   "expo-widgets",
+      //   {
+      //     groupIdentifier: "group.com.dvnt.app",
+      //     enablePushNotifications: true,
+      //   },
+      // ],
       ["./plugins/with-development-team", { teamId: "436WA3W63V" }],
       "expo-secure-store",
       "react-native-compressor",

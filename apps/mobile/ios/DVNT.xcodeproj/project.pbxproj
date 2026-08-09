@@ -7,250 +7,95 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0DF2976028324962B21E6814 /* Intents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DC3079BBE5964D1D97570672 /* Intents.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
-		11189177D355C16DE1E3A1F4 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97D8C192DEC89CFD18134F1D /* ExpoModulesProvider.swift */; };
+		06941CD9AF6C4CF89E448AC3 /* PushKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3BE822C8A3534870B597D497 /* PushKit.framework */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		16E1B6C6E29645CCAC0094C3 /* dvnt-ring.wav in Resources */ = {isa = PBXBuildFile; fileRef = 85EE6AD74A53426285C28AFF /* dvnt-ring.wav */; };
-		29F72D6DAD7E44EC917710F2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 30F58D4FBD7C4B198FE2C001 /* PrivacyInfo.xcprivacy */; };
-		2E747EBC458A4269A3C67646 /* AppDelegate+VoIPPush.m in Sources */ = {isa = PBXBuildFile; fileRef = 91B6FB66C560462C949C767D /* AppDelegate+VoIPPush.m */; };
+		196755987F5B43FCB7F2B11F /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = DDF06ACF5DE449D2803516DC /* MainInterface.storyboard */; };
+		19C61EF21EEE4A4F9E0A5989 /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CFDAC658FC46AA9F07DF5E /* noop-file.swift */; };
+		2BB3E60F256248F3A7BB1245 /* ShareExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = C7C67CF699BB491CB4E5C6D1 /* ShareExtension.appex */; };
+		335A807052DE469C9E92E9D1 /* dvnt-ring.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2B3EC6C0FF9A4A139FA95795 /* dvnt-ring.wav */; };
+		3605C162A6FD431BA4757437 /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 34A7C147AEEF4508A93DB2F6 /* CallKit.framework */; };
+		37A953256887046D783112E7 /* libPods-DVNT.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1C7518CB6C99AEFC79CFCBD2 /* libPods-DVNT.a */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		56835B1C439345129DF0D871 /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = DD722D9AF6D54ECFB634B62A /* MainInterface.storyboard */; };
-		60616A32FCC843EF9454B0AB /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F64EA461B6C54D84951CE834 /* CallKit.framework */; };
-		A0299CDF555B4B98B5BCD630 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B6436D4EC50B43CF946705A6 /* PrivacyInfo.xcprivacy */; };
-		A4B9F3D633CB00C03DC3847E /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02031F6DC653780488B944F0 /* ExpoModulesProvider.swift */; };
-		A549896C497142A7988C56B4 /* index.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C741DCBE0C04B40B7E5144C /* index.swift */; };
-		B833A84319814699A565797F /* PushKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 09373BCE28E842029442217F /* PushKit.framework */; };
+		7C122066119A4246AE0946A0 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = AEE66999911541B6A66D1443 /* PrivacyInfo.xcprivacy */; };
+		7C73611C017548F084DC40D8 /* Intents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 11984E0456514B81A1B1FC5A /* Intents.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
+		7DB8027F63CE4323A9F040D8 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D1CE34906E2749379E49CA40 /* PrivacyInfo.xcprivacy */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		BE87E864DBA64BF98AECE12E /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFAA40C7A343484D94442D93 /* noop-file.swift */; };
-		BF294468F86AF3095DB8318A /* libPods-ExpoWidgetsTarget.a in Frameworks */ = {isa = PBXBuildFile; fileRef = BA7A068A2DB4C449E1A50C0E /* libPods-ExpoWidgetsTarget.a */; };
-		C605C25111E7E6E78BDDE044 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B6436D4EC50B43CF946705A6 /* PrivacyInfo.xcprivacy */; };
-		DD54D08D97F14877B70548AE /* ShareExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 233219B6018B4594AB61922A /* ShareExtension.appex */; };
-		DE7A36048AE446D95FB63C5A /* libPods-DVNT.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 03C99CC9C1F91B1A5980093E /* libPods-DVNT.a */; };
-		E2C6C7F12811438A8F3CB361 /* ShareExtensionPreprocessor.js in Resources */ = {isa = PBXBuildFile; fileRef = E8A38EBE09E54C9FB5BD4442 /* ShareExtensionPreprocessor.js */; };
-		E32F5972DD8C4468AA7308E6 /* ExpoWidgetsTarget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F35EE3AE84E4436DB8B1B063 /* ExpoWidgetsTarget.appex */; };
+		BE505EE568A3402D9421F3EF /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1878ADC27F97436A86064D24 /* ShareViewController.swift */; };
+		CCEBCBEE945440D38A8A1CEE /* AppDelegate+VoIPPush.m in Sources */ = {isa = PBXBuildFile; fileRef = C882BA7B82B343D3A37030C9 /* AppDelegate+VoIPPush.m */; };
+		E70203EC0FE8F2C5C1EE3610 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9CDCD0188A75151DABA98BF /* ExpoModulesProvider.swift */; };
+		EC6114624B4741AA8DFD0BAD /* ShareExtensionPreprocessor.js in Resources */ = {isa = PBXBuildFile; fileRef = F4EC77F4C32D48C0A9444B01 /* ShareExtensionPreprocessor.js */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
-		F7D0634AD44946F4A1EC9BF8 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BF73E6E022F4C9EB4ADC932 /* ShareViewController.swift */; };
-		XX12B55A1EDABF083C3B51XX /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX470101BAEB8E0BBC8B0DXX /* WidgetKit.framework */; };
-		XX1A6800511A685AB346D2XX /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XXA12889081EB894481655XX /* AppIntents.framework */; };
-		XX1ECDC44A36499A2C9883XX /* WatchKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX378A422B4194AC6966BAXX /* WatchKit.framework */; };
-		XX378C5AFCA51B0EA4F6B5XX /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */; };
-		XX3C562DEF346B45594832XX /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XXCAF23C3FC41F82140FA1XX /* ActivityKit.framework */; };
-		XX6A44985675A04437B8C4XX /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */; };
-		XX701AE525521F5C0BCBCBXX /* DVNTWatchComplication.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		XX8E4863C19534EC7D4226XX /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX8ACBDF17A27E5D829A2CXX /* WatchConnectivity.framework */; };
-		XX9DE1DCAA7FEF616A33B4XX /* DVNT.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		XXD492FB1555A651E8C029XX /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX99DB34EAB420F9CA31AFXX /* UserNotifications.framework */; };
-		XXFF0758375E66BEE6B904XX /* CoreImage.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX7E674302DD5EEB942175XX /* CoreImage.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		B75BAA8F8D7044B884BE7E6D /* PBXContainerItemProxy */ = {
+		AF5518A04EEE485DB13B4A56 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 0377FDEE945C44A6A311BB75;
-			remoteInfo = ExpoWidgetsTarget;
-		};
-		F9DC22D0160B459790A27826 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = DE167F149ACA4AD89E8B8264;
+			remoteGlobalIDString = 62E64F267F994D84A8FE5B11;
 			remoteInfo = ShareExtension;
-		};
-		XXB32BF84AD63A8E0D9F0EXX /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = XXEB4F218FD5F06DBADE29XX;
-			remoteInfo = DVNTWatchComplication;
-		};
-		XXCC2F6CC4483EF823FD14XX /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = XX6A43DD0F552874E793D0XX;
-			remoteInfo = DVNT;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		0DCF43A95CBB43D9BD718A99 /* Embed Foundation Extensions */ = {
+		F3FBEF4D85164CF0ADB659DD /* Copy Files */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				E32F5972DD8C4468AA7308E6 /* ExpoWidgetsTarget.appex in Embed Foundation Extensions */,
-				XX701AE525521F5C0BCBCBXX /* DVNTWatchComplication.appex in Embed Foundation Extensions */,
-			);
-			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		4EBF93BC1AEA4BB98A5C69C1 /* Copy Files */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				DD54D08D97F14877B70548AE /* ShareExtension.appex in Copy Files */,
+				2BB3E60F256248F3A7BB1245 /* ShareExtension.appex in Copy Files */,
 			);
 			name = "Copy Files";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		XX81D5C67C94C2E1F9007EXX /* Embed Watch Content */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
-			dstSubfolderSpec = 16;
-			files = (
-				XX9DE1DCAA7FEF616A33B4XX /* DVNT.app in Embed Watch Content */,
-			);
-			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		02031F6DC653780488B944F0 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-DVNT/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		03C99CC9C1F91B1A5980093E /* libPods-DVNT.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-DVNT.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		09373BCE28E842029442217F /* PushKit.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = PushKit.framework; path = System/Library/Frameworks/PushKit.framework; sourceTree = SDKROOT; };
-		13B07F961A680F5B00A75B9A /* DVNT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; fileEncoding = 4; includeInIndex = 0; path = DVNT.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = DVNT/Images.xcassets; sourceTree = "<group>"; };
-		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = Info.plist; path = DVNT/Info.plist; sourceTree = "<group>"; };
-		1C741DCBE0C04B40B7E5144C /* index.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = index.swift; path = index.swift; sourceTree = "<group>"; };
-		233219B6018B4594AB61922A /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = undefined; name = ShareExtension.appex; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		284ACCF02C034CE0970B40E6 /* ExpoWidgetsTarget.entitlements */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ExpoWidgetsTarget.entitlements; path = ExpoWidgetsTarget.entitlements; sourceTree = "<group>"; };
-		30F58D4FBD7C4B198FE2C001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		4C2D97B6F16693F442E16C51 /* Pods-ExpoWidgetsTarget.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ExpoWidgetsTarget.release.xcconfig"; path = "Target Support Files/Pods-ExpoWidgetsTarget/Pods-ExpoWidgetsTarget.release.xcconfig"; sourceTree = "<group>"; };
-		534787E8BD721E707B6D5DE1 /* Pods-ExpoWidgetsTarget.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ExpoWidgetsTarget.debug.xcconfig"; path = "Target Support Files/Pods-ExpoWidgetsTarget/Pods-ExpoWidgetsTarget.debug.xcconfig"; sourceTree = "<group>"; };
-		5B36118C59329B88C1FFE58B /* Pods-DVNT.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-DVNT.release.xcconfig"; path = "Target Support Files/Pods-DVNT/Pods-DVNT.release.xcconfig"; sourceTree = "<group>"; };
-		83BA34EB5F1A47919D169E09 /* ShareExtension-Info.plist */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = "ShareExtension-Info.plist"; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; };
-		85EE6AD74A53426285C28AFF /* dvnt-ring.wav */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = audio.wav; name = "dvnt-ring.wav"; path = "DVNT/dvnt-ring.wav"; sourceTree = "<group>"; };
-		91B6FB66C560462C949C767D /* AppDelegate+VoIPPush.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = sourcecode.c.objc; name = "AppDelegate+VoIPPush.m"; path = "DVNT/AppDelegate+VoIPPush.m"; sourceTree = "<group>"; };
-		97D8C192DEC89CFD18134F1D /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-ExpoWidgetsTarget/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		9BF73E6E022F4C9EB4ADC932 /* ShareViewController.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = ShareViewController.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
-		A166665694083D04D9803699 /* Pods-DVNT.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-DVNT.debug.xcconfig"; path = "Target Support Files/Pods-DVNT/Pods-DVNT.debug.xcconfig"; sourceTree = "<group>"; };
-		A38EA87AD7B94AD1B30BE64C /* Info.plist */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = Info.plist; path = Info.plist; sourceTree = "<group>"; };
-		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = DVNT/SplashScreen.storyboard; sourceTree = "<group>"; };
-		B6436D4EC50B43CF946705A6 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = DVNT/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		BA7A068A2DB4C449E1A50C0E /* libPods-ExpoWidgetsTarget.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ExpoWidgetsTarget.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		DC3079BBE5964D1D97570672 /* Intents.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = Intents.framework; path = System/Library/Frameworks/Intents.framework; sourceTree = SDKROOT; };
-		DD722D9AF6D54ECFB634B62A /* MainInterface.storyboard */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = MainInterface.storyboard; path = MainInterface.storyboard; sourceTree = "<group>"; };
-		E8A38EBE09E54C9FB5BD4442 /* ShareExtensionPreprocessor.js */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtensionPreprocessor.js; path = ShareExtensionPreprocessor.js; sourceTree = "<group>"; };
-		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
-		EFAA40C7A343484D94442D93 /* noop-file.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = "noop-file.swift"; path = "DVNT/noop-file.swift"; sourceTree = "<group>"; };
-		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = DVNT/AppDelegate.swift; sourceTree = "<group>"; };
-		F11748442D0722820044C1D9 /* DVNT-Bridging-Header.h */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.h; name = "DVNT-Bridging-Header.h"; path = "DVNT/DVNT-Bridging-Header.h"; sourceTree = "<group>"; };
-		F3066D47C1B049CCBE8DB1B2 /* ShareExtension.entitlements */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtension.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
-		F35EE3AE84E4436DB8B1B063 /* ExpoWidgetsTarget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = undefined; name = ExpoWidgetsTarget.appex; path = ExpoWidgetsTarget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		F64EA461B6C54D84951CE834 /* CallKit.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = CallKit.framework; path = System/Library/Frameworks/CallKit.framework; sourceTree = SDKROOT; };
-		XX378A422B4194AC6966BAXX /* WatchKit.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = WatchKit.framework; path = System/Library/Frameworks/WatchKit.framework; sourceTree = SDKROOT; };
-		XX470101BAEB8E0BBC8B0DXX /* WidgetKit.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
-		XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
-		XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; fileEncoding = 4; includeInIndex = 0; path = DVNT.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		XX7E674302DD5EEB942175XX /* CoreImage.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = CoreImage.framework; path = System/Library/Frameworks/CoreImage.framework; sourceTree = SDKROOT; };
-		XX8ACBDF17A27E5D829A2CXX /* WatchConnectivity.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = System/Library/Frameworks/WatchConnectivity.framework; sourceTree = SDKROOT; };
-		XX99DB34EAB420F9CA31AFXX /* UserNotifications.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = UserNotifications.framework; path = System/Library/Frameworks/UserNotifications.framework; sourceTree = SDKROOT; };
-		XXA12889081EB894481655XX /* AppIntents.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
-		XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = 4; includeInIndex = 0; path = DVNTWatchComplication.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		XXCAF23C3FC41F82140FA1XX /* ActivityKit.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
+		0294C3CB674D41189BD1DD0E /* ShareExtension-Info.plist */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = "ShareExtension-Info.plist"; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; };
+		11984E0456514B81A1B1FC5A /* Intents.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = wrapper.framework; name = Intents.framework; path = System/Library/Frameworks/Intents.framework; sourceTree = SDKROOT; };
+		13B07F961A680F5B00A75B9A /* DVNT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DVNT.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = DVNT/Images.xcassets; sourceTree = "<group>"; };
+		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = DVNT/Info.plist; sourceTree = "<group>"; };
+		1878ADC27F97436A86064D24 /* ShareViewController.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = ShareViewController.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		1C7518CB6C99AEFC79CFCBD2 /* libPods-DVNT.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-DVNT.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2B3EC6C0FF9A4A139FA95795 /* dvnt-ring.wav */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = audio.wav; name = "dvnt-ring.wav"; path = "DVNT/dvnt-ring.wav"; sourceTree = "<group>"; };
+		34A7C147AEEF4508A93DB2F6 /* CallKit.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = wrapper.framework; name = CallKit.framework; path = System/Library/Frameworks/CallKit.framework; sourceTree = SDKROOT; };
+		3BE822C8A3534870B597D497 /* PushKit.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = wrapper.framework; name = PushKit.framework; path = System/Library/Frameworks/PushKit.framework; sourceTree = SDKROOT; };
+		993201415FDAA5640E798FE8 /* Pods-DVNT.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-DVNT.release.xcconfig"; path = "Target Support Files/Pods-DVNT/Pods-DVNT.release.xcconfig"; sourceTree = "<group>"; };
+		A6BB55E9A2A7421DA307696E /* ShareExtension.entitlements */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtension.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = DVNT/SplashScreen.storyboard; sourceTree = "<group>"; };
+		AEE66999911541B6A66D1443 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B3E248B49EE4CCF820DA2B78 /* Pods-DVNT.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-DVNT.debug.xcconfig"; path = "Target Support Files/Pods-DVNT/Pods-DVNT.debug.xcconfig"; sourceTree = "<group>"; };
+		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
+		C1CFDAC658FC46AA9F07DF5E /* noop-file.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = "noop-file.swift"; path = "DVNT/noop-file.swift"; sourceTree = "<group>"; };
+		C7C67CF699BB491CB4E5C6D1 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = undefined; name = ShareExtension.appex; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C882BA7B82B343D3A37030C9 /* AppDelegate+VoIPPush.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = sourcecode.c.objc; name = "AppDelegate+VoIPPush.m"; path = "DVNT/AppDelegate+VoIPPush.m"; sourceTree = "<group>"; };
+		D1CE34906E2749379E49CA40 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = DVNT/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		DDF06ACF5DE449D2803516DC /* MainInterface.storyboard */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = MainInterface.storyboard; path = MainInterface.storyboard; sourceTree = "<group>"; };
+		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = DVNT/AppDelegate.swift; sourceTree = "<group>"; };
+		F11748442D0722820044C1D9 /* DVNT-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "DVNT-Bridging-Header.h"; path = "DVNT/DVNT-Bridging-Header.h"; sourceTree = "<group>"; };
+		F4EC77F4C32D48C0A9444B01 /* ShareExtensionPreprocessor.js */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtensionPreprocessor.js; path = ShareExtensionPreprocessor.js; sourceTree = "<group>"; };
+		F9CDCD0188A75151DABA98BF /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-DVNT/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
-
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		XX62501F23E6A939F451D2XX /* Exceptions for "watch-complication" folder in "DVNTWatchComplication" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-				"expo-target.config.js",
-			);
-			target = XXEB4F218FD5F06DBADE29XX /* DVNTWatchComplication */;
-		};
-		XX656DECF5F5D2DB365E55XX /* Exceptions for "watch" folder in "DVNT" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-				"expo-target.config.js",
-			);
-			target = XX6A43DD0F552874E793D0XX /* DVNT */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
-/* Begin PBXFileSystemSynchronizedRootGroup section */
-		XX0DBF78894CEA43EF97D3XX /* watch */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				XX656DECF5F5D2DB365E55XX /* Exceptions for "watch" folder in "DVNT" target */,
-			);
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = watch;
-			sourceTree = "<group>";
-		};
-		XXC4AE1142AB83CBDC6EA3XX /* watch-complication */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				XX62501F23E6A939F451D2XX /* Exceptions for "watch-complication" folder in "DVNTWatchComplication" target */,
-			);
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = "watch-complication";
-			sourceTree = "<group>";
-		};
-/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		13B07F8C1A680F5B00A75B9A /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B833A84319814699A565797F /* PushKit.framework in Frameworks */,
-				60616A32FCC843EF9454B0AB /* CallKit.framework in Frameworks */,
-				0DF2976028324962B21E6814 /* Intents.framework in Frameworks */,
-				DE7A36048AE446D95FB63C5A /* libPods-DVNT.a in Frameworks */,
+				06941CD9AF6C4CF89E448AC3 /* PushKit.framework in Frameworks */,
+				3605C162A6FD431BA4757437 /* CallKit.framework in Frameworks */,
+				7C73611C017548F084DC40D8 /* Intents.framework in Frameworks */,
+				37A953256887046D783112E7 /* libPods-DVNT.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		7BA382C9B41248D8A9528124 /* Frameworks */ = {
+		4C0709B917534F25AA6E4EFA /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		CEAF0179618449B4AEE912CD /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				BF294468F86AF3095DB8318A /* libPods-ExpoWidgetsTarget.a in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		XX074B8811C1CF8E8A3D74XX /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				XX6A44985675A04437B8C4XX /* SwiftUI.framework in Frameworks */,
-				XX8E4863C19534EC7D4226XX /* WatchConnectivity.framework in Frameworks */,
-				XXFF0758375E66BEE6B904XX /* CoreImage.framework in Frameworks */,
-				XX1ECDC44A36499A2C9883XX /* WatchKit.framework in Frameworks */,
-				XXD492FB1555A651E8C029XX /* UserNotifications.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		XXBA6CDF0021ABEEEDFCFBXX /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				XX12B55A1EDABF083C3B51XX /* WidgetKit.framework in Frameworks */,
-				XX378C5AFCA51B0EA4F6B5XX /* SwiftUI.framework in Frameworks */,
-				XX3C562DEF346B45594832XX /* ActivityKit.framework in Frameworks */,
-				XX1A6800511A685AB346D2XX /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -266,79 +111,42 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				B6436D4EC50B43CF946705A6 /* PrivacyInfo.xcprivacy */,
-				85EE6AD74A53426285C28AFF /* dvnt-ring.wav */,
-				91B6FB66C560462C949C767D /* AppDelegate+VoIPPush.m */,
-				EFAA40C7A343484D94442D93 /* noop-file.swift */,
+				D1CE34906E2749379E49CA40 /* PrivacyInfo.xcprivacy */,
+				2B3EC6C0FF9A4A139FA95795 /* dvnt-ring.wav */,
+				C882BA7B82B343D3A37030C9 /* AppDelegate+VoIPPush.m */,
+				C1CFDAC658FC46AA9F07DF5E /* noop-file.swift */,
 			);
 			name = DVNT;
-			sourceTree = "<group>";
-		};
-		18D2844A7D6445D18E40709D /* ExpoWidgetsTarget */ = {
-			isa = PBXGroup;
-			children = (
-				284ACCF02C034CE0970B40E6 /* ExpoWidgetsTarget.entitlements */,
-				A38EA87AD7B94AD1B30BE64C /* Info.plist */,
-				1C741DCBE0C04B40B7E5144C /* index.swift */,
-			);
-			name = ExpoWidgetsTarget;
-			path = ExpoWidgetsTarget;
 			sourceTree = "<group>";
 		};
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				09373BCE28E842029442217F /* PushKit.framework */,
-				F64EA461B6C54D84951CE834 /* CallKit.framework */,
-				DC3079BBE5964D1D97570672 /* Intents.framework */,
-				XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */,
-				XX8ACBDF17A27E5D829A2CXX /* WatchConnectivity.framework */,
-				XX7E674302DD5EEB942175XX /* CoreImage.framework */,
-				XX378A422B4194AC6966BAXX /* WatchKit.framework */,
-				XX99DB34EAB420F9CA31AFXX /* UserNotifications.framework */,
-				XX470101BAEB8E0BBC8B0DXX /* WidgetKit.framework */,
-				XXCAF23C3FC41F82140FA1XX /* ActivityKit.framework */,
-				XXA12889081EB894481655XX /* AppIntents.framework */,
-				03C99CC9C1F91B1A5980093E /* libPods-DVNT.a */,
-				BA7A068A2DB4C449E1A50C0E /* libPods-ExpoWidgetsTarget.a */,
+				3BE822C8A3534870B597D497 /* PushKit.framework */,
+				34A7C147AEEF4508A93DB2F6 /* CallKit.framework */,
+				11984E0456514B81A1B1FC5A /* Intents.framework */,
+				1C7518CB6C99AEFC79CFCBD2 /* libPods-DVNT.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		582864DB6CB14FBFB938E383 /* ShareExtension */ = {
+		374E0FF4DDF704F89C73EC04 /* ExpoModulesProviders */ = {
 			isa = PBXGroup;
 			children = (
-				9BF73E6E022F4C9EB4ADC932 /* ShareViewController.swift */,
-				DD722D9AF6D54ECFB634B62A /* MainInterface.storyboard */,
-				E8A38EBE09E54C9FB5BD4442 /* ShareExtensionPreprocessor.js */,
-				30F58D4FBD7C4B198FE2C001 /* PrivacyInfo.xcprivacy */,
-				83BA34EB5F1A47919D169E09 /* ShareExtension-Info.plist */,
-				F3066D47C1B049CCBE8DB1B2 /* ShareExtension.entitlements */,
+				DBA6174F0E39A48ED1AF0C3D /* DVNT */,
 			);
-			name = ShareExtension;
-			path = ShareExtension;
+			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
-		720AFA4AEE4BDBB002552E26 /* Pods */ = {
+		809C2FDC5D280899521C7ED4 /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				A166665694083D04D9803699 /* Pods-DVNT.debug.xcconfig */,
-				5B36118C59329B88C1FFE58B /* Pods-DVNT.release.xcconfig */,
-				534787E8BD721E707B6D5DE1 /* Pods-ExpoWidgetsTarget.debug.xcconfig */,
-				4C2D97B6F16693F442E16C51 /* Pods-ExpoWidgetsTarget.release.xcconfig */,
+				B3E248B49EE4CCF820DA2B78 /* Pods-DVNT.debug.xcconfig */,
+				993201415FDAA5640E798FE8 /* Pods-DVNT.release.xcconfig */,
 			);
 			name = Pods;
 			path = Pods;
-			sourceTree = "<group>";
-		};
-		79985174FD8E2E04AA13A27E /* ExpoModulesProviders */ = {
-			isa = PBXGroup;
-			children = (
-				A51241CBF16CFD7578537B81 /* DVNT */,
-				CDD5302784126032EF21ADB2 /* ExpoWidgetsTarget */,
-			);
-			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -351,15 +159,13 @@
 		83CBB9F61A601CBA00E9B192 = {
 			isa = PBXGroup;
 			children = (
-				XX3E41C1850246162C0061XX /* expo:targets */,
 				13B07FAE1A68108700A75B9A /* DVNT */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				18D2844A7D6445D18E40709D /* ExpoWidgetsTarget */,
-				582864DB6CB14FBFB938E383 /* ShareExtension */,
-				720AFA4AEE4BDBB002552E26 /* Pods */,
-				79985174FD8E2E04AA13A27E /* ExpoModulesProviders */,
+				D4B465B80DD74A53BA041574 /* ShareExtension */,
+				809C2FDC5D280899521C7ED4 /* Pods */,
+				374E0FF4DDF704F89C73EC04 /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -370,20 +176,9 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* DVNT.app */,
-				F35EE3AE84E4436DB8B1B063 /* ExpoWidgetsTarget.appex */,
-				233219B6018B4594AB61922A /* ShareExtension.appex */,
-				XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */,
-				XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */,
+				C7C67CF699BB491CB4E5C6D1 /* ShareExtension.appex */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		A51241CBF16CFD7578537B81 /* DVNT */ = {
-			isa = PBXGroup;
-			children = (
-				02031F6DC653780488B944F0 /* ExpoModulesProvider.swift */,
-			);
-			name = DVNT;
 			sourceTree = "<group>";
 		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
@@ -395,84 +190,64 @@
 			path = DVNT/Supporting;
 			sourceTree = "<group>";
 		};
-		CDD5302784126032EF21ADB2 /* ExpoWidgetsTarget */ = {
+		D4B465B80DD74A53BA041574 /* ShareExtension */ = {
 			isa = PBXGroup;
 			children = (
-				97D8C192DEC89CFD18134F1D /* ExpoModulesProvider.swift */,
+				1878ADC27F97436A86064D24 /* ShareViewController.swift */,
+				DDF06ACF5DE449D2803516DC /* MainInterface.storyboard */,
+				F4EC77F4C32D48C0A9444B01 /* ShareExtensionPreprocessor.js */,
+				AEE66999911541B6A66D1443 /* PrivacyInfo.xcprivacy */,
+				0294C3CB674D41189BD1DD0E /* ShareExtension-Info.plist */,
+				A6BB55E9A2A7421DA307696E /* ShareExtension.entitlements */,
 			);
-			name = ExpoWidgetsTarget;
+			name = ShareExtension;
+			path = ShareExtension;
 			sourceTree = "<group>";
 		};
-		XX3E41C1850246162C0061XX /* expo:targets */ = {
+		DBA6174F0E39A48ED1AF0C3D /* DVNT */ = {
 			isa = PBXGroup;
 			children = (
-				XX0DBF78894CEA43EF97D3XX /* watch */,
-				XXC4AE1142AB83CBDC6EA3XX /* watch-complication */,
+				F9CDCD0188A75151DABA98BF /* ExpoModulesProvider.swift */,
 			);
-			name = "expo:targets";
-			path = ../targets;
+			name = DVNT;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		0377FDEE945C44A6A311BB75 /* ExpoWidgetsTarget */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = CBD70C740AA34456BE3AC6E4 /* Build configuration list for PBXNativeTarget "ExpoWidgetsTarget" */;
-			buildPhases = (
-				E3DF7CB2528DC4C9B688A7D2 /* [CP] Check Pods Manifest.lock */,
-				D293BF52D0561E075FFB7A49 /* [Expo] Configure project */,
-				E8AD4CB6B95848FABC6F8165 /* Sources */,
-				CEAF0179618449B4AEE912CD /* Frameworks */,
-				ED1971B4B7BD8A13921F39AE /* [CP] Copy Pods Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = ExpoWidgetsTarget;
-			productName = ExpoWidgetsTarget;
-			productReference = F35EE3AE84E4436DB8B1B063 /* ExpoWidgetsTarget.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 		13B07F861A680F5B00A75B9A /* DVNT */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "DVNT" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				B52752DBA2FE971E5DA721CA /* [Expo] Configure project */,
+				B91128F3A97F386D50ED5D87 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				A3C22D152FD24458B1E8D96D /* [Expo Dev Launcher] Strip Local Network Keys for Release */,
-				0DCF43A95CBB43D9BD718A99 /* Embed Foundation Extensions */,
-				4EBF93BC1AEA4BB98A5C69C1 /* Copy Files */,
-				98C89111879B432598CD3282 /* Upload Debug Symbols to Sentry */,
-				XX81D5C67C94C2E1F9007EXX /* Embed Watch Content */,
-				9ED87CE7B9AB3F501E62C168 /* [CP] Embed Pods Frameworks */,
+				A78E6CC86D2D47528FED7829 /* [Expo Dev Launcher] Strip Local Network Keys for Release */,
+				F3FBEF4D85164CF0ADB659DD /* Copy Files */,
+				C6998EF9959340D688063B95 /* Upload Debug Symbols to Sentry */,
+				4A0E9CB43B03006A641F17C6 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				F3AA704B6B91425FADF32B93 /* PBXTargetDependency */,
-				D66E9A2BCC7D482197FD3E65 /* PBXTargetDependency */,
-				XXDE0A65E7D3B48A78312AXX /* PBXTargetDependency */,
-				XX75F5F1EB59D6C7091039XX /* PBXTargetDependency */,
+				87D3A9BFFB7E4BE0B3A0CDDA /* PBXTargetDependency */,
 			);
 			name = DVNT;
 			productName = DVNT;
 			productReference = 13B07F961A680F5B00A75B9A /* DVNT.app */;
 			productType = "com.apple.product-type.application";
 		};
-		DE167F149ACA4AD89E8B8264 /* ShareExtension */ = {
+		62E64F267F994D84A8FE5B11 /* ShareExtension */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 6F855A0B728B4E9FB37E3016 /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+			buildConfigurationList = EEF606FCCB394CD7A3F29FEB /* Build configuration list for PBXNativeTarget "ShareExtension" */;
 			buildPhases = (
-				C5F0C6DC073C468B95B80409 /* Sources */,
-				C3673E19C07B4F0F95598FCE /* Resources */,
-				7BA382C9B41248D8A9528124 /* Frameworks */,
+				AFAD6142E33041289C3F9653 /* Sources */,
+				615736ADFD5D40D4A713498D /* Resources */,
+				4C0709B917534F25AA6E4EFA /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -480,47 +255,7 @@
 			);
 			name = ShareExtension;
 			productName = ShareExtension;
-			productReference = 233219B6018B4594AB61922A /* ShareExtension.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
-		XX6A43DD0F552874E793D0XX /* DVNT */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = XX5D98D9F202CA073387BEXX /* Build configuration list for PBXNativeTarget "DVNT" */;
-			buildPhases = (
-				XX074B8811C1CF8E8A3D74XX /* Frameworks */,
-				XXE45443DC38DCFE1DB622XX /* Sources */,
-				XXFA5A8CCDD805DF7AEF9CXX /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				XX0DBF78894CEA43EF97D3XX /* watch */,
-			);
-			name = DVNT;
-			productName = DVNT;
-			productReference = XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */;
-			productType = "com.apple.product-type.application";
-		};
-		XXEB4F218FD5F06DBADE29XX /* DVNTWatchComplication */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = XX3F6D23B063207BA20538XX /* Build configuration list for PBXNativeTarget "DVNTWatchComplication" */;
-			buildPhases = (
-				XXBA6CDF0021ABEEEDFCFBXX /* Frameworks */,
-				XXDC105B0E28F884B8E02DXX /* Sources */,
-				XXC55EF014B50CBDECCD15XX /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				XXC4AE1142AB83CBDC6EA3XX /* watch-complication */,
-			);
-			name = DVNTWatchComplication;
-			productName = DVNTWatchComplication;
-			productReference = XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */;
+			productReference = C7C67CF699BB491CB4E5C6D1 /* ShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
@@ -531,27 +266,9 @@
 			attributes = {
 				LastUpgradeCheck = 1130;
 				TargetAttributes = {
-					0377FDEE945C44A6A311BB75 = {
-						LastSwiftMigration = 1250;
-					};
 					13B07F861A680F5B00A75B9A = {
 						DevelopmentTeam = 436WA3W63V;
 						LastSwiftMigration = 1250;
-					};
-					DE167F149ACA4AD89E8B8264 = {
-						CreatedOnToolsVersion = 14.3;
-						DevelopmentTeam = 436WA3W63V;
-						ProvisioningStyle = Automatic;
-					};
-					XX6A43DD0F552874E793D0XX = {
-						CreatedOnToolsVersion = 14.3;
-						DevelopmentTeam = 436WA3W63V;
-						ProvisioningStyle = Automatic;
-					};
-					XXEB4F218FD5F06DBADE29XX = {
-						CreatedOnToolsVersion = 14.3;
-						DevelopmentTeam = 436WA3W63V;
-						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -569,10 +286,7 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* DVNT */,
-				0377FDEE945C44A6A311BB75 /* ExpoWidgetsTarget */,
-				DE167F149ACA4AD89E8B8264 /* ShareExtension */,
-				XX6A43DD0F552874E793D0XX /* DVNT */,
-				XXEB4F218FD5F06DBADE29XX /* DVNTWatchComplication */,
+				62E64F267F994D84A8FE5B11 /* ShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -585,33 +299,18 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				A0299CDF555B4B98B5BCD630 /* PrivacyInfo.xcprivacy in Resources */,
-				16E1B6C6E29645CCAC0094C3 /* dvnt-ring.wav in Resources */,
+				7DB8027F63CE4323A9F040D8 /* PrivacyInfo.xcprivacy in Resources */,
+				335A807052DE469C9E92E9D1 /* dvnt-ring.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		C3673E19C07B4F0F95598FCE /* Resources */ = {
+		615736ADFD5D40D4A713498D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				56835B1C439345129DF0D871 /* MainInterface.storyboard in Resources */,
-				E2C6C7F12811438A8F3CB361 /* ShareExtensionPreprocessor.js in Resources */,
-				29F72D6DAD7E44EC917710F2 /* PrivacyInfo.xcprivacy in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		XXC55EF014B50CBDECCD15XX /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		XXFA5A8CCDD805DF7AEF9CXX /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				C605C25111E7E6E78BDDE044 /* PrivacyInfo.xcprivacy in Resources */,
+				196755987F5B43FCB7F2B11F /* MainInterface.storyboard in Resources */,
+				EC6114624B4741AA8DFD0BAD /* ShareExtensionPreprocessor.js in Resources */,
+				7C122066119A4246AE0946A0 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -624,15 +323,11 @@
 			buildActionMask = 2147483647;
 			files = (
 			);
-			inputFileListPaths = (
-			);
 			inputPaths = (
 				"$(SRCROOT)/.xcode.env",
 				"$(SRCROOT)/.xcode.env.local",
 			);
 			name = "Bundle React Native code and images";
-			outputFileListPaths = (
-			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -659,6 +354,32 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		4A0E9CB43B03006A641F17C6 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-DVNT/Pods-DVNT-frameworks.sh",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/ExpoModulesJSI/ExpoModulesJSI.framework/ExpoModulesJSI",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/FaceSDK/FaceSDK.framework/FaceSDK",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/FishjamWebRTC/WebRTC.framework/WebRTC",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/RegulaCommon/RegulaCommon.framework/RegulaCommon",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermesvm.framework/hermesvm",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputPaths = (
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ExpoModulesJSI.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/FaceSDK.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/WebRTC.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RegulaCommon.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermesvm.framework",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-DVNT/Pods-DVNT-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
@@ -759,69 +480,21 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-DVNT/Pods-DVNT-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		98C89111879B432598CD3282 /* Upload Debug Symbols to Sentry */ = {
+		A78E6CC86D2D47528FED7829 /* [Expo Dev Launcher] Strip Local Network Keys for Release */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Upload Debug Symbols to Sentry";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "/bin/sh `${NODE_BINARY:-node} --print \"require('path').dirname(require.resolve('@sentry/react-native/package.json')) + '/scripts/sentry-xcode-debug-files.sh'\"`";
-		};
-		9ED87CE7B9AB3F501E62C168 /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-DVNT/Pods-DVNT-frameworks.sh",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/ExpoModulesJSI/ExpoModulesJSI.framework/ExpoModulesJSI",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/FaceSDK/FaceSDK.framework/FaceSDK",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/FishjamWebRTC/WebRTC.framework/WebRTC",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/RegulaCommon/RegulaCommon.framework/RegulaCommon",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermesvm.framework/hermesvm",
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputPaths = (
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ExpoModulesJSI.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/FaceSDK.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/WebRTC.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RegulaCommon.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermesvm.framework",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-DVNT/Pods-DVNT-frameworks.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-		A3C22D152FD24458B1E8D96D /* [Expo Dev Launcher] Strip Local Network Keys for Release */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
 			);
 			inputPaths = (
 			);
 			name = "[Expo Dev Launcher] Strip Local Network Keys for Release";
-			outputFileListPaths = (
-			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "# Strip dev-launcher-specific local network permission keys from non-Debug builds\n# This only removes _expo._tcp Bonjour services and the dev-launcher usage description.\n# Other Bonjour services and custom descriptions are preserved for production use.\n\nif [ \"$CONFIGURATION\" != \"Debug\" ]; then\n  PLIST_PATH=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\n  if [ -f \"$PLIST_PATH\" ]; then\n    # Check if NSBonjourServices exists\n    if /usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" >/dev/null 2>&1; then\n      # Get the count of services\n      COUNT=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n\n      # Remove _expo._tcp\n      for ((i=COUNT-1; i>=0; i--)); do\n        SERVICE=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n        if echo \"$SERVICE\" | grep -q \"_expo._tcp\"; then\n          /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || true\n        fi\n      done\n\n      # If the array is now empty, remove it entirely\n      REMAINING=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n      if [ \"$REMAINING\" -eq \"0\" ]; then\n        /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null || true\n      fi\n    fi\n\n    # Only delete the description if it matches the dev-launcher default text\n    DESC=$(/usr/libexec/PlistBuddy -c \"Print :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n    if echo \"$DESC\" | grep -q \"Expo Dev Launcher\"; then\n      /usr/libexec/PlistBuddy -c \"Delete :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || true\n    fi\n  fi\nfi\n";
 		};
-		B52752DBA2FE971E5DA721CA /* [Expo] Configure project */ = {
+		B91128F3A97F386D50ED5D87 /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -845,81 +518,19 @@
 			shellPath = /bin/sh;
 			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-DVNT/expo-configure-project.sh\"\n";
 		};
-		D293BF52D0561E075FFB7A49 /* [Expo] Configure project */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/.xcode.env",
-				"$(SRCROOT)/.xcode.env.local",
-				"$(SRCROOT)/ExpoWidgetsTarget/ExpoWidgetsTarget.entitlements",
-				"$(SRCROOT)/Pods/Target Support Files/Pods-ExpoWidgetsTarget/expo-configure-project.sh",
-			);
-			name = "[Expo] Configure project";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(SRCROOT)/Pods/Target Support Files/Pods-ExpoWidgetsTarget/ExpoModulesProvider.swift",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-ExpoWidgetsTarget/expo-configure-project.sh\"\n";
-		};
-		E3DF7CB2528DC4C9B688A7D2 /* [CP] Check Pods Manifest.lock */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
-				"${PODS_ROOT}/Manifest.lock",
-			);
-			name = "[CP] Check Pods Manifest.lock";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-ExpoWidgetsTarget-checkManifestLockResult.txt",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		ED1971B4B7BD8A13921F39AE /* [CP] Copy Pods Resources */ = {
+		C6998EF9959340D688063B95 /* Upload Debug Symbols to Sentry */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-ExpoWidgetsTarget/Pods-ExpoWidgetsTarget-resources.sh",
-				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoWidgets/ExpoWidgets.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/RCT-Folly/RCT-Folly_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/React-Core/React-Core_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/React-cxxreact/React-cxxreact_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/React-timing/React-timing_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/boost/boost_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/glog/glog_privacy.bundle",
 			);
-			name = "[CP] Copy Pods Resources";
+			name = "Upload Debug Symbols to Sentry";
 			outputPaths = (
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoWidgets.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/RCT-Folly_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-Core_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-cxxreact_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-timing_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/boost_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/glog_privacy.bundle",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ExpoWidgetsTarget/Pods-ExpoWidgetsTarget-resources.sh\"\n";
-			showEnvVarsInLog = 0;
+			shellScript = "/bin/sh `${NODE_BINARY:-node} --print \"require('path').dirname(require.resolve('@sentry/react-native/package.json')) + '/scripts/sentry-xcode-debug-files.sh'\"`";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -929,74 +540,61 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				2E747EBC458A4269A3C67646 /* AppDelegate+VoIPPush.m in Sources */,
-				BE87E864DBA64BF98AECE12E /* noop-file.swift in Sources */,
-				A4B9F3D633CB00C03DC3847E /* ExpoModulesProvider.swift in Sources */,
+				CCEBCBEE945440D38A8A1CEE /* AppDelegate+VoIPPush.m in Sources */,
+				19C61EF21EEE4A4F9E0A5989 /* noop-file.swift in Sources */,
+				E70203EC0FE8F2C5C1EE3610 /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		C5F0C6DC073C468B95B80409 /* Sources */ = {
+		AFAD6142E33041289C3F9653 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F7D0634AD44946F4A1EC9BF8 /* ShareViewController.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		E8AD4CB6B95848FABC6F8165 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A549896C497142A7988C56B4 /* index.swift in Sources */,
-				11189177D355C16DE1E3A1F4 /* ExpoModulesProvider.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		XXDC105B0E28F884B8E02DXX /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		XXE45443DC38DCFE1DB622XX /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
+				BE505EE568A3402D9421F3EF /* ShareViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		D66E9A2BCC7D482197FD3E65 /* PBXTargetDependency */ = {
+		87D3A9BFFB7E4BE0B3A0CDDA /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = DE167F149ACA4AD89E8B8264 /* ShareExtension */;
-			targetProxy = F9DC22D0160B459790A27826 /* PBXContainerItemProxy */;
-		};
-		F3AA704B6B91425FADF32B93 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 0377FDEE945C44A6A311BB75 /* ExpoWidgetsTarget */;
-			targetProxy = B75BAA8F8D7044B884BE7E6D /* PBXContainerItemProxy */;
-		};
-		XX75F5F1EB59D6C7091039XX /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = XXEB4F218FD5F06DBADE29XX /* DVNTWatchComplication */;
-			targetProxy = XXB32BF84AD63A8E0D9F0EXX /* PBXContainerItemProxy */;
-		};
-		XXDE0A65E7D3B48A78312AXX /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = XX6A43DD0F552874E793D0XX /* DVNT */;
-			targetProxy = XXCC2F6CC4483EF823FD14XX /* PBXContainerItemProxy */;
+			target = 62E64F267F994D84A8FE5B11 /* ShareExtension */;
+			targetProxy = AF5518A04EEE485DB13B4A56 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		05435656FB9143208C09FB86 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 436WA3W63V;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.dvnt.app.share-extension";
+				PRODUCT_NAME = ShareExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = A166665694083D04D9803699 /* Pods-DVNT.debug.xcconfig */;
+			baseConfigurationReference = B3E248B49EE4CCF820DA2B78 /* Pods-DVNT.debug.xcconfig */;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = DVNT/DVNT.entitlements;
@@ -1019,7 +617,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.4;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -1038,9 +636,8 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 5B36118C59329B88C1FFE58B /* Pods-DVNT.release.xcconfig */;
+			baseConfigurationReference = 993201415FDAA5640E798FE8 /* Pods-DVNT.release.xcconfig */;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = DVNT/DVNT.entitlements;
@@ -1059,7 +656,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.4;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -1075,7 +672,7 @@
 			};
 			name = Release;
 		};
-		45F18CB523EA4024AFBBDFB1 /* Debug */ = {
+		543A52D749F740CB9ED2B77B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
@@ -1104,32 +701,6 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
-		};
-		5B12934485214EF689BD355C /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 436WA3W63V;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0.0;
-				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = "com.dvnt.app.share-extension";
-				PRODUCT_NAME = ShareExtension;
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
 		};
 		83CBBA201A601CBA00E9B192 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -1279,226 +850,6 @@
 			};
 			name = Release;
 		};
-		D416E82FD7F04E249727689C /* Release */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = 4C2D97B6F16693F442E16C51 /* Pods-ExpoWidgetsTarget.release.xcconfig */;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = ExpoWidgetsTarget/ExpoWidgetsTarget.entitlements;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 436WA3W63V;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = ExpoWidgetsTarget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = ExpoWidgetsTarget;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0.0;
-				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.ExpoWidgetsTarget;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		F594D10A54E542D79B7CF7F9 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = 534787E8BD721E707B6D5DE1 /* Pods-ExpoWidgetsTarget.debug.xcconfig */;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = ExpoWidgetsTarget/ExpoWidgetsTarget.entitlements;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 436WA3W63V;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = ExpoWidgetsTarget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = ExpoWidgetsTarget;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0.0;
-				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
-				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.ExpoWidgetsTarget;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		XX9DC68CD511CD4E7F8ED6XX /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CODE_SIGN_ENTITLEMENTS = "../targets/watch-complication/generated.entitlements";
-				CODE_SIGN_STYLE = Automatic;
-				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 436WA3W63V;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "../targets/watch-complication/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = DVNTWatchComplication;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0.0;
-				MTL_FAST_MATH = YES;
-				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp.complication;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
-				SKIP_INSTALL = YES;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		XXA5B1A9E26E07C9435DEFXX /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CODE_SIGN_ENTITLEMENTS = "../targets/watch-complication/generated.entitlements";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 436WA3W63V;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "../targets/watch-complication/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = DVNTWatchComplication;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0.0;
-				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-				MTL_FAST_MATH = YES;
-				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
-				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp.complication;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
-				SKIP_INSTALL = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		XXAF910CE60410C350784AXX /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CODE_SIGN_ENTITLEMENTS = ../targets/watch/generated.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 436WA3W63V;
-				ENABLE_PREVIEWS = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = ../targets/watch/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = DVNT;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.dvnt.app;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0.0;
-				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-				MTL_FAST_MATH = YES;
-				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
-				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
-			};
-			name = Debug;
-		};
-		XXD5786D9162175CB0EE1EXX /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CODE_SIGN_ENTITLEMENTS = ../targets/watch/generated.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 436WA3W63V;
-				ENABLE_PREVIEWS = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = ../targets/watch/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = DVNT;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.dvnt.app;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0.0;
-				MTL_FAST_MATH = YES;
-				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1507,15 +858,6 @@
 			buildConfigurations = (
 				13B07F941A680F5B00A75B9A /* Debug */,
 				13B07F951A680F5B00A75B9A /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		6F855A0B728B4E9FB37E3016 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				45F18CB523EA4024AFBBDFB1 /* Debug */,
-				5B12934485214EF689BD355C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1529,29 +871,11 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		CBD70C740AA34456BE3AC6E4 /* Build configuration list for PBXNativeTarget "ExpoWidgetsTarget" */ = {
+		EEF606FCCB394CD7A3F29FEB /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				F594D10A54E542D79B7CF7F9 /* Debug */,
-				D416E82FD7F04E249727689C /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		XX3F6D23B063207BA20538XX /* Build configuration list for PBXNativeTarget "DVNTWatchComplication" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				XXA5B1A9E26E07C9435DEFXX /* Debug */,
-				XX9DC68CD511CD4E7F8ED6XX /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		XX5D98D9F202CA073387BEXX /* Build configuration list for PBXNativeTarget "DVNT" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				XXAF910CE60410C350784AXX /* Debug */,
-				XXD5786D9162175CB0EE1EXX /* Release */,
+				543A52D749F740CB9ED2B77B /* Debug */,
+				05435656FB9143208C09FB86 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

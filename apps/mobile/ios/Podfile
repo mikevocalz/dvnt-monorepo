@@ -62,8 +62,6 @@ target 'DVNT' do
   )
 
   post_install do |installer|
-    expo_widgets_post_install(installer)
-
     react_native_post_install(
       installer,
       config[:reactNativePath],
@@ -97,52 +95,30 @@ target 'DVNT' do
         config.build_settings['SWIFT_VERSION'] = '5.9'
       end
     end
-  end
-
-end
-
-require File.join(File.dirname(`node --print "require.resolve('expo-widgets/package.json')"`), "scripts/autolinking")
-target "ExpoWidgetsTarget" do
-    use_expo_modules_widgets!
-
-    if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
-      config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
-    else
-      config_command = [
-        'node',
-        '--no-warnings',
-        '--eval',
-        "require(require.resolve('expo-modules-autolinking', { paths: [require.resolve('expo/package.json')] }))(process.argv.slice(1))",
-        'react-native-config',
-        '--json',
-        '--platform',
-        'ios'
-      ]
+    # [fix-visioncamera-barcode-scanner-swift] Xcode 26 can crash while
+    # incrementally compiling Nitrogen-generated Swift in
+    # VisionCameraBarcodeScanner. Pin the pod to Swift 5.9 and whole-module
+    # compilation so local dev and EAS preview builds stay stable.
+    installer.pods_project.targets.each do |target|
+      next unless target.name == 'VisionCameraBarcodeScanner'
+      target.build_configurations.each do |config|
+        config.build_settings['SWIFT_VERSION'] = '5.9'
+        config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+        config.build_settings['SWIFT_COMPILATION_MODE'] = 'wholemodule'
+      end
     end
-
-    config = use_expo_native_module!(config_command)
-
-    use_frameworks! :linkage => podfile_properties['ios.useFrameworks'].to_sym if podfile_properties['ios.useFrameworks']
-    use_frameworks! :linkage => ENV['USE_FRAMEWORKS'].to_sym if ENV['USE_FRAMEWORKS']
-
-    use_react_native!(
-      :path => config[:reactNativePath],
-      :hermes_enabled => podfile_properties['expo.jsEngine'] == nil || podfile_properties['expo.jsEngine'] == 'hermes',
-      :app_path => "#{Pod::Config.instance.installation_root}/..",
-      :privacy_file_aggregation_enabled => podfile_properties['apple.privacyManifestAggregationEnabled'] != 'false',
-    )
-end
-
-
-# apple-targets-extension-loader -- Dynamic loading of target configurations
-Dir.glob(File.join(__dir__, '..', 'targets', '**', 'pods.rb')).each do |target_file|
-  target_name = File.basename(File.dirname(target_file))
-  target target_name do
-    # Create a new binding with access to necessary methods and variables
-    target_binding = binding
-    target_binding.local_variable_set(:podfile_properties, podfile_properties)
-
-    # Evaluate the target file content in the new binding
-    eval(File.read(target_file), target_binding, target_file)
+    # [fix-wgpu-headers] Ensure wgpu's cpp/ tree is in HEADER_SEARCH_PATHS so
+    # qualified includes like "jsi/NativeObject.h" resolve to wgpu's own headers
+    # instead of Skia's identically-named copies.
+    installer.pods_project.targets.each do |t|
+      next unless t.name == 'react-native-wgpu'
+      t.build_configurations.each do |config|
+        paths = config.build_settings['HEADER_SEARCH_PATHS'] || ['$(inherited)']
+        paths = [paths] if paths.is_a?(String)
+        paths << '"$(PODS_TARGET_SRCROOT)/cpp"' unless paths.any? { |p| p.include?('PODS_TARGET_SRCROOT)/cpp"') }
+        paths << '"$(PODS_TARGET_SRCROOT)/cpp/jsi"' unless paths.any? { |p| p.include?('cpp/jsi') }
+        config.build_settings['HEADER_SEARCH_PATHS'] = paths
+      end
+    end
   end
 end
