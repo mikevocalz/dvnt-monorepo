@@ -12,7 +12,9 @@ import { usePresenceManager } from "@dvnt/app/lib/hooks/use-presence";
 import {
   registerForPushNotificationsAsync,
   savePushTokenToBackend,
+  saveLiveActivityPushToStartToken,
 } from "@dvnt/app/lib/notifications";
+import { addLiveActivityPushToStartListener } from "@dvnt/app/features/live-surface";
 import {
   registerVoipPushToken,
   saveVoipTokenToBackend,
@@ -210,8 +212,22 @@ export default function ProtectedLayout() {
       }
     });
 
+    // Register the iOS Live Activity push-to-start token (expo-widgets) so the
+    // server can start a Live Activity remotely while backgrounded.
+    const unsubPushToStart = addLiveActivityPushToStartListener(
+      (pushToStartToken) => {
+        saveLiveActivityPushToStartToken(pushToStartToken).catch((error) => {
+          console.error(
+            "[ProtectedLayout] Live Activity push-to-start save failed:",
+            error,
+          );
+        });
+      },
+    );
+
     return () => {
       unsubVoip();
+      unsubPushToStart();
     };
   }, [user?.id, user?.username]);
 

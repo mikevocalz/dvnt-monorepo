@@ -409,6 +409,18 @@ export default {
       "./plugins/with-voip-push",
       "./plugins/with-custom-ringtone",
       "./plugins/with-live-activity",
+      // expo-widgets drives iOS Live Activities (WS-1 migration). It generates,
+      // via CNG, exactly what the hand-rolled ActivityKit module could not
+      // safely ship: the widget-extension target, App Group, aps-environment,
+      // and the NSSupportsLiveActivities Info.plist flag. groupIdentifier keeps
+      // the existing App Group; enablePushNotifications turns on push-to-start.
+      [
+        "expo-widgets",
+        {
+          groupIdentifier: "group.com.dvnt.app",
+          enablePushNotifications: true,
+        },
+      ],
       ["./plugins/with-development-team", { teamId: "436WA3W63V" }],
       "expo-secure-store",
       "react-native-compressor",

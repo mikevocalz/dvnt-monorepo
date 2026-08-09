@@ -68,6 +68,12 @@ verify_jwt = false
 [functions.send_notification]
 verify_jwt = false
 
+# live-surface-push is called server-side only (service-role bearer or
+# x-internal-secret). It does its own internal-caller auth (I4), so the gateway
+# JWT check must stay off.
+[functions.live-surface-push]
+verify_jwt = false
+
 [functions.video_create_room]
 verify_jwt = false
 

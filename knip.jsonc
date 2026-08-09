@@ -118,7 +118,11 @@
     "packages/app": {
       "entry": [
         "index.ts",
-        "**/*.{native,web,ios,android}.{ts,tsx}"
+        "**/*.{native,web,ios,android}.{ts,tsx}",
+        // expo-widgets Live Activity layout: consumed by the native WidgetKit
+        // runtime via the "widget" directive (lazy platform-gated require), not
+        // a normal JS import, so it is an entry point rather than "unused".
+        "features/live-surface/native/live-activity-layout.tsx"
       ],
       "project": ["**/*.{ts,tsx}"],
       "ignore": ["nativewind-env.d.ts"]

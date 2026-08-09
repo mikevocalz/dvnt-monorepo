@@ -7,6 +7,7 @@
 export { fetchLiveSurface } from "./api";
 export { useLiveSurface } from "./hooks/use-live-surface";
 export {
+  addLiveActivityPushToStartListener,
   areLiveActivitiesEnabled,
   endLiveActivity,
   updateLiveActivity,

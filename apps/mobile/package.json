@@ -130,6 +130,7 @@
     "expo-video": "~57.0.2",
     "expo-video-thumbnails": "~57.0.1",
     "expo-web-browser": "~57.0.2",
+    "expo-widgets": "~57.0.8",
     "i18next": "^26.0.5",
     "i18next-http-backend": "^4.0.1",
     "lucide-react-native": "^1.8.0",
