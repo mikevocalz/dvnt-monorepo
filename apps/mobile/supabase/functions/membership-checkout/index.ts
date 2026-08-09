@@ -14,6 +14,7 @@
  *
  * Plan → Stripe price id is resolved from env (STRIPE_PRICE_DVNT_VIP, …), with a
  * one-time create-on-demand fallback persisted into membership_plans.stripe_price_id.
+ * Return URLs use PUBLIC_SITE_URL (shared convention) -> dvntapp.live fallback.
  * Webhook is the source of truth for subscription state.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -22,7 +23,7 @@ import { verifySession } from "../_shared/verify-session.ts";
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-const SITE_URL = Deno.env.get("DVNT_WEB_URL") || "https://dvntapp.live";
+const SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live").replace(/\/$/, "");
 
 // plan_key → env var holding its Stripe price id (mirrors lib/subscription/plans.ts).
 const PRICE_ENV: Record<string, string> = {
