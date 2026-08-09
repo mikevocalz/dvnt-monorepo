@@ -28,6 +28,9 @@ export interface WebSentryConfig {
   replaysSessionSampleRate?: number;
   /** Error session replay sample rate (0-1). Default: 1.0 */
   replaysOnErrorSampleRate?: number;
+  /** Enable Sentry Logs (structured logging). Default: false. Verified option
+   *  `enableLogs` — @sentry/core options.d.ts:530. Powers the logs.ts seam. */
+  enableLogs?: boolean;
 }
 
 /**
@@ -51,6 +54,9 @@ export function initWebSentry(Sentry: any, config: WebSentryConfig): void {
     enabled: config.enabled ?? true,
     environment: config.environment,
     release: `dvnt-web@${config.appVersion}`,
+    // Structured logging — off unless explicitly enabled (verified: enableLogs,
+    // @sentry/core options.d.ts:530).
+    enableLogs: config.enableLogs ?? false,
 
     // Sampling
     sampleRate: config.sampleRate ?? 1.0,

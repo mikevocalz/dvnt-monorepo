@@ -11,6 +11,7 @@
  */
 
 import { withSentry } from "../_shared/sentry.ts";
+import { withHeartbeat, tryClaimJob, releaseJob } from "../_shared/heartbeat.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 
@@ -61,6 +62,15 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
     return json({ error: "Misconfigured" }, 500);
   }
 
+  // WS-4 skip-if-running: TTL (5 min) < the documented 15-min cadence so a
+  // crashed run self-heals before the next tick. The per-order CAS below is
+  // the real double-issue guard; this only stops overlap stampedes.
+  const JOB = "reconcile-orders";
+  if (!(await tryClaimJob(JOB, 300))) {
+    return json({ skipped: true, reason: "already_running" }, 200);
+  }
+  try {
+   return await withHeartbeat(JOB, async () => {
   try {
     const body = await req.json().catch(() => ({}));
     const rawHours = Number(body.hours_back);
@@ -257,5 +267,9 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
   } catch (err: any) {
     console.error("[reconcile] Error:", err);
     return json({ error: err.message || "Internal error" }, 500);
+  }
+   });
+  } finally {
+    await releaseJob(JOB);
   }
 }));

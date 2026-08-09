@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
 import { createBeforeSend, createBeforeSendTransaction, isEventClamped } from "@dvnt/observability/sanitize";
+import { dvntTracesSampler } from "@dvnt/observability/sampling";
 
 // Noise that must never spend quota (DVNT-WEB-A: Safari extension bridge).
 const IGNORED_ERROR_PATTERNS = [/webkit\.messageHandlers/];
@@ -27,7 +28,12 @@ Sentry.init({
     "https://73060ee2cb8a7f7bad5807413342355f@o4511776624541696.ingest.us.sentry.io/4511776642170880",
   environment: process.env.NEXT_PUBLIC_VERCEL_ENV || process.env.NODE_ENV || "development",
   release: process.env.SENTRY_RELEASE,
+  // Web analog of an EAS Update id — per-deploy release-health breakdown.
+  dist: process.env.NEXT_PUBLIC_SENTRY_DIST,
   sendDefaultPii: false,
+  // Structured logging — funnel logs (logs.ts). Verified: enableLogs,
+  // @sentry/core options.d.ts:530.
+  enableLogs: true,
   integrations: [
     // §2.4: full masking, no unmask lists.
     Sentry.replayIntegration({
@@ -45,11 +51,9 @@ Sentry.init({
       },
     }),
   ],
-  tracesSampler: (ctx) => {
-    const name = ctx.name || "";
-    if (/onboarding|welcome|verification|checkout|auth/.test(name)) return 1.0;
-    return 0.15;
-  },
+  // Shared funnel sampler (money/onboarding/lynk/upload → 1.0, chatty → 0,
+  // else 0.15). Map + span-math proof: packages/observability/src/sampling.ts.
+  tracesSampler: dvntTracesSampler,
   // Stitch browser → Supabase edge functions traces.
   tracePropagationTargets: [
     /^\//,

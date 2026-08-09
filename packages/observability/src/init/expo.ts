@@ -41,6 +41,9 @@ export interface ExpoSentryConfig {
   tracesSampler?: (ctx: { name?: string }) => number;
   /** Hosts that receive sentry-trace/baggage headers for stitched traces. */
   tracePropagationTargets?: (string | RegExp)[];
+  /** Enable Sentry Logs (structured logging). Default: false. Verified option
+   *  `enableLogs` — @sentry/core options.d.ts:530. Powers the logs.ts seam. */
+  enableLogs?: boolean;
 }
 
 /**
@@ -71,7 +74,14 @@ export function initExpoSentry(Sentry: any, config: ExpoSentryConfig): void {
     enabled: config.enabled ?? true,
     environment: config.environment,
     release,
-    dist: config.buildNumber,
+    // dist ties release-health to a specific artifact. Default = native build
+    // number; when an OTA update is live, prefer the EAS Update id so crash-free
+    // sessions/users report per-OTA as well as per-build (see release.ts +
+    // docs/observability-verification.md §Release health & OTA).
+    dist: config.expoUpdateId ?? config.buildNumber,
+    // Structured logging — off unless explicitly enabled (verified: enableLogs,
+    // @sentry/core options.d.ts:530).
+    enableLogs: config.enableLogs ?? false,
 
     // Sampling — tracesSampler (dynamic, per-flow boost) wins when provided.
     sampleRate: config.sampleRate ?? 1.0,

@@ -12,6 +12,7 @@
  */
 import * as Sentry from "npm:@sentry/deno@10";
 import { withSentry, captureEdge } from "../_shared/sentry.ts";
+import { recordHeartbeat } from "../_shared/heartbeat.ts";
 
 const MONITOR_SLUG = "cdn-probe";
 const MONITOR_CONFIG = {
@@ -120,6 +121,17 @@ Deno.serve(
         MONITOR_CONFIG,
       );
     }
+
+    // WS-3: cdn-probe carries the funded monitor no longer — its outcome lands
+    // as a heartbeat row (+ the structured logs above) instead of error events.
+    await recordHeartbeat("cdn-probe", result.ok, cdn.latencyMs, {
+      cdnStatus: cdn.status,
+      cdnLatencyMs: cdn.latencyMs,
+      originLatencyMs: origin?.latencyMs ?? null,
+      edgeSlow,
+      cacheStatus: cdn.cacheStatus,
+    });
+
     await Sentry.flush(2000);
 
     return new Response(JSON.stringify(result), {

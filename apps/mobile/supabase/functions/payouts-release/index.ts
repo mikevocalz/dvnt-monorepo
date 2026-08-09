@@ -11,6 +11,7 @@ import {
   sendResendEmail,
   payoutStatement,
 } from "../_shared/send-resend-email.ts";
+import { withHeartbeat, tryClaimJob, releaseJob } from "../_shared/heartbeat.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -251,6 +252,18 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // WS-4 skip-if-running: TTL (15 min) self-heals a crashed run before the
+  // documented hourly cadence. Per-event CAS + deterministic Stripe
+  // Idempotency-Key are the real double-payout guards; this only stops overlap.
+  const JOB = "payouts-release";
+  if (!(await tryClaimJob(JOB, 900))) {
+    return new Response(
+      JSON.stringify({ skipped: true, reason: "already_running" }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  try {
+   return await withHeartbeat(JOB, async () => {
   if (!STRIPE_SECRET_KEY) {
     return new Response(
       JSON.stringify({
@@ -538,5 +551,9 @@ Deno.serve(async (req: Request) => {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });
+  }
+   });
+  } finally {
+    await releaseJob(JOB);
   }
 });

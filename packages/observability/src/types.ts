@@ -136,6 +136,29 @@ export interface ReleaseInfo {
 
 // ─── Sentry SDK Abstraction ──────────────────────────────────────────────────
 
+/**
+ * Structured-logging surface (Sentry Logs product).
+ *
+ * Shape verified against @sentry/core 10.69.0 — the `logger` namespace is
+ * `export * as logger from './logs/public-api'`
+ * (node_modules/@sentry/core/build/types/shared-exports.d.ts:90), whose members
+ * are `trace|debug|info|warn|error|fatal(message, attributes?, metadata?)` at
+ * node_modules/@sentry/core/build/types/logs/public-api.d.ts:35,63,90,120,150,180.
+ * Re-exported by @sentry/nextjs (build/types/index.types.d.ts:26) and by
+ * @sentry/react-native 8.22.0 (dist/js/index.d.ts:7, via @sentry/browser).
+ * Only reachable at runtime when `enableLogs: true` is set on Sentry.init
+ * (options.d.ts:530). Optional here so an SDK/build without logs degrades to
+ * breadcrumbs (see logs.ts).
+ */
+export interface SentryStructuredLogger {
+  trace(message: string, attributes?: Record<string, unknown>): void;
+  debug(message: string, attributes?: Record<string, unknown>): void;
+  info(message: string, attributes?: Record<string, unknown>): void;
+  warn(message: string, attributes?: Record<string, unknown>): void;
+  error(message: string, attributes?: Record<string, unknown>): void;
+  fatal(message: string, attributes?: Record<string, unknown>): void;
+}
+
 export interface SentrySDK {
   captureException(error: unknown, context?: any): string;
   captureMessage(message: string, level?: SeverityLevel): string;
@@ -153,6 +176,9 @@ export interface SentrySDK {
   setContext(name: string, context: Record<string, any> | null): void;
   withScope(callback: (scope: any) => void): void;
   startSpan?<T>(context: { name: string; op?: string; attributes?: Record<string, any> }, callback: (span: any) => T): T;
+  /** Structured-logging namespace — present only when the SDK build ships Logs
+   *  AND `enableLogs: true` is set. Absent → logs.ts falls back to breadcrumbs. */
+  logger?: SentryStructuredLogger;
 }
 
 // ─── Feature Areas ───────────────────────────────────────────────────────────

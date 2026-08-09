@@ -52,6 +52,8 @@ Worst-case model at **~120× today's session volume** (assumption, not a measure
 
 Even doubling every assumption (40 tx/session, 40 spans/tx) lands at ~3.4M — still under 5M — and today's *actual* traffic is two orders of magnitude below the model. Spans are not the constraint; errors and replays are.
 
+**SHIPPED (WS-5, 2026-08-09):** this map is now a single exported `dvntTracesSampler` + route→rate table in `packages/observability/src/sampling.ts` (with this span-math proof inlined as a comment), imported by all three `apps/web` Sentry configs (server/edge/client) — replacing their inline `onboarding|welcome|verification|checkout|auth → 1.0 / 0.15` samplers. Adds the chatty→0 bucket (health probes, `.well-known`, feed-poll/presence/heartbeat) and Sneaky Lynk join + media upload → 1.0. Verified against `@sentry/core` 10.69.0: `tracesSampler` sig at `options.d.ts:585`, `TracesSamplerSamplingContext` at `samplingcontext.d.ts`. See [observability-verification.md](./observability-verification.md) §1. Logs (§1 table) turned on via `enableLogs: true` (verified `options.d.ts:530`) as the home for webhook outcomes + funnel logs — §2 of the same doc.
+
 ## 5 · One-line summary
 
 Fix the one bug that is 18× the error quota, filter its replay capture with `beforeErrorSampling` (typings-verified), stop paying error-quota for probe telemetry, wire 50/80% spend notifications at `Settings → Subscription → Manage Spend Notifications`, and the whole org runs at <50% of the free tier — plan/monitor spend (§6 of observability-baseline.md) is then purely about resilience, not survival.

@@ -16,6 +16,8 @@
     "./capture": "./src/capture.ts",
     "./release": "./src/release.ts",
     "./bridge": "./src/bridge.ts",
+    "./sampling": "./src/sampling.ts",
+    "./logs": "./src/logs.ts",
     "./types": "./src/types.ts",
     "./init/expo": "./src/init/expo.ts",
     "./init/web": "./src/init/web.ts",
