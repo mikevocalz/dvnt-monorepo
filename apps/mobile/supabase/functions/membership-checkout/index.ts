@@ -22,7 +22,7 @@ import { verifySession } from "../_shared/verify-session.ts";
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-const SITE_URL = Deno.env.get("DVNT_WEB_URL") || "http://localhost:3000";
+const SITE_URL = Deno.env.get("DVNT_WEB_URL") || "https://dvntapp.live";
 
 // plan_key → env var holding its Stripe price id (mirrors lib/subscription/plans.ts).
 const PRICE_ENV: Record<string, string> = {
@@ -217,8 +217,8 @@ Deno.serve(async (req: Request) => {
       customer: stripeCustomerId,
       "line_items[0][price]": priceId,
       "line_items[0][quantity]": "1",
-      success_url: `${SITE_URL}/pricing?checkout=success`,
-      cancel_url: `${SITE_URL}/pricing?checkout=cancelled`,
+      success_url: `${SITE_URL}/settings/membership?checkout=success`,
+      cancel_url: `${SITE_URL}/settings/membership?checkout=cancelled`,
       "subscription_data[metadata][plan_key]": plan_key,
       "subscription_data[metadata][product_family]": family,
       "subscription_data[metadata][dvnt_user_id]": user_id,
