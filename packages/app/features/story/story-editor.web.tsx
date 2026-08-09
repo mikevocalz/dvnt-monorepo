@@ -56,6 +56,8 @@ import {
   SlidersHorizontal,
   Palette,
   Undo2,
+  Redo2,
+  ChevronLeft,
   Search,
   Highlighter,
   Eraser,
@@ -571,21 +573,7 @@ export function StoryEditorScreen() {
         <BackgroundStrip />
       ) : null}
 
-      {/* Undo (drawing/elements history) */}
-      {undoStack.length > 0 ? (
-        <button
-          onClick={() => useEditorStore.getState().undo()}
-          aria-label="Undo"
-          className="fixed left-4 z-30 w-11 h-11 rounded-xl flex items-center justify-center active:scale-95"
-          style={{
-            background: "rgba(0,0,0,0.55)",
-            border: `1px solid ${HAIRLINE}`,
-            bottom: "calc(env(safe-area-inset-bottom) + 16px)",
-          }}
-        >
-          <Undo2 size={18} color="#fff" />
-        </button>
-      ) : null}
+      {/* Undo/Redo now live inside the RightIslandMenu rail (v1 parity). */}
     </div>
   );
 }
@@ -1104,6 +1092,12 @@ const TOOLS: {
   { id: "adjust", Icon: SlidersHorizontal, label: "Adjust" },
 ];
 
+// v1-mobile Dynamic-Island rail drawer: a magenta indicator tab flush on the
+// right edge that slides the tool buttons (+ undo/redo) in/out. Tap the tab to
+// toggle, tap a tool to select + collapse (the sheet opens below), tap outside
+// to close. CSS-transition slide (no reanimated on web); spring feel via the
+// same cubic-bezier the landing header uses. Buttons live in the drawer, per v1.
+const RAIL_INDICATOR = "#FF5BFC";
 function RightIslandMenu({
   mode,
   onSelect,
@@ -1111,29 +1105,111 @@ function RightIslandMenu({
   mode: string;
   onSelect: (m: "text" | "drawing" | "sticker" | "filter" | "adjust") => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const undoStack = useEditorStore((s) => s.undoStack);
+  const redoStack = useEditorStore((s) => s.redoStack);
+  const canUndo = undoStack.length > 0;
+  const canRedo = redoStack.length > 0;
+
   return (
-    <nav
-      className="absolute right-1 top-2 z-20 flex flex-col gap-2 p-2 rounded-2xl"
-      style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${HAIRLINE}` }}
-    >
-      {TOOLS.map((t) => {
-        const isActive = mode === t.id;
-        return (
-          <button
-            key={t.id}
-            onClick={() => onSelect(t.id)}
-            aria-label={t.label}
-            title={t.label}
-            className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-95"
+    <>
+      {/* Click-outside scrim (only while open) */}
+      {open ? (
+        <div
+          className="fixed inset-0 z-10"
+          onClick={() => setOpen(false)}
+          aria-hidden
+        />
+      ) : null}
+
+      <div className="absolute right-0 top-1/2 z-20 flex items-center -translate-y-1/2">
+        {/* Sliding panel — the drawer where the buttons live */}
+        <nav
+          className="flex flex-col gap-1.5 p-2 mr-1 rounded-2xl"
+          style={{
+            background: "rgba(0,0,0,0.72)",
+            border: `1px solid ${HAIRLINE}`,
+            backdropFilter: "blur(10px)",
+            transform: open ? "translateX(0)" : "translateX(130%)",
+            opacity: open ? 1 : 0,
+            pointerEvents: open ? "auto" : "none",
+            transition:
+              "transform 0.34s cubic-bezier(0.22,1,0.36,1), opacity 0.2s ease",
+          }}
+        >
+          {TOOLS.map((t) => {
+            const isActive = mode === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => {
+                  onSelect(t.id);
+                  setOpen(false);
+                }}
+                aria-label={t.label}
+                title={t.label}
+                className="flex items-center gap-2 h-10 pl-2 pr-3 rounded-xl active:scale-95"
+                style={{ background: isActive ? DEVIANT_GRADIENT : SURFACE }}
+              >
+                <t.Icon size={18} color={isActive ? INK : "#fff"} />
+                <span
+                  className="text-xs font-semibold"
+                  style={{ color: isActive ? INK : "#fff" }}
+                >
+                  {t.label}
+                </span>
+              </button>
+            );
+          })}
+
+          {/* Undo / Redo live in the rail, like v1 */}
+          <div className="flex gap-1.5 mt-1 pt-2" style={{ borderTop: `1px solid ${HAIRLINE}` }}>
+            <button
+              onClick={() => useEditorStore.getState().undo()}
+              disabled={!canUndo}
+              aria-label="Undo"
+              title="Undo"
+              className="flex-1 h-9 rounded-xl flex items-center justify-center active:scale-95"
+              style={{ background: SURFACE, opacity: canUndo ? 1 : 0.35 }}
+            >
+              <Undo2 size={16} color="#fff" />
+            </button>
+            <button
+              onClick={() => useEditorStore.getState().redo()}
+              disabled={!canRedo}
+              aria-label="Redo"
+              title="Redo"
+              className="flex-1 h-9 rounded-xl flex items-center justify-center active:scale-95"
+              style={{ background: SURFACE, opacity: canRedo ? 1 : 0.35 }}
+            >
+              <Redo2 size={16} color="#fff" />
+            </button>
+          </div>
+        </nav>
+
+        {/* Indicator tab — always visible, flush to the right edge */}
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-label={open ? "Close tools" : "Open tools"}
+          className="flex items-center justify-center rounded-l-2xl active:scale-95"
+          style={{
+            width: 26,
+            height: 100,
+            background: RAIL_INDICATOR,
+            boxShadow: "0 4px 20px rgba(255,91,252,0.35)",
+          }}
+        >
+          <ChevronLeft
+            size={18}
+            color={INK}
             style={{
-              background: isActive ? DEVIANT_GRADIENT : SURFACE,
+              transform: open ? "rotate(180deg)" : "rotate(0deg)",
+              transition: "transform 0.34s cubic-bezier(0.22,1,0.36,1)",
             }}
-          >
-            <t.Icon size={18} color={isActive ? INK : "#fff"} />
-          </button>
-        );
-      })}
-    </nav>
+          />
+        </button>
+      </div>
+    </>
   );
 }
 
