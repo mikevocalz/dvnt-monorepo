@@ -43,8 +43,8 @@ export function StoryRouteScreen() {
 
   useEffect(() => {
     if (!stories || !id) return;
+    // Own story included — /feed/story/[id] must open your own fresh post too.
     const groups = (stories as any[])
-      .filter((s) => !s.isYou)
       .map(toViewerGroup)
       .filter((g) => g.segments.length > 0);
     const idx = groups.findIndex((g) => g.id === id);
