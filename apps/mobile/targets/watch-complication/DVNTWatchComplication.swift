@@ -133,7 +133,15 @@ struct DVNTComplicationView: View {
                         .font(.headline).widgetAccentable()
                     Text(msg).font(.caption).lineLimit(2)
                 } else {
-                    Text("DVNT").font(.headline).widgetAccentable()
+                    // Brand mark, not a text wordmark. accessoryRectangular is
+                    // the only accessory family that can carry an image
+                    // alongside text — circular/corner already use the glyph,
+                    // and accessoryInline is a single text line by watchOS
+                    // design, so that one has to stay text.
+                    Image("Glyph")
+                        .resizable().scaledToFit()
+                        .frame(height: 13)
+                        .widgetAccentable()
                     Text(entry.title).font(.caption).lineLimit(1)
                     if let d = entry.eventDate {
                         Text(d, style: .relative).font(.caption2).foregroundStyle(.secondary)

@@ -7,24 +7,24 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		076C3CF0CC544D4B866E2FD3 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 82D6534734334E9980E0C8C4 /* PrivacyInfo.xcprivacy */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		1579A580A4FE4DBFB7935A4A /* ShareExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = C32F76EC7B08483EAF217E47 /* ShareExtension.appex */; };
+		33837637CC9E4DE4A531A7CE /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 85CF6B9A86C14B84A1430EE5 /* CallKit.framework */; };
+		3CB0B7575BD14E5188AD46CE /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF5D3A44FE37466F98D31A01 /* noop-file.swift */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		4A52F1AA0E434B95B157939A /* dvnt-ring.wav in Resources */ = {isa = PBXBuildFile; fileRef = D2FE201A5B8A4072BAC1F5DC /* dvnt-ring.wav */; };
-		548E22AC2C98496CB3C63B6E /* ShareExtension-Info.plist in [missing build phase] */ = {isa = PBXBuildFile; fileRef = 7DD9132353B9473F846407DF /* ShareExtension-Info.plist */; };
-		5FDCD70068BE40CFAD08F1C5 /* ShareExtensionPreprocessor.js in Resources */ = {isa = PBXBuildFile; fileRef = 8EE05141882248108A8A2C08 /* ShareExtensionPreprocessor.js */; };
-		617CC6A2C2EB4C2187F346A6 /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA083497D0D4B39B0B372D4 /* noop-file.swift */; };
-		69074E0B8C44431EACF88AE9 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94452E79E3054290B0D343EE /* ShareViewController.swift */; };
-		7A42588CBCC346AC93B79A6E /* Intents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7054BD1072194B2C9BE931B8 /* Intents.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
-		8D7B94E3922A40318C3A5919 /* PushKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3AE9A03A898B4CFC9F3A2E36 /* PushKit.framework */; };
-		A738305448C34902BCBF63CA /* AppDelegate+VoIPPush.m in Sources */ = {isa = PBXBuildFile; fileRef = 34D090A67CAA44A5B037D134 /* AppDelegate+VoIPPush.m */; };
+		4B464D899B06407F9C55C141 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDAF3A2930F449EDA09625F3 /* ShareViewController.swift */; };
+		4CF4F0DA67714EC19E19DF8F /* ShareExtensionPreprocessor.js in Resources */ = {isa = PBXBuildFile; fileRef = 710F530B8F784634A2DA9B64 /* ShareExtensionPreprocessor.js */; };
+		585E2F5B7F2440F88258001D /* ShareExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 537793750AFA4795B80CADAA /* ShareExtension.appex */; };
+		6554CB68C9E04990B6905BAD /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 72CBE5967CDC4B4D9144154C /* PrivacyInfo.xcprivacy */; };
+		72791902C7CA43D5AC64ABCA /* dvnt-ring.wav in Resources */ = {isa = PBXBuildFile; fileRef = DF8E516E63404EBDA2DB4EEB /* dvnt-ring.wav */; };
+		83AD66B3C0354146861B3432 /* ShareExtension-Info.plist in [missing build phase] */ = {isa = PBXBuildFile; fileRef = E1303C48B93C42099FA08555 /* ShareExtension-Info.plist */; };
+		88F175C1FB164C81A64B292D /* AppDelegate+VoIPPush.m in Sources */ = {isa = PBXBuildFile; fileRef = F548234B44AF4622BAD5ADB5 /* AppDelegate+VoIPPush.m */; };
+		A4F6A59504854FEE9B75149E /* PushKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A8A04916FBBA4444BCE95AFD /* PushKit.framework */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		DA5AD3241FD3493EB7875D90 /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5B25B91C881B4F829F436A09 /* CallKit.framework */; };
-		E0C59452C0D34FCB8A4C494C /* ShareExtension.entitlements in [missing build phase] */ = {isa = PBXBuildFile; fileRef = FC11B6F83FDD451B96D02CED /* ShareExtension.entitlements */; };
-		E99858FD2BA241E5A443544A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C2E716EA5D28401098111862 /* PrivacyInfo.xcprivacy */; };
+		BB4AFFDA480A482793712C85 /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = ECB61A1CF02D49D8BAD05412 /* MainInterface.storyboard */; };
+		CB431D6FD9E644F88BBEFA18 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B000E8D610674AD49ACEB2A6 /* PrivacyInfo.xcprivacy */; };
+		D4F4F3026602432B9AA50989 /* Intents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CB3ECFF569C34A4DA5C37550 /* Intents.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
+		E4137E17C1414E38936B676D /* ShareExtension.entitlements in [missing build phase] */ = {isa = PBXBuildFile; fileRef = 01C5E8FA0D1940509F19BC4A /* ShareExtension.entitlements */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
-		FA27D8BA546C4B8A987D8BC9 /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 0ACFF89AD6A8452F8A480C95 /* MainInterface.storyboard */; };
 		XX12B55A1EDABF083C3B51XX /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX470101BAEB8E0BBC8B0DXX /* WidgetKit.framework */; };
 		XX1A6800511A685AB346D2XX /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XXA12889081EB894481655XX /* AppIntents.framework */; };
 		XX1ECDC44A36499A2C9883XX /* WatchKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX378A422B4194AC6966BAXX /* WatchKit.framework */; };
@@ -39,11 +39,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		19A40CC308B64CE696840638 /* PBXContainerItemProxy */ = {
+		01AC38B5E26749DC8BF0712F /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 38C5FC64F94845E1851F2711;
+			remoteGlobalIDString = 23E2F27FF708480C85A9E3B0;
 			remoteInfo = ShareExtension;
 		};
 		XX905D8E303DEB70231992XX /* PBXContainerItemProxy */ = {
@@ -63,11 +63,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		9D2A1C719D2A463BBF560904 /* Copy Files */ = {
+		0B02516A513E40CAAB3F482A /* Copy Files */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1579A580A4FE4DBFB7935A4A /* ShareExtension.appex in Copy Files */,
+				585E2F5B7F2440F88258001D /* ShareExtension.appex in Copy Files */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			name = "Copy Files";
@@ -99,28 +99,28 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		0ACFF89AD6A8452F8A480C95 /* MainInterface.storyboard */ = {isa = PBXFileReference; name = MainInterface.storyboard; path = MainInterface.storyboard; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		01C5E8FA0D1940509F19BC4A /* ShareExtension.entitlements */ = {isa = PBXFileReference; name = ShareExtension.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
 		13B07F961A680F5B00A75B9A /* DVNT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DVNT.app; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = 4; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = DVNT/Images.xcassets; sourceTree = "<group>"; fileEncoding = 4; includeInIndex = 0; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = DVNT/Info.plist; sourceTree = "<group>"; includeInIndex = 0; };
-		34D090A67CAA44A5B037D134 /* AppDelegate+VoIPPush.m */ = {isa = PBXFileReference; name = "AppDelegate+VoIPPush.m"; path = "DVNT/AppDelegate+VoIPPush.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = undefined; };
-		3AE9A03A898B4CFC9F3A2E36 /* PushKit.framework */ = {isa = PBXFileReference; name = PushKit.framework; path = System/Library/Frameworks/PushKit.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
-		5B25B91C881B4F829F436A09 /* CallKit.framework */ = {isa = PBXFileReference; name = CallKit.framework; path = System/Library/Frameworks/CallKit.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
-		7054BD1072194B2C9BE931B8 /* Intents.framework */ = {isa = PBXFileReference; name = Intents.framework; path = System/Library/Frameworks/Intents.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
-		7DD9132353B9473F846407DF /* ShareExtension-Info.plist */ = {isa = PBXFileReference; name = "ShareExtension-Info.plist"; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.xml; explicitFileType = undefined; includeInIndex = 0; };
-		82D6534734334E9980E0C8C4 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = PrivacyInfo.xcprivacy; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
-		8EE05141882248108A8A2C08 /* ShareExtensionPreprocessor.js */ = {isa = PBXFileReference; name = ShareExtensionPreprocessor.js; path = ShareExtensionPreprocessor.js; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
-		94452E79E3054290B0D343EE /* ShareViewController.swift */ = {isa = PBXFileReference; name = ShareViewController.swift; path = ShareViewController.swift; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
-		9BA083497D0D4B39B0B372D4 /* noop-file.swift */ = {isa = PBXFileReference; name = "noop-file.swift"; path = "DVNT/noop-file.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
+		537793750AFA4795B80CADAA /* ShareExtension.appex */ = {isa = PBXFileReference; name = ShareExtension.appex; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = undefined; lastKnownFileType = undefined; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; };
+		710F530B8F784634A2DA9B64 /* ShareExtensionPreprocessor.js */ = {isa = PBXFileReference; name = ShareExtensionPreprocessor.js; path = ShareExtensionPreprocessor.js; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		72CBE5967CDC4B4D9144154C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = PrivacyInfo.xcprivacy; path = DVNT/PrivacyInfo.xcprivacy; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		85CF6B9A86C14B84A1430EE5 /* CallKit.framework */ = {isa = PBXFileReference; name = CallKit.framework; path = System/Library/Frameworks/CallKit.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
+		A8A04916FBBA4444BCE95AFD /* PushKit.framework */ = {isa = PBXFileReference; name = PushKit.framework; path = System/Library/Frameworks/PushKit.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = DVNT/SplashScreen.storyboard; sourceTree = "<group>"; includeInIndex = 0; };
+		B000E8D610674AD49ACEB2A6 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = PrivacyInfo.xcprivacy; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; includeInIndex = 0; };
-		C2E716EA5D28401098111862 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = PrivacyInfo.xcprivacy; path = DVNT/PrivacyInfo.xcprivacy; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
-		C32F76EC7B08483EAF217E47 /* ShareExtension.appex */ = {isa = PBXFileReference; name = ShareExtension.appex; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = undefined; lastKnownFileType = undefined; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; };
-		D2FE201A5B8A4072BAC1F5DC /* dvnt-ring.wav */ = {isa = PBXFileReference; name = "dvnt-ring.wav"; path = "DVNT/dvnt-ring.wav"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = audio.wav; explicitFileType = undefined; includeInIndex = undefined; };
+		CB3ECFF569C34A4DA5C37550 /* Intents.framework */ = {isa = PBXFileReference; name = Intents.framework; path = System/Library/Frameworks/Intents.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
+		CF5D3A44FE37466F98D31A01 /* noop-file.swift */ = {isa = PBXFileReference; name = "noop-file.swift"; path = "DVNT/noop-file.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
+		DF8E516E63404EBDA2DB4EEB /* dvnt-ring.wav */ = {isa = PBXFileReference; name = "dvnt-ring.wav"; path = "DVNT/dvnt-ring.wav"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = audio.wav; explicitFileType = undefined; includeInIndex = undefined; };
+		E1303C48B93C42099FA08555 /* ShareExtension-Info.plist */ = {isa = PBXFileReference; name = "ShareExtension-Info.plist"; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.xml; explicitFileType = undefined; includeInIndex = 0; };
+		ECB61A1CF02D49D8BAD05412 /* MainInterface.storyboard */ = {isa = PBXFileReference; name = MainInterface.storyboard; path = MainInterface.storyboard; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; fileEncoding = 4; includeInIndex = undefined; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = DVNT/AppDelegate.swift; sourceTree = "<group>"; fileEncoding = 4; includeInIndex = 0; };
 		F11748442D0722820044C1D9 /* DVNT-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "DVNT-Bridging-Header.h"; path = "DVNT/DVNT-Bridging-Header.h"; sourceTree = "<group>"; fileEncoding = 4; includeInIndex = 0; };
-		FC11B6F83FDD451B96D02CED /* ShareExtension.entitlements */ = {isa = PBXFileReference; name = ShareExtension.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		F548234B44AF4622BAD5ADB5 /* AppDelegate+VoIPPush.m */ = {isa = PBXFileReference; name = "AppDelegate+VoIPPush.m"; path = "DVNT/AppDelegate+VoIPPush.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = undefined; };
+		FDAF3A2930F449EDA09625F3 /* ShareViewController.swift */ = {isa = PBXFileReference; name = ShareViewController.swift; path = ShareViewController.swift; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
 		XX378A422B4194AC6966BAXX /* WatchKit.framework */ = {isa = PBXFileReference; path = System/Library/Frameworks/WatchKit.framework; fileEncoding = 4; lastKnownFileType = wrapper.framework; includeInIndex = undefined; name = WatchKit.framework; sourceTree = SDKROOT; };
 		XX470101BAEB8E0BBC8B0DXX /* WidgetKit.framework */ = {isa = PBXFileReference; path = System/Library/Frameworks/WidgetKit.framework; fileEncoding = 4; lastKnownFileType = wrapper.framework; includeInIndex = undefined; name = WidgetKit.framework; sourceTree = SDKROOT; };
 		XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */ = {isa = PBXFileReference; path = System/Library/Frameworks/SwiftUI.framework; fileEncoding = 4; lastKnownFileType = wrapper.framework; includeInIndex = undefined; name = SwiftUI.framework; sourceTree = SDKROOT; };
@@ -184,13 +184,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8D7B94E3922A40318C3A5919 /* PushKit.framework in Frameworks */,
-				DA5AD3241FD3493EB7875D90 /* CallKit.framework in Frameworks */,
-				7A42588CBCC346AC93B79A6E /* Intents.framework in Frameworks */,
+				A4F6A59504854FEE9B75149E /* PushKit.framework in Frameworks */,
+				33837637CC9E4DE4A531A7CE /* CallKit.framework in Frameworks */,
+				D4F4F3026602432B9AA50989 /* Intents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		9AAAD2305C7A49BB9D434C29 /* Frameworks */ = {
+		C23940219F544E0099BC6757 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -232,10 +232,10 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				C2E716EA5D28401098111862 /* PrivacyInfo.xcprivacy */,
-				D2FE201A5B8A4072BAC1F5DC /* dvnt-ring.wav */,
-				34D090A67CAA44A5B037D134 /* AppDelegate+VoIPPush.m */,
-				9BA083497D0D4B39B0B372D4 /* noop-file.swift */,
+				72CBE5967CDC4B4D9144154C /* PrivacyInfo.xcprivacy */,
+				DF8E516E63404EBDA2DB4EEB /* dvnt-ring.wav */,
+				F548234B44AF4622BAD5ADB5 /* AppDelegate+VoIPPush.m */,
+				CF5D3A44FE37466F98D31A01 /* noop-file.swift */,
 			);
 			name = DVNT;
 			sourceTree = "<group>";
@@ -244,9 +244,9 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				3AE9A03A898B4CFC9F3A2E36 /* PushKit.framework */,
-				5B25B91C881B4F829F436A09 /* CallKit.framework */,
-				7054BD1072194B2C9BE931B8 /* Intents.framework */,
+				A8A04916FBBA4444BCE95AFD /* PushKit.framework */,
+				85CF6B9A86C14B84A1430EE5 /* CallKit.framework */,
+				CB3ECFF569C34A4DA5C37550 /* Intents.framework */,
 				XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */,
 				XX8ACBDF17A27E5D829A2CXX /* WatchConnectivity.framework */,
 				XX7E674302DD5EEB942175XX /* CoreImage.framework */,
@@ -274,7 +274,7 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				8ECC7154E8BD4A3DA282A482 /* ShareExtension */,
+				B73FA1A017FC469390A4E0C5 /* ShareExtension */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -285,22 +285,22 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* DVNT.app */,
-				C32F76EC7B08483EAF217E47 /* ShareExtension.appex */,
+				537793750AFA4795B80CADAA /* ShareExtension.appex */,
 				XX76D1DA9C9A13DAFA7C18XX /* DVNTWatch.app */,
 				XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		8ECC7154E8BD4A3DA282A482 /* ShareExtension */ = {
+		B73FA1A017FC469390A4E0C5 /* ShareExtension */ = {
 			isa = PBXGroup;
 			children = (
-				94452E79E3054290B0D343EE /* ShareViewController.swift */,
-				0ACFF89AD6A8452F8A480C95 /* MainInterface.storyboard */,
-				8EE05141882248108A8A2C08 /* ShareExtensionPreprocessor.js */,
-				82D6534734334E9980E0C8C4 /* PrivacyInfo.xcprivacy */,
-				7DD9132353B9473F846407DF /* ShareExtension-Info.plist */,
-				FC11B6F83FDD451B96D02CED /* ShareExtension.entitlements */,
+				FDAF3A2930F449EDA09625F3 /* ShareViewController.swift */,
+				ECB61A1CF02D49D8BAD05412 /* MainInterface.storyboard */,
+				710F530B8F784634A2DA9B64 /* ShareExtensionPreprocessor.js */,
+				B000E8D610674AD49ACEB2A6 /* PrivacyInfo.xcprivacy */,
+				E1303C48B93C42099FA08555 /* ShareExtension-Info.plist */,
+				01C5E8FA0D1940509F19BC4A /* ShareExtension.entitlements */,
 			);
 			name = ShareExtension;
 			path = ShareExtension;
@@ -338,16 +338,16 @@
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				40F6B41D9D0D453287412E3B /* [Expo Dev Launcher] Strip Local Network Keys for Release */,
-				9D2A1C719D2A463BBF560904 /* Copy Files */,
-				F791B4EB1B97463BA3C30600 /* Upload Debug Symbols to Sentry */,
+				CCA441F21ED2433AA3BAD9AC /* [Expo Dev Launcher] Strip Local Network Keys for Release */,
+				0B02516A513E40CAAB3F482A /* Copy Files */,
+				0AEFAB00217140CFBC5ED9EE /* Upload Debug Symbols to Sentry */,
 				XX81D5C67C94C2E1F9007EXX /* Embed Watch Content */,
 				XX72A8CFBF0FBA13A79902XX /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				5AA18E413C5A476891F76260 /* PBXTargetDependency */,
+				24C262F4829F45A28BFBE30C /* PBXTargetDependency */,
 				XX59C5220957AF6113E904XX /* PBXTargetDependency */,
 				XX36DA247C17C94BD9E4E7XX /* PBXTargetDependency */,
 			);
@@ -356,17 +356,17 @@
 			productReference = 13B07F961A680F5B00A75B9A /* DVNT.app */;
 			productType = "com.apple.product-type.application";
 		};
-		38C5FC64F94845E1851F2711 /* ShareExtension */ = {
+		23E2F27FF708480C85A9E3B0 /* ShareExtension */ = {
 			isa = PBXNativeTarget;
 			name = ShareExtension;
 			productName = ShareExtension;
-			productReference = C32F76EC7B08483EAF217E47 /* ShareExtension.appex */;
+			productReference = 537793750AFA4795B80CADAA /* ShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
-			buildConfigurationList = 7D609280C3714694A3C43BF2 /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+			buildConfigurationList = 164158E675AE4E7A9C1A52D5 /* Build configuration list for PBXNativeTarget "ShareExtension" */;
 			buildPhases = (
-				860438BA5A864BACA8A3FA86 /* Sources */,
-				4BFC5E60BAC0402DA94EBBED /* Resources */,
-				9AAAD2305C7A49BB9D434C29 /* Frameworks */,
+				4601E82FA5F64AE9943E51E2 /* Sources */,
+				40F6B16F77474DD3AD33F5BF /* Resources */,
+				C23940219F544E0099BC6757 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -425,7 +425,7 @@
 						LastSwiftMigration = 1250;
 						DevelopmentTeam = 436WA3W63V;
 					};
-					38C5FC64F94845E1851F2711 = {
+					23E2F27FF708480C85A9E3B0 = {
 						CreatedOnToolsVersion = 14.3;
 						ProvisioningStyle = Automatic;
 						DevelopmentTeam = 436WA3W63V;
@@ -456,7 +456,7 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* DVNT */,
-				38C5FC64F94845E1851F2711 /* ShareExtension */,
+				23E2F27FF708480C85A9E3B0 /* ShareExtension */,
 				XXAB3F603B232A2BDC4FCBXX /* DVNTWatch */,
 				XX6204D228DD36AB94F694XX /* DVNTWatchComplication */,
 			);
@@ -471,18 +471,18 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				E99858FD2BA241E5A443544A /* PrivacyInfo.xcprivacy in Resources */,
-				4A52F1AA0E434B95B157939A /* dvnt-ring.wav in Resources */,
+				6554CB68C9E04990B6905BAD /* PrivacyInfo.xcprivacy in Resources */,
+				72791902C7CA43D5AC64ABCA /* dvnt-ring.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		4BFC5E60BAC0402DA94EBBED /* Resources */ = {
+		40F6B16F77474DD3AD33F5BF /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				FA27D8BA546C4B8A987D8BC9 /* MainInterface.storyboard in Resources */,
-				5FDCD70068BE40CFAD08F1C5 /* ShareExtensionPreprocessor.js in Resources */,
-				076C3CF0CC544D4B866E2FD3 /* PrivacyInfo.xcprivacy in Resources */,
+				BB4AFFDA480A482793712C85 /* MainInterface.storyboard in Resources */,
+				4CF4F0DA67714EC19E19DF8F /* ShareExtensionPreprocessor.js in Resources */,
+				CB431D6FD9E644F88BBEFA18 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -546,19 +546,19 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		40F6B41D9D0D453287412E3B /* [Expo Dev Launcher] Strip Local Network Keys for Release */ = {
+		0AEFAB00217140CFBC5ED9EE /* Upload Debug Symbols to Sentry */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
-			name = "[Expo Dev Launcher] Strip Local Network Keys for Release";
+			name = "Upload Debug Symbols to Sentry";
 			inputPaths = (
 			);
 			outputPaths = (
 			);
 			shellPath = /bin/sh;
-			shellScript = "# Strip dev-launcher-specific local network permission keys from non-Debug builds\n# This only removes _expo._tcp Bonjour services and the dev-launcher usage description.\n# Other Bonjour services and custom descriptions are preserved for production use.\n\nif [ \"$CONFIGURATION\" != \"Debug\" ]; then\n  PLIST_PATH=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\n  if [ -f \"$PLIST_PATH\" ]; then\n    # Check if NSBonjourServices exists\n    if /usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" >/dev/null 2>&1; then\n      # Get the count of services\n      COUNT=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n\n      # Remove _expo._tcp\n      for ((i=COUNT-1; i>=0; i--)); do\n        SERVICE=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n        if echo \"$SERVICE\" | grep -q \"_expo._tcp\"; then\n          /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || true\n        fi\n      done\n\n      # If the array is now empty, remove it entirely\n      REMAINING=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n      if [ \"$REMAINING\" -eq \"0\" ]; then\n        /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null || true\n      fi\n    fi\n\n    # Only delete the description if it matches the dev-launcher default text\n    DESC=$(/usr/libexec/PlistBuddy -c \"Print :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n    if echo \"$DESC\" | grep -q \"Expo Dev Launcher\"; then\n      /usr/libexec/PlistBuddy -c \"Delete :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || true\n    fi\n  fi\nfi\n";
+			shellScript = "/bin/sh `${NODE_BINARY:-node} --print \"require('path').dirname(require.resolve('@sentry/react-native/package.json')) + '/scripts/sentry-xcode-debug-files.sh'\"`";
 			outputFileListPaths = (
 			);
 			inputFileListPaths = (
@@ -590,19 +590,19 @@
 			inputFileListPaths = (
 			);
 		};
-		F791B4EB1B97463BA3C30600 /* Upload Debug Symbols to Sentry */ = {
+		CCA441F21ED2433AA3BAD9AC /* [Expo Dev Launcher] Strip Local Network Keys for Release */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
-			name = "Upload Debug Symbols to Sentry";
+			name = "[Expo Dev Launcher] Strip Local Network Keys for Release";
 			inputPaths = (
 			);
 			outputPaths = (
 			);
 			shellPath = /bin/sh;
-			shellScript = "/bin/sh `${NODE_BINARY:-node} --print \"require('path').dirname(require.resolve('@sentry/react-native/package.json')) + '/scripts/sentry-xcode-debug-files.sh'\"`";
+			shellScript = "# Strip dev-launcher-specific local network permission keys from non-Debug builds\n# This only removes _expo._tcp Bonjour services and the dev-launcher usage description.\n# Other Bonjour services and custom descriptions are preserved for production use.\n\nif [ \"$CONFIGURATION\" != \"Debug\" ]; then\n  PLIST_PATH=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\n  if [ -f \"$PLIST_PATH\" ]; then\n    # Check if NSBonjourServices exists\n    if /usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" >/dev/null 2>&1; then\n      # Get the count of services\n      COUNT=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n\n      # Remove _expo._tcp\n      for ((i=COUNT-1; i>=0; i--)); do\n        SERVICE=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n        if echo \"$SERVICE\" | grep -q \"_expo._tcp\"; then\n          /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || true\n        fi\n      done\n\n      # If the array is now empty, remove it entirely\n      REMAINING=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n      if [ \"$REMAINING\" -eq \"0\" ]; then\n        /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null || true\n      fi\n    fi\n\n    # Only delete the description if it matches the dev-launcher default text\n    DESC=$(/usr/libexec/PlistBuddy -c \"Print :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n    if echo \"$DESC\" | grep -q \"Expo Dev Launcher\"; then\n      /usr/libexec/PlistBuddy -c \"Delete :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || true\n    fi\n  fi\nfi\n";
 			outputFileListPaths = (
 			);
 			inputFileListPaths = (
@@ -616,16 +616,16 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				A738305448C34902BCBF63CA /* AppDelegate+VoIPPush.m in Sources */,
-				617CC6A2C2EB4C2187F346A6 /* noop-file.swift in Sources */,
+				88F175C1FB164C81A64B292D /* AppDelegate+VoIPPush.m in Sources */,
+				3CB0B7575BD14E5188AD46CE /* noop-file.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		860438BA5A864BACA8A3FA86 /* Sources */ = {
+		4601E82FA5F64AE9943E51E2 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				69074E0B8C44431EACF88AE9 /* ShareViewController.swift in Sources */,
+				4B464D899B06407F9C55C141 /* ShareViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -646,10 +646,10 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		5AA18E413C5A476891F76260 /* PBXTargetDependency */ = {
+		24C262F4829F45A28BFBE30C /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 38C5FC64F94845E1851F2711 /* ShareExtension */;
-			targetProxy = 19A40CC308B64CE696840638 /* PBXContainerItemProxy */;
+			target = 23E2F27FF708480C85A9E3B0 /* ShareExtension */;
+			targetProxy = 01AC38B5E26749DC8BF0712F /* PBXContainerItemProxy */;
 		};
 		XX36DA247C17C94BD9E4E7XX /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -742,52 +742,6 @@
 				CODE_SIGN_ENTITLEMENTS = DVNT/DVNT.entitlements;
 			};
 			name = Release;
-		};
-		39AF46A56318490FBF721118 /* Debug */ = {
-			name = Debug;
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_NAME = ShareExtension;
-				SKIP_INSTALL = YES;
-				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.dvnt.app.share-extension";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				DEVELOPMENT_TEAM = 436WA3W63V;
-			};
-		};
-		3C65DBFC5F16492EAD368D9F /* Release */ = {
-			name = Release;
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_NAME = ShareExtension;
-				SKIP_INSTALL = YES;
-				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.dvnt.app.share-extension";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				DEVELOPMENT_TEAM = 436WA3W63V;
-			};
 		};
 		83CBBA201A601CBA00E9B192 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -913,6 +867,52 @@
 				);
 			};
 			name = Release;
+		};
+		9A9A3410E20B4C5EBBC987A8 /* Debug */ = {
+			name = Debug;
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_NAME = ShareExtension;
+				SKIP_INSTALL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.dvnt.app.share-extension";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				DEVELOPMENT_TEAM = 436WA3W63V;
+			};
+		};
+		C42974D7ABBD4C0EA7E9A3A9 /* Release */ = {
+			name = Release;
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_NAME = ShareExtension;
+				SKIP_INSTALL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.dvnt.app.share-extension";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				DEVELOPMENT_TEAM = 436WA3W63V;
+			};
 		};
 		XX3F38E9AB1EA730298605XX /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -1096,11 +1096,11 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		7D609280C3714694A3C43BF2 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
+		164158E675AE4E7A9C1A52D5 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				39AF46A56318490FBF721118 /* Debug */,
-				3C65DBFC5F16492EAD368D9F /* Release */,
+				9A9A3410E20B4C5EBBC987A8 /* Debug */,
+				C42974D7ABBD4C0EA7E9A3A9 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
