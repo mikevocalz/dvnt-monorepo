@@ -282,12 +282,14 @@ export default {
       ],
       // Links native targets (Apple Watch app + watch complication) outside /ios
       // via CNG. Auto-discovers apps/mobile/targets/*/expo-target.config.js.
-      // TEMPORARILY DISABLED for the SDK 56 production build: the watch
-      // complication App ID (com.dvnt.app.watchkitapp.complication) isn't
-      // registerable on the Individual Apple team, which blocked credential
-      // setup. The watch app was held-back anyway (PROMPT 7). Re-enable once the
-      // watch App IDs are registered on the Apple Developer portal.
-      // "@bacons/apple-targets",
+      // Re-enabled 2026-08-09: Mike confirms the watch App IDs + App Group
+      // (group.com.dvnt.app.watch, com.dvnt.app.watchkitapp[.complication]) are
+      // registered on the Developer portal — the earlier "not registerable on
+      // the Individual team" blocker is resolved. `eas build -p ios` is the
+      // definitive check: it succeeds if registered, else errors naming the
+      // missing App ID (revert this line to disable). Links the watch app +
+      // complication targets under apps/mobile/targets/* via CNG.
+      "@bacons/apple-targets",
       "./plugins/disable-user-script-sandboxing",
       "./plugins/with-app-controller-init",
       // Install NSSetUncaughtExceptionHandler EARLY so it's the first
