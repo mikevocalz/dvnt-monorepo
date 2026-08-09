@@ -287,16 +287,23 @@ export default {
       ],
       // Links native targets (Apple Watch app + watch complication) outside /ios
       // via CNG. Auto-discovers apps/mobile/targets/*/expo-target.config.js.
-      // DISABLED again 2026-08-09 after running the definitive check. Apple
-      // still refuses both watch App IDs on team 436WA3W63V:
-      //   - com.dvnt.app.watchkitapp.complication → "An App ID with Identifier
-      //     ... is not available" (same blocker as the SDK 56 build in June).
-      //   - com.dvnt.app.watchkitapp → registers, but APP_GROUPS capability
-      //     sync fails (group.com.dvnt.app.watch is not a registered App Group).
-      // Swift sources stay under apps/mobile/targets/* — only the CNG link is
-      // off. Re-enable by uncommenting once BOTH App IDs and the watch App
-      // Group exist in the Developer portal.
-      // "@bacons/apple-targets",
+      // Re-enabled 2026-08-09 to attempt the watch targets via an INTERACTIVE
+      // build. The blocker was never the code: EAS could register
+      // com.dvnt.app.watchkitapp but not attach its App Group, because an App
+      // Store Connect API key cannot sync capability *identifiers* — EAS said
+      // so outright ("Skipping capability identifier syncing because the
+      // current Apple authentication session is not using Cookies"). A cookie
+      // session (interactive Apple ID login) can, and should create
+      // group.com.dvnt.app.watch on the fly.
+      //
+      // If the interactive run still fails on
+      // com.dvnt.app.watchkitapp.complication ("An App ID with Identifier ...
+      // is not available"), that identifier is taken and must be registered by
+      // hand in the Developer portal — or renamed here and in
+      // targets/watch-complication/expo-target.config.js.
+      //
+      // Links the watch app + complication under apps/mobile/targets/* via CNG.
+      "@bacons/apple-targets",
       "./plugins/disable-user-script-sandboxing",
       "./plugins/with-app-controller-init",
       // Install NSSetUncaughtExceptionHandler EARLY so it's the first
@@ -335,8 +342,10 @@ export default {
         {
           image: "./assets/images/splash-icon.png",
           resizeMode: "contain",
+          // No `dark:` variant: the app is userInterfaceStyle "dark", and
+          // declaring both makes expo-splash-screen warn that the interface
+          // style prevents the splash from applying. One black splash is right.
           backgroundColor: "#000000",
-          dark: { backgroundColor: "#000000" },
         },
       ],
       "expo-status-bar",
