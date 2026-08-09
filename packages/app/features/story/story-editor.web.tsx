@@ -1,16 +1,21 @@
 "use client";
 
 /**
- * Story overlay editor — WEB variant (feature-parity with the native editor).
+ * Story overlay editor — WEB parts (feature-parity with the native editor).
+ *
+ * This module is the SHARED source of the web editor UI: the RightIslandMenu
+ * rail, the tool sheets (Text / Draw / Stickers / Effects / Adjust), the
+ * EditorStage, the overlay producers, and the export `bakeFrame`. The unified
+ * story composer (`story-create.web.tsx`) imports these and hosts them INLINE —
+ * the rail + sheets live on the create screen, Share bakes + uploads directly,
+ * and there is no second /feed/story/editor screen and no result-store handoff.
  *
  * Native source of truth: app/(protected)/story/editor.tsx + src/stories-editor
  * (Skia canvas + gesture-handler + reanimated). Those native-graphics libs can't
  * run on web, so this is a SEPARATE browser-native implementation that drives the
- * SAME Zustand stores the native editor uses:
+ * SAME editor Zustand store the native editor uses:
  *   - useEditorStore  (features/stories-editor/stores/editor-store) — media +
  *     elements + drawing + filters + adjustments + backgrounds + tool UI state
- *   - useStoryFlowStore — the story-creation state machine
- *   - useStoryEditorResultStore — the hand-off back to story/create
  *
  * Web substrate (NO Skia / canvas-kit / reanimated / gesture-handler):
  *   - Drawing   → an HTML5 <canvas> 2D overlay; pointer strokes → addDrawingPath
@@ -44,7 +49,6 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "solito/navigation";
 import {
   X,
   Type,
@@ -95,6 +99,7 @@ import type {
   StoryBackground,
 } from "@dvnt/app/features/stories-editor/constants";
 import type {
+  CanvasElement,
   TextElement,
   StickerElement,
   DrawingPath,
@@ -104,8 +109,6 @@ import type {
   Position,
   TextStylePreset,
 } from "@dvnt/app/features/stories-editor/types";
-import { useStoryFlowStore } from "@dvnt/app/lib/stores/story-flow-store";
-import { useStoryEditorResultStore } from "@dvnt/app/lib/stores/story-editor-result-store";
 // WS-4 interactive-sticker value entry: event/ticket search + @mention search.
 // Verified sources — useEventSearch/useMyEvents return the `Event` shape
 // (id/title/image/date/location); searchApi.searchUsers returns
@@ -122,13 +125,21 @@ import type {
 } from "@dvnt/app/lib/types";
 
 // ── Brand tokens (docs/dvnt-design-system.md) ───────────────────────────
-const INK = "#06070d";
-const ACCENT = "#3FDCFF"; // cyan — primary accent
-const DANGER = "#FC253A";
-const DEVIANT_GRADIENT =
+export const INK = "#06070d";
+export const ACCENT = "#3FDCFF"; // cyan — primary accent
+export const DANGER = "#FC253A";
+export const DEVIANT_GRADIENT =
   "linear-gradient(100deg, #3FDCFF 0%, #8A40CF 52%, #FF5BFC 100%)";
-const SURFACE = "rgba(255,255,255,0.06)";
-const HAIRLINE = "rgba(255,255,255,0.10)";
+export const SURFACE = "rgba(255,255,255,0.06)";
+export const HAIRLINE = "rgba(255,255,255,0.10)";
+
+/** The five tool modes the RightIslandMenu rail toggles. */
+export type EditorToolMode =
+  | "text"
+  | "drawing"
+  | "sticker"
+  | "filter"
+  | "adjust";
 
 // Text/drawing colour palette — mirrors native color options.
 const TEXT_COLORS = [
@@ -353,258 +364,81 @@ function assetToUrl(source: string | number): string {
 const LUT_FILTER_ID = "dvnt-story-lut";
 
 // ============================================================
-// Screen
+// Export helpers — shared by the unified create screen (story-create.web) so
+// Share can bake + build overlays without a route hop / result-store handoff.
 // ============================================================
 
-export function StoryEditorScreen() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const uriParam = searchParams?.get("uri") ?? "";
-  const typeParam = searchParams?.get("type") ?? "image";
-  const initialMode = searchParams?.get("initialMode") ?? undefined;
-  const indexParam = searchParams?.get("index") ?? "0";
-
-  const mediaUri = uriParam ? decodeURIComponent(uriParam) : "";
-  const mediaType: "image" | "video" =
-    typeParam === "video" ? "video" : "image";
-
-  // Editor store (the EXACT zustand store native uses).
-  const elements = useEditorStore((s) => s.elements);
-  const mode = useEditorStore((s) => s.mode);
-  const storeMediaUri = useEditorStore((s) => s.mediaUri);
-  const currentFilter = useEditorStore((s) => s.currentFilter);
-  const adjustments = useEditorStore((s) => s.adjustments);
-  const canvasBackground = useEditorStore((s) => s.canvasBackground);
-  const undoStack = useEditorStore((s) => s.undoStack);
-  const selected = useSelectedElement();
-
-  const stageRef = useRef<HTMLDivElement>(null);
-  const [exporting, setExporting] = useState(false);
-
-  const textOnly = initialMode === "text";
-
-  // [REGRESSION LOCK parity] Reset editor on mount, then seed media — clean
-  // slate every session, same guarantee the native useLayoutEffect provides.
-  const didMount = useRef(false);
-  useEffect(() => {
-    if (didMount.current) return;
-    didMount.current = true;
-    const editor = useEditorStore.getState();
-    editor.resetEditor();
-    if (mediaUri) editor.setMedia(mediaUri, mediaType);
-    if (initialMode === "text") editor.setTextOnlyMode(true);
-  }, [mediaUri, mediaType, initialMode]);
-
-  // Drive the story-flow state machine to the right editing state, mirroring
-  // native (HUB → EDIT_IMAGE / EDIT_VIDEO / TEXT_ONLY).
-  useEffect(() => {
-    const targetState =
-      initialMode === "text"
-        ? "TEXT_ONLY"
-        : mediaType === "video"
-          ? "EDIT_VIDEO"
-          : "EDIT_IMAGE";
-    const flow = useStoryFlowStore.getState();
-    if (flow.state === targetState) return;
-    if (flow.state !== "HUB") {
-      flow.forceIdle();
-      useStoryFlowStore.getState().transitionTo("HUB");
+/**
+ * Build the portable overlay arrays (text / emoji / image-sticker / WS-4 →
+ * storyOverlays; GIF → animatedGifOverlays) from a set of editor elements.
+ * Same producer logic the standalone editor's Done used, so the publish shape
+ * is unchanged.
+ */
+export function buildOverlaysFromElements(elements: CanvasElement[]): {
+  storyOverlays: StoryOverlay[];
+  animatedGifOverlays: StoryAnimatedGifOverlay[];
+} {
+  const storyOverlays: StoryOverlay[] = [];
+  const animatedGifOverlays: StoryAnimatedGifOverlay[] = [];
+  for (const el of elements) {
+    if (el.type === "text") {
+      storyOverlays.push(textElementToOverlay(el));
+    } else if (el.type === "sticker") {
+      if (isGif(el)) animatedGifOverlays.push(gifStickerToAnimatedOverlay(el));
+      else if (isWs4(el)) storyOverlays.push(ws4StickerToOverlay(el));
+      else storyOverlays.push(stickerElementToOverlay(el));
     }
-    useStoryFlowStore.getState().transitionTo(targetState);
-  }, [initialMode, mediaType]);
+  }
+  return { storyOverlays, animatedGifOverlays };
+}
 
-  const handleClose = () => {
-    useStoryFlowStore.getState().transitionTo("HUB");
-    router.back();
-    setTimeout(() => useEditorStore.getState().resetEditor(), 350);
-  };
-
-  const handleDone = async () => {
-    if (exporting) return;
-    setExporting(true);
-    try {
-      const editor = useEditorStore.getState();
-      const rawUri = editor.mediaUri ?? mediaUri;
-
-      // Build overlays (text / emoji / image-sticker / ws4). Drawing + filters
-      // are NOT overlays — they are baked into the frame below (native parity).
-      const storyOverlays: StoryOverlay[] = [];
-      const animatedGifOverlays: StoryAnimatedGifOverlay[] = [];
-      for (const el of editor.elements) {
-        if (el.type === "text") {
-          storyOverlays.push(textElementToOverlay(el));
-        } else if (el.type === "sticker") {
-          if (isGif(el)) animatedGifOverlays.push(gifStickerToAnimatedOverlay(el));
-          else if (isWs4(el)) storyOverlays.push(ws4StickerToOverlay(el));
-          else storyOverlays.push(stickerElementToOverlay(el));
-        }
-      }
-
-      // Bake media + filter + vignette + drawing into a flattened frame, the
-      // same pixels native's makeImageSnapshot captures. Only for image / text
-      // -only; video can't be re-encoded in-browser without heavy deps.
-      let outUri = rawUri;
-      const needsBake =
-        editor.drawingPaths.length > 0 ||
-        hasVisibleColorMatrix(editor.currentFilter, editor.adjustments) ||
-        editor.adjustments.vignette !== 0 ||
-        (textOnly && true);
-      if (mediaType === "image" && needsBake) {
-        const baked = await bakeFrame({
-          mediaUri: textOnly ? null : rawUri,
-          background: editor.canvasBackground,
-          filter: editor.currentFilter,
-          adjustments: editor.adjustments,
-          drawingPaths: editor.drawingPaths,
-        });
-        if (baked) outUri = baked;
-      }
-
-      useStoryEditorResultStore.getState().setResult({
-        uri: outUri || rawUri,
-        index: Number.parseInt(indexParam, 10) || 0,
-        mediaType,
-        storyOverlays,
-        animatedGifOverlays,
-      });
-      useStoryFlowStore.getState().transitionTo("HUB");
-      router.push("/feed/story/create");
-      setTimeout(() => useEditorStore.getState().resetEditor(), 300);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const resolvedMedia = storeMediaUri || mediaUri;
-  const matrix = combinedColorMatrix(currentFilter, adjustments);
-  const matrixValues = matrix.join(" ");
-  const applyMatrix = hasVisibleColorMatrix(currentFilter, adjustments);
-
-  // Persistent tool tabs (the RightIslandMenu nav anchor).
-  const setMode = useEditorStore((s) => s.setMode);
-  const toggleMode = (m: typeof mode) => setMode(mode === m ? "idle" : m);
-
+/**
+ * Whether an item's edits require an image bake (drawing / colour matrix /
+ * vignette). Text / stickers stay as overlays and never force a bake.
+ */
+export function needsBake(edit: {
+  drawingPaths: DrawingPath[];
+  currentFilter: LUTFilter | null;
+  adjustments: FilterAdjustment;
+}): boolean {
   return (
-    <div
-      className="min-h-[100dvh] w-full flex flex-col text-white select-none"
-      style={{ background: INK }}
-    >
-      {/* Hidden SVG colour-matrix filter (LUT + adjustments) for live preview */}
-      <svg
-        aria-hidden
-        width={0}
-        height={0}
-        style={{ position: "absolute", width: 0, height: 0 }}
-      >
-        <filter id={LUT_FILTER_ID} colorInterpolationFilters="sRGB">
-          <feColorMatrix type="matrix" values={matrixValues} />
-        </filter>
-      </svg>
-
-      {/* Top bar — close / title / Share(Done). Matches Create Story chrome. */}
-      <header
-        className="sticky top-0 z-40 flex items-center justify-between px-4 py-3"
-        style={{
-          borderBottom: `1px solid ${HAIRLINE}`,
-          background: "rgba(6,7,13,0.85)",
-          backdropFilter: "saturate(160%) blur(18px)",
-          paddingTop: "calc(env(safe-area-inset-top) + 12px)",
-        }}
-      >
-        <button
-          onClick={handleClose}
-          aria-label="Close editor"
-          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-95"
-          style={{ background: SURFACE }}
-        >
-          <X size={18} color="#fff" />
-        </button>
-        <h1 className="text-[17px] font-semibold">Edit story</h1>
-        <button
-          onClick={handleDone}
-          disabled={exporting}
-          aria-label="Done"
-          className="h-9 px-5 rounded-xl flex items-center gap-1.5 font-semibold text-black active:scale-95 disabled:opacity-60"
-          style={{ background: DEVIANT_GRADIENT }}
-        >
-          <Check size={16} color={INK} strokeWidth={3} />
-          {exporting ? "Saving…" : "Share"}
-        </button>
-      </header>
-
-      {/* Stage + right island menu + tool panels */}
-      <main className="flex-1 flex flex-col items-center px-3 py-4">
-        <div className="relative flex items-start justify-center w-full">
-          <EditorStage
-            stageRef={stageRef}
-            mediaUri={resolvedMedia}
-            mediaType={mediaType}
-            textOnly={textOnly}
-            background={canvasBackground}
-            applyMatrix={applyMatrix}
-            vignette={adjustments.vignette}
-          />
-
-          {/* Right island menu — persistent nav anchor across tool modes */}
-          <RightIslandMenu mode={mode} onSelect={toggleMode} />
-        </div>
-
-        {/* Selected-element quick controls (scale / rotate / delete) */}
-        {selected ? <SelectionBar /> : null}
-
-        <p className="text-white/40 text-xs text-center max-w-xs mt-3">
-          {elements.length === 0
-            ? "Pick a tool on the right, then Share when you're done."
-            : `${elements.length} overlay${elements.length === 1 ? "" : "s"} · drag to reposition`}
-        </p>
-      </main>
-
-      {/* Non-modal tool panels — canvas stays visible above them. */}
-      {mode === "text" ? <TextPanel /> : null}
-      {mode === "drawing" ? <DrawingPanel /> : null}
-      {mode === "sticker" ? <StickerPanel /> : null}
-      {mode === "filter" ? <FilterPanel mediaUri={resolvedMedia} /> : null}
-      {mode === "adjust" ? <AdjustPanel /> : null}
-      {(mode === "idle" || textOnly) && !resolvedMedia ? (
-        <BackgroundStrip />
-      ) : null}
-
-      {/* Undo/Redo now live inside the RightIslandMenu rail (v1 parity). */}
-    </div>
+    edit.drawingPaths.length > 0 ||
+    hasVisibleColorMatrix(edit.currentFilter, edit.adjustments) ||
+    edit.adjustments.vignette !== 0
   );
 }
 
-export default StoryEditorScreen;
-
 // ============================================================
-// Stage (the 9:16 canvas)
+// Stage (the 9:16 canvas) — self-contained: reads media / filter / adjustments
+// / background / elements straight off the editor store, and owns the hidden
+// SVG colour-matrix filter def the media element references. `topOverlay`
+// renders chrome (e.g. multi-item progress dots) inside the stage frame.
 // ============================================================
 
-function EditorStage({
+export function EditorStage({
   stageRef,
-  mediaUri,
-  mediaType,
   textOnly,
-  background,
-  applyMatrix,
-  vignette,
+  topOverlay,
 }: {
   stageRef: React.RefObject<HTMLDivElement | null>;
-  mediaUri: string;
-  mediaType: "image" | "video";
   textOnly: boolean;
-  background: string;
-  applyMatrix: boolean;
-  vignette: number;
+  topOverlay?: React.ReactNode;
 }) {
   const elements = useEditorStore((s) => s.elements);
   const selectedId = useEditorStore((s) => s.selectedElementId);
   const mode = useEditorStore((s) => s.mode);
+  const mediaUri = useEditorStore((s) => s.mediaUri) ?? "";
+  const mediaType = useEditorStore((s) => s.mediaType);
+  const background = useEditorStore((s) => s.canvasBackground);
+  const currentFilter = useEditorStore((s) => s.currentFilter);
+  const adjustments = useEditorStore((s) => s.adjustments);
 
   const bg = STORY_BACKGROUNDS.find((b) => b.id === background);
   const bgStyle = backgroundToCss(bg);
+  const applyMatrix = hasVisibleColorMatrix(currentFilter, adjustments);
+  const matrixValues = combinedColorMatrix(currentFilter, adjustments).join(" ");
   const mediaFilter = applyMatrix ? `url(#${LUT_FILTER_ID})` : undefined;
+  const vignette = adjustments.vignette;
 
   return (
     <div
@@ -625,6 +459,18 @@ function EditorStage({
         }
       }}
     >
+      {/* Hidden SVG colour-matrix filter (LUT + adjustments) for live preview */}
+      <svg
+        aria-hidden
+        width={0}
+        height={0}
+        style={{ position: "absolute", width: 0, height: 0 }}
+      >
+        <filter id={LUT_FILTER_ID} colorInterpolationFilters="sRGB">
+          <feColorMatrix type="matrix" values={matrixValues} />
+        </filter>
+      </svg>
+
       {/* Base: media (filtered) or background */}
       {!textOnly && mediaUri ? (
         mediaType === "video" ? (
@@ -693,6 +539,9 @@ function EditorStage({
           }
           return null;
         })}
+
+      {/* Stage-top chrome (multi-item progress dots, etc.) */}
+      {topOverlay}
     </div>
   );
 }
@@ -1135,7 +984,7 @@ function RailArrow({ open }: { open: boolean }) {
   );
 }
 
-function RightIslandMenu({
+export function RightIslandMenu({
   mode,
   onSelect,
 }: {
@@ -1269,7 +1118,7 @@ function RightIslandMenu({
 // Selected element quick controls
 // ============================================================
 
-function SelectionBar() {
+export function SelectionBar() {
   const selected = useSelectedElement();
   if (!selected) return null;
   const t = selected.transform;
@@ -1366,7 +1215,7 @@ function Panel({
 
 // ---- Text panel (full text v2) ----
 
-function TextPanel() {
+export function TextPanel() {
   const selected = useSelectedElement();
   const el = selected && selected.type === "text" ? selected : null;
 
@@ -1536,7 +1385,7 @@ const DRAW_TOOLS: { id: DrawingTool; Icon: typeof Pencil; label: string }[] = [
   { id: "arrow", Icon: ArrowRight, label: "Arrow" },
 ];
 
-function DrawingPanel() {
+export function DrawingPanel() {
   const tool = useEditorStore((s) => s.drawingTool);
   const color = useEditorStore((s) => s.drawingColor);
   const strokeWidth = useEditorStore((s) => s.strokeWidth);
@@ -1632,7 +1481,7 @@ const WS4_STICKERS: {
   { id: "ws4-link", label: "Link", category: "link", Icon: LinkIcon, metadata: { kind: "link", url: "" } },
 ];
 
-function StickerPanel() {
+export function StickerPanel() {
   const activeTab = useEditorStore((s) => s.stickerActiveTab) as StickerTab;
   const setActiveTab = useEditorStore((s) => s.setStickerActiveTab);
   const query = useEditorStore((s) => s.stickerSearchQuery);
@@ -2096,7 +1945,7 @@ function Ws4ValuePanel({
 
 // ---- Filter panel (LUT + effects) ----
 
-function FilterPanel({ mediaUri }: { mediaUri: string }) {
+export function FilterPanel({ mediaUri }: { mediaUri: string }) {
   const mainTab = useEditorStore((s) => s.filterMainTab);
   const setMainTab = useEditorStore((s) => s.setFilterMainTab);
   const effectCategory = useEditorStore((s) => s.filterEffectCategory);
@@ -2259,7 +2108,7 @@ const ADJUSTMENTS: {
   { key: "vignette", label: "Vignette", min: 0, max: 100 },
 ];
 
-function AdjustPanel() {
+export function AdjustPanel() {
   const adjustments = useEditorStore((s) => s.adjustments);
   return (
     <Panel title="Adjust">
@@ -2288,7 +2137,7 @@ function AdjustPanel() {
 
 // ---- Background strip (text-only + no media) ----
 
-function BackgroundStrip() {
+export function BackgroundStrip() {
   const canvasBackground = useEditorStore((s) => s.canvasBackground);
   return (
     <div
@@ -2377,7 +2226,7 @@ function Slider({
 // the caller falls back to the raw media uri.
 // ============================================================
 
-async function bakeFrame(opts: {
+export async function bakeFrame(opts: {
   mediaUri: string | null;
   background: string;
   filter: LUTFilter | null;

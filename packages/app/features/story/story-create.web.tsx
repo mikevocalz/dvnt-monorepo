@@ -2,54 +2,115 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "solito/navigation";
-import {
-  X,
-  Image as ImageIcon,
-  Type,
-  Globe,
-  Star,
-  Trash2,
-} from "lucide-react";
+import { X, Image as ImageIcon, Type, Globe, Star, Check } from "lucide-react";
 import { useCreateStoryStore } from "@dvnt/app/lib/stores/create-story-store";
-import { useStoryEditorResultStore } from "@dvnt/app/lib/stores/story-editor-result-store";
-import { useStoryFlowStore } from "@dvnt/app/lib/stores/story-flow-store";
 import { useCreateStory } from "@dvnt/app/lib/hooks/use-stories";
-import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
+import {
+  useMediaUpload,
+  type MediaFile,
+} from "@dvnt/app/lib/hooks/use-media-upload";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { storyTagsApi } from "@dvnt/app/lib/api/stories";
-import { TEXT_POST_THEMES } from "@dvnt/app/lib/posts/text-post";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
 import type {
   StoryOverlay,
   StoryAnimatedGifOverlay,
 } from "@dvnt/app/lib/types";
 import { detectMediaKind } from "@dvnt/app/lib/media/detect-media-kind";
+// eslint-disable-next-line no-restricted-imports -- deep store import: the stories-editor barrel re-exports EditorScreen (RN-only File.uri typing) which breaks apps/web's DOM-lib typecheck; route the store deep to keep web green.
 import {
-  useStoryCreateWebStore,
-  STORY_TEXT_COLORS,
-} from "@dvnt/app/lib/stores/story-create-web-store";
-import { StoryOverlaysLayer } from "@dvnt/app/components/story-overlays-layer.web";
+  useEditorStore,
+  useSelectedElement,
+} from "@dvnt/app/features/stories-editor/stores/editor-store";
+import { DEFAULT_ADJUSTMENTS } from "@dvnt/app/features/stories-editor/constants";
+import type {
+  CanvasElement,
+  DrawingPath,
+  FilterAdjustment,
+  LUTFilter,
+} from "@dvnt/app/features/stories-editor/types";
+import {
+  EditorStage,
+  RightIslandMenu,
+  SelectionBar,
+  TextPanel,
+  DrawingPanel,
+  StickerPanel,
+  FilterPanel,
+  AdjustPanel,
+  BackgroundStrip,
+  bakeFrame,
+  buildOverlaysFromElements,
+  needsBake,
+  INK,
+  DEVIANT_GRADIENT,
+  HAIRLINE,
+  type EditorToolMode,
+} from "./story-editor.web";
 
 const MAX_STORY_ITEMS = 4;
 
 /**
- * Story composer — web port of `(protected)/story/create.tsx`.
+ * Story composer — the SINGLE story-creation screen (web). It hosts the v2
+ * editor rail (RightIslandMenu) + tool sheets (Text / Draw / Stickers /
+ * Effects / Adjust) INLINE, so the rail is present the moment media is added —
+ * no "Edit" tap, no route hop to a second /feed/story/editor screen.
  *
  * Law 1 (data wiring is sacred): same portable state + mutation native uses.
  *   - Media + visibility + tags live in `useCreateStoryStore`.
- *   - Media is uploaded with `useMediaUpload({ folder: "stories" })`.
- *   - The story is published via the SAME `useCreateStory()` mutation.
- *   - Tags persisted with `storyTagsApi.addTags`.
- *
- * Native-only surfaces simplified for web:
- *   - expo-camera / expo-image-picker  → `<input type=file accept="image/*,video/*">`.
- *   - Skia/gesture text+sticker editor  → CSS-positioned draggable text overlays
- *     (`useStoryCreateWebStore`), serialized into the portable `StoryOverlay[]`
- *     text shape on publish. Drawing / stickers / effects / GIF overlays are
- *     native-only and intentionally omitted.
- *   - Text-only background stories      → `TEXT_POST_THEMES` gradient picker.
+ *   - The editor's tools operate on `useEditorStore` (the shared editor store)
+ *     for the CURRENT item, in place. Per-item edits are snapshotted so
+ *     switching between multi-story items restores each item's overlays.
+ *   - Share = bake + DIRECT upload: for each item we bake the editor's
+ *     drawing + filter + vignette into the image (video/GIF upload raw), then
+ *     run the SAME `uploadMultiple` → `useCreateStory()` contract with the
+ *     text / sticker / WS-4 overlays (→ storyOverlays) and GIF overlays
+ *     (→ animatedGifOverlays). No `story-editor-result-store` handoff.
+ *   - Text-only stories bake the background (+ drawing) to an image and go
+ *     through the same media path (create-story requires media); text rides as
+ *     a storyOverlay.
  */
+
+// ── Per-item editor snapshot (web-local, keyed by the item's stable blob uri) ─
+
+interface ItemEdit {
+  elements: CanvasElement[];
+  drawingPaths: DrawingPath[];
+  currentFilter: LUTFilter | null;
+  adjustments: FilterAdjustment;
+  canvasBackground: string;
+}
+
+function snapshotEditor(): ItemEdit {
+  const s = useEditorStore.getState();
+  return {
+    elements: s.elements,
+    drawingPaths: s.drawingPaths,
+    currentFilter: s.currentFilter,
+    adjustments: s.adjustments,
+    canvasBackground: s.canvasBackground,
+  };
+}
+
+// Load an item's saved edits into the editor store (or a fresh slate) and point
+// the store at that item's media. Direct setState (web-only) so switching items
+// doesn't churn the undo history — it's a load, not an edit.
+function loadEditorForItem(asset: MediaAsset | undefined, edit?: ItemEdit) {
+  useEditorStore.setState({
+    elements: edit?.elements ?? [],
+    drawingPaths: edit?.drawingPaths ?? [],
+    currentFilter: edit?.currentFilter ?? null,
+    adjustments: edit?.adjustments ?? DEFAULT_ADJUSTMENTS,
+    canvasBackground: edit?.canvasBackground ?? "black",
+    selectedElementId: null,
+    undoStack: [],
+    redoStack: [],
+    mediaUri: asset?.uri ?? null,
+    mediaType: (asset?.type as "image" | "video") ?? "image",
+  });
+}
+
 export function StoryCreateScreen() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -79,68 +140,65 @@ export function StoryCreateScreen() {
     statusMessage: uploadStatus,
   } = useMediaUpload({ folder: "stories", userId: currentUser?.id });
 
-  const {
-    overlays,
-    editingId,
-    textTheme,
-    updateOverlayContent,
-    updateOverlayPosition,
-    updateOverlayColor,
-    removeOverlay,
-    setEditingId,
-    setDraggingId,
-    toStoryOverlays,
-    reset: resetWeb,
-  } = useStoryCreateWebStore();
-
-  // Editor → create hand-off: the story editor writes the edited media +
-  // overlays into the shared result store, then routes back here; consume it.
-  // The editor's text/sticker/GIF overlays (drawing + filters are already baked
-  // into r.uri) are carried through to publish, keyed by media index.
-  // Subscribe to the result VALUE (not the stable action) so the effect re-fires
-  // when the editor sets a result on return — reading `consumeResult` once on
-  // mount could never pick up a result produced after this screen mounted, which
-  // is exactly the return-from-editor case. Merge, then clear the store.
-  const pendingResult = useStoryEditorResultStore((s) => s.result);
-  const clearResult = useStoryEditorResultStore((s) => s.clear);
-  const forceIdleFlow = useStoryFlowStore((s) => s.forceIdle);
-  const editorOverlaysRef = useRef<
-    Record<
-      number,
-      { storyOverlays: StoryOverlay[]; animatedGifOverlays: StoryAnimatedGifOverlay[] }
-    >
-  >({});
-  useEffect(() => {
-    const r = pendingResult;
-    if (r?.uri) {
-      editorOverlaysRef.current[r.index] = {
-        storyOverlays: r.storyOverlays ?? [],
-        animatedGifOverlays: r.animatedGifOverlays ?? [],
-      };
-      const assets = useCreateStoryStore.getState().mediaAssets;
-      const next = assets.map((a, i) =>
-        i === r.index ? ({ ...a, uri: r.uri, type: r.mediaType } as MediaAsset) : a,
-      );
-      // If the editor produced media but the composer had none, seed it.
-      setMediaAssets(
-        next.length
-          ? next
-          : ([{ uri: r.uri, type: r.mediaType }] as unknown as MediaAsset[]),
-      );
-      clearResult();
-    }
-  }, [pendingResult, setMediaAssets, clearResult]);
-
-  // Reset transient web editing state + the flow state machine on leave.
-  useEffect(() => () => {
-    resetWeb();
-    forceIdleFlow();
-  }, [resetWeb, forceIdleFlow]);
+  // Editor store — the rail's tools drive this, operating on the current item.
+  const mode = useEditorStore((s) => s.mode);
+  const setMode = useEditorStore((s) => s.setMode);
+  const textOnlyMode = useEditorStore((s) => s.textOnlyMode);
+  const editorMediaUri = useEditorStore((s) => s.mediaUri) ?? "";
+  const elements = useEditorStore((s) => s.elements);
+  const selected = useSelectedElement();
 
   const currentAsset = mediaAssets[currentIndex];
-  const isTextStory = mediaAssets.length === 0 && overlays.length > 0;
-  const isValid = mediaAssets.length > 0 || overlays.length > 0;
+  const hasMedia = mediaAssets.length > 0;
+  const textOnly = !hasMedia && textOnlyMode;
+  const showEditor = hasMedia || textOnly;
+  const isValid = hasMedia || (textOnly && elements.length > 0);
   const busy = isSharing || isCreateStoryPending;
+
+  // Per-item editor snapshots (keyed by the item's stable blob uri) + the uri
+  // currently loaded into the editor store.
+  const perItemEdits = useRef<Record<string, ItemEdit>>({});
+  const loadedUriRef = useRef<string | null>(null);
+
+  // [REGRESSION LOCK parity] Clean slate on mount; the seeding effect then
+  // loads the current item (if any).
+  const didMount = useRef(false);
+  useEffect(() => {
+    if (didMount.current) return;
+    didMount.current = true;
+    useEditorStore.getState().resetEditor();
+    loadedUriRef.current = null;
+  }, []);
+
+  // Seed / re-seed the editor store from the CURRENT media item, saving the
+  // outgoing item's edits so switching between items restores each one.
+  useEffect(() => {
+    const curUri = currentAsset?.uri ?? null;
+    if (loadedUriRef.current === curUri) return;
+    if (loadedUriRef.current) {
+      perItemEdits.current[loadedUriRef.current] = snapshotEditor();
+    }
+    if (curUri) {
+      loadEditorForItem(currentAsset, perItemEdits.current[curUri]);
+    } else if (!useEditorStore.getState().textOnlyMode) {
+      // No media and not a text-only story → clean editor.
+      useEditorStore.getState().resetEditor();
+    }
+    loadedUriRef.current = curUri;
+  }, [currentAsset]);
+
+  // Reset editor + create state on leave.
+  useEffect(
+    () => () => {
+      useEditorStore.getState().resetEditor();
+    },
+    [],
+  );
+
+  const toggleMode = useCallback(
+    (m: EditorToolMode) => setMode(mode === m ? "idle" : m),
+    [mode, setMode],
+  );
 
   // ── Media intake (file input) ───────────────────────────────────────
   const onPickFiles = useCallback(
@@ -180,20 +238,25 @@ export function StoryCreateScreen() {
         };
       });
 
+      // Adding media leaves any text-only draft behind.
+      if (useEditorStore.getState().textOnlyMode) {
+        useEditorStore.setState({ textOnlyMode: false });
+      }
+
       const firstNewIndex = mediaAssets.length;
       const updated = [...mediaAssets, ...next];
       setMediaAssets(updated);
       setCurrentIndex(firstNewIndex);
-      // Media stays on the composer and shares directly (the proven upload
-      // path). The v2 editor is opt-in via the Edit pill on the preview —
-      // auto-routing every pick through the editor's bake→blob→consume→upload
-      // round-trip broke sharing (upload never fired), so it's opt-in now.
+      // The rail + tool sheets are already present inline; the seeding effect
+      // seeds the editor store for the new current item. No route hop.
     },
     [mediaAssets, setMediaAssets, setCurrentIndex, showToast],
   );
 
   const handleRemoveMedia = useCallback(
     (index: number) => {
+      const removed = mediaAssets[index];
+      if (removed) delete perItemEdits.current[removed.uri];
       const updated = mediaAssets.filter((_, i) => i !== index);
       setMediaAssets(updated);
       if (currentIndex >= updated.length && updated.length > 0) {
@@ -205,32 +268,14 @@ export function StoryCreateScreen() {
     [mediaAssets, currentIndex, setMediaAssets, setCurrentIndex],
   );
 
-  // ── Text-overlay drag (pointer) ─────────────────────────────────────
-  const beginDrag = useCallback(
-    (id: string) => (e: React.PointerEvent) => {
-      e.stopPropagation();
-      setDraggingId(id);
-      setEditingId(id);
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    },
-    [setDraggingId, setEditingId],
-  );
+  const startTextStory = useCallback(() => {
+    useEditorStore.getState().resetEditor();
+    useEditorStore.setState({ textOnlyMode: true });
+    useEditorStore.getState().setMode("text");
+    loadedUriRef.current = null;
+  }, []);
 
-  const onStagePointerMove = useCallback(
-    (e: React.PointerEvent) => {
-      const draggingId = useStoryCreateWebStore.getState().draggingId;
-      if (!draggingId || !stageRef.current) return;
-      const rect = stageRef.current.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      const y = (e.clientY - rect.top) / rect.height;
-      updateOverlayPosition(draggingId, x, y);
-    },
-    [updateOverlayPosition],
-  );
-
-  const endDrag = useCallback(() => setDraggingId(null), [setDraggingId]);
-
-  // ── Publish ─────────────────────────────────────────────────────────
+  // ── Publish (bake + direct upload — no route hop, no result-store) ──────
   const handleShare = useCallback(async () => {
     if (busy) return;
     if (!isValid) {
@@ -240,52 +285,125 @@ export function StoryCreateScreen() {
 
     setIsSharing(true);
 
-    try {
-      const webTextOverlays = toStoryOverlays();
+    const finishSuccess = (newStory?: { id?: string | number }) => {
+      if (taggedUsers.length > 0 && newStory?.id) {
+        const tags = taggedUsers.map((u) => ({ userId: u.id, x: 0.5, y: 0.5 }));
+        storyTagsApi
+          .addTags(String(newStory.id), tags)
+          .catch(() => undefined);
+      }
+      setIsSharing(false);
+      showToast("success", "Success", "Story shared successfully!");
+      resetStore();
+      useEditorStore.getState().resetEditor();
+      router.replace("/feed");
+    };
+    const finishError = (error: { message?: string } | null) => {
+      setIsSharing(false);
+      showToast("error", "Error", error?.message || "Failed to share story.");
+    };
 
-      // Text-only story (no media): publish as a themed text item.
-      if (mediaAssets.length === 0) {
-        const theme = TEXT_POST_THEMES[textTheme];
+    try {
+      // Snapshot the currently-loaded item so its live edits are included.
+      if (loadedUriRef.current) {
+        perItemEdits.current[loadedUriRef.current] = snapshotEditor();
+      }
+
+      // ── Text-only: bake the background (+ drawing) to an image so it goes
+      //    through the same media path; text rides as a storyOverlay.
+      if (!hasMedia) {
+        const edit = snapshotEditor();
+        const { storyOverlays, animatedGifOverlays } =
+          buildOverlaysFromElements(edit.elements);
+        const baked = await bakeFrame({
+          mediaUri: null,
+          background: edit.canvasBackground,
+          filter: edit.currentFilter,
+          adjustments: edit.adjustments,
+          drawingPaths: edit.drawingPaths,
+        });
+        if (!baked) {
+          setIsSharing(false);
+          showToast("error", "Error", "Could not render your text story.");
+          return;
+        }
+        const uploadResults = await uploadMultiple([
+          { uri: baked, type: "image", kind: "image", mimeType: "image/jpeg" },
+        ]);
+        const failed = uploadResults.filter((r) => !r.success);
+        if (failed.length > 0) {
+          setIsSharing(false);
+          showToast(
+            "error",
+            "Upload Error",
+            failed[0]?.error || "Failed to upload media.",
+          );
+          return;
+        }
+        const r = uploadResults[0];
         const storyItems = [
           {
-            type: "text",
-            text: overlays.map((o) => o.content).join("\n"),
-            textColor: theme.textPrimary,
-            backgroundColor: theme.gradient[1] ?? theme.gradient[0],
-            storyOverlays: webTextOverlays,
-            animatedGifOverlays: [],
+            type: r.kind ?? r.type,
+            url: r.url,
+            ...(r.path && { storageKey: r.path }),
+            thumbnail: r.thumbnail,
+            ...(r.thumbnailPath && { thumbnailKey: r.thumbnailPath }),
+            ...(r.mimeType && { mimeType: r.mimeType }),
+            storyOverlays,
+            animatedGifOverlays,
           },
         ];
         createStoryMutate(
           { items: storyItems, visibility },
-          {
-            onSuccess: () => {
-              setIsSharing(false);
-              showToast("success", "Success", "Story shared successfully!");
-              resetStore();
-              resetWeb();
-              router.replace("/feed");
-            },
-            onError: (error: any) => {
-              setIsSharing(false);
-              showToast(
-                "error",
-                "Error",
-                error?.message || "Failed to share story.",
-              );
-            },
-          },
+          { onSuccess: finishSuccess, onError: finishError },
         );
         return;
       }
 
-      // Media story: upload assets, then publish.
-      const mediaFiles = mediaAssets.map((m) => ({
-        uri: m.uri,
-        type: m.type as "image" | "video",
-        kind: m.kind,
-        mimeType: m.mimeType,
-      }));
+      // ── Media story: bake each image item (drawing + filter + vignette),
+      //    collect that item's overlays, upload directly, then create-story.
+      const overlaysPerIndex: Record<
+        number,
+        {
+          storyOverlays: StoryOverlay[];
+          animatedGifOverlays: StoryAnimatedGifOverlay[];
+        }
+      > = {};
+      const mediaFiles: MediaFile[] = [];
+      for (let i = 0; i < mediaAssets.length; i++) {
+        const asset = mediaAssets[i];
+        const edit = perItemEdits.current[asset.uri];
+        overlaysPerIndex[i] = buildOverlaysFromElements(edit?.elements ?? []);
+
+        let uri = asset.uri;
+        let kind = asset.kind;
+        let mimeType = asset.mimeType;
+        const bakeable =
+          asset.type === "image" &&
+          asset.kind !== "gif" &&
+          !!edit &&
+          needsBake(edit);
+        if (bakeable) {
+          const baked = await bakeFrame({
+            mediaUri: asset.uri,
+            background: edit.canvasBackground,
+            filter: edit.currentFilter,
+            adjustments: edit.adjustments,
+            drawingPaths: edit.drawingPaths,
+          });
+          if (baked) {
+            uri = baked;
+            kind = "image";
+            mimeType = "image/jpeg";
+          }
+        }
+        mediaFiles.push({
+          uri,
+          type: asset.type as "image" | "video",
+          kind,
+          mimeType,
+        });
+      }
 
       const uploadResults = await uploadMultiple(mediaFiles);
       const failed = uploadResults.filter((r) => !r.success);
@@ -300,10 +418,7 @@ export function StoryCreateScreen() {
       }
 
       const storyItems = uploadResults.map((r, index) => {
-        // Editor overlays for this item (text / stickers / WS-4) + the web
-        // composer's own draggable text overlays for the active item.
-        const editor = editorOverlaysRef.current[index];
-        const composerText = index === currentIndex ? webTextOverlays : [];
+        const ov = overlaysPerIndex[index];
         return {
           type: r.kind ?? r.type,
           url: r.url,
@@ -311,40 +426,14 @@ export function StoryCreateScreen() {
           thumbnail: r.thumbnail,
           ...(r.thumbnailPath && { thumbnailKey: r.thumbnailPath }),
           ...(r.mimeType && { mimeType: r.mimeType }),
-          storyOverlays: [...(editor?.storyOverlays ?? []), ...composerText],
-          animatedGifOverlays: editor?.animatedGifOverlays ?? [],
+          storyOverlays: ov?.storyOverlays ?? [],
+          animatedGifOverlays: ov?.animatedGifOverlays ?? [],
         };
       });
 
       createStoryMutate(
         { items: storyItems, visibility },
-        {
-          onSuccess: (newStory: any) => {
-            if (taggedUsers.length > 0 && newStory?.id) {
-              const tags = taggedUsers.map((u) => ({
-                userId: u.id,
-                x: 0.5,
-                y: 0.5,
-              }));
-              storyTagsApi
-                .addTags(String(newStory.id), tags)
-                .catch(() => undefined);
-            }
-            setIsSharing(false);
-            showToast("success", "Success", "Story shared successfully!");
-            resetStore();
-            resetWeb();
-            router.replace("/feed");
-          },
-          onError: (error: any) => {
-            setIsSharing(false);
-            showToast(
-              "error",
-              "Error",
-              error?.message || "Failed to share story.",
-            );
-          },
-        },
+        { onSuccess: finishSuccess, onError: finishError },
       );
     } catch (error: any) {
       setIsSharing(false);
@@ -353,39 +442,50 @@ export function StoryCreateScreen() {
   }, [
     busy,
     isValid,
+    hasMedia,
     mediaAssets,
-    overlays,
-    textTheme,
-    currentIndex,
     visibility,
     taggedUsers,
-    toStoryOverlays,
     uploadMultiple,
     createStoryMutate,
     setIsSharing,
     showToast,
     resetStore,
-    resetWeb,
     router,
   ]);
 
   const handleClose = useCallback(() => {
     resetStore();
-    resetWeb();
+    useEditorStore.getState().resetEditor();
     router.back();
-  }, [resetStore, resetWeb, router]);
+  }, [resetStore, router]);
 
-  const stageBackground =
-    isTextStory && mediaAssets.length === 0
-      ? `linear-gradient(160deg, ${TEXT_POST_THEMES[textTheme].gradient.join(", ")})`
-      : "#000";
+  const progressDots =
+    mediaAssets.length > 1 ? (
+      <div className="absolute top-3 left-3 right-3 flex gap-1 z-10">
+        {mediaAssets.map((_, idx) => (
+          <div
+            key={idx}
+            className={`flex-1 h-0.5 rounded-full ${idx === currentIndex ? "bg-white" : "bg-white/30"}`}
+          />
+        ))}
+      </div>
+    ) : null;
 
   return (
-    <div className="min-h-[100dvh] bg-[#06070d] text-white flex flex-col">
-      {/* Sticky header */}
-      <div
-        className="sticky top-0 z-30 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
-        style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
+    <div
+      className="min-h-[100dvh] w-full flex flex-col text-white select-none"
+      style={{ background: INK }}
+    >
+      {/* Sticky header — close / title / gradient Share */}
+      <header
+        className="sticky top-0 z-40 flex items-center justify-between px-4 py-3"
+        style={{
+          borderBottom: `1px solid ${HAIRLINE}`,
+          background: "rgba(6,7,13,0.85)",
+          backdropFilter: "saturate(160%) blur(18px)",
+          paddingTop: "calc(env(safe-area-inset-top) + 12px)",
+        }}
       >
         <button
           onClick={handleClose}
@@ -398,16 +498,19 @@ export function StoryCreateScreen() {
         <button
           onClick={handleShare}
           disabled={busy || !isValid}
-          className="text-[16px] font-semibold text-cyan-400 disabled:text-white/40"
+          aria-label="Share"
+          className="h-9 px-5 rounded-xl flex items-center gap-1.5 font-semibold text-black active:scale-95 disabled:opacity-40"
+          style={{ background: DEVIANT_GRADIENT }}
         >
+          <Check size={16} color={INK} strokeWidth={3} />
           {busy ? "Sharing…" : "Share"}
         </button>
-      </div>
+      </header>
 
-      <div className="mx-auto w-full max-w-md flex-1 flex flex-col items-center px-4 py-5">
+      <main className="flex-1 flex flex-col items-center px-3 py-4 w-full">
         {/* Upload progress */}
         {busy && (
-          <div className="w-full mb-4 rounded-2xl bg-black/80 p-4">
+          <div className="w-full max-w-md mb-4 rounded-2xl bg-black/80 p-4">
             <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
               <div
                 className="h-full bg-cyan-400 rounded-full transition-[width]"
@@ -423,143 +526,40 @@ export function StoryCreateScreen() {
           </div>
         )}
 
-        {/* Portrait 9:16 stage */}
-        <div
-          ref={stageRef}
-          onPointerMove={onStagePointerMove}
-          onPointerUp={endDrag}
-          onPointerLeave={endDrag}
-          className="relative w-full aspect-[9/16] rounded-2xl overflow-hidden bg-black select-none touch-none"
-          style={{ background: stageBackground }}
-        >
-          {currentAsset ? (
-            currentAsset.type === "video" ? (
-              <video
-                key={currentAsset.uri}
-                src={currentAsset.uri}
-                className="absolute inset-0 w-full h-full object-cover"
-                controls
-                playsInline
+        {showEditor ? (
+          <>
+            {/* Stage + persistent rail (RightIslandMenu) + inline tool sheets */}
+            <div className="relative flex items-start justify-center w-full">
+              <EditorStage
+                stageRef={stageRef}
+                textOnly={textOnly}
+                topOverlay={progressDots}
               />
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={currentAsset.uri}
-                alt=""
-                className="absolute inset-0 w-full h-full object-cover"
-              />
-            )
-          ) : !isTextStory ? (
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/45"
-            >
-              <ImageIcon size={48} />
-              <span className="text-base">Add media to get started</span>
-            </button>
-          ) : null}
-
-          {/* Editor overlays returned for THIS item (text / emoji / image
-              stickers / WS-4 / GIFs) — the same shared renderer the story
-              viewer uses, so the share preview shows what will publish.
-              Non-interactive here (WS-4 stickers aren't tappable in the
-              composer). Sits above the media, below the Edit button + the
-              composer's own draggable text overlays. */}
-          {currentAsset ? (
-            <StoryOverlaysLayer
-              storyOverlays={
-                editorOverlaysRef.current[currentIndex]?.storyOverlays
-              }
-              animatedGifOverlays={
-                editorOverlaysRef.current[currentIndex]?.animatedGifOverlays
-              }
-              interactive={false}
-            />
-          ) : null}
-
-          {/* Re-open the v2 editor for the current item (drawing/filters/etc.) */}
-          {currentAsset ? (
-            <button
-              onClick={() =>
-                router.push(
-                  `/feed/story/editor?uri=${encodeURIComponent(currentAsset.uri)}&type=${currentAsset.type}&index=${currentIndex}`,
-                )
-              }
-              className="absolute top-3 right-3 h-9 px-3 rounded-full flex items-center gap-1.5 text-xs font-semibold text-white"
-              style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)" }}
-            >
-              Edit
-            </button>
-          ) : null}
-
-          {/* Text overlays (draggable) */}
-          {overlays.map((o) => (
-            <div
-              key={o.id}
-              onPointerDown={beginDrag(o.id)}
-              className="absolute -translate-x-1/2 -translate-y-1/2 cursor-move px-2 py-1 max-w-[90%]"
-              style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%` }}
-            >
-              <div
-                contentEditable
-                suppressContentEditableWarning
-                onPointerDown={(e) => e.stopPropagation()}
-                onFocus={() => setEditingId(o.id)}
-                onInput={(e) =>
-                  updateOverlayContent(
-                    o.id,
-                    (e.target as HTMLDivElement).innerText,
-                  )
-                }
-                className="text-center font-bold text-2xl leading-tight outline-none whitespace-pre-wrap"
-                style={{
-                  color: o.color,
-                  textShadow: "0 1px 4px rgba(0,0,0,0.6)",
-                }}
-              >
-                {o.content}
-              </div>
+              <RightIslandMenu mode={mode} onSelect={toggleMode} />
             </div>
-          ))}
 
-          {/* Slide progress + thumbnail dots */}
-          {mediaAssets.length > 1 && (
-            <div className="absolute top-3 left-3 right-3 flex gap-1">
-              {mediaAssets.map((_, idx) => (
-                <div
-                  key={idx}
-                  className={`flex-1 h-0.5 rounded-full ${idx === currentIndex ? "bg-white" : "bg-white/30"}`}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+            {/* Selected-element quick controls (scale / rotate / delete) */}
+            {selected ? <SelectionBar /> : null}
 
-        {/* Active overlay controls */}
-        {editingId && (
-          <div className="w-full mt-3 flex items-center justify-center gap-3">
-            {STORY_TEXT_COLORS.map((c) => (
-              <button
-                key={c}
-                onClick={() => updateOverlayColor(editingId, c)}
-                aria-label={`Text color ${c}`}
-                className="w-7 h-7 rounded-lg border border-white/20"
-                style={{ backgroundColor: c }}
-              />
-            ))}
-            <button
-              onClick={() => removeOverlay(editingId)}
-              aria-label="Delete text"
-              className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center text-white/70"
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
+            <p className="text-white/40 text-xs text-center max-w-xs mt-3">
+              {elements.length === 0
+                ? "Pick a tool on the right, then Share when you're done."
+                : `${elements.length} overlay${elements.length === 1 ? "" : "s"} · drag to reposition`}
+            </p>
+          </>
+        ) : (
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="w-full max-w-md aspect-[9/16] rounded-2xl bg-black flex flex-col items-center justify-center gap-3 text-white/45 border border-white/10"
+          >
+            <ImageIcon size={48} />
+            <span className="text-base">Add media to get started</span>
+          </button>
         )}
 
         {/* Media thumbnails */}
-        {mediaAssets.length > 0 && (
-          <div className="w-full mt-4 flex gap-2 overflow-x-auto pb-1">
+        {hasMedia && (
+          <div className="w-full max-w-md mt-4 flex gap-2 overflow-x-auto pb-1">
             {mediaAssets.map((asset, idx) => (
               <button
                 key={asset.id}
@@ -594,14 +594,10 @@ export function StoryCreateScreen() {
           </div>
         )}
 
-        {/* Text-story theme picker removed — text stories are composed in the
-            v2 editor now (its own background strip), so this inline color
-            selector above the visibility toggle is redundant. */}
-
         <div className="flex-1" />
 
         {/* Visibility toggle */}
-        <div className="w-full flex justify-center mt-5 mb-4">
+        <div className="w-full max-w-md flex justify-center mt-5 mb-4">
           <button
             onClick={() =>
               setVisibility(
@@ -639,8 +635,8 @@ export function StoryCreateScreen() {
           </button>
         </div>
 
-        {/* Action buttons */}
-        <div className="w-full flex justify-center gap-8 pb-6">
+        {/* Action buttons — Gallery + Text (text starts a text-only story) */}
+        <div className="w-full max-w-md flex justify-center gap-8 pb-6">
           <button
             onClick={() => fileRef.current?.click()}
             disabled={mediaAssets.length >= MAX_STORY_ITEMS || busy}
@@ -658,11 +654,9 @@ export function StoryCreateScreen() {
           </button>
 
           <button
-            onClick={() =>
-              router.push("/feed/story/editor?initialMode=text&index=0")
-            }
-            disabled={busy}
-            className={`flex flex-col items-center gap-1 ${busy ? "opacity-40" : ""}`}
+            onClick={startTextStory}
+            disabled={busy || hasMedia}
+            className={`flex flex-col items-center gap-1 ${busy || hasMedia ? "opacity-40" : ""}`}
           >
             <span className="w-14 h-14 rounded-xl bg-white/8 flex items-center justify-center">
               <Type size={24} color="#fff" />
@@ -670,7 +664,7 @@ export function StoryCreateScreen() {
             <span className="text-white/55 text-xs">Text</span>
           </button>
         </div>
-      </div>
+      </main>
 
       <input
         ref={fileRef}
@@ -680,6 +674,14 @@ export function StoryCreateScreen() {
         hidden
         onChange={onPickFiles}
       />
+
+      {/* Non-modal tool sheets — canvas stays visible above them. */}
+      {mode === "text" ? <TextPanel /> : null}
+      {mode === "drawing" ? <DrawingPanel /> : null}
+      {mode === "sticker" ? <StickerPanel /> : null}
+      {mode === "filter" ? <FilterPanel mediaUri={editorMediaUri} /> : null}
+      {mode === "adjust" ? <AdjustPanel /> : null}
+      {textOnly && mode === "idle" ? <BackgroundStrip /> : null}
     </div>
   );
 }
