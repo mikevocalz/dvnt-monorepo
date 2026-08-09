@@ -141,7 +141,7 @@ export const queryPersister = createSyncStoragePersister({
 export const persistOptions = {
   persister: queryPersister,
   maxAge: 30 * 60 * 1000, // 30 min — matches gcTime
-  buster: "v10", // v10: nuke pre-strict-spicy-filter feed caches (P0-1)
+  buster: "v11", // v11: evict pre-james-suppression feed/search caches
 };
 
 /**
@@ -159,7 +159,7 @@ export function checkAndClearCacheOnOTAUpdate(): void {
     if (!queryMmkv) return;
 
     const previousVersion = queryMmkv.getString(OTA_VERSION_KEY);
-    const currentVersion = "v10"; // Must match buster version
+    const currentVersion = "v11"; // Must match buster version
 
     if (previousVersion !== currentVersion) {
       console.log(
