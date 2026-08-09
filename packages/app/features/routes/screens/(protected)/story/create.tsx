@@ -180,7 +180,9 @@ function StoryOverlayPreview({
         }
 
         if (overlay.type === "text") {
-          const maxWidth = width * overlay.maxWidthRatio;
+          // Wrap width scales with the text box, matching the editors (see
+          // story/[id].tsx viewer).
+          const maxWidth = width * overlay.maxWidthRatio * overlay.scale;
           const fontSize = Math.max(width * overlay.fontSizeRatio * overlay.scale, 16);
           return (
             <View

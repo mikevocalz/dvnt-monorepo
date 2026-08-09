@@ -287,7 +287,8 @@ export function StoryOverlaysLayer({
             position: "absolute",
             left: `${overlay.x * 100}%`,
             top: `calc(${overlay.y * 100}% - ${fontSize})`,
-            width: `${overlay.maxWidthRatio * 100}%`,
+            // Wrap width scales with the text box, matching the editors.
+            width: `${overlay.maxWidthRatio * overlay.scale * 100}%`,
             opacity: overlay.opacity ?? 1,
             transform: `translateX(-50%) rotate(${overlay.rotation}deg)`,
             textAlign: overlay.textAlign || "center",

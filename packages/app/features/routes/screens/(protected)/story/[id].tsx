@@ -578,7 +578,10 @@ function StoryOverlayLayer({ overlays }: { overlays: StoryOverlay[] }) {
         }
 
         if (overlay.type === "text") {
-          const maxWidth = width * overlay.maxWidthRatio;
+          // Editors scale the WHOLE text box (transform.scale), so the wrap
+          // width must scale with the font — otherwise scaled-up text wraps
+          // early and breaks words mid-glyph ("ultr / a").
+          const maxWidth = width * overlay.maxWidthRatio * overlay.scale;
           const fontSize = Math.max(
             width * overlay.fontSizeRatio * overlay.scale,
             18,
