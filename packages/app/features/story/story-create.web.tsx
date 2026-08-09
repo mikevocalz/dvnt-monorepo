@@ -89,7 +89,6 @@ export function StoryCreateScreen() {
     removeOverlay,
     setEditingId,
     setDraggingId,
-    setTextTheme,
     toStoryOverlays,
     reset: resetWeb,
   } = useStoryCreateWebStore();
@@ -601,22 +600,9 @@ export function StoryCreateScreen() {
           </div>
         )}
 
-        {/* Text-story theme picker (only when no media) */}
-        {mediaAssets.length === 0 && (
-          <div className="w-full mt-4 flex items-center justify-center gap-2">
-            {Object.values(TEXT_POST_THEMES).map((theme) => (
-              <button
-                key={theme.key}
-                onClick={() => setTextTheme(theme.key)}
-                aria-label={theme.label}
-                className={`w-9 h-9 rounded-xl border ${textTheme === theme.key ? "border-cyan-400" : "border-white/15"}`}
-                style={{
-                  background: `linear-gradient(160deg, ${theme.gradient.join(", ")})`,
-                }}
-              />
-            ))}
-          </div>
-        )}
+        {/* Text-story theme picker removed — text stories are composed in the
+            v2 editor now (its own background strip), so this inline color
+            selector above the visibility toggle is redundant. */}
 
         <div className="flex-1" />
 
