@@ -15,6 +15,9 @@
 module.exports = {
   type: "widget",
   name: "DVNTWatchComplication",
+  // Shown in the watch-face complication picker — the target name would
+  // otherwise leak there verbatim.
+  displayName: "DVNT",
   // NOTE: ".complications" (plural), not ".complication". Apple permanently
   // reserves an App ID string once it has been created and deleted — the
   // singular form was registered during the June attempt, removed, and has

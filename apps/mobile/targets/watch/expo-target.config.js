@@ -13,7 +13,18 @@
  */
 module.exports = {
   type: "watch",
-  name: "DVNT",
+  // Target name MUST be unique across the Xcode project. It was "DVNT", the
+  // same as the main app target, and EAS/fastlane maps provisioning profiles
+  // BY TARGET NAME — so the watch's profile (com.dvnt.app.watchkitapp) was
+  // applied to the phone app, failing the build with "has app ID
+  // com.dvnt.app.watchkitapp, which does not match bundle ID com.dvnt.app"
+  // plus a cascade of missing-capability errors (App Groups, Apple Pay,
+  // Associated Domains, Push, Sign In with Apple — all the phone app's, none
+  // of which the watch profile carries).
+  // displayName keeps the user-visible name on the watch as "DVNT"
+  // (INFOPLIST_KEY_CFBundleDisplayName falls back to `name` when unset).
+  name: "DVNTWatch",
+  displayName: "DVNT",
   // Watch app needs its own bundle id; keep it under the phone app's namespace.
   bundleIdentifier: "com.dvnt.app.watchkitapp",
   deploymentTarget: "10.0",

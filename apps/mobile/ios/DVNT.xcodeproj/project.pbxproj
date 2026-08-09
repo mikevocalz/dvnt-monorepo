@@ -7,67 +7,67 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		073A854A82C44010A74CE67F /* ShareExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 44DB2D858C5A420FBE118FFD /* ShareExtension.appex */; };
+		076C3CF0CC544D4B866E2FD3 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 82D6534734334E9980E0C8C4 /* PrivacyInfo.xcprivacy */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		3C3D39D8EAE341DB81334871 /* ShareExtension.entitlements in [missing build phase] */ = {isa = PBXBuildFile; fileRef = 99C6D1530CDA41E4A0F911D2 /* ShareExtension.entitlements */; };
+		1579A580A4FE4DBFB7935A4A /* ShareExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = C32F76EC7B08483EAF217E47 /* ShareExtension.appex */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		5DE7DA55830D4B868A38AD63 /* ShareExtension-Info.plist in [missing build phase] */ = {isa = PBXBuildFile; fileRef = 2A71D40C87834E2E86686312 /* ShareExtension-Info.plist */; };
-		6ABC3B27522243BDB890565C /* AppDelegate+VoIPPush.m in Sources */ = {isa = PBXBuildFile; fileRef = 09FD0E203A9642CA936707D9 /* AppDelegate+VoIPPush.m */; };
-		6C3F2845CB61440A9C3035D6 /* PushKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EB4DEA045C88461D8D6FD47C /* PushKit.framework */; };
-		92930870F74046F28C7B7F32 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 512C7E5FFF814D4E927A46E9 /* ShareViewController.swift */; };
-		9DD3AF545EDA4759AC530D41 /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FB8FE8B14D994DE389DD398F /* CallKit.framework */; };
-		A6B5AA06768248A18C0DCE4B /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 927EAA8C9DA9494395A5C7A4 /* MainInterface.storyboard */; };
-		A74202CB52404B8DA615D0E3 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1F3D0EDDAC5846739168C9FD /* PrivacyInfo.xcprivacy */; };
-		A9A69574804A4D6F987F9048 /* Intents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D4CD138312646B48119BAAD /* Intents.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
-		BA7C074C6B1A423882B3B5C7 /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29B082B9448D40E285C4C7B4 /* noop-file.swift */; };
+		4A52F1AA0E434B95B157939A /* dvnt-ring.wav in Resources */ = {isa = PBXBuildFile; fileRef = D2FE201A5B8A4072BAC1F5DC /* dvnt-ring.wav */; };
+		548E22AC2C98496CB3C63B6E /* ShareExtension-Info.plist in [missing build phase] */ = {isa = PBXBuildFile; fileRef = 7DD9132353B9473F846407DF /* ShareExtension-Info.plist */; };
+		5FDCD70068BE40CFAD08F1C5 /* ShareExtensionPreprocessor.js in Resources */ = {isa = PBXBuildFile; fileRef = 8EE05141882248108A8A2C08 /* ShareExtensionPreprocessor.js */; };
+		617CC6A2C2EB4C2187F346A6 /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA083497D0D4B39B0B372D4 /* noop-file.swift */; };
+		69074E0B8C44431EACF88AE9 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94452E79E3054290B0D343EE /* ShareViewController.swift */; };
+		7A42588CBCC346AC93B79A6E /* Intents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7054BD1072194B2C9BE931B8 /* Intents.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
+		8D7B94E3922A40318C3A5919 /* PushKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3AE9A03A898B4CFC9F3A2E36 /* PushKit.framework */; };
+		A738305448C34902BCBF63CA /* AppDelegate+VoIPPush.m in Sources */ = {isa = PBXBuildFile; fileRef = 34D090A67CAA44A5B037D134 /* AppDelegate+VoIPPush.m */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		CC960B370CEC40C49FB36D78 /* ShareExtensionPreprocessor.js in Resources */ = {isa = PBXBuildFile; fileRef = 95A4FCAB7CBD4A80BC7067D5 /* ShareExtensionPreprocessor.js */; };
-		CF317E6E7ED84DCFB6454658 /* dvnt-ring.wav in Resources */ = {isa = PBXBuildFile; fileRef = 1502621529DD47608F7411ED /* dvnt-ring.wav */; };
-		EC61DD13FC52408F8BE846E3 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 20CE64A9B51B412E9BABFC80 /* PrivacyInfo.xcprivacy */; };
+		DA5AD3241FD3493EB7875D90 /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5B25B91C881B4F829F436A09 /* CallKit.framework */; };
+		E0C59452C0D34FCB8A4C494C /* ShareExtension.entitlements in [missing build phase] */ = {isa = PBXBuildFile; fileRef = FC11B6F83FDD451B96D02CED /* ShareExtension.entitlements */; };
+		E99858FD2BA241E5A443544A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C2E716EA5D28401098111862 /* PrivacyInfo.xcprivacy */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
+		FA27D8BA546C4B8A987D8BC9 /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 0ACFF89AD6A8452F8A480C95 /* MainInterface.storyboard */; };
 		XX12B55A1EDABF083C3B51XX /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX470101BAEB8E0BBC8B0DXX /* WidgetKit.framework */; };
 		XX1A6800511A685AB346D2XX /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XXA12889081EB894481655XX /* AppIntents.framework */; };
 		XX1ECDC44A36499A2C9883XX /* WatchKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX378A422B4194AC6966BAXX /* WatchKit.framework */; };
 		XX378C5AFCA51B0EA4F6B5XX /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */; };
 		XX3C562DEF346B45594832XX /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XXCAF23C3FC41F82140FA1XX /* ActivityKit.framework */; };
+		XX511D59BA7099E82B7645XX /* DVNTWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = XX76D1DA9C9A13DAFA7C18XX /* DVNTWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		XX6A44985675A04437B8C4XX /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */; };
 		XX701AE525521F5C0BCBCBXX /* DVNTWatchComplication.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		XX8E4863C19534EC7D4226XX /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX8ACBDF17A27E5D829A2CXX /* WatchConnectivity.framework */; };
-		XX9DE1DCAA7FEF616A33B4XX /* DVNT.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		XXD492FB1555A651E8C029XX /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX99DB34EAB420F9CA31AFXX /* UserNotifications.framework */; };
 		XXFF0758375E66BEE6B904XX /* CoreImage.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX7E674302DD5EEB942175XX /* CoreImage.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		47AA720569EF4C0AB5638200 /* PBXContainerItemProxy */ = {
+		19A40CC308B64CE696840638 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 26E635904856460B838FBE28;
+			remoteGlobalIDString = 38C5FC64F94845E1851F2711;
 			remoteInfo = ShareExtension;
 		};
-		XXCC2F6CC4483EF823FD14XX /* PBXContainerItemProxy */ = {
+		XX905D8E303DEB70231992XX /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = XX6A43DD0F552874E793D0XX;
-			remoteInfo = DVNT;
-		};
-		XXD8D31858A1417409D307XX /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = XX289530F332B492D22046XX;
+			remoteGlobalIDString = XX6204D228DD36AB94F694XX;
 			remoteInfo = DVNTWatchComplication;
+		};
+		XXF24FC26F267E0662B0E5XX /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = XXAB3F603B232A2BDC4FCBXX;
+			remoteInfo = DVNTWatch;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		DA9112D56BB84129BB0113F3 /* Copy Files */ = {
+		9D2A1C719D2A463BBF560904 /* Copy Files */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				073A854A82C44010A74CE67F /* ShareExtension.appex in Copy Files */,
+				1579A580A4FE4DBFB7935A4A /* ShareExtension.appex in Copy Files */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			name = "Copy Files";
@@ -89,7 +89,7 @@
 			isa = PBXCopyFilesBuildPhase;
 			name = "Embed Watch Content";
 			files = (
-				XX9DE1DCAA7FEF616A33B4XX /* DVNT.app in Embed Watch Content */,
+				XX511D59BA7099E82B7645XX /* DVNTWatch.app in Embed Watch Content */,
 			);
 			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
 			dstSubfolderSpec = 16;
@@ -99,32 +99,32 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		09FD0E203A9642CA936707D9 /* AppDelegate+VoIPPush.m */ = {isa = PBXFileReference; name = "AppDelegate+VoIPPush.m"; path = "DVNT/AppDelegate+VoIPPush.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = undefined; };
+		0ACFF89AD6A8452F8A480C95 /* MainInterface.storyboard */ = {isa = PBXFileReference; name = MainInterface.storyboard; path = MainInterface.storyboard; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
 		13B07F961A680F5B00A75B9A /* DVNT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DVNT.app; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = 4; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = DVNT/Images.xcassets; sourceTree = "<group>"; fileEncoding = 4; includeInIndex = 0; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = DVNT/Info.plist; sourceTree = "<group>"; includeInIndex = 0; };
-		1502621529DD47608F7411ED /* dvnt-ring.wav */ = {isa = PBXFileReference; name = "dvnt-ring.wav"; path = "DVNT/dvnt-ring.wav"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = audio.wav; explicitFileType = undefined; includeInIndex = undefined; };
-		1F3D0EDDAC5846739168C9FD /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = PrivacyInfo.xcprivacy; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
-		20CE64A9B51B412E9BABFC80 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = PrivacyInfo.xcprivacy; path = DVNT/PrivacyInfo.xcprivacy; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
-		29B082B9448D40E285C4C7B4 /* noop-file.swift */ = {isa = PBXFileReference; name = "noop-file.swift"; path = "DVNT/noop-file.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
-		2A71D40C87834E2E86686312 /* ShareExtension-Info.plist */ = {isa = PBXFileReference; name = "ShareExtension-Info.plist"; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.xml; explicitFileType = undefined; includeInIndex = 0; };
-		44DB2D858C5A420FBE118FFD /* ShareExtension.appex */ = {isa = PBXFileReference; name = ShareExtension.appex; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = undefined; lastKnownFileType = undefined; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; };
-		512C7E5FFF814D4E927A46E9 /* ShareViewController.swift */ = {isa = PBXFileReference; name = ShareViewController.swift; path = ShareViewController.swift; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
-		7D4CD138312646B48119BAAD /* Intents.framework */ = {isa = PBXFileReference; name = Intents.framework; path = System/Library/Frameworks/Intents.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
-		927EAA8C9DA9494395A5C7A4 /* MainInterface.storyboard */ = {isa = PBXFileReference; name = MainInterface.storyboard; path = MainInterface.storyboard; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
-		95A4FCAB7CBD4A80BC7067D5 /* ShareExtensionPreprocessor.js */ = {isa = PBXFileReference; name = ShareExtensionPreprocessor.js; path = ShareExtensionPreprocessor.js; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
-		99C6D1530CDA41E4A0F911D2 /* ShareExtension.entitlements */ = {isa = PBXFileReference; name = ShareExtension.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		34D090A67CAA44A5B037D134 /* AppDelegate+VoIPPush.m */ = {isa = PBXFileReference; name = "AppDelegate+VoIPPush.m"; path = "DVNT/AppDelegate+VoIPPush.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = undefined; };
+		3AE9A03A898B4CFC9F3A2E36 /* PushKit.framework */ = {isa = PBXFileReference; name = PushKit.framework; path = System/Library/Frameworks/PushKit.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
+		5B25B91C881B4F829F436A09 /* CallKit.framework */ = {isa = PBXFileReference; name = CallKit.framework; path = System/Library/Frameworks/CallKit.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
+		7054BD1072194B2C9BE931B8 /* Intents.framework */ = {isa = PBXFileReference; name = Intents.framework; path = System/Library/Frameworks/Intents.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
+		7DD9132353B9473F846407DF /* ShareExtension-Info.plist */ = {isa = PBXFileReference; name = "ShareExtension-Info.plist"; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.xml; explicitFileType = undefined; includeInIndex = 0; };
+		82D6534734334E9980E0C8C4 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = PrivacyInfo.xcprivacy; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		8EE05141882248108A8A2C08 /* ShareExtensionPreprocessor.js */ = {isa = PBXFileReference; name = ShareExtensionPreprocessor.js; path = ShareExtensionPreprocessor.js; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		94452E79E3054290B0D343EE /* ShareViewController.swift */ = {isa = PBXFileReference; name = ShareViewController.swift; path = ShareViewController.swift; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
+		9BA083497D0D4B39B0B372D4 /* noop-file.swift */ = {isa = PBXFileReference; name = "noop-file.swift"; path = "DVNT/noop-file.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = DVNT/SplashScreen.storyboard; sourceTree = "<group>"; includeInIndex = 0; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; includeInIndex = 0; };
-		EB4DEA045C88461D8D6FD47C /* PushKit.framework */ = {isa = PBXFileReference; name = PushKit.framework; path = System/Library/Frameworks/PushKit.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
+		C2E716EA5D28401098111862 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; name = PrivacyInfo.xcprivacy; path = DVNT/PrivacyInfo.xcprivacy; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		C32F76EC7B08483EAF217E47 /* ShareExtension.appex */ = {isa = PBXFileReference; name = ShareExtension.appex; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = undefined; lastKnownFileType = undefined; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; };
+		D2FE201A5B8A4072BAC1F5DC /* dvnt-ring.wav */ = {isa = PBXFileReference; name = "dvnt-ring.wav"; path = "DVNT/dvnt-ring.wav"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = audio.wav; explicitFileType = undefined; includeInIndex = undefined; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; fileEncoding = 4; includeInIndex = undefined; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = DVNT/AppDelegate.swift; sourceTree = "<group>"; fileEncoding = 4; includeInIndex = 0; };
 		F11748442D0722820044C1D9 /* DVNT-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "DVNT-Bridging-Header.h"; path = "DVNT/DVNT-Bridging-Header.h"; sourceTree = "<group>"; fileEncoding = 4; includeInIndex = 0; };
-		FB8FE8B14D994DE389DD398F /* CallKit.framework */ = {isa = PBXFileReference; name = CallKit.framework; path = System/Library/Frameworks/CallKit.framework; sourceTree = SDKROOT; fileEncoding = undefined; lastKnownFileType = wrapper.framework; explicitFileType = undefined; includeInIndex = undefined; };
+		FC11B6F83FDD451B96D02CED /* ShareExtension.entitlements */ = {isa = PBXFileReference; name = ShareExtension.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
 		XX378A422B4194AC6966BAXX /* WatchKit.framework */ = {isa = PBXFileReference; path = System/Library/Frameworks/WatchKit.framework; fileEncoding = 4; lastKnownFileType = wrapper.framework; includeInIndex = undefined; name = WatchKit.framework; sourceTree = SDKROOT; };
 		XX470101BAEB8E0BBC8B0DXX /* WidgetKit.framework */ = {isa = PBXFileReference; path = System/Library/Frameworks/WidgetKit.framework; fileEncoding = 4; lastKnownFileType = wrapper.framework; includeInIndex = undefined; name = WidgetKit.framework; sourceTree = SDKROOT; };
 		XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */ = {isa = PBXFileReference; path = System/Library/Frameworks/SwiftUI.framework; fileEncoding = 4; lastKnownFileType = wrapper.framework; includeInIndex = undefined; name = SwiftUI.framework; sourceTree = SDKROOT; };
-		XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DVNT.app; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = 4; };
+		XX76D1DA9C9A13DAFA7C18XX /* DVNTWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DVNTWatch.app; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = 4; };
 		XX7E674302DD5EEB942175XX /* CoreImage.framework */ = {isa = PBXFileReference; path = System/Library/Frameworks/CoreImage.framework; fileEncoding = 4; lastKnownFileType = wrapper.framework; includeInIndex = undefined; name = CoreImage.framework; sourceTree = SDKROOT; };
 		XX8ACBDF17A27E5D829A2CXX /* WatchConnectivity.framework */ = {isa = PBXFileReference; path = System/Library/Frameworks/WatchConnectivity.framework; fileEncoding = 4; lastKnownFileType = wrapper.framework; includeInIndex = undefined; name = WatchConnectivity.framework; sourceTree = SDKROOT; };
 		XX99DB34EAB420F9CA31AFXX /* UserNotifications.framework */ = {isa = PBXFileReference; path = System/Library/Frameworks/UserNotifications.framework; fileEncoding = 4; lastKnownFileType = wrapper.framework; includeInIndex = undefined; name = UserNotifications.framework; sourceTree = SDKROOT; };
@@ -134,17 +134,17 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		XX36B88FBB507408CA1FB8XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		XX11BF5A2AA47E5BC8352CXX /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			target = XX289530F332B492D22046XX /* DVNTWatchComplication */;
+			target = XXAB3F603B232A2BDC4FCBXX /* DVNTWatch */;
 			membershipExceptions = (
 				Info.plist,
 				"expo-target.config.js",
 			);
 		};
-		XX656DECF5F5D2DB365E55XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		XX5856799FB119C968AFF7XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			target = XX6A43DD0F552874E793D0XX /* DVNT */;
+			target = XX6204D228DD36AB94F694XX /* DVNTWatchComplication */;
 			membershipExceptions = (
 				Info.plist,
 				"expo-target.config.js",
@@ -153,11 +153,11 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		XX0DBF78894CEA43EF97D3XX /* watch */ = {
+		XX17DED761019F21BFA4A8XX /* watch-complication */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = watch;
+			path = "watch-complication";
 			exceptions = (
-				XX656DECF5F5D2DB365E55XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+				XX5856799FB119C968AFF7XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
 			);
 			explicitFileTypes = {
 			};
@@ -165,11 +165,11 @@
 			);
 			sourceTree = "<group>";
 		};
-		XX9C4F61213998D6BBC486XX /* watch-complication */ = {
+		XX9CE412A01777341E8191XX /* watch */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "watch-complication";
+			path = watch;
 			exceptions = (
-				XX36B88FBB507408CA1FB8XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+				XX11BF5A2AA47E5BC8352CXX /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
 			);
 			explicitFileTypes = {
 			};
@@ -184,13 +184,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6C3F2845CB61440A9C3035D6 /* PushKit.framework in Frameworks */,
-				9DD3AF545EDA4759AC530D41 /* CallKit.framework in Frameworks */,
-				A9A69574804A4D6F987F9048 /* Intents.framework in Frameworks */,
+				8D7B94E3922A40318C3A5919 /* PushKit.framework in Frameworks */,
+				DA5AD3241FD3493EB7875D90 /* CallKit.framework in Frameworks */,
+				7A42588CBCC346AC93B79A6E /* Intents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		3EEA7CAE87EE446AB4FA79DF /* Frameworks */ = {
+		9AAAD2305C7A49BB9D434C29 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -232,10 +232,10 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				20CE64A9B51B412E9BABFC80 /* PrivacyInfo.xcprivacy */,
-				1502621529DD47608F7411ED /* dvnt-ring.wav */,
-				09FD0E203A9642CA936707D9 /* AppDelegate+VoIPPush.m */,
-				29B082B9448D40E285C4C7B4 /* noop-file.swift */,
+				C2E716EA5D28401098111862 /* PrivacyInfo.xcprivacy */,
+				D2FE201A5B8A4072BAC1F5DC /* dvnt-ring.wav */,
+				34D090A67CAA44A5B037D134 /* AppDelegate+VoIPPush.m */,
+				9BA083497D0D4B39B0B372D4 /* noop-file.swift */,
 			);
 			name = DVNT;
 			sourceTree = "<group>";
@@ -244,9 +244,9 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				EB4DEA045C88461D8D6FD47C /* PushKit.framework */,
-				FB8FE8B14D994DE389DD398F /* CallKit.framework */,
-				7D4CD138312646B48119BAAD /* Intents.framework */,
+				3AE9A03A898B4CFC9F3A2E36 /* PushKit.framework */,
+				5B25B91C881B4F829F436A09 /* CallKit.framework */,
+				7054BD1072194B2C9BE931B8 /* Intents.framework */,
 				XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */,
 				XX8ACBDF17A27E5D829A2CXX /* WatchConnectivity.framework */,
 				XX7E674302DD5EEB942175XX /* CoreImage.framework */,
@@ -274,7 +274,7 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				F741C85B53DD43F69341B16D /* ShareExtension */,
+				8ECC7154E8BD4A3DA282A482 /* ShareExtension */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -285,11 +285,25 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* DVNT.app */,
-				44DB2D858C5A420FBE118FFD /* ShareExtension.appex */,
-				XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */,
+				C32F76EC7B08483EAF217E47 /* ShareExtension.appex */,
+				XX76D1DA9C9A13DAFA7C18XX /* DVNTWatch.app */,
 				XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		8ECC7154E8BD4A3DA282A482 /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				94452E79E3054290B0D343EE /* ShareViewController.swift */,
+				0ACFF89AD6A8452F8A480C95 /* MainInterface.storyboard */,
+				8EE05141882248108A8A2C08 /* ShareExtensionPreprocessor.js */,
+				82D6534734334E9980E0C8C4 /* PrivacyInfo.xcprivacy */,
+				7DD9132353B9473F846407DF /* ShareExtension-Info.plist */,
+				FC11B6F83FDD451B96D02CED /* ShareExtension.entitlements */,
+			);
+			name = ShareExtension;
+			path = ShareExtension;
 			sourceTree = "<group>";
 		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
@@ -301,25 +315,11 @@
 			path = DVNT/Supporting;
 			sourceTree = "<group>";
 		};
-		F741C85B53DD43F69341B16D /* ShareExtension */ = {
-			isa = PBXGroup;
-			children = (
-				512C7E5FFF814D4E927A46E9 /* ShareViewController.swift */,
-				927EAA8C9DA9494395A5C7A4 /* MainInterface.storyboard */,
-				95A4FCAB7CBD4A80BC7067D5 /* ShareExtensionPreprocessor.js */,
-				1F3D0EDDAC5846739168C9FD /* PrivacyInfo.xcprivacy */,
-				2A71D40C87834E2E86686312 /* ShareExtension-Info.plist */,
-				99C6D1530CDA41E4A0F911D2 /* ShareExtension.entitlements */,
-			);
-			name = ShareExtension;
-			path = ShareExtension;
-			sourceTree = "<group>";
-		};
 		XX3E41C1850246162C0061XX /* expo:targets */ = {
 			isa = PBXGroup;
 			children = (
-				XX0DBF78894CEA43EF97D3XX /* watch */,
-				XX9C4F61213998D6BBC486XX /* watch-complication */,
+				XX9CE412A01777341E8191XX /* watch */,
+				XX17DED761019F21BFA4A8XX /* watch-complication */,
 			);
 			sourceTree = "<group>";
 			name = expo:targets;
@@ -338,42 +338,42 @@
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				E83571A80343466EA8F5285D /* [Expo Dev Launcher] Strip Local Network Keys for Release */,
-				DA9112D56BB84129BB0113F3 /* Copy Files */,
-				886A680F02BF4EA2BD2491FE /* Upload Debug Symbols to Sentry */,
+				40F6B41D9D0D453287412E3B /* [Expo Dev Launcher] Strip Local Network Keys for Release */,
+				9D2A1C719D2A463BBF560904 /* Copy Files */,
+				F791B4EB1B97463BA3C30600 /* Upload Debug Symbols to Sentry */,
 				XX81D5C67C94C2E1F9007EXX /* Embed Watch Content */,
 				XX72A8CFBF0FBA13A79902XX /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				D09FDD7627514C4A9CED4A82 /* PBXTargetDependency */,
-				XXDE0A65E7D3B48A78312AXX /* PBXTargetDependency */,
-				XXD5408C74C32022CA590EXX /* PBXTargetDependency */,
+				5AA18E413C5A476891F76260 /* PBXTargetDependency */,
+				XX59C5220957AF6113E904XX /* PBXTargetDependency */,
+				XX36DA247C17C94BD9E4E7XX /* PBXTargetDependency */,
 			);
 			name = DVNT;
 			productName = DVNT;
 			productReference = 13B07F961A680F5B00A75B9A /* DVNT.app */;
 			productType = "com.apple.product-type.application";
 		};
-		26E635904856460B838FBE28 /* ShareExtension */ = {
+		38C5FC64F94845E1851F2711 /* ShareExtension */ = {
 			isa = PBXNativeTarget;
 			name = ShareExtension;
 			productName = ShareExtension;
-			productReference = 44DB2D858C5A420FBE118FFD /* ShareExtension.appex */;
+			productReference = C32F76EC7B08483EAF217E47 /* ShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
-			buildConfigurationList = 240BA0AF834042689B4ADF0B /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+			buildConfigurationList = 7D609280C3714694A3C43BF2 /* Build configuration list for PBXNativeTarget "ShareExtension" */;
 			buildPhases = (
-				BC2F4D0847D04B14A2D6BD62 /* Sources */,
-				BA50C3E62F9B4B2A9D4F98BC /* Resources */,
-				3EEA7CAE87EE446AB4FA79DF /* Frameworks */,
+				860438BA5A864BACA8A3FA86 /* Sources */,
+				4BFC5E60BAC0402DA94EBBED /* Resources */,
+				9AAAD2305C7A49BB9D434C29 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 		};
-		XX289530F332B492D22046XX /* DVNTWatchComplication */ = {
+		XX6204D228DD36AB94F694XX /* DVNTWatchComplication */ = {
 			isa = PBXNativeTarget;
 			buildPhases = (
 				XXBA6CDF0021ABEEEDFCFBXX /* Frameworks */,
@@ -384,16 +384,16 @@
 			);
 			dependencies = (
 			);
-			buildConfigurationList = XXB170575CD1E0A7D80214XX /* Build configuration list for PBXNativeTarget "DVNTWatchComplication" */;
+			buildConfigurationList = XXA9B94FC6A91205D7CDEDXX /* Build configuration list for PBXNativeTarget "DVNTWatchComplication" */;
 			name = DVNTWatchComplication;
 			productName = DVNTWatchComplication;
 			productReference = XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */;
 			productType = "com.apple.product-type.app-extension";
 			fileSystemSynchronizedGroups = (
-				XX9C4F61213998D6BBC486XX /* watch-complication */,
+				XX17DED761019F21BFA4A8XX /* watch-complication */,
 			);
 		};
-		XX6A43DD0F552874E793D0XX /* DVNT */ = {
+		XXAB3F603B232A2BDC4FCBXX /* DVNTWatch */ = {
 			isa = PBXNativeTarget;
 			buildPhases = (
 				XX074B8811C1CF8E8A3D74XX /* Frameworks */,
@@ -404,13 +404,13 @@
 			);
 			dependencies = (
 			);
-			buildConfigurationList = XX5D98D9F202CA073387BEXX /* Build configuration list for PBXNativeTarget "DVNT" */;
-			name = DVNT;
-			productName = DVNT;
-			productReference = XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */;
+			buildConfigurationList = XX5D98D9F202CA073387BEXX /* Build configuration list for PBXNativeTarget "DVNTWatch" */;
+			name = DVNTWatch;
+			productName = DVNTWatch;
+			productReference = XX76D1DA9C9A13DAFA7C18XX /* DVNTWatch.app */;
 			productType = "com.apple.product-type.application";
 			fileSystemSynchronizedGroups = (
-				XX0DBF78894CEA43EF97D3XX /* watch */,
+				XX9CE412A01777341E8191XX /* watch */,
 			);
 		};
 /* End PBXNativeTarget section */
@@ -425,17 +425,17 @@
 						LastSwiftMigration = 1250;
 						DevelopmentTeam = 436WA3W63V;
 					};
-					26E635904856460B838FBE28 = {
+					38C5FC64F94845E1851F2711 = {
 						CreatedOnToolsVersion = 14.3;
 						ProvisioningStyle = Automatic;
 						DevelopmentTeam = 436WA3W63V;
 					};
-					XX6A43DD0F552874E793D0XX = {
+					XXAB3F603B232A2BDC4FCBXX = {
 						CreatedOnToolsVersion = 14.3;
 						ProvisioningStyle = Automatic;
 						DevelopmentTeam = 436WA3W63V;
 					};
-					XX289530F332B492D22046XX = {
+					XX6204D228DD36AB94F694XX = {
 						CreatedOnToolsVersion = 14.3;
 						ProvisioningStyle = Automatic;
 						DevelopmentTeam = 436WA3W63V;
@@ -456,9 +456,9 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* DVNT */,
-				26E635904856460B838FBE28 /* ShareExtension */,
-				XX6A43DD0F552874E793D0XX /* DVNT */,
-				XX289530F332B492D22046XX /* DVNTWatchComplication */,
+				38C5FC64F94845E1851F2711 /* ShareExtension */,
+				XXAB3F603B232A2BDC4FCBXX /* DVNTWatch */,
+				XX6204D228DD36AB94F694XX /* DVNTWatchComplication */,
 			);
 		};
 /* End PBXProject section */
@@ -471,18 +471,18 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				EC61DD13FC52408F8BE846E3 /* PrivacyInfo.xcprivacy in Resources */,
-				CF317E6E7ED84DCFB6454658 /* dvnt-ring.wav in Resources */,
+				E99858FD2BA241E5A443544A /* PrivacyInfo.xcprivacy in Resources */,
+				4A52F1AA0E434B95B157939A /* dvnt-ring.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		BA50C3E62F9B4B2A9D4F98BC /* Resources */ = {
+		4BFC5E60BAC0402DA94EBBED /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A6B5AA06768248A18C0DCE4B /* MainInterface.storyboard in Resources */,
-				CC960B370CEC40C49FB36D78 /* ShareExtensionPreprocessor.js in Resources */,
-				A74202CB52404B8DA615D0E3 /* PrivacyInfo.xcprivacy in Resources */,
+				FA27D8BA546C4B8A987D8BC9 /* MainInterface.storyboard in Resources */,
+				5FDCD70068BE40CFAD08F1C5 /* ShareExtensionPreprocessor.js in Resources */,
+				076C3CF0CC544D4B866E2FD3 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -546,6 +546,24 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
+		40F6B41D9D0D453287412E3B /* [Expo Dev Launcher] Strip Local Network Keys for Release */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			name = "[Expo Dev Launcher] Strip Local Network Keys for Release";
+			inputPaths = (
+			);
+			outputPaths = (
+			);
+			shellPath = /bin/sh;
+			shellScript = "# Strip dev-launcher-specific local network permission keys from non-Debug builds\n# This only removes _expo._tcp Bonjour services and the dev-launcher usage description.\n# Other Bonjour services and custom descriptions are preserved for production use.\n\nif [ \"$CONFIGURATION\" != \"Debug\" ]; then\n  PLIST_PATH=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\n  if [ -f \"$PLIST_PATH\" ]; then\n    # Check if NSBonjourServices exists\n    if /usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" >/dev/null 2>&1; then\n      # Get the count of services\n      COUNT=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n\n      # Remove _expo._tcp\n      for ((i=COUNT-1; i>=0; i--)); do\n        SERVICE=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n        if echo \"$SERVICE\" | grep -q \"_expo._tcp\"; then\n          /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || true\n        fi\n      done\n\n      # If the array is now empty, remove it entirely\n      REMAINING=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n      if [ \"$REMAINING\" -eq \"0\" ]; then\n        /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null || true\n      fi\n    fi\n\n    # Only delete the description if it matches the dev-launcher default text\n    DESC=$(/usr/libexec/PlistBuddy -c \"Print :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n    if echo \"$DESC\" | grep -q \"Expo Dev Launcher\"; then\n      /usr/libexec/PlistBuddy -c \"Delete :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || true\n    fi\n  fi\nfi\n";
+			outputFileListPaths = (
+			);
+			inputFileListPaths = (
+			);
+		};
 		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -572,7 +590,7 @@
 			inputFileListPaths = (
 			);
 		};
-		886A680F02BF4EA2BD2491FE /* Upload Debug Symbols to Sentry */ = {
+		F791B4EB1B97463BA3C30600 /* Upload Debug Symbols to Sentry */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -590,24 +608,6 @@
 			inputFileListPaths = (
 			);
 		};
-		E83571A80343466EA8F5285D /* [Expo Dev Launcher] Strip Local Network Keys for Release */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			name = "[Expo Dev Launcher] Strip Local Network Keys for Release";
-			inputPaths = (
-			);
-			outputPaths = (
-			);
-			shellPath = /bin/sh;
-			shellScript = "# Strip dev-launcher-specific local network permission keys from non-Debug builds\n# This only removes _expo._tcp Bonjour services and the dev-launcher usage description.\n# Other Bonjour services and custom descriptions are preserved for production use.\n\nif [ \"$CONFIGURATION\" != \"Debug\" ]; then\n  PLIST_PATH=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\n  if [ -f \"$PLIST_PATH\" ]; then\n    # Check if NSBonjourServices exists\n    if /usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" >/dev/null 2>&1; then\n      # Get the count of services\n      COUNT=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n\n      # Remove _expo._tcp\n      for ((i=COUNT-1; i>=0; i--)); do\n        SERVICE=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n        if echo \"$SERVICE\" | grep -q \"_expo._tcp\"; then\n          /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || true\n        fi\n      done\n\n      # If the array is now empty, remove it entirely\n      REMAINING=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n      if [ \"$REMAINING\" -eq \"0\" ]; then\n        /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null || true\n      fi\n    fi\n\n    # Only delete the description if it matches the dev-launcher default text\n    DESC=$(/usr/libexec/PlistBuddy -c \"Print :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n    if echo \"$DESC\" | grep -q \"Expo Dev Launcher\"; then\n      /usr/libexec/PlistBuddy -c \"Delete :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || true\n    fi\n  fi\nfi\n";
-			outputFileListPaths = (
-			);
-			inputFileListPaths = (
-			);
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -616,16 +616,16 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				6ABC3B27522243BDB890565C /* AppDelegate+VoIPPush.m in Sources */,
-				BA7C074C6B1A423882B3B5C7 /* noop-file.swift in Sources */,
+				A738305448C34902BCBF63CA /* AppDelegate+VoIPPush.m in Sources */,
+				617CC6A2C2EB4C2187F346A6 /* noop-file.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		BC2F4D0847D04B14A2D6BD62 /* Sources */ = {
+		860438BA5A864BACA8A3FA86 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				92930870F74046F28C7B7F32 /* ShareViewController.swift in Sources */,
+				69074E0B8C44431EACF88AE9 /* ShareViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -646,20 +646,20 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		D09FDD7627514C4A9CED4A82 /* PBXTargetDependency */ = {
+		5AA18E413C5A476891F76260 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 26E635904856460B838FBE28 /* ShareExtension */;
-			targetProxy = 47AA720569EF4C0AB5638200 /* PBXContainerItemProxy */;
+			target = 38C5FC64F94845E1851F2711 /* ShareExtension */;
+			targetProxy = 19A40CC308B64CE696840638 /* PBXContainerItemProxy */;
 		};
-		XXD5408C74C32022CA590EXX /* PBXTargetDependency */ = {
+		XX36DA247C17C94BD9E4E7XX /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = XX289530F332B492D22046XX /* DVNTWatchComplication */;
-			targetProxy = XXD8D31858A1417409D307XX /* PBXContainerItemProxy */;
+			target = XX6204D228DD36AB94F694XX /* DVNTWatchComplication */;
+			targetProxy = XX905D8E303DEB70231992XX /* PBXContainerItemProxy */;
 		};
-		XXDE0A65E7D3B48A78312AXX /* PBXTargetDependency */ = {
+		XX59C5220957AF6113E904XX /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = XX6A43DD0F552874E793D0XX /* DVNT */;
-			targetProxy = XXCC2F6CC4483EF823FD14XX /* PBXContainerItemProxy */;
+			target = XXAB3F603B232A2BDC4FCBXX /* DVNTWatch */;
+			targetProxy = XXF24FC26F267E0662B0E5XX /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -743,7 +743,32 @@
 			};
 			name = Release;
 		};
-		7287FFD152E349298F867652 /* Release */ = {
+		39AF46A56318490FBF721118 /* Debug */ = {
+			name = Debug;
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_NAME = ShareExtension;
+				SKIP_INSTALL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.dvnt.app.share-extension";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				DEVELOPMENT_TEAM = 436WA3W63V;
+			};
+		};
+		3C65DBFC5F16492EAD368D9F /* Release */ = {
 			name = Release;
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -889,28 +914,85 @@
 			};
 			name = Release;
 		};
-		85A9837FCCE940E99302BEDC /* Debug */ = {
-			name = Debug;
+		XX3F38E9AB1EA730298605XX /* Release */ = {
 			isa = XCBuildConfiguration;
+			name = Release;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_NAME = ShareExtension;
-				SKIP_INSTALL = YES;
-				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "../targets/watch-complication/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = DVNT;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.dvnt.app.share-extension";
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp.complications;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				CODE_SIGN_ENTITLEMENTS = "../targets/watch-complication/generated.entitlements";
+				REGISTER_APP_GROUPS = YES;
+				DEVELOPMENT_TEAM = 436WA3W63V;
+			};
+		};
+		XX70FAD23154702A349A9FXX /* Debug */ = {
+			isa = XCBuildConfiguration;
+			name = Debug;
+			buildSettings = {
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "../targets/watch-complication/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = DVNT;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp.complications;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				CODE_SIGN_ENTITLEMENTS = "../targets/watch-complication/generated.entitlements";
+				REGISTER_APP_GROUPS = YES;
 				DEVELOPMENT_TEAM = 436WA3W63V;
 			};
 		};
@@ -1002,88 +1084,6 @@
 				DEVELOPMENT_TEAM = 436WA3W63V;
 			};
 		};
-		XXED3CDA041B8C7CACD4FAXX /* Release */ = {
-			isa = XCBuildConfiguration;
-			name = Release;
-			buildSettings = {
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CODE_SIGN_STYLE = Automatic;
-				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "../targets/watch-complication/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = DVNTWatchComplication;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0.0;
-				MTL_FAST_MATH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp.complications;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				CODE_SIGN_ENTITLEMENTS = "../targets/watch-complication/generated.entitlements";
-				REGISTER_APP_GROUPS = YES;
-				DEVELOPMENT_TEAM = 436WA3W63V;
-			};
-		};
-		XXFBB89892CDFF1FE86967XX /* Debug */ = {
-			isa = XCBuildConfiguration;
-			name = Debug;
-			buildSettings = {
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "../targets/watch-complication/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = DVNTWatchComplication;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0.0;
-				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-				MTL_FAST_MATH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp.complications;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				CODE_SIGN_ENTITLEMENTS = "../targets/watch-complication/generated.entitlements";
-				REGISTER_APP_GROUPS = YES;
-				DEVELOPMENT_TEAM = 436WA3W63V;
-			};
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1096,11 +1096,11 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		240BA0AF834042689B4ADF0B /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
+		7D609280C3714694A3C43BF2 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				85A9837FCCE940E99302BEDC /* Debug */,
-				7287FFD152E349298F867652 /* Release */,
+				39AF46A56318490FBF721118 /* Debug */,
+				3C65DBFC5F16492EAD368D9F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1114,7 +1114,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		XX5D98D9F202CA073387BEXX /* Build configuration list for PBXNativeTarget "DVNT" */ = {
+		XX5D98D9F202CA073387BEXX /* Build configuration list for PBXNativeTarget "DVNTWatch" */ = {
 			isa = XCConfigurationList;
 			defaultConfigurationIsVisible = 0;
 			buildConfigurations = (
@@ -1123,12 +1123,12 @@
 			);
 			defaultConfigurationName = Release;
 		};
-		XXB170575CD1E0A7D80214XX /* Build configuration list for PBXNativeTarget "DVNTWatchComplication" */ = {
+		XXA9B94FC6A91205D7CDEDXX /* Build configuration list for PBXNativeTarget "DVNTWatchComplication" */ = {
 			isa = XCConfigurationList;
 			defaultConfigurationIsVisible = 0;
 			buildConfigurations = (
-				XXFBB89892CDFF1FE86967XX /* Debug */,
-				XXED3CDA041B8C7CACD4FAXX /* Release */,
+				XX70FAD23154702A349A9FXX /* Debug */,
+				XX3F38E9AB1EA730298605XX /* Release */,
 			);
 			defaultConfigurationName = Release;
 		};
