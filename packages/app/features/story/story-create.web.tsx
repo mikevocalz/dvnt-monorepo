@@ -184,18 +184,12 @@ export function StoryCreateScreen() {
       const updated = [...mediaAssets, ...next];
       setMediaAssets(updated);
       setCurrentIndex(firstNewIndex);
-
-      // Adding media opens the v2 editor (full drawing/filters/stickers/text)
-      // for the first new item; it bakes + returns overlays via the result
-      // store, which the consume effect above merges back by index.
-      const first = next[0];
-      if (first) {
-        router.push(
-          `/feed/story/editor?uri=${encodeURIComponent(first.uri)}&type=${first.type}&index=${firstNewIndex}`,
-        );
-      }
+      // Media stays on the composer and shares directly (the proven upload
+      // path). The v2 editor is opt-in via the Edit pill on the preview —
+      // auto-routing every pick through the editor's bake→blob→consume→upload
+      // round-trip broke sharing (upload never fired), so it's opt-in now.
     },
-    [mediaAssets, setMediaAssets, setCurrentIndex, showToast, router],
+    [mediaAssets, setMediaAssets, setCurrentIndex, showToast],
   );
 
   const handleRemoveMedia = useCallback(
