@@ -228,6 +228,10 @@ export function StoryOverlaysLayer({
                 wordBreak: "break-word",
                 borderRadius: overlay.stickerKind ? 999 : 0,
                 padding: overlay.stickerKind ? "0.2em 0.6em" : 0,
+                textShadow:
+                  overlay.stickerKind || overlay.backgroundColor
+                    ? "none"
+                    : "0 1px 4px rgba(0,0,0,0.6)",
               }}
             >
               {overlay.content}

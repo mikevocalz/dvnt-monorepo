@@ -83,7 +83,6 @@ export function StoryCreateScreen() {
     overlays,
     editingId,
     textTheme,
-    addTextOverlay,
     updateOverlayContent,
     updateOverlayPosition,
     updateOverlayColor,
@@ -679,7 +678,9 @@ export function StoryCreateScreen() {
           </button>
 
           <button
-            onClick={addTextOverlay}
+            onClick={() =>
+              router.push("/feed/story/editor?initialMode=text&index=0")
+            }
             disabled={busy}
             className={`flex flex-col items-center gap-1 ${busy ? "opacity-40" : ""}`}
           >
