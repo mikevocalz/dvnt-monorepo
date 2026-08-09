@@ -20,6 +20,10 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { storyTagsApi } from "@dvnt/app/lib/api/stories";
 import { TEXT_POST_THEMES } from "@dvnt/app/lib/posts/text-post";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
+import type {
+  StoryOverlay,
+  StoryAnimatedGifOverlay,
+} from "@dvnt/app/lib/types";
 import { detectMediaKind } from "@dvnt/app/lib/media/detect-media-kind";
 import {
   useStoryCreateWebStore,
@@ -92,11 +96,23 @@ export function StoryCreateScreen() {
 
   // Editor → create hand-off: the story editor writes the edited media +
   // overlays into the shared result store, then routes back here; consume it.
+  // The editor's text/sticker/GIF overlays (drawing + filters are already baked
+  // into r.uri) are carried through to publish, keyed by media index.
   const consumeEditorResult = useStoryEditorResultStore((s) => s.consumeResult);
   const forceIdleFlow = useStoryFlowStore((s) => s.forceIdle);
+  const editorOverlaysRef = useRef<
+    Record<
+      number,
+      { storyOverlays: StoryOverlay[]; animatedGifOverlays: StoryAnimatedGifOverlay[] }
+    >
+  >({});
   useEffect(() => {
     const r = consumeEditorResult();
     if (r?.uri) {
+      editorOverlaysRef.current[r.index] = {
+        storyOverlays: r.storyOverlays ?? [],
+        animatedGifOverlays: r.animatedGifOverlays ?? [],
+      };
       const assets = useCreateStoryStore.getState().mediaAssets;
       const next = assets.map((a, i) =>
         i === r.index ? ({ ...a, uri: r.uri, type: r.mediaType } as MediaAsset) : a,
@@ -273,17 +289,22 @@ export function StoryCreateScreen() {
         return;
       }
 
-      const storyItems = uploadResults.map((r, index) => ({
-        type: r.kind ?? r.type,
-        url: r.url,
-        ...(r.path && { storageKey: r.path }),
-        thumbnail: r.thumbnail,
-        ...(r.thumbnailPath && { thumbnailKey: r.thumbnailPath }),
-        ...(r.mimeType && { mimeType: r.mimeType }),
-        // Text overlays apply to the first (active) media item on web.
-        storyOverlays: index === currentIndex ? webTextOverlays : [],
-        animatedGifOverlays: [],
-      }));
+      const storyItems = uploadResults.map((r, index) => {
+        // Editor overlays for this item (text / stickers / WS-4) + the web
+        // composer's own draggable text overlays for the active item.
+        const editor = editorOverlaysRef.current[index];
+        const composerText = index === currentIndex ? webTextOverlays : [];
+        return {
+          type: r.kind ?? r.type,
+          url: r.url,
+          ...(r.path && { storageKey: r.path }),
+          thumbnail: r.thumbnail,
+          ...(r.thumbnailPath && { thumbnailKey: r.thumbnailPath }),
+          ...(r.mimeType && { mimeType: r.mimeType }),
+          storyOverlays: [...(editor?.storyOverlays ?? []), ...composerText],
+          animatedGifOverlays: editor?.animatedGifOverlays ?? [],
+        };
+      });
 
       createStoryMutate(
         { items: storyItems, visibility },

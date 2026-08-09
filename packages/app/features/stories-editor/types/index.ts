@@ -38,6 +38,13 @@ export interface StickerElement extends BaseElement {
   category: StickerCategory;
   size: number;
   assetId?: string;
+  // ---- WS-4 / DVNT-native interactive stickers ----
+  // Optional metadata for tappable, data-bearing stickers (event, ticket
+  // "I'm going", mention, link). Additive + optional so nothing that ignores
+  // them breaks. The web editor renders these as branded pills and serializes
+  // them into the export so create-story stores the tappable region.
+  label?: string;
+  metadata?: Record<string, string>;
 }
 
 export interface StickerInsertOptions {
