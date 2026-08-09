@@ -15,7 +15,13 @@
 module.exports = {
   type: "widget",
   name: "DVNTWatchComplication",
-  bundleIdentifier: "com.dvnt.app.watchkitapp.complication",
+  // NOTE: ".complications" (plural), not ".complication". Apple permanently
+  // reserves an App ID string once it has been created and deleted — the
+  // singular form was registered during the June attempt, removed, and has
+  // been refused ever since with "An App ID with Identifier ... is not
+  // available", even on an authenticated cookie session. The string is burned;
+  // it cannot be recovered. Must stay a child of the watch app's bundle id.
+  bundleIdentifier: "com.dvnt.app.watchkitapp.complications",
   deploymentTarget: "10.0",
   entitlements: {
     "com.apple.security.application-groups": ["group.com.dvnt.app.watch"],
