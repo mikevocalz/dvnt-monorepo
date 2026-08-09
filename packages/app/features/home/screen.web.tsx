@@ -374,6 +374,8 @@ function toViewerGroup(s: any): StoryViewerGroup {
       type: (it.type === "video" ? "video" : "image") as "image" | "video",
       url: it.url as string,
       duration: it.duration as number | undefined,
+      storyOverlays: it.storyOverlays,
+      animatedGifOverlays: it.animatedGifOverlays,
     }));
   return { id: String(s.id ?? s.username), username: s.username, avatar: s.avatar, segments };
 }

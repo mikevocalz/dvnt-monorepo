@@ -29,6 +29,7 @@ import {
   useStoryCreateWebStore,
   STORY_TEXT_COLORS,
 } from "@dvnt/app/lib/stores/story-create-web-store";
+import { StoryOverlaysLayer } from "@dvnt/app/components/story-overlays-layer.web";
 
 const MAX_STORY_ITEMS = 4;
 
@@ -98,7 +99,12 @@ export function StoryCreateScreen() {
   // overlays into the shared result store, then routes back here; consume it.
   // The editor's text/sticker/GIF overlays (drawing + filters are already baked
   // into r.uri) are carried through to publish, keyed by media index.
-  const consumeEditorResult = useStoryEditorResultStore((s) => s.consumeResult);
+  // Subscribe to the result VALUE (not the stable action) so the effect re-fires
+  // when the editor sets a result on return — reading `consumeResult` once on
+  // mount could never pick up a result produced after this screen mounted, which
+  // is exactly the return-from-editor case. Merge, then clear the store.
+  const pendingResult = useStoryEditorResultStore((s) => s.result);
+  const clearResult = useStoryEditorResultStore((s) => s.clear);
   const forceIdleFlow = useStoryFlowStore((s) => s.forceIdle);
   const editorOverlaysRef = useRef<
     Record<
@@ -107,7 +113,7 @@ export function StoryCreateScreen() {
     >
   >({});
   useEffect(() => {
-    const r = consumeEditorResult();
+    const r = pendingResult;
     if (r?.uri) {
       editorOverlaysRef.current[r.index] = {
         storyOverlays: r.storyOverlays ?? [],
@@ -123,8 +129,9 @@ export function StoryCreateScreen() {
           ? next
           : ([{ uri: r.uri, type: r.mediaType }] as unknown as MediaAsset[]),
       );
+      clearResult();
     }
-  }, [consumeEditorResult, setMediaAssets]);
+  }, [pendingResult, setMediaAssets, clearResult]);
 
   // Reset transient web editing state + the flow state machine on leave.
   useEffect(() => () => {
@@ -458,6 +465,24 @@ export function StoryCreateScreen() {
               <ImageIcon size={48} />
               <span className="text-base">Add media to get started</span>
             </button>
+          ) : null}
+
+          {/* Editor overlays returned for THIS item (text / emoji / image
+              stickers / WS-4 / GIFs) — the same shared renderer the story
+              viewer uses, so the share preview shows what will publish.
+              Non-interactive here (WS-4 stickers aren't tappable in the
+              composer). Sits above the media, below the Edit button + the
+              composer's own draggable text overlays. */}
+          {currentAsset ? (
+            <StoryOverlaysLayer
+              storyOverlays={
+                editorOverlaysRef.current[currentIndex]?.storyOverlays
+              }
+              animatedGifOverlays={
+                editorOverlaysRef.current[currentIndex]?.animatedGifOverlays
+              }
+              interactive={false}
+            />
           ) : null}
 
           {/* Re-open the v2 editor for the current item (drawing/filters/etc.) */}

@@ -105,6 +105,9 @@ import type {
 } from "@dvnt/app/features/stories-editor/types";
 import { useStoryFlowStore } from "@dvnt/app/lib/stores/story-flow-store";
 import { useStoryEditorResultStore } from "@dvnt/app/lib/stores/story-editor-result-store";
+// Single source of truth for image-sticker web URLs — shared with the story
+// viewer / create-preview overlay renderer so the maps can't drift.
+import { STICKER_WEB_URLS } from "@dvnt/app/components/story-overlays-layer.web";
 import type {
   StoryOverlay,
   StoryAnimatedGifOverlay,
@@ -328,24 +331,10 @@ function assetToUrl(source: string | number): string {
 
 // Metro `require()` of the sticker PNGs doesn't resolve to a browser URL in the
 // Next build (assetToUrl returns "" → blank cells), so on web we serve them
-// from apps/web/public/stickers/ and resolve by sticker id. Keep in sync with
-// IMAGE_STICKER_PACKS (packages/app/features/stories-editor/constants).
-const STICKER_WEB_URLS: Record<string, string> = {
-  "dvnt-app": "/stickers/dvnt/DVNT-stickers_APP.png",
-  "dvnt-afterhours": "/stickers/dvnt/DVNT-stickers_AfterHours.png",
-  "dvnt-counterculture": "/stickers/dvnt/DVNT-stickers_CounterCulture.png",
-  "dvnt-dayplay": "/stickers/dvnt/DVNT-stickers_DAYPLAY.png",
-  "dvnt-deviant": "/stickers/dvnt/DVNT-stickers_Deviant.png",
-  "dvnt-energycheck": "/stickers/dvnt/DVNT-stickers_EnergyCheck.png",
-  "dvnt-ftc": "/stickers/dvnt/DVNT-stickers_FTC.png",
-  "dvnt-outside": "/stickers/dvnt/DVNT-stickers_OUTSIDE.png",
-  "dvnt-eatit": "/stickers/dvnt/eat-it.png",
-  "ballroom-chop": "/stickers/ballroom/1-chop.png",
-  "ballroom-serve1": "/stickers/ballroom/serve.png",
-  "ballroom-serve2": "/stickers/ballroom/category-is.png",
-  "ballroom-ate": "/stickers/ballroom/ate-that.png",
-  "ballroom-tea": "/stickers/ballroom/tea.png",
-};
+// from apps/web/public/stickers/ and resolve by sticker id. STICKER_WEB_URLS is
+// now defined in the shared overlay renderer (story-overlays-layer.web) and
+// imported above, so the editor and the viewer/preview share one map. Keep in
+// sync with IMAGE_STICKER_PACKS (packages/app/features/stories-editor/constants).
 
 // ============================================================
 // Filter → CSS string for LIVE preview via feColorMatrix + vignette handled
@@ -1341,7 +1330,7 @@ function Panel({
 }) {
   return (
     <div
-      className="fixed left-0 right-0 z-30 rounded-t-3xl"
+      className="fixed left-1/2 -translate-x-1/2 w-full max-w-3xl z-30 rounded-t-3xl"
       style={{
         bottom: 0,
         background: "#141414",
@@ -1978,7 +1967,7 @@ function BackgroundStrip() {
   const canvasBackground = useEditorStore((s) => s.canvasBackground);
   return (
     <div
-      className="fixed left-0 right-0 z-20 px-4 py-3"
+      className="fixed left-1/2 -translate-x-1/2 w-full max-w-3xl z-20 px-4 py-3"
       style={{
         bottom: 0,
         background: "rgba(6,7,13,0.9)",

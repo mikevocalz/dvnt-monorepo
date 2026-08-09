@@ -1,10 +1,18 @@
 import { create } from "zustand";
+import type {
+  StoryAnimatedGifOverlay,
+  StoryOverlay,
+} from "@dvnt/app/lib/types";
 
 /** One playable segment within a user's story group. */
 export interface StoryViewerSegment {
   type: "image" | "video";
   url: string;
   duration?: number;
+  /** Text / emoji / image-sticker / WS-4 overlays rendered over this segment. */
+  storyOverlays?: StoryOverlay[];
+  /** Animated-GIF overlays (published as a separate array) for this segment. */
+  animatedGifOverlays?: StoryAnimatedGifOverlay[];
 }
 
 /** A user's story (a group of segments) as fed to the full-screen viewer. */
