@@ -57,7 +57,6 @@ import {
   Palette,
   Undo2,
   Redo2,
-  ChevronLeft,
   Search,
   Highlighter,
   Eraser,
@@ -1092,12 +1091,52 @@ const TOOLS: {
   { id: "adjust", Icon: SlidersHorizontal, label: "Adjust" },
 ];
 
-// v1-mobile Dynamic-Island rail drawer: a magenta indicator tab flush on the
-// right edge that slides the tool buttons (+ undo/redo) in/out. Tap the tab to
-// toggle, tap a tool to select + collapse (the sheet opens below), tap outside
-// to close. CSS-transition slide (no reanimated on web); spring feel via the
-// same cubic-bezier the landing header uses. Buttons live in the drawer, per v1.
-const RAIL_INDICATOR = "#FF5BFC";
+// v1-mobile "Dynamic Island" rail drawer, matched to the native component
+// (components/toolbar/RightIslandMenu.tsx): magenta indicator tab (26×100,
+// #FF5BFC, thin white chevron arrow) hugging the panel's LEFT edge; the whole
+// [indicator][panel] group slides — closed = translated right by the panel
+// width so only the tab shows, open = flush. Panel is solid black w/ #555
+// border; Undo/Redo circular row on top; tool options are icon-ABOVE-label,
+// 72px tall; active = blue tint + 3px left border. CSS transition (no
+// reanimated on web). Tap tab to toggle, tap tool to select + collapse.
+const RAIL = {
+  panelW: 140,
+  indicatorW: 26,
+  indicatorH: 100,
+  optionH: 72,
+  indicator: "#FF5BFC",
+  bg: "#000",
+  border: "#555",
+  text: "#B3AFAF",
+  activeBg: "rgba(59,130,246,0.25)",
+  activeBar: "#3B82F6",
+  activeIcon: "#fff",
+  spring: "cubic-bezier(0.22,1,0.36,1)",
+};
+
+function RailArrow({ open }: { open: boolean }) {
+  return (
+    <svg
+      width={12}
+      height={20}
+      viewBox="0 0 12 20"
+      fill="none"
+      style={{
+        transform: open ? "rotate(180deg)" : "rotate(0deg)",
+        transition: `transform 0.34s ${RAIL.spring}`,
+      }}
+    >
+      <path
+        d="M10 2L2 10L10 18"
+        stroke="#fff"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function RightIslandMenu({
   mode,
   onSelect,
@@ -1113,30 +1152,84 @@ function RightIslandMenu({
 
   return (
     <>
-      {/* Click-outside scrim (only while open) */}
+      {/* Click-outside overlay (only while open) */}
       {open ? (
         <div
-          className="fixed inset-0 z-10"
+          className="fixed inset-0 z-[89]"
           onClick={() => setOpen(false)}
           aria-hidden
         />
       ) : null}
 
-      <div className="absolute right-0 top-1/2 z-20 flex items-center -translate-y-1/2">
-        {/* Sliding panel — the drawer where the buttons live */}
-        <nav
-          className="flex flex-col gap-1.5 p-2 mr-1 rounded-2xl"
+      {/* Container ([indicator][panel]) translates as one, vertically centered */}
+      <div
+        className="absolute right-0 top-1/2 z-[90] flex flex-row items-stretch"
+        style={{
+          transform: `translate(${open ? 0 : RAIL.panelW}px, -50%)`,
+          transition: `transform 0.34s ${RAIL.spring}`,
+        }}
+      >
+        {/* Indicator tab — flush to the panel's left edge */}
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-label={open ? "Close tools" : "Open tools"}
+          className="flex items-center justify-center self-center active:scale-95"
           style={{
-            background: "rgba(0,0,0,0.72)",
-            border: `1px solid ${HAIRLINE}`,
-            backdropFilter: "blur(10px)",
-            transform: open ? "translateX(0)" : "translateX(130%)",
-            opacity: open ? 1 : 0,
-            pointerEvents: open ? "auto" : "none",
-            transition:
-              "transform 0.34s cubic-bezier(0.22,1,0.36,1), opacity 0.2s ease",
+            width: RAIL.indicatorW,
+            height: RAIL.indicatorH,
+            background: RAIL.indicator,
+            borderTopLeftRadius: 14,
+            borderBottomLeftRadius: 14,
+            boxShadow: "-2px 0 10px rgba(255,91,252,0.35)",
           }}
         >
+          <RailArrow open={open} />
+        </button>
+
+        {/* Panel */}
+        <nav
+          className="flex flex-col"
+          style={{
+            width: RAIL.panelW,
+            background: RAIL.bg,
+            borderTopLeftRadius: 20,
+            borderBottomLeftRadius: 20,
+            paddingTop: 16,
+            paddingBottom: 16,
+            border: `1px solid ${RAIL.border}`,
+            borderRight: "none",
+            boxShadow: "-4px 0 16px rgba(0,0,0,0.5)",
+          }}
+        >
+          {/* Undo / Redo row (top) */}
+          <div
+            className="flex flex-row items-center justify-center gap-4"
+            style={{
+              height: RAIL.optionH,
+              borderBottom: "1px solid rgba(255,255,255,0.08)",
+            }}
+          >
+            <button
+              onClick={() => useEditorStore.getState().undo()}
+              disabled={!canUndo}
+              aria-label="Undo"
+              className="w-10 h-10 rounded-xl flex items-center justify-center active:scale-95"
+              style={{ background: "rgba(255,255,255,0.08)", opacity: canUndo ? 1 : 0.25 }}
+            >
+              <Undo2 size={18} color={RAIL.activeIcon} strokeWidth={2} />
+            </button>
+            <button
+              onClick={() => useEditorStore.getState().redo()}
+              disabled={!canRedo}
+              aria-label="Redo"
+              className="w-10 h-10 rounded-xl flex items-center justify-center active:scale-95"
+              style={{ background: "rgba(255,255,255,0.08)", opacity: canRedo ? 1 : 0.25 }}
+            >
+              <Redo2 size={18} color={RAIL.activeIcon} strokeWidth={2} />
+            </button>
+          </div>
+
+          {/* Tool options — icon above label, 72px tall */}
           {TOOLS.map((t) => {
             const isActive = mode === t.id;
             return (
@@ -1147,67 +1240,28 @@ function RightIslandMenu({
                   setOpen(false);
                 }}
                 aria-label={t.label}
-                title={t.label}
-                className="flex items-center gap-2 h-10 pl-2 pr-3 rounded-xl active:scale-95"
-                style={{ background: isActive ? DEVIANT_GRADIENT : SURFACE }}
+                className="flex flex-col items-center justify-center gap-1"
+                style={{
+                  height: RAIL.optionH,
+                  background: isActive ? RAIL.activeBg : "transparent",
+                  borderLeft: `3px solid ${isActive ? RAIL.activeBar : "transparent"}`,
+                }}
               >
-                <t.Icon size={18} color={isActive ? INK : "#fff"} />
+                <t.Icon
+                  size={22}
+                  color={isActive ? RAIL.activeIcon : RAIL.text}
+                  strokeWidth={isActive ? 2.2 : 1.6}
+                />
                 <span
-                  className="text-xs font-semibold"
-                  style={{ color: isActive ? INK : "#fff" }}
+                  className="text-[11px] font-semibold"
+                  style={{ color: isActive ? RAIL.activeIcon : RAIL.text }}
                 >
                   {t.label}
                 </span>
               </button>
             );
           })}
-
-          {/* Undo / Redo live in the rail, like v1 */}
-          <div className="flex gap-1.5 mt-1 pt-2" style={{ borderTop: `1px solid ${HAIRLINE}` }}>
-            <button
-              onClick={() => useEditorStore.getState().undo()}
-              disabled={!canUndo}
-              aria-label="Undo"
-              title="Undo"
-              className="flex-1 h-9 rounded-xl flex items-center justify-center active:scale-95"
-              style={{ background: SURFACE, opacity: canUndo ? 1 : 0.35 }}
-            >
-              <Undo2 size={16} color="#fff" />
-            </button>
-            <button
-              onClick={() => useEditorStore.getState().redo()}
-              disabled={!canRedo}
-              aria-label="Redo"
-              title="Redo"
-              className="flex-1 h-9 rounded-xl flex items-center justify-center active:scale-95"
-              style={{ background: SURFACE, opacity: canRedo ? 1 : 0.35 }}
-            >
-              <Redo2 size={16} color="#fff" />
-            </button>
-          </div>
         </nav>
-
-        {/* Indicator tab — always visible, flush to the right edge */}
-        <button
-          onClick={() => setOpen((o) => !o)}
-          aria-label={open ? "Close tools" : "Open tools"}
-          className="flex items-center justify-center rounded-l-2xl active:scale-95"
-          style={{
-            width: 26,
-            height: 100,
-            background: RAIL_INDICATOR,
-            boxShadow: "0 4px 20px rgba(255,91,252,0.35)",
-          }}
-        >
-          <ChevronLeft
-            size={18}
-            color={INK}
-            style={{
-              transform: open ? "rotate(180deg)" : "rotate(0deg)",
-              transition: "transform 0.34s cubic-bezier(0.22,1,0.36,1)",
-            }}
-          />
-        </button>
       </div>
     </>
   );
