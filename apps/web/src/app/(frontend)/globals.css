@@ -95,6 +95,63 @@ body {
   font-style: normal;
   font-display: swap;
 }
+
+/* Story text-overlay faces (TEXT_FONTS in features/stories-editor/constants).
+   These MUST stay in sync with the fonts loaded natively in the mobile root
+   layout: the story viewer re-lays-out overlay text live on every platform, so
+   a face that silently falls back to system-ui on web wraps at different
+   points than the real outlines do on device — text the author placed on one
+   line comes back split mid-word. Names match RN's fontFamily exactly. */
+@font-face {
+  font-family: "Inter-Regular";
+  src: url("/fonts/Inter-Regular.ttf") format("truetype");
+  font-display: block;
+}
+@font-face {
+  font-family: "Inter-SemiBold";
+  src: url("/fonts/Inter-SemiBold.ttf") format("truetype");
+  font-display: block;
+}
+@font-face {
+  font-family: "Inter-Bold";
+  src: url("/fonts/Inter-Bold.ttf") format("truetype");
+  font-display: block;
+}
+@font-face {
+  font-family: "SpaceGrotesk-Regular";
+  src: url("/fonts/SpaceGrotesk-Regular.ttf") format("truetype");
+  font-display: block;
+}
+@font-face {
+  font-family: "SpaceGrotesk-SemiBold";
+  src: url("/fonts/SpaceGrotesk-SemiBold.ttf") format("truetype");
+  font-display: block;
+}
+@font-face {
+  font-family: "SpaceGrotesk-Bold";
+  src: url("/fonts/SpaceGrotesk-Bold.ttf") format("truetype");
+  font-display: block;
+}
+@font-face {
+  font-family: "BraveGates";
+  src: url("/fonts/BraveGates.ttf") format("truetype");
+  font-display: block;
+}
+@font-face {
+  font-family: "LightBrighter";
+  src: url("/fonts/LightBrighter.ttf") format("truetype");
+  font-display: block;
+}
+@font-face {
+  font-family: "Oasis";
+  src: url("/fonts/oasis.ttf") format("truetype");
+  font-display: block;
+}
+@font-face {
+  font-family: "RedHat";
+  src: url("/fonts/redhat.ttf") format("truetype");
+  font-display: block;
+}
 /* Hide scrollbars on horizontal strips/carousels (class is used across the
    shared web screens but was never defined — every strip showed a bar). */
 @utility no-scrollbar {
