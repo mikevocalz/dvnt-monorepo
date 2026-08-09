@@ -8,6 +8,7 @@
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 import { getAuthToken } from "@dvnt/app/lib/auth-client";
+import { supabase } from "@dvnt/app/lib/supabase/client";
 import { beginUpload, settleUpload } from "@dvnt/app/lib/media/upload-watchdog-store";
 
 const FileSystem = LegacyFileSystem;
@@ -243,14 +244,18 @@ async function uploadToServerImpl(
         form.append("kind", kind);
         form.append("mime", mime);
         if (opts?.blurhash) form.append("blurhash", opts.blurhash);
-        const res = await fetch(MEDIA_UPLOAD_URL, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${authToken}`, apikey: SUPABASE_ANON_KEY },
-          body: form,
-          signal: AbortSignal.timeout(120_000),
-        });
-        const body = await res.json().catch(() => ({}) as any);
-        if (res.status === 200 && body?.ok) {
+        // Use supabase.functions.invoke — NOT a raw fetch. A raw cross-origin
+        // fetch to the functions host fails with "Failed to fetch" in the
+        // browser (empty apikey in the web bundle + preflight); invoke uses the
+        // correctly-initialized client key + the mechanism that works for every
+        // other web edge call. supabase-js sets Content-Type for FormData.
+        const { data: body, error: invokeErr } =
+          await supabase.functions.invoke("media-upload", {
+            body: form,
+            headers: { Authorization: `Bearer ${authToken}` },
+          });
+        if (invokeErr) throw invokeErr;
+        if (body?.ok) {
           onProgress?.({ loaded: 100, total: 100, percentage: 100 });
           return {
             success: true,
@@ -264,7 +269,7 @@ async function uploadToServerImpl(
           url: "",
           path: "",
           filename: "",
-          error: body?.error || `Upload failed (status ${res.status})`,
+          error: body?.error || "Upload failed",
         };
       } catch (e) {
         return {
