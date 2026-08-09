@@ -62,6 +62,16 @@ target 'DVNT' do
   )
 
   post_install do |installer|
+    # dvnt: enforce minimum iOS deployment target
+    installer.pods_project.targets.each do |t|
+      t.build_configurations.each do |config|
+        current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+        if current.nil? || current.to_f < 17.0.to_f
+          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.0'
+        end
+      end
+    end
+
     react_native_post_install(
       installer,
       config[:reactNativePath],

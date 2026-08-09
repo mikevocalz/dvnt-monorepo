@@ -6,7 +6,7 @@
   "expo.inlineModules.xcodeProjectTargets": "{\"mainTarget\":\"DVNT\",\"targets\":[]}",
   "ios.forceStaticLinking": "[]",
   "apple.privacyManifestAggregationEnabled": "true",
-  "ios.buildReactNativeFromSource": "true",
+  "ios.buildReactNativeFromSource": "false",
   "EXPO_USE_PRECOMPILED_MODULES": "true",
   "expo-image.disable-libdav1d": "false"
 }

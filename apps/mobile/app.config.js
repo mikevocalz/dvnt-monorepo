@@ -359,14 +359,22 @@ export default {
       ],
       appSecurityPlugin,
       "./plugins/with-swift5-compat",
+      // Must run so its post_install pass lands in the generated Podfile.
+      ["./plugins/with-ios-deployment-target", { target: "17.0" }],
       [
         "expo-build-properties",
         {
           ios: {
             deploymentTarget: "17.0",
           },
-          // Disable experimental RN/Hermes flags in production to reduce SIGTRAP crash risk
-          buildReactNativeFromSource: !isProd,
+          // Off everywhere, not just production. Building React Native from
+          // source compiles RN's own pods at their default iOS 15.1 target
+          // while ExpoModulesCore requires 16.4, which fails the Xcode build:
+          //   "compiling for iOS 15.1, but module 'ExpoModulesCore' has a
+          //    minimum deployment target of iOS 16.4"
+          // Production already had it off and builds clean; development had it
+          // on and errored. Prebuilt RN artifacts honour deploymentTarget above.
+          buildReactNativeFromSource: false,
           // useHermesV1: !isProd, // Disabled due to version conflicts
         },
       ],
