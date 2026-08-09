@@ -316,3 +316,141 @@ verify_jwt = false
 # does its own constant-time secret auth (I4). Gateway JWT check must stay off.
 [functions.revenuecat-webhook]
 verify_jwt = false
+
+# Pinned 2026-08-09: an unlisted function is deployed with verify_jwt=TRUE,
+# which 401s every caller (this app authenticates with Better Auth tokens, not
+# Supabase JWTs). The 2026-08-08 bulk deploy flipped 5 unlisted functions that
+# way and broke didit-webhook, create-verification-session and create-event.
+# Every function the repo ships is pinned here so that cannot recur.
+
+[functions.backfill-thumbnails]
+verify_jwt = false
+
+[functions.branding]
+verify_jwt = false
+
+[functions.bulk-comp-tickets]
+verify_jwt = false
+
+[functions.bulk-refund-tickets]
+verify_jwt = false
+
+[functions.create-event]
+verify_jwt = false
+
+[functions.create-event-moment]
+verify_jwt = false
+
+[functions.create-verification-session]
+verify_jwt = false
+
+[functions.delete-account]
+verify_jwt = false
+
+[functions.didit-webhook]
+verify_jwt = false
+
+[functions.event-analytics]
+verify_jwt = false
+
+[functions.event-broadcast-message]
+verify_jwt = false
+
+[functions.event-waitlist]
+verify_jwt = false
+
+[functions.export-event-attendees]
+verify_jwt = false
+
+[functions.flyer-color]
+verify_jwt = false
+
+[functions.get-bookmarks]
+verify_jwt = false
+
+[functions.get-event-staff]
+verify_jwt = false
+
+[functions.get-following-ids]
+verify_jwt = false
+
+[functions.get-host-dashboard]
+verify_jwt = false
+
+[functions.get-my-tickets]
+verify_jwt = false
+
+[functions.host-disputes]
+verify_jwt = false
+
+[functions.host-transactions]
+verify_jwt = false
+
+[functions.invite-co-organizer]
+verify_jwt = false
+
+[functions.live-surface]
+verify_jwt = false
+
+[functions.notify-event-change]
+verify_jwt = false
+
+[functions.notify-sale-open]
+verify_jwt = false
+
+[functions.organizer-connect]
+verify_jwt = false
+
+[functions.organizer-refund]
+verify_jwt = false
+
+[functions.payment-methods]
+verify_jwt = false
+
+[functions.persona-webhook]
+verify_jwt = false
+
+[functions.places-autocomplete]
+verify_jwt = false
+
+[functions.places-details]
+verify_jwt = false
+
+[functions.promotion-cancel]
+verify_jwt = false
+
+[functions.promotion-checkout]
+verify_jwt = false
+
+[functions.promotion-webhook]
+verify_jwt = false
+
+[functions.purchases]
+verify_jwt = false
+
+[functions.report-content]
+verify_jwt = false
+
+[functions.rsvp-issue-ticket]
+verify_jwt = false
+
+[functions.sneaky-access-checkout]
+verify_jwt = false
+
+[functions.sneaky-billing-checkout]
+verify_jwt = false
+
+[functions.sneaky-billing-portal]
+verify_jwt = false
+
+[functions.submit-verification]
+verify_jwt = false
+
+[functions.toggle-sale-notify]
+verify_jwt = false
+
+[functions.transfer-ticket]
+verify_jwt = false
+
+[functions.validate-promo-code]
+verify_jwt = false
