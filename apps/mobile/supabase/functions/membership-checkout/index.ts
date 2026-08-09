@@ -45,7 +45,11 @@ const FAMILY: Record<string, "sneaky_lynk" | "dvnt_membership"> = {
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  // The web client (pricing page + settings/membership) sends the Better Auth
+  // session in x-auth-token and the anon key in apikey/Authorization; all must
+  // be in the preflight allow-list or the browser blocks the POST.
+  "Access-Control-Allow-Headers":
+    "Content-Type, Authorization, x-auth-token, apikey, x-client-info",
 };
 
 function json(data: unknown, status = 200) {
