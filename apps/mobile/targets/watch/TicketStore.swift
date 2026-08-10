@@ -52,6 +52,10 @@ final class TicketStore: ObservableObject {
 
     var isEmpty: Bool { envelope.tickets.isEmpty }
 
+    /// nil until the phone has resolved entitlements at least once. Read-only —
+    /// the watch never resolves, ranks, or expires a plan itself.
+    var membership: WatchMembership? { envelope.membership }
+
     /// Next upcoming valid event — drives the complication countdown.
     var nextEvent: EventGroup? {
         groups.first { $0.hasPresentable }
@@ -87,7 +91,10 @@ final class TicketStore: ObservableObject {
 
     // MARK: - Helpers
 
-    static func parseDate(_ iso: String) -> Date? {
+    /// `nonisolated` because it touches no store state and is called from view
+    /// bodies and `RingPhase.of` — inheriting the class's `@MainActor` would make
+    /// every one of those an actor hop, and an error outright under Swift 6.
+    nonisolated static func parseDate(_ iso: String) -> Date? {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let d = f.date(from: iso) { return d }

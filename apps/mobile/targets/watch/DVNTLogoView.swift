@@ -14,17 +14,3 @@ struct DVNTLogoView: View {
             .accessibilityLabel("DVNT")
     }
 }
-
-/// Launch / loading state: gradient wordmark on true-black.
-struct LaunchView: View {
-    var body: some View {
-        ZStack {
-            DVNT.canvas.ignoresSafeArea()
-            VStack(spacing: 10) {
-                DVNTLogoView(height: 26)
-                ProgressView()
-                    .tint(DVNT.accent)
-            }
-        }
-    }
-}

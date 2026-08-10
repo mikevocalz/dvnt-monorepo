@@ -132,6 +132,25 @@ try {
     `watch QR wire format OK — ${matrix.size}x${matrix.size}, ` +
       `${matrix.bits.length} hex chars (~${Math.ceil(matrix.bits.length / 2)} bytes/ticket)`,
   );
+  // 3. RingPhase boundaries. The watch binary is arm64_32 and cannot run here,
+  //    but RingPhase + Models + TicketStore import only Foundation/Combine, so
+  //    the same sources build and RUN for the host. A pass that flips to blocked
+  //    an hour early strands a paying member at a door — worth executing, not
+  //    just type-checking.
+  const watchDir = join(root, "apps/mobile/targets/watch");
+  const checkBin = join(tmp, "ringphase-check");
+  execFileSync(
+    "swiftc",
+    [
+      "-o", checkBin,
+      join(watchDir, "RingPhase.swift"),
+      join(watchDir, "Models.swift"),
+      join(watchDir, "TicketStore.swift"),
+      join(root, "scripts/watch-ringphase-check/main.swift"),
+    ],
+    { stdio: "inherit" },
+  );
+  execFileSync(checkBin, { stdio: "inherit" });
 } finally {
   rmSync(bundle, { force: true });
   rmSync(tmp, { recursive: true, force: true });

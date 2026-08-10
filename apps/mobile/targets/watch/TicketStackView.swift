@@ -21,7 +21,7 @@ struct TicketStackView: View {
         .tabViewStyle(.verticalPage)
         .background(DVNT.canvas.ignoresSafeArea())
         .navigationTitle(group.tickets.count > 1 ? "\(index + 1) of \(group.tickets.count)" : "Ticket")
-        .onChange(of: index) { _ in
+        .onChange(of: index) {
             WKInterfaceDevice.current().play(.click)
         }
         .onAppear {
@@ -39,6 +39,7 @@ private struct TicketPage: View {
     let eventTitle: String
 
     @EnvironmentObject private var broadcasts: BroadcastStore
+    @EnvironmentObject private var store: TicketStore
     @State private var flipped = false
 
     /// HIG W-AC-04: the card-flip is decorative. Honour Reduce Motion by
@@ -73,9 +74,12 @@ private struct TicketPage: View {
                     .lineLimit(1)
 
                 qrZone
-                    .padding(.vertical, 4)
 
                 statusLine
+
+                ownershipStamp
+
+                doorPerks
 
                 hostMessagesLink
             }
@@ -91,22 +95,34 @@ private struct TicketPage: View {
         }
     }
 
-    @ViewBuilder private var qrZone: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white)
+    /// The ring is sized from the real screen, not a constant. A 150pt card was
+    /// tuned on one watch and left every other size wrong — on 45/49mm it wasted
+    /// a third of the width, which on a pass screen is scan distance thrown away.
+    private var ringDiameter: CGFloat {
+        min(WKInterfaceDevice.current().screenBounds.width - 20, 184)
+    }
 
-            if ticket.status.isPresentable {
-                QRCodeView(matrix: ticket.qrMatrix, size: 124)
-                    .padding(6)
-            } else {
-                // Blocked: do NOT present a scannable code for a dead ticket.
-                blockedOverlay
+    /// The white scan card is inscribed at 80% — its corners cross the ring's
+    /// inner edge, so the code reads as a stub punched through the ring rather
+    /// than a square politely parked inside a circle.
+    private var cardSide: CGFloat { ringDiameter * 0.80 }
+
+    @ViewBuilder private var qrZone: some View {
+        AccessRing(phase: RingPhase.of(ticket), tint: accent, diameter: ringDiameter) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.white)
+
+                if ticket.status.isPresentable {
+                    QRCodeView(matrix: ticket.qrMatrix, size: cardSide - 12)
+                } else {
+                    // Blocked: do NOT present a scannable code for a dead ticket.
+                    blockedOverlay
+                }
             }
+            .frame(width: cardSide, height: cardSide)
+            .rotation3DEffect(.degrees(flipped ? 0 : 90), axis: (x: 0, y: 1, z: 0))
         }
-        .frame(width: 150, height: 150)
-        .rotation3DEffect(.degrees(flipped ? 0 : 90), axis: (x: 0, y: 1, z: 0))
-        .shadow(color: accent.opacity(ticket.status.isPresentable ? 0.45 : 0), radius: 10)
     }
 
     @ViewBuilder private var blockedOverlay: some View {
@@ -134,16 +150,71 @@ private struct TicketPage: View {
         }
     }
 
+    /// The ring's own caption. `.everyMinute` rather than a per-second tick: a
+    /// countdown that updates 60× more often than it visibly changes is pure
+    /// battery, and watchOS coalesces the minute schedule with the system clock.
     @ViewBuilder private var statusLine: some View {
-        if ticket.status.isPresentable {
-            Text("PRESENT AT DOOR")
-                .font(DVNT.TypeScale.stamp())
-                .tracking(DVNT.TypeScale.stampTracking)
-                .foregroundColor(accent)
-        } else if ticket.status.isUsed, let at = ticket.checkedInAt.flatMap(TicketStore.parseDate) {
+        if ticket.status.isUsed, let at = ticket.checkedInAt.flatMap(TicketStore.parseDate) {
             Text("Checked in \(at.formatted(date: .omitted, time: .shortened))")
                 .font(DVNT.TypeScale.caption())
-                .foregroundColor(.white.opacity(0.55))
+                .foregroundColor(DVNT.textDim)
+        } else if ticket.status.isPresentable {
+            TimelineView(.everyMinute) { ctx in
+                let phase = RingPhase.of(ticket, now: ctx.date)
+                Text(caption(for: phase, now: ctx.date))
+                    .font(DVNT.TypeScale.stamp())
+                    .tracking(DVNT.TypeScale.stampTracking)
+                    .foregroundColor(phase == .open ? accent : .white)
+            }
+        }
+    }
+
+    private func caption(for phase: RingPhase, now: Date) -> String {
+        switch phase {
+        case .open: return "DOORS OPEN"
+        case .admitted: return "CHECKED IN"
+        case .blocked: return ticket.status.displayLabel.uppercased()
+        case .scheduled: return "PRESENT AT DOOR"
+        case .approaching:
+            guard let doors = ticket.eventDate.flatMap(TicketStore.parseDate) else {
+                return "PRESENT AT DOOR"
+            }
+            let mins = max(Int(doors.timeIntervalSince(now) / 60), 0)
+            return mins >= 60
+                ? "DOORS IN \(mins / 60)H \(mins % 60)M"
+                : "DOORS IN \(mins)M"
+        }
+    }
+
+    /// Honest about whose pass this is. A code held under someone else's account
+    /// still scans, but the wearer should know before the door tells them.
+    @ViewBuilder private var ownershipStamp: some View {
+        if ticket.isOwner == false {
+            Label("HELD FOR YOU", systemImage: "person.crop.square")
+                .font(DVNT.TypeScale.stamp(11))
+                .tracking(DVNT.TypeScale.stampTracking)
+                .foregroundColor(DVNT.textDim)
+        }
+    }
+
+    /// Resolved entitlement, as decided by the phone's resolver from Supabase —
+    /// not a plan name the watch pattern-matched into perks. Only shown for a
+    /// pass that can still get someone in; there is no door to skip afterwards.
+    @ViewBuilder private var doorPerks: some View {
+        if ticket.status.isPresentable,
+           let perks = store.membership?.doorPerks, !perks.isEmpty {
+            VStack(alignment: .leading, spacing: DVNT.Space.tight) {
+                ForEach(perks, id: \.label) { perk in
+                    Label(perk.label, systemImage: perk.symbol)
+                        .font(DVNT.TypeScale.stamp(12))
+                        .tracking(DVNT.TypeScale.stampTracking)
+                        .foregroundStyle(DVNT.brandGradient)
+                }
+            }
+            .padding(.top, DVNT.Space.tight)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Included with your membership: "
+                + perks.map(\.label).joined(separator: ", "))
         }
     }
 

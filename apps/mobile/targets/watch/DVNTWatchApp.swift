@@ -38,23 +38,13 @@ struct DVNTWatchApp: App {
     }
 }
 
+/// Straight to content. There used to be a 600 ms brand beat here, which is a
+/// third of the time a wrist glance lasts spent showing a logo — and it was paid
+/// on *every* raise, not just cold launch, because watchOS relaunches this scene
+/// freely. `TicketStore.init` loads the App Group cache synchronously, so there
+/// was never anything to wait for. The mark still sits in the navigation title.
 private struct RootView: View {
-    @EnvironmentObject private var store: TicketStore
-    @State private var booted = false
-
     var body: some View {
-        Group {
-            if booted {
-                EventListView()
-            } else {
-                LaunchView()
-            }
-        }
-        .task {
-            // Brief brand launch beat, then reveal. (Tickets are already loaded
-            // from the App Group cache synchronously in TicketStore.init.)
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            withAnimation(.easeOut(duration: 0.25)) { booted = true }
-        }
+        EventListView()
     }
 }

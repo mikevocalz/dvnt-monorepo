@@ -52,9 +52,14 @@ struct WatchTicket: Identifiable, Codable, Hashable {
     let eventLocation: String?
     let entryWindow: String?
 
+    /// nil when the phone could not resolve identity; false means this pass is
+    /// held under someone else's account and was bought for the wearer.
+    let isOwner: Bool?
+
     enum CodingKeys: String, CodingKey {
         case id, eventId, qrToken, qrMatrix, status, tier, tierName, tableNumber
         case checkedInAt, eventTitle, eventDate, eventEndDate, eventLocation, entryWindow
+        case isOwner
     }
 
     /// Lenient decode — the bridge maps the DB `scanned` to `checked_in`, but be
@@ -76,6 +81,35 @@ struct WatchTicket: Identifiable, Codable, Hashable {
         eventEndDate = try? c.decode(String.self, forKey: .eventEndDate)
         eventLocation = try? c.decode(String.self, forKey: .eventLocation)
         entryWindow = try? c.decode(String.self, forKey: .entryWindow)
+        isOwner = try? c.decode(Bool.self, forKey: .isOwner)
+    }
+}
+
+/// The member's resolved capabilities, as projected by the phone. Mirrors
+/// `WatchMembershipDTO` in `packages/app/features/watch/watch-payload.ts`.
+///
+/// The watch resolves nothing: no plan ranking, no date maths against a period
+/// end, no processor SDK. It renders what the phone's resolver already decided,
+/// which is what keeps invariant I3 true on this side of the wire too.
+struct WatchMembership: Codable, Hashable {
+    let planLabel: String
+    let memberBadge: Bool
+    let priorityRsvp: Bool
+    let earlyTicketAccess: Bool
+    let vipAdmission: Bool
+    let expeditedEntry: Bool
+    let coatCheck: Bool
+
+    /// What this plan changes about walking up to a door tonight, in the order a
+    /// member would use it. Anything that does not change behaviour at a venue
+    /// (badges, RSVP priority, early access) is deliberately absent — it is
+    /// phone-side marketing, and the wrist is not where it belongs.
+    var doorPerks: [(symbol: String, label: String)] {
+        var out: [(String, String)] = []
+        if expeditedEntry { out.append(("figure.walk.motion", "EXPEDITED ENTRY")) }
+        if vipAdmission { out.append(("star.fill", "VIP ADMISSION")) }
+        if coatCheck { out.append(("hanger", "COAT CHECK INCLUDED")) }
+        return out
     }
 }
 
@@ -122,5 +156,22 @@ struct WatchTicketEnvelope: Codable {
     let tickets: [WatchTicket]
     let syncedAt: Double      // epoch seconds (sent by the phone — watch clock-safe)
 
-    static let empty = WatchTicketEnvelope(tickets: [], syncedAt: 0)
+    /// Absent until the phone's entitlement query resolves. Absent means "we do
+    /// not know yet", which the UI renders as nothing — never as Free.
+    let membership: WatchMembership?
+
+    static let empty = WatchTicketEnvelope(tickets: [], syncedAt: 0, membership: nil)
+
+    init(tickets: [WatchTicket], syncedAt: Double, membership: WatchMembership? = nil) {
+        self.tickets = tickets
+        self.syncedAt = syncedAt
+        self.membership = membership
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tickets = (try? c.decode([WatchTicket].self, forKey: .tickets)) ?? []
+        syncedAt = (try? c.decode(Double.self, forKey: .syncedAt)) ?? 0
+        membership = try? c.decode(WatchMembership.self, forKey: .membership)
+    }
 }

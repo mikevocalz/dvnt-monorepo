@@ -8,6 +8,8 @@
  */
 
 import type { TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { getPlan } from "@dvnt/app/lib/subscription/plans";
+import type { Entitlements } from "@dvnt/app/lib/subscription/types";
 
 /**
  * The matrix generator behind `react-native-qrcode-svg` — the very encoder the
@@ -54,12 +56,57 @@ export interface WatchTicketDTO {
   eventEndDate?: string;
   eventLocation?: string;
   entryWindow?: string;
+  /**
+   * False when the ticket row belongs to someone else — a pass bought for the
+   * member and still held under the buyer's account. The watch says so out
+   * loud rather than implying every code on the wrist is the wearer's own.
+   * Undefined means we could not resolve identity; the watch then says nothing.
+   */
+  isOwner?: boolean;
+}
+
+/**
+ * The member's resolved capabilities, flattened to the handful that change what
+ * someone physically does at a door.
+ *
+ * This is a **projection of `Entitlements`**, which the resolver derives from
+ * Supabase subscription rows written by the Stripe / RevenueCat webhooks. The
+ * watch therefore inherits invariant I3 for free: it can no more read a
+ * processor SDK than the phone can, because it only ever sees this object.
+ * Nothing here is a client guess, and nothing here is re-derived on the watch.
+ */
+export interface WatchMembershipDTO {
+  /** "Free" | "Core" | "Insider" | "VIP" | "Founders Circle" | Sneaky tiers. */
+  planLabel: string;
+  memberBadge: boolean;
+  priorityRsvp: boolean;
+  earlyTicketAccess: boolean;
+  vipAdmission: boolean;
+  /** VIP: skip the general line. The single most useful fact on a wrist. */
+  expeditedEntry: boolean;
+  coatCheck: boolean;
 }
 
 export interface WatchTicketEnvelope {
   tickets: WatchTicketDTO[];
   /** Epoch seconds, stamped by the phone so the watch shows honest staleness. */
   syncedAt: number;
+  /** Absent until entitlements have resolved — never defaulted to Free, which
+   *  would flash "no perks" at a paying VIP on every cold start. */
+  membership?: WatchMembershipDTO;
+}
+
+/** Flatten resolved entitlements into the door-relevant subset. */
+export function toWatchMembership(ent: Entitlements): WatchMembershipDTO {
+  return {
+    planLabel: getPlan(ent.planKey).name,
+    memberBadge: ent.memberBadge,
+    priorityRsvp: ent.priorityRsvp,
+    earlyTicketAccess: ent.earlyTicketAccess,
+    vipAdmission: ent.vipAdmission,
+    expeditedEntry: ent.expeditedEntry,
+    coatCheck: ent.coatCheck,
+  };
 }
 
 /** Map the DB status to the watch's display status. */
@@ -130,9 +177,13 @@ export function toQRMatrix(token: string): WatchQRMatrix | undefined {
   }
 }
 
-export function toWatchTicket(record: TicketRecord): WatchTicketDTO {
+export function toWatchTicket(
+  record: TicketRecord,
+  viewerId?: string | null,
+): WatchTicketDTO {
   const status = mapStatus(record);
   return {
+    isOwner: viewerId ? record.user_id === viewerId : undefined,
     id: record.id,
     eventId: String(record.event_id),
     qrToken: record.qr_token,
@@ -150,21 +201,55 @@ export function toWatchTicket(record: TicketRecord): WatchTicketDTO {
   };
 }
 
+/** What the phone knows about the viewer when it builds an envelope. */
+export interface WatchViewerContext {
+  /** Resolved entitlements. Omit while still loading — see `membership`. */
+  entitlements?: Entitlements;
+  /** The signed-in user id, for owner-vs-guest resolution. */
+  viewerId?: string | null;
+}
+
 /**
  * Build the envelope. Only admission-style tickets belong on the wrist — coat
  * check / product / service rows aren't scanned at the door.
+ *
+ * One-way projection: this reads phone state and emits a DTO. The watch never
+ * writes back, so there is exactly one source of truth and the wrist is a pure
+ * view of it.
  */
-export function buildWatchEnvelope(records: TicketRecord[]): WatchTicketEnvelope {
+export function buildWatchEnvelope(
+  records: TicketRecord[],
+  ctx: WatchViewerContext = {},
+): WatchTicketEnvelope {
   const tickets = records
     .filter((r) => !r.category || r.category === "admission")
-    .map(toWatchTicket);
-  return { tickets, syncedAt: Math.floor(Date.now() / 1000) };
+    .map((r) => toWatchTicket(r, ctx.viewerId));
+  return {
+    tickets,
+    syncedAt: Math.floor(Date.now() / 1000),
+    membership: ctx.entitlements ? toWatchMembership(ctx.entitlements) : undefined,
+  };
 }
 
-/** Stable signature to skip redundant pushes (qrToken + status per ticket). */
+/**
+ * Stable signature to skip redundant pushes. Covers the membership projection
+ * too — an upgrade to VIP must reach the wrist even when no ticket changed.
+ */
 export function envelopeSignature(env: WatchTicketEnvelope): string {
-  return env.tickets
-    .map((t) => `${t.id}:${t.status}:${t.qrToken}`)
+  const tickets = env.tickets
+    .map((t) => `${t.id}:${t.status}:${t.qrToken}:${t.isOwner ?? "?"}`)
     .sort()
     .join("|");
+  const m = env.membership;
+  const plan = m
+    ? `${m.planLabel}:${[
+        m.memberBadge,
+        m.priorityRsvp,
+        m.earlyTicketAccess,
+        m.vipAdmission,
+        m.expeditedEntry,
+        m.coatCheck,
+      ].join(",")}`
+    : "-";
+  return `${plan}#${tickets}`;
 }

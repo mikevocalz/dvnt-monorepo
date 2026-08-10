@@ -22,7 +22,11 @@ struct EventListView: View {
                             }
                             .listRowBackground(
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(DVNT.brandGradient.opacity(0.22))
+                                    .fill(DVNT.surface)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .strokeBorder(DVNT.hairline, lineWidth: 1)
+                                    )
                             )
                         }
                         ForEach(store.groups) { group in
@@ -47,7 +51,10 @@ struct EventListView: View {
             // watchOS has no `.principal` toolbar placement — the view-builder
             // navigationTitle (watchOS 10+) is how a mark takes the title slot.
             .navigationTitle { DVNTLogoView(height: 16) }
-            .containerBackground(DVNT.brandGradient.opacity(0.18), for: .navigation)
+            // Flat black. The container background was a washed brand gradient
+            // behind every row — a section background, which the design system
+            // rules out outright, and on OLED it lights pixels for nothing.
+            .containerBackground(DVNT.canvas, for: .navigation)
         }
         .onAppear { connectivity.requestSync() }
     }
@@ -67,28 +74,28 @@ private struct EventRow: View {
     let group: EventGroup
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DVNT.Space.tight) {
             HStack {
                 Text(group.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(DVNT.TypeScale.title())
                     .foregroundColor(.white)
-                    .lineLimit(1)
-                Spacer(minLength: 6)
+                    .lineLimit(2)
+                Spacer(minLength: DVNT.Space.snug)
                 CountBadge(count: group.count, active: group.hasPresentable)
             }
             if let date = group.date {
                 Text(date.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(DVNT.TypeScale.caption())
+                    .foregroundColor(DVNT.textDim)
             }
             if let loc = group.location, !loc.isEmpty {
                 Text(loc)
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
+                    .font(DVNT.TypeScale.caption(13))
+                    .foregroundColor(DVNT.textFaint)
                     .lineLimit(1)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, DVNT.Space.tight)
     }
 }
 
@@ -97,13 +104,12 @@ private struct CountBadge: View {
     let active: Bool
     var body: some View {
         Text("\(count)")
-            .font(.system(size: 12, weight: .bold))
+            .font(DVNT.TypeScale.stamp(14))
             .foregroundColor(active ? .black : .white)
-            .frame(minWidth: 18, minHeight: 18)
-            .padding(.horizontal, 4)
-            .background(
-                Capsule().fill(active ? AnyShapeStyle(DVNT.brandGradient) : AnyShapeStyle(Color.white.opacity(0.15)))
-            )
+            .frame(minWidth: 22, minHeight: 22)
+            .padding(.horizontal, DVNT.Space.tight)
+            // Flat. The one gradient on this target is the AccessRing.
+            .background(Capsule().fill(active ? Color.white : Color.white.opacity(0.15)))
     }
 }
 
@@ -111,25 +117,31 @@ private struct CountBadge: View {
 private struct BroadcastsEntryRow: View {
     let unread: Int
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DVNT.Space.base) {
             Image(systemName: "megaphone.fill")
-                .font(.system(size: 14))
+                .font(.system(size: 15))
                 .foregroundColor(.white)
             Text("Messages from host")
-                .font(.system(size: 14, weight: .semibold))
+                .font(DVNT.TypeScale.body())
                 .foregroundColor(.white)
                 .lineLimit(1)
-            Spacer(minLength: 4)
+            Spacer(minLength: DVNT.Space.tight)
             if unread > 0 {
                 Text("\(unread)")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.black)
-                    .frame(minWidth: 18, minHeight: 18)
-                    .padding(.horizontal, 4)
-                    .background(Capsule().fill(Color.white))
+                    .font(DVNT.TypeScale.stamp(14))
+                    // White on signal-red, not black: #FC253A against black type
+                    // is a ~2.6:1 pair, which fails at a glance in a dark venue.
+                    .foregroundColor(.white)
+                    .frame(minWidth: 22, minHeight: 22)
+                    .padding(.horizontal, DVNT.Space.tight)
+                    .background(Capsule().fill(DVNT.signal))
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, DVNT.Space.tight)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(unread > 0
+            ? "Messages from host, \(unread) unread"
+            : "Messages from host")
     }
 }
 
@@ -137,14 +149,15 @@ private struct StalenessRow: View {
     let syncedAt: Date
     let reachable: Bool
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: DVNT.Space.snug) {
             Image(systemName: reachable ? "checkmark.circle" : "iphone.slash")
-                .font(.system(size: 10))
+                .font(.system(size: 13))
             Text(reachable ? "Live" : "As of \(syncedAt.formatted(date: .omitted, time: .shortened))")
-                .font(.system(size: 10))
+                .font(DVNT.TypeScale.caption(13))
         }
-        .foregroundColor(.white.opacity(0.4))
+        .foregroundColor(DVNT.textFaint)
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -153,18 +166,18 @@ private struct EmptyTicketsView: View {
     var body: some View {
         ZStack {
             DVNT.canvas.ignoresSafeArea()
-            VStack(spacing: 10) {
+            VStack(spacing: DVNT.Space.roomy) {
                 DVNTLogoView(height: 22)
                 Image(systemName: "ticket")
-                    .font(.system(size: 26))
-                    .foregroundStyle(DVNT.brandGradient)
+                    .font(.system(size: 28))
+                    .foregroundColor(DVNT.accent)
                 Text("No tickets yet")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(DVNT.TypeScale.title())
                     .foregroundColor(.white)
                 Text(reachable ? "Buy on your iPhone — they appear here."
                                : "Open DVNT on your iPhone to sync.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.5))
+                    .font(DVNT.TypeScale.body())
+                    .foregroundColor(DVNT.textDim)
                     .multilineTextAlignment(.center)
             }
             .padding()

@@ -1,46 +1,63 @@
 import SwiftUI
 
-/// DVNT brand on watchOS. True-black canvas (OLED power + contrast), the exact
-/// teal→blue and purple ramps from docs/dvnt-design-system.md. No substitutions.
+/// DVNT brand on watchOS. True-black canvas (OLED power + contrast) and the
+/// token table from docs/dvnt-design-system.md §1 — cyan / violet / magenta,
+/// signal, gold. These are the phone's literal hexes, not a watch-local remix:
+/// a member glancing from wrist to phone must not see two brands.
 enum DVNT {
     static let canvas = Color.black
 
-    // Teal → blue ramp (exact stops).
-    static let teal = [
-        Color(hex: 0x0f4961),
-        Color(hex: 0x175b7b),
-        Color(hex: 0x217098),
-        Color(hex: 0x2981af),
-        Color(hex: 0x2f8ec1),
-        Color(hex: 0x3397ce),
-        Color(hex: 0x369cd5),
-        Color(hex: 0x379ed8),
-    ]
+    // MARK: Brand stops (design-system §1)
+    static let cyan = Color(hex: 0x3FDCFF)
+    static let violet = Color(hex: 0x8A40CF)
+    static let magenta = Color(hex: 0xFF5BFC)
+    static let signal = Color(hex: 0xFC253A)
+    static let gold = Color(hex: 0xF5C518)
 
-    // Purple ramp (exact stops).
-    static let purple = [
-        Color(hex: 0x874e9f),
-        Color(hex: 0x824a9b),
-        Color(hex: 0x743f92),
-        Color(hex: 0x5d2d82),
-        Color(hex: 0x5b2c81),
-    ]
+    static let hairline = Color.white.opacity(0.10)
+    static let surface = Color.white.opacity(0.04)
+    static let textDim = Color.white.opacity(0.60)
+    static let textFaint = Color.white.opacity(0.40)
 
-    static let accent = Color(hex: 0x3397ce)
+    /// Primary accent. Cyan is stop 1 and the design system's "primary accent".
+    static let accent = cyan
 
-    /// Diagonal brand gradient used on accents and QR-screen chrome.
+    /// **The Deviant Gradient** — `linear-gradient(100deg, #3FDCFF 0%, #8A40CF 52%,
+    /// #FF5BFC 100%)`. One brand stroke, and the design system spends it on a short
+    /// list only (CTA, price chip, the "going" ring, one hairline). On the wrist
+    /// that list is exactly one thing: `AccessRing`. Everything else is flat
+    /// `surface` + `hairline` — see the "Cut the glow" note in the design system.
+    ///
+    /// 100° in CSS is measured clockwise from north, so the gradient line runs
+    /// left→right with a slight upward tilt: (sin100°, −cos100°).
     static let brandGradient = LinearGradient(
-        colors: teal + purple.reversed(),
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        stops: [
+            .init(color: cyan, location: 0.0),
+            .init(color: violet, location: 0.52),
+            .init(color: magenta, location: 1.0),
+        ],
+        startPoint: UnitPoint(x: 0.008, y: 0.413),
+        endPoint: UnitPoint(x: 0.992, y: 0.587)
+    )
+
+    /// The same three stops swept around a circle, for `AccessRing`. Wrapped
+    /// back to cyan at the seam so a rotating sweep has no visible hard edge.
+    static let brandSweep = AngularGradient(
+        stops: [
+            .init(color: cyan, location: 0.00),
+            .init(color: violet, location: 0.36),
+            .init(color: magenta, location: 0.70),
+            .init(color: cyan, location: 1.00),
+        ],
+        center: .center
     )
 
     /// Tier accent matching the phone's TIER_ACCENT map.
     static func tierAccent(_ tier: String?) -> Color {
         switch tier {
-        case "free": return Color(hex: 0x3FDCFF)
-        case "vip": return Color(hex: 0x8A40CF)
-        case "table": return Color(hex: 0xFF5BFC)
+        case "free": return cyan
+        case "vip": return violet
+        case "table": return magenta
         default: return Color(hex: 0x34A2DF) // ga
         }
     }
