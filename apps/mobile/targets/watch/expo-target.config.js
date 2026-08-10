@@ -35,7 +35,12 @@ module.exports = {
   entitlements: {
     "com.apple.security.application-groups": ["group.com.dvnt.app.watch"],
   },
-  frameworks: ["SwiftUI", "WatchConnectivity", "CoreImage", "WatchKit", "UserNotifications"],
+  // NEVER add CoreImage here. It does not exist in the watchOS SDK, and listing
+  // it puts CoreImage.framework in the target's Frameworks build phase — which
+  // fails at LINK time, after every compile has succeeded. Dropping the Swift
+  // `import CoreImage` is not enough on its own; this list is the second half.
+  // The ticket QR is encoded on the phone and shipped as `qrMatrix` instead.
+  frameworks: ["SwiftUI", "WatchConnectivity", "WatchKit", "UserNotifications"],
   // The real brand wordmark. apple-targets >=3 rasterizes target `images` through
   // @expo/image-utils, which rejects SVG ("Invalid mimeType") — so reference a PNG
   // rasterized from DVNT-logo-grad-white.svg (the full 2360x908 wordmark, transparent

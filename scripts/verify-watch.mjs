@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 /**
- * Guards the phone → watch QR wire format.
+ * Guards the two watch invariants that fail late and expensively.
+ *
+ * 1. Every framework a watch target declares must exist in the watchOS SDK.
+ *    CoreImage did not, and listing it cost a full production build: the Swift
+ *    compiled fine and the LINK failed, ~12 minutes into EAS. A framework list
+ *    is not type checked by anything, so check it here.
+ *
+ * 2. The phone → watch QR wire format.
  *
  * watchOS has no Core Image, so the phone encodes the ticket QR and ships the
  * module grid (`WatchQRMatrix`) instead of a token the watch could not draw.
@@ -12,18 +19,53 @@
  * `WatchQRMatrix.modules` in apps/mobile/targets/watch/Models.swift. Keep the
  * two in lockstep: if you change one, this fails until you change the other.
  *
- *   node scripts/verify-watch-qr.mjs
+ *   node scripts/verify-watch.mjs
  */
 import assert from "node:assert";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
+
+// --- 1. Declared frameworks must exist in the watchOS SDK ---------------------
+const targets = ["watch", "watch-complication"];
+let sdk = null;
+try {
+  sdk = execFileSync("xcrun", ["--sdk", "watchos", "--show-sdk-path"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+} catch {
+  console.warn("! no watchOS SDK on this machine — skipping the framework audit");
+}
+
+for (const target of targets) {
+  const config = require(join(root, "apps/mobile/targets", target, "expo-target.config.js"));
+  for (const framework of config.frameworks ?? []) {
+    // Hard-fail regardless of SDK availability: this one has already cost a build.
+    assert.notStrictEqual(
+      framework,
+      "CoreImage",
+      `targets/${target} declares CoreImage, which does not exist on watchOS — ` +
+        `the QR is encoded on the phone (see watch-payload.ts)`,
+    );
+    if (!sdk) continue;
+    assert.ok(
+      existsSync(join(sdk, "System/Library/Frameworks", `${framework}.framework`)),
+      `targets/${target} declares ${framework}, absent from the watchOS SDK — it would fail at link`,
+    );
+  }
+}
+console.log(
+  sdk
+    ? `watch frameworks OK — every declared framework exists in ${sdk.split("/").pop()}`
+    : "watch frameworks OK — CoreImage absent (SDK audit skipped)",
+);
 
 // watch-payload.ts is TS with a runtime require; bundle it to CJS inside the
 // repo so its own `react-native-qrcode-svg` require still resolves.
