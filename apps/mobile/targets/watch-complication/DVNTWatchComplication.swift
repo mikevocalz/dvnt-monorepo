@@ -16,11 +16,21 @@ private enum ComplicationCache {
               let tickets = json["tickets"] as? [[String: Any]]
         else { return nil }
 
+        // A `valid` row for an event that already ended would otherwise squat on
+        // the watch face indefinitely — the DB never flips it, and the wearer has
+        // no way to dismiss a complication. Drop anything past its end (or past
+        // doors + 8h when no end is published), mirroring RingPhase in the app.
+        let now = Date()
         let upcoming = tickets
             .filter { ($0["status"] as? String) == "valid" }
             .compactMap { t -> (String, Date?)? in
                 let title = (t["eventTitle"] as? String) ?? "DVNT"
                 let date = (t["eventDate"] as? String).flatMap(parse)
+                if let date {
+                    let ends = (t["eventEndDate"] as? String).flatMap(parse)
+                        ?? date.addingTimeInterval(8 * 3600)
+                    guard now < ends else { return nil }
+                }
                 return (title, date)
             }
             .sorted { lhs, rhs in
@@ -85,12 +95,40 @@ struct DVNTProvider: TimelineProvider {
         completion(currentEntry())
     }
 
+    /// The countdown window the circular gauge fills across — the same 24 hours
+    /// `RingPhase` uses in the app, so the face and the pass never disagree.
+    static let window: TimeInterval = 24 * 3600
+
     func getTimeline(in context: Context, completion: @escaping (Timeline<DVNTEntry>) -> Void) {
         let entry = currentEntry()
-        // Refresh hourly; WidgetCenter.reloadAllTimelines() is also called by the
-        // watch app when a new ticket set arrives.
-        let next = Calendar.current.date(byAdding: .hour, value: 1, to: entry.date) ?? entry.date
-        completion(Timeline(entries: [entry], policy: .after(next)))
+
+        // One hourly entry left the gauge up to 59 minutes stale — which on the
+        // night of an event is the whole point of the complication. Pre-render a
+        // run of entries instead: WidgetKit renders them without waking us, so a
+        // tightening cadence costs no extra refresh budget. Outside the window
+        // there is nothing to count down, so one entry is right.
+        guard let doors = entry.eventDate, doors > entry.date,
+              doors.timeIntervalSince(entry.date) <= Self.window
+        else {
+            let next = Calendar.current.date(byAdding: .hour, value: 1, to: entry.date) ?? entry.date
+            completion(Timeline(entries: [entry], policy: .after(next)))
+            return
+        }
+
+        let remaining = doors.timeIntervalSince(entry.date)
+        // ~10 min apart, capped so we stay well inside WidgetKit's entry budget.
+        let step = max(remaining / 90, 600)
+        var entries: [DVNTEntry] = []
+        var t = entry.date
+        while t < doors {
+            entries.append(DVNTEntry(date: t, title: entry.title,
+                                     eventDate: doors, broadcast: entry.broadcast))
+            t = t.addingTimeInterval(step)
+        }
+        // Land one exactly on doors so the gauge reads full the moment it matters.
+        entries.append(DVNTEntry(date: doors, title: entry.title,
+                                 eventDate: doors, broadcast: entry.broadcast))
+        completion(Timeline(entries: entries, policy: .after(doors)))
     }
 
     private func currentEntry() -> DVNTEntry {
@@ -110,14 +148,39 @@ struct DVNTComplicationView: View {
     @Environment(\.widgetFamily) private var family
     let entry: DVNTEntry
 
+    /// 0…1 across the last 24 hours before doors, or nil when there is nothing
+    /// to count to. Computed from `entry.date`, not `Date()`, so a pre-rendered
+    /// timeline entry draws the fill for the moment it represents.
+    private var countdownFill: Double? {
+        guard let doors = entry.eventDate else { return nil }
+        let remaining = doors.timeIntervalSince(entry.date)
+        guard remaining <= DVNTProvider.window else { return nil }
+        guard remaining > 0 else { return 1 }
+        return min(max(1 - (remaining / DVNTProvider.window), 0), 1)
+    }
+
     var body: some View {
         switch family {
         case .accessoryCircular:
-            ZStack {
-                AccessoryWidgetBackground()
-                Image("Glyph")
-                    .resizable().scaledToFit().padding(6)
-                    .widgetAccentable()
+            // The AccessRing, at watch-face scale. A bare glyph told the wearer
+            // nothing they did not already know from having the app installed;
+            // a filling gauge is the actual glance — "how close is tonight".
+            // Falls back to the mark when there is no dated event to count to.
+            if let fill = countdownFill {
+                Gauge(value: fill) {
+                    Image("Glyph").resizable().scaledToFit()
+                } currentValueLabel: {
+                    Image("Glyph").resizable().scaledToFit().padding(3)
+                }
+                .gaugeStyle(.accessoryCircularCapacity)
+                .widgetAccentable()
+            } else {
+                ZStack {
+                    AccessoryWidgetBackground()
+                    Image("Glyph")
+                        .resizable().scaledToFit().padding(6)
+                        .widgetAccentable()
+                }
             }
         case .accessoryInline:
             if let d = entry.eventDate {
