@@ -13,7 +13,16 @@
  * @type {import('@bacons/apple-targets/app.plugin').Config}
  */
 module.exports = {
-  type: "widget",
+  // "watch-widget", NOT "widget". apple-targets maps `widget` to an iOS
+  // widget extension (SDKROOT iphoneos + IPHONEOS_DEPLOYMENT_TARGET), so the
+  // deploymentTarget below was read as iOS 10 — which predates SwiftUI — and
+  // the build failed with ~80 errors of the form "'Timeline' is only available
+  // in iOS 14.0 or newer", "'View' is only available in iOS 13.0 or newer".
+  // Nothing was wrong with the Swift; it was being compiled for the wrong OS.
+  // `watch-widget` is the registry's "Watch face complication using WidgetKit"
+  // and sets SDKROOT watchos + WATCHOS_DEPLOYMENT_TARGET, so 10.0 correctly
+  // means watchOS 10.
+  type: "watch-widget",
   name: "DVNTWatchComplication",
   // Shown in the watch-face complication picker — the target name would
   // otherwise leak there verbatim.
