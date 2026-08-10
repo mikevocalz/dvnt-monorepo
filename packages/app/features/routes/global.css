@@ -1,4 +1,18 @@
-@import "tailwindcss";
+/* NO `@import "tailwindcss"` here.
+ *
+ * apps/mobile/global.css is the NativeWind entry (metro.config.js:
+ * withNativewind(config, { input: "./global.css" })) and it carries the
+ * @source directives that let Tailwind v4 see class names inside
+ * packages/app and packages/ui. This file has none, so importing Tailwind a
+ * second time produced a competing stylesheet built from an almost empty
+ * content scan — a second registration of the same utility class names, from
+ * a build that could only see this one directory.
+ *
+ * Every variable below is already defined in apps/mobile/global.css (verified
+ * a strict superset: 77 vars vs 23, zero unique here), so this file is kept
+ * only for the web rail's variable definitions and must never own a Tailwind
+ * build of its own.
+ */
 
 @layer base {
   :root {
