@@ -41,28 +41,35 @@ private struct TicketPage: View {
     @EnvironmentObject private var broadcasts: BroadcastStore
     @State private var flipped = false
 
+    /// HIG W-AC-04: the card-flip is decorative. Honour Reduce Motion by
+    /// presenting the pass already turned rather than animating into it.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var accent: Color { DVNT.tierAccent(ticket.tier) }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 8) {
                 // Tier / guest label per ticket.
-                HStack(spacing: 6) {
-                    Circle().fill(accent).frame(width: 7, height: 7)
-                    Text(ticket.tierName ?? ticket.tier?.capitalized ?? "General")
-                        .font(.system(size: 13, weight: .semibold))
+                HStack(spacing: DVNT.Space.snug) {
+                    Circle().fill(accent).frame(width: 8, height: 8)
+                    Text((ticket.tierName ?? ticket.tier?.capitalized ?? "General").uppercased())
+                        .font(DVNT.TypeScale.stamp(14))
+                        .tracking(DVNT.TypeScale.stampTracking)
                         .foregroundColor(.white)
+                        .lineLimit(1)
                     if let table = ticket.tableNumber, !table.isEmpty {
                         Text("· \(table)")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.6))
+                            .font(DVNT.TypeScale.stamp(14))
+                            .foregroundColor(.white.opacity(0.7))
                     }
                 }
-                .padding(.top, 2)
+                .padding(.top, DVNT.Space.hair)
+                .accessibilityElement(children: .combine)
 
                 Text(eventTitle)
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.55))
+                    .font(DVNT.TypeScale.caption())
+                    .foregroundColor(.white.opacity(0.6))
                     .lineLimit(1)
 
                 qrZone
@@ -76,7 +83,11 @@ private struct TicketPage: View {
             .padding(.bottom, 10)
         }
         .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { flipped = true }
+            if reduceMotion {
+                flipped = true
+            } else {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { flipped = true }
+            }
         }
     }
 
@@ -126,13 +137,13 @@ private struct TicketPage: View {
     @ViewBuilder private var statusLine: some View {
         if ticket.status.isPresentable {
             Text("PRESENT AT DOOR")
-                .font(.system(size: 10, weight: .bold))
-                .tracking(1.2)
+                .font(DVNT.TypeScale.stamp())
+                .tracking(DVNT.TypeScale.stampTracking)
                 .foregroundColor(accent)
         } else if ticket.status.isUsed, let at = ticket.checkedInAt.flatMap(TicketStore.parseDate) {
             Text("Checked in \(at.formatted(date: .omitted, time: .shortened))")
-                .font(.system(size: 10))
-                .foregroundColor(.white.opacity(0.5))
+                .font(DVNT.TypeScale.caption())
+                .foregroundColor(.white.opacity(0.55))
         }
     }
 
@@ -144,17 +155,20 @@ private struct TicketPage: View {
             NavigationLink {
                 BroadcastListView(eventId: ticket.eventId)
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "megaphone.fill").font(.system(size: 11))
-                    Text("Messages from host").font(.system(size: 12, weight: .semibold))
+                HStack(spacing: DVNT.Space.snug) {
+                    Image(systemName: "megaphone.fill").font(.system(size: 14))
+                    Text("Messages from host").font(DVNT.TypeScale.body())
                 }
                 .foregroundColor(.white)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 12)
+                .padding(.vertical, DVNT.Space.base)
+                .padding(.horizontal, DVNT.Space.roomy)
                 .background(Capsule().fill(DVNT.brandGradient.opacity(0.30)))
             }
             .buttonStyle(.plain)
-            .padding(.top, 6)
+            .padding(.top, DVNT.Space.snug)
+            .accessibilityLabel(count == 1
+                ? "1 message from the host"
+                : "\(count) messages from the host")
         }
     }
 }

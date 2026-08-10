@@ -46,6 +46,63 @@ enum DVNT {
     }
 }
 
+// MARK: - Type
+
+extension DVNT {
+    /// The type system. Two registers, deliberately different jobs.
+    ///
+    /// STRUCTURAL type — tier, status, "present at door", counts — is condensed
+    /// and tracked. That is venue vernacular: laminates, door signage, marquee
+    /// boards. It also buys real horizontal room on a 40mm screen, so a label
+    /// like "GENERAL ADMISSION" sets on one line instead of truncating.
+    ///
+    /// CONTENT type — event names, host messages, times — stays default width.
+    /// Condensing content hurts legibility at arm's length in the dark, which is
+    /// the one condition this app is actually used in.
+    /// Sizes obey the watchOS glanceability floor (HIG W-GL-03): body is never
+    /// below 16pt, titles never below 18pt. The previous screens set 10–15pt
+    /// across the board — 32 of 42 explicit sizes were under the floor, which is
+    /// why nothing read at arm's length in a dark room.
+    enum TypeScale {
+        /// Stamped structural label — tier, status, "PRESENT AT DOOR".
+        /// Uppercase at the call site; tracking is baked in. Condensed + heavy at
+        /// 13pt reads as signage and stays legible; it is a label, not body copy.
+        static func stamp(_ size: CGFloat = 13) -> Font {
+            .system(size: size, weight: .heavy).width(.condensed)
+        }
+
+        /// Screen and row titles. Floor is 18pt.
+        static func title(_ size: CGFloat = 18) -> Font {
+            .system(size: max(size, 18), weight: .semibold)
+        }
+
+        /// Body copy: host messages, event names on the pass. Floor is 16pt.
+        static func body(_ size: CGFloat = 16) -> Font {
+            .system(size: max(size, 16), weight: .regular)
+        }
+
+        /// Secondary metadata — dates, venue, staleness. Deliberately the one
+        /// register allowed under the body floor, so use it only for text the
+        /// user never has to read to act.
+        static func caption(_ size: CGFloat = 14) -> Font {
+            .system(size: size, weight: .regular)
+        }
+
+        /// Tracking for stamped labels. Applied via `.tracking(DVNT.TypeScale.stampTracking)`.
+        static let stampTracking: CGFloat = 1.4
+    }
+
+    /// 4-based spacing scale. Every magic number in this target should resolve here.
+    enum Space {
+        static let hair: CGFloat = 2
+        static let tight: CGFloat = 4
+        static let snug: CGFloat = 6
+        static let base: CGFloat = 8
+        static let roomy: CGFloat = 12
+        static let loose: CGFloat = 16
+    }
+}
+
 extension Color {
     init(hex: UInt32) {
         self.init(

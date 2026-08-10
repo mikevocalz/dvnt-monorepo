@@ -12,9 +12,17 @@ struct QRCodeView: View {
     let matrix: WatchQRMatrix?
     var size: CGFloat = 132
 
+    /// Wrist-down (Always On). The code is a credential: watchOS HIG W-AO-02
+    /// requires sensitive content to be redacted in the dimmed state, and a
+    /// static high-contrast QR left lit is also the worst case for OLED
+    /// burn-in. Wrist down shows the mark instead — raise to present.
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
     var body: some View {
         Group {
-            if let side = matrix?.size, side > 0, let modules = matrix?.modules {
+            if isLuminanceReduced {
+                dormant
+            } else if let side = matrix?.size, side > 0, let modules = matrix?.modules {
                 Canvas { ctx, canvas in
                     let cell = min(canvas.width, canvas.height) / CGFloat(side)
                     var path = Path()
@@ -43,6 +51,28 @@ struct QRCodeView: View {
             }
         }
         .frame(width: size, height: size)
-        .background(Color.white)            // máx contrast quiet zone
+        // The quiet zone is the scan surface, so it stays pure white while the
+        // code is presented — but true black when dormant, so a lowered wrist
+        // is not a lit white rectangle in a dark room.
+        .background(isLuminanceReduced ? Color.black : Color.white)
+        .accessibilityElement()
+        .accessibilityLabel(isLuminanceReduced
+            ? "Ticket code hidden. Raise your wrist to present it."
+            : "Ticket QR code. Show this to door staff.")
+    }
+
+    /// Wrist-down state: the mark, and one instruction. No code, no animation,
+    /// nothing that updates — HIG W-AO-01 asks for reduced complexity, and
+    /// there is nothing here worth a redraw.
+    private var dormant: some View {
+        VStack(spacing: DVNT.Space.snug) {
+            Image(systemName: "qrcode")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(DVNT.brandGradient)
+            Text("RAISE TO PRESENT")
+                .font(DVNT.TypeScale.stamp(11))
+                .tracking(DVNT.TypeScale.stampTracking)
+                .foregroundColor(.white.opacity(0.55))
+        }
     }
 }
