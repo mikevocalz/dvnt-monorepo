@@ -21,6 +21,15 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { callSignalsApi, type CallSignal } from "@dvnt/app/lib/api/call-signals";
+import {
+  clearCallOnWatch,
+  pushCallToWatch,
+  registerWatchCallHandler,
+} from "@dvnt/app/features/watch/watch-bridge";
+import {
+  toWatchCall,
+  watchCallId,
+} from "@dvnt/app/features/watch/watch-call-payload";
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetView,
@@ -36,6 +45,15 @@ export function IncomingCallOverlay() {
   const [incomingCall, setIncomingCall] = useState<CallSignal | null>(null);
   const snapPoints = useMemo(() => ["95%"], []);
 
+  // The watch listener is registered once, but accept/decline close over the
+  // current call — so both the call and the handlers are mirrored into refs.
+  const incomingCallRef = useRef<CallSignal | null>(null);
+  incomingCallRef.current = incomingCall;
+  const handlersRef = useRef<{ accept: () => void; decline: () => void }>({
+    accept: () => {},
+    decline: () => {},
+  });
+
   // Subscribe to incoming calls
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return;
@@ -47,18 +65,37 @@ export function IncomingCallOverlay() {
       (signal) => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setIncomingCall(signal);
+        // Ring the wrist too. The watch can only accept or decline — the room
+        // is joined here — but that decision is the whole point of a glance.
+        void pushCallToWatch(toWatchCall(signal));
 
         // Auto-dismiss after 30 seconds
         setTimeout(() => {
-          setIncomingCall((current) =>
-            current?.id === signal.id ? null : current,
-          );
+          setIncomingCall((current) => {
+            if (current?.id !== signal.id) return current;
+            // The watch times out on the same 30s, but tell it anyway: a
+            // wrist left ringing buzzes every 2.4s until someone taps it.
+            void clearCallOnWatch(watchCallId(signal));
+            return null;
+          });
         }, 30000);
       },
     );
 
     return unsubscribe;
   }, [isAuthenticated]);
+
+  // The wearer's decision, coming back over WCSession.
+  useEffect(() => {
+    return registerWatchCallHandler((callId, action) => {
+      const current = incomingCallRef.current;
+      // A queued decision can land after the call is gone. Ignore it rather
+      // than routing into a room nobody is ringing any more.
+      if (!current || callId !== watchCallId(current)) return;
+      if (action === "accept") handlersRef.current.accept();
+      else handlersRef.current.decline();
+    });
+  }, []);
 
   useEffect(() => {
     if (incomingCall) sheetRef.current?.snapToIndex(0);
@@ -85,6 +122,9 @@ export function IncomingCallOverlay() {
   const handleAccept = useCallback(async () => {
     if (!incomingCall) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    // Stop the ring immediately — the round-trip to Supabase below can take a
+    // second, and a wrist that keeps buzzing after you answered reads as broken.
+    void clearCallOnWatch(watchCallId(incomingCall));
 
     try {
       await callSignalsApi.updateSignalStatus(incomingCall.id, "accepted");
@@ -102,6 +142,7 @@ export function IncomingCallOverlay() {
   const handleDecline = useCallback(async () => {
     if (!incomingCall) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    void clearCallOnWatch(watchCallId(incomingCall));
 
     try {
       await callSignalsApi.updateSignalStatus(incomingCall.id, "declined");
@@ -109,6 +150,8 @@ export function IncomingCallOverlay() {
 
     setIncomingCall(null);
   }, [incomingCall]);
+
+  handlersRef.current = { accept: handleAccept, decline: handleDecline };
 
   const callerName = incomingCall?.caller_username || "Unknown";
   const callerInitial = callerName.charAt(0).toUpperCase();

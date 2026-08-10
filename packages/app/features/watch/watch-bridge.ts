@@ -18,6 +18,7 @@
 import { Platform } from "react-native";
 import type { WatchTicketEnvelope } from "./watch-payload";
 import type { WatchBroadcastEnvelope } from "./watch-broadcast-payload";
+import type { WatchCallAction, WatchCallDTO } from "./watch-call-payload";
 
 const IPHONE_APP_GROUP = "group.com.dvnt.app";
 const TICKETS_STORAGE_KEY = "dvnt.tickets.envelope";
@@ -157,6 +158,86 @@ export async function syncBroadcastsToWatch(
   } catch (err) {
     console.warn("[watch-bridge] broadcast push failed", err);
   }
+}
+
+/**
+ * Ring the watch. Deliberately NOT the application context: that slot is a
+ * latest-wins snapshot shared by tickets and broadcasts, so a call parked there
+ * would still be ringing on the next launch. A call is an event — `sendMessage`
+ * when reachable, `transferUserInfo` as the queued fallback.
+ */
+export async function pushCallToWatch(call: WatchCallDTO): Promise<void> {
+  if (Platform.OS !== "ios") return;
+  const mod = connectivityModule();
+  if (!mod) return;
+  const body = { call: JSON.stringify(call) };
+  try {
+    if ((await isReachable(mod)) && typeof mod.sendMessage === "function") {
+      mod.sendMessage(body, undefined, () => {
+        // Reachability is a snapshot and can be stale by the time we send.
+        mod.transferUserInfo?.(body);
+      });
+    } else {
+      mod.transferUserInfo?.(body);
+    }
+  } catch (err) {
+    console.warn("[watch-bridge] call push failed", err);
+  }
+}
+
+/**
+ * Stop the wrist ringing — answered on the phone, declined, or timed out.
+ * Always best-effort on both transports: a missed clear leaves the watch
+ * buzzing every 2.4s for a call that no longer exists.
+ */
+export async function clearCallOnWatch(callId: string): Promise<void> {
+  if (Platform.OS !== "ios") return;
+  const mod = connectivityModule();
+  if (!mod) return;
+  const body = { callEnded: callId };
+  try {
+    if ((await isReachable(mod)) && typeof mod.sendMessage === "function") {
+      mod.sendMessage(body, undefined, () => mod.transferUserInfo?.(body));
+    } else {
+      mod.transferUserInfo?.(body);
+    }
+  } catch (err) {
+    console.warn("[watch-bridge] call clear failed", err);
+  }
+}
+
+/**
+ * Listen for the wearer's accept/decline. Returns an unsubscribe fn.
+ *
+ * Both transports are handled: `message` for the live case, `user-info` for a
+ * decision made while the phone was briefly unreachable. Decisions are
+ * de-duplicated by call id, because a queued action can arrive after the live
+ * one already landed.
+ */
+export function registerWatchCallHandler(
+  onAction: (callId: string, action: WatchCallAction) => void,
+): () => void {
+  if (Platform.OS !== "ios") return () => {};
+  const mod = requireWatchConnectivity<any>();
+  if (!mod || typeof mod.watchEvents?.addListener !== "function") return () => {};
+
+  const seen = new Set<string>();
+  const handle = (payload: any, reply?: (r: any) => void) => {
+    if (payload?.type === "callAction" && typeof payload.callId === "string") {
+      const key = `${payload.callId}:${payload.action}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        onAction(payload.callId, payload.action === "accept" ? "accept" : "decline");
+      }
+    }
+    reply?.({ ok: true });
+  };
+
+  const subs = [
+    mod.watchEvents.addListener("message", handle),
+    mod.watchEvents.addListener("user-info", (info: any) => handle(info)),
+  ];
+  return () => subs.forEach((s) => s?.remove?.());
 }
 
 type EnvelopeGetters = {

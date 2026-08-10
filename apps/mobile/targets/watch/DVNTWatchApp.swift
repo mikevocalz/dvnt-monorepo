@@ -6,15 +6,20 @@ import SwiftUI
 struct DVNTWatchApp: App {
     @StateObject private var store: TicketStore
     @StateObject private var broadcastStore: BroadcastStore
+    @StateObject private var callStore: CallStore
     @StateObject private var connectivity: WatchConnectivityManager
 
     init() {
         let store = TicketStore()
         let broadcastStore = BroadcastStore()
+        let callStore = CallStore()
         _store = StateObject(wrappedValue: store)
         _broadcastStore = StateObject(wrappedValue: broadcastStore)
+        _callStore = StateObject(wrappedValue: callStore)
         _connectivity = StateObject(
-            wrappedValue: WatchConnectivityManager(store: store, broadcastStore: broadcastStore)
+            wrappedValue: WatchConnectivityManager(
+                store: store, broadcastStore: broadcastStore, callStore: callStore
+            )
         )
     }
 
@@ -23,6 +28,7 @@ struct DVNTWatchApp: App {
             RootView()
                 .environmentObject(store)
                 .environmentObject(broadcastStore)
+                .environmentObject(callStore)
                 .environmentObject(connectivity)
                 .preferredColorScheme(.dark)
         }
@@ -44,7 +50,26 @@ struct DVNTWatchApp: App {
 /// freely. `TicketStore.init` loads the App Group cache synchronously, so there
 /// was never anything to wait for. The mark still sits in the navigation title.
 private struct RootView: View {
+    @EnvironmentObject private var callStore: CallStore
+
     var body: some View {
-        EventListView()
+        ZStack {
+            EventListView()
+
+            // A ringing call covers everything, including a presented pass. It
+            // is the only thing on this watch that outranks a ticket, and it
+            // must not be reachable by scrolling past.
+            if let call = callStore.incoming {
+                IncomingCallView(
+                    call: call,
+                    handedOff: callStore.handedOff,
+                    onAccept: { callStore.accept() },
+                    onDecline: { callStore.decline() }
+                )
+                .transition(.opacity)
+                .zIndex(1)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: callStore.incoming)
     }
 }

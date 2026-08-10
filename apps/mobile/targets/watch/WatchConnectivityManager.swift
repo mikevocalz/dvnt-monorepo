@@ -17,15 +17,42 @@ import WatchKit
 final class WatchConnectivityManager: NSObject, ObservableObject {
     private let store: TicketStore
     private let broadcastStore: BroadcastStore
+    private let callStore: CallStore
     @Published var isReachable = false
 
-    init(store: TicketStore, broadcastStore: BroadcastStore) {
+    init(store: TicketStore, broadcastStore: BroadcastStore, callStore: CallStore) {
         self.store = store
         self.broadcastStore = broadcastStore
+        self.callStore = callStore
         super.init()
+        callStore.relay = { [weak self] callId, action in
+            self?.sendCallAction(callId: callId, action: action)
+        }
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
         WCSession.default.activate()
+    }
+
+    /// Answer/decline goes back over `sendMessage`, not the application context:
+    /// a decision is an event, and the context slot is a latest-wins snapshot
+    /// that tickets and broadcasts already share.
+    private func sendCallAction(callId: String, action: String) {
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        let body: [String: Any] = ["type": "callAction", "callId": callId, "action": action]
+        if session.isReachable {
+            session.sendMessage(body, replyHandler: nil, errorHandler: { [weak self] _ in
+                // The phone was there a moment ago and is not now. Queue it —
+                // a decline that never lands leaves the caller ringing out.
+                self?.queueCallAction(body)
+            })
+        } else {
+            queueCallAction(body)
+        }
+    }
+
+    private func queueCallAction(_ body: [String: Any]) {
+        WCSession.default.transferUserInfo(body)
     }
 
     /// Ask the phone for a fresh set (e.g. on appear / manual refresh).
@@ -54,6 +81,16 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
             if !usedTicketIds.subtracting(beforeUsed).isEmpty {
                 WKInterfaceDevice.current().play(.success)
             }
+        }
+
+        // A call is an event, not a snapshot: `call` rings, `callEnded` clears.
+        // Both arrive by sendMessage or transferUserInfo, never by context.
+        if let data = jsonData(payload["call"]),
+           let call = try? JSONDecoder().decode(WatchIncomingCall.self, from: data) {
+            callStore.present(call)
+        }
+        if let ended = payload["callEnded"] as? String {
+            callStore.clear(callId: ended.isEmpty ? nil : ended)
         }
 
         if let data = jsonData(payload["broadcasts"]) {
