@@ -132,7 +132,57 @@ try {
     `watch QR wire format OK — ${matrix.size}x${matrix.size}, ` +
       `${matrix.bits.length} hex chars (~${Math.ceil(matrix.bits.length / 2)} bytes/ticket)`,
   );
-  // 3. RingPhase boundaries. The watch binary is arm64_32 and cannot run here,
+  // 3. The watch feature gate. `watchFeatureEnabled` ANDs every switch with the
+  //    master one; getting that backwards means a member who switched the watch
+  //    off still gets their door QR pushed to a wrist they told us to stop using.
+  //    Executable because the store is plain zustand — only the MMKV adapter is
+  //    native, and it is aliased to an in-memory stand-in here.
+  const gateBundle = join(root, "node_modules", ".verify-watch-settings.cjs");
+  try {
+    execFileSync(
+      join(root, "node_modules", ".bin", "esbuild"),
+      [
+        "packages/app/features/watch/watch-settings-store.ts",
+        "--bundle",
+        "--platform=node",
+        "--format=cjs",
+        "--packages=external",
+        "--alias:@dvnt/app/lib/mmkv-zustand=./scripts/watch-settings-check/mmkv-stub.js",
+        `--outfile=${gateBundle}`,
+        "--log-level=warning",
+      ],
+      { cwd: root, stdio: "inherit" },
+    );
+    const { useWatchSettingsStore, watchFeatureEnabled } = require(gateBundle);
+    const set = (patch) => useWatchSettingsStore.setState(patch);
+    const features = ["tickets", "broadcasts", "calls"];
+
+    set({ enabled: true, tickets: true, broadcasts: true, calls: true });
+    for (const f of features) {
+      assert.ok(watchFeatureEnabled(f), `${f} should be on when everything is on`);
+    }
+
+    // Master off wins over every per-feature switch left on.
+    set({ enabled: false });
+    assert.strictEqual(watchFeatureEnabled("enabled"), false, "master should read off");
+    for (const f of features) {
+      assert.strictEqual(
+        watchFeatureEnabled(f),
+        false,
+        `${f} must be off while the master switch is off`,
+      );
+    }
+
+    // One feature off does not take the others down with it.
+    set({ enabled: true, calls: false });
+    assert.strictEqual(watchFeatureEnabled("calls"), false, "calls should be off");
+    assert.ok(watchFeatureEnabled("tickets"), "tickets should survive calls being off");
+    console.log("watch feature gate OK — master ANDs, per-feature isolated");
+  } finally {
+    rmSync(gateBundle, { force: true });
+  }
+
+  // 4. RingPhase boundaries. The watch binary is arm64_32 and cannot run here,
   //    but RingPhase + Models + TicketStore import only Foundation/Combine, so
   //    the same sources build and RUN for the host. A pass that flips to blocked
   //    an hour early strands a paying member at a door — worth executing, not

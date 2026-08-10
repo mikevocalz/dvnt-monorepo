@@ -21,6 +21,7 @@ try {
 import {
   User,
   Bell,
+  Watch,
   Lock,
   HelpCircle,
   Shield,
@@ -405,6 +406,15 @@ export default function SettingsScreenIOS() {
               icon={<Heart size={20} color="#666" />}
               label="Likes and Comments"
               onPress={() => router.push("/settings/likes-comments" as any)}
+            />
+          </SettingsSection>
+
+          {/* Devices — iOS only; there is no Apple Watch on Android. */}
+          <SettingsSection title="Devices">
+            <SettingsListItem
+              icon={<Watch size={20} color="#666" />}
+              label="Apple Watch"
+              onPress={() => router.push("/settings/watch" as any)}
             />
           </SettingsSection>
 

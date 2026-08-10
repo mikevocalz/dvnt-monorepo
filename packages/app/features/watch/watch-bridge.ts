@@ -19,6 +19,11 @@ import { Platform } from "react-native";
 import type { WatchTicketEnvelope } from "./watch-payload";
 import type { WatchBroadcastEnvelope } from "./watch-broadcast-payload";
 import type { WatchCallAction, WatchCallDTO } from "./watch-call-payload";
+import {
+  useWatchSettingsStore,
+  watchFeatureEnabled,
+  type WatchFeatureKey,
+} from "./watch-settings-store";
 
 const IPHONE_APP_GROUP = "group.com.dvnt.app";
 const TICKETS_STORAGE_KEY = "dvnt.tickets.envelope";
@@ -117,6 +122,13 @@ async function isReachable(mod: any): Promise<boolean> {
 export async function syncTicketsToWatch(
   env: WatchTicketEnvelope,
 ): Promise<void> {
+  if (!watchFeatureEnabled("tickets")) return;
+  await pushTickets(env);
+}
+
+/** Unguarded push — the switch is checked by callers, so disabling a feature
+ *  can still send the empty envelope that clears the wrist. */
+async function pushTickets(env: WatchTicketEnvelope): Promise<void> {
   if (Platform.OS !== "ios") return;
   const json = JSON.stringify(env);
   lastTicketsPayload = json;
@@ -143,6 +155,12 @@ export async function syncTicketsToWatch(
 export async function syncBroadcastsToWatch(
   env: WatchBroadcastEnvelope,
 ): Promise<void> {
+  if (!watchFeatureEnabled("broadcasts")) return;
+  await pushBroadcasts(env);
+}
+
+/** Unguarded push — see `pushTickets`. */
+async function pushBroadcasts(env: WatchBroadcastEnvelope): Promise<void> {
   if (Platform.OS !== "ios") return;
   const json = JSON.stringify(env);
   lastBroadcastsPayload = json;
@@ -167,6 +185,7 @@ export async function syncBroadcastsToWatch(
  * when reachable, `transferUserInfo` as the queued fallback.
  */
 export async function pushCallToWatch(call: WatchCallDTO): Promise<void> {
+  if (!watchFeatureEnabled("calls")) return;
   if (Platform.OS !== "ios") return;
   const mod = connectivityModule();
   if (!mod) return;
@@ -223,6 +242,9 @@ export function registerWatchCallHandler(
 
   const seen = new Set<string>();
   const handle = (payload: any, reply?: (r: any) => void) => {
+    // Checked per-decision, not at registration: flipping the switch off must
+    // take effect immediately, without waiting for this listener to remount.
+    if (!watchFeatureEnabled("calls")) return reply?.({ ok: true });
     if (payload?.type === "callAction" && typeof payload.callId === "string") {
       const key = `${payload.callId}:${payload.action}`;
       if (!seen.has(key)) {
@@ -238,6 +260,58 @@ export function registerWatchCallHandler(
     mod.watchEvents.addListener("user-info", (info: any) => handle(info)),
   ];
   return () => subs.forEach((s) => s?.remove?.());
+}
+
+export interface WatchStatus {
+  paired: boolean;
+  appInstalled: boolean;
+  reachable: boolean;
+}
+
+/**
+ * Is there actually a watch to talk to? Used by the settings screen so the
+ * switches are never presented as if they were doing something when no watch
+ * is paired. All three degrade to false rather than throwing.
+ */
+export async function getWatchStatus(): Promise<WatchStatus> {
+  const off = { paired: false, appInstalled: false, reachable: false };
+  if (Platform.OS !== "ios") return off;
+  const mod = requireWatchConnectivity<any>();
+  if (!mod) return off;
+  const probe = async (fn: unknown): Promise<boolean> =>
+    typeof fn === "function"
+      ? await (fn as () => Promise<boolean>)().catch(() => false)
+      : false;
+  const [paired, appInstalled, reachable] = await Promise.all([
+    probe(mod.getIsPaired),
+    probe(mod.getIsWatchAppInstalled),
+    probe(mod.getReachability),
+  ]);
+  return { paired, appInstalled, reachable };
+}
+
+/**
+ * The one write path for the watch feature switches.
+ *
+ * Turning a feature off is not just "stop pushing": whatever was last pushed is
+ * cached in the watch's own App Group and would sit there indefinitely. So a
+ * disable sends the empty envelope that clears it, and a re-enable is left to
+ * the next natural sync (the ticket/broadcast hooks push on their own poll).
+ */
+export async function setWatchFeature(
+  key: WatchFeatureKey,
+  value: boolean,
+): Promise<void> {
+  useWatchSettingsStore.getState().set(key, value);
+  if (value) return;
+
+  const syncedAt = Math.floor(Date.now() / 1000);
+  const master = key === "enabled";
+  if (master || key === "tickets") await pushTickets({ tickets: [], syncedAt });
+  if (master || key === "broadcasts")
+    await pushBroadcasts({ broadcasts: [], syncedAt });
+  // Empty id = clear whatever is ringing (`CallStore.clear(callId: nil)`).
+  if (master || key === "calls") await clearCallOnWatch("");
 }
 
 type EnvelopeGetters = {
@@ -260,10 +334,15 @@ export function registerWatchRequestHandler(getters: EnvelopeGetters): () => voi
   const sub = mod.watchEvents.addListener(
     "message",
     (message: any, reply: any) => {
-      if (message?.type === "requestTickets") {
+      // A request from the wrist must not resurrect a feature the member
+      // switched off — the retained (emptied) payload stands.
+      if (message?.type === "requestTickets" && watchFeatureEnabled("tickets")) {
         const env = getters.tickets?.();
         if (env) lastTicketsPayload = JSON.stringify(env);
-      } else if (message?.type === "requestBroadcasts") {
+      } else if (
+        message?.type === "requestBroadcasts" &&
+        watchFeatureEnabled("broadcasts")
+      ) {
         const env = getters.broadcasts?.();
         if (env) lastBroadcastsPayload = JSON.stringify(env);
       }
