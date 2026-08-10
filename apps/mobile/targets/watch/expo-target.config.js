@@ -28,12 +28,8 @@ module.exports = {
   // Watch app needs its own bundle id; keep it under the phone app's namespace.
   bundleIdentifier: "com.dvnt.app.watchkitapp",
   deploymentTarget: "10.0",
-  // App icon for the watch home screen. MUST be square: watchOS masks the icon
-  // into a circle, so a non-square source is squashed to fit. This pointed at
-  // dvnt-glyph.png, which is 2816x1536 (1.83:1) despite the old comment calling
-  // it square — the watch icon came out distorted and did not match the phone.
-  // ios-icon.png is the phone's own 1024x1024 icon, so the two now match.
-  icon: "../../assets/images/ios-icon.png",
+  // App icon for the watch home screen (square glyph — re-used from the phone assets).
+  icon: "../../assets/images/dvnt-glyph.png",
   // App Group shared between the watch app and the watch complication (per-device
   // container — the watch CANNOT read the iPhone's group, hence WCSession transport).
   entitlements: {
