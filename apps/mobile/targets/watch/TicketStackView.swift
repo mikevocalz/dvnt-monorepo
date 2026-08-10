@@ -86,7 +86,7 @@ private struct TicketPage: View {
                 .fill(Color.white)
 
             if ticket.status.isPresentable {
-                QRCodeView(token: ticket.qrToken, size: 124)
+                QRCodeView(matrix: ticket.qrMatrix, size: 124)
                     .padding(6)
             } else {
                 // Blocked: do NOT present a scannable code for a dead ticket.

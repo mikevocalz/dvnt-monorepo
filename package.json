@@ -19,6 +19,7 @@
     "verify-migration": "node scripts/verify-migration.mjs",
     "postinstall": "(patch-package --patch-dir apps/mobile/patches || true) && for f in apps/mobile/scripts/patch-callkeep.sh apps/mobile/scripts/patch-expo-dev-launcher.sh apps/mobile/scripts/patch-insta-story.sh apps/mobile/scripts/patch-react-native-gradle-plugin.sh apps/mobile/scripts/patch-screen-transitions.sh apps/mobile/scripts/patch-vision-camera.sh; do [ -f \"$f\" ] && bash \"$f\" || true; done",
     "verify:parity": "node scripts/verify-port-parity.mjs",
+    "verify:watch-qr": "node scripts/verify-watch-qr.mjs",
     "verify:functions": "node scripts/verify-edge-functions.mjs",
     "verify:functions:live": "node scripts/verify-edge-functions.mjs --live --project-ref npfjanxturvmjyevoyfo"
   },

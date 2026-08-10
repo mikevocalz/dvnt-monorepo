@@ -9,6 +9,17 @@
 
 import type { TicketRecord } from "@dvnt/app/lib/api/tickets";
 
+/**
+ * The matrix generator behind `react-native-qrcode-svg` — the very encoder the
+ * phone's own ticket QR renders from, so the wrist shows what the phone shows.
+ * Untyped and CommonJS-required (Metro only resolves literal-string requires),
+ * matching the lazy-require style in `watch-bridge.ts`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const genMatrixModule = require("react-native-qrcode-svg/src/genMatrix");
+const genMatrix: (value: string, errorCorrectionLevel: string) => number[][] =
+  genMatrixModule.default ?? genMatrixModule;
+
 export type WatchTicketStatus =
   | "valid"
   | "checked_in"
@@ -16,10 +27,23 @@ export type WatchTicketStatus =
   | "expired"
   | "transfer_pending";
 
+/**
+ * The QR module grid the watch draws. watchOS has no Core Image, so the phone
+ * encodes here and the watch only paints. Hex, row-major, 4 modules per
+ * character, most-significant bit first. Mirrors `WatchQRMatrix` in
+ * `apps/mobile/targets/watch/Models.swift`.
+ */
+export interface WatchQRMatrix {
+  size: number;
+  bits: string;
+}
+
 export interface WatchTicketDTO {
   id: string;
   eventId: string;
   qrToken: string;
+  /** Only carried for a `valid` ticket — see `toWatchTicket`. */
+  qrMatrix?: WatchQRMatrix;
   status: WatchTicketStatus;
   tier?: string;
   tierName?: string;
@@ -71,12 +95,52 @@ function inferTier(name?: string): string | undefined {
   return "ga";
 }
 
+/**
+ * Encode the token into the module grid the watch paints, at error-correction
+ * level "H" — the level the phone renders, so both read identically at the door.
+ * Returns undefined rather than throwing: the watch falls back to its placeholder
+ * and the member can still present the phone.
+ */
+export function toQRMatrix(token: string): WatchQRMatrix | undefined {
+  if (!token) return undefined;
+  try {
+    const rows = genMatrix(token, "H");
+    const size = rows.length;
+    if (!size) return undefined;
+
+    let bits = "";
+    let nibble = 0;
+    let filled = 0;
+    for (const row of rows) {
+      for (const module of row) {
+        nibble = (nibble << 1) | (module ? 1 : 0);
+        if (++filled === 4) {
+          bits += nibble.toString(16);
+          nibble = 0;
+          filled = 0;
+        }
+      }
+    }
+    // Pad the tail MSB-first so the decoder's bit offsets stay aligned.
+    if (filled) bits += (nibble << (4 - filled)).toString(16);
+
+    return { size, bits };
+  } catch {
+    return undefined;
+  }
+}
+
 export function toWatchTicket(record: TicketRecord): WatchTicketDTO {
+  const status = mapStatus(record);
   return {
     id: record.id,
     eventId: String(record.event_id),
     qrToken: record.qr_token,
-    status: mapStatus(record),
+    // Only a valid ticket presents a scannable code, and the single WCSession
+    // application-context slot is shared with broadcasts — so nothing else pays
+    // the ~500 bytes a matrix costs.
+    qrMatrix: status === "valid" ? toQRMatrix(record.qr_token) : undefined,
+    status,
     tier: inferTier(record.ticket_type_name),
     tierName: record.ticket_type_name,
     checkedInAt: record.checked_in_at ?? undefined,

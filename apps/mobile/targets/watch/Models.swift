@@ -1,5 +1,31 @@
 import Foundation
 
+/// The QR module grid, encoded on the phone and shipped over the wire: watchOS has
+/// no Core Image, so the watch draws the phone's own matrix rather than re-encoding
+/// `qrToken`. Hex, row-major, 4 modules per character, most-significant bit first.
+/// Mirrors `WatchQRMatrix` in `packages/app/features/watch/watch-payload.ts`.
+struct WatchQRMatrix: Codable, Hashable {
+    let size: Int
+    let bits: String
+
+    /// Row-major dark/light modules, or nil if `bits` is malformed or short — a
+    /// half-drawn code would scan as the wrong ticket, so it must fail closed.
+    var modules: [Bool]? {
+        guard size > 0 else { return nil }
+        let count = size * size
+        var out = [Bool]()
+        out.reserveCapacity(count)
+        for ch in bits {
+            guard let nibble = ch.hexDigitValue else { return nil }
+            for shift in stride(from: 3, through: 0, by: -1) {
+                guard out.count < count else { break }
+                out.append((nibble >> shift) & 1 == 1)
+            }
+        }
+        return out.count == count ? out : nil
+    }
+}
+
 /// The compact ticket DTO the phone pushes over WCSession and persists into the
 /// watch App Group. Mirrors `packages/app/src/watch/watch-payload.ts` — keep the
 /// two in lockstep. `qrToken` is the EXACT string the host scanner expects
@@ -9,6 +35,10 @@ struct WatchTicket: Identifiable, Codable, Hashable {
     let eventId: String
     let qrToken: String
     let status: TicketStatus
+
+    /// Present only for a `valid` ticket — nothing else presents a scannable code,
+    /// and the single WCSession application-context slot is precious.
+    let qrMatrix: WatchQRMatrix?
 
     let tier: String?
     let tierName: String?
@@ -23,7 +53,7 @@ struct WatchTicket: Identifiable, Codable, Hashable {
     let entryWindow: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, eventId, qrToken, status, tier, tierName, tableNumber
+        case id, eventId, qrToken, qrMatrix, status, tier, tierName, tableNumber
         case checkedInAt, eventTitle, eventDate, eventEndDate, eventLocation, entryWindow
     }
 
@@ -34,6 +64,7 @@ struct WatchTicket: Identifiable, Codable, Hashable {
         id = try c.decode(String.self, forKey: .id)
         eventId = try c.decode(String.self, forKey: .eventId)
         qrToken = (try? c.decode(String.self, forKey: .qrToken)) ?? ""
+        qrMatrix = try? c.decode(WatchQRMatrix.self, forKey: .qrMatrix)
         let raw = (try? c.decode(String.self, forKey: .status)) ?? "valid"
         status = TicketStatus(rawValue: raw) ?? .valid
         tier = try? c.decode(String.self, forKey: .tier)

@@ -44,10 +44,9 @@ struct EventListView: View {
                     TicketStackView(group: group)
                 }
             }
-            .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .principal) { DVNTLogoView(height: 16) }
-            }
+            // watchOS has no `.principal` toolbar placement — the view-builder
+            // navigationTitle (watchOS 10+) is how a mark takes the title slot.
+            .navigationTitle { DVNTLogoView(height: 16) }
             .containerBackground(DVNT.brandGradient.opacity(0.18), for: .navigation)
         }
         .onAppear { connectivity.requestSync() }
