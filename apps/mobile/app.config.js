@@ -303,7 +303,21 @@ export default {
       // targets/watch-complication/expo-target.config.js.
       //
       // Links the watch app + complication under apps/mobile/targets/* via CNG.
-      "@bacons/apple-targets",
+      // DISABLED 2026-08-09 — blocked on a real watchOS problem, not config.
+      // targets/watch/QRCodeView.swift generates the ticket QR with
+      // CIFilter.qrCodeGenerator(), and Core Image does not exist on watchOS
+      // (Apple ships it for iOS/macOS/tvOS/visionOS only) — the build fails
+      // with "no such module 'CoreImage'". The QR is the whole point of the
+      // watch app, so this needs a deliberate fix: either a pure-Swift QR
+      // encoder on the watch, or the phone rasterising the QR (iOS DOES have
+      // Core Image) and shipping the bytes in the WCSession payload. The phone
+      // currently uses react-native-qrcode-svg in JS, so there is nothing
+      // native to reuse.
+      //
+      // Everything else about the watch is now fixed and registered: App IDs,
+      // group.com.dvnt.app.watch, unique target names, and the complication as
+      // a watch-widget. Re-enable this line once QR generation is resolved.
+      // "@bacons/apple-targets",
       "./plugins/disable-user-script-sandboxing",
       "./plugins/with-app-controller-init",
       // Install NSSetUncaughtExceptionHandler EARLY so it's the first
