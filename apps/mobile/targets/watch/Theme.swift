@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchKit
 
 /// DVNT brand on watchOS. True-black canvas (OLED power + contrast) and the
 /// token table from docs/dvnt-design-system.md §1 — cyan / violet / magenta,
@@ -107,6 +108,69 @@ extension DVNT {
 
         /// Tracking for stamped labels. Applied via `.tracking(DVNT.TypeScale.stampTracking)`.
         static let stampTracking: CGFloat = 1.4
+
+        /// Countdowns and counts. Monospaced digits so a ticking value does not
+        /// reflow the row it sits in — pair with `.contentTransition(.numericText())`.
+        static func numeral(_ size: CGFloat = 28) -> Font {
+            .system(size: size, weight: .bold).monospacedDigit()
+        }
+
+        /// SF Symbol sizing. Icons were the one register still set with raw
+        /// `.system(size:)` at the call site (13 / 15 / 28 across four files);
+        /// these are those three values, named.
+        enum Icon {
+            static let inline: CGFloat = 13   // trailing metadata glyphs
+            static let row: CGFloat = 15      // leading glyph on a list row
+            static let hero: CGFloat = 28     // empty-state / focal
+        }
+    }
+
+    /// Surface elevations. Three steps and a hairline — the exact opacities
+    /// already in use, lifted out of the call sites that repeated them.
+    enum Surface {
+        static let low = Color.white.opacity(0.04)    // == DVNT.surface
+        static let mid = Color.white.opacity(0.06)    // list row fill
+        static let high = Color.white.opacity(0.15)   // inactive badge
+        static let hairline = Color.white.opacity(0.08)
+    }
+
+    /// Corner radii. `14` was hardcoded at five call sites in EventListView alone.
+    enum Radius {
+        static let card: CGFloat = 14
+        static let chip: CGFloat = 10
+        static let hero: CGFloat = 20
+    }
+
+    /// Motion vocabulary. One set of curves so nothing reads as ad-hoc.
+    ///
+    /// Nothing here loops. This target's rule (see `AccessRing`) is that a
+    /// repeating animation must be driven by a `TimelineView` the view can
+    /// pause — `repeatForever` keeps ticking off-screen and in Always-On,
+    /// which is a battery bug you cannot see in the simulator.
+    enum Motion {
+        static let enter = Animation.spring(response: 0.42, dampingFraction: 0.82)
+        static let settle = Animation.spring(response: 0.55, dampingFraction: 0.9)
+        static let quick = Animation.easeOut(duration: 0.18)
+
+        /// Staggered list entrance, capped so a long list does not crawl in.
+        static func stagger(_ i: Int) -> Animation { enter.delay(min(Double(i) * 0.055, 0.4)) }
+    }
+}
+
+// MARK: - Haptics
+
+extension DVNT {
+    /// Haptic vocabulary — the same gesture must always feel the same. Named by
+    /// meaning, not by `WKHapticType`, so the mapping is changed in one place.
+    enum Haptic {
+        /// Crown-driven page change.
+        static func page() { WKInterfaceDevice.current().play(.click) }
+        /// Entering a destination — the ticket stack, the door.
+        static func enter() { WKInterfaceDevice.current().play(.start) }
+        /// A ticket just went checked-in during a sync. The physical "you're in".
+        static func admit() { WKInterfaceDevice.current().play(.success) }
+        /// A pass that cannot be presented was opened.
+        static func blocked() { WKInterfaceDevice.current().play(.failure) }
     }
 
     /// 4-based spacing scale. Every magic number in this target should resolve here.

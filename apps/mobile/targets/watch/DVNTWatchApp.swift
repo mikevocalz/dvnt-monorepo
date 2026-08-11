@@ -66,7 +66,7 @@ private struct RootView: View {
 
     var body: some View {
         ZStack {
-            EventListView()
+            RootTabs()
 
             // A ringing call covers everything, including a presented pass. It
             // is the only thing on this watch that outranks a ticket, and it

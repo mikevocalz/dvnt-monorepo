@@ -1,19 +1,126 @@
 import SwiftUI
 
-/// Home screen: a glanceable list of events, each row showing name, date, door
-/// time and a ticket-count badge. Tapping an event opens its paged QR stack.
-struct EventListView: View {
+/// The three list destinations behind `RootTabs`: live passes, the sectioned
+/// event history, and the message surfaces.
+///
+/// This file used to hold a single flat `EventListView` — broadcasts, DMs, the
+/// door and every event in one uniform stream, sorted only by "has a presentable
+/// ticket, then date". Nothing was categorised, so nothing was findable.
+
+// MARK: - Tickets
+
+/// Everything the member can actually present at a door right now. This is the
+/// tab that answers "let me in", so it holds only live passes and nothing else —
+/// a revoked or already-scanned ticket in this list is a false promise.
+struct TicketsView: View {
     @EnvironmentObject private var store: TicketStore
-    @EnvironmentObject private var broadcasts: BroadcastStore
-    @EnvironmentObject private var dms: DMStore
-    @EnvironmentObject private var doors: DoorStore
+    @EnvironmentObject private var connectivity: WatchConnectivityManager
+
+    private var live: [EventGroup] { store.groups.filter(\.hasPresentable) }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if live.isEmpty {
+                    EmptyTicketsView(reachable: connectivity.isReachable)
+                } else {
+                    List {
+                        ForEach(Array(live.enumerated()), id: \.element.id) { i, group in
+                            NavigationLink(value: group.id) {
+                                EventRow(group: group)
+                            }
+                            .listRowBackground(rowBackground(group))
+                            .appearStaggered(index: i)
+                        }
+                        StalenessFooter()
+                    }
+                    .listStyle(.carousel)
+                }
+            }
+            .navigationDestination(for: String.self) { id in
+                if let group = store.groups.first(where: { $0.id == id }) {
+                    TicketStackView(group: group)
+                }
+            }
+            .navigationTitle { DVNTLogoView(height: 16) }
+            .containerBackground(DVNT.canvas, for: .navigation)
+        }
+        .onAppear { connectivity.requestSync() }
+    }
+}
+
+// MARK: - Events
+
+/// The full event history, in three sections. Tonight is a privileged position,
+/// not a row that happens to sort first.
+struct EventsView: View {
+    @EnvironmentObject private var store: TicketStore
     @EnvironmentObject private var connectivity: WatchConnectivityManager
 
     var body: some View {
         NavigationStack {
             Group {
-                if store.isEmpty && broadcasts.isEmpty && dms.isEmpty && doors.isEmpty {
+                if store.isEmpty {
                     EmptyTicketsView(reachable: connectivity.isReachable)
+                } else {
+                    List {
+                        section("Tonight", store.tonight, startIndex: 0)
+                        section("Upcoming", store.upcoming, startIndex: store.tonight.count)
+                        section("Past", store.past,
+                                startIndex: store.tonight.count + store.upcoming.count)
+                        StalenessFooter()
+                    }
+                    .listStyle(.carousel)
+                }
+            }
+            .navigationDestination(for: String.self) { id in
+                if let group = store.groups.first(where: { $0.id == id }) {
+                    TicketStackView(group: group)
+                }
+            }
+            .navigationTitle { DVNTLogoView(height: 16) }
+            .containerBackground(DVNT.canvas, for: .navigation)
+        }
+    }
+
+    /// `startIndex` keeps the entrance stagger continuous across section
+    /// boundaries, so the screen assembles top-to-bottom as one movement
+    /// instead of three lists racing each other.
+    @ViewBuilder
+    private func section(_ title: String, _ groups: [EventGroup], startIndex: Int) -> some View {
+        if !groups.isEmpty {
+            Section {
+                ForEach(Array(groups.enumerated()), id: \.element.id) { i, group in
+                    NavigationLink(value: group.id) {
+                        EventRow(group: group)
+                    }
+                    .listRowBackground(rowBackground(group))
+                    .appearStaggered(index: startIndex + i)
+                }
+            } header: {
+                Text(title.uppercased())
+                    .font(DVNT.TypeScale.stamp())
+                    .tracking(DVNT.TypeScale.stampTracking)
+                    .foregroundColor(DVNT.textFaint)
+            }
+        }
+    }
+}
+
+// MARK: - Messages
+
+/// Host broadcasts and member conversations. These were entry rows wedged above
+/// the event list; they are their own destination now, which is also what stops
+/// an unread badge from competing with tonight's door for attention.
+struct MessagesView: View {
+    @EnvironmentObject private var broadcasts: BroadcastStore
+    @EnvironmentObject private var dms: DMStore
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if broadcasts.isEmpty && dms.isEmpty {
+                    EmptyMessagesView()
                 } else {
                     List {
                         if !broadcasts.isEmpty {
@@ -22,14 +129,7 @@ struct EventListView: View {
                             } label: {
                                 BroadcastsEntryRow(unread: broadcasts.unreadCount)
                             }
-                            .listRowBackground(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(DVNT.surface)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .strokeBorder(DVNT.hairline, lineWidth: 1)
-                                    )
-                            )
+                            .entryRowBackground()
                         }
                         if !dms.isEmpty {
                             NavigationLink {
@@ -37,72 +137,48 @@ struct EventListView: View {
                             } label: {
                                 DMsEntryRow(unread: dms.unreadCount)
                             }
-                            .listRowBackground(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(DVNT.surface)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .strokeBorder(DVNT.hairline, lineWidth: 1)
-                                    )
-                            )
-                        }
-                        if let d = doors.door {
-                            NavigationLink {
-                                DoorView()
-                            } label: {
-                                DoorEntryRow(arrived: d.arrived, remaining: d.remaining)
-                            }
-                            .listRowBackground(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(DVNT.surface)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .strokeBorder(DVNT.hairline, lineWidth: 1)
-                                    )
-                            )
-                        }
-                        ForEach(store.groups) { group in
-                            NavigationLink(value: group.id) {
-                                EventRow(group: group)
-                            }
-                            .listRowBackground(rowBackground(group))
-                        }
-                        if let synced = store.syncedAt {
-                            StalenessRow(syncedAt: synced, reachable: connectivity.isReachable)
-                                .listRowBackground(Color.clear)
+                            .entryRowBackground()
                         }
                     }
                     .listStyle(.carousel)
                 }
             }
-            .navigationDestination(for: String.self) { eventId in
-                if let group = store.groups.first(where: { $0.id == eventId }) {
-                    TicketStackView(group: group)
-                }
-            }
-            // watchOS has no `.principal` toolbar placement — the view-builder
-            // navigationTitle (watchOS 10+) is how a mark takes the title slot.
             .navigationTitle { DVNTLogoView(height: 16) }
-            // Flat black. The container background was a washed brand gradient
-            // behind every row — a section background, which the design system
-            // rules out outright, and on OLED it lights pixels for nothing.
             .containerBackground(DVNT.canvas, for: .navigation)
         }
-        .onAppear { connectivity.requestSync() }
-    }
-
-    private func rowBackground(_ group: EventGroup) -> some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(Color.white.opacity(0.06))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(group.hasPresentable ? DVNT.accent.opacity(0.5) : Color.white.opacity(0.08),
-                                  lineWidth: 1)
-            )
     }
 }
 
-private struct EventRow: View {
+// MARK: - Shared chrome
+
+/// An event row: cyan edge when something in it can actually be presented at a
+/// door, plain hairline otherwise.
+func rowBackground(_ group: EventGroup) -> some View {
+    cardBackground(
+        fill: DVNT.Surface.mid,
+        stroke: group.hasPresentable ? DVNT.accent.opacity(0.5) : DVNT.Surface.hairline
+    )
+}
+
+/// The shared card chrome behind every list row. This was five copies of the
+/// same `RoundedRectangle(cornerRadius: 14) + strokeBorder` pair.
+func cardBackground(fill: Color, stroke: Color) -> some View {
+    RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous)
+        .fill(fill)
+        .overlay(
+            RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous)
+                .strokeBorder(stroke, lineWidth: 1)
+        )
+}
+
+extension View {
+    /// Chrome for the privileged entry rows (Broadcasts / Messages / Door).
+    func entryRowBackground() -> some View {
+        listRowBackground(cardBackground(fill: DVNT.Surface.low, stroke: DVNT.hairline))
+    }
+}
+
+struct EventRow: View {
     let group: EventGroup
 
     var body: some View {
@@ -113,6 +189,7 @@ private struct EventRow: View {
                     .foregroundColor(.white)
                     .lineLimit(2)
                 Spacer(minLength: DVNT.Space.snug)
+                if group.hasPresentable { LiveDot() }
                 CountBadge(count: group.count, active: group.hasPresentable)
             }
             if let date = group.date {
@@ -141,17 +218,18 @@ private struct CountBadge: View {
             .frame(minWidth: 22, minHeight: 22)
             .padding(.horizontal, DVNT.Space.tight)
             // Flat. The one gradient on this target is the AccessRing.
-            .background(Capsule().fill(active ? Color.white : Color.white.opacity(0.15)))
+            .background(Capsule().fill(active ? Color.white : DVNT.Surface.high))
+            .accessibilityLabel("\(count) ticket\(count == 1 ? "" : "s")")
     }
 }
 
 /// Home-list entry into the host-broadcast history, with an unread badge.
-private struct BroadcastsEntryRow: View {
+struct BroadcastsEntryRow: View {
     let unread: Int
     var body: some View {
         HStack(spacing: DVNT.Space.base) {
             Image(systemName: "megaphone.fill")
-                .font(.system(size: 15))
+                .font(.system(size: DVNT.TypeScale.Icon.row))
                 .foregroundColor(.white)
             Text("Messages from host")
                 .font(DVNT.TypeScale.body())
@@ -178,12 +256,12 @@ private struct BroadcastsEntryRow: View {
 }
 
 /// Home-list entry into the member's conversations, with an unread badge.
-private struct DMsEntryRow: View {
+struct DMsEntryRow: View {
     let unread: Int
     var body: some View {
         HStack(spacing: DVNT.Space.base) {
             Image(systemName: "message.fill")
-                .font(.system(size: 15))
+                .font(.system(size: DVNT.TypeScale.Icon.row))
                 .foregroundColor(.white)
             Text("Messages")
                 .font(DVNT.TypeScale.body())
@@ -203,20 +281,18 @@ private struct DMsEntryRow: View {
         }
         .padding(.vertical, DVNT.Space.tight)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(unread > 0
-            ? "Messages, \(unread) unread"
-            : "Messages")
+        .accessibilityLabel(unread > 0 ? "Messages, \(unread) unread" : "Messages")
     }
 }
 
 /// Home-list entry into host mode. Only present while an event is running.
-private struct DoorEntryRow: View {
+struct DoorEntryRow: View {
     let arrived: Int
     let remaining: Int
     var body: some View {
         HStack(spacing: DVNT.Space.base) {
             Image(systemName: "door.left.hand.open")
-                .font(.system(size: 15))
+                .font(.system(size: DVNT.TypeScale.Icon.row))
                 .foregroundColor(.white)
             Text("Door")
                 .font(DVNT.TypeScale.body())
@@ -232,42 +308,54 @@ private struct DoorEntryRow: View {
     }
 }
 
-private struct StalenessRow: View {
-    let syncedAt: Date
-    let reachable: Bool
+/// Honest staleness. Kept as a list footer on every ticket-bearing tab, because
+/// a pass the member cannot verify the freshness of is worse than no pass.
+struct StalenessFooter: View {
+    @EnvironmentObject private var store: TicketStore
+    @EnvironmentObject private var connectivity: WatchConnectivityManager
+
     var body: some View {
-        HStack(spacing: DVNT.Space.snug) {
-            Image(systemName: reachable ? "checkmark.circle" : "iphone.slash")
-                .font(.system(size: 13))
-            Text(reachable ? "Live" : "As of \(syncedAt.formatted(date: .omitted, time: .shortened))")
-                .font(DVNT.TypeScale.caption(13))
+        if let synced = store.syncedAt {
+            HStack(spacing: DVNT.Space.snug) {
+                Image(systemName: connectivity.isReachable ? "checkmark.circle" : "iphone.slash")
+                    .font(.system(size: DVNT.TypeScale.Icon.inline))
+                Text(connectivity.isReachable
+                     ? "Live"
+                     : "As of \(synced.formatted(date: .omitted, time: .shortened))")
+                    .font(DVNT.TypeScale.caption(13))
+            }
+            .foregroundColor(DVNT.textFaint)
+            .frame(maxWidth: .infinity)
+            .listRowBackground(Color.clear)
+            .accessibilityElement(children: .combine)
         }
-        .foregroundColor(DVNT.textFaint)
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
     }
 }
 
-private struct EmptyTicketsView: View {
+struct EmptyTicketsView: View {
     let reachable: Bool
     var body: some View {
-        ZStack {
-            DVNT.canvas.ignoresSafeArea()
-            VStack(spacing: DVNT.Space.roomy) {
-                DVNTLogoView(height: 22)
-                Image(systemName: "ticket")
-                    .font(.system(size: 28))
-                    .foregroundColor(DVNT.accent)
-                Text("No tickets yet")
-                    .font(DVNT.TypeScale.title())
-                    .foregroundColor(.white)
-                Text(reachable ? "Buy on your iPhone — they appear here."
-                               : "Open DVNT on your iPhone to sync.")
-                    .font(DVNT.TypeScale.body())
-                    .foregroundColor(DVNT.textDim)
-                    .multilineTextAlignment(.center)
-            }
-            .padding()
+        ContentUnavailableView {
+            Label("No tickets yet", systemImage: "ticket")
+                .font(DVNT.TypeScale.title())
+        } description: {
+            Text(reachable ? "Buy on your iPhone — they appear here."
+                           : "Open DVNT on your iPhone to sync.")
+                .font(DVNT.TypeScale.body())
         }
+        .containerBackground(DVNT.canvas, for: .navigation)
+    }
+}
+
+struct EmptyMessagesView: View {
+    var body: some View {
+        ContentUnavailableView {
+            Label("No messages", systemImage: "message")
+                .font(DVNT.TypeScale.title())
+        } description: {
+            Text("Notes from your hosts land here.")
+                .font(DVNT.TypeScale.body())
+        }
+        .containerBackground(DVNT.canvas, for: .navigation)
     }
 }
