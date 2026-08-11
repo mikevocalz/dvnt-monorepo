@@ -67,7 +67,9 @@ import {
 import type {
   SneakyBilling,
   RCPackageLike,
+  OfferingsResultLike,
 } from "@dvnt/app/features/screens/membership/billing";
+import { offeringsUnavailableCopy } from "@dvnt/app/features/screens/membership/billing";
 import { useSneakyPurchaseStore } from "../stores/sneaky-purchase-store";
 import { useSneakyLynkCaptureProtection } from "../hooks/useSneakyLynkCaptureProtection";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -227,16 +229,27 @@ function NativeSneakySubscriptionModal({
     queryKey: ["rc-sneaky-packages"],
     enabled: !!billing && visible,
     staleTime: 5 * 60_000,
-    queryFn: () => (billing as SneakyBilling).getSneakyPackages(),
+    queryFn: async () => {
+      const b = billing as SneakyBilling;
+      // Prefer the reason-preserving fetch so an empty paywall can say WHY.
+      if (b.getSneakyOfferings) return b.getSneakyOfferings();
+      const packages = await b.getSneakyPackages();
+      return { status: "ok", packages } as OfferingsResultLike;
+    },
   });
+  const offerings = packagesQuery.data;
+  /** Set only when the store came back with nothing to sell. */
+  const unavailableReason =
+    offerings && offerings.status === "unavailable" ? offerings.reason : null;
+
   const packageByPlan = useMemo(() => {
     const map: Partial<Record<PlanKey, RCPackageLike>> = {};
-    for (const pkg of packagesQuery.data ?? []) {
+    for (const pkg of offerings?.status === "ok" ? offerings.packages : []) {
       const key = planKeyFromRCProductId(pkg.product.identifier);
       if (key) map[key] = pkg;
     }
     return map;
-  }, [packagesQuery.data]);
+  }, [offerings]);
 
   // ── Activation watch: the webhook closes the loop, we just poll the ONE
   // read path until the purchased plan shows up. onSubscribed rides a ref so
@@ -495,6 +508,10 @@ function NativeSneakySubscriptionModal({
             const priceLabel =
               pkg?.product.priceString ?? fallbackPrice(p.priceCents);
             const isPurchasable = canSell && !isFree && !isCurrentPlan && !!pkg;
+            const sellableInPrinciple = canSell && !isFree && !isCurrentPlan;
+            const ctaUnavailableLabel = unavailableReason
+              ? offeringsUnavailableCopy(unavailableReason)
+              : "Not available right now";
             const isPurchasing = purchasingPlanKey === key;
 
             return (
@@ -548,6 +565,21 @@ function NativeSneakySubscriptionModal({
                   ))}
                 </View>
 
+                {!isPurchasable && sellableInPrinciple ? (
+                  /* Disabled, but visible and reasoned — a priced tier with no
+                     button at all reads as half-built. */
+                  <View
+                    className="mt-3 rounded-xl py-3 flex-row items-center justify-center gap-2"
+                    style={{ backgroundColor: "#8A40CF", opacity: 0.45 }}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: true }}
+                    accessibilityLabel={`Unavailable: ${ctaUnavailableLabel}`}
+                  >
+                    <Text className="text-white text-sm font-semibold">
+                      {ctaUnavailableLabel}
+                    </Text>
+                  </View>
+                ) : null}
                 {isPurchasable ? (
                   <Pressable
                     onPress={() => onBuy(key)}
