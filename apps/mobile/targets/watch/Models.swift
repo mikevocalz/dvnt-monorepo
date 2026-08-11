@@ -52,6 +52,26 @@ struct WatchTicket: Identifiable, Codable, Hashable {
     let eventLocation: String?
     let entryWindow: String?
 
+    /// The flyer's colour, `#rrggbb`. Seven bytes, and the ONLY artwork that is
+    /// guaranteed to be here with the phone in another room — which is why it,
+    /// not `imageURL`, is what stops a card rendering as three lines of text on
+    /// black.
+    ///
+    /// `AsyncImage` cannot satisfy offline-first: a paired-only watch has no
+    /// network path, and AsyncImage writes nothing into the App Group this
+    /// target persists into, so nothing it fetched survives the next launch.
+    /// Nor can the pixels ride the wire — the single WCSession
+    /// applicationContext slot is size-capped and precious (see `qrMatrix`
+    /// above; it is shared with broadcasts, DMs and door counts). A hex always
+    /// fits. The hex is the guarantee; the art is the upgrade.
+    let dominantHex: String?
+
+    /// A WATCH-SIZED rendition (~200x200 @2x) of the flyer — progressive
+    /// enhancement drawn over `dominantHex` when the wrist happens to be able
+    /// to reach the CDN. NEVER the full flyer, and never load-bearing: if it
+    /// never resolves the card is already finished. See `EventArt`.
+    let imageURL: String?
+
     /// nil when the phone could not resolve identity; false means this pass is
     /// held under someone else's account and was bought for the wearer.
     let isOwner: Bool?
@@ -59,6 +79,7 @@ struct WatchTicket: Identifiable, Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, eventId, qrToken, qrMatrix, status, tier, tierName, tableNumber
         case checkedInAt, eventTitle, eventDate, eventEndDate, eventLocation, entryWindow
+        case dominantHex, imageURL
         case isOwner
     }
 
@@ -81,6 +102,10 @@ struct WatchTicket: Identifiable, Codable, Hashable {
         eventEndDate = try? c.decode(String.self, forKey: .eventEndDate)
         eventLocation = try? c.decode(String.self, forKey: .eventLocation)
         entryWindow = try? c.decode(String.self, forKey: .entryWindow)
+        // Both artwork fields decode leniently and independently: art is never
+        // a reason to drop a ticket, and either one arriving alone is useful.
+        dominantHex = try? c.decode(String.self, forKey: .dominantHex)
+        imageURL = try? c.decode(String.self, forKey: .imageURL)
         isOwner = try? c.decode(Bool.self, forKey: .isOwner)
     }
 }
@@ -145,6 +170,13 @@ struct EventGroup: Identifiable {
     let title: String
     let date: Date?
     let location: String?
+
+    /// Event artwork, lifted off the tickets so a row can draw itself without
+    /// reaching into `tickets`. Both are per-event, so any ticket in the group
+    /// carries the same values — see `TicketStore.groups`.
+    let dominantHex: String?
+    let imageURL: String?
+
     let tickets: [WatchTicket]
 
     var count: Int { tickets.count }

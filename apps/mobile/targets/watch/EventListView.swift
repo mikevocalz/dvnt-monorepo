@@ -29,7 +29,7 @@ struct TicketsView: View {
                             NavigationLink(value: group.id) {
                                 EventRow(group: group)
                             }
-                            .listRowBackground(rowBackground(group))
+                            .listRowBackground(Color.clear)
                             .appearStaggered(index: i)
                         }
                         StalenessFooter()
@@ -94,7 +94,7 @@ struct EventsView: View {
                     NavigationLink(value: group.id) {
                         EventRow(group: group)
                     }
-                    .listRowBackground(rowBackground(group))
+                    .listRowBackground(Color.clear)
                     .appearStaggered(index: startIndex + i)
                 }
             } header: {
@@ -151,15 +151,6 @@ struct MessagesView: View {
 
 // MARK: - Shared chrome
 
-/// An event row: cyan edge when something in it can actually be presented at a
-/// door, plain hairline otherwise.
-func rowBackground(_ group: EventGroup) -> some View {
-    cardBackground(
-        fill: DVNT.Surface.mid,
-        stroke: group.hasPresentable ? DVNT.accent.opacity(0.5) : DVNT.Surface.hairline
-    )
-}
-
 /// The shared card chrome behind every list row. This was five copies of the
 /// same `RoundedRectangle(cornerRadius: 14) + strokeBorder` pair.
 func cardBackground(fill: Color, stroke: Color) -> some View {
@@ -178,33 +169,65 @@ extension View {
     }
 }
 
+/// An art-forward event card. The flyer (or the event's `dominantHex` when the
+/// art has not arrived) is the background; the text sits on a scrim over it.
+///
+/// This replaces three lines of text on flat black, which is what made a
+/// ticketing app read as a database view.
 struct EventRow: View {
     let group: EventGroup
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DVNT.Space.tight) {
-            HStack {
+        ZStack(alignment: .bottomLeading) {
+            EventArt(group: group)
+
+            // A neutral black ramp, NOT the brand gradient — this is a
+            // legibility device, not a brand stroke. Title type has to clear
+            // an arbitrary flyer underneath it, and a member reads this at
+            // arm's length in a dark room.
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.55), .black.opacity(0.9)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            VStack(alignment: .leading, spacing: DVNT.Space.hair) {
                 Text(group.title)
                     .font(DVNT.TypeScale.title())
                     .foregroundColor(.white)
                     .lineLimit(2)
-                Spacer(minLength: DVNT.Space.snug)
-                if group.hasPresentable { LiveDot() }
-                CountBadge(count: group.count, active: group.hasPresentable)
+                HStack(spacing: DVNT.Space.snug) {
+                    if let date = group.date {
+                        Text(date.formatted(date: .abbreviated, time: .shortened))
+                            .font(DVNT.TypeScale.caption())
+                            .foregroundColor(.white.opacity(0.82))
+                    }
+                    if group.hasPresentable { LiveDot() }
+                }
+                if let loc = group.location, !loc.isEmpty {
+                    Text(loc)
+                        .font(DVNT.TypeScale.caption(13))
+                        .foregroundColor(.white.opacity(0.66))
+                        .lineLimit(1)
+                }
             }
-            if let date = group.date {
-                Text(date.formatted(date: .abbreviated, time: .shortened))
-                    .font(DVNT.TypeScale.caption())
-                    .foregroundColor(DVNT.textDim)
-            }
-            if let loc = group.location, !loc.isEmpty {
-                Text(loc)
-                    .font(DVNT.TypeScale.caption(13))
-                    .foregroundColor(DVNT.textFaint)
-                    .lineLimit(1)
-            }
+            .padding(DVNT.Space.roomy)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            CountBadge(count: group.count, active: group.hasPresentable)
+                .padding(DVNT.Space.base)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         }
-        .padding(.vertical, DVNT.Space.tight)
+        .frame(height: 108)
+        .clipShape(RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous)
+                .strokeBorder(
+                    group.hasPresentable ? DVNT.accent.opacity(0.55) : DVNT.Surface.hairline,
+                    lineWidth: 1
+                )
+        )
+        .accessibilityElement(children: .combine)
     }
 }
 

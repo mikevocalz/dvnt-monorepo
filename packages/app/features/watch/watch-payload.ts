@@ -8,6 +8,7 @@
  */
 
 import type { TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { normalizeHex } from "@dvnt/app/lib/color/normalizeColor";
 import { getPlan } from "@dvnt/app/lib/subscription/plans";
 import type { Entitlements } from "@dvnt/app/lib/subscription/types";
 
@@ -56,6 +57,35 @@ export interface WatchTicketDTO {
   eventEndDate?: string;
   eventLocation?: string;
   entryWindow?: string;
+  /**
+   * The event's flyer colour, `#rrggbb`. ~7 bytes, and it is the ONLY piece of
+   * artwork that is guaranteed present offline — which is why it is the primary
+   * fix for a blank wrist, not the image below.
+   *
+   * A paired-but-unreachable watch has no network path of its own, and
+   * `AsyncImage` writes nothing into the watch App Group, so it can never be
+   * offline-first. Nor can the bytes ride along here: `Models.swift` documents
+   * the single WCSession applicationContext slot as size-capped and "precious"
+   * (it is shared with broadcasts, DMs and door counts). A hex fits in that
+   * budget forever. The hex is the guarantee; the art is the upgrade.
+   */
+  dominantHex?: string;
+  /**
+   * A WATCH-SIZED rendition of the flyer (~200x200 @2x) — progressive
+   * enhancement only, drawn over `dominantHex` when the wrist happens to have a
+   * route to the CDN. NEVER the full flyer.
+   *
+   * CAVEAT, verified not assumed: this repo has no watch-rendition helper to
+   * reuse. Bunny Optimizer is OFF on the `dvnt.b-cdn.net` pull zone — `?width=`
+   * returns the byte-identical original (see the header of
+   * `packages/app/lib/media/resolve-renderable.ts`), and every stored thumbnail
+   * column in production is NULL. Fabricating a transform here is exactly the
+   * bug an earlier backfill shipped (`?thumb=true` "thumbnails" that were the
+   * whole video). So this carries the existing cover URL unchanged, and the
+   * watch treats it as best-effort. When a real rendition pipeline lands, point
+   * this one line at it and the wrist gets small art for free.
+   */
+  imageURL?: string;
   /**
    * False when the ticket row belongs to someone else — a pass bought for the
    * member and still held under the buyer's account. The watch says so out
@@ -198,6 +228,14 @@ export function toWatchTicket(
     eventTitle: record.event_title ?? "Event",
     eventDate: record.event_date,
     eventLocation: record.event_location,
+    // Normalised through the same coercion every other surface uses, so the
+    // wrist and the phone never disagree about what "#FFF" meant. Undefined
+    // (not a brand default) when the column is unset — the watch renders its
+    // own flat surface rather than a colour we invented for it.
+    dominantHex: normalizeHex(record.event_dominant_color) ?? undefined,
+    // The cover as stored. See `imageURL` on the DTO for why there is no
+    // rendition transform here.
+    imageURL: record.event_image?.trim() || undefined,
   };
 }
 
@@ -234,10 +272,21 @@ export function buildWatchEnvelope(
 /**
  * Stable signature to skip redundant pushes. Covers the membership projection
  * too — an upgrade to VIP must reach the wrist even when no ticket changed.
+ *
+ * Artwork is part of the signature for the same reason: `dominant_color` is
+ * backfilled lazily (first viewer extracts it and writes it back), so it
+ * usually arrives on a poll where nothing else about the ticket moved. Left
+ * out, the wrist would keep the blank card until an unrelated status flip.
+ * The hex is 7 characters and the URL is compared by presence only.
  */
 export function envelopeSignature(env: WatchTicketEnvelope): string {
   const tickets = env.tickets
-    .map((t) => `${t.id}:${t.status}:${t.qrToken}:${t.isOwner ?? "?"}`)
+    .map(
+      (t) =>
+        `${t.id}:${t.status}:${t.qrToken}:${t.isOwner ?? "?"}:${
+          t.dominantHex ?? "-"
+        }:${t.imageURL ? "1" : "0"}`,
+    )
     .sort()
     .join("|");
   const m = env.membership;

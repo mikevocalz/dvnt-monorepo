@@ -118,11 +118,30 @@ private struct HeroCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(DVNT.Space.roomy)
-        .background(
-            cardBackground(
-                fill: DVNT.Surface.mid,
-                stroke: group.hasPresentable ? DVNT.accent.opacity(0.55) : DVNT.Surface.hairline
-            )
+        .background {
+            ZStack {
+                // Full-bleed flyer behind the hero, at the larger hero radius.
+                // Falls back to the event's dominantHex, which is offline-safe.
+                EventArt(group: group, cornerRadius: DVNT.Radius.hero)
+
+                // Heavier scrim than the list rows carry: the hero stacks a
+                // countdown, a venue and a CTA over the art, so it needs more
+                // headroom to stay legible than a two-line row does. Neutral
+                // black, not the brand gradient.
+                LinearGradient(
+                    colors: [.black.opacity(0.45), .black.opacity(0.82)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .clipShape(RoundedRectangle(cornerRadius: DVNT.Radius.hero, style: .continuous))
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: DVNT.Radius.hero, style: .continuous)
+                .strokeBorder(
+                    group.hasPresentable ? DVNT.accent.opacity(0.55) : DVNT.Surface.hairline,
+                    lineWidth: 1
+                )
         )
     }
 }

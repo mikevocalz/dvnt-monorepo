@@ -25,6 +25,14 @@ final class TicketStore: ObservableObject {
                 title: first?.eventTitle ?? "Event",
                 date: first?.eventDate.flatMap(Self.parseDate),
                 location: first?.eventLocation,
+                // Artwork is per-event, so any ticket in the group carries it —
+                // but take the first ticket that actually HAS one rather than
+                // `first?`, because a group can mix a freshly-issued row (the
+                // phone's optimistic RSVP record, which has no event join yet)
+                // with a synced one that does. Reading position 0 blindly is
+                // how a card that has art renders blank.
+                dominantHex: tickets.compactMap(\.dominantHex).first,
+                imageURL: tickets.compactMap(\.imageURL).first,
                 // Stable order inside a group: valid first, then by tier label.
                 tickets: tickets.sorted { lhs, rhs in
                     if lhs.status.isPresentable != rhs.status.isPresentable {

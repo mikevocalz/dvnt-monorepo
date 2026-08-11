@@ -37,6 +37,13 @@ export interface TicketRecord {
   ticket_type_name?: string;
   event_title?: string;
   event_image?: string;
+  /**
+   * `events.dominant_color` — the flyer's representative hex, joined by
+   * get-my-tickets. Null until the first viewer's extraction writes it back
+   * (see `lib/color/useEventDominantColor`). Consumed by the watch projection,
+   * which needs an always-offline colour for a card that has no image.
+   */
+  event_dominant_color?: string | null;
   event_date?: string;
   event_location?: string;
   username?: string;

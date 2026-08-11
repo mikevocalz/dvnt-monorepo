@@ -60,7 +60,10 @@ Deno.serve(async (req: Request) => {
     let query = supabase
       .from("tickets")
       .select(
-        "*, ticket_types(name), events(title, cover_image_url, start_date, end_date, location)",
+        // `dominant_color` rides along so the Apple Watch has an offline-safe
+        // flyer colour for every card (see features/watch/watch-payload.ts).
+        // It is one already-materialised column on a row we are joining anyway.
+        "*, ticket_types(name), events(title, cover_image_url, dominant_color, start_date, end_date, location)",
       )
       .in("user_id", userIdCandidates)
       .order("created_at", { ascending: false });
@@ -83,6 +86,7 @@ Deno.serve(async (req: Request) => {
       ticket_type_name: t.ticket_types?.name || "General",
       event_title: t.events?.title || "",
       event_image: t.events?.cover_image_url || "",
+      event_dominant_color: t.events?.dominant_color ?? null,
       event_date: t.events?.start_date || "",
       event_location: t.events?.location || "",
     }));
