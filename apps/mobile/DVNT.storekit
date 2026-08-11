@@ -1,0 +1,166 @@
+{
+  "identifier": "B11C3E21-60A5-5CC6-9077-9A7CD6161D0F",
+  "nonRenewingSubscriptions": [],
+  "products": [],
+  "settings": {
+    "_applicationInternalID": "6758054072",
+    "_developerTeamID": "436WA3W63V",
+    "_failTransactionsEnabled": false,
+    "_lastSynchronizedDate": 0,
+    "_locale": "en_US",
+    "_storefront": "USA",
+    "_storeKitErrors": []
+  },
+  "subscriptionGroups": [
+    {
+      "id": "20250001",
+      "localizations": [],
+      "name": "DVNT Membership",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "25.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "329035883",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "DVNT Core membership.",
+              "displayName": "Core",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "dvnt_core",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Core",
+          "subscriptionGroupID": "20250001",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "50.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "952919622",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "Level up your connections.",
+              "displayName": "Insider",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "dvnt_insider",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Insider",
+          "subscriptionGroupID": "20250001",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "75.00",
+          "familyShareable": false,
+          "groupNumber": 3,
+          "internalID": "682265918",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "DVNT VIP membership.",
+              "displayName": "VIP",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "dvnt_vip",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "VIP",
+          "subscriptionGroupID": "20250001",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "150.00",
+          "familyShareable": false,
+          "groupNumber": 4,
+          "internalID": "390200866",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "DVNT Founders Circle.",
+              "displayName": "Founders Circle",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "dvnt_founders_circle",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Founders Circle",
+          "subscriptionGroupID": "20250001",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        }
+      ]
+    },
+    {
+      "id": "20250002",
+      "localizations": [],
+      "name": "Sneaky Lynk",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "459702318",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "Sneaky Lynk tier 1.",
+              "displayName": "Sneaky Tier 1",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "sneaky_tier_1",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Sneaky Tier 1",
+          "subscriptionGroupID": "20250002",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "14.99",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "574693538",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "Sneaky Lynk tier 2.",
+              "displayName": "Sneaky Tier 2",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "sneaky_tier_2",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Sneaky Tier 2",
+          "subscriptionGroupID": "20250002",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 4,
+    "minor": 0
+  }
+}

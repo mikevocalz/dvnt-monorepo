@@ -176,22 +176,153 @@ function isUserCancelled(err: unknown): boolean {
   );
 }
 
+
+// ── Why is the paywall empty? (IAP diagnosability) ─────────────────────────
+//
+// Every failure path below used to return `[]`, which meant FIVE different
+// causes — no native module, RC never configured, no offering marked current,
+// a thrown store error, and a missing offering key — were indistinguishable to
+// the UI. The paywall rendered a price with no button and read as half-built.
+//
+// A disabled CTA is fine. A disabled CTA that cannot say why is not: it is the
+// difference between "the store is unreachable, try again" and "nobody has
+// marked an offering current in the RevenueCat dashboard", and only one of
+// those is the user's problem.
+export type OfferingsUnavailableReason =
+  /** No linked native pod — web, Expo Go, or a build without the module. */
+  | "no_native_module"
+  /** Module present but `configure` never succeeded (missing/blank API key). */
+  | "not_configured"
+  /** RC answered, but no offering is marked current / the key is absent. */
+  | "no_offering_configured"
+  /** RC threw — network, StoreKit down, or the device isn't in a sandbox account. */
+  | "store_unreachable";
+
+export type OfferingsResult =
+  | { status: "ok"; packages: RCPackage[] }
+  | {
+      status: "unavailable";
+      reason: OfferingsUnavailableReason;
+      /** Raw RC message, for the disabled-CTA detail line and Sentry. */
+      detail?: string;
+    };
+
+/** Human copy for a disabled CTA. Short, honest, and actionable where it can be. */
+export function offeringsUnavailableCopy(
+  reason: OfferingsUnavailableReason,
+): string {
+  switch (reason) {
+    case "no_native_module":
+      return "In-app purchases aren't available in this build.";
+    case "not_configured":
+      return "Purchases aren't set up in this build.";
+    case "no_offering_configured":
+      return "Plans aren't available right now.";
+    case "store_unreachable":
+      return "Can't reach the App Store. Check your connection and try again.";
+  }
+}
+
+/**
+ * Report an offerings failure once, with enough context to act on.
+ *
+ * `no_native_module` is deliberately NOT reported — it is the expected state on
+ * web and in Expo Go, and paging on it would be noise. The other three are all
+ * real: two are dashboard misconfiguration and one is a live store problem.
+ */
+function reportOfferingsFailure(
+  reason: OfferingsUnavailableReason,
+  offeringKey: string,
+  detail?: unknown,
+): void {
+  if (reason === "no_native_module") return;
+  const message = `[revenuecat] offerings unavailable (${offeringKey}): ${reason}`;
+  console.warn(message, detail ?? "");
+  try {
+    // Lazy + guarded: Sentry must never be the reason a paywall crashes.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Sentry = require("@sentry/react-native");
+    Sentry.captureException(
+      detail instanceof Error ? detail : new Error(message),
+      {
+        tags: {
+          feature: "iap",
+          rc_offering: offeringKey,
+          rc_unavailable_reason: reason,
+        },
+        extra: { detail: safeDetail(detail) },
+      },
+    );
+  } catch {
+    // No Sentry in this build — the console.warn above still stands.
+  }
+}
+
+function safeDetail(detail: unknown): string {
+  if (detail == null) return "";
+  if (detail instanceof Error) return detail.message;
+  try {
+    return JSON.stringify(detail).slice(0, 500);
+  } catch {
+    return String(detail);
+  }
+}
+
+/**
+ * Shared offerings fetch. `offeringKey` is `null` for the current offering
+ * (membership) or a lookup key (`sneaky`) for a named one.
+ */
+async function fetchOfferings(
+  offeringKey: string | null,
+): Promise<OfferingsResult> {
+  const label = offeringKey ?? "current";
+  const Purchases = getPurchases();
+  if (!Purchases) {
+    return { status: "unavailable", reason: "no_native_module" };
+  }
+  if (!_configured) configureRevenueCat();
+  if (!_configured) {
+    reportOfferingsFailure("not_configured", label);
+    return { status: "unavailable", reason: "not_configured" };
+  }
+  try {
+    const offerings = await Purchases.getOfferings();
+    const offering = offeringKey
+      ? offerings.all[offeringKey]
+      : offerings.current;
+    const packages = offering?.availablePackages ?? [];
+    if (packages.length === 0) {
+      // RC answered fine — there is simply nothing published to sell. This is
+      // the dashboard-work case: products -> entitlements -> offering, and the
+      // offering marked current.
+      reportOfferingsFailure("no_offering_configured", label);
+      return { status: "unavailable", reason: "no_offering_configured" };
+    }
+    return { status: "ok", packages };
+  } catch (err) {
+    reportOfferingsFailure("store_unreachable", label, err);
+    return {
+      status: "unavailable",
+      reason: "store_unreachable",
+      detail: safeDetail(err),
+    };
+  }
+}
+
 /** Fetch the current offering's packages (offering lookup_key `default`:
  *  `core` / `insider` / `vip` / `founders_circle`). Returns [] when RC is
  *  unavailable (web / expo-go / missing key) so the paywall can fall back to
  *  read-only tier cards. */
 export async function getMembershipPackages(): Promise<RCPackage[]> {
-  const Purchases = getPurchases();
-  if (!Purchases) return [];
-  if (!_configured) configureRevenueCat();
-  if (!_configured) return [];
-  try {
-    const offerings = await Purchases.getOfferings();
-    return offerings.current?.availablePackages ?? [];
-  } catch (err) {
-    console.warn("[revenuecat] getOfferings failed", err);
-    return [];
-  }
+  const result = await fetchOfferings(null);
+  return result.status === "ok" ? result.packages : [];
+}
+
+/** Same fetch, but keeps WHY it is empty. Prefer this in any UI that renders a
+ *  CTA — `getMembershipPackages` throws the reason away by design, for the
+ *  callers that genuinely only need the list. */
+export async function getMembershipOfferings(): Promise<OfferingsResult> {
+  return fetchOfferings(null);
 }
 
 /** Fetch the standalone Sneaky Lynk offering's packages (offering lookup_key
@@ -200,17 +331,13 @@ export async function getMembershipPackages(): Promise<RCPackage[]> {
  *  `offerings.current` (that's the `default` membership offering). Returns []
  *  when RC is unavailable, same degrade as getMembershipPackages. */
 export async function getSneakyPackages(): Promise<RCPackage[]> {
-  const Purchases = getPurchases();
-  if (!Purchases) return [];
-  if (!_configured) configureRevenueCat();
-  if (!_configured) return [];
-  try {
-    const offerings = await Purchases.getOfferings();
-    return offerings.all["sneaky"]?.availablePackages ?? [];
-  } catch (err) {
-    console.warn("[revenuecat] getOfferings (sneaky) failed", err);
-    return [];
-  }
+  const result = await fetchOfferings("sneaky");
+  return result.status === "ok" ? result.packages : [];
+}
+
+/** Reason-preserving variant — see `getMembershipOfferings`. */
+export async function getSneakyOfferings(): Promise<OfferingsResult> {
+  return fetchOfferings("sneaky");
 }
 
 export type PurchaseResult = {
