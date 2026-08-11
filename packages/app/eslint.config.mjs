@@ -17,6 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import tsParser from "@typescript-eslint/parser";
 import importPlugin from "eslint-plugin-import";
+import noBarrelFiles from "eslint-plugin-no-barrel-files";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -97,6 +98,19 @@ export default [
       // through the alias is forbidden; intra-feature relative imports (`./`,
       // `../`) and app-global namespaces (`@dvnt/app/lib/*`, `@dvnt/ui`) stay
       // legal and are not matched here.
+      // OWNERSHIP, not route-through-barrel. See docs/barrels-decision.md.
+      //
+      // The intent of this rule was always "do not reach into another feature's
+      // internals". Requiring a barrel was the MECHANISM, and that mechanism
+      // carries a runtime cost the intent never asked for: Expo 57's tree
+      // shaking is off in this repo (it needs EXPO_UNSTABLE_METRO_OPTIMIZE_GRAPH
+      // + EXPO_UNSTABLE_TREE_SHAKING, neither of which is set), so Metro bundles
+      // and evaluates EVERY module behind a barrel before the one you asked for
+      // returns — straight onto TTI.
+      //
+      // So the ban stays on OTHER features' internals, and the per-feature
+      // overrides below re-permit a feature's own deep paths. A feature owns its
+      // own tree; nobody else reaches into it.
       "no-restricted-imports": [
         "error",
         {
@@ -112,11 +126,37 @@ export default [
                 "@dvnt/app/features/*/types/**",
               ],
               message:
-                "Import features through their public barrel (@dvnt/app/features/<feature>), not a deep path into another feature's internals. See docs/code-standards.md §Boundaries.",
+                "Don't reach into another feature's internals — import its public surface (@dvnt/app/features/<feature>) or, on a hot path, the specific module you need from your OWN feature. See docs/barrels-decision.md.",
             },
           ],
         },
       ],
+    },
+  },
+
+  // ── Hot paths: no NEW barrel files (docs/barrels-decision.md, option c) ────
+  // Tree shaking is off in this repo (verified against installed Expo source —
+  // it needs EXPO_UNSTABLE_METRO_OPTIMIZE_GRAPH + EXPO_UNSTABLE_TREE_SHAKING,
+  // neither set), so every module behind a barrel is bundled AND evaluated
+  // before the one you asked for returns. On the surfaces that decide first
+  // paint, that lands straight on TTI.
+  //
+  // `warn`, not `error`, on purpose: 7 barrels already exist on these paths
+  // (events 2, video 2, ticket 3). Failing on them today would break the
+  // "app lint exit 0" gate and force a rewrite of every importer before WS-7
+  // has measured whether it's worth it. Those 7 ARE the measurement targets —
+  // WS-7 confirms or refutes the saving, and this flips to error or comes out.
+  {
+    files: [
+      "components/feed/**/*.{ts,tsx}",
+      "features/events/**/*.{ts,tsx}",
+      "features/video/**/*.{ts,tsx}",
+      "features/call/**/*.{ts,tsx}",
+      "features/ticket/**/*.{ts,tsx}",
+    ],
+    plugins: { "no-barrel-files": noBarrelFiles },
+    rules: {
+      "no-barrel-files/no-barrel-files": "warn",
     },
   },
 ];
