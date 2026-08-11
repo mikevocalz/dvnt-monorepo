@@ -18,3 +18,7 @@ dist
 # Claude local
 .claude
 CLAUDE.md.vercel
+
+# Serena MCP local project config — machine-local, never shared.
+# Swept into a security commit by a stray `git add -A` on 2026-08-10.
+.serena/
