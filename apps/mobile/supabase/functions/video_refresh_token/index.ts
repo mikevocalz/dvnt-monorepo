@@ -242,15 +242,17 @@ Deno.serve(async (req) => {
           Authorization: `Bearer ${fishjamApiKey}`,
           "Content-Type": "application/json",
         },
+        // NO `metadata` KEY — Fishjam rejects it now with
+        // 400 "Invalid request structure". Same breaking change that broke
+        // video_join_room; probed directly against the live API:
+        //   {"type":"webrtc"}                  -> 201
+        //   {"type":"webrtc","options":{...}}  -> 201
+        //   {"type":"webrtc","metadata":{...}} -> 400
+        // Peer metadata is set client-side on joinRoom (use-video-call.ts).
         body: JSON.stringify({
           type: "webrtc",
           options: {
             enableSimulcast: true,
-          },
-          metadata: {
-            userId,
-            role: member.role,
-            jti,
           },
         }),
       },

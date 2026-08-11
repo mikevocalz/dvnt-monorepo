@@ -484,9 +484,19 @@ Deno.serve(async (req) => {
           Authorization: `Bearer ${fishjamApiKey}`,
           "Content-Type": "application/json",
         },
-        // Passing `metadata` here makes the peer's username + role
-        // visible to every other peer in the room via peer.metadata.
-        body: JSON.stringify({ type: "webrtc", metadata: peerMetadata }),
+        // NO `metadata` KEY. Fishjam's peer endpoint rejects it outright now:
+        //   {"type":"webrtc"}                     -> 201
+        //   {"type":"webrtc","options":{...}}     -> 201
+        //   {"type":"webrtc","metadata":{...}}    -> 400 "Invalid request structure"
+        // (probed directly against the live API, throwaway room, both platforms
+        // were failing on this.) It used to be accepted, which is why this line
+        // read the way it did — a silent breaking change on their side.
+        //
+        // Nothing is lost by dropping it: the CLIENT already sends the same
+        // fields as peerMetadata on joinRoom (use-video-call.ts — userId,
+        // username, avatar), which is where Fishjam wants peer metadata set.
+        // This body was redundant even before it became fatal.
+        body: JSON.stringify({ type: "webrtc" }),
       });
 
     let addPeerRes = await createFishjamPeer(fishjamRoomId);
