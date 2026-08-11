@@ -11,11 +11,13 @@
 const {
   withAndroidLiveNotification,
   withAndroidNotificationFiles,
+  withAndroidLiveNotificationPackage,
 } = require("./with-live-activity-android");
 
 function withLiveActivity(config) {
   config = withAndroidLiveNotification(config);
   config = withAndroidNotificationFiles(config);
+  config = withAndroidLiveNotificationPackage(config);
   return config;
 }
 

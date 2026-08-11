@@ -132,7 +132,7 @@ private struct EmptyBroadcastsView: View {
             VStack(spacing: DVNT.Space.base) {
                 Image(systemName: "megaphone")
                     .font(.system(size: DVNT.TypeScale.Icon.hero))
-                    .foregroundStyle(DVNT.brandGradient)
+                    .foregroundColor(DVNT.accent)
                 Text("No messages yet")
                     .font(DVNT.TypeScale.title())
                     .foregroundColor(.white)

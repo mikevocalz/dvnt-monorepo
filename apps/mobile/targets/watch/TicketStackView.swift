@@ -208,7 +208,7 @@ private struct TicketPage: View {
                     Label(perk.label, systemImage: perk.symbol)
                         .font(DVNT.TypeScale.stamp())
                         .tracking(DVNT.TypeScale.stampTracking)
-                        .foregroundStyle(DVNT.brandGradient)
+                        .foregroundColor(DVNT.accent)
                 }
             }
             .padding(.top, DVNT.Space.tight)
@@ -233,7 +233,7 @@ private struct TicketPage: View {
                 .foregroundColor(.white)
                 .padding(.vertical, DVNT.Space.base)
                 .padding(.horizontal, DVNT.Space.roomy)
-                .background(Capsule().fill(DVNT.brandGradient.opacity(0.30)))
+                .background(Capsule().fill(DVNT.accent.opacity(0.30)))
             }
             .buttonStyle(.plain)
             .padding(.top, DVNT.Space.snug)
