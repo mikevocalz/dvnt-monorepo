@@ -401,6 +401,24 @@ export default {
           ios: {
             deploymentTarget: "17.0",
           },
+          android: {
+            // Raised 24 -> 30 deliberately, to clear the floor `react-native-moq`
+            // requires (iOS 16+ / Android API 30+) so Sneaky Lynk's native
+            // broadcast can move off the WHIP/WHEP workaround onto MoQ.
+            //
+            // Nothing set this before: expo-build-properties had only an `ios`
+            // block, so Android fell through to Expo's default of 24 —
+            // node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle:68
+            //   minSdkVersion project.ext.safeExtGet("minSdkVersion", 24)
+            //
+            // THE COST, stated plainly because it is real: this drops Android
+            // 7.0, 8.x, 9 and 10. Anyone below API 30 can no longer install or
+            // update. Mike made this call explicitly to unblock MoQ.
+            //
+            // Note the watch module already required 30 (android/wear/build.gradle),
+            // so 30 is not new to this repo — it is new to the phone app.
+            minSdkVersion: 30,
+          },
           // Off everywhere, not just production. Building React Native from
           // source compiles RN's own pods at their default iOS 15.1 target
           // while ExpoModulesCore requires 16.4, which fails the Xcode build:
