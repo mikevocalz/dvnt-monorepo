@@ -64,6 +64,7 @@ import { useBootstrapMessages } from "@dvnt/app/lib/hooks/use-bootstrap-messages
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
 import { useChatStore } from "@dvnt/app/lib/stores/chat-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
@@ -464,10 +465,12 @@ function ConversationList({
           tintColor="#3EA4E5"
         />
       }
-      contentContainerStyle={[
-        conversationListStyles.listContent,
-        conversations.length === 0 && conversationListStyles.listContentEmpty,
-      ] as any}
+      contentContainerStyle={
+        [
+          conversationListStyles.listContent,
+          conversations.length === 0 && conversationListStyles.listContentEmpty,
+        ] as any
+      }
       ListEmptyComponent={
         <EmptyState
           icon={emptyIcon}
@@ -1006,8 +1009,7 @@ function MessagesScreenContent() {
     let cancelled = false;
 
     const channelId = `conv-list-${currentUser.id}-${Date.now()}`;
-    const channel = supabase
-      .channel(channelId)
+    const channel = freshChannel(channelId)
       .on(
         "postgres_changes",
         {

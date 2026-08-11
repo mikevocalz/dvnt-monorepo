@@ -64,7 +64,10 @@ import { normalizeChatParams } from "@dvnt/app/lib/navigation/chat-routes";
 import { messagesApiClient } from "@dvnt/app/lib/api/messages";
 import { useConversationResolution } from "@dvnt/app/lib/hooks/use-conversation-resolution";
 import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
-import { messageKeys, useRefreshMessageCounts } from "@dvnt/app/lib/hooks/use-messages";
+import {
+  messageKeys,
+  useRefreshMessageCounts,
+} from "@dvnt/app/lib/hooks/use-messages";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { useQueryClient } from "@tanstack/react-query";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
@@ -86,7 +89,10 @@ import { MediaPreviewModal } from "@dvnt/app/components/media-preview-modal";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTypingIndicator } from "@dvnt/app/lib/hooks/use-typing-indicator";
 import { TypingIndicator } from "@dvnt/app/components/chat/typing-indicator";
-import { useUserPresence, formatLastSeen } from "@dvnt/app/lib/hooks/use-presence";
+import {
+  useUserPresence,
+  formatLastSeen,
+} from "@dvnt/app/lib/hooks/use-presence";
 import { StoryReplyBubble } from "@dvnt/app/components/chat/story-reply-bubble";
 import { SharedPostBubble } from "@dvnt/app/components/chat/shared-post-bubble";
 import { EventShareBubble } from "@dvnt/app/components/chat/event-share-bubble";
@@ -96,6 +102,7 @@ import { MediaLightbox as Galeria } from "@dvnt/app/components/media/MediaLightb
 import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
 import { SheetHeader } from "@dvnt/app/components/ui/sheet-header";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
 
 export const unstable_settings = {
@@ -648,8 +655,7 @@ function ChatScreenContent() {
     const channelId = `chat-${convId}-${Date.now()}`;
     console.log("[Chat] Subscribing to realtime messages:", channelId);
 
-    const channel = supabase
-      .channel(channelId)
+    const channel = freshChannel(channelId)
       .on(
         "postgres_changes",
         {
@@ -940,8 +946,9 @@ function ChatScreenContent() {
           setIsConversationValid(false);
           // CRITICAL: Orphaned conversation - invalidate cache and navigate back
           // This ensures retry will call edge function to create NEW conversation
-          const { invalidateConversationCache } =
-            await import("@dvnt/app/lib/hooks/use-conversation-resolution");
+          const { invalidateConversationCache } = await import(
+            "@dvnt/app/lib/hooks/use-conversation-resolution"
+          );
           invalidateConversationCache(queryClient, chatId || activeConvId);
           console.log(
             "[Chat] Invalidated cache for orphaned conversation:",
@@ -964,8 +971,9 @@ function ChatScreenContent() {
         loadedRecipientConversationIdRef.current = null;
         setIsConversationValid(false);
         // Also invalidate cache on error
-        const { invalidateConversationCache } =
-          await import("@dvnt/app/lib/hooks/use-conversation-resolution");
+        const { invalidateConversationCache } = await import(
+          "@dvnt/app/lib/hooks/use-conversation-resolution"
+        );
         invalidateConversationCache(queryClient, chatId || activeConvId);
 
         useUIStore

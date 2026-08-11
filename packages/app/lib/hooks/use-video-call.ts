@@ -47,6 +47,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { videoApi } from "@dvnt/app/features/video/api";
 import { callSignalsApi } from "@dvnt/app/lib/api/call-signals";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import {
   startOutgoingCall,
@@ -1480,8 +1481,7 @@ export function useVideoCall() {
     log(
       `[SIGNAL_SUB] Subscribing to call_signals updates for room: ${currentRoomId}`,
     );
-    const channel = supabase
-      .channel(`call_end:${currentRoomId}`)
+    const channel = freshChannel(`call_end:${currentRoomId}`)
       .on(
         "postgres_changes",
         {

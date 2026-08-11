@@ -7,6 +7,7 @@ import {
 } from "@dvnt/app/lib/api/notifications";
 import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { followsApi } from "@dvnt/app/lib/api/follows";
 
@@ -401,8 +402,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       channelId,
     );
 
-    const channel = supabase
-      .channel(channelId)
+    const channel = freshChannel(channelId)
       .on(
         "postgres_changes",
         {

@@ -37,11 +37,15 @@ import {
 } from "lucide-react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Haptics from "expo-haptics";
-import { organizerApi, type OrganizerStatus } from "@dvnt/app/lib/api/organizer";
+import {
+  organizerApi,
+  type OrganizerStatus,
+} from "@dvnt/app/lib/api/organizer";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 const REQ_LABELS: Record<string, string> = {
   "individual.address.city": "city",
   "individual.address.line1": "street",
@@ -135,8 +139,7 @@ function OrganizerSetupContent() {
   // re-fetch immediately so charges/payouts checkmarks flip without poll.
   useEffect(() => {
     if (!userAuthId) return;
-    const channel = supabase
-      .channel(`organizer-rt:${userAuthId}:${Date.now()}`)
+    const channel = freshChannel(`organizer-rt:${userAuthId}:${Date.now()}`)
       .on(
         "postgres_changes",
         {
@@ -211,13 +214,9 @@ function OrganizerSetupContent() {
     if (isFullyConnected && !celebratedRef.current) {
       celebratedRef.current = true;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      successScale.value = withTiming(
-        1,
-        { duration: 0 },
-        () => {
-          "worklet";
-        },
-      );
+      successScale.value = withTiming(1, { duration: 0 }, () => {
+        "worklet";
+      });
       successScale.value = withSpring(
         1.08,
         { damping: 12, stiffness: 220 },
@@ -273,10 +272,7 @@ function OrganizerSetupContent() {
   else if (status.connected) ctaLabel = "Continue Setup";
 
   return (
-    <View
-      className="flex-1 bg-background"
-      style={{ paddingTop: insets.top }}
-    >
+    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <View className="flex-row items-center px-4 py-3 gap-3">
         <Pressable
           onPress={() => router.back()}
@@ -347,9 +343,7 @@ function OrganizerSetupContent() {
                         : "Required to sell paid tickets"}
                 </Text>
               </View>
-              {isFullyConnected && (
-                <Sparkles size={20} color="#22C55E" />
-              )}
+              {isFullyConnected && <Sparkles size={20} color="#22C55E" />}
             </View>
 
             {/* Progress bar */}
@@ -406,8 +400,14 @@ function OrganizerSetupContent() {
             {/* Restricted / disabled reason — specific, not generic */}
             {!isFullyConnected && reasonCopy && (
               <View className="flex-row items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/8 px-3.5 py-2.5 mb-4">
-                <AlertCircle size={15} color="#EF4444" style={{ marginTop: 2 }} />
-                <Text className="text-xs text-red-300 flex-1">{reasonCopy}</Text>
+                <AlertCircle
+                  size={15}
+                  color="#EF4444"
+                  style={{ marginTop: 2 }}
+                />
+                <Text className="text-xs text-red-300 flex-1">
+                  {reasonCopy}
+                </Text>
               </View>
             )}
 

@@ -39,6 +39,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ArrowLeft, Radio, ScanLine } from "lucide-react-native";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 
 const BUCKET_COUNT = 30; // 30 minutes
@@ -155,15 +156,11 @@ export default function EventLiveScreen() {
         const newBuckets = Array(BUCKET_COUNT).fill(0);
         const feed: ScanRow[] = [];
         for (const s of scans || []) {
-          const ts = s.checked_in_at
-            ? new Date(s.checked_in_at).getTime()
-            : 0;
+          const ts = s.checked_in_at ? new Date(s.checked_in_at).getTime() : 0;
           const bi = bucketIndexFor(ts, now);
           if (bi >= 0) newBuckets[bi] += 1;
           const ttRaw: any = (s as any).ticket_types;
-          const tierName = Array.isArray(ttRaw)
-            ? ttRaw[0]?.name
-            : ttRaw?.name;
+          const tierName = Array.isArray(ttRaw) ? ttRaw[0]?.name : ttRaw?.name;
           feed.push({
             id: (s as any).id,
             checked_in_at: (s as any).checked_in_at,
@@ -188,8 +185,7 @@ export default function EventLiveScreen() {
   useEffect(() => {
     if (!Number.isFinite(eventId) || eventId <= 0) return;
     const channelId = `event-live:${eventId}:${Date.now()}`;
-    const channel = supabase
-      .channel(channelId)
+    const channel = freshChannel(channelId)
       // New ticket issued — bump sold count immediately. Without this,
       // sold ticks up only on the 30s poll, which feels broken to a
       // host watching the room fill up in real time.
@@ -295,10 +291,7 @@ export default function EventLiveScreen() {
     return buckets.slice(-5).reduce((s, n) => s + n, 0);
   }, [buckets]);
 
-  const maxBucket = useMemo(
-    () => Math.max(1, ...buckets),
-    [buckets],
-  );
+  const maxBucket = useMemo(() => Math.max(1, ...buckets), [buckets]);
 
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
@@ -483,7 +476,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
-  statValue: { color: "#fff", fontSize: 22, fontWeight: "700", letterSpacing: -0.3 },
+  statValue: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+  },
   statLabel: {
     fontSize: 10,
     fontWeight: "700",
