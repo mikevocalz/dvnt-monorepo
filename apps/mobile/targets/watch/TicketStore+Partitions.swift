@@ -64,3 +64,41 @@ extension TicketStore {
     /// What the Now tab leads with: tonight if there is one, else the next thing.
     var focus: EventGroup? { tonight.first ?? upcoming.first }
 }
+
+// MARK: - Marquee stubs
+//
+// The ticket-stub voice in the chrome (Space Mono, uppercase) — "3 TONIGHT",
+// "DOORS 21:00", "2 UPCOMING". Computed here rather than in the view so the
+// menu and the destinations cannot disagree about what tonight looks like.
+extension TicketStore {
+    /// Doors are open when the focus event has started AND still has a pass that
+    /// can be presented. Both halves matter: a started event whose tickets are
+    /// all scanned is not "live" for this member any more.
+    var isDoorsOpen: Bool {
+        guard let g = focus, let date = g.date else { return false }
+        return date <= Date() && g.hasPresentable
+    }
+
+    /// Before doors: the time they open. After doors: how many passes are live.
+    var nowStub: String? {
+        guard let g = focus else { return nil }
+        if let date = g.date, date > Date() {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "HH:mm"
+            return "DOORS \(f.string(from: date))"
+        }
+        let n = g.tickets.filter { $0.status.isPresentable }.count
+        return n > 0 ? "\(n) LIVE" : nil
+    }
+
+    var ticketStub: String? {
+        let n = groups.reduce(0) { $0 + $1.count }
+        return n > 0 ? "\(n) TICKET\(n == 1 ? "" : "S")" : nil
+    }
+
+    var upcomingStub: String? {
+        let n = upcoming.count
+        return n > 0 ? "\(n) UPCOMING" : nil
+    }
+}

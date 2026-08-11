@@ -73,3 +73,23 @@ final class DMStore: ObservableObject {
         envelope = env
     }
 }
+
+// MARK: - Marquee mosaic
+
+extension DMStore {
+    /// Sender avatars for the Messages Door's 2x2 mosaic, most recent first.
+    ///
+    /// Returns [] today, deliberately and honestly: `WatchDM` carries
+    /// {id, name, handle, preview, timestamp, unread, isGroup} and NO avatar,
+    /// and neither does `WatchBroadcast`. There is nothing on the wrist to draw.
+    ///
+    /// `AvatarMosaic` renders empty slots as Deviant Gradient tiles, so the Door
+    /// is still a branded composition rather than an empty box — it just is not
+    /// yet *who wrote*. Populating this needs the phone to attach
+    /// `hostAvatarURL` (and `eventImageURL`) in watch-dm-payload.ts /
+    /// watch-broadcast-payload.ts with `Models.swift` mirrored in the same
+    /// change; both already carry the ids those lookups need, so it costs no
+    /// extra queries. Until then this returning [] is the correct behaviour,
+    /// not a stub to paper over.
+    var recentAvatarURLs: [String] { [] }
+}
