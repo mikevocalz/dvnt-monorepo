@@ -58,6 +58,7 @@ import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useUserPresence } from "@dvnt/app/lib/hooks/use-presence";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 
 // ── Conversation shape returned by messagesApi.getFilteredConversations ──────
@@ -69,7 +70,13 @@ interface ConversationMember {
 }
 interface Conversation {
   id: string;
-  user: { id: string; authId?: string; name: string; username: string; avatar: string };
+  user: {
+    id: string;
+    authId?: string;
+    name: string;
+    username: string;
+    avatar: string;
+  };
   lastMessage: string;
   timestamp: string;
   unread: boolean;
@@ -110,7 +117,11 @@ function SneakyLynkTab() {
 
   const openRoom = (r: any) => {
     if (r.isLive === false || r.status === "ended") {
-      showToast("info", "Lynk Ended", "This Lynk has ended and can't be rejoined");
+      showToast(
+        "info",
+        "Lynk Ended",
+        "This Lynk has ended and can't be rejoined",
+      );
       return;
     }
     const query = new URLSearchParams({
@@ -132,7 +143,9 @@ function SneakyLynkTab() {
         onClick={createLynk}
         aria-label="Start a Lynk"
         className="flex h-9 w-9 items-center justify-center rounded-xl text-white transition-transform active:scale-95"
-        style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+        style={{
+          backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)",
+        }}
       >
         <Plus size={20} color="#06070d" />
       </button>
@@ -156,7 +169,10 @@ function SneakyLynkTab() {
         <div className="flex flex-col items-center justify-center px-8 py-20 text-center">
           <div
             className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
-            style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+            style={{
+              backgroundImage:
+                "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)",
+            }}
           >
             <Radio size={28} color="#06070d" />
           </div>
@@ -168,7 +184,10 @@ function SneakyLynkTab() {
             type="button"
             onClick={createLynk}
             className="mt-5 flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-[#06070d] transition-transform active:scale-95"
-            style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+            style={{
+              backgroundImage:
+                "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)",
+            }}
           >
             <Plus size={18} color="#06070d" /> Start a Lynk
           </button>
@@ -189,7 +208,10 @@ function SneakyLynkTab() {
           >
             <span
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
-              style={{ backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)" }}
+              style={{
+                backgroundImage:
+                  "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)",
+              }}
             >
               <Radio size={18} color="#06070d" />
             </span>
@@ -198,7 +220,11 @@ function SneakyLynkTab() {
                 {r.title || r.name || r.hostName || "Live room"}
               </span>
               <span className="block truncate text-xs text-white/55">
-                {(r.host?.displayName || r.host?.username || r.hostName || r.host_name || "") +
+                {(r.host?.displayName ||
+                  r.host?.username ||
+                  r.hostName ||
+                  r.host_name ||
+                  "") +
                   (r.listeners != null ? ` · ${r.listeners} listening` : "")}
               </span>
             </span>
@@ -302,9 +328,7 @@ function ConversationRow({
   onDelete: (item: ConversationItem) => void;
 }) {
   const isGroup = !!item.isGroup;
-  const memberCount = isGroup
-    ? Math.max(item.members?.length ?? 1, 1)
-    : 0;
+  const memberCount = isGroup ? Math.max(item.members?.length ?? 1, 1) : 0;
 
   return (
     <div
@@ -468,8 +492,7 @@ export function MessagesScreen() {
     let cancelled = false;
 
     const channelId = `conv-list-${viewerId}-${Date.now()}`;
-    const channel = supabase
-      .channel(channelId)
+    const channel = freshChannel(channelId)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
@@ -605,7 +628,11 @@ export function MessagesScreen() {
     try {
       const result = await messagesApiClient.deleteConversation(item.id);
       if (!result.ok) {
-        showToast("error", "Delete failed", "Couldn't remove that conversation");
+        showToast(
+          "error",
+          "Delete failed",
+          "Couldn't remove that conversation",
+        );
         return;
       }
 
@@ -774,7 +801,10 @@ export function MessagesScreen() {
                 : "border-transparent bg-transparent text-white/60"
             }`}
           >
-            <Radio size={16} color={activeTab === "lynk" ? "#FF8BFD" : "#6B7280"} />
+            <Radio
+              size={16}
+              color={activeTab === "lynk" ? "#FF8BFD" : "#6B7280"}
+            />
             Sneaky Lynk
           </button>
         </nav>

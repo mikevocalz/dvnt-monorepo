@@ -28,6 +28,7 @@ import { useCallback, useEffect } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — `qrcode` ships without bundled types in this monorepo.
 import QRCode from "qrcode";
@@ -103,11 +104,13 @@ export function GuestTicketScreen() {
   const openGate = usePublicGateStore((s) => s.openGate);
 
   const rawToken = params?.token;
-  const token = Array.isArray(rawToken) ? (rawToken[0] ?? "") : (rawToken ?? "");
+  const token = Array.isArray(rawToken)
+    ? (rawToken[0] ?? "")
+    : (rawToken ?? "");
 
   // ── Ticket data — EXACT native edge fn via invokeEdge, same query key ──
-  const { data, isLoading, isError, refetch } = useQuery<GuestTicketData | null>(
-    {
+  const { data, isLoading, isError, refetch } =
+    useQuery<GuestTicketData | null>({
       queryKey: ["guest-ticket", token],
       queryFn: async () => {
         if (!token) return null;
@@ -120,20 +123,25 @@ export function GuestTicketScreen() {
       },
       enabled: !!token,
       staleTime: 60 * 1000,
-    },
-  );
+    });
 
   // Phase 2 — live: a host edit (time/venue/cancel) refetches the guest ticket
   // so the holder's no-login view reflects it. Anon Realtime is RLS-scoped, so
   // this updates for public events (the common guest case).
-  const liveEventId = data?.ticket?.event?.id ? String(data.ticket.event.id) : "";
+  const liveEventId = data?.ticket?.event?.id
+    ? String(data.ticket.event.id)
+    : "";
   useEffect(() => {
     if (!liveEventId) return;
-    const ch = supabase
-      .channel(`guest-ticket-rt:${liveEventId}:${token}`)
+    const ch = freshChannel(`guest-ticket-rt:${liveEventId}:${token}`)
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "events", filter: `id=eq.${liveEventId}` },
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "events",
+          filter: `id=eq.${liveEventId}`,
+        },
         () => {
           void refetch();
         },

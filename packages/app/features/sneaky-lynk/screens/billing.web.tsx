@@ -36,10 +36,13 @@ import {
 } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
+import { PLANS } from "@dvnt/app/lib/subscription/plans";
+import type { PlanKey } from "@dvnt/app/lib/subscription/types";
 import { useSneakyBillingStore } from "../stores/billing-store";
 
 const ACCENT = "#3FDCFF";
@@ -54,48 +57,67 @@ interface PlanRow {
   highlight: boolean;
 }
 
+// Derived from PLANS — the single source of truth. NOT hand-written.
+//
+// These used to be literals, and they drifted: the catalog said $9.99/$14.99
+// while this file said $15/$25 with "15 screens"/"unlimited". The drift then
+// caused a real mispricing, because the wrong copy was the one that looked
+// authoritative and the catalog got "corrected" to match it before the product
+// spec settled it the other way round. Deriving removes the second source
+// rather than re-syncing two of them.
+//
+// The host_25 / host_50 ids are the legacy Stripe-era plan_id values still
+// stored on sneaky_subscriptions rows; LEGACY_SNEAKY_PLAN in
+// lib/subscription/use-entitlements.ts maps them the same way.
+const LEGACY_ID_TO_PLAN_KEY = {
+  free: "free",
+  host_25: "sneaky_tier_1",
+  host_50: "sneaky_tier_2",
+} as const;
+
+const usd = (cents: number) =>
+  cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`;
+
+/** null = unlimited, matching PlanEntitlements.maxParticipants. */
+const paxOf = (key: PlanKey) => PLANS[key].entitlements.maxParticipants ?? null;
+
 const PLAN_LABELS: Record<
   string,
   { name: string; price: string; maxPax: number | null }
-> = {
-  // Source of truth is packages/app/lib/subscription/plans.ts. These labels had
-  // drifted to $15/$25 with 15/unlimited screens, which matched neither the
-  // catalog nor the product spec, and caused a real mispricing incident: the
-  // catalog was "corrected" to the web numbers before the spec settled it the
-  // other way. Keep these in step with PLANS or delete them in favour of it.
-  free: { name: "Free", price: "$0/mo", maxPax: 5 },
-  host_25: { name: "Tier 1", price: "$9.99/mo", maxPax: 10 },
-  host_50: { name: "Tier 2", price: "$14.99/mo", maxPax: 50 },
-};
+> = Object.fromEntries(
+  Object.entries(LEGACY_ID_TO_PLAN_KEY).map(([legacyId, key]) => [
+    legacyId,
+    {
+      name: PLANS[key].name,
+      price: `${usd(PLANS[key].priceCents)}/mo`,
+      maxPax: paxOf(key),
+    },
+  ]),
+);
 
-const UPGRADE_PLANS: PlanRow[] = [
-  {
-    id: "host_25",
-    name: "Tier 1",
-    price: "$9.99",
-    priceNote: "/ month",
-    maxLabel: "Up to 10 people per link",
-    highlight: true,
-    features: [
-      "Unlimited session duration",
-      "Up to 10 people per link",
-      "Block accounts, Face For Access, mute chat",
-    ],
+const UPGRADE_PLANS: PlanRow[] = (["host_25", "host_50"] as const).map(
+  (legacyId, i) => {
+    const key = LEGACY_ID_TO_PLAN_KEY[legacyId];
+    const plan = PLANS[key];
+    const pax = paxOf(key);
+    return {
+      id: legacyId,
+      name: plan.name,
+      price: usd(plan.priceCents),
+      priceNote: "/ month",
+      maxLabel:
+        pax === null
+          ? "Unlimited people per link"
+          : `Up to ${pax} people per link`,
+      highlight: i === 0,
+      // Bullets come from the catalog too, so the sell copy cannot drift from
+      // what the entitlement resolver actually grants.
+      features: plan.bullets.sneaky.length
+        ? [...plan.bullets.sneaky]
+        : ["Unlimited session duration", "Cancel anytime"],
+    };
   },
-  {
-    id: "host_50",
-    name: "Tier 2",
-    price: "$14.99",
-    priceNote: "/ month",
-    maxLabel: "Up to 50 people per link",
-    highlight: false,
-    features: [
-      "Unlimited session duration",
-      "Up to 50 people per link",
-      "Block accounts, Face For Access, mute chat",
-    ],
-  },
-];
+);
 
 export function SneakyLynkBillingScreen() {
   const router = useRouter();
@@ -110,7 +132,9 @@ export function SneakyLynkBillingScreen() {
   const setSubscription = useSneakyBillingStore((s) => s.setSubscription);
   const setIsLoading = useSneakyBillingStore((s) => s.setIsLoading);
   const setIsPortalLoading = useSneakyBillingStore((s) => s.setIsPortalLoading);
-  const setShowUpgradeModal = useSneakyBillingStore((s) => s.setShowUpgradeModal);
+  const setShowUpgradeModal = useSneakyBillingStore(
+    (s) => s.setShowUpgradeModal,
+  );
   const setCheckoutPlanId = useSneakyBillingStore((s) => s.setCheckoutPlanId);
 
   const FREE_SUB = {
@@ -149,8 +173,7 @@ export function SneakyLynkBillingScreen() {
   // Realtime: auto-refresh when the Stripe webhook updates the subscription row.
   useEffect(() => {
     if (!authUser?.id) return;
-    const channel = supabase
-      .channel("sneaky-sub-changes-web")
+    const channel = freshChannel("sneaky-sub-changes-web")
       .on(
         "postgres_changes" as any,
         {
@@ -184,7 +207,11 @@ export function SneakyLynkBillingScreen() {
       if (error || data?.error) {
         const msg = data?.error || error?.message;
         if (msg?.includes("No billing account")) {
-          showToast("info", "No billing account", "Subscribe to a paid plan first.");
+          showToast(
+            "info",
+            "No billing account",
+            "Subscribe to a paid plan first.",
+          );
         } else {
           throw error ?? new Error(msg);
         }
@@ -194,7 +221,11 @@ export function SneakyLynkBillingScreen() {
         window.location.assign(data.url);
       }
     } catch (err: any) {
-      showToast("error", "Error", err.message || "Could not open billing portal");
+      showToast(
+        "error",
+        "Error",
+        err.message || "Could not open billing portal",
+      );
     } finally {
       setIsPortalLoading(false);
     }
@@ -211,7 +242,10 @@ export function SneakyLynkBillingScreen() {
           "sneaky-billing-checkout",
           {
             body: { plan_id: planId },
-            headers: { Authorization: `Bearer ${token}`, "x-auth-token": token },
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "x-auth-token": token,
+            },
           },
         );
         if (error) throw error;
@@ -219,7 +253,9 @@ export function SneakyLynkBillingScreen() {
         if (data?.updated) {
           showToast(
             "success",
-            data?.billing_effect === "upgrade_prorated_now" ? "Plan upgraded" : "Plan downgraded",
+            data?.billing_effect === "upgrade_prorated_now"
+              ? "Plan upgraded"
+              : "Plan downgraded",
             "Stripe updated your plan.",
           );
           setShowUpgradeModal(false);
@@ -227,7 +263,11 @@ export function SneakyLynkBillingScreen() {
           return;
         }
         if (data?.redirect === "billing_portal") {
-          showToast("info", "Change Plan", "Use the billing portal to change your plan.");
+          showToast(
+            "info",
+            "Change Plan",
+            "Use the billing portal to change your plan.",
+          );
           setShowUpgradeModal(false);
           return;
         }
@@ -237,18 +277,31 @@ export function SneakyLynkBillingScreen() {
           return;
         }
       } catch (err: any) {
-        showToast("error", "Checkout failed", err.message || "Could not start checkout");
+        showToast(
+          "error",
+          "Checkout failed",
+          err.message || "Could not start checkout",
+        );
       } finally {
         setCheckoutPlanId(null);
       }
     },
-    [authUser?.id, showToast, setCheckoutPlanId, setShowUpgradeModal, loadSubscription],
+    [
+      authUser?.id,
+      showToast,
+      setCheckoutPlanId,
+      setShowUpgradeModal,
+      loadSubscription,
+    ],
   );
 
-  const planInfo = PLAN_LABELS[subscription?.plan_id ?? "free"] ?? PLAN_LABELS.free;
-  const isActive = subscription?.status === "active" || subscription?.status === "trialing";
+  const planInfo =
+    PLAN_LABELS[subscription?.plan_id ?? "free"] ?? PLAN_LABELS.free;
+  const isActive =
+    subscription?.status === "active" || subscription?.status === "trialing";
   const isPastDue = subscription?.status === "past_due";
-  const isFree = !subscription?.stripe_subscription_id || subscription?.plan_id === "free";
+  const isFree =
+    !subscription?.stripe_subscription_id || subscription?.plan_id === "free";
 
   const periodEndLabel = subscription?.current_period_end
     ? new Date(subscription.current_period_end).toLocaleDateString("en-US", {
@@ -273,7 +326,9 @@ export function SneakyLynkBillingScreen() {
         >
           <ChevronLeft size={20} color="#fff" />
         </button>
-        <h1 className="flex-1 text-[17px] font-semibold">{getLynkDisplayName()} Billing</h1>
+        <h1 className="flex-1 text-[17px] font-semibold">
+          {getLynkDisplayName()} Billing
+        </h1>
         <button
           type="button"
           onClick={loadSubscription}
@@ -294,7 +349,9 @@ export function SneakyLynkBillingScreen() {
           <section
             className="rounded-2xl p-5 border"
             style={{
-              backgroundColor: isActive ? "#8A40CF10" : "rgba(255,255,255,0.04)",
+              backgroundColor: isActive
+                ? "#8A40CF10"
+                : "rgba(255,255,255,0.04)",
               borderColor: isActive ? "#8A40CF40" : "rgba(255,255,255,0.08)",
             }}
           >
@@ -306,13 +363,21 @@ export function SneakyLynkBillingScreen() {
                 <Crown size={20} color="#8A40CF" />
               </span>
               <span className="flex-1">
-                <span className="block text-base font-bold">{planInfo.name}</span>
-                <span className="block text-sm text-white/60">{planInfo.price}</span>
+                <span className="block text-base font-bold">
+                  {planInfo.name}
+                </span>
+                <span className="block text-sm text-white/60">
+                  {planInfo.price}
+                </span>
               </span>
               <span
                 className="px-3 py-1 rounded-full text-xs font-semibold"
                 style={{
-                  backgroundColor: isActive ? "#22c55e20" : isPastDue ? "#ef444420" : "#88888820",
+                  backgroundColor: isActive
+                    ? "#22c55e20"
+                    : isPastDue
+                      ? "#ef444420"
+                      : "#88888820",
                   color: isActive ? "#22c55e" : isPastDue ? "#ef4444" : "#888",
                 }}
               >
@@ -327,7 +392,9 @@ export function SneakyLynkBillingScreen() {
             <div className="flex gap-3 flex-wrap">
               <span className="flex items-center gap-1 text-xs text-white/60">
                 <Check size={13} color="#22c55e" />
-                {planInfo.maxPax === null ? "Unlimited screens" : `Up to ${planInfo.maxPax} screens`}
+                {planInfo.maxPax === null
+                  ? "Unlimited screens"
+                  : `Up to ${planInfo.maxPax} screens`}
               </span>
               {(planInfo.maxPax === null || planInfo.maxPax > 5) && (
                 <span className="flex items-center gap-1 text-xs text-white/60">
@@ -355,12 +422,15 @@ export function SneakyLynkBillingScreen() {
               <AlertCircle size={18} color="#ef4444" className="shrink-0" />
               <div className="flex-1">
                 <p className="text-sm">
-                  Your last payment failed. Update your payment method to keep access.
+                  Your last payment failed. Update your payment method to keep
+                  access.
                 </p>
                 {subscription?.grace_period_ends_at ? (
                   <p className="text-xs mt-1" style={{ color: "#ef4444" }}>
                     Access will be downgraded on{" "}
-                    {new Date(subscription.grace_period_ends_at).toLocaleDateString("en-US", {
+                    {new Date(
+                      subscription.grace_period_ends_at,
+                    ).toLocaleDateString("en-US", {
                       month: "long",
                       day: "numeric",
                     })}
@@ -381,7 +451,9 @@ export function SneakyLynkBillingScreen() {
               <span className="flex items-center gap-3">
                 <ExternalLink size={18} color="#fff" />
                 <span>
-                  <span className="block text-sm font-semibold">Manage Subscription</span>
+                  <span className="block text-sm font-semibold">
+                    Manage Subscription
+                  </span>
                   <span className="block text-xs text-white/60">
                     Update card, cancel, or change plan
                   </span>
@@ -413,11 +485,13 @@ export function SneakyLynkBillingScreen() {
               <span className="flex items-center gap-1">
                 <Shield size={11} className="text-white/40" />
                 <span className="text-[11px] text-white/60 text-center">
-                  Cancel anytime. Membership automatically renews the 1st of each month.
+                  Cancel anytime. Membership automatically renews the 1st of
+                  each month.
                 </span>
               </span>
               <span className="text-[10px] text-white/40 text-center mt-1">
-                Starting mid-month results in a startup charge, then monthly on the 1st.
+                Starting mid-month results in a startup charge, then monthly on
+                the 1st.
               </span>
             </div>
           ) : null}
@@ -442,19 +516,27 @@ export function SneakyLynkBillingScreen() {
                 key={plan.id}
                 className="rounded-2xl border p-4"
                 style={{
-                  borderColor: plan.highlight ? `${ACCENT}55` : "rgba(255,255,255,0.1)",
-                  backgroundColor: plan.highlight ? `${ACCENT}10` : "rgba(255,255,255,0.03)",
+                  borderColor: plan.highlight
+                    ? `${ACCENT}55`
+                    : "rgba(255,255,255,0.1)",
+                  backgroundColor: plan.highlight
+                    ? `${ACCENT}10`
+                    : "rgba(255,255,255,0.03)",
                 }}
               >
                 <div className="flex items-baseline justify-between mb-2">
                   <span className="text-base font-bold">{plan.name}</span>
                   <span className="text-sm text-white/70">
-                    <span className="font-bold text-white">{plan.price}</span> {plan.priceNote}
+                    <span className="font-bold text-white">{plan.price}</span>{" "}
+                    {plan.priceNote}
                   </span>
                 </div>
                 <ul className="mb-3 flex flex-col gap-1">
                   {plan.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-xs text-white/70">
+                    <li
+                      key={f}
+                      className="flex items-center gap-2 text-xs text-white/70"
+                    >
                       <Check size={13} color="#22c55e" />
                       {f}
                     </li>
@@ -465,9 +547,18 @@ export function SneakyLynkBillingScreen() {
                   disabled={current || loading}
                   onClick={() => handleSubscribe(plan.id)}
                   className="w-full rounded-xl py-3 text-sm font-bold disabled:opacity-50"
-                  style={{ backgroundColor: current ? "rgba(255,255,255,0.08)" : "#8A40CF", color: "#fff" }}
+                  style={{
+                    backgroundColor: current
+                      ? "rgba(255,255,255,0.08)"
+                      : "#8A40CF",
+                    color: "#fff",
+                  }}
                 >
-                  {current ? "Current Plan" : loading ? "Starting…" : `Choose ${plan.name}`}
+                  {current
+                    ? "Current Plan"
+                    : loading
+                      ? "Starting…"
+                      : `Choose ${plan.name}`}
                 </button>
               </div>
             );

@@ -39,6 +39,7 @@ import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { useOrganizerSetupUIStore } from "@dvnt/app/lib/stores/organizer-setup-ui-store";
 
 const REQ_LABELS: Record<string, string> = {
@@ -76,7 +77,9 @@ function requirementAction(field: string): string {
 }
 
 /** Format requirements.current_deadline (unix seconds or ISO) as a date. */
-function formatDeadline(value: string | number | null | undefined): string | null {
+function formatDeadline(
+  value: string | number | null | undefined,
+): string | null {
   if (value == null) return null;
   const d =
     typeof value === "number"
@@ -185,8 +188,7 @@ export function OrganizerSetupScreen() {
   // re-fetch immediately so charges/payouts checkmarks flip without poll.
   useEffect(() => {
     if (!userAuthId) return;
-    const channel = supabase
-      .channel(`organizer-rt:${userAuthId}:${Date.now()}`)
+    const channel = freshChannel(`organizer-rt:${userAuthId}:${Date.now()}`)
       .on(
         "postgres_changes",
         {
@@ -405,8 +407,8 @@ export function OrganizerSetupScreen() {
                   <Clock size={15} color="#F59E0B" className="shrink-0" />
                   <span className="text-xs text-amber-300">
                     Complete the steps below by{" "}
-                    <span className="font-semibold">{deadlineLabel}</span> to keep
-                    selling tickets.
+                    <span className="font-semibold">{deadlineLabel}</span> to
+                    keep selling tickets.
                   </span>
                 </div>
               ) : null}
@@ -414,7 +416,11 @@ export function OrganizerSetupScreen() {
               {/* Restricted / disabled reason — specific, not generic */}
               {!isFullyConnected && reasonCopy ? (
                 <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/8 px-3.5 py-2.5">
-                  <AlertCircle size={15} color="#EF4444" className="mt-0.5 shrink-0" />
+                  <AlertCircle
+                    size={15}
+                    color="#EF4444"
+                    className="mt-0.5 shrink-0"
+                  />
                   <span className="text-xs text-red-300">{reasonCopy}</span>
                 </div>
               ) : null}
