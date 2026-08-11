@@ -323,6 +323,7 @@ export default {
       // name / reason / call-stack-symbols persisted for next launch.
       "./plugins/with-uncaught-exception-handler",
       "./plugins/android-fixes",
+      "./plugins/with-wear-os",
       "./plugins/fix-wgpu-headers",
       "./plugins/with-cube-luts",
       "./plugins/disable-frame-processors",
