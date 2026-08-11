@@ -58,29 +58,42 @@ const PLAN_LABELS: Record<
   string,
   { name: string; price: string; maxPax: number | null }
 > = {
+  // Source of truth is packages/app/lib/subscription/plans.ts. These labels had
+  // drifted to $15/$25 with 15/unlimited screens, which matched neither the
+  // catalog nor the product spec, and caused a real mispricing incident: the
+  // catalog was "corrected" to the web numbers before the spec settled it the
+  // other way. Keep these in step with PLANS or delete them in favour of it.
   free: { name: "Free", price: "$0/mo", maxPax: 5 },
-  host_25: { name: "Host 15", price: "$15/mo", maxPax: 15 },
-  host_50: { name: "Unlimited", price: "$25/mo", maxPax: null },
+  host_25: { name: "Tier 1", price: "$9.99/mo", maxPax: 10 },
+  host_50: { name: "Tier 2", price: "$14.99/mo", maxPax: 50 },
 };
 
 const UPGRADE_PLANS: PlanRow[] = [
   {
     id: "host_25",
-    name: "Host 15",
-    price: "$15",
+    name: "Tier 1",
+    price: "$9.99",
     priceNote: "/ month",
-    maxLabel: "Up to 15 screens",
+    maxLabel: "Up to 10 people per link",
     highlight: true,
-    features: ["Up to 15 screens per session", "Unlimited duration", "Cancel anytime"],
+    features: [
+      "Unlimited session duration",
+      "Up to 10 people per link",
+      "Block accounts, Face For Access, mute chat",
+    ],
   },
   {
     id: "host_50",
-    name: "Unlimited",
-    price: "$25",
+    name: "Tier 2",
+    price: "$14.99",
     priceNote: "/ month",
-    maxLabel: "Unlimited screens",
+    maxLabel: "Up to 50 people per link",
     highlight: false,
-    features: ["Unlimited screens", "Unlimited duration", "Cancel anytime"],
+    features: [
+      "Unlimited session duration",
+      "Up to 50 people per link",
+      "Block accounts, Face For Access, mute chat",
+    ],
   },
 ];
 
