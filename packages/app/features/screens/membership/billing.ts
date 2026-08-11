@@ -34,8 +34,51 @@ export interface MembershipPurchaseResult {
   error?: string;
 }
 
+/**
+ * Why a paywall has no packages to sell.
+ *
+ * Mirrors `OfferingsUnavailableReason` in apps/mobile/lib/billing/revenuecat.ts
+ * — packages/app never imports across the app boundary, so the contract is
+ * restated here exactly as `RCPackageLike` is. Keep the two in lockstep.
+ */
+export type OfferingsUnavailableReason =
+  | "no_native_module"
+  | "not_configured"
+  | "no_offering_configured"
+  | "store_unreachable";
+
+export type OfferingsResultLike =
+  | { status: "ok"; packages: RCPackageLike[] }
+  | {
+      status: "unavailable";
+      reason: OfferingsUnavailableReason;
+      detail?: string;
+    };
+
+/**
+ * Copy for a DISABLED cta. A priced card with no button reads as half-built;
+ * a priced card with a disabled button that says why reads as honest.
+ */
+export function offeringsUnavailableCopy(
+  reason: OfferingsUnavailableReason,
+): string {
+  switch (reason) {
+    case "no_native_module":
+      return "Not available in this build";
+    case "not_configured":
+      return "Purchases unavailable";
+    case "no_offering_configured":
+      return "Not available right now";
+    case "store_unreachable":
+      return "Can't reach the App Store";
+  }
+}
+
 export interface MembershipBilling {
   getMembershipPackages(): Promise<RCPackageLike[]>;
+  /** Reason-preserving variant. Optional so existing adapters keep compiling;
+   *  when absent the UI degrades to a generic unavailable state. */
+  getMembershipOfferings?(): Promise<OfferingsResultLike>;
   purchaseMembershipPackage(
     pkg: RCPackageLike,
     opts?: { googleOldProductId?: string | null },
@@ -52,6 +95,8 @@ export interface MembershipBilling {
  */
 export interface SneakyBilling {
   getSneakyPackages(): Promise<RCPackageLike[]>;
+  /** Reason-preserving variant — see MembershipBilling. */
+  getSneakyOfferings?(): Promise<OfferingsResultLike>;
   purchaseMembershipPackage(
     pkg: RCPackageLike,
     opts?: { googleOldProductId?: string | null },

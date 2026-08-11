@@ -49,7 +49,12 @@ import {
   planKeyFromRCProductId,
   type PlanKey,
 } from "@dvnt/app/lib/subscription";
-import type { MembershipBilling, RCPackageLike } from "./billing";
+import type {
+  MembershipBilling,
+  RCPackageLike,
+  OfferingsResultLike,
+} from "./billing";
+import { offeringsUnavailableCopy } from "./billing";
 import { useMembershipPurchaseStore } from "./membership-purchase-store";
 
 const C = {
@@ -141,16 +146,27 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
     queryKey: ["rc-membership-packages"],
     enabled: !!billing,
     staleTime: 5 * 60_000,
-    queryFn: () => (billing as MembershipBilling).getMembershipPackages(),
+    queryFn: async () => {
+      const b = billing as MembershipBilling;
+      // Prefer the reason-preserving fetch so an empty paywall can say WHY.
+      if (b.getMembershipOfferings) return b.getMembershipOfferings();
+      const packages = await b.getMembershipPackages();
+      return { status: "ok", packages } as OfferingsResultLike;
+    },
   });
+
+  const offerings = packagesQuery.data;
+  /** Set only when the store came back with nothing to sell. */
+  const unavailableReason =
+    offerings && offerings.status === "unavailable" ? offerings.reason : null;
   const packageByPlan = useMemo(() => {
     const map: Partial<Record<PlanKey, RCPackageLike>> = {};
-    for (const pkg of packagesQuery.data ?? []) {
+    for (const pkg of offerings?.status === "ok" ? offerings.packages : []) {
       const key = planKeyFromRCProductId(pkg.product.identifier);
       if (key) map[key] = pkg;
     }
     return map;
-  }, [packagesQuery.data]);
+  }, [offerings]);
 
   // ── Activation watch: the webhook closes the loop, we just poll the ONE
   // read path until the purchased plan shows up.
@@ -336,6 +352,12 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
         // Store price when the catalog is loaded; plans.ts fallback otherwise.
         const priceLabel = pkg?.product.priceString ?? fallbackPrice(p.priceCents);
         const isPurchasable = canSell && key !== "free" && !isCurrent && !!pkg;
+        // Would we sell this plan if the catalog had loaded? Drives the
+        // disabled-CTA fallback below.
+        const sellableInPrinciple = canSell && key !== "free" && !isCurrent;
+        const ctaUnavailableLabel = unavailableReason
+          ? offeringsUnavailableCopy(unavailableReason)
+          : "Not available right now";
         const isPurchasing = purchasingPlanKey === key;
         return (
           <View
@@ -391,6 +413,20 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
                   </Animated.Text>
                 )}
               </Pressable>
+            ) : sellableInPrinciple ? (
+              /* A priced card with NO button reads as half-built. When the
+                 catalog is empty we still render the CTA — disabled, with the
+                 reason — so the state is legible instead of looking broken. */
+              <View
+                style={[styles.cta, styles.ctaDisabled]}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: true }}
+                accessibilityLabel={`${p.name} unavailable: ${ctaUnavailableLabel}`}
+              >
+                <Animated.Text style={styles.ctaText}>
+                  {ctaUnavailableLabel}
+                </Animated.Text>
+              </View>
             ) : null}
           </View>
         );

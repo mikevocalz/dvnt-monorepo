@@ -7,12 +7,14 @@
 import MembershipSettingsScreen from "@dvnt/app/features/routes/screens/settings/membership";
 import {
   getMembershipPackages,
+  getMembershipOfferings,
   purchaseMembershipPackage,
   restoreMembershipPurchases,
 } from "@/lib/billing/revenuecat";
 
 const billing = {
   getMembershipPackages,
+  getMembershipOfferings,
   purchaseMembershipPackage,
   restoreMembershipPurchases,
 };

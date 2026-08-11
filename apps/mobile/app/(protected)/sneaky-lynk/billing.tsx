@@ -6,12 +6,14 @@
 import BillingScreen from '@dvnt/app/features/routes/screens/(protected)/sneaky-lynk/billing';
 import {
   getSneakyPackages,
+  getSneakyOfferings,
   purchaseMembershipPackage,
   restoreMembershipPurchases,
 } from '@/lib/billing/revenuecat';
 
 const billing = {
   getSneakyPackages,
+  getSneakyOfferings,
   purchaseMembershipPackage,
   restoreMembershipPurchases,
 };

@@ -9,6 +9,7 @@
 import SneakyLynkRoomScreen from '@dvnt/app/features/routes/screens/(protected)/sneaky-lynk/room/[id]';
 import {
   getSneakyPackages,
+  getSneakyOfferings,
   purchaseMembershipPackage,
   restoreMembershipPurchases,
 } from '@/lib/billing/revenuecat';
@@ -18,6 +19,7 @@ export * from '@dvnt/app/features/routes/screens/(protected)/sneaky-lynk/room/[i
 
 const billing = {
   getSneakyPackages,
+  getSneakyOfferings,
   purchaseMembershipPackage,
   restoreMembershipPurchases,
 };
