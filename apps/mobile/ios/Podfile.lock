@@ -2987,7 +2987,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - RNTrueSheet (3.10.1):
+  - RNTrueSheet (3.11.10):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -3270,7 +3270,7 @@ DEPENDENCIES:
   - EXConstants (from `../../../node_modules/expo-constants/ios`)
   - EXJSONUtils (from `../../../node_modules/expo-json-utils/ios`)
   - EXManifests (from `../../../node_modules/expo-manifests/ios`)
-  - Expo (from `../node_modules/expo`)
+  - Expo (from `../../../node_modules/expo`)
   - expo-dev-client (from `../../../node_modules/expo-dev-client/ios`)
   - expo-dev-launcher (from `../../../node_modules/expo-dev-launcher`)
   - expo-dev-menu (from `../../../node_modules/expo-dev-menu`)
@@ -3505,7 +3505,7 @@ EXTERNAL SOURCES:
   EXManifests:
     :path: "../../../node_modules/expo-manifests/ios"
   Expo:
-    :path: "../node_modules/expo"
+    :path: "../../../node_modules/expo"
   expo-dev-client:
     :path: "../../../node_modules/expo-dev-client/ios"
   expo-dev-launcher:
@@ -4054,7 +4054,7 @@ SPEC CHECKSUMS:
   RNScreens: 05b877358c403ad6b9d816e725f8a3d56cc5325d
   RNSentry: 4bf6124c0e855870f96d263f5bb6533446c39ba3
   RNSVG: 5a15a0cf553a18ab64bb38eeb4041e7e6d97bcec
-  RNTrueSheet: 5b4e880d71d2a0dbcc3b404458581b7b8737ab4d
+  RNTrueSheet: cafa662aa27b68ed915904a6c3ed59d2d68d9613
   RNVoipPushNotification: a6f7c09e1ca7220e2be1c45e9b6b897c9600024b
   RNWatch: fd30ca40a5b5ef58dcbc195638e68219bc455236
   RNWorklets: 34cebfc81eb9a7d9128fd21e8a2abdf1ce1a277c
