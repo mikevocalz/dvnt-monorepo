@@ -200,14 +200,14 @@ struct EventRow: View {
                     if let date = group.date {
                         Text(date.formatted(date: .abbreviated, time: .shortened))
                             .font(DVNT.TypeScale.caption())
-                            .foregroundColor(.white.opacity(0.82))
+                            .foregroundColor(DVNT.OnArt.secondary)
                     }
                     if group.hasPresentable { LiveDot() }
                 }
                 if let loc = group.location, !loc.isEmpty {
                     Text(loc)
                         .font(DVNT.TypeScale.caption(13))
-                        .foregroundColor(.white.opacity(0.66))
+                        .foregroundColor(DVNT.OnArt.tertiary)
                         .lineLimit(1)
                 }
             }

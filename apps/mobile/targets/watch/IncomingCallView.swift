@@ -81,7 +81,7 @@ struct IncomingCallView: View {
                     .overlay(Circle().strokeBorder(DVNT.hairline, lineWidth: 1))
                     .overlay(
                         Text(call.initial)
-                            .font(.system(size: 30, weight: .semibold))
+                            .font(DVNT.TypeScale.title(30))
                             .foregroundColor(.white)
                     )
             }
@@ -125,7 +125,7 @@ private struct CallButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: DVNT.TypeScale.Icon.control, weight: .semibold))
                 .foregroundColor(.white)
                 .frame(width: 52, height: 52)
                 .background(Circle().fill(fill))

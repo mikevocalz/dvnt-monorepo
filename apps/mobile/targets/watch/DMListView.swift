@@ -21,8 +21,8 @@ struct DMListView: View {
                             DMRow(dm: dm)
                         }
                         .listRowBackground(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.white.opacity(dm.unread ? 0.10 : 0.05))
+                            RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous)
+                                .fill(dm.unread ? DVNT.hairline : DVNT.Surface.low)
                         )
                     }
                 }
@@ -41,7 +41,7 @@ private struct DMRow: View {
         VStack(alignment: .leading, spacing: DVNT.Space.tight) {
             HStack(spacing: DVNT.Space.snug) {
                 Image(systemName: dm.isGroup ? "person.2.fill" : "person.fill")
-                    .font(.system(size: 12))
+                    .font(.system(size: DVNT.TypeScale.Icon.inline))
                     .foregroundStyle(dm.unread ? DVNT.accent : DVNT.textFaint)
                 Text(dm.name)
                     .font(DVNT.TypeScale.title(18))
@@ -142,7 +142,7 @@ private struct EmptyDMsView: View {
             DVNT.canvas.ignoresSafeArea()
             VStack(spacing: DVNT.Space.base) {
                 Image(systemName: "message")
-                    .font(.system(size: 24))
+                    .font(.system(size: DVNT.TypeScale.Icon.hero))
                     .foregroundColor(DVNT.accent)
                 Text("No messages")
                     .font(DVNT.TypeScale.title())

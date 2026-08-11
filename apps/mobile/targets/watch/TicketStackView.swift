@@ -22,10 +22,10 @@ struct TicketStackView: View {
         .background(DVNT.canvas.ignoresSafeArea())
         .navigationTitle(group.tickets.count > 1 ? "\(index + 1) of \(group.tickets.count)" : "Ticket")
         .onChange(of: index) {
-            WKInterfaceDevice.current().play(.click)
+            DVNT.Haptic.page()
         }
         .onAppear {
-            WKInterfaceDevice.current().play(.start)
+            DVNT.Haptic.enter()
         }
     }
 }
@@ -50,7 +50,7 @@ private struct TicketPage: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 8) {
+            VStack(spacing: DVNT.Space.base) {
                 // Tier / guest label per ticket.
                 HStack(spacing: DVNT.Space.snug) {
                     Circle().fill(accent).frame(width: 8, height: 8)
@@ -62,7 +62,7 @@ private struct TicketPage: View {
                     if let table = ticket.tableNumber, !table.isEmpty {
                         Text("· \(table)")
                             .font(DVNT.TypeScale.stamp(14))
-                            .foregroundColor(.white.opacity(0.7))
+                            .foregroundColor(DVNT.textBright)
                     }
                 }
                 .padding(.top, DVNT.Space.hair)
@@ -70,7 +70,7 @@ private struct TicketPage: View {
 
                 Text(eventTitle)
                     .font(DVNT.TypeScale.caption())
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(DVNT.textDim)
                     .lineLimit(1)
 
                 qrZone
@@ -83,14 +83,14 @@ private struct TicketPage: View {
 
                 hostMessagesLink
             }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 10)
+            .padding(.horizontal, DVNT.Space.base)
+            .padding(.bottom, DVNT.Space.roomy)
         }
         .onAppear {
             if reduceMotion {
                 flipped = true
             } else {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { flipped = true }
+                withAnimation(DVNT.Motion.enter) { flipped = true }
             }
         }
     }
@@ -110,7 +110,7 @@ private struct TicketPage: View {
     @ViewBuilder private var qrZone: some View {
         AccessRing(phase: RingPhase.of(ticket), tint: accent, diameter: ringDiameter) {
             ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous)
                     .fill(Color.white)
 
                 if ticket.status.isPresentable {
@@ -126,24 +126,24 @@ private struct TicketPage: View {
     }
 
     @ViewBuilder private var blockedOverlay: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: DVNT.Space.base) {
             switch ticket.status {
             case .checkedIn, .scanned:
                 Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 34)).foregroundColor(DVNT.accent)
-                Text("Checked In").font(.system(size: 13, weight: .semibold)).foregroundColor(.black)
+                    .font(.system(size: DVNT.TypeScale.Icon.hero)).foregroundColor(DVNT.accent)
+                Text("Checked In").font(DVNT.TypeScale.body()).foregroundColor(.black)
             case .revoked:
                 Image(systemName: "xmark.octagon.fill")
-                    .font(.system(size: 34)).foregroundColor(Color(hex: 0xFC253A))
-                Text("Revoked").font(.system(size: 13, weight: .semibold)).foregroundColor(.black)
+                    .font(.system(size: DVNT.TypeScale.Icon.hero)).foregroundColor(Color(hex: 0xFC253A))
+                Text("Revoked").font(DVNT.TypeScale.body()).foregroundColor(.black)
             case .expired:
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 34)).foregroundColor(.gray)
-                Text("Expired").font(.system(size: 13, weight: .semibold)).foregroundColor(.black)
+                    .font(.system(size: DVNT.TypeScale.Icon.hero)).foregroundColor(.gray)
+                Text("Expired").font(DVNT.TypeScale.body()).foregroundColor(.black)
             case .transferPending:
                 Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 34)).foregroundColor(DVNT.accent)
-                Text("Transferring").font(.system(size: 13, weight: .semibold)).foregroundColor(.black)
+                    .font(.system(size: DVNT.TypeScale.Icon.hero)).foregroundColor(DVNT.accent)
+                Text("Transferring").font(DVNT.TypeScale.body()).foregroundColor(.black)
             case .valid:
                 EmptyView()
             }
@@ -191,7 +191,7 @@ private struct TicketPage: View {
     @ViewBuilder private var ownershipStamp: some View {
         if ticket.isOwner == false {
             Label("HELD FOR YOU", systemImage: "person.crop.square")
-                .font(DVNT.TypeScale.stamp(11))
+                .font(DVNT.TypeScale.stamp())
                 .tracking(DVNT.TypeScale.stampTracking)
                 .foregroundColor(DVNT.textDim)
         }
@@ -206,7 +206,7 @@ private struct TicketPage: View {
             VStack(alignment: .leading, spacing: DVNT.Space.tight) {
                 ForEach(perks, id: \.label) { perk in
                     Label(perk.label, systemImage: perk.symbol)
-                        .font(DVNT.TypeScale.stamp(12))
+                        .font(DVNT.TypeScale.stamp())
                         .tracking(DVNT.TypeScale.stampTracking)
                         .foregroundStyle(DVNT.brandGradient)
                 }
@@ -227,7 +227,7 @@ private struct TicketPage: View {
                 BroadcastListView(eventId: ticket.eventId)
             } label: {
                 HStack(spacing: DVNT.Space.snug) {
-                    Image(systemName: "megaphone.fill").font(.system(size: 14))
+                    Image(systemName: "megaphone.fill").font(.system(size: DVNT.TypeScale.Icon.row))
                     Text("Messages from host").font(DVNT.TypeScale.body())
                 }
                 .foregroundColor(.white)

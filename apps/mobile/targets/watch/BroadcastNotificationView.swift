@@ -30,26 +30,26 @@ struct BroadcastNotificationView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: DVNT.Space.base) {
+                HStack(spacing: DVNT.Space.snug) {
                     Image(systemName: model.intent.glyph)
-                        .font(.system(size: 16))
+                        .font(.system(size: DVNT.TypeScale.Icon.row))
                         .foregroundStyle(model.intent.accent)
                     Text(model.heading)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.75))
+                        .font(DVNT.TypeScale.caption())
+                        .foregroundColor(DVNT.textBright)
                         .lineLimit(2)
                 }
 
                 // The hero — verbatim, never truncated to fit chrome.
                 Text(model.message)
-                    .font(.system(size: 19, weight: .semibold))
+                    .font(DVNT.TypeScale.title(19))
                     .foregroundColor(.white)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 6)
+            .padding(.horizontal, DVNT.Space.tight)
+            .padding(.vertical, DVNT.Space.snug)
         }
         .background(DVNT.canvas.ignoresSafeArea())
     }

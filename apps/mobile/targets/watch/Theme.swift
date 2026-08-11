@@ -17,7 +17,25 @@ enum DVNT {
 
     static let hairline = Color.white.opacity(0.10)
     static let surface = Color.white.opacity(0.04)
+
+    /// Text sitting on *artwork* rather than on the canvas. A flyer is an
+    /// unknown, often mid-tone image, so the canvas ramp (`textDim` 0.60,
+    /// `textFaint` 0.40) goes muddy on top of it even through a scrim. These
+    /// run brighter on purpose — same hierarchy, more headroom.
+    enum OnArt {
+        static let primary = Color.white
+        static let secondary = Color.white.opacity(0.82)
+        static let tertiary = Color.white.opacity(0.66)
+    }
+    /// Between `textDim` and full white. Four call sites had invented 0.70 and
+    /// 0.75 for the same job; both round here, and a 0.02–0.03 alpha shift on
+    /// white is below the perceptual floor of an OLED watch panel.
+    static let textBright = Color.white.opacity(0.72)
     static let textDim = Color.white.opacity(0.60)
+    /// The missing rung. Six call sites wanted "dimmer than `textDim`, brighter
+    /// than `textFaint`" and each invented its own 0.5–0.55, which is precisely
+    /// how a palette drifts.
+    static let textMuted = Color.white.opacity(0.55)
     static let textFaint = Color.white.opacity(0.40)
 
     /// Primary accent. Cyan is stop 1 and the design system's "primary accent".
@@ -115,12 +133,25 @@ extension DVNT {
             .system(size: size, weight: .bold).monospacedDigit()
         }
 
+        /// A numeral that is *signage* rather than content — the door count, a
+        /// capacity board. Condensed and heavy for the same reason `stamp` is
+        /// (venue vernacular: laminates, door boards), but monospaced so a live
+        /// count does not reflow its row as it ticks.
+        ///
+        /// Split from `numeral` deliberately: a plain `numeral` here would drop
+        /// `.width(.condensed)` and quietly restyle the one screen a host stares
+        /// at all night.
+        static func numeralStamp(_ size: CGFloat = 34) -> Font {
+            .system(size: size, weight: .heavy).width(.condensed).monospacedDigit()
+        }
+
         /// SF Symbol sizing. Icons were the one register still set with raw
         /// `.system(size:)` at the call site (13 / 15 / 28 across four files);
         /// these are those three values, named.
         enum Icon {
             static let inline: CGFloat = 13   // trailing metadata glyphs
             static let row: CGFloat = 15      // leading glyph on a list row
+            static let control: CGFloat = 20  // glyph inside a tap target
             static let hero: CGFloat = 28     // empty-state / focal
         }
     }

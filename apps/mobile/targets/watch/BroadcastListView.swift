@@ -31,8 +31,8 @@ struct BroadcastListView: View {
                             BroadcastRow(broadcast: b)
                         }
                         .listRowBackground(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.white.opacity(b.read ? 0.05 : 0.10))
+                            RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous)
+                                .fill(b.read ? DVNT.Surface.low : DVNT.hairline)
                         )
                     }
                 }
@@ -40,7 +40,7 @@ struct BroadcastListView: View {
             }
         }
         .navigationTitle("Host")
-        .containerBackground(DVNT.brandGradient.opacity(0.16), for: .navigation)
+        .containerBackground(DVNT.canvas, for: .navigation)
     }
 }
 
@@ -48,32 +48,32 @@ private struct BroadcastRow: View {
     let broadcast: WatchBroadcast
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DVNT.Space.tight) {
+            HStack(spacing: DVNT.Space.snug) {
                 Image(systemName: broadcast.intent.glyph)
-                    .font(.system(size: 12))
+                    .font(.system(size: DVNT.TypeScale.Icon.inline))
                     .foregroundStyle(broadcast.intent.accent)
                 Text(broadcast.eventTitle)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.7))
+                    .font(DVNT.TypeScale.caption())
+                    .foregroundColor(DVNT.textBright)
                     .lineLimit(1)
-                Spacer(minLength: 4)
+                Spacer(minLength: DVNT.Space.tight)
                 if !broadcast.read {
                     Circle().fill(broadcast.intent.accent).frame(width: 6, height: 6)
                 }
             }
             // Two-line preview only — the full message lives on the detail screen.
             Text(broadcast.body)
-                .font(.system(size: 14, weight: .medium))
+                .font(DVNT.TypeScale.body())
                 .foregroundColor(.white)
                 .lineLimit(2)
             if let date = broadcast.date {
                 Text(date.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.4))
+                    .font(DVNT.TypeScale.caption())
+                    .foregroundColor(DVNT.textFaint)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, DVNT.Space.hair)
     }
 }
 
@@ -84,39 +84,39 @@ struct BroadcastDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: DVNT.Space.roomy) {
+                HStack(spacing: DVNT.Space.snug) {
                     Image(systemName: broadcast.intent.glyph)
-                        .font(.system(size: 16))
+                        .font(.system(size: DVNT.TypeScale.Icon.row))
                         .foregroundStyle(broadcast.intent.accent)
                     Text(broadcast.title ?? broadcast.eventTitle)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.75))
+                        .font(DVNT.TypeScale.caption())
+                        .foregroundColor(DVNT.textBright)
                         .lineLimit(2)
                 }
 
                 // The hero — verbatim, no truncation.
                 Text(broadcast.body)
-                    .font(.system(size: 19, weight: .semibold))
+                    .font(DVNT.TypeScale.title(19))
                     .foregroundColor(.white)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Divider().overlay(Color.white.opacity(0.1))
+                Divider().overlay(DVNT.hairline)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DVNT.Space.tight) {
                     Label(broadcast.eventTitle, systemImage: "calendar")
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.55))
+                        .font(DVNT.TypeScale.caption())
+                        .foregroundColor(DVNT.textMuted)
                     if let date = broadcast.date {
                         Label(date.formatted(date: .abbreviated, time: .shortened),
                               systemImage: "clock")
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.4))
+                            .font(DVNT.TypeScale.caption())
+                            .foregroundColor(DVNT.textFaint)
                     }
                 }
             }
-            .padding(.horizontal, 4)
-            .padding(.bottom, 12)
+            .padding(.horizontal, DVNT.Space.tight)
+            .padding(.bottom, DVNT.Space.roomy)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(DVNT.canvas.ignoresSafeArea())
@@ -129,17 +129,17 @@ private struct EmptyBroadcastsView: View {
     var body: some View {
         ZStack {
             DVNT.canvas.ignoresSafeArea()
-            VStack(spacing: 8) {
+            VStack(spacing: DVNT.Space.base) {
                 Image(systemName: "megaphone")
-                    .font(.system(size: 24))
+                    .font(.system(size: DVNT.TypeScale.Icon.hero))
                     .foregroundStyle(DVNT.brandGradient)
                 Text("No messages yet")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(DVNT.TypeScale.title())
                     .foregroundColor(.white)
                 Text(reachable ? "Host updates appear here."
                                : "Open DVNT on your iPhone to sync.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.5))
+                    .font(DVNT.TypeScale.body())
+                    .foregroundColor(DVNT.textMuted)
                     .multilineTextAlignment(.center)
             }
             .padding()

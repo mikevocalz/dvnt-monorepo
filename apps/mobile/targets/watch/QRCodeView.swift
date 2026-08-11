@@ -67,12 +67,12 @@ struct QRCodeView: View {
     private var dormant: some View {
         VStack(spacing: DVNT.Space.snug) {
             Image(systemName: "qrcode")
-                .font(.system(size: 34, weight: .light))
+                .font(.system(size: DVNT.TypeScale.Icon.hero, weight: .light))
                 .foregroundStyle(DVNT.brandGradient)
             Text("RAISE TO PRESENT")
-                .font(DVNT.TypeScale.stamp(11))
+                .font(DVNT.TypeScale.stamp())
                 .tracking(DVNT.TypeScale.stampTracking)
-                .foregroundColor(.white.opacity(0.55))
+                .foregroundColor(DVNT.textMuted)
         }
     }
 }

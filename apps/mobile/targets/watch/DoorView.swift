@@ -66,7 +66,7 @@ struct DoorView: View {
             } else {
                 VStack(spacing: DVNT.Space.base) {
                     Image(systemName: "door.left.hand.open")
-                        .font(.system(size: 24))
+                        .font(.system(size: DVNT.TypeScale.Icon.hero))
                         .foregroundColor(DVNT.accent)
                     Text("No event running")
                         .font(DVNT.TypeScale.title())
@@ -92,7 +92,7 @@ private struct DoorNumber: View {
     var body: some View {
         VStack(spacing: DVNT.Space.hair) {
             Text("\(value)")
-                .font(.system(size: 34, weight: .heavy).width(.condensed))
+                .font(DVNT.TypeScale.numeralStamp(34))
                 .foregroundColor(accent)
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
@@ -104,7 +104,7 @@ private struct DoorNumber: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, DVNT.Space.base)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous)
                 .fill(DVNT.surface)
         )
         .accessibilityElement(children: .combine)
