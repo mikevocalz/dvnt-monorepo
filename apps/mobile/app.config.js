@@ -496,6 +496,7 @@ export default {
       //   },
       // ],
       ["./plugins/with-development-team", { teamId: "436WA3W63V" }],
+      "./plugins/with-storekit-config",
       "expo-secure-store",
       "react-native-compressor",
       [
