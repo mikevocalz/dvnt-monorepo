@@ -34,7 +34,18 @@ export default {
     name: "DVNT",
     slug: "dvnt",
     version: "1.0.0",
-    runtimeVersion: "1.0.0",
+    // Fingerprint, NOT a hardcoded string. A fixed runtimeVersion makes every
+    // binary ever shipped claim the same native contract, so `eas update`
+    // happily serves a JS bundle built against today's native module set to a
+    // binary that predates it. When Fabric then mounts a view whose Expo module
+    // isn't in that older binary, ExpoFabricView's initializer hits
+    // `fatalError(AppContextLost)` — EXC_BREAKPOINT, no JS stack, invisible if
+    // it happens on a background launch. Confirmed twice on-device
+    // (DVNT-2026-08-10-141056/164451.ips, build 1.0.312, byte-identical stacks).
+    // Native surface has churned hard since: SDK 56->57, Sentry, widgets +
+    // push-to-start, background-task, watch targets. Fingerprint hashes the
+    // native project so mismatched pairs are never offered the update at all.
+    runtimeVersion: { policy: "fingerprint" },
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     // DVNT is dark-only. "automatic" let every SYSTEM-drawn surface follow the
@@ -59,7 +70,10 @@ export default {
       // CRITICAL: Use appEnv (which reads APP_ENV from EAS profiles), NOT NODE_ENV
       // NODE_ENV defaults to "development" during Metro bundling even for production builds
       enabled: appEnv === "production" || appEnv === "preview", // Enable OTA for production and preview builds only
-      runtimeVersion: "1.0.0", // Fixed runtime version for OTA safety
+      // NOTE: runtimeVersion is a TOP-LEVEL expo config key. It used to be
+      // duplicated here as "1.0.0" with a comment claiming it was "for OTA
+      // safety" — it was never read by expo-updates, and the top-level value it
+      // shadowed in spirit was the actual cause of the AppContextLost crash.
       message: "A new version is available. Restart to apply updates.", // User-friendly message
     },
     buildCacheProvider: "eas",
