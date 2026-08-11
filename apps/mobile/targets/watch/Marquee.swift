@@ -78,6 +78,9 @@ struct MarqueePage<Destination: View>: View {
                     }
                     .padding(DVNT.Space.roomy)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // The single glass surface — chrome floating on artwork.
+                    // No-op before watchOS 26; the scrim already covers it.
+                    .marqueeChrome()
                 }
             }
             .buttonStyle(.plain)
@@ -165,5 +168,44 @@ struct GradientRail: View {
         .opacity(0.9)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Liquid Glass
+
+/// The one glass surface, on the navigation layer only.
+///
+/// watchOS 26 ships Liquid Glass: a translucent material for chrome that floats
+/// *above* content and refracts what is behind it. The design system already
+/// asks for exactly this on web — "depth = hairlines + the liquid-glass header
+/// (saturate(160%) blur(18px), bg ink/72), ONE glass surface, not drop-shadows
+/// everywhere." A Door's label block is that surface here: it is chrome sitting
+/// on artwork, which is precisely the case the material was designed for.
+///
+/// AVAILABILITY-GATED RATHER THAN RAISING THE FLOOR. The spec framed this as a
+/// choice between bumping deploymentTarget (which drops Series 4/5 and SE 1) or
+/// faking it with .ultraThinMaterial. There is a third option that costs
+/// nothing: keep deploymentTarget at 10.0 and gate on #available. Modern watches
+/// get real Liquid Glass, older ones keep the scrim they already had, and no
+/// member loses the app over a material.
+///
+/// Verified against WatchOS26.4.sdk: `.glassEffect(.regular, in:)` typechecks at
+/// -target arm64_32-apple-watchos26.0 and fails at 10.0 with "only available in
+/// watchOS 26.0 or newer" — which is what makes the gate necessary and correct.
+///
+/// NEVER put this on a content row. One strong surface, not many weak ones.
+extension View {
+    @ViewBuilder func marqueeChrome() -> some View {
+        if #available(watchOS 26.0, *) {
+            self.glassEffect(
+                .regular,
+                in: .rect(cornerRadius: DVNT.Radius.card, style: .continuous)
+            )
+        } else {
+            // Pre-26: the Door's own scrim is already doing this job, so add
+            // nothing. A white-opacity panel here would be the "many weak
+            // surfaces" the design system rules out.
+            self
+        }
     }
 }
