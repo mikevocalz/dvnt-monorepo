@@ -189,10 +189,14 @@ extension DVNT {
     }
 
     /// Corner radii. `14` was hardcoded at five call sites in EventListView alone.
+    /// Radii per docs/dvnt-design-system.md: chips/CTAs 8, cards 20, hero 24.
+    /// No pills for content — a capsule chip is a different product's language.
+    /// Previously 10/14/20, which was a watch-local remix and read as generic.
     enum Radius {
-        static let card: CGFloat = 14
-        static let chip: CGFloat = 10
-        static let hero: CGFloat = 20
+        static let chip: CGFloat = 8
+        static let control: CGFloat = 12
+        static let card: CGFloat = 20
+        static let hero: CGFloat = 24
     }
 
     /// Motion vocabulary. One set of curves so nothing reads as ad-hoc.
@@ -202,12 +206,17 @@ extension DVNT {
     /// pause — `repeatForever` keeps ticking off-screen and in Always-On,
     /// which is a battery bug you cannot see in the simulator.
     enum Motion {
-        static let enter = Animation.spring(response: 0.42, dampingFraction: 0.82)
-        static let settle = Animation.spring(response: 0.55, dampingFraction: 0.9)
-        static let quick = Animation.easeOut(duration: 0.18)
+        /// The app's curve, ported exactly: cubic-bezier(0.22, 1, 0.36, 1) at
+        /// 240ms. These were watch-local springs (response .42/.55), which is
+        /// why watch motion felt like a different product from the phone — a
+        /// spring overshoots and settles, this curve arrives decisively. Names
+        /// are unchanged so no call site moves.
+        static let enter = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)
+        static let settle = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.28)
+        static let quick = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.18)
 
         /// Staggered list entrance, capped so a long list does not crawl in.
-        static func stagger(_ i: Int) -> Animation { enter.delay(min(Double(i) * 0.055, 0.4)) }
+        static func stagger(_ i: Int) -> Animation { enter.delay(min(Double(i) * 0.045, 0.32)) }
     }
 }
 

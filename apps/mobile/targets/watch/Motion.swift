@@ -71,7 +71,12 @@ struct LiveDot: View {
             let wave = 1 - abs(t * 2 - 1)
 
             Circle()
-                .fill(DVNT.accent)
+                // `signal`, not `accent`. Cyan is the primary accent and is
+                // already everywhere on this screen, so a cyan dot read as one
+                // more accent rather than as LIVE. #FC253A is the design
+                // system's live/destructive colour and is used nowhere else on
+                // the wrist, which is what makes it mean something.
+                .fill(DVNT.signal)
                 .frame(width: diameter, height: diameter)
                 .opacity(isPulsing ? 0.35 + wave * 0.65 : 1)
         }
