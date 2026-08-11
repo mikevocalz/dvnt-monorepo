@@ -27,6 +27,35 @@
     "apps/mobile/apps/**"
   ],
 
+
+  // --- WS-1 re-baseline (2026-08-10) keep-annotations -------------------------
+  // The 2026-08-07 baseline listed 553 unused files, headlined by ~533 orphans
+  // in apps/mobile/{lib,src,components}. Re-derived on master 69 commits later:
+  // 46 unused files, and the mobile orphan trees hold 85 files total. The purge
+  // the baseline promised was already banked. Everything below is a FALSE
+  // POSITIVE or a deliberate keep — verified individually, not swept:
+  //
+  //  * scripts/codemods/ws6-*.ts — spent one-shot ts-morph codemods, retained ON
+  //    PURPOSE: docs/structure-target.md:114 ships them "so the reviewer can
+  //    re-run it".
+  //  * scripts/watch-settings-check/mmkv-stub.js, scripts/presence-check/stubs.js
+  //    — consumed via esbuild --alias inside scripts/verify-*.mjs. Knip's module
+  //    graph cannot see bundler alias maps; deleting these breaks verify-watch
+  //    and verify-presence.
+  //  * apps/mobile/supabase/__tests__/*.test.ts — tests are entry points.
+  //  * features/presence/*, features/events/door-dashboard.ts,
+  //    features/ticket/ui/TicketPerkChip.tsx — Host & Guest WS-5/7/8, landed
+  //    ahead of their screen wiring. Work-in-progress, not orphans.
+  //  * features/scanner/ui/**, features/stories-editor/canvas-kit/**,
+  //    features/stories/ui/story-* — leaves behind feature barrels + platform
+  //    forks; review individually before any removal.
+  //  * apps/web/src/platform/* — resolved by the Next webpack alias map, not by
+  //    an import.
+  //
+  // The ONE genuine dead file this pass found — features/call/ui/
+  // incoming-call-overlay.tsx — was not deleted: it was a BUG. It is the global
+  // incoming-call listener and the sole driver of the watch call path, and it
+  // had never been mounted. Fixed on master (90621ff), not purged.
   // Binaries referenced only from shell scripts / CI that Knip can't trace.
   "ignoreBinaries": [
     "patch-package",

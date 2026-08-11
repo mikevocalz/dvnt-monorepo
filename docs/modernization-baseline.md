@@ -110,3 +110,49 @@ It's a **Payload v4 ESM CLI / migration runner** — `src/` is just `payload.con
 Per the prompt's strict ordering, isolated PRs: **WS-1** dead-file purge (quarantine the 533 mobile orphans → CI+smoke → delete; re-run Knip to reclassify deps) → **WS-2** Expo 57 resolve (`expo install --fix`, kill the SDK-56 duplicates, patches re-justified, native build proof) → **WS-3** Next 16.3 (+ Turbopack port, Instant Nav decision per route) → **WS-4** Payload newer-4.0 build (+ importMap regen, admin/Sentry parity) → **WS-5** full sweep security-first (better-auth/next/sharp/postcss now; majors per HOLD list) + `renovate.json` policy → **WS-6** structure/quality (target tree approved first, one feature per PR) → **WS-7** measured perf (Callstack skills, before/after on release builds).
 
 *Nothing proceeds past this document without approval of the plan and the §6 answers.*
+
+---
+
+## WS-1 RE-BASELINE — 2026-08-10 (supersedes the file counts above)
+
+The 2026-08-07 inventory is **stale**. Master is ~69 commits past it and the
+purge it recommended was largely already banked. Re-derived with Knip on master
+(`typescript@6.0.3` — now published, so no scratch 5.9.2 was needed; that
+caveat is retired):
+
+| Metric | 2026-08-07 | 2026-08-10 |
+|---|---|---|
+| Unused **files** | 553 | **46** |
+| `apps/mobile/{lib,src,components}` orphans | ~533 | **85 files exist in total** |
+| Mobile routes importing `@/` | "zero" | **1** |
+| Unused exports | 247 | 328 |
+| Unused deps / devDeps | 148 / 27 | 149 / 23 |
+
+**Do not quarantine off the old list.** Two of its load-bearing claims are now
+false, and the second is dangerous: the one mobile route that imports `@/` is
+`apps/mobile/app/settings/membership.tsx`, the RevenueCat billing adapter. A
+sweep based on the old inventory would have deleted the IAP seam.
+
+### Outcome: annotation, not deletion
+
+All 46 were reviewed individually. **Zero were deleted** — every one is a false
+positive or a deliberate keep, with reasons recorded inline in `knip.jsonc`:
+spent-but-retained WS-6 codemods (`docs/structure-target.md:114` ships them for
+reviewer re-run), esbuild `--alias` stubs the verifiers depend on, test entry
+points, Host & Guest WS-5/7/8 code landed ahead of its screen wiring, feature-
+barrel leaves needing individual review, and webpack-alias-resolved platform
+shims.
+
+### The one genuine finding was a bug, not an orphan
+
+`packages/app/features/call/ui/incoming-call-overlay.tsx` was defined, exported
+and **mounted nowhere on any branch** (`git log -S` across all history).
+Incoming calls therefore rendered nothing — and because `pushCallToWatch` and
+`registerWatchCallHandler` have that component as their sole consumer, the watch
+never rang either. Fixed by mounting it (`90621ff`), not by deleting it.
+
+**WS-1 is closed.** The remaining dead-code surface is 46 annotated keeps. The
+next real win in this lane is the 328 unused exports and the dependency
+reclassification, both of which should be re-derived rather than taken from the
+2026-08-07 numbers.
+
