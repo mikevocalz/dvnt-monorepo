@@ -15,7 +15,11 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
-import { callSignalsApi, type CallSignal } from "@dvnt/app/lib/api/call-signals";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
+import {
+  callSignalsApi,
+  type CallSignal,
+} from "@dvnt/app/lib/api/call-signals";
 import {
   setupCallKeep,
   registerCallKeepListeners,
@@ -333,8 +337,11 @@ export function useCallKeepCoordinator(): void {
       // When the caller's ring timeout fires and marks the signal as "missed",
       // or when the caller hangs up (status → "ended"), we need to dismiss
       // the native ringing UI on the callee's device.
-      signalUpdateChannel = supabase
-        .channel(`call_signal_updates:${userId}`)
+      // freshChannel, not supabase.channel: a stable topic hands back the
+      // already-joined channel on remount and .on() throws
+      // "cannot add postgres_changes callbacks ... after subscribe()",
+      // which killed the whole (protected) subtree. See lib/supabase/realtime.ts.
+      signalUpdateChannel = freshChannel(`call_signal_updates:${userId}`)
         .on(
           "postgres_changes",
           {

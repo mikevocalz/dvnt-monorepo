@@ -4,6 +4,7 @@
  */
 
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import type {
   VideoRoom,
@@ -385,8 +386,7 @@ export const videoApi = {
       const realtimeRoomId = await resolveRealtimeRoomId(roomId);
       if (!realtimeRoomId || cancelled) return;
 
-      channel = supabase
-        .channel(`video_room_events:${realtimeRoomId}`)
+      channel = freshChannel(`video_room_events:${realtimeRoomId}`)
         .on(
           "postgres_changes",
           {
@@ -443,8 +443,7 @@ export const videoApi = {
       const realtimeRoomId = await resolveRealtimeRoomId(roomId);
       if (!realtimeRoomId || cancelled) return;
 
-      channel = supabase
-        .channel(`video_room_members:${realtimeRoomId}`)
+      channel = freshChannel(`video_room_members:${realtimeRoomId}`)
         .on(
           "postgres_changes",
           {

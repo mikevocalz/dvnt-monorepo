@@ -6,6 +6,7 @@
  */
 
 import { supabase } from "../supabase/client";
+import { freshChannel } from "../supabase/realtime";
 
 export interface CallSignal {
   id: number;
@@ -19,9 +20,6 @@ export interface CallSignal {
   call_type: "audio" | "video";
   created_at: string;
 }
-
-/** Makes each call-signal channel topic unique — see subscribeToIncomingCalls. */
-let callChannelSeq = 0;
 
 export const callSignalsApi = {
   /**
@@ -168,34 +166,10 @@ export const callSignalsApi = {
     // to prevent multiple signals for the same call from canceling each other
     const _seenRoomIds = new Set<string>();
 
-    // A stable topic is NOT safe here. Verified in @supabase/realtime-js:
-    //   RealtimeClient.channel():  `const exists = getChannels().find(...)`
-    //                              `if (!exists) {...} else return exists`
-    //   RealtimeChannel.on():      throws when `isJoined() || isJoining()`
-    // so re-subscribing with the same topic hands back the still-joined channel
-    // and .on("postgres_changes") throws:
-    //   "cannot add `postgres_changes` callbacks for realtime:call_signals:<id>
-    //    after `subscribe()`"
-    // removeChannel() cannot prevent it — it is `async` (`await
-    // channel.unsubscribe()` before teardown), so the channel is still in
-    // getChannels() on the very next synchronous line.
-    //
-    // IncomingCallOverlay lives in the (protected) layout, so any remount that
-    // laps its own cleanup threw during the effect and took every protected
-    // screen with it — the inbox included.
-    //
-    // Fix: a unique topic per subscription can never collide with a joined one.
-    // Strays are still swept first so repeated remounts can't stack listeners
-    // and ring the same call twice.
-    for (const c of supabase.getChannels()) {
-      if (c.topic.startsWith(`realtime:call_signals:${userAuthId}`)) {
-        console.log("[CallSignals] Sweeping stale channel:", c.topic);
-        void supabase.removeChannel(c);
-      }
-    }
-
-    const channel = supabase
-      .channel(`call_signals:${userAuthId}:${++callChannelSeq}`)
+    // freshChannel, not supabase.channel — a stable topic hands back the
+    // already-joined channel on remount and .on() throws. Full explanation of
+    // the realtime-js behaviour lives in lib/supabase/realtime.ts.
+    const channel = freshChannel(`call_signals:${userAuthId}`)
       .on(
         "postgres_changes",
         {

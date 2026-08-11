@@ -5,6 +5,7 @@
  */
 
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import type { SneakyUser } from "../types";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -173,8 +174,7 @@ export function subscribeToRoomComments(
     resolveAuthor?: (authorId: string) => RoomCommentAuthor | undefined;
   },
 ): () => void {
-  const channel = supabase
-    .channel(`room-comments:${roomId}`)
+  const channel = freshChannel(`room-comments:${roomId}`)
     .on(
       "postgres_changes",
       {

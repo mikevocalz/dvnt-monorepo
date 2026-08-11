@@ -45,6 +45,7 @@ import {
 import { useVideoRoom } from "@dvnt/app/features/video";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import {
   VideoStage,
   VideoGrid,
@@ -62,7 +63,10 @@ import {
   RemoteAudioLayer,
 } from "@dvnt/app/features/sneaky-lynk/ui";
 import type { VideoParticipant } from "@dvnt/app/features/sneaky-lynk/ui";
-import type { SneakyRoom, SneakyUser } from "@dvnt/app/features/sneaky-lynk/types";
+import type {
+  SneakyRoom,
+  SneakyUser,
+} from "@dvnt/app/features/sneaky-lynk/types";
 import { RoomJoinErrorSheet } from "@dvnt/app/features/sneaky-lynk";
 import { RoomFullSheet } from "@dvnt/app/features/sneaky-lynk";
 import { CaptureNotificationBanner } from "@dvnt/app/features/sneaky-lynk";
@@ -1288,8 +1292,7 @@ function ServerRoom({
   useEffect(() => {
     if (!id) return;
 
-    const channel = supabase
-      .channel(`video_room_meta:${id}`)
+    const channel = freshChannel(`video_room_meta:${id}`)
       .on(
         "postgres_changes",
         {
@@ -1609,8 +1612,7 @@ function ServerRoom({
       );
     if (!isUuid) return;
 
-    const channel = supabase
-      .channel(`room-closed:${id}`)
+    const channel = freshChannel(`room-closed:${id}`)
       .on(
         "postgres_changes" as any,
         {

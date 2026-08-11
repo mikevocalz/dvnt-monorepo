@@ -5,6 +5,7 @@
 
 import { useEffect, useCallback, useRef } from "react";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import type { RoomEvent, EjectPayload } from "../types";
 
 interface UseRoomEventsParams {
@@ -84,8 +85,7 @@ export function useRoomEvents({
     console.log("[SneakyLynk] Subscribing to room events:", roomId);
 
     // Subscribe to sneaky_room_events table changes
-    const channel = supabase
-      .channel(`sneaky-room-${roomId}`)
+    const channel = freshChannel(`sneaky-room-${roomId}`)
       .on(
         "postgres_changes",
         {

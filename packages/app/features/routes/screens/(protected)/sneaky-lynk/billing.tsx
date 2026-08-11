@@ -29,6 +29,7 @@ import {
 } from "lucide-react-native";
 import * as WebBrowser from "expo-web-browser";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
@@ -119,8 +120,7 @@ function BillingScreenContent({
   useEffect(() => {
     if (!authUser?.id) return;
 
-    const channel = supabase
-      .channel("sneaky-sub-changes")
+    const channel = freshChannel("sneaky-sub-changes")
       .on(
         "postgres_changes" as any,
         {
@@ -380,7 +380,11 @@ function BillingScreenContent({
           {Platform.OS === "ios" && isFree && !billing ? (
             <View
               className="rounded-2xl p-4 items-center gap-1"
-              style={{ backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" }}
+              style={{
+                backgroundColor: "rgba(255,255,255,0.04)",
+                borderWidth: 1,
+                borderColor: "rgba(255,255,255,0.08)",
+              }}
             >
               <Text className="text-sm font-sans-semibold text-foreground text-center">
                 Manage Your Plan
