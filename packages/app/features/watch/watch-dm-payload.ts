@@ -22,6 +22,13 @@ export interface WatchDMDTO {
   name: string;
   /** @handle for a 1:1; empty for a group. */
   handle: string;
+  /**
+   * Sender avatar, for the Messages Door's 2x2 mosaic on the watch.
+   * Optional: a group has no single face, and an avatar-less member is normal —
+   * AvatarMosaic fills empty slots with the Deviant Gradient rather than grey.
+   * Costs no extra query; `Conversation.user.avatar` is already loaded.
+   */
+  avatarURL?: string;
   /** Last message text, rendered verbatim. May be empty for a fresh thread. */
   preview: string;
   /** Epoch seconds parsed from the conversation's ISO timestamp. */
@@ -56,6 +63,7 @@ export function toWatchDM(c: Conversation): WatchDMDTO {
       ? c.groupName || "Group"
       : c.user?.name || c.user?.username || "DVNT",
     handle: isGroup ? "" : c.user?.username ? `@${c.user.username}` : "",
+    avatarURL: isGroup ? undefined : c.user?.avatar?.trim() || undefined,
     preview: c.lastMessage ?? "",
     timestamp: toEpochSeconds(c.timestamp),
     unread: !!c.unread,
@@ -101,7 +109,8 @@ export function validateDMReply(
 ): WatchDMReply | null {
   if (!raw || typeof raw !== "object") return null;
   const { conversationId, text } = raw as Record<string, unknown>;
-  if (typeof conversationId !== "string" || typeof text !== "string") return null;
+  if (typeof conversationId !== "string" || typeof text !== "string")
+    return null;
   const body = text.trim();
   if (!body || body.length > MAX_REPLY_CHARS) return null;
   if (!knownIds.includes(conversationId)) return null;

@@ -15,9 +15,13 @@ struct WatchDM: Identifiable, Codable, Hashable {
     let timestamp: Double // epoch seconds
     let unread: Bool
     let isGroup: Bool
+    /// Sender avatar for the Messages Door mosaic. Optional by design: a group
+    /// has no single face and an avatar-less member is normal — AvatarMosaic
+    /// fills the gap with the Deviant Gradient rather than grey.
+    let avatarURL: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, handle, preview, timestamp, unread, isGroup
+        case id, name, handle, preview, timestamp, unread, isGroup, avatarURL
     }
 
     /// Lenient decode throughout: one malformed row must not blank the inbox.
@@ -30,6 +34,9 @@ struct WatchDM: Identifiable, Codable, Hashable {
         timestamp = (try? c.decode(Double.self, forKey: .timestamp)) ?? 0
         unread = (try? c.decode(Bool.self, forKey: .unread)) ?? false
         isGroup = (try? c.decode(Bool.self, forKey: .isGroup)) ?? false
+        // Lenient like the rest: an older phone build sends no avatarURL at all.
+        avatarURL = (try? c.decode(String.self, forKey: .avatarURL))
+            .flatMap { $0.isEmpty ? nil : $0 }
     }
 
     var date: Date? { timestamp > 0 ? Date(timeIntervalSince1970: timestamp) : nil }

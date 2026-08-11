@@ -77,19 +77,25 @@ final class DMStore: ObservableObject {
 // MARK: - Marquee mosaic
 
 extension DMStore {
-    /// Sender avatars for the Messages Door's 2x2 mosaic, most recent first.
+    /// Sender avatars for the Messages Door's 2x2 mosaic — distinct senders,
+    /// most recent first, capped at four.
     ///
-    /// Returns [] today, deliberately and honestly: `WatchDM` carries
-    /// {id, name, handle, preview, timestamp, unread, isGroup} and NO avatar,
-    /// and neither does `WatchBroadcast`. There is nothing on the wrist to draw.
+    /// `avatarURL` arrives from watch-dm-payload.ts, which attaches
+    /// `Conversation.user.avatar` (already loaded — no extra query). Groups send
+    /// none by design: a group has no single face. Empty slots render as Deviant
+    /// Gradient tiles in AvatarMosaic, never grey, so a one-sender mosaic is
+    /// still a composition rather than a broken grid.
     ///
-    /// `AvatarMosaic` renders empty slots as Deviant Gradient tiles, so the Door
-    /// is still a branded composition rather than an empty box — it just is not
-    /// yet *who wrote*. Populating this needs the phone to attach
-    /// `hostAvatarURL` (and `eventImageURL`) in watch-dm-payload.ts /
-    /// watch-broadcast-payload.ts with `Models.swift` mirrored in the same
-    /// change; both already carry the ids those lookups need, so it costs no
-    /// extra queries. Until then this returning [] is the correct behaviour,
-    /// not a stub to paper over.
-    var recentAvatarURLs: [String] { [] }
+    /// De-duped on purpose: four messages from the same host must not become
+    /// four identical tiles.
+    var recentAvatarURLs: [String] {
+        envelope.dms
+            .sorted { $0.timestamp > $1.timestamp }
+            .compactMap(\.avatarURL)
+            .reduce(into: [String]()) { acc, url in
+                // De-dupe: four messages from one host should not be four
+                // identical tiles. Distinct senders, most recent first.
+                if !acc.contains(url) && acc.count < 4 { acc.append(url) }
+            }
+    }
 }
