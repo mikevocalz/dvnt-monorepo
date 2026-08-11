@@ -37,8 +37,18 @@ const SUPABASE_URL =
     ? _rawSplashUrl
     : "https://npfjanxturvmjyevoyfo.supabase.co";
 
-const BOOT_TIMEOUT_MS = 1000; // 1 second max (hard cap)
-const ANIMATION_DURATION_MS = 1000; // 0.8 second display time
+const ANIMATION_DURATION_MS = 1000; // normal path: how long the icon shows
+
+// Safety net for a boot that never finishes. MUST stay comfortably longer than
+// ANIMATION_DURATION_MS. It used to be 1000 — exactly equal — so both timers
+// fired on the same tick and the net won the race every launch (its effect is
+// declared first, so its setTimeout is registered first). Every cold start
+// therefore logged "[Splash] Boot timeout reached" and fired an extra
+// checkApiHealth(); worse, a momentarily flaky network at boot flipped
+// setBootTimedOut(true) and showed the failure screen on a perfectly healthy
+// app. At 4s the normal path has long since set animationFinished, so the
+// net's guard short-circuits and it only ever fires when boot is genuinely stuck.
+const BOOT_TIMEOUT_MS = 4000;
 
 // Module-level flag - persists across component remounts
 let hasCalledFinish = false;
