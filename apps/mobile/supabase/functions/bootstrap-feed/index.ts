@@ -286,7 +286,7 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
             id, username, first_name, verified,
             avatar:avatar_id(url)
           ),
-          media:posts_media(type, url, "order", mime_type, live_photo_video_url),
+          media:posts_media(type, url, _order, mime_type, live_photo_video_url),
           post_text_slides(id, slide_index, content)
         `,
         { count: "exact" },
@@ -445,7 +445,7 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
           verified: author?.verified || false,
         },
         media: (p.media || [])
-          .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+          .sort((a: any, b: any) => (a._order || 0) - (b._order || 0))
           .map((m: any) => {
             const rawType: string = m.type || "image";
             const mimeType: string | undefined = m.mime_type || undefined;

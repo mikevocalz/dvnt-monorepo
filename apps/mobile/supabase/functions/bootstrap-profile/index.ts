@@ -116,7 +116,7 @@ Deno.serve(async (req: Request) => {
       .select(
         `
           id, created_at, content, post_kind, text_theme, is_nsfw, likes_count,
-          media:posts_media(type, url, "order")
+          media:posts_media(type, url, _order)
         `,
       )
       .eq("author_id", profileUserId)
@@ -194,7 +194,7 @@ Deno.serve(async (req: Request) => {
 
     const posts = (postsResult.data || []).map((post: any) => {
       const media = (post.media || []).sort(
-        (a: any, b: any) => (a.order || 0) - (b.order || 0),
+        (a: any, b: any) => (a._order || 0) - (b._order || 0),
       );
       const firstMedia = media[0];
       const isTextPost = post.post_kind === "text";

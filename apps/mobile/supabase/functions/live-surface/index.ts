@@ -203,7 +203,7 @@ async function buildTile2(
     .select(
       `
       id, content, likes_count,
-      media:posts_media(type, url, "order")
+      media:posts_media(type, url, _order)
     `,
     )
     .gte("created_at", sevenDaysAgo)
@@ -214,7 +214,7 @@ async function buildTile2(
   const items: Tile2Item[] = [];
   const mediaSorted = (arr: any[]) =>
     Array.isArray(arr)
-      ? [...arr].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0))
+      ? [...arr].sort((a: any, b: any) => (a._order ?? 0) - (b._order ?? 0))
       : [];
 
   for (const post of posts || []) {
