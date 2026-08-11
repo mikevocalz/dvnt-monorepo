@@ -1,3 +1,4 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
   Text,
@@ -18,7 +19,7 @@ import React, {
   memo,
 } from "react";
 import * as Haptics from "expo-haptics";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import {
   ArrowLeft,
   Heart,
@@ -104,6 +105,7 @@ import { TranslateButton } from "@dvnt/app/components/ui/translate-button";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { useTranslation } from "react-i18next";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
+import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 // CRITICAL: Match FeedItem's 4:5 aspect ratio for consistent display
@@ -1614,6 +1616,10 @@ function PostDetailScreenContent() {
                 height: "100%",
               }}
             >
+              {/* ZoomTarget marks where a feed / profile-grid card lands.
+                  Wrapping the media (not the screen) is what makes the picture
+                  fly into place instead of the card ballooning to full screen. */}
+              <ZoomTarget>
               <SafeMediaWrapper width={SCREEN_WIDTH} height={PORTRAIT_HEIGHT}>
                 {hasMultipleMedia ? (
                   <MediaCarousel
@@ -1662,6 +1668,7 @@ function PostDetailScreenContent() {
                   </View>
                 )}
               </SafeMediaWrapper>
+              </ZoomTarget>
             </View>
 
             {/* Tag overlay — tap image to toggle, sits on top of all media */}

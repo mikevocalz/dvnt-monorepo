@@ -1,3 +1,4 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
   Text,
@@ -6,10 +7,10 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "expo-router";
 import {
   Camera,
   ChevronRight,

@@ -6,8 +6,8 @@ import {
   Alert,
   ActivityIndicator,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Main } from "@expo/html-elements";
+
+import { Main, SafeAreaView } from "@dvnt/app/components/ui/html";
 import { useRouter, useNavigation } from "expo-router";
 import { useLayoutEffect, useState, useEffect } from "react";
 import { Platform } from "react-native";

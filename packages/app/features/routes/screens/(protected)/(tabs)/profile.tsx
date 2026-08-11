@@ -62,6 +62,7 @@ import {
 import { appendCacheBuster, getAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { ProfileScreenGuard } from "@dvnt/app/features/profile";
 import { ProfilePronounsPill } from "@dvnt/app/features/profile";
+import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 
 // mapPostToGridTile is now replaced by safeGridTiles from safe-profile-mappers.ts
 
@@ -98,6 +99,7 @@ function normalizeProfileLinks(value: unknown): string[] {
 }
 
 function ProfileScreenContent() {
+  const tabBarInset = useTabBarInset();
   const router = useRouter();
   const navigation = useNavigation();
   const { colors } = useColorScheme();
@@ -612,7 +614,10 @@ function ProfileScreenContent() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerClassName="pb-5"
+        // pb-5 (20px) left the last row of the grid under the floating tab bar,
+        // and `contentContainerClassName` is not one of the props NativeWind
+        // maps automatically, so it may never have applied at all.
+        contentContainerStyle={{ paddingBottom: tabBarInset }}
       >
         <View className="px-5 pt-5 pb-4">
           {/* Centered Profile Header */}

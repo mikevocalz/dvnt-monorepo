@@ -1,3 +1,4 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
   Text,
@@ -50,7 +51,7 @@ import {
   Copy,
 } from "lucide-react-native";
 import { EmptyState } from "@dvnt/app/components/ui/empty-state";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import {
   useChatStore,
   Message,

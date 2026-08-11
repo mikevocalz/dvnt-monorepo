@@ -1,3 +1,4 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import { useEffect, useCallback, useMemo, useState } from "react";
 import * as Haptics from "expo-haptics";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
@@ -12,13 +13,10 @@ import {
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useRouter } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "expo-router";
 import { useSafeHeader } from "@dvnt/app/lib/hooks/use-safe-header";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import {
-  useSafeAreaInsets,
-  SafeAreaView,
-} from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLayoutEffect } from "react";
 import {
   X,

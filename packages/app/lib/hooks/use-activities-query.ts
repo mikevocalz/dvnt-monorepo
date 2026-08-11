@@ -21,6 +21,8 @@ import {
 } from "@dvnt/app/lib/api/notifications";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
+import { postKeys, profileKeys, activityKeys } from "@dvnt/app/lib/query-keys";
+export { activityKeys };
 
 // Re-export Activity type so consumers don't need the store import
 export type ActivityType =
@@ -98,11 +100,6 @@ export interface LikedActivity {
 }
 
 // Query keys
-export const activityKeys = {
-  all: ["activities"] as const,
-  list: (viewerId: string) => ["activities", viewerId] as const,
-  liked: (viewerId: string) => ["activities", viewerId, "liked"] as const,
-};
 
 /**
  * Transform a backend Notification into an Activity.

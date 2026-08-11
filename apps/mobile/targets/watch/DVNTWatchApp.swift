@@ -7,18 +7,28 @@ struct DVNTWatchApp: App {
     @StateObject private var store: TicketStore
     @StateObject private var broadcastStore: BroadcastStore
     @StateObject private var callStore: CallStore
+    @StateObject private var dmStore: DMStore
+    @StateObject private var doorStore: DoorStore
     @StateObject private var connectivity: WatchConnectivityManager
 
     init() {
         let store = TicketStore()
         let broadcastStore = BroadcastStore()
         let callStore = CallStore()
+        let dmStore = DMStore()
+        let doorStore = DoorStore()
         _store = StateObject(wrappedValue: store)
         _broadcastStore = StateObject(wrappedValue: broadcastStore)
         _callStore = StateObject(wrappedValue: callStore)
+        _dmStore = StateObject(wrappedValue: dmStore)
+        _doorStore = StateObject(wrappedValue: doorStore)
         _connectivity = StateObject(
             wrappedValue: WatchConnectivityManager(
-                store: store, broadcastStore: broadcastStore, callStore: callStore
+                store: store,
+                broadcastStore: broadcastStore,
+                callStore: callStore,
+                dmStore: dmStore,
+                doorStore: doorStore
             )
         )
     }
@@ -29,6 +39,8 @@ struct DVNTWatchApp: App {
                 .environmentObject(store)
                 .environmentObject(broadcastStore)
                 .environmentObject(callStore)
+                .environmentObject(dmStore)
+                .environmentObject(doorStore)
                 .environmentObject(connectivity)
                 .preferredColorScheme(.dark)
         }

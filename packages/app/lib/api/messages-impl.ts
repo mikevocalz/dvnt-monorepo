@@ -289,11 +289,22 @@ export const messagesApi = {
         })
         .filter(Boolean);
 
+      // Only shout when a conversation vanished for a reason we cannot explain.
+      // A thread with no messages yet is an ordinary state — someone opened a
+      // chat and never sent — and calling that "CRITICAL: likely RLS" put a red
+      // LogBox over the tab bar on every fresh account. Count the ghosts first
+      // and stay quiet if they account for the whole set.
       if (conversations.length === 0 && convRows.length > 0) {
-        console.error(
-          `[Messages] CRITICAL: ${convRows.length} conversations found but ALL filtered out. ` +
-            `Likely RLS blocking messages table. authId=${authId}`,
-        );
+        const emptyThreads = convRows.filter(
+          (row: any) => !lastMsgMap.get(row.conversation[DB.conversations.id]),
+        ).length;
+        if (emptyThreads < convRows.length) {
+          console.error(
+            `[Messages] CRITICAL: ${convRows.length} conversations found but ALL filtered out, ` +
+              `${convRows.length - emptyThreads} of them with messages. ` +
+              `Likely RLS blocking the messages table. authId=${authId}`,
+          );
+        }
       }
 
       conversations.sort((a: any, b: any) => {

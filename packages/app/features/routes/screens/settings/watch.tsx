@@ -5,10 +5,17 @@
  */
 
 import { View, Text, ScrollView, ActivityIndicator } from "react-native";
-import { Main } from "@expo/html-elements";
+import { Main } from "@dvnt/app/components/ui/html";
 import { useNavigation } from "expo-router";
 import { useLayoutEffect, useEffect, useState } from "react";
-import { Watch, Ticket, Megaphone, Phone } from "lucide-react-native";
+import {
+  Watch,
+  Ticket,
+  Megaphone,
+  Phone,
+  MessageCircle,
+  DoorOpen,
+} from "lucide-react-native";
 import { SettingsCloseButton } from "@dvnt/app/components/settings-back-button";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { Switch } from "@dvnt/app/components/ui/switch";
@@ -46,6 +53,18 @@ const ROWS: Row[] = [
     detail: "Ring the wrist, and answer or decline from it.",
     icon: <Phone size={20} color="#FF5BFC" />,
   },
+  {
+    key: "messages",
+    label: "Messages",
+    detail: "Recent conversations on the wrist, with a one-line reply.",
+    icon: <MessageCircle size={20} color="#F5C518" />,
+  },
+  {
+    key: "door",
+    label: "Door Counts",
+    detail: "Running an event? Arrived, expected and the priority lane.",
+    icon: <DoorOpen size={20} color="#3FDCFF" />,
+  },
 ];
 
 export default function WatchSettingsScreen() {
@@ -55,9 +74,11 @@ export default function WatchSettingsScreen() {
   const tickets = useWatchSettingsStore((s) => s.tickets);
   const broadcasts = useWatchSettingsStore((s) => s.broadcasts);
   const calls = useWatchSettingsStore((s) => s.calls);
+  const messages = useWatchSettingsStore((s) => s.messages);
+  const door = useWatchSettingsStore((s) => s.door);
   const [status, setStatus] = useState<WatchStatus | null>(null);
 
-  const values = { tickets, broadcasts, calls };
+  const values = { tickets, broadcasts, calls, messages, door };
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -173,7 +194,9 @@ export default function WatchSettingsScreen() {
             <Text className="text-sm text-muted-foreground">
               Turning something off clears it from the watch straight away. Calls
               are still answered on this iPhone either way — the watch only ever
-              carries the decision.
+              carries the decision, and a reply typed on the wrist is sent by
+              this iPhone. Messages starts off: anyone next to you can read your
+              wrist.
             </Text>
           </View>
         </ScrollView>

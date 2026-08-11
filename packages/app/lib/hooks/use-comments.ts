@@ -20,18 +20,14 @@ import {
   findCommentThread,
   insertCommentIntoThreads,
 } from "@dvnt/app/lib/comments/threading";
+import { commentKeys } from "@dvnt/app/lib/query-keys";
+export { commentKeys };
 
 export type CommentThread = {
   parentComment: Comment;
   replies: Comment[];
 };
 
-export const commentKeys = {
-  all: ["comments"] as const,
-  byPost: (postId: string) => [...commentKeys.all, "post", postId] as const,
-  thread: (postId: string, rootCommentId: string) =>
-    [...commentKeys.all, "thread", postId, rootCommentId] as const,
-};
 
 function findCachedThread(
   queryClient: QueryClient,

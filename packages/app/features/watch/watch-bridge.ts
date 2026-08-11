@@ -3,9 +3,11 @@
  *
  *  1. WCSession.updateApplicationContext (via react-native-watch-connectivity) —
  *     latest-wins coalesced snapshot of the member's current state. There is a
- *     SINGLE application-context slot, so tickets and broadcasts are merged into
- *     one dictionary (`{ payload, broadcasts }`); pushing one never wipes the
- *     other (see `pushMergedContext`). transferUserInfo is also used for prompt
+ *     SINGLE application-context slot, so tickets, broadcasts and conversation
+ *     previews are merged into one dictionary (`{ payload, broadcasts, dms }`);
+ *     pushing one never wipes the others (see `pushMergedContext`). Note that
+ *     `dms` is watch-only — see `pushDMs`.
+ *     transferUserInfo is also used for prompt
  *     delivery of a fresh snapshot when the watch is reachable.
  *  2. ExtensionStorage (via @bacons/apple-targets) — writes the same snapshots
  *     into the iPhone App Group (group.com.dvnt.app) for the iPhone-side widget.
@@ -19,6 +21,12 @@ import { Platform } from "react-native";
 import type { WatchTicketEnvelope } from "./watch-payload";
 import type { WatchBroadcastEnvelope } from "./watch-broadcast-payload";
 import type { WatchCallAction, WatchCallDTO } from "./watch-call-payload";
+import type { WatchDoorEnvelope } from "./watch-door-payload";
+import {
+  validateDMReply,
+  type WatchDMEnvelope,
+  type WatchDMReply,
+} from "./watch-dm-payload";
 import {
   useWatchSettingsStore,
   watchFeatureEnabled,
@@ -36,6 +44,8 @@ let warnedStorage = false;
 // one never drops the other (the two sync hooks fire independently).
 let lastTicketsPayload: string | null = null;
 let lastBroadcastsPayload: string | null = null;
+let lastDMsPayload: string | null = null;
+let lastDoorPayload: string | null = null;
 
 /**
  * Lazy, optional requires so a missing native module degrades gracefully.
@@ -80,6 +90,8 @@ function pushMergedContext(mod: any): void {
   const ctx: Record<string, string> = {};
   if (lastTicketsPayload != null) ctx.payload = lastTicketsPayload;
   if (lastBroadcastsPayload != null) ctx.broadcasts = lastBroadcastsPayload;
+  if (lastDMsPayload != null) ctx.dms = lastDMsPayload;
+  if (lastDoorPayload != null) ctx.door = lastDoorPayload;
   if (Object.keys(ctx).length === 0) return;
   try {
     mod.updateApplicationContext(ctx);
@@ -175,6 +187,99 @@ async function pushBroadcasts(env: WatchBroadcastEnvelope): Promise<void> {
     }
   } catch (err) {
     console.warn("[watch-bridge] broadcast push failed", err);
+  }
+}
+
+/**
+ * Sync the member's conversation previews to the watch. No-op off iOS. Shares
+ * the application-context slot with tickets and broadcasts.
+ */
+export async function syncDMsToWatch(env: WatchDMEnvelope): Promise<void> {
+  if (!watchFeatureEnabled("messages")) return;
+  await pushDMs(env);
+}
+
+/** Unguarded push — see `pushTickets`. */
+async function pushDMs(env: WatchDMEnvelope): Promise<void> {
+  if (Platform.OS !== "ios") return;
+  const json = JSON.stringify(env);
+  lastDMsPayload = json;
+  // Deliberately NOT written to the iPhone App Group like tickets/broadcasts:
+  // that copy exists for the iPhone widget, and no widget shows DMs. Message
+  // previews sitting in a container nothing reads is footprint for nothing.
+
+  const mod = connectivityModule();
+  if (!mod) return;
+  try {
+    pushMergedContext(mod);
+    if ((await isReachable(mod)) && typeof mod.transferUserInfo === "function") {
+      mod.transferUserInfo({ dms: json });
+    }
+  } catch (err) {
+    console.warn("[watch-bridge] dm push failed", err);
+  }
+}
+
+/**
+ * Listen for a reply typed on the wrist and hand it to `onReply`, which owns
+ * the actual send (the watch never holds DVNT auth — it only carries words).
+ *
+ * `knownIds` is read per-message, not captured, so a thread that arrived after
+ * this listener mounted is still replyable. Replies are validated against that
+ * set and de-duplicated: `sendMessage` and `transferUserInfo` can both land for
+ * one tap, and a double send is a visible, embarrassing bug.
+ */
+export function registerWatchDMReplyHandler(
+  knownIds: () => readonly string[],
+  onReply: (reply: WatchDMReply) => void,
+): () => void {
+  if (Platform.OS !== "ios") return () => {};
+  const mod = requireWatchConnectivity<any>();
+  if (!mod || typeof mod.watchEvents?.addListener !== "function") return () => {};
+
+  const seen = new Set<string>();
+  const handle = (payload: any, reply?: (r: any) => void) => {
+    if (payload?.type !== "dmReply") return;
+    // Checked per-reply so switching Messages off takes effect immediately.
+    if (!watchFeatureEnabled("messages")) return reply?.({ ok: false });
+    const valid = validateDMReply(payload, knownIds());
+    if (!valid) return reply?.({ ok: false });
+    const key = `${valid.conversationId}:${valid.text}:${payload.sentAt ?? ""}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      onReply(valid);
+    }
+    reply?.({ ok: true });
+  };
+
+  const subs = [
+    mod.watchEvents.addListener("message", handle),
+    mod.watchEvents.addListener("user-info", (info: any) => handle(info)),
+  ];
+  return () => subs.forEach((s) => s?.remove?.());
+}
+
+/**
+ * Push the host's live door counts to the wrist. No-op off iOS. Shares the
+ * application-context slot with the member-facing payloads.
+ *
+ * Aggregates only — see `watch-door-payload`. Nothing here can locate anyone.
+ */
+export async function syncDoorToWatch(env: WatchDoorEnvelope): Promise<void> {
+  if (!watchFeatureEnabled("door")) return;
+  if (Platform.OS !== "ios") return;
+  const json = JSON.stringify(env);
+  lastDoorPayload = json;
+
+  const mod = connectivityModule();
+  if (!mod) return;
+  try {
+    pushMergedContext(mod);
+    if ((await isReachable(mod)) && typeof mod.transferUserInfo === "function") {
+      mod.transferUserInfo({ door: json });
+    }
+  } catch (err) {
+    console.warn("[watch-bridge] door push failed", err);
   }
 }
 
@@ -310,6 +415,12 @@ export async function setWatchFeature(
   if (master || key === "tickets") await pushTickets({ tickets: [], syncedAt });
   if (master || key === "broadcasts")
     await pushBroadcasts({ broadcasts: [], syncedAt });
+  if (master || key === "messages") await pushDMs({ dms: [], syncedAt });
+  if (master || key === "door") {
+    lastDoorPayload = JSON.stringify({ door: null, syncedAt });
+    const mod = connectivityModule();
+    if (mod) pushMergedContext(mod);
+  }
   // Empty id = clear whatever is ringing (`CallStore.clear(callId: nil)`).
   if (master || key === "calls") await clearCallOnWatch("");
 }
@@ -317,6 +428,7 @@ export async function setWatchFeature(
 type EnvelopeGetters = {
   tickets?: () => WatchTicketEnvelope | null;
   broadcasts?: () => WatchBroadcastEnvelope | null;
+  dms?: () => WatchDMEnvelope | null;
 };
 
 /**
@@ -345,6 +457,12 @@ export function registerWatchRequestHandler(getters: EnvelopeGetters): () => voi
       ) {
         const env = getters.broadcasts?.();
         if (env) lastBroadcastsPayload = JSON.stringify(env);
+      } else if (
+        message?.type === "requestDMs" &&
+        watchFeatureEnabled("messages")
+      ) {
+        const env = getters.dms?.();
+        if (env) lastDMsPayload = JSON.stringify(env);
       }
       try {
         pushMergedContext(mod);

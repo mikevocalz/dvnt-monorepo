@@ -15,14 +15,14 @@ import { useRef, useCallback, useMemo, useEffect } from "react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { STALE_TIMES, GC_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
-import { profileKeys } from "@dvnt/app/lib/hooks/use-profile";
-import { activityKeys } from "@dvnt/app/lib/hooks/use-activities-query";
 import { isValidPostId } from "@dvnt/app/lib/validation/post-params";
 import {
   decrementPostCountEverywhere,
   removePostEverywhere,
   type PostOwnerIdentity,
 } from "@dvnt/app/lib/query/patch";
+import { postKeys, profileKeys, activityKeys } from "@dvnt/app/lib/query-keys";
+export { postKeys };
 
 // Track in-flight like mutations per post to prevent race conditions
 const pendingLikeMutations = new Set<string>();
@@ -87,14 +87,6 @@ function restoreCachedQuery(
  * queryKey: ["posts", "detail", postId]
  * queryKey: ["profilePosts", userId]
  */
-export const postKeys = {
-  all: ["posts"] as const,
-  feed: () => [...postKeys.all, "feed"] as const,
-  feedInfinite: () => [...postKeys.all, "feed", "infinite"] as const,
-  profilePosts: (userId: string) => ["profilePosts", userId] as const,
-  profile: (userId: string) => postKeys.profilePosts(userId),
-  detail: (id: string) => [...postKeys.all, "detail", id] as const,
-};
 
 // Fetch feed posts (legacy - for backwards compatibility)
 export function useFeedPosts() {

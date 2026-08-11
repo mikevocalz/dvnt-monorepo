@@ -116,6 +116,85 @@ async function fetchScannerName(
   }
 }
 
+// ── Membership tier + perks at the door (Host & Guest WS-3/WS-4) ───────────
+// Mirrors lib/subscription/entitlements.ts + lib/perks/perk-config.ts. Resolved
+// on the scan response so the door reads a decision instead of computing one.
+// Nothing here touches QR validation — it runs strictly after the CAS redeem.
+const PLAN_RANK: Record<string, number> = {
+  free: 0, sneaky_tier_1: 1, sneaky_tier_2: 2, dvnt_core: 3,
+  dvnt_insider: 4, dvnt_vip: 5, dvnt_founders_circle: 6,
+};
+const PERK_KEYS = ["skip_line","early_entry","guaranteed_entry","comp_drink","table_priority"] as const;
+const DEFAULT_PERKS: Record<string, number | null> = {
+  skip_line: PLAN_RANK.dvnt_insider,
+  early_entry: PLAN_RANK.dvnt_vip,
+  guaranteed_entry: PLAN_RANK.dvnt_founders_circle,
+  comp_drink: null,
+  table_priority: PLAN_RANK.dvnt_vip,
+};
+
+function subConfersTier(sub: any, now: number): boolean {
+  switch (sub?.status) {
+    case "active": return true;
+    case "past_due":
+      return sub.grace_period_ends_at
+        ? new Date(sub.grace_period_ends_at).getTime() > now : false;
+    case "canceled":
+      return sub.cancel_at_period_end && sub.current_period_end
+        ? new Date(sub.current_period_end).getTime() > now : false;
+    default: return false;
+  }
+}
+
+/**
+ * Best-effort: a tier lookup must NEVER fail a scan. If this throws or the
+ * network hiccups the door still admits on the QR, which is the only thing that
+ * decides entry. Returns { tier, perks } or nulls.
+ */
+async function resolveDoorTier(
+  supabase: any,
+  userId: string | null,
+  eventId: number | string | null,
+): Promise<{ membership_tier: any; perks: string[] }> {
+  const empty = { membership_tier: null, perks: [] as string[] };
+  if (!userId) return empty;
+  try {
+    const [subRes, evRes] = await Promise.all([
+      supabase
+        .from("membership_subscriptions")
+        .select("plan_key, status, current_period_end, cancel_at_period_end, grace_period_ends_at")
+        .eq("user_id", userId)
+        .maybeSingle(),
+      eventId != null
+        ? supabase.from("events").select("perk_config").eq("id", eventId).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+    const sub = subRes?.data;
+    if (!sub || !subConfersTier(sub, Date.now())) return empty;
+    const rank = PLAN_RANK[sub.plan_key];
+    if (rank == null) return empty;
+
+    const cfg = { ...DEFAULT_PERKS };
+    const raw = evRes?.data?.perk_config;
+    if (raw && typeof raw === "object") {
+      for (const k of PERK_KEYS) {
+        const v = (raw as Record<string, unknown>)[k];
+        if (v === null) cfg[k] = null;
+        else if (typeof v === "number" && Number.isFinite(v)) cfg[k] = v;
+      }
+    }
+    const perks = PERK_KEYS.filter((k) => {
+      const min = cfg[k];
+      return typeof min === "number" && rank >= min;
+    });
+    return { membership_tier: { planKey: sub.plan_key, rank }, perks };
+  } catch (_e) {
+    // Never let tier resolution break a door scan.
+    return empty;
+  }
+}
+
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: cors });
@@ -377,8 +456,18 @@ Deno.serve(async (req: Request) => {
           ? await fetchTicketAddons(supabase, ticket)
           : [];
 
+        // WS-4: tier + perk on the result card. Resolved AFTER the CAS redeem
+        // above, so a slow or failing lookup can never affect admission.
+        const door = await resolveDoorTier(
+          supabase,
+          (ticket as any)?.user_id ?? null,
+          (ticket as any)?.event_id ?? rpcResult.eventId ?? null,
+        );
+
         return json({
           valid: true,
+          membership_tier: door.membership_tier,
+          perks: door.perks,
           ticket: {
             ...(ticket ?? {
               id: rpcResult.ticketId,

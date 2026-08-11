@@ -15,6 +15,16 @@ import React, {
 } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Image } from "expo-image";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
+import { Motion } from "@legendapp/motion";
 import { useRouter } from "expo-router";
 import { Phone, PhoneOff, Video } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
@@ -35,6 +45,75 @@ import BottomSheet, {
   BottomSheetView,
 } from "@gorhom/bottom-sheet";
 import type { BottomSheetBackdropProps } from "@gorhom/bottom-sheet";
+
+/** The ring cadence, matched to the watch so wrist and phone pulse together. */
+const RING_INTERVAL_MS = 2400;
+
+/**
+ * A 64pt target that does not move under the thumb reads as a dead button, and
+ * this is the one screen where a member needs to know the tap registered before
+ * anything else happens. Spring down on press, spring back on release.
+ */
+function CallButton({
+  onPress,
+  style,
+  label,
+  children,
+}: {
+  onPress: () => void;
+  style: object;
+  label: string;
+  children: React.ReactNode;
+}) {
+  const scale = useSharedValue(1);
+  const animated = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
+  return (
+    <View style={styles.actionItem}>
+      <Animated.View style={animated}>
+        <Pressable
+          style={style}
+          onPress={onPress}
+          onPressIn={() => {
+            scale.value = withSpring(0.9, { damping: 14, stiffness: 320 });
+          }}
+          onPressOut={() => {
+            scale.value = withSpring(1, { damping: 12, stiffness: 260 });
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={label}
+        >
+          {children}
+        </Pressable>
+      </Animated.View>
+      <Text style={styles.actionLabel}>{label}</Text>
+    </View>
+  );
+}
+
+/** The halo behind the avatar, breathing on the ring cadence. */
+function RingPulse() {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 1200, easing: Easing.out(Easing.quad) }),
+        withTiming(0, { duration: 0 }),
+      ),
+      -1,
+      false,
+    );
+    // Reanimated cancels the loop when the node unmounts; nothing to clear.
+  }, [progress]);
+
+  const animated = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + progress.value * 0.45 }],
+    opacity: 0.35 * (1 - progress.value),
+  }));
+
+  return <Animated.View pointerEvents="none" style={[styles.pulse, animated]} />;
+}
 
 export function IncomingCallOverlay() {
   const sheetRef = useRef<BottomSheet>(null);
@@ -100,6 +179,18 @@ export function IncomingCallOverlay() {
   useEffect(() => {
     if (incomingCall) sheetRef.current?.snapToIndex(0);
     else sheetRef.current?.close();
+  }, [incomingCall]);
+
+  // Keep buzzing while it rings. One buzz on arrival is missed by anyone whose
+  // phone is in a pocket — which is most of them. The interval is cleared on
+  // answer, decline, timeout and unmount, so it can never outlive the call.
+  useEffect(() => {
+    if (!incomingCall) return;
+    const ring = () => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    };
+    const id = setInterval(ring, RING_INTERVAL_MS);
+    return () => clearInterval(id);
   }, [incomingCall]);
 
   const handleSheetChange = useCallback((index: number) => {
@@ -171,18 +262,26 @@ export function IncomingCallOverlay() {
         {incomingCall && (
           <>
             {/* Caller Info */}
-            <View style={styles.callerInfo}>
-              {incomingCall.caller_avatar ? (
-                <Image
-                  source={{ uri: incomingCall.caller_avatar }}
-                  style={styles.avatar}
-                  contentFit="cover"
-                />
-              ) : (
-                <View style={styles.avatarFallback}>
-                  <Text style={styles.avatarInitial}>{callerInitial}</Text>
-                </View>
-              )}
+            <Motion.View
+              style={styles.callerInfo}
+              initial={{ opacity: 0, scale: 0.92 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ type: "spring", damping: 18, stiffness: 220 }}
+            >
+              <View style={styles.avatarWrap}>
+                <RingPulse />
+                {incomingCall.caller_avatar ? (
+                  <Image
+                    source={{ uri: incomingCall.caller_avatar }}
+                    style={styles.avatar}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <View style={styles.avatarFallback}>
+                    <Text style={styles.avatarInitial}>{callerInitial}</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.callerName}>{callerName}</Text>
               <Text style={styles.callType}>
                 {incomingCall.is_group
@@ -191,32 +290,35 @@ export function IncomingCallOverlay() {
                     ? "Audio Call"
                     : "Video Call"}
               </Text>
-            </View>
+            </Motion.View>
 
             {/* Action Buttons */}
-            <View
+            <Motion.View
               style={[styles.actions, { paddingBottom: insets.bottom + 40 }]}
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ type: "spring", damping: 20, stiffness: 200, delay: 80 }}
             >
-              {/* Decline */}
-              <View style={styles.actionItem}>
-                <Pressable style={styles.declineButton} onPress={handleDecline}>
-                  <PhoneOff size={28} color="#fff" />
-                </Pressable>
-                <Text style={styles.actionLabel}>Decline</Text>
-              </View>
+              <CallButton
+                onPress={handleDecline}
+                style={styles.declineButton}
+                label="Decline"
+              >
+                <PhoneOff size={28} color="#fff" />
+              </CallButton>
 
-              {/* Accept */}
-              <View style={styles.actionItem}>
-                <Pressable style={styles.acceptButton} onPress={handleAccept}>
-                  {incomingCall.call_type === "audio" ? (
-                    <Phone size={28} color="#fff" />
-                  ) : (
-                    <Video size={28} color="#fff" />
-                  )}
-                </Pressable>
-                <Text style={styles.actionLabel}>Accept</Text>
-              </View>
-            </View>
+              <CallButton
+                onPress={handleAccept}
+                style={styles.acceptButton}
+                label="Accept"
+              >
+                {incomingCall.call_type === "audio" ? (
+                  <Phone size={28} color="#fff" />
+                ) : (
+                  <Video size={28} color="#fff" />
+                )}
+              </CallButton>
+            </Motion.View>
           </>
         )}
       </BottomSheetView>
@@ -242,6 +344,17 @@ const styles = StyleSheet.create({
   callerInfo: {
     alignItems: "center",
     gap: 12,
+  },
+  avatarWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pulse: {
+    position: "absolute",
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "rgb(62, 164, 229)",
   },
   avatar: {
     width: 100,

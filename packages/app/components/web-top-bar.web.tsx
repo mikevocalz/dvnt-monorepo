@@ -6,7 +6,7 @@
  * liquid-glass + safe-area aware, matching WebTabBar.
  */
 import { Pressable, View, StyleSheet } from "react-native";
-import { Header } from "@expo/html-elements";
+import { Header } from "@dvnt/app/components/ui/html";
 import { useRouter } from "solito/navigation";
 import { Search, BookOpen, MessageCircle } from "lucide-react";
 import Logo from "@dvnt/app/components/logo";

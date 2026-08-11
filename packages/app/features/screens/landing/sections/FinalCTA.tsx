@@ -3,7 +3,7 @@
  * (FinalCTA.web.tsx) adds the GSAP card-settle animation.
  */
 import { Platform, Pressable, StyleSheet, View } from "react-native";
-import { Section, H2 } from "@expo/html-elements";
+import { Section, H2 } from "@dvnt/app/components/ui/html";
 import Animated from "react-native-reanimated";
 import { LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
 

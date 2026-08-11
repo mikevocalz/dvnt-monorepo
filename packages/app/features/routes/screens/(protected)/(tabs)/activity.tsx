@@ -35,6 +35,7 @@ import {
 } from "@dvnt/app/lib/hooks/use-activities-query";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
 import { navigateToPost } from "@dvnt/app/lib/routes/post-routes";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
@@ -582,6 +583,7 @@ function ActivityScreenContent() {
   const router = useRouter();
   const { colors } = useColorScheme();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const [activeTab, setActiveTab] = useState<TabType>("All");
   const [refreshing, setRefreshing] = useState(false);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
@@ -1181,7 +1183,7 @@ function ActivityScreenContent() {
           renderItem={renderLikedItem}
           keyExtractor={likedKeyExtractor}
           contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          contentContainerStyle={{ paddingBottom: tabBarInset }}
           ListHeaderComponent={ListHeader}
           ListEmptyComponent={ListEmpty}
           showsVerticalScrollIndicator={false}
@@ -1196,7 +1198,7 @@ function ActivityScreenContent() {
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          contentContainerStyle={{ paddingBottom: tabBarInset }}
           ListHeaderComponent={ListHeader}
           ListEmptyComponent={ListEmpty}
           showsVerticalScrollIndicator={false}

@@ -21,6 +21,13 @@ export interface ScanResult {
   message?: string
   /** Order add-ons shown on the result card ("VIP table ×1 — unredeemed"). */
   addons?: ScanAddonSummary[]
+  /** WS-4: holder's SUBSCRIPTION tier label — distinct from `tierName`, which
+   *  is the ticket tier. Both appear on the card; they are different axes. */
+  planLabel?: string | null
+  /** WS-4: plan accent, so the badge reads at a door in the dark. */
+  planColor?: string | null
+  /** WS-4: perk labels already resolved by the server ("Skip the line"). */
+  perkLabels?: string[]
   /** already_scanned: the ORIGINAL check-in facts from the server CAS. */
   checkedInAt?: string | null
   checkedInByName?: string | null

@@ -9,7 +9,8 @@ import {
 import { Image } from "expo-image";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Main } from "@expo/html-elements";
+import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
+import { Main, LinearGradient } from "@dvnt/app/components/ui/html";
 import {
   Heart,
   Plus,
@@ -30,7 +31,7 @@ import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useIsLargeScreen } from "@dvnt/app/lib/hooks/use-is-large-screen";
-import { LinearGradient } from "expo-linear-gradient";
+
 import { Motion } from "@legendapp/motion";
 import Animated from "react-native-reanimated";
 import { useRef, useCallback, useMemo } from "react";
@@ -331,6 +332,7 @@ function EventsScreenContent() {
   const router = useRouter();
   const { colors } = useColorScheme();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const queryClient = useQueryClient();
   const pagerRef = useRef<any>(null);
   const trace = useScreenTrace("Events");
@@ -926,7 +928,7 @@ function EventsScreenContent() {
                         className="flex-1"
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={{
-                          paddingBottom: insets.bottom + 32,
+                          paddingBottom: tabBarInset,
                         }}
                       >
                         {tabIndex === 1 &&
@@ -950,7 +952,7 @@ function EventsScreenContent() {
                         className="flex-1"
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={{
-                          paddingBottom: insets.bottom + 32,
+                          paddingBottom: tabBarInset,
                         }}
                       >
                         {tabIndex === 1 &&

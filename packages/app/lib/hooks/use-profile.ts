@@ -15,17 +15,13 @@ import {
 } from "@tanstack/react-query";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { postKeys } from "@dvnt/app/lib/hooks/use-posts";
 import { resolveAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import type { AppUser } from "@dvnt/app/lib/auth-client";
+import { postKeys, profileKeys, activityKeys } from "@dvnt/app/lib/query-keys";
+export { profileKeys };
 
 // Query keys - MUST be scoped by userId
-export const profileKeys = {
-  all: ["profile"] as const,
-  byId: (userId: string) => ["profile", userId] as const,
-  byUsername: (username: string) => ["profile", "username", username] as const,
-};
 
 export interface ProfileData {
   id: string;

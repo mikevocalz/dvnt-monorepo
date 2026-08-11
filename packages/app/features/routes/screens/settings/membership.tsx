@@ -8,7 +8,7 @@
  */
 
 import { useLayoutEffect } from "react";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "expo-router";
 import { SettingsCloseButton } from "@dvnt/app/components/settings-back-button";
 import { MembershipScreen } from "@dvnt/app/features/screens/membership/MembershipScreen";
 import type { MembershipBilling } from "@dvnt/app/features/screens/membership/billing";

@@ -29,7 +29,7 @@ import {
   ScrollView,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "expo-router";
 import { useSafeHeader } from "@dvnt/app/lib/hooks/use-safe-header";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { Image } from "expo-image";

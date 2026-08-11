@@ -12,7 +12,7 @@
  * from @expo/html-elements.
  */
 import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import { A, Header, Nav } from "@expo/html-elements";
+import { A, Header, Nav } from "@dvnt/app/components/ui/html";
 import { useContext, useRef, useState, useEffect, useCallback } from "react";
 // Universal routing via Solito's app-router API: usePathname() wraps
 // next/navigation on web and expo-router/react-navigation on native. Replaces

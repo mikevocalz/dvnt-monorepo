@@ -33,6 +33,7 @@ import { getVideoThumbnail } from "@dvnt/app/lib/media/getVideoThumbnail";
 import { LegendList } from "@dvnt/app/components/list";
 import { TextPostSurface } from "@dvnt/app/features/post";
 import { postsApi } from "@dvnt/app/lib/api/posts";
+import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -205,12 +206,16 @@ const GridCell = memo(function GridCell({
   const handlePress = useCallback(() => onPress(tile.id), [tile.id, onPress]);
 
   return (
-    <Pressable
-      onPress={interactive ? handlePress : undefined}
+    <ZoomCard
+      href={`/(protected)/post/${tile.id}` as never}
+      onPress={handlePress}
       disabled={!interactive}
-      testID={`profile.${userId}.gridTile.${tile.id}`}
     >
-      <View style={[styles.cellInner, { width, height, borderRadius }]}>
+      {/* Flattened: expo-router's <Slot> (Link asChild) rejects style arrays. */}
+      <View
+        style={StyleSheet.flatten([styles.cellInner, { width, height, borderRadius }])}
+        testID={`profile.${userId}.gridTile.${tile.id}`}
+      >
         {tile.kind === "text" ? (
           <ProfileTextCell tile={tile} width={width} height={height} />
         ) : tile.kind === "video" ? (
@@ -289,7 +294,7 @@ const GridCell = memo(function GridCell({
           <DVNTMediaBadge kind={tile.kind} />
         )}
       </View>
-    </Pressable>
+    </ZoomCard>
   );
 });
 

@@ -19,10 +19,11 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { likesApi } from "@dvnt/app/lib/api/likes";
 import { postKeys } from "@dvnt/app/lib/hooks/use-posts";
-import { postLikersKeys } from "@dvnt/app/lib/hooks/use-post-likers";
 import { activityKeys } from "@dvnt/app/lib/hooks/use-activities-query";
 import { updatePostLikeEverywhere } from "@dvnt/app/lib/query/patch";
 import type { Post } from "@dvnt/app/lib/types";
+import { postLikersKeys, likeStateKeys } from "@dvnt/app/lib/query-keys";
+export { likeStateKeys };
 
 interface LikeState {
   hasLiked: boolean;
@@ -92,11 +93,6 @@ function logCacheMutation(
 }
 
 // Query keys for like state
-export const likeStateKeys = {
-  all: ["likeState"] as const,
-  forPost: (viewerId: string, postId: string) =>
-    ["likeState", viewerId, postId] as const,
-};
 
 /**
  * Central hook for post like state

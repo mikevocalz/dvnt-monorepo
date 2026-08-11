@@ -1,5 +1,5 @@
 import { View } from "react-native";
-import { Main } from "@expo/html-elements";
+import { Main } from "@dvnt/app/components/ui/html";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { PublicBrowseBanner } from "@dvnt/app/components/access/PublicBrowseBanner";
 import { Feed } from "@dvnt/app/components/feed/feed";

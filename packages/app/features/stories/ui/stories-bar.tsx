@@ -1,5 +1,14 @@
 import { View, Text, Pressable, ScrollView } from "react-native";
-import { Section } from "@expo/html-elements";
+import { Section } from "@dvnt/app/components/ui/html";
+import Animated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedStyle,
+} from "react-native-reanimated";
+import { feedScrollY } from "@dvnt/app/lib/stores/feed-scroll-shared";
+
+/** Row height. The collapse interpolates over exactly this much scroll. */
+const STORIES_HEIGHT = 154;
 import { Plus } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo } from "react";
@@ -100,13 +109,33 @@ function StoriesBarContent({
     }
   }, [myStory, router, user?.username]);
 
+  // Collapse as the feed scrolls away, Instagram-style: the row gives its height
+  // back to the feed instead of just fading, so nothing is left holding dead
+  // space. Driven entirely on the UI thread from `feedScrollY` — no re-renders,
+  // which matters because this row is a horizontally scrollable image strip.
+  const collapseStyle = useAnimatedStyle(() => {
+    const progress = interpolate(
+      feedScrollY.value,
+      [0, STORIES_HEIGHT],
+      [0, 1],
+      Extrapolation.CLAMP,
+    );
+    return {
+      height: STORIES_HEIGHT * (1 - progress),
+      opacity: 1 - progress,
+      // Pull it up as it shrinks so the content slides out rather than squashing.
+      transform: [{ translateY: -STORIES_HEIGHT * progress * 0.35 }],
+    };
+  });
+
   if (isPending) {
     return <StoriesBarSkeleton />;
   }
 
   return (
+    <Animated.View style={collapseStyle}>
     <Section className="border-b border-border">
-      <View style={{ height: 154, flexDirection: "row" }}>
+      <View style={{ height: STORIES_HEIGHT, flexDirection: "row" }}>
         {/* Your Story */}
         <View style={{ paddingTop: 5, paddingLeft: 4, paddingRight: 10 }}>
           <View style={{ alignItems: "center", gap: 6 }}>
@@ -246,6 +275,7 @@ function StoriesBarContent({
         )}
       </View>
     </Section>
+    </Animated.View>
   );
 }
 

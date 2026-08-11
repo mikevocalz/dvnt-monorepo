@@ -150,15 +150,21 @@ async function invokeEdgeFunction<T>(
     },
   });
 
+  // Throw, don't log. Callers own the decision about whether a failure is
+  // worth reporting: `syncAuthUser` retries immediately and usually succeeds on
+  // attempt 2, so shouting here put a red LogBox on every cold start for
+  // something that had already recovered by the time anyone read it.
   if (error) {
-    console.error(`[Privileged] ${functionName} error:`, error);
-    throw new Error(error.message || `Failed to call ${functionName}`);
+    const status = (error as { context?: Response })?.context?.status;
+    throw new Error(
+      `${error.message || `Failed to call ${functionName}`}${
+        status ? ` (HTTP ${status})` : ""
+      }`,
+    );
   }
 
   if (!data?.ok) {
-    const errorMessage = data?.error?.message || `${functionName} failed`;
-    console.error(`[Privileged] ${functionName} failed:`, errorMessage);
-    throw new Error(errorMessage);
+    throw new Error(data?.error?.message || `${functionName} failed`);
   }
 
   return data.data as T;

@@ -6,7 +6,7 @@
 import { useEffect } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
 import { useRouter } from "solito/navigation";
-import { H1, P } from "@expo/html-elements";
+import { H1, P } from "@dvnt/app/components/ui/html";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,

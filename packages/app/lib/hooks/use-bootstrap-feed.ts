@@ -35,6 +35,33 @@ import {
  * Hydrate TanStack Query cache from bootstrap response.
  * This replaces 5+ individual queries with cache writes from a single response.
  */
+/**
+ * Would hydrating this response destroy data we already have?
+ *
+ * Bootstrap is an ACCELERATION — it exists to put the first page on screen
+ * without waiting on five round-trips. It is not authoritative. When the edge
+ * function answers with an empty feed while the ordinary paginated query has
+ * already filled the cache, writing it through blanks the screen: observed live
+ * as `getFeedPostsPaginated success, count: 10` followed by
+ * `[BootstrapFeed] Hydrated cache: 0 posts, 0 stories` and a "No Posts Yet"
+ * empty state over ten perfectly good posts. Same mechanism empties the stories
+ * row.
+ *
+ * An empty accelerator is a no-op, never a wipe.
+ */
+function wouldClobber(
+  queryClient: ReturnType<typeof useQueryClient>,
+  data: BootstrapFeedResponse,
+): boolean {
+  if (data.posts?.length) return false;
+  const existing = queryClient.getQueryData<{ pages?: { data?: unknown[] }[] }>(
+    postKeys.feedInfinite(),
+  );
+  const cachedCount =
+    existing?.pages?.reduce((n, page) => n + (page?.data?.length ?? 0), 0) ?? 0;
+  return cachedCount > 0;
+}
+
 function hydrateFromBootstrap(
   queryClient: ReturnType<typeof useQueryClient>,
   userId: string,
@@ -237,7 +264,14 @@ export function useBootstrapFeed() {
           return;
         }
 
-        hydrateFromBootstrap(queryClient, userId, data);
+        if (wouldClobber(queryClient, data)) {
+          console.warn(
+            "[BootstrapFeed] Empty bootstrap over a populated feed — skipping " +
+              "hydration so the real query's posts survive",
+          );
+        } else {
+          hydrateFromBootstrap(queryClient, userId, data);
+        }
         trace.markUsable();
         setBootstrapState({ key: bootstrapKey, status: "ready" });
       })

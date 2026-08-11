@@ -34,6 +34,7 @@ import { useEventsTabVisibility } from "@dvnt/app/features/weatherfx";
 import { useLiveSurface } from "@dvnt/app/features/live-surface";
 import { useWatchTicketSync } from "@dvnt/app/features/watch/use-watch-ticket-sync";
 import { useWatchBroadcastSync } from "@dvnt/app/features/watch/use-watch-broadcast-sync";
+import { useWatchDMSync } from "@dvnt/app/features/watch/use-watch-dm-sync";
 import { TransitionStack as Stack } from "@dvnt/app/lib/navigation/transition-stack";
 import {
   dvntEventTransition,
@@ -160,6 +161,9 @@ export default function ProtectedLayout() {
   // Mirror host broadcasts onto the watch too (no-op off iOS). Reuses the existing
   // activity feed — no new pipeline. See docs/watch-broadcast-fit.md.
   useWatchBroadcastSync();
+  // Conversation previews on the wrist + relay a reply typed there back through
+  // the phone's own send path. Opt-in — off until the member turns it on.
+  useWatchDMSync();
 
   const user = useAuthStore((s) => s.user);
 
@@ -298,8 +302,12 @@ export default function ProtectedLayout() {
             )
           }
         />
+        {/* `ticket/` has its own _layout, so this stack's child is the GROUP
+            `ticket`, not `ticket/[id]`. Naming the leaf meant expo-router
+            matched nothing ("No route named ticket/[id] exists in nested
+            children") and the shared-element transition never applied. */}
         <Stack.Screen
-          name="ticket/[id]"
+          name="ticket"
           options={({ route }) =>
             dvntTicketTransition(
               String((route.params as any)?.id ?? ""),

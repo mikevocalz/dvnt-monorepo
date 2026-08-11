@@ -3,7 +3,7 @@
  * the web split animates. (Web uses IdentityStrip.web.tsx with GSAP.)
  */
 import { Image, StyleSheet, View } from "react-native";
-import { Section, H2, P } from "@expo/html-elements";
+import { Section, H2, P } from "@dvnt/app/components/ui/html";
 import Animated from "react-native-reanimated";
 import { LANDING_COLORS } from "../theme";
 

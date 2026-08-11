@@ -4,7 +4,7 @@
  * @expo/html-elements (real <header> on web) + RN primitives; Solito navigation.
  */
 import { Pressable, View, StyleSheet, useWindowDimensions } from "react-native";
-import { Header } from "@expo/html-elements";
+import { Header } from "@dvnt/app/components/ui/html";
 import { useRouter } from "solito/navigation";
 import { Search, MessageCircle } from "lucide-react";
 import Logo from "./logo";

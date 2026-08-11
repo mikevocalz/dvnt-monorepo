@@ -1,6 +1,7 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import { View, Text, Pressable, TextInput } from "react-native";
 import { LegendList } from "@dvnt/app/components/list";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ArrowLeft, Search, X } from "lucide-react-native";

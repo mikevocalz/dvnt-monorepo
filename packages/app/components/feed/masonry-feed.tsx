@@ -15,7 +15,6 @@ import {
   Text,
   Pressable,
   StyleSheet,
-  ScrollView,
   RefreshControl,
   useWindowDimensions,
 } from "react-native";
@@ -43,7 +42,7 @@ import { ImageOff, WifiOff } from "lucide-react-native";
 import { useConnectivityStore } from "@dvnt/app/lib/stores/connectivity-store";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { seedLikeState, usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
-import { navigateToPost } from "@dvnt/app/lib/routes/post-routes";
+import { navigateToPost, getPostDetailRoute } from "@dvnt/app/lib/routes/post-routes";
 import { getVideoThumbnail } from "@dvnt/app/lib/media/getVideoThumbnail";
 import { useQuery } from "@tanstack/react-query";
 import { DVNTMediaBadge } from "@dvnt/app/components/media/DVNTMediaBadge";
@@ -64,6 +63,11 @@ import {
   prefetchImages,
   prefetchImagesBlocking,
 } from "@dvnt/app/lib/perf/image-prefetch";
+import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
+import { LegendList } from "@dvnt/app/components/list";
+import type { LegendListRef } from "@dvnt/app/components/list";
+import { feedScrollY, resetFeedScroll } from "@dvnt/app/lib/stores/feed-scroll-shared";
+import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -339,12 +343,17 @@ const MasonryCell = memo(function MasonryCell({
     : media?.thumbnail || media?.url || null;
 
   return (
-    <Pressable
-      onPress={handlePress}
-      onPressIn={handlePressIn}
-      style={{ marginBottom: COLUMN_GAP }}
+    <ZoomCard
+      href={getPostDetailRoute(post.id) as never}
+      onPress={handlePressIn}
     >
-      <View style={[styles.cell, { width, height, borderRadius: CELL_RADIUS }]}>
+      {/* Flattened: expo-router's <Slot> (Link asChild) rejects style arrays. */}
+      <View
+        style={StyleSheet.flatten([
+          styles.cell,
+          { width, height, borderRadius: CELL_RADIUS, marginBottom: COLUMN_GAP },
+        ])}
+      >
         {isTextPost ? (
           <TextPostSurface
             text={textPostPreview.previewText}
@@ -458,7 +467,7 @@ const MasonryCell = memo(function MasonryCell({
           </View>
         </LinearGradient>
       </View>
-    </Pressable>
+    </ZoomCard>
   );
 });
 
@@ -587,12 +596,14 @@ export function MasonryFeed() {
   const queryClient = useQueryClient();
   const { width: screenWidth } = useWindowDimensions();
   const viewerId = useAuthStore((s) => s.user?.id) || "";
-  const scrollRef = useRef<ScrollView>(null);
+  const listRef = useRef<LegendListRef>(null);
+  const tabBarInset = useTabBarInset();
   const scrollToTopTrigger = useFeedScrollStore((s) => s.scrollToTopTrigger);
 
   useEffect(() => {
-    if (scrollToTopTrigger > 0 && scrollRef.current) {
-      scrollRef.current.scrollTo?.({ y: 0, animated: true });
+    if (scrollToTopTrigger > 0 && listRef.current) {
+      listRef.current.scrollToOffset?.({ offset: 0, animated: true });
+      resetFeedScroll();
     }
   }, [scrollToTopTrigger]);
 
@@ -736,6 +747,8 @@ export function MasonryFeed() {
   const handleScroll = useCallback(
     (e: any) => {
       const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+      // Drives the stories-row collapse (UI thread, no re-render).
+      feedScrollY.value = Math.max(0, contentOffset.y);
       const distanceFromBottom =
         contentSize.height - layoutMeasurement.height - contentOffset.y;
       if (distanceFromBottom < 800 && hasNextPage && !isFetchingNextPage) {
@@ -770,12 +783,36 @@ export function MasonryFeed() {
   }
 
   return (
-    <ScrollView
-      ref={scrollRef}
+    <LegendList
+      ref={listRef}
+      // Virtualized at SECTION granularity. Each section already carries its own
+      // shortest-first column packing, so the masonry layout is byte-identical to
+      // the old ScrollView — the only change is that offscreen sections stop
+      // rendering. Under a plain ScrollView every post in an infinite feed stayed
+      // mounted with its images decoded and its videos alive.
+      data={sections}
+      keyExtractor={(section: MasonrySection) => section.key}
+      renderItem={({ item }: { item: MasonrySection }) =>
+        item.type === "event" ? (
+          <FeedEventCard event={item.event} />
+        ) : (
+          <MasonrySection_
+            posts={item.posts}
+            columnWidth={columnWidth}
+            onPress={handlePress}
+          />
+        )
+      }
+      recycleItems
+      estimatedItemSize={columnWidth * 2.4}
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: 80 }}
+      contentContainerStyle={{ paddingBottom: tabBarInset }}
       onScroll={handleScroll}
-      scrollEventThrottle={200}
+      scrollEventThrottle={16}
+      onEndReached={() => {
+        if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+      }}
+      onEndReachedThreshold={0.5}
       refreshControl={
         <RefreshControl
           refreshing={isRefetching}
@@ -783,48 +820,32 @@ export function MasonryFeed() {
           tintColor="#fff"
         />
       }
-    >
-      {/* StoriesBar lifted to HomeScreen (app/(protected)/(tabs)/index.tsx)
-          so it stays mounted across feed-mode toggles and the spicy toggle.
-          Thin divider restores the separator that used to sit above the grid. */}
-      <View
-        style={{
-          height: 8,
-          borderTopWidth: 1,
-          borderTopColor: "rgba(255,255,255,0.06)",
-        }}
-      />
-
-      {filteredPosts.length === 0 ? (
+      ListHeaderComponent={
+        /* StoriesBar lives in HomeScreen so it survives feed-mode toggles; this
+           thin rule restores the separator that used to sit above the grid. */
+        <View
+          style={{
+            height: 8,
+            borderTopWidth: 1,
+            borderTopColor: "rgba(255,255,255,0.06)",
+          }}
+        />
+      }
+      ListEmptyComponent={
         <EmptyState
           icon={ImageOff}
           title="No Posts Yet"
           description="When you or people you follow share posts, they'll appear here"
         />
-      ) : (
-        <>
-          {sections.map((section) => {
-            if (section.type === "event") {
-              return <FeedEventCard key={section.key} event={section.event} />;
-            }
-            return (
-              <MasonrySection_
-                key={section.key}
-                posts={section.posts}
-                columnWidth={columnWidth}
-                onPress={handlePress}
-              />
-            );
-          })}
-        </>
-      )}
-
-      {isFetchingNextPage && (
-        <View style={styles.loadMore}>
-          <Text style={styles.loadMoreText}>Loading...</Text>
-        </View>
-      )}
-    </ScrollView>
+      }
+      ListFooterComponent={
+        isFetchingNextPage ? (
+          <View style={styles.loadMore}>
+            <Text style={styles.loadMoreText}>Loading...</Text>
+          </View>
+        ) : null
+      }
+    />
   );
 }
 

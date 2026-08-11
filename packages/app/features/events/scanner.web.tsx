@@ -52,6 +52,8 @@ import {
   type ScanResult,
   type ScanHistoryEntry,
 } from "@dvnt/app/lib/stores/scanner-store";
+import { planAccent, planLabel as planLabelFor } from "@dvnt/app/lib/theme/plan-colors";
+import { PERK_LABELS } from "@dvnt/app/lib/perks/perk-config";
 
 const ROW_HEIGHT = 44;
 
@@ -226,6 +228,25 @@ function ScanResultOverlay({
         {result.tierName ? (
           <p className="text-sm text-white/70">{result.tierName}</p>
         ) : null}
+        {/* WS-4 — subscription tier + perks, sized to be read at a door in the
+            dark at arm's length. Deliberately louder than the ticket tier above
+            it: this is what tells staff to move someone to the front. */}
+        {result.planLabel ? (
+          <span
+            className="rounded-xl px-4 py-1.5 text-[17px] font-extrabold uppercase tracking-wide"
+            style={{
+              backgroundColor: `${result.planColor ?? "#fff"}26`,
+              color: result.planColor ?? "#fff",
+            }}
+          >
+            {result.planLabel}
+          </span>
+        ) : null}
+        {result.perkLabels?.length ? (
+          <p className="text-[15px] font-semibold text-white">
+            {result.perkLabels.join(" · ")}
+          </p>
+        ) : null}
         {result.message ? (
           <p className="text-[13px] text-white/70">{result.message}</p>
         ) : null}
@@ -381,12 +402,18 @@ function ScannerActive({ eventId }: { eventId: string }) {
               const tierName = isAddon
                 ? `Add-on ×${data.addon?.quantity ?? 1}`
                 : data.ticket?.tier_name;
+              const planKey = data.membership_tier?.planKey ?? null;
               setScanResult({
                 type: "success",
                 kind: data.kind ?? "ticket",
                 name,
                 tierName,
                 addons: data.addons,
+                // `free` gets no badge — only a paid tier is worth door attention.
+                planLabel:
+                  planKey && planKey !== "free" ? planLabelFor(planKey) : null,
+                planColor: planAccent(planKey),
+                perkLabels: (data.perks ?? []).map((p) => PERK_LABELS[p]),
               });
               recordSuccess({ kind: data.kind ?? "ticket", name, tierName });
               // Seed local knowledge so a re-scan flips instantly.

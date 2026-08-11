@@ -85,8 +85,11 @@ function getFactory(): LiveActivityFactory<LiveSurfacePayload> | null {
  * native method is called.
  */
 export async function areLiveActivitiesEnabled(): Promise<boolean> {
-  return isIOS && !!widgets;
+  return isIOS && !!widgets && !startUnsupported;
 }
+
+/** Latched once `start` proves this build cannot host a Live Activity. */
+let startUnsupported = false;
 
 /**
  * Start the DVNT Live Activity, or update it if one is already running.
@@ -94,6 +97,7 @@ export async function areLiveActivitiesEnabled(): Promise<boolean> {
  * layout component derives its view from it.
  */
 export function updateLiveActivity(payload: LiveSurfacePayload): void {
+  if (startUnsupported) return;
   const f = getFactory();
   if (!f) return;
   try {
@@ -108,7 +112,15 @@ export function updateLiveActivity(payload: LiveSurfacePayload): void {
       f.start(payload, payload.tile1?.deepLink);
     }
   } catch (e) {
-    console.warn("[LiveSurface] updateLiveActivity failed:", e);
+    // `start` fails identically for the whole life of a build when the widget
+    // target has no NSSupportsLiveActivities key — which is the case while
+    // expo-widgets is disabled. Latch it: retrying cannot succeed, and warning
+    // on every location/weather tick buried the logs that matter.
+    startUnsupported = true;
+    console.warn(
+      "[LiveSurface] Live Activities unavailable in this build — not retrying:",
+      e,
+    );
   }
 }
 

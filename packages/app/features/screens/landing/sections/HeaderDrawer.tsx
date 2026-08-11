@@ -4,7 +4,7 @@
  * keeps a simple slide-over so the split resolves and the API matches.
  */
 import { Modal, Pressable, StyleSheet, View } from "react-native";
-import { A } from "@expo/html-elements";
+import { A } from "@dvnt/app/components/ui/html";
 import Animated from "react-native-reanimated";
 import { LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
 

@@ -155,9 +155,9 @@ try {
     );
     const { useWatchSettingsStore, watchFeatureEnabled } = require(gateBundle);
     const set = (patch) => useWatchSettingsStore.setState(patch);
-    const features = ["tickets", "broadcasts", "calls"];
+    const features = ["tickets", "broadcasts", "calls", "messages", "door"];
 
-    set({ enabled: true, tickets: true, broadcasts: true, calls: true });
+    set({ enabled: true, tickets: true, broadcasts: true, calls: true, messages: true, door: true });
     for (const f of features) {
       assert.ok(watchFeatureEnabled(f), `${f} should be on when everything is on`);
     }
@@ -180,6 +180,76 @@ try {
     console.log("watch feature gate OK — master ANDs, per-feature isolated");
   } finally {
     rmSync(gateBundle, { force: true });
+  }
+
+  // 3b. The wrist-reply trust boundary. A reply arrives from another process as
+  //     free text plus a conversation id; `validateDMReply` is the only thing
+  //     standing between that and the member's outbox. An id the phone never
+  //     pushed must not be sendable to.
+  const dmBundle = join(root, "node_modules", ".verify-watch-dm.cjs");
+  try {
+    execFileSync(
+      join(root, "node_modules", ".bin", "esbuild"),
+      [
+        "packages/app/features/watch/watch-dm-payload.ts",
+        "--bundle",
+        "--platform=node",
+        "--format=cjs",
+        "--packages=external",
+        `--outfile=${dmBundle}`,
+        "--log-level=warning",
+      ],
+      { cwd: root, stdio: "inherit" },
+    );
+    const { buildDMEnvelope, dmSignature, validateDMReply } = require(dmBundle);
+
+    const env = buildDMEnvelope([
+      { id: 7, user: { id: "u1", name: "Ada", username: "ada", avatar: "" },
+        lastMessage: "you coming?", timestamp: "2026-08-10T01:00:00.000Z", unread: true },
+      { id: 9, isGroup: true, groupName: "Backroom", user: { id: "u2", name: "", username: "", avatar: "" },
+        lastMessage: "doors at 11", timestamp: "2026-08-10T02:00:00.000Z", unread: false },
+    ]);
+    assert.strictEqual(env.dms.length, 2, "both conversations should project");
+    assert.strictEqual(env.dms[0].id, "9", "newest conversation should sort first");
+    assert.strictEqual(env.dms[0].name, "Backroom", "group should use its group name");
+    assert.strictEqual(env.dms[0].handle, "", "a group has no handle");
+    assert.strictEqual(env.dms[1].handle, "@ada", "a 1:1 should carry the @handle");
+    assert.notStrictEqual(
+      dmSignature(env),
+      dmSignature(buildDMEnvelope([])),
+      "signature must change when the set does",
+    );
+
+    const known = env.dms.map((d) => d.id);
+    assert.deepStrictEqual(
+      validateDMReply({ conversationId: "7", text: "  omw  " }, known),
+      { conversationId: "7", text: "omw" },
+      "a known thread with real text should pass, trimmed",
+    );
+    assert.strictEqual(
+      validateDMReply({ conversationId: "404", text: "hi" }, known),
+      null,
+      "a conversation the phone never pushed must be rejected",
+    );
+    assert.strictEqual(
+      validateDMReply({ conversationId: "7", text: "   " }, known),
+      null,
+      "whitespace is not a message",
+    );
+    assert.strictEqual(
+      validateDMReply({ conversationId: "7", text: "x".repeat(501) }, known),
+      null,
+      "over-long bodies must be rejected",
+    );
+    assert.strictEqual(
+      validateDMReply({ conversationId: 7, text: "hi" }, known),
+      null,
+      "a non-string id must be rejected, not coerced",
+    );
+    assert.strictEqual(validateDMReply(null, known), null, "null must be rejected");
+    console.log("watch DM wire format OK — projection sorts, reply gate fails closed");
+  } finally {
+    rmSync(dmBundle, { force: true });
   }
 
   // 4. RingPhase boundaries. The watch binary is arm64_32 and cannot run here,

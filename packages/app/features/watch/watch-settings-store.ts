@@ -20,6 +20,10 @@ export interface WatchFeatures {
   broadcasts: boolean;
   /** Ring the wrist on an incoming call, and accept the wearer's decision. */
   calls: boolean;
+  /** Conversation previews on the wrist, and replying from it. */
+  messages: boolean;
+  /** Host mode: live door counts on the wrist while running an event. */
+  door: boolean;
 }
 
 export type WatchFeatureKey = keyof WatchFeatures;
@@ -29,6 +33,13 @@ const DEFAULTS: WatchFeatures = {
   tickets: true,
   broadcasts: true,
   calls: true,
+  // Opt-in, unlike the rest. Tickets and broadcasts are the member's own
+  // business; a DM preview is someone else's words on a screen anyone standing
+  // next to them can read. Nobody gets that turned on for them.
+  messages: false,
+  // Host mode. On by default because it only ever populates for someone who is
+  // actually running an event — a member who hosts nothing sees nothing.
+  door: true,
 };
 
 interface WatchSettingsState extends WatchFeatures {

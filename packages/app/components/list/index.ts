@@ -9,9 +9,9 @@
  *   import type { LegendListRef, LegendListProps, LegendListRenderItemProps } from "@dvnt/app/components/list";
  */
 
-export { LegendList } from "@legendapp/list";
+export { LegendList } from "@legendapp/list/react-native";
 export type {
   LegendListProps,
   LegendListRef,
   LegendListRenderItemProps,
-} from "@legendapp/list";
+} from "@legendapp/list/react-native";

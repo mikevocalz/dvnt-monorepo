@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "expo-router";
 import { SettingsCloseButton } from "@dvnt/app/components/settings-back-button";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import {

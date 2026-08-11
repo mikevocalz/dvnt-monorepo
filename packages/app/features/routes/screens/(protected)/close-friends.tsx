@@ -1,3 +1,4 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 /**
  * Manage Close Friends Screen
  * Instagram-style close friends management with search, add/remove, optimistic toggle.
@@ -11,7 +12,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { LegendList } from "@dvnt/app/components/list";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ChevronLeft, Search, Star, X } from "lucide-react-native";

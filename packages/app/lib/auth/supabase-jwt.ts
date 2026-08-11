@@ -251,6 +251,46 @@ export async function ensureSupabaseJwt(): Promise<boolean> {
 }
 
 /**
+ * Keep the bridged JWT alive for as long as the member is signed in.
+ *
+ * Without this, `ensureSupabaseJwt` ran exactly once per auth-state change.
+ * The minted token is short-lived, so it would quietly expire mid-session and
+ * every PostgREST read after that went out with a dead bearer and came back
+ * 401 — which callers swallow into empty lists (a signed-in member seeing "No
+ * new profiles to discover right now" while a signed-out visitor saw the full
+ * list, because anon can read those tables and a rejected JWT cannot).
+ *
+ * The web client also guards per request (it drops an already-expired token
+ * rather than send it), but native attaches via `setSession` and has no such
+ * hook, so the renewal has to happen on a clock for both.
+ *
+ * Ticks at half the refresh window, so a token is always renewed with margin.
+ * Returns an unsubscribe fn. Safe to call repeatedly — the previous timer is
+ * cleared first.
+ */
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startSupabaseJwtAutoRefresh(): () => void {
+  stopSupabaseJwtAutoRefresh();
+  // Fire once immediately so a cold start does not wait a whole interval.
+  void ensureSupabaseJwt().catch(() => false);
+  refreshTimer = setInterval(
+    () => {
+      void ensureSupabaseJwt().catch(() => false);
+    },
+    (REFRESH_WINDOW_SECONDS / 2) * 1000,
+  );
+  return stopSupabaseJwtAutoRefresh;
+}
+
+export function stopSupabaseJwtAutoRefresh(): void {
+  if (refreshTimer != null) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+/**
  * Drop the cached JWT and detach from the supabase client. Call this
  * on Better Auth sign-out so the next user (or anon state) doesn't
  * inherit the previous user's authenticated session.

@@ -1,3 +1,4 @@
+import { LinearGradient } from "@dvnt/app/components/ui/html";
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { View, Text, Pressable, ScrollView, Image } from "react-native";
 import {
@@ -9,7 +10,7 @@ import {
   AlertCircle,
 } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
+
 import { Motion } from "@legendapp/motion";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { Ticket } from "@dvnt/app/lib/stores/ticket-store";

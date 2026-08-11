@@ -26,6 +26,87 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 
+// ── Membership tier resolution (Host & Guest WS-1) ─────────────────────────
+// Deno can't import packages/app, so PLAN_RANK and the entitlement rules are
+// mirrored here from lib/subscription/plans.ts + entitlements.ts. Keep in
+// lockstep — same constraint the SUPPRESSED_FEED_AUTHOR_IDS mirror lives under.
+const PLAN_RANK: Record<string, number> = {
+  free: 0,
+  sneaky_tier_1: 1,
+  sneaky_tier_2: 2,
+  dvnt_core: 3,
+  dvnt_insider: 4,
+  dvnt_vip: 5,
+  dvnt_founders_circle: 6,
+};
+
+/**
+ * Mirrors `isSubscriptionActive`: active always; past_due only inside the
+ * dunning grace window; canceled only while a paid period is still running.
+ * A lapsed member confers no perk — that is the spec's law, enforced here so
+ * the client can never grant one by being out of date.
+ */
+function subscriptionConfersTier(sub: any, now: number): boolean {
+  switch (sub?.status) {
+    case "active":
+      return true;
+    case "past_due":
+      return sub.grace_period_ends_at
+        ? new Date(sub.grace_period_ends_at).getTime() > now
+        : false;
+    case "canceled":
+      return sub.cancel_at_period_end && sub.current_period_end
+        ? new Date(sub.current_period_end).getTime() > now
+        : false;
+    default:
+      return false;
+  }
+}
+
+
+
+// ── Perk resolution (WS-3) ─────────────────────────────────────────────────
+// Mirrors lib/perks/perk-config.ts. Resolved HERE, at query time, so the door
+// never recomputes entitlement under pressure — the roster ships the answer.
+const PERK_KEYS = [
+  "skip_line",
+  "early_entry",
+  "guaranteed_entry",
+  "comp_drink",
+  "table_priority",
+] as const;
+
+const DEFAULT_PERK_CONFIG: Record<string, number | null> = {
+  skip_line: PLAN_RANK.dvnt_insider,
+  early_entry: PLAN_RANK.dvnt_vip,
+  guaranteed_entry: PLAN_RANK.dvnt_founders_circle,
+  comp_drink: null,
+  table_priority: PLAN_RANK.dvnt_vip,
+};
+
+function effectivePerkConfig(raw: unknown): Record<string, number | null> {
+  const out = { ...DEFAULT_PERK_CONFIG };
+  if (raw && typeof raw === "object") {
+    for (const k of PERK_KEYS) {
+      const v = (raw as Record<string, unknown>)[k];
+      if (v === null) out[k] = null;
+      else if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+    }
+  }
+  return out;
+}
+
+function resolvePerks(
+  rank: number | null,
+  config: Record<string, number | null>,
+): string[] {
+  if (rank == null) return [];
+  return PERK_KEYS.filter((k) => {
+    const min = config[k];
+    return typeof min === "number" && rank >= min;
+  });
+}
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
@@ -64,6 +145,10 @@ Deno.serve(async (req: Request) => {
       pageSize?: number;
       status?: string;
       search?: string;
+      /** WS-2 sort key. Defaults to `purchased_at` (the historic order). */
+      sort?: string;
+      /** WS-2 keyset cursor — `{ value, id }` from the previous page's last row. */
+      cursor?: { value?: string | number | null; id?: string } | null;
     } = {};
     try {
       body = await req.json();
@@ -188,12 +273,88 @@ Deno.serve(async (req: Request) => {
       query = query.ilike("qr_token", `${escapeLike(search)}%`);
     }
 
-    const { data, error, count } = await query
-      .order("created_at", { ascending: false })
-      .range(offset, offset + pageSize - 1);
+    // ── Ordering + keyset pagination (WS-2) ────────────────────────────
+    // Offset paging (.range) duplicates and skips rows the moment a ticket is
+    // sold mid-scroll: every insert shifts the window under the reader. Keyset
+    // on the sort tuple is stable under concurrent inserts, which is what the
+    // roster's own accept criterion requires.
+    //
+    // `page`/`offset` remain honoured when no cursor is supplied so existing
+    // callers keep working unchanged.
+    const SORTS: Record<string, { col: string; asc: boolean }> = {
+      purchased_at: { col: "created_at", asc: false },
+      checked_in: { col: "checked_in_at", asc: false },
+      ticket_tier: { col: "ticket_type_id", asc: true },
+      status: { col: "status", asc: true },
+    };
+    const sortKey = typeof body.sort === "string" ? body.sort : "purchased_at";
+    const sort = SORTS[sortKey] ?? SORTS.purchased_at;
+
+    query = query.order(sort.col, { ascending: sort.asc, nullsFirst: false });
+    // `id` breaks ties so the tuple is total — without it two tickets sold in
+    // the same millisecond can swap places between pages and be served twice.
+    query = query.order("id", { ascending: sort.asc });
+
+    const cursor =
+      body.cursor && typeof body.cursor === "object" ? body.cursor : null;
+    if (cursor && cursor.value !== undefined && cursor.id) {
+      // Strict "after the cursor" in the sort's own direction.
+      const op = sort.asc ? "gt" : "lt";
+      query = query.or(
+        `${sort.col}.${op}.${cursor.value},and(${sort.col}.eq.${cursor.value},id.${op}.${cursor.id})`,
+      );
+      query = query.limit(pageSize);
+    } else {
+      query = query.range(offset, offset + pageSize - 1);
+    }
+
+    const { data, error, count } = await query;
     if (error) {
       console.error("[get-event-tickets] query error:", error);
       return errorResponse("Could not fetch tickets", 500);
+    }
+
+    // ── Batched holder + tier lookup (WS-1). Two queries for the whole page,
+    //    never one per row. `tickets.user_id` is the Better Auth auth id (see
+    //    the table comment), which is exactly what membership_subscriptions
+    //    keys on, so no id translation is needed.
+    const holderIds = [
+      ...new Set((data || []).map((t: any) => t.user_id).filter(Boolean)),
+    ];
+    const nowMs = Date.now();
+    const tierByUser = new Map<string, { planKey: string; rank: number }>();
+    const nameByUser = new Map<string, string>();
+
+    // Host's perk matrix for THIS event (null → the platform defaults).
+    const { data: eventRow } = await supabase
+      .from("events")
+      .select("perk_config")
+      .eq("id", eventIdNum)
+      .maybeSingle();
+    const perkConfig = effectivePerkConfig(eventRow?.perk_config);
+
+    if (holderIds.length > 0) {
+      const [subsRes, usersRes] = await Promise.all([
+        supabase
+          .from("membership_subscriptions")
+          .select(
+            "user_id, plan_key, status, current_period_end, cancel_at_period_end, grace_period_ends_at",
+          )
+          .in("user_id", holderIds),
+        supabase
+          .from("users")
+          .select("auth_id, username")
+          .in("auth_id", holderIds),
+      ]);
+      for (const sub of subsRes.data || []) {
+        if (!subscriptionConfersTier(sub, nowMs)) continue;
+        const planKey = sub.plan_key as string;
+        if (!(planKey in PLAN_RANK)) continue;
+        tierByUser.set(sub.user_id, { planKey, rank: PLAN_RANK[planKey] });
+      }
+      for (const u of usersRes.data || []) {
+        if (u.username) nameByUser.set(u.auth_id, u.username);
+      }
     }
 
     const isScanner = effectiveRole === "scanner";
@@ -208,16 +369,37 @@ Deno.serve(async (req: Request) => {
         checked_in_at: t.checked_in_at,
         checked_in_by: t.checked_in_by,
       };
+      // Holder identity + membership tier. Both axes travel together but stay
+      // distinct: `ticket_type_name` is the TICKET tier, `membership_tier` is
+      // the SUBSCRIPTION tier. A guest (no user_id) simply has neither — null,
+      // never a "Free" chip, so the roster never frames them as lesser.
+      const holderName = t.user_id
+        ? nameByUser.get(t.user_id) || null
+        : t.guest_name || null;
+      const tier = t.user_id ? tierByUser.get(t.user_id) || null : null;
+      const membership_tier = tier
+        ? { planKey: tier.planKey, rank: tier.rank }
+        : null;
+      // Resolved server-side per WS-3 so the scanner card and the priority lane
+      // read a decision rather than making one. A lapsed member reaches here
+      // with tier === null and therefore gets [].
+      const perks = resolvePerks(tier?.rank ?? null, perkConfig);
+
       if (isScanner) {
-        // Scanner role: name + tier + add-on info only. No emails, no
-        // purchase amounts, no Stripe references. PII visibility is
-        // gated server-side per Phase 5.8 of the organizer prompt.
-        return base;
+        // Scanner role (Phase-0 decision, option 3): holder name + membership
+        // tier + add-on info, so the door can work the priority lane. Still no
+        // emails, no purchase amounts, no Stripe references. Note this is a
+        // deliberate WIDENING — the payload previously carried no holder
+        // identity at all, despite this comment claiming otherwise.
+        return { ...base, holder_name: holderName, membership_tier, perks };
       }
       // Owner/admin/editor get the full row
       return {
         ...t,
         ticket_type_name: t.ticket_types?.name || "General",
+        holder_name: holderName,
+        membership_tier,
+        perks,
       };
     });
 
@@ -227,8 +409,23 @@ Deno.serve(async (req: Request) => {
       page,
       pageSize,
       total: count ?? null,
-      hasMore: count != null ? offset + pageSize < count : tickets.length === pageSize,
+      hasMore: cursor
+        ? tickets.length === pageSize
+        : count != null
+          ? offset + pageSize < count
+          : tickets.length === pageSize,
       role: effectiveRole,
+      sort: sortKey,
+      perk_config: perkConfig,
+      // Feed this straight back as `cursor` for the next page. Null when the
+      // page came up short — there is nothing after it.
+      nextCursor:
+        tickets.length === pageSize && data && data.length > 0
+          ? {
+              value: (data[data.length - 1] as any)[sort.col] ?? null,
+              id: (data[data.length - 1] as any).id,
+            }
+          : null,
     });
   } catch (err) {
     console.error("[get-event-tickets] unexpected:", err);

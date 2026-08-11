@@ -15,7 +15,7 @@
  */
 import { useEffect } from "react";
 import { Platform, StyleSheet, View, useWindowDimensions } from "react-native";
-import { Main } from "@expo/html-elements";
+import { Main } from "@dvnt/app/components/ui/html";
 import Animated, {
   useAnimatedRef,
   useScrollViewOffset,

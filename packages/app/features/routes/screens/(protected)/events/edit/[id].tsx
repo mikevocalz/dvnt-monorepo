@@ -1,3 +1,4 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
   Text,
@@ -16,7 +17,7 @@ import {
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { DvntMap } from "@dvnt/app/components/map";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import { ArrowLeft, Loader2, Calendar, Clock } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useState, useEffect } from "react";

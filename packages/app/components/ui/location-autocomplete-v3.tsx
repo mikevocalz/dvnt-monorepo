@@ -4,15 +4,8 @@
  */
 
 import { useRef, useEffect, useState, useCallback } from "react";
-import {
-  View,
-  StyleSheet,
-  Text,
-  TextInput,
-  Pressable,
-  FlatList,
-  TouchableOpacity,
-} from "react-native";
+import { View, StyleSheet, Text, TextInput, Pressable, TouchableOpacity } from "react-native";
+import { LegendList } from "@dvnt/app/components/list";
 import { MapPin, X, Loader2 } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useDebounce } from "@dvnt/app/lib/hooks/use-debounce";
@@ -1016,7 +1009,7 @@ export function LocationAutocompleteV3({
             elevation: 1000,
           }}
         >
-          <FlatList
+          <LegendList
             keyboardShouldPersistTaps="always"
             data={visiblePredictions}
             keyExtractor={(item) => item.place_id}

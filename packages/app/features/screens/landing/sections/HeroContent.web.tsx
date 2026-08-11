@@ -12,7 +12,7 @@
  */
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "solito/navigation";
-import { H1, P } from "@expo/html-elements";
+import { H1, P } from "@dvnt/app/components/ui/html";
 import { LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
 
 const WORDS = ["connect.", "gather.", "move."];

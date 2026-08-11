@@ -5,6 +5,18 @@ import { updateProfilePrivileged } from "../supabase/privileged";
 import { requireBetterAuthToken, getCurrentUserRow } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
 
+/**
+ * Did PostgREST reject our credentials (as opposed to failing for a real
+ * reason)? A bridged JWT that has expired comes back as 401 / PGRST301, and the
+ * right response is to drop it and retry as anon — not to surface an empty list.
+ */
+function isAuthRejection(error: unknown): boolean {
+  const e = error as { code?: string; status?: number; message?: string };
+  if (!e) return false;
+  if (e.status === 401 || e.code === "PGRST301" || e.code === "401") return true;
+  return /jwt|token/i.test(e.message ?? "") && /expired|invalid/i.test(e.message ?? "");
+}
+
 function normalizeUserLinks(value: unknown): string[] {
   const sanitize = (items: unknown[]) =>
     items
@@ -653,7 +665,20 @@ export const usersApi = {
         query = query.neq("id", currentAuthId);
       }
 
-      const { data: authUsers, error } = await query;
+      let { data: authUsers, error } = await query;
+
+      // A rejected bridged JWT (expired mint) reads as 401/PGRST301 here. The
+      // table is readable by anon, so the recovery is to drop the dead token
+      // and retry — otherwise a signed-in member sees an empty Discover while a
+      // signed-out visitor sees the full list. `reauthAfter401` is the module's
+      // own documented recovery path and nothing was calling it.
+      if (error && isAuthRejection(error)) {
+        const { reauthAfter401 } = await import(
+          "@dvnt/app/lib/auth/supabase-jwt"
+        );
+        await reauthAfter401().catch(() => false);
+        ({ data: authUsers, error } = await query);
+      }
 
       if (error) {
         console.error("[Users] getNewestUsers BA query error:", error);

@@ -3,7 +3,7 @@
  * anchors (@expo/html-elements A) on web; accessible on native.
  */
 import { StyleSheet, Text, View } from "react-native";
-import { A, Footer as FooterTag, Nav } from "@expo/html-elements";
+import { A, Footer as FooterTag, Nav } from "@dvnt/app/components/ui/html";
 import Logo from "@dvnt/app/components/logo";
 import { LANDING_COLORS } from "../theme";
 

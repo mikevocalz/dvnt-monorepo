@@ -23,6 +23,8 @@ import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { activityKeys } from "@dvnt/app/lib/hooks/use-activities-query";
+import { eventKeys } from "@dvnt/app/lib/query-keys";
+export { eventKeys };
 
 // Filter params for events home
 export type EventSort =
@@ -84,19 +86,6 @@ export interface Event {
 }
 
 // Query keys
-export const eventKeys = {
-  all: ["events"] as const,
-  list: (filters?: EventFilters) =>
-    [...eventKeys.all, "list", filters ?? {}] as const,
-  upcoming: () => [...eventKeys.all, "upcoming"] as const,
-  past: () => [...eventKeys.all, "past"] as const,
-  detail: (id: string) => [...eventKeys.all, "detail", id] as const,
-  byCategory: (category: string) =>
-    [...eventKeys.all, "category", category] as const,
-  liked: (userId: number) => [...eventKeys.all, "liked", userId] as const,
-  search: (q: string) => [...eventKeys.all, "search", q] as const,
-  forYou: () => [...eventKeys.all, "forYou"] as const,
-};
 
 function findEventInCache(
   queryClient: ReturnType<typeof useQueryClient>,

@@ -136,6 +136,7 @@ import {
   useLeaveWaitlist,
 } from "@dvnt/app/lib/hooks/use-event-waitlist";
 import { ensureOnlineOrToast } from "@dvnt/app/lib/connectivity/guard";
+import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const HERO_HEIGHT = 420;
@@ -1763,6 +1764,10 @@ function EventDetailScreenContent() {
               event hasn't been given a cover image yet. Without this
               the hero is just black behind the existing overlay
               gradient, which makes the screen look unfinished. */}
+          {/* ZoomTarget marks the rect the feed card flies into. Without it
+              the card expands into the whole screen instead of the hero
+              landing in place. */}
+          <ZoomTarget>
           <View style={s.heroImageContainer}>
             <Animated.View style={[s.heroImageContainer, heroParallaxStyle]}>
               {/* Video flyer is the preferred hero medium when the organizer
@@ -1800,6 +1805,7 @@ function EventDetailScreenContent() {
               )}
             </Animated.View>
           </View>
+          </ZoomTarget>
 
           {/* Dark gradient overlay */}
           <LinearGradient

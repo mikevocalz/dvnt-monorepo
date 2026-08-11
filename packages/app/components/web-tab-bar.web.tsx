@@ -5,7 +5,7 @@
  * <nav>) + RN primitives (works on Next; native never imports this .web file).
  */
 import { Pressable, Text, View, StyleSheet, useWindowDimensions } from "react-native";
-import { Nav } from "@expo/html-elements";
+import { Nav } from "@dvnt/app/components/ui/html";
 import { useRouter, usePathname } from "solito/navigation";
 import { Home, Calendar, Plus, Heart, User } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";

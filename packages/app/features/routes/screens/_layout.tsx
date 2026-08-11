@@ -1,4 +1,3 @@
-import "../global.css";
 // Install the global JS error handler FIRST — must be armed before
 // any other side-effect import can throw. Captures uncaught JS
 // errors + unhandled Promise rejections, persists to MMKV for the
@@ -282,14 +281,20 @@ function RootLayout() {
   useEffect(() => {
     if (authStatus === "loading") return;
     if (!isAuthenticated) return;
+    let stop: (() => void) | null = null;
     (async () => {
       try {
-        const { ensureSupabaseJwt } = await import("@dvnt/app/lib/auth/supabase-jwt");
-        await ensureSupabaseJwt();
+        const { startSupabaseJwtAutoRefresh } = await import(
+          "@dvnt/app/lib/auth/supabase-jwt"
+        );
+        // Renews on a clock instead of once per auth change — a token that
+        // expires mid-session used to turn every authenticated read into a 401.
+        stop = startSupabaseJwtAutoRefresh();
       } catch {
         // bridge is additive — failures are silent
       }
     })();
+    return () => stop?.();
   }, [authStatus, isAuthenticated, userId]);
 
   // ── Background tasks (WS-11) — register when authenticated ────────────

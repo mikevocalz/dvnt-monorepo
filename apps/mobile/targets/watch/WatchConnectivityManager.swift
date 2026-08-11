@@ -18,15 +18,26 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
     private let store: TicketStore
     private let broadcastStore: BroadcastStore
     private let callStore: CallStore
+    private let dmStore: DMStore
+    private let doorStore: DoorStore
     @Published var isReachable = false
 
-    init(store: TicketStore, broadcastStore: BroadcastStore, callStore: CallStore) {
+    init(store: TicketStore,
+         broadcastStore: BroadcastStore,
+         callStore: CallStore,
+         dmStore: DMStore,
+         doorStore: DoorStore) {
         self.store = store
         self.broadcastStore = broadcastStore
         self.callStore = callStore
+        self.dmStore = dmStore
+        self.doorStore = doorStore
         super.init()
         callStore.relay = { [weak self] callId, action in
             self?.sendCallAction(callId: callId, action: action)
+        }
+        dmStore.relay = { [weak self] conversationId, text in
+            self?.sendDMReply(conversationId: conversationId, text: text)
         }
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
@@ -55,6 +66,30 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         WCSession.default.transferUserInfo(body)
     }
 
+    /// Relay a reply typed on the wrist. The watch holds no DVNT session, so it
+    /// carries words and the phone performs the send.
+    ///
+    /// `sentAt` is the phone's de-duplication key: the live `sendMessage` and the
+    /// queued `transferUserInfo` can both land for one tap, and sending the same
+    /// line to another person twice is a bug they can see.
+    private func sendDMReply(conversationId: String, text: String) {
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        let body: [String: Any] = [
+            "type": "dmReply",
+            "conversationId": conversationId,
+            "text": text,
+            "sentAt": Date().timeIntervalSince1970,
+        ]
+        if session.isReachable {
+            session.sendMessage(body, replyHandler: nil, errorHandler: { _ in
+                session.transferUserInfo(body)
+            })
+        } else {
+            session.transferUserInfo(body)
+        }
+    }
+
     /// Ask the phone for a fresh set (e.g. on appear / manual refresh).
     func requestSync() {
         let session = WCSession.default
@@ -63,6 +98,9 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
             Task { @MainActor in self?.handlePayload(reply) }
         }, errorHandler: nil)
         session.sendMessage(["type": "requestBroadcasts"], replyHandler: { [weak self] reply in
+            Task { @MainActor in self?.handlePayload(reply) }
+        }, errorHandler: nil)
+        session.sendMessage(["type": "requestDMs"], replyHandler: { [weak self] reply in
             Task { @MainActor in self?.handlePayload(reply) }
         }, errorHandler: nil)
     }
@@ -102,6 +140,22 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
                 // the weight (urgent → .notification). Rate-limited by "fresh"-set
                 // diffing so a backfill of many at once doesn't machine-gun.
                 WKInterfaceDevice.current().play(newest.intent.haptic)
+            }
+        }
+
+        // Host mode: aggregate door counts. Silent — a number changing is not
+        // an event worth buzzing a host's wrist for while they work a door.
+        if let data = jsonData(payload["door"]) {
+            doorStore.ingest(json: data)
+        }
+
+        if let data = jsonData(payload["dms"]) {
+            let beforeUnread = dmStore.unreadIds
+            dmStore.ingest(json: data)
+            // One tap for any genuinely new thread, not one per thread — a
+            // backfill after a spell out of range must not machine-gun.
+            if !dmStore.unreadIds.subtracting(beforeUnread).isEmpty {
+                WKInterfaceDevice.current().play(.click)
             }
         }
     }

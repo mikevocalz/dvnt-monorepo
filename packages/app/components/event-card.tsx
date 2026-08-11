@@ -1,8 +1,9 @@
+import { LinearGradient } from "@dvnt/app/components/ui/html";
 import { View, Text, Pressable } from "react-native";
 import { Image } from "expo-image";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import { Heart, Share2, Bookmark, Zap } from "lucide-react-native";
-import { LinearGradient } from "expo-linear-gradient";
+
 import { Motion } from "@legendapp/motion";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useCallback } from "react";

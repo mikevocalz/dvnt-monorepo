@@ -11,7 +11,7 @@
 // ── Safe import of react-native-wgpu ────────────────────────────────
 let _wgpuAvailable = false;
 try {
-  require("react-native-wgpu");
+  require("react-native-webgpu");
   _wgpuAvailable = true;
 } catch {
   console.warn("[GpuRuntime] react-native-wgpu not available in this binary");

@@ -8,6 +8,14 @@ import {
   parseDTO,
   type CartLineRefundResponse,
 } from "@dvnt/app/lib/contracts/dto";
+import type { PlanKey } from "@dvnt/app/lib/subscription/types";
+import type { PerkKey } from "@dvnt/app/lib/perks/perk-config";
+
+/** Keyset cursor for the roster — the previous page's last row. */
+export interface RosterCursor {
+  value: string | number | null;
+  id: string;
+}
 
 export interface TicketRecord {
   id: string;
@@ -32,6 +40,20 @@ export interface TicketRecord {
   event_date?: string;
   event_location?: string;
   username?: string;
+  /** Holder display name, resolved server-side. Guests carry `guest_name`. */
+  holder_name?: string | null;
+  /**
+   * SUBSCRIPTION tier — deliberately NOT the ticket tier (`ticket_type_name`).
+   * Server-resolved from `membership_subscriptions` at query time; the client
+   * never derives or caches it. `null` for guests and for anyone whose
+   * subscription doesn't currently confer a tier (lapsed past_due, ended
+   * cancellation) — a lapsed member gets no perk, by law.
+   *
+   * Only present for roles permitted to see it; absent entirely otherwise.
+   */
+  membership_tier?: { planKey: PlanKey; rank: number } | null;
+  /** WS-3 perks resolved for this holder at this event. */
+  perks?: PerkKey[];
 }
 
 /** Add-on summary rendered on door scan result cards ("VIP table ×1 — unredeemed"). */
@@ -64,6 +86,10 @@ export interface ScanTicketResponse {
   addon?: ScanAddonSummary;
   /** The scanned ticket's order add-ons (name, qty, redeemed state). */
   addons?: ScanAddonSummary[];
+  /** WS-4: holder's subscription tier, resolved server-side after the redeem. */
+  membership_tier?: { planKey: PlanKey; rank: number } | null;
+  /** WS-4: perks this holder has at THIS event, already resolved by the server. */
+  perks?: PerkKey[];
 }
 
 export const ticketsApi = {
@@ -112,6 +138,14 @@ export const ticketsApi = {
         | "transfer_pending"
         | "void";
       search?: string;
+      /** WS-2 sort key; defaults server-side to `purchased_at`. */
+      sort?: "purchased_at" | "checked_in" | "ticket_tier" | "status";
+      /**
+       * Keyset cursor from the previous page's `nextCursor`. Prefer this over
+       * `page` on a live roster: offset paging duplicates and skips rows as
+       * tickets are sold mid-scroll.
+       */
+      cursor?: RosterCursor | null;
     } = {},
   ): Promise<{
     tickets: TicketRecord[];
@@ -120,6 +154,7 @@ export const ticketsApi = {
     total: number | null;
     hasMore: boolean;
     role: "owner" | "admin" | "editor" | "scanner" | null;
+    nextCursor: RosterCursor | null;
   }> {
     const { data, error } = await invokeEdge<{
       ok: boolean;
@@ -129,12 +164,15 @@ export const ticketsApi = {
       total?: number | null;
       hasMore?: boolean;
       role?: "owner" | "admin" | "editor" | "scanner";
+      nextCursor?: RosterCursor | null;
     }>("get-event-tickets", {
       event_id: parseInt(eventId),
       page: opts.page ?? 1,
       pageSize: opts.pageSize ?? 50,
       status: opts.status ?? "all",
       search: opts.search ?? "",
+      sort: opts.sort ?? "purchased_at",
+      cursor: opts.cursor ?? null,
     });
     if (error) {
       console.error(
@@ -148,6 +186,7 @@ export const ticketsApi = {
         total: null,
         hasMore: false,
         role: null,
+        nextCursor: null,
       };
     }
     const tickets = data?.ok ? (data.tickets ?? []) : [];
@@ -158,6 +197,7 @@ export const ticketsApi = {
       total: data?.total ?? null,
       hasMore: data?.hasMore ?? false,
       role: data?.role ?? null,
+      nextCursor: data?.nextCursor ?? null,
     };
   },
 
@@ -172,7 +212,14 @@ export const ticketsApi = {
       tickets: TicketRecord[];
     }>("get-my-tickets", {});
     if (error) {
-      if (!/not authenticated/i.test(error.message ?? "")) {
+      // A 401/403 here is the cold-start race: the ticket poll fires before the
+      // session token is in hand, and the very next poll (~5s) succeeds. It is
+      // not worth a red LogBox on every launch. Anything else still shouts.
+      const authRace =
+        error.status === 401 ||
+        error.status === 403 ||
+        /not authenticated/i.test(error.message ?? "");
+      if (!authRace) {
         console.error("[Tickets] getMyTickets error:", error.message);
       }
       return [];

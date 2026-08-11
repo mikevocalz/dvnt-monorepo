@@ -1,3 +1,4 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 /**
  * Edit Event Screen
  *
@@ -24,7 +25,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import {
   ArrowLeft,
   Check,

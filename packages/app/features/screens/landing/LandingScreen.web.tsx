@@ -15,7 +15,7 @@
  * persistent SiteChrome in the Next root layout.
  */
 import { StyleSheet } from "react-native";
-import { Main } from "@expo/html-elements";
+import { Main } from "@dvnt/app/components/ui/html";
 import { ScreenScrollView } from "@dvnt/app/components/screen-scroll-view";
 import { AmbientField } from "./sections/AmbientField";
 import { Hero } from "./sections/Hero";

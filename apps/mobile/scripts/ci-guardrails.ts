@@ -38,7 +38,20 @@ const PROTECTED_TABLES = [
   "comment_likes",
 ];
 
-const CLIENT_DIRS = ["lib", "app", "components", "src"];
+// ROOT is apps/mobile, so these four only ever covered the app shell. Almost all
+// client code now lives in packages/app — which is how a raw `FlatList` reached
+// `components/ui/location-autocomplete-v3.tsx` with a guardrail supposedly
+// banning it. Scan the workspace package too.
+const CLIENT_DIRS = [
+  "lib",
+  "app",
+  "components",
+  "src",
+  "../../packages/app/lib",
+  "../../packages/app/components",
+  "../../packages/app/features",
+  "../../packages/ui/src",
+];
 
 function checkDirectWrites() {
   for (const dir of CLIENT_DIRS) {

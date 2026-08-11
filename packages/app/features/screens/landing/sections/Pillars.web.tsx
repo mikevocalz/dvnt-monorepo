@@ -14,7 +14,7 @@
  */
 import { useRef } from "react";
 import { Image, StyleSheet, Text, View, type ViewStyle } from "react-native";
-import { Article, H2, P } from "@expo/html-elements";
+import { Article, H2, P } from "@dvnt/app/components/ui/html";
 import { useGsapScope, ScrollTrigger } from "../hooks/useGsap";
 import { LANDING_COLORS } from "../theme";
 

@@ -3,7 +3,7 @@
  * handle the HLS playlist directly, muted + looping for an ambient backdrop.
  */
 import { StyleSheet, View, useWindowDimensions } from "react-native";
-import { Section } from "@expo/html-elements";
+import { Section } from "@dvnt/app/components/ui/html";
 import { VideoView, useVideoPlayer } from "expo-video";
 import { HeroContent } from "./HeroContent";
 import { HERO_VIDEO_PLAYLIST, LANDING_COLORS } from "../theme";

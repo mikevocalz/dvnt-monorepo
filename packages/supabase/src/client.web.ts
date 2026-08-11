@@ -87,6 +87,49 @@ export function setBridgeAccessToken(token: string | null): void {
   _bridgeToken = token;
 }
 
+/**
+ * Read the `exp` claim without verifying — we are not trusting this token, only
+ * deciding whether it is worth sending. Returns null for anything unparseable.
+ */
+function jwtExpiry(token: string): number | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    const exp = JSON.parse(json)?.exp;
+    return typeof exp === "number" ? exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The bridged token is minted by `supabase-jwt.ts`, which re-mints on a timer.
+ * When that mint fails — the edge fn is cold, offline, or a privacy extension
+ * kills the request — the LAST token stays attached here and every subsequent
+ * PostgREST call goes out with a dead bearer and comes back 401. Callers like
+ * `getNewestUsers` catch and return `[]`, so the symptom is a signed-in user
+ * seeing empty sections ("No new profiles to discover right now") while a
+ * signed-out visitor sees everything. Anon can read those tables; a rejected
+ * JWT cannot.
+ *
+ * So: an expired token is worse than no token. Drop it and fall back to the
+ * anon key, which is exactly the pre-bridge behaviour.
+ *
+ * ponytail: 30s of slack absorbs clock skew. This does not re-mint — that is
+ * `ensureSupabaseJwt`'s job on its own timer; this only stops us sending a
+ * bearer we already know is dead.
+ */
+function usableBridgeToken(): string | null {
+  if (!_bridgeToken) return null;
+  const exp = jwtExpiry(_bridgeToken);
+  if (exp != null && exp - 30 <= Math.floor(Date.now() / 1000)) {
+    _bridgeToken = null;
+    return null;
+  }
+  return _bridgeToken;
+}
+
 // Same-origin edge-function proxy (Next only — gated on the same env flag the
 // auth proxy uses; web-vite has no /api/fn rewrite). Cross-origin calls to
 // supabase.co/functions/v1 get killed by privacy extensions / flaky networks
@@ -118,7 +161,7 @@ const proxiedFetch: typeof fetch = (input, init) => {
 };
 
 export const supabase = createClient(supabaseUrl, clientKey, {
-  accessToken: async () => _bridgeToken ?? clientKey,
+  accessToken: async () => usableBridgeToken() ?? clientKey,
   global: { fetch: proxiedFetch },
 });
 

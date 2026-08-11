@@ -22,7 +22,7 @@ import {
   Modal,
   StatusBar,
 } from "react-native";
-import { Article } from "@expo/html-elements";
+import { Article } from "@dvnt/app/components/ui/html";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import {
   Heart,
@@ -77,7 +77,8 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useBookmarkStore } from "@dvnt/app/lib/stores/bookmark-store";
 import { routeToProfile } from "@dvnt/app/lib/utils/route-to-profile";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { navigateToPost } from "@dvnt/app/lib/routes/post-routes";
+import { navigateToPost, getPostDetailRoute } from "@dvnt/app/lib/routes/post-routes";
+import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 import { formatLikeCount } from "@dvnt/app/lib/utils/format-count";
 import { useResponsiveMedia } from "@dvnt/app/lib/hooks/use-responsive-media";
 import { TagOverlayViewer } from "@dvnt/app/features/tags";
@@ -959,13 +960,19 @@ function FeedPostComponent({
                 singleUrl &&
                 (singleUrl.startsWith("http://") ||
                   singleUrl.startsWith("https://"));
+              // Zoom into the detail screen. Falls back to a plain press when
+              // the tap means something else — a tagged post toggles its tags,
+              // a guest opens the auth gate — because a Link's navigation
+              // cannot be vetoed after the press. No press-scale on this path:
+              // it fights the zoom for the same frame.
               return (
-                <Pressable
-                  onPress={handlePostPress}
-                  onPressIn={handlePressIn}
-                  onPressOut={handlePressOut}
-                  style={{ width: "100%", height: PORTRAIT_HEIGHT }}
+                <ZoomCard
+                  href={getPostDetailRoute(id) as never}
+                  onPress={handlePressIn}
+                  disabled={postTags.length > 0 || guestMode}
+                  onDisabledPress={handlePostPress}
                 >
+                <View style={{ width: "100%", height: PORTRAIT_HEIGHT }}>
                   {isValidSingleUrl ? (
                     <DVNTMediaRenderer
                       item={media[0]}
@@ -985,7 +992,8 @@ function FeedPostComponent({
                       </Text>
                     </View>
                   )}
-                </Pressable>
+                </View>
+                </ZoomCard>
               );
             })()}
 

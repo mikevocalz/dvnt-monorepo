@@ -12,7 +12,7 @@ import {
 import {
   LegendList,
   type LegendListRenderItemProps,
-} from "@legendapp/list";
+} from "@legendapp/list/react-native";
 
 export interface VenuePrediction {
   placeId: string;

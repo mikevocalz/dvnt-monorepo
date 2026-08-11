@@ -5,12 +5,14 @@ import SwiftUI
 struct EventListView: View {
     @EnvironmentObject private var store: TicketStore
     @EnvironmentObject private var broadcasts: BroadcastStore
+    @EnvironmentObject private var dms: DMStore
+    @EnvironmentObject private var doors: DoorStore
     @EnvironmentObject private var connectivity: WatchConnectivityManager
 
     var body: some View {
         NavigationStack {
             Group {
-                if store.isEmpty && broadcasts.isEmpty {
+                if store.isEmpty && broadcasts.isEmpty && dms.isEmpty && doors.isEmpty {
                     EmptyTicketsView(reachable: connectivity.isReachable)
                 } else {
                     List {
@@ -19,6 +21,36 @@ struct EventListView: View {
                                 BroadcastListView()
                             } label: {
                                 BroadcastsEntryRow(unread: broadcasts.unreadCount)
+                            }
+                            .listRowBackground(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(DVNT.surface)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .strokeBorder(DVNT.hairline, lineWidth: 1)
+                                    )
+                            )
+                        }
+                        if !dms.isEmpty {
+                            NavigationLink {
+                                DMListView()
+                            } label: {
+                                DMsEntryRow(unread: dms.unreadCount)
+                            }
+                            .listRowBackground(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(DVNT.surface)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .strokeBorder(DVNT.hairline, lineWidth: 1)
+                                    )
+                            )
+                        }
+                        if let d = doors.door {
+                            NavigationLink {
+                                DoorView()
+                            } label: {
+                                DoorEntryRow(arrived: d.arrived, remaining: d.remaining)
                             }
                             .listRowBackground(
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -142,6 +174,61 @@ private struct BroadcastsEntryRow: View {
         .accessibilityLabel(unread > 0
             ? "Messages from host, \(unread) unread"
             : "Messages from host")
+    }
+}
+
+/// Home-list entry into the member's conversations, with an unread badge.
+private struct DMsEntryRow: View {
+    let unread: Int
+    var body: some View {
+        HStack(spacing: DVNT.Space.base) {
+            Image(systemName: "message.fill")
+                .font(.system(size: 15))
+                .foregroundColor(.white)
+            Text("Messages")
+                .font(DVNT.TypeScale.body())
+                .foregroundColor(.white)
+                .lineLimit(1)
+            Spacer(minLength: DVNT.Space.tight)
+            if unread > 0 {
+                Text("\(unread)")
+                    .font(DVNT.TypeScale.stamp(14))
+                    .foregroundColor(.black)
+                    .frame(minWidth: 22, minHeight: 22)
+                    .padding(.horizontal, DVNT.Space.tight)
+                    // Cyan, not signal-red: an unread DM is not an emergency,
+                    // and red is spent on the host's urgent broadcasts.
+                    .background(Capsule().fill(DVNT.accent))
+            }
+        }
+        .padding(.vertical, DVNT.Space.tight)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(unread > 0
+            ? "Messages, \(unread) unread"
+            : "Messages")
+    }
+}
+
+/// Home-list entry into host mode. Only present while an event is running.
+private struct DoorEntryRow: View {
+    let arrived: Int
+    let remaining: Int
+    var body: some View {
+        HStack(spacing: DVNT.Space.base) {
+            Image(systemName: "door.left.hand.open")
+                .font(.system(size: 15))
+                .foregroundColor(.white)
+            Text("Door")
+                .font(DVNT.TypeScale.body())
+                .foregroundColor(.white)
+            Spacer(minLength: DVNT.Space.tight)
+            Text("\(arrived) in · \(remaining) out")
+                .font(DVNT.TypeScale.caption(13))
+                .foregroundColor(DVNT.textDim)
+        }
+        .padding(.vertical, DVNT.Space.tight)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Door: \(arrived) arrived, \(remaining) still outside")
     }
 }
 

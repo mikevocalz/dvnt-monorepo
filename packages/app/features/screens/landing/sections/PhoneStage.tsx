@@ -7,7 +7,7 @@
  * docs/landing-page-notes.md). Built so that swap touches only this file.
  */
 import { Platform, StyleSheet, View } from "react-native";
-import { Section } from "@expo/html-elements";
+import { Section } from "@dvnt/app/components/ui/html";
 import Animated, {
   interpolate,
   useAnimatedStyle,

@@ -1,13 +1,14 @@
 import { View, Text, Pressable } from "react-native";
-import { Main } from "@expo/html-elements";
+import { Main } from "@dvnt/app/components/ui/html";
 import { Feed } from "@dvnt/app/components/feed/feed";
 import { MasonryFeed } from "@dvnt/app/components/feed/masonry-feed";
 
 import { StoriesBar } from "@dvnt/app/features/stories";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import * as Haptics from "expo-haptics";
-import { useCallback, memo } from "react";
+import { useCallback, memo, useEffect } from "react";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
+import { resetFeedScroll } from "@dvnt/app/lib/stores/feed-scroll-shared";
 import { Motion } from "@legendapp/motion";
 
 /**
@@ -65,6 +66,12 @@ export const FeedModeToggle = memo(function FeedModeToggle() {
 
 export default function HomeScreen() {
   const feedMode = useAppStore((s) => s.feedMode);
+
+  // Swapping feeds swaps the scroll container too — without this the stories
+  // row stays collapsed at the old feed's offset with nothing to scroll it back.
+  useEffect(() => {
+    resetFeedScroll();
+  }, [feedMode]);
 
   return (
     <View className="flex-1 bg-background max-w-3xl w-full self-center">

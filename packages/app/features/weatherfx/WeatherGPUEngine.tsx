@@ -35,7 +35,7 @@ import { WeatherAudioEngine } from "../weatheraudio/WeatherAudioEngine";
 let WgpuCanvas: React.ComponentType<any> | null = null;
 let useCanvasEffect: any = null;
 try {
-  const wgpu = require("react-native-wgpu");
+  const wgpu = require("react-native-webgpu");
   WgpuCanvas = wgpu.Canvas;
   useCanvasEffect = wgpu.useCanvasEffect;
 } catch {

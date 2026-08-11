@@ -3,7 +3,7 @@
  * copy the web split (BentoFeatureGrid.web.tsx) animates with GSAP.
  */
 import { StyleSheet, View } from "react-native";
-import { Section, H2, H3, P } from "@expo/html-elements";
+import { Section, H2, H3, P } from "@dvnt/app/components/ui/html";
 import Animated from "react-native-reanimated";
 import { LANDING_COLORS } from "../theme";
 

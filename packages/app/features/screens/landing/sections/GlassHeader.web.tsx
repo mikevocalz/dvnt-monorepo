@@ -15,7 +15,7 @@
  * transition* style props) for reliable cross-package universal rendering.
  */
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import { A, Header, Nav } from "@expo/html-elements";
+import { A, Header, Nav } from "@dvnt/app/components/ui/html";
 import { useState, useEffect } from "react";
 // Universal routing via Solito's app-router API (see GlassHeader.tsx).
 import { usePathname, useRouter } from "solito/navigation";

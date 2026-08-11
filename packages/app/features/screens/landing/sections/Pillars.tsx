@@ -5,7 +5,7 @@
  * motion collapses the transl(parallax) to a pure fade.
  */
 import { Image, Platform, StyleSheet, View } from "react-native";
-import { Article, H2, P } from "@expo/html-elements";
+import { Article, H2, P } from "@dvnt/app/components/ui/html";
 import Animated, {
   interpolate,
   useAnimatedStyle,
