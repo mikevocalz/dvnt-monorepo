@@ -44,7 +44,24 @@ struct EventArt: View {
     /// HIG W-AC-04: Reduce Motion means no cross-fade, not a slower one.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var fill: Color { Color(dvntHex: dominantHex) ?? DVNT.Surface.mid }
+    /// The event's own dominant colour when the payload carried one.
+    private var hexFill: Color? { Color(dvntHex: dominantHex) }
+
+    /// Step 3, the no-hex case. Was `DVNT.Surface.mid` — a 6% white wash, i.e.
+    /// grey. The design system's rule for a missing image is explicit: it falls
+    /// back to the Deviant Gradient, never grey, because "never an empty box"
+    /// is the whole point of The Door. A grey card is the one outcome that
+    /// reads as broken rather than as branded.
+    ///
+    /// Held at 0.45 so it stays a backdrop: a full-strength gradient competes
+    /// with the title and the LIVE dot sitting on top of it.
+    @ViewBuilder private var fill: some View {
+        if let hexFill {
+            hexFill
+        } else {
+            DVNT.brandGradient.opacity(0.45)
+        }
+    }
 
     private var remoteURL: URL? {
         guard !isLuminanceReduced, let raw = imageURL?.trimmingCharacters(in: .whitespacesAndNewlines),
