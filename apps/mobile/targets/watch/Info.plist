@@ -4,5 +4,29 @@
   <dict>
     <key>WKApplication</key>
     <true/>
+    <!--
+      The three DVNT faces. Without this key the .ttf files ship inside the
+      bundle but are never registered, so every Font.custom(...) silently falls
+      back to the system face — which is exactly why the watch "looked nothing
+      like mobile/web" while appearing to use brand type in code.
+
+      The files live in targets/watch/fonts/. That directory is inside the
+      target's PBXFileSystemSynchronizedRootGroup (path = watch), whose only
+      membershipExceptions are Info.plist and expo-target.config.js — so they
+      are added to Copy Bundle Resources automatically, with no pbxproj edit.
+      Xcode flattens resources into the bundle root, hence bare filenames here
+      rather than fonts/Name.ttf.
+
+      Space Grotesk = display, Inter = body, Space Mono = data (countdowns,
+      prices, ticket codes). Keep in step with docs/dvnt-design-system.md.
+    -->
+    <key>UIAppFonts</key>
+    <array>
+      <string>SpaceGrotesk-Bold.ttf</string>
+      <string>SpaceGrotesk-SemiBold.ttf</string>
+      <string>Inter-Regular.ttf</string>
+      <string>Inter-SemiBold.ttf</string>
+      <string>SpaceMono-Regular.ttf</string>
+    </array>
   </dict>
 </plist>

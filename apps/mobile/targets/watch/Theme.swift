@@ -104,24 +104,24 @@ extension DVNT {
         /// Uppercase at the call site; tracking is baked in. Condensed + heavy at
         /// 13pt reads as signage and stays legible; it is a label, not body copy.
         static func stamp(_ size: CGFloat = 13) -> Font {
-            .system(size: size, weight: .heavy).width(.condensed)
+            .custom("SpaceGrotesk-Bold", size: size)
         }
 
         /// Screen and row titles. Floor is 18pt.
         static func title(_ size: CGFloat = 18) -> Font {
-            .system(size: max(size, 18), weight: .semibold)
+            .custom("SpaceGrotesk-Bold", size: max(size, 18))
         }
 
         /// Body copy: host messages, event names on the pass. Floor is 16pt.
         static func body(_ size: CGFloat = 16) -> Font {
-            .system(size: max(size, 16), weight: .regular)
+            .custom("Inter-Regular", size: max(size, 16))
         }
 
         /// Secondary metadata — dates, venue, staleness. Deliberately the one
         /// register allowed under the body floor, so use it only for text the
         /// user never has to read to act.
         static func caption(_ size: CGFloat = 14) -> Font {
-            .system(size: size, weight: .regular)
+            .custom("Inter-Regular", size: size)
         }
 
         /// Tracking for stamped labels. Applied via `.tracking(DVNT.TypeScale.stampTracking)`.
@@ -130,7 +130,7 @@ extension DVNT {
         /// Countdowns and counts. Monospaced digits so a ticking value does not
         /// reflow the row it sits in — pair with `.contentTransition(.numericText())`.
         static func numeral(_ size: CGFloat = 28) -> Font {
-            .system(size: size, weight: .bold).monospacedDigit()
+            .custom("SpaceMono-Regular", size: size).monospacedDigit()
         }
 
         /// A numeral that is *signage* rather than content — the door count, a
@@ -142,7 +142,7 @@ extension DVNT {
         /// `.width(.condensed)` and quietly restyle the one screen a host stares
         /// at all night.
         static func numeralStamp(_ size: CGFloat = 34) -> Font {
-            .system(size: size, weight: .heavy).width(.condensed).monospacedDigit()
+            .custom("SpaceMono-Regular", size: size).monospacedDigit()
         }
 
         /// SF Symbol sizing. Icons were the one register still set with raw
