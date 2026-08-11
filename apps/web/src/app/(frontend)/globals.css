@@ -1,6 +1,13 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/preflight.css" layer(base);
-@import "tailwindcss/utilities.css";
+/* `important`: react-native-web injects its runtime stylesheet (default black
+   text, flex-grow:0, the atomic css-view-* rules) UNLAYERED and at runtime —
+   i.e. after this build CSS in document order — so it wins every specificity
+   tie against our utilities and `className` silently does nothing on any RNW
+   component. Leaving utilities unlayered is not enough; v4's important flag is.
+   Safe here: every hand-written class is `dvnt-*` prefixed, so no utility name
+   collides. Native (NW5 runtime) is unaffected. Mirrors sosinspires-mono. */
+@import "tailwindcss/utilities.css" important;
 @import "nativewind/theme";
 
 /* DVNT blog brand theme — tokens, keyframes, utilities. Scoped to `.dvnt-blog`
