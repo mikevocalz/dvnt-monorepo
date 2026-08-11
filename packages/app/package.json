@@ -287,7 +287,7 @@
     "expo-notifications": "~57.0.2",
     "expo-paste-input": "^0.2.1",
     "expo-print": "~57.0.0",
-    "expo-router": "~57.0.2",
+    "expo-router": "~57.0.11",
     "expo-screen-capture": "~57.0.0",
     "expo-screen-orientation": "~57.0.0",
     "expo-secure-store": "~57.0.0",

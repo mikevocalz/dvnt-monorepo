@@ -53,7 +53,7 @@
     "@gorhom/bottom-sheet": "^5.2.9",
     "@legendapp/list": "3.0.0-beta.44",
     "@legendapp/motion": "^2.5.3",
-    "@lodev09/react-native-true-sheet": "^3.10.0",
+    "@lodev09/react-native-true-sheet": "^3.11.10",
     "@nandorojo/galeria": "^3.0.0",
     "@react-native-masked-view/masked-view": "^0.3.2",
     "@react-navigation/bottom-tabs": "^7.17.1",
