@@ -23,7 +23,11 @@
  * Modelled on ./with-live-activity-android.js — same withDangerousMod shape.
  */
 
-const { withDangerousMod, withAppBuildGradle } = require("expo/config-plugins");
+const {
+  withDangerousMod,
+  withAppBuildGradle,
+  withMainApplication,
+} = require("expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
 
@@ -123,6 +127,49 @@ function withWearableDependency(config) {
   });
 }
 
+/**
+ * Register the ReactPackage with MainApplication.
+ *
+ * This step is the whole difference between a native module that works and one
+ * that is `undefined` in JS. Copying a ReactPackage.kt into
+ * android/app/src/main/java/ compiles fine, ships fine, and does nothing —
+ * `PackageList(this).packages` only contains autolinked modules, and a
+ * hand-added package must be appended to that list explicitly.
+ *
+ * There is a live example of the failure in this repo:
+ * plugins/with-live-activity-android.js copies DVNTLiveNotificationPackage.kt
+ * into the app module but never registers it, so NativeModules.
+ * DVNTLiveNotification is undefined at runtime. Not fixed here — enabling a
+ * module that has been dormant is a behaviour change, not a wiring fix — but
+ * that is why this function exists.
+ */
+function withWearPackageRegistered(config) {
+  return withMainApplication(config, (config) => {
+    const src = config.modResults.contents;
+
+    if (src.includes("WearBridgePackage()")) {
+      return config;
+    }
+
+    // The Expo template emits `PackageList(this).packages.apply {` with a
+    // commented example inside. Append into that block.
+    const anchor = /(PackageList\(this\)\.packages\.apply\s*\{)/;
+    if (!anchor.test(src)) {
+      console.warn(
+        "[with-wear-os] Could not find PackageList(...).packages.apply in MainApplication — " +
+          "WearBridgePackage NOT registered. The JS module will be undefined."
+      );
+      return config;
+    }
+
+    config.modResults.contents = src.replace(
+      anchor,
+      "$1\n          // Data Layer bridge for the Wear OS app (plugins/with-wear-os.js).\n          add(WearBridgePackage())"
+    );
+    return config;
+  });
+}
+
 module.exports = function withWearOS(config) {
-  return withWearableDependency(withWearModuleSources(config));
+  return withWearPackageRegistered(withWearableDependency(withWearModuleSources(config)));
 };

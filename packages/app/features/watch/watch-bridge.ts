@@ -17,7 +17,7 @@
  * is absent (web, Android, or a dev build before `expo prebuild` adds the targets).
  */
 
-import { Platform } from "react-native";
+import { NativeModules, Platform } from "react-native";
 import type { WatchTicketEnvelope } from "./watch-payload";
 import type { WatchBroadcastEnvelope } from "./watch-broadcast-payload";
 import type { WatchCallAction, WatchCallDTO } from "./watch-call-payload";
@@ -129,7 +129,11 @@ async function isReachable(mod: any): Promise<boolean> {
 }
 
 /**
- * Sync the current ticket set to the watch + iPhone App Group. No-op off iOS.
+ * Sync the current ticket set to the wrist.
+ *
+ * iOS: WCSession application context + the iPhone App Group for the widget.
+ * Android: a DataClient item on /tickets for the Wear OS app. Both rails carry
+ * the byte-identical envelope, which is why watch-payload.ts is platform-free.
  */
 export async function syncTicketsToWatch(
   env: WatchTicketEnvelope,
@@ -138,9 +142,51 @@ export async function syncTicketsToWatch(
   await pushTickets(env);
 }
 
+// ---------------------------------------------------------------- Wear OS
+
+interface WearBridge {
+  syncTickets(payloadJson: string, syncedAt: number): Promise<boolean>;
+  isWearAppAvailable(): Promise<boolean>;
+}
+
+/** Absent on iOS, in Expo Go, and in any build predating the wear plugin. */
+function wearBridge(): WearBridge | null {
+  if (Platform.OS !== "android") return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((NativeModules as any)?.DVNTWearBridge as WearBridge) ?? null;
+}
+
+/**
+ * The Android rail. Same envelope as iOS — the Wear app decodes the identical
+ * JSON the Apple Watch does, which is why `watch-payload.ts` is platform-free.
+ *
+ * Asks CapabilityClient first rather than writing unconditionally: a DataItem
+ * put with no watch present is wasted work on every ticket refresh, on the
+ * overwhelming majority of installs that have no watch at all.
+ */
+async function pushTicketsToWear(env: WatchTicketEnvelope): Promise<void> {
+  const mod = wearBridge();
+  if (!mod) return;
+  try {
+    if (!(await mod.isWearAppAvailable())) return;
+    const json = JSON.stringify(env);
+    lastTicketsPayload = json;
+    // syncedAt is seconds on the wire (the Apple Watch reads it that way);
+    // the Data Layer wants millis, and it doubles as the field that makes two
+    // otherwise-identical payloads differ so the listener actually fires.
+    await mod.syncTickets(json, Math.round((env.syncedAt || Date.now() / 1000) * 1000));
+  } catch (err) {
+    console.warn("[watch-bridge] wear ticket push failed", err);
+  }
+}
+
 /** Unguarded push — the switch is checked by callers, so disabling a feature
  *  can still send the empty envelope that clears the wrist. */
 async function pushTickets(env: WatchTicketEnvelope): Promise<void> {
+  if (Platform.OS === "android") {
+    await pushTicketsToWear(env);
+    return;
+  }
   if (Platform.OS !== "ios") return;
   const json = JSON.stringify(env);
   lastTicketsPayload = json;
