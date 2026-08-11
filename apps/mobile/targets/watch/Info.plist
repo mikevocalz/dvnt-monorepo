@@ -22,6 +22,14 @@
     -->
     <key>UIAppFonts</key>
     <array>
+      <!--
+        Republica Minor is the MARQUEE voice — the uppercase structural labels
+        ("TONIGHT", "LIVE NOW", "PRESENT AT DOOR"). Note its PostScript name is
+        `RepublicaMinor-BoldItalic`, which does NOT match this filename; the
+        filename goes here, the PostScript name goes in Font.custom(). Getting
+        that backwards falls back to the system face silently.
+      -->
+      <string>Republica-Minor.ttf</string>
       <string>SpaceGrotesk-Bold.ttf</string>
       <string>SpaceGrotesk-SemiBold.ttf</string>
       <string>Inter-Regular.ttf</string>

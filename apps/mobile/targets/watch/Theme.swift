@@ -100,11 +100,23 @@ extension DVNT {
     /// across the board — 32 of 42 explicit sizes were under the floor, which is
     /// why nothing read at arm's length in a dark room.
     enum TypeScale {
-        /// Stamped structural label — tier, status, "PRESENT AT DOOR".
-        /// Uppercase at the call site; tracking is baked in. Condensed + heavy at
-        /// 13pt reads as signage and stays legible; it is a label, not body copy.
+        /// Stamped structural label — tier, status, "PRESENT AT DOOR", the
+        /// marquee eyebrows. Uppercase at the call site; pair with
+        /// `.tracking(DVNT.TypeScale.stampTracking)`.
+        ///
+        /// This is Republica Minor, and it is the one place the watch gets its
+        /// own voice: a bold ITALIC display face reads as venue signage —
+        /// laminates, door boards, a marquee — which is exactly the register
+        /// these labels occupy. Titles stay Space Grotesk, because an italic
+        /// display face is wrong for content you actually read (event names,
+        /// host messages) at arm's length in a dark room.
+        ///
+        /// NAME WARNING: the PostScript name is `RepublicaMinor-BoldItalic`,
+        /// NOT the `Republica-Minor` filename. Font.custom takes the PostScript
+        /// name; UIAppFonts takes the filename. Swapping them fails silently to
+        /// the system face — verify with the name table, never by eye.
         static func stamp(_ size: CGFloat = 13) -> Font {
-            .custom("SpaceGrotesk-Bold", size: size)
+            .custom("RepublicaMinor-BoldItalic", size: size)
         }
 
         /// Screen and row titles. Floor is 18pt.
@@ -125,7 +137,18 @@ extension DVNT {
         }
 
         /// Tracking for stamped labels. Applied via `.tracking(DVNT.TypeScale.stampTracking)`.
-        static let stampTracking: CGFloat = 1.4
+        ///
+        /// Raised from 1.4 when `stamp` became Republica Minor. That face is
+        /// bold AND italic with tight native sidebearings, so set solid it
+        /// closes up into a block at 13pt on a 40mm panel — the slanted stems
+        /// of adjacent caps nearly touch. 2.2pt at 13pt is ~0.17em, which is
+        /// heavy for a text face but correct for tracked-out signage caps and
+        /// is what gives the marquee its air.
+        ///
+        /// If a label ever needs a much larger size, prefer size * 0.17 over
+        /// this constant — tracking should scale with the type, and every
+        /// current call site sits in the 11-14pt band this is tuned for.
+        static let stampTracking: CGFloat = 2.2
 
         /// Countdowns and counts. Monospaced digits so a ticking value does not
         /// reflow the row it sits in — pair with `.contentTransition(.numericText())`.
