@@ -10,7 +10,7 @@
  *   Hide: opacity 1→0 (withTiming 180ms)
  */
 
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect } from "react";
 import { View, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import type { SharedValue } from "react-native-reanimated";
@@ -42,13 +42,25 @@ export const TagOverlayViewer: React.FC<TagOverlayViewerProps> = React.memo(
     // Filter tags for current media slide
     const tags = allTags.filter((t: PostTag) => t.mediaIndex === mediaIndex);
 
-    // Force hide when tags become empty
-    if (tags.length === 0) {
-      if (tagProgress.value !== 0) {
+    // Force hide when tags become empty.
+    //
+    // This used to read AND write tagProgress.value inline during render, which
+    // is what produced "[Reanimated] Reading `value` during component render".
+    // Writing a shared value from render is a side effect in the render phase —
+    // under React 19 it can be discarded or applied twice.
+    //
+    // The `return null` that followed it was the more dangerous half: it sat
+    // ABOVE the useCallback below, so the moment tags went from non-empty to
+    // empty this component rendered fewer hooks than the previous pass and
+    // React throws "Rendered fewer hooks than expected". The effect + the
+    // return being moved below every hook fixes both.
+    const isEmpty = tags.length === 0;
+
+    useEffect(() => {
+      if (isEmpty) {
         tagProgress.value = withTiming(0, { duration: 100 });
       }
-      return null;
-    }
+    }, [isEmpty, tagProgress]);
 
     const handleTagPress = useCallback(
       (tag: PostTag) => {
@@ -63,6 +75,10 @@ export const TagOverlayViewer: React.FC<TagOverlayViewerProps> = React.memo(
       },
       [currentUserId, guestMode, router, queryClient],
     );
+
+    // Every hook has now run — safe to bail out. Above the useCallback this was
+    // a "Rendered fewer hooks than expected" crash waiting on an empty tag list.
+    if (isEmpty) return null;
 
     return (
       <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
