@@ -1,9 +1,24 @@
 /**
- * StoryReplyBubble — Instagram-style story reply context in DMs
+ * StoryReplyBubble — story reply context in DMs.
  *
- * Shows the story thumbnail alongside the reply text.
- * If the story has expired, shows "Story no longer available"
- * with a dimmed/blurred placeholder — identical to Instagram behavior.
+ * Shape: a compact quoted-story strip with the reply underneath, the way a
+ * quote-reply reads everywhere else. The story is CONTEXT for the reply, not
+ * the subject of the message — so it is a 44x60 thumbnail on a row, not a
+ * 160pt-tall full-bleed panel above the text.
+ *
+ * That panel was the bug in the screenshot: an expired story rendered as a
+ * near-empty dark rectangle taller than the message it belonged to, with a
+ * one-word reply ("heart") stranded at the bottom. The content was 3% of the
+ * box.
+ *
+ * EXPLICIT STYLES, NOT className. Every layout value here is an inline style.
+ * On web this component was rendering with none of its Tailwind classes
+ * resolved — no radius, no padding, no centering — so the header sat flush in
+ * the corner and the expired placeholder pinned to the top of its box. Inline
+ * styles are the same values, minus the dependency on class resolution
+ * differing between the native and web pipelines. Colours stay literal for the
+ * same reason; this is one small leaf component, not a licence to abandon
+ * tokens elsewhere.
  */
 
 import { View, Text, Pressable } from "react-native";
@@ -19,6 +34,9 @@ interface StoryReplyBubbleProps {
   isOwnMessage: boolean;
 }
 
+const THUMB_W = 44;
+const THUMB_H = 60;
+
 export function StoryReplyBubble({
   storyReply,
   replyText,
@@ -29,8 +47,8 @@ export function StoryReplyBubble({
   const handleStoryPress = useCallback(() => {
     if (storyReply.isExpired) return;
     if (storyReply.storyId || storyReply.storyUsername) {
-      // Pass username as fallback — group IDs change when new stories are posted,
-      // so stale storyId from metadata may not match the current group ID.
+      // Pass username as fallback — group IDs change when new stories are
+      // posted, so a stale storyId from metadata may not match the current one.
       const storyId = storyReply.storyId || "0";
       const usernameParam = storyReply.storyUsername
         ? `?username=${encodeURIComponent(storyReply.storyUsername)}`
@@ -45,96 +63,107 @@ export function StoryReplyBubble({
     }
   }, [storyReply.storyUsername, router]);
 
+  const label = isOwnMessage
+    ? `You replied to ${storyReply.storyUsername ?? "their"}'s story`
+    : "Replied to your story";
+
   return (
     <View
-      className="rounded-2xl overflow-hidden"
       style={{
         maxWidth: 300,
+        borderRadius: 18,
+        overflow: "hidden",
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        gap: 8,
         backgroundColor: isOwnMessage
-          ? "rgba(62, 164, 229, 0.08)"
-          : "rgba(55, 55, 55, 0.9)",
+          ? "rgba(62, 164, 229, 0.12)"
+          : "rgba(255, 255, 255, 0.07)",
       }}
     >
-      {/* Story context header — tap navigates to author profile, not story */}
+      {/* Quoted story: thumbnail + who, on one row. The whole row is the
+          affordance — a 44pt-wide thumbnail is too small to be the only target. */}
       <Pressable
-        onPress={handleProfilePress}
-        className="flex-row items-center gap-2 px-3 pt-2.5 pb-1.5"
+        onPress={storyReply.isExpired ? handleProfilePress : handleStoryPress}
+        accessibilityRole="button"
+        accessibilityLabel={
+          storyReply.isExpired ? `${label}. Story no longer available.` : label
+        }
+        style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
       >
-        {/* Mini avatar */}
-        {storyReply.storyAvatar ? (
-          <Image
-            source={{ uri: storyReply.storyAvatar }}
-            style={{ width: 16, height: 16, borderRadius: 8 }}
-          />
-        ) : (
-          <View
-            className="items-center justify-center rounded-full bg-muted"
-            style={{ width: 16, height: 16 }}
-          >
-            <Text style={{ fontSize: 8, color: "#fff" }}>
-              {storyReply.storyUsername?.charAt(0).toUpperCase() || "?"}
-            </Text>
-          </View>
-        )}
-        <Text className="text-muted-foreground text-[11px]" numberOfLines={2}>
-          {isOwnMessage
-            ? `You replied to ${storyReply.storyUsername}'s story`
-            : `Replied to your story`}
-        </Text>
-      </Pressable>
+        <View
+          style={{
+            width: THUMB_W,
+            height: THUMB_H,
+            borderRadius: 8,
+            overflow: "hidden",
+            backgroundColor: "rgba(255,255,255,0.06)",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {storyReply.isExpired ? (
+            <ImageOff size={16} color="rgba(255,255,255,0.35)" />
+          ) : storyReply.storyMediaUrl ? (
+            <Image
+              source={{ uri: storyReply.storyMediaUrl }}
+              style={{ width: "100%", height: "100%" }}
+              contentFit="cover"
+              transition={0}
+              cachePolicy="memory-disk"
+              recyclingKey={storyReply.storyMediaUrl}
+            />
+          ) : (
+            <ImageOff size={16} color="rgba(255,255,255,0.25)" />
+          )}
+        </View>
 
-      {/* Story thumbnail + expired state */}
-      <Pressable
-        onPress={handleStoryPress}
-        disabled={storyReply.isExpired}
-        className="mx-2.5 mb-1.5 rounded-xl overflow-hidden"
-        style={{ height: 160 }}
-      >
-        {storyReply.isExpired ? (
-          /* Expired story — dimmed placeholder */
-          <View
-            className="flex-1 items-center justify-center rounded-xl"
-            style={{ backgroundColor: "rgba(30,30,30,0.8)" }}
+        <View style={{ flex: 1, gap: 2 }}>
+          {/* The relationship line. Dim on purpose — it is the caption for the
+              reply, and it must never out-shout the message itself. */}
+          <Text
+            numberOfLines={1}
+            style={{
+              fontSize: 12,
+              lineHeight: 16,
+              color: "rgba(255,255,255,0.55)",
+            }}
           >
-            <ImageOff size={28} color="rgba(255,255,255,0.25)" />
+            {label}
+          </Text>
+          {/* Expired says so here, in words, next to the thing it describes —
+              rather than as a placeholder filling a large empty panel. */}
+          {storyReply.isExpired ? (
             <Text
-              className="text-white/30 text-xs font-medium mt-2 text-center"
-              style={{ maxWidth: 140 }}
+              numberOfLines={1}
+              style={{
+                fontSize: 12,
+                lineHeight: 16,
+                color: "rgba(255,255,255,0.35)",
+              }}
             >
               Story no longer available
             </Text>
-          </View>
-        ) : storyReply.storyMediaUrl ? (
-          /* Active story — show thumbnail */
-          <Image
-            source={{ uri: storyReply.storyMediaUrl }}
-            style={{ width: "100%", height: "100%" }}
-            contentFit="cover"
-            transition={0}
-            cachePolicy="memory-disk"
-            recyclingKey={storyReply.storyMediaUrl}
-          />
-        ) : (
-          /* No media URL — gradient placeholder */
-          <View
-            className="flex-1 items-center justify-center"
-            style={{ backgroundColor: "#1a1a1a" }}
-          >
-            <Text className="text-white/40 text-xs">Story</Text>
-          </View>
-        )}
+          ) : (
+            <Text
+              numberOfLines={1}
+              style={{
+                fontSize: 12,
+                lineHeight: 16,
+                color: "rgba(62, 164, 229, 0.9)",
+              }}
+            >
+              View story
+            </Text>
+          )}
+        </View>
       </Pressable>
 
-      {/* Reply text */}
-      <View className="px-3 pb-2.5 pt-1">
-        <Text
-          className={`text-[15px] ${
-            isOwnMessage ? "text-foreground" : "text-foreground"
-          }`}
-        >
-          {replyText}
-        </Text>
-      </View>
+      {/* The actual message. Largest text in the bubble, because it is the
+          point of it — the quoted story above is supporting context. */}
+      <Text style={{ fontSize: 15, lineHeight: 20, color: "#fff" }}>
+        {replyText}
+      </Text>
     </View>
   );
 }
