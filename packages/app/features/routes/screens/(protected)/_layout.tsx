@@ -29,6 +29,7 @@ import { refreshWeather } from "@dvnt/app/features/weatherfx/WeatherDecisionEngi
 import { useWeatherFXStore } from "@dvnt/app/features/weatherfx/WeatherFXStore";
 // import { WeatherGPUEngine } from "@dvnt/app/features/weatherfx/WeatherGPUEngine";
 import { WeatherReanimatedOverlay } from "@dvnt/app/features/weatherfx/WeatherReanimatedOverlay";
+import { IncomingCallOverlay } from "@dvnt/app/features/call/ui/incoming-call-overlay";
 import { useEventsTabVisibility } from "@dvnt/app/features/weatherfx";
 // import { isWebGPUAvailable } from "@dvnt/app/features/gpu/GpuRuntime";
 import { useLiveSurface } from "@dvnt/app/features/live-surface";
@@ -347,6 +348,12 @@ export default function ProtectedLayout() {
       {/* PERSISTENT: Weather overlay — renders ON TOP of screens.
           pointerEvents="none" — touches pass through to content below. */}
       <WeatherReanimatedOverlay />
+      {/* PERSISTENT: incoming-call listener. Subscribes to call_signals and
+          presents the accept/decline sheet over whatever is on screen.
+          It also owns the WATCH call path — pushCallToWatch /
+          registerWatchCallHandler are fired from inside it — so while this was
+          unmounted, incoming calls rang on neither the phone nor the wrist. */}
+      <IncomingCallOverlay />
       {/* WeatherGPUEngine disabled - requires react-native-wgpu native module */}
       {/* {isWebGPUAvailable() && <WeatherGPUEngine />} */}
     </>
