@@ -19,7 +19,6 @@ const P = "rgb(62, 164, 229)";
 export function ProfileCompletionCard() {
   const user = useAuthStore((s) => s.user);
   const requestNudge = useOnboardingV2Store((s) => s.requestNudge);
-  const markStep = useOnboardingV2Store((s) => s.markStep);
   const { percent, missing } = computeProfileCompletion(user);
 
   // Session-capped nudge (the cap lives in the store, not here).
@@ -91,8 +90,19 @@ export function ProfileCompletionCard() {
           <Pressable
             key={item.key}
             onPress={() => {
-              markStep(`profile.${item.key}`, "done");
-              router.push("/(protected)/edit-profile" as any);
+              // No markStep here. It used to fire markStep(..., "done") on TAP,
+              // before the user had done anything, so backing straight out still
+              // recorded the step as complete. Steps are marked on SAVE (see
+              // welcome.tsx), and the ring is derived from real user fields via
+              // computeProfileCompletion regardless — so the tap-time call only
+              // ever corrupted the step log.
+              // item.route is the WEB path (/feed/...), which does not exist on
+              // native. Every row also used to land on the same untargeted form,
+              // so "Add your city" dropped you at the top with no idea why.
+              router.push({
+                pathname: "/(protected)/edit-profile",
+                params: { focus: item.key },
+              } as any);
             }}
             accessibilityRole="button"
             style={{
