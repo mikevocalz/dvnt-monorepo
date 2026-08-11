@@ -27,6 +27,7 @@ const {
   withDangerousMod,
   withAppBuildGradle,
   withMainApplication,
+  withProjectBuildGradle,
 } = require("expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
@@ -136,12 +137,10 @@ function withWearableDependency(config) {
  * `PackageList(this).packages` only contains autolinked modules, and a
  * hand-added package must be appended to that list explicitly.
  *
- * There is a live example of the failure in this repo:
- * plugins/with-live-activity-android.js copies DVNTLiveNotificationPackage.kt
- * into the app module but never registers it, so NativeModules.
- * DVNTLiveNotification is undefined at runtime. Not fixed here — enabling a
- * module that has been dormant is a behaviour change, not a wiring fix — but
- * that is why this function exists.
+ * with-live-activity-android.js shipped for months without this step: it
+ * copied DVNTLiveNotificationPackage.kt into the app module and never
+ * registered it, so NativeModules.DVNTLiveNotification was undefined at
+ * runtime and nothing errored on either side. It has the same mod now.
  */
 function withWearPackageRegistered(config) {
   return withMainApplication(config, (config) => {
@@ -170,6 +169,39 @@ function withWearPackageRegistered(config) {
   });
 }
 
+/**
+ * Put the Compose Compiler Gradle plugin on the root buildscript classpath.
+ *
+ * From Kotlin 2.0 this is not optional: `composeOptions {
+ * kotlinCompilerExtensionVersion }` no longer exists, and AGP fails at
+ * CONFIGURATION time — before any compile — for any module with
+ * buildFeatures.compose enabled and no compose plugin. The error names the
+ * plugin but not the module, which is a fun ten minutes on a multi-module build.
+ *
+ * Deliberately unversioned, exactly like the kotlin-gradle-plugin line beside
+ * it: expo-root-project supplies the version, and pinning one here would let it
+ * drift out of lockstep with the Kotlin version and fail with a compiler/plugin
+ * mismatch.
+ */
+function withComposeCompilerClasspath(config) {
+  return withProjectBuildGradle(config, (config) => {
+    if (config.modResults.language !== "groovy") {
+      console.warn("[with-wear-os] Root build.gradle is not Groovy — compose plugin not added.");
+      return config;
+    }
+    if (config.modResults.contents.includes("compose-compiler-gradle-plugin")) {
+      return config;
+    }
+    config.modResults.contents = config.modResults.contents.replace(
+      /(classpath\(['"]org\.jetbrains\.kotlin:kotlin-gradle-plugin['"]\))/,
+      "$1\n    classpath('org.jetbrains.kotlin:compose-compiler-gradle-plugin')"
+    );
+    return config;
+  });
+}
+
 module.exports = function withWearOS(config) {
-  return withWearPackageRegistered(withWearableDependency(withWearModuleSources(config)));
+  return withWearPackageRegistered(
+    withComposeCompilerClasspath(withWearableDependency(withWearModuleSources(config)))
+  );
 };

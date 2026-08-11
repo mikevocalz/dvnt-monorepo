@@ -22,3 +22,6 @@ CLAUDE.md.vercel
 # Serena MCP local project config — machine-local, never shared.
 # Swept into a security commit by a stray `git add -A` on 2026-08-10.
 .serena/
+
+# Gradle build output from workspace packages with native android/ dirs.
+packages/*/android/build/

@@ -21,6 +21,9 @@ class MainApplication : Application(), ReactApplication {
       context = applicationContext,
       packageList =
         PackageList(this).packages.apply {
+          // Data Layer bridge for the Wear OS app (plugins/with-wear-os.js).
+          add(WearBridgePackage())
+          add(DVNTLiveNotificationPackage())
           // Packages that cannot be autolinked yet can be added manually here, for example:
           // add(MyReactNativePackage())
         }
