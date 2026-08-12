@@ -343,3 +343,45 @@ browser has run this path. Treat the visual result as unproven until it does.
 `apps/web` pins TypeScript 5.8.3, whose `lib.dom.d.ts` predates WebGPU, so it
 now carries `@webgpu/types@0.1.65` — pinned to the exact version
 `react-native-webgpu` ships against, so the two can't disagree.
+
+**WS-5 parity verification — done. The five unknowns resolve to NO BLOCKER.**
+
+Verified against the published `expo-callkit-telecom@0.4.0` tarball (npm), not
+the README: the complete native surface was enumerated from the Swift and
+Kotlin `Function`/`AsyncFunction` registrations, which is the authoritative
+list. iOS and Android expose the same set apart from
+`failIncomingCallConnected` (iOS only).
+
+| Ours | Theirs | Verified verdict |
+|---|---|---|
+| `endAllCalls` | absent, both platforms | **Composable, not missing.** The module models exactly one live call (`CallStore.firstSession`; `getActiveCallSession(): CallSession \| null`), so this is `endCall(activeSession.id)` — an adapter one-liner. |
+| `reportConnectingOutgoingCallWithUUID` | absent | **Real gap, cosmetic.** `reportOutgoingCallConnected` calls `provider.reportOutgoingCall(with:connectedAt:)` (CallManager.swift:510); nothing anywhere passes `startedConnectingAt:`. iOS never shows the "connecting…" phase. No functional loss. |
+| `setAvailable` | absent | **Obviated.** A ConnectionService concept; Core-Telecom registration is declarative. |
+| `setCurrentCallActive` | `fulfillIncomingCallConnected` | **Semantics match, with a trap.** It resolves the pending `CXAnswerCallAction` *and* sets `status=.connected` + `connectedAt` (CallManager.swift:466-479) — it is not a free-standing "mark active" and it fails if the fulfil request already timed out. Note the JS wrapper (`fulfillIncomingCallConnected`) and the native function (`fulfillIncomingCallAnswered`) have **different names**; logs will disagree with source. |
+| `canMakeMultipleCalls` | absent, and not configurable | **A match, not a gap.** `maximumCallGroups = 1`, `maximumCallsPerCallGroup = 1` are hard-coded (CallManager.swift:59-60) — and we already call `canMakeMultipleCalls(false)` (callkeep.ts:281). Their constraint is our existing configuration. |
+| `updateDisplay` | absent | Real gap — caller name/handle can't be revised after `reportIncomingCall`. |
+| `backToForeground` | absent | **Obviated on Android** by `setFullScreenIntent(..., true)` (CallNotificationManager.kt:226/262/304). |
+
+**The finding that settles the phasing:** of those seven APIs, only
+`endAllCalls` has any consumer outside our own wrapper — three sites
+(`lib/supabase/privileged.ts:104`, `lib/hooks/use-video-call.ts:56,1092`) —
+and it is trivially composable. `updateDisplay`, `backToForeground`,
+`setAvailable`, `setCurrentCallActive`, `reportConnectingOutgoingCallWithUUID`
+and `canMakeMultipleCalls` have **zero** consumers outside
+`features/services/callkeep/`: they are surface we wrote and never called. The
+gaps therefore cost nothing, and the "ship the covered surface behind a flag,
+retain callkeep for the remainder" fallback is not needed — the covered
+surface is the whole used surface.
+
+One caveat found on the way, unrelated to parity but on the cutover path:
+`packages/app/features/services/callkeep/callkeep.ts` and
+`apps/mobile/src/services/callkeep/callkeep.ts` are **byte-identical copies**,
+and `apps/mobile/lib/supabase/privileged.ts:66` dynamically imports the
+apps/mobile one while `packages/app/lib/supabase/privileged.ts:104` imports the
+packages/app one. A cutover that edits only one leaves the other live. Collapse
+them to one module before the adapter lands, not after.
+
+Still unverified for WS-5 (needs a build, not a source read): the claim that
+native-before-JS call reporting shrinks the 1.0.315/1.0.316 headless-boot
+SIGABRT surface. That is the actual reason for the migration and it can only be
+confirmed on a device.
