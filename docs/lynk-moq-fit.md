@@ -276,3 +276,25 @@ branch) is retained as the pure-MoQ-on-native fallback but is no longer the
 default path. Native publish-from-phone is now **supported** (was web-first in the
 prior draft). Token-response shapes differ by transport (MoQ: single scoped token;
 livestream: per-publisher list) — both behind the hook seam, screens unaffected.
+
+### 6.1-R (2026-08-12) — SUPERSEDED: native goes true-native MoQ via `react-native-moq`
+
+The §6.1 decision (native = WHIP/WHEP livestream) was made when the only
+native MoQ options were a WebView-hosted `@moq` player or nothing. That
+constraint no longer holds: **`react-native-moq`** (Software Mansion Labs,
+npm 0.2.0, 2026-07-10) provides true-native MoQ bindings targeting the New
+Architecture, iOS 16+ / Android API 30+.
+
+Gates re-verified 2026-08-12 (full table in `docs/realtime-media-baseline.md`
+§Decision 3): all pass — deploymentTarget 17.0, minSdk 30 (`562f820`),
+newArchEnabled, plain-autolinking CNG install, docs pinned at our 0.29.0 SDK
+line, and explicit native↔web interop ("a stream published from the browser
+with `@moq/publish` can be watched with `react-native-moq`, and vice versa").
+`lynk-moq-token` already mints the correct path-scoped tokens for both intents.
+
+New decision: **both platforms converge on MoQ behind the unchanged
+`useLynkBroadcast`/`useLynkViewer` seam.** The WHIP/WHEP path, per-publisher
+livestream rooms, `video_room_members.livestream_id`, poll discovery, and the
+WebView `moqPlayerHtml.ts` fallback are retained through burn-in only, then
+deleted (delete list in the baseline doc). Maturity caution: 0.2.0 is young —
+the seam keeps a revert hook-internal.
