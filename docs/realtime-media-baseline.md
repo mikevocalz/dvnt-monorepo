@@ -295,3 +295,51 @@ seam. Until then the MoQ path is exercised only by the genesis screens at
 **Native build note.** `react-native-moq` is a native module (iOS 16.0 floor vs
 our 17.0; Android minSdk 30 vs our 30; SPM `moq-kit` 0.3.0 via `spm_dependency`).
 A new dev build is required before the native MoQ path can run at all.
+
+**WS-4 — built, not yet run on a device.** GPU reactions per Decision 5.
+
+Package reconciliation done first, as the decision required: the duplicate
+`react-native-wgpu` declaration is gone (every import already used the
+successor name), `react-native-webgpu` is declared once per consumer and
+bumped 0.5.15 → **0.8.2**, and `typegpu@0.12.0` is added. The bump happened
+now rather than later because nothing mounts GPU at runtime today
+(`WeatherGPUEngine` is still commented out of `(protected)/_layout.tsx`), so
+the blast radius is zero — and writing new GPU code against a stale API only
+to bump afterwards is the more expensive order. Peers check out: RN 0.86 vs
+>=0.81, Reanimated 4.5.3 vs >=4.2.1, worklets 0.11.3 vs >=0.7.2.
+
+Shape as designed: one pipeline, one pre-allocated ring of 64 instances, motion
+as a pure function of `(now - spawnTime)` in the vertex shader, so per frame the
+CPU does one uniform write and one `draw(6, 64)`. Spawning writes 20 bytes.
+Scratch buffers are hoisted (zero-per-frame-allocation law). TypeGPU owns the
+schemas — `sizeOf(ReactionInstance)` is the stride authority — and the shader
+stays plain WGSL because web and native run the same source.
+
+Deviations from the decision text, both deliberate:
+- Draws the full ring every frame and collapses expired instances to a
+  degenerate quad in the vertex shader, instead of `draw(6, liveCount)`. 64
+  degenerate quads is free and it removes a CPU-side liveness count. Marked
+  with a `ponytail:` comment naming the upgrade path.
+- The atlas is rasterized from each screen's **existing** palette rather than a
+  new shared one. Native (`ControlsBar`) and web (`room.web.tsx`) currently ship
+  *different* six-emoji sets. Unifying them is a visible product change, so it
+  is flagged here rather than made silently.
+
+Cap: `GPU_REACTION_CAP = 50` applies only once the overlay reports it has a
+device, an atlas AND a pipeline; any failure in that chain leaves the RN/DOM
+path mounted at the old cap of 6. Transport (`useRoomReactions`) is unchanged
+apart from the cap becoming a parameter.
+
+Fixed in passing (flagged by Decision 5): `FloatingReaction` started its
+animation inside a `useRef` initializer — a render-body side effect that
+double-fired `onComplete` on any discarded render. Now an effect.
+
+Evidence: `@dvnt/app` and `web` typecheck clean; the layout contract between
+`writeInstance`, the TypeGPU schema and the WGSL struct has 4 passing
+assertions (`features/gpu/reactions/engine.test.ts`, run with `tsx/esm`).
+**What is NOT verified: a single rendered frame.** No device, simulator, or
+browser has run this path. Treat the visual result as unproven until it does.
+
+`apps/web` pins TypeScript 5.8.3, whose `lib.dom.d.ts` predates WebGPU, so it
+now carries `@webgpu/types@0.1.65` — pinned to the exact version
+`react-native-webgpu` ships against, so the two can't disagree.

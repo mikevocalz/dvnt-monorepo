@@ -71,6 +71,7 @@
     "@types/pg": "^8.11.10",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@webgpu/types": "0.1.65",
     "autoprefixer": "^10.4.21",
     "cross-env": "^10.1.0",
     "eslint": "^9",

@@ -11,7 +11,7 @@ export { RoomParticipantsSheet } from "./RoomParticipantsSheet";
 export { HandQueueSheet } from "./HandQueueSheet";
 export { SpeakerGrid } from "./SpeakerGrid";
 export { ListenerGrid } from "./ListenerGrid";
-export { ControlsBar } from "./ControlsBar";
+export { ControlsBar, REACTION_EMOJIS } from "./ControlsBar";
 export { ConnectionBanner } from "./ConnectionBanner";
 export { EjectModal } from "./EjectModal";
 export { TopicPills } from "./TopicPills";

@@ -87,7 +87,8 @@ import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
 import { classifySneakyLynkError } from "../errors";
 import { videoApi } from "@dvnt/app/features/video/api";
-import { useRoomReactions } from "../hooks/useRoomReactions";
+import { useRoomReactions, GPU_REACTION_CAP } from "../hooks/useRoomReactions";
+import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
 import { useSneakyLynkCaptureBroadcast } from "../hooks/useSneakyLynkCaptureBroadcast";
 import {
   fetchRoomComments,
@@ -1100,7 +1101,16 @@ function RoomInner({
   };
 
   // Shared realtime/data wiring (same channels + edge fns as the native room).
-  const { reactions, sendReaction } = useRoomReactions({ roomId: id, currentUser });
+  // GPU reactions raise the concurrent cap to 50; the DOM path stays at 6
+  // because each reaction there is a keyframed <span>. Only flips true once the
+  // overlay has a device, an atlas and a pipeline — any failure keeps the DOM
+  // path exactly as it was.
+  const [gpuReactions, setGpuReactions] = useState(false);
+  const { reactions, sendReaction } = useRoomReactions({
+    roomId: id,
+    currentUser,
+    cap: gpuReactions ? GPU_REACTION_CAP : undefined,
+  });
   const { comments, send: sendChat } = useRoomChat(id, currentUser);
   const members = useRoomMembersSync(id, authUser?.id);
   const captureBroadcast = useSneakyLynkCaptureBroadcast({
@@ -1757,7 +1767,12 @@ function RoomInner({
       )}
 
       {/* Floating reactions overlay */}
-      <FloatingReactions reactions={reactions} />
+      <GpuReactionOverlay
+        reactions={reactions}
+        emojis={REACTION_EMOJIS}
+        onAvailabilityChange={setGpuReactions}
+      />
+      <FloatingReactions reactions={gpuReactions ? [] : reactions} />
 
       {/* Controls bar */}
       <footer className="relative z-10 flex flex-col items-center gap-3 pb-8 pt-2">

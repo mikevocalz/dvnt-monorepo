@@ -18,14 +18,30 @@ export interface RoomReaction extends ReactionBroadcastPayload {
   isOwn: boolean;
 }
 
+/**
+ * Concurrent reactions the RN/DOM overlay can carry. Each one is an animated
+ * view (native) or a keyframed span (web), so this stays deliberately small.
+ * The GPU overlay raises it — see `GPU_REACTION_CAP`.
+ */
+const FALLBACK_REACTION_CAP = 6;
+
+/** One instance in a pre-allocated ring buffer, so the cap can be real. */
+export const GPU_REACTION_CAP = 50;
+
 interface UseRoomReactionsOptions {
   roomId: string;
   currentUser: SneakyUser;
+  /**
+   * Max concurrent reactions. Pass `GPU_REACTION_CAP` once the GPU overlay
+   * reports it is carrying them; leave unset for the RN/DOM path.
+   */
+  cap?: number;
 }
 
 export function useRoomReactions({
   roomId,
   currentUser,
+  cap = FALLBACK_REACTION_CAP,
 }: UseRoomReactionsOptions) {
   const [reactions, setReactions] = useState<RoomReaction[]>([]);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -42,7 +58,7 @@ export function useRoomReactions({
 
   const enqueueReaction = useCallback(
     (reaction: RoomReaction) => {
-      setReactions((prev) => [...prev.slice(-5), reaction]);
+      setReactions((prev) => [...prev.slice(-(cap - 1)), reaction]);
 
       if (timersRef.current[reaction.id]) {
         clearTimeout(timersRef.current[reaction.id]);
@@ -52,7 +68,7 @@ export function useRoomReactions({
         removeReaction(reaction.id);
       }, REACTION_TTL_MS);
     },
-    [removeReaction],
+    [removeReaction, cap],
   );
 
   const ensureChannel = useCallback(() => {

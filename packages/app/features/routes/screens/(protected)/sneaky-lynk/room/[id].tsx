@@ -54,6 +54,7 @@ import {
   SpeakerGrid,
   ListenerGrid,
   ControlsBar,
+  REACTION_EMOJIS,
   ConnectionBanner,
   EjectModal,
   ChatSheet,
@@ -92,7 +93,11 @@ import {
   DVNTLiquidGlass,
   DVNTLiquidGlassIconButton,
 } from "@dvnt/app/components/media/DVNTLiquidGlass";
-import { useRoomReactions } from "@dvnt/app/features/sneaky-lynk";
+import {
+  useRoomReactions,
+  GPU_REACTION_CAP,
+} from "@dvnt/app/features/sneaky-lynk";
+import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
 import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
@@ -2457,9 +2462,15 @@ function RoomLayout({
   hideTimer?: boolean;
   timerStartedAt?: number;
 }) {
+  // GPU reactions carry a real 50-concurrent cap; the RN overlay stays capped
+  // at 6 because each one there is an animated view. `gpuReactions` only flips
+  // true once the overlay reports it has a device, an atlas AND a pipeline, so
+  // a failure anywhere in that chain leaves the RN path exactly as it was.
+  const [gpuReactions, setGpuReactions] = useState(false);
   const { reactions, sendReaction } = useRoomReactions({
     roomId,
     currentUser: localUser,
+    cap: gpuReactions ? GPU_REACTION_CAP : undefined,
   });
   // Bottom padding below the speaker grid so the controls bar never
   // clips participant name labels rendered on the last row of tiles.
@@ -2776,6 +2787,13 @@ function RoomLayout({
 
         <RemoteAudioLayer participants={allParticipants} />
 
+        <GpuReactionOverlay
+          reactions={reactions}
+          emojis={REACTION_EMOJIS}
+          paused={isChatOpen}
+          onAvailabilityChange={setGpuReactions}
+        />
+
         <ControlsBar
           isMuted={effectiveMuted}
           isVideoEnabled={effectiveVideoOn}
@@ -2783,7 +2801,7 @@ function RoomLayout({
           hasVideo={hasVideo ?? true}
           localRole={localRole}
           overlayOpen={isChatOpen}
-          floatingReactions={reactions}
+          floatingReactions={gpuReactions ? [] : reactions}
           onLeave={onLeave}
           onToggleMute={onToggleMic}
           onToggleVideo={onToggleVideo}

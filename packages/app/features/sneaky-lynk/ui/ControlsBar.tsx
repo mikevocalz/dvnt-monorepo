@@ -29,7 +29,12 @@ import {
 import Reanimated, { FadeInRight, FadeOutRight } from "react-native-reanimated";
 import type { RoomReaction } from "../hooks/useRoomReactions";
 
-const REACTION_EMOJIS = ["😂", "😢", "😊", "😈", "🥵", "💝"];
+/**
+ * The room's reaction palette. Exported because the GPU overlay rasterizes its
+ * atlas from exactly this list, in this order — if the two ever drift, taps
+ * render the wrong glyph.
+ */
+export const REACTION_EMOJIS = ["😂", "😢", "😊", "😈", "🥵", "💝"];
 
 interface ControlsBarProps {
   isMuted: boolean;
@@ -72,8 +77,14 @@ function FloatingReaction({
     ),
   ).current;
 
-  useRef(
-    Animated.parallel([
+  // Starting the animation inside a `useRef` initializer ran it during render —
+  // a side effect React is free to invoke twice (StrictMode, and any render
+  // that gets thrown away), which double-fired `onComplete`. Effect, once.
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
+  useEffect(() => {
+    const animation = Animated.parallel([
       Animated.timing(translateY, {
         toValue: -196 - Math.random() * 72,
         duration: 2200,
@@ -99,8 +110,11 @@ function FloatingReaction({
         easing: Easing.in(Easing.quad),
         useNativeDriver: true,
       }),
-    ]).start(onComplete),
-  ).current;
+    ]);
+    animation.start(() => onCompleteRef.current());
+    return () => animation.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Animated.View

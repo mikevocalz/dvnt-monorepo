@@ -46,7 +46,8 @@
     },
     "jsxImportSource": "nativewind",
     "types": [
-      "nativewind/types"
+      "nativewind/types",
+      "@webgpu/types"
     ]
   },
   "include": [
