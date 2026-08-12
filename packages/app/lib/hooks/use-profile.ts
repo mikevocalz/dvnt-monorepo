@@ -481,7 +481,13 @@ export function useUpdateProfile() {
         gender: variables.gender ?? authUser.gender,
         hashtags: variables.hashtags ?? authUser.hashtags,
         name: variables.name ?? authUser.name,
-      };
+        // These two drive the `identity` (20) and `audience` (10) items in
+        // computeProfileCompletion. Omitting them here made the completion ring
+        // snap back to 70% the moment you saved, before the server round-trip
+        // could restore it.
+        sexuality: variables.sexuality ?? (authUser as any).sexuality,
+        eventAudience: variables.eventAudience ?? (authUser as any).eventAudience,
+      } as AppUser;
       setUser(optimisticUser);
       patchCurrentUserEverywhere(queryClient, authUser, optimisticUser);
 

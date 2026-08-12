@@ -563,43 +563,16 @@ export const usersApi = {
           : {}),
       };
 
-      const fallbackPayload = {
-        name: updates.name,
-        firstName: updates.firstName,
-        lastName: updates.lastName,
-        username: updates.username,
-        bio: updates.bio,
-        location: updates.location,
-        website: updates.website,
-        avatarUrl: updates.avatar,
-      };
-
-      let updatedUser;
-      try {
-        updatedUser = await updateProfilePrivileged(primaryPayload);
-      } catch (error: any) {
-        const errorMessage = String(error?.message || "");
-        const usedOptionalFields =
-          "pronouns" in primaryPayload ||
-          "gender" in primaryPayload ||
-          "links" in primaryPayload ||
-          "sexuality" in primaryPayload ||
-          "eventAudience" in primaryPayload;
-        const shouldRetryBasePayload =
-          usedOptionalFields &&
-          (errorMessage === "Failed to update profile" ||
-            errorMessage === "An unexpected error occurred");
-
-        if (!shouldRetryBasePayload) {
-          throw error;
-        }
-
-        console.warn(
-          "[Users] updateProfile retrying without optional fields:",
-          errorMessage,
-        );
-        updatedUser = await updateProfilePrivileged(fallbackPayload);
-      }
+      // NO silent retry-without-optional-fields here. There used to be one: on
+      // "Failed to update profile" / "An unexpected error occurred" it re-sent a
+      // payload stripped of pronouns, gender, links, sexuality and eventAudience.
+      // That call succeeded, the user got a green "Saved" toast, and those five
+      // fields were silently discarded — which is why "finish your profile"
+      // stuck at 70% forever: identity (20) + audience (10) never persisted, and
+      // nothing anywhere reported a failure. A partial save that lies is worse
+      // than a visible error. If the update fails now, it fails loudly and the
+      // error reaches the toast in edit-profile.
+      const updatedUser = await updateProfilePrivileged(primaryPayload);
 
       const normalizedUser = {
         ...updatedUser,
