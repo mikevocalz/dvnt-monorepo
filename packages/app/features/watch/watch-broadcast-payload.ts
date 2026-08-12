@@ -12,6 +12,7 @@
  */
 
 import type { Activity } from "@dvnt/app/lib/hooks/use-activities-query";
+import { normalizeHex } from "@dvnt/app/lib/color/normalizeColor";
 
 /**
  * Coarse intent derived from the message text — STYLING ONLY. The host's words
@@ -36,6 +37,21 @@ export interface WatchBroadcastDTO {
   /** Epoch seconds (parsed from the activity's ISO `createdAt`). */
   createdAt: number;
   read: boolean;
+  /**
+   * The event's dominant colour, `#rrggbb`. This is the one the wrist actually
+   * relies on: `EventArt.swift` paints it synchronously and is finished, so a
+   * broadcast row is never an empty box even on a watch with no network path.
+   * Seven bytes against the ~262 KB applicationContext slot.
+   */
+  dominantHex?: string;
+  /**
+   * Event artwork, faded in over `dominantHex` if and when it arrives. Strictly
+   * an upgrade — failure and timeout are indistinguishable from not having it.
+   * NOT a watch-sized rendition: Bunny Optimizer is off on the pull zone
+   * (`?width=` returns the original byte-for-byte), so this is the full asset
+   * and the hex is what makes that acceptable.
+   */
+  eventImageURL?: string;
 }
 
 export interface WatchBroadcastEnvelope {
@@ -72,6 +88,12 @@ export function toWatchBroadcast(a: Activity): WatchBroadcastDTO {
     intent: inferIntent(body),
     createdAt: toEpochSeconds(a.createdAt),
     read: !!a.isRead,
+    // Same extraction the ticket projector uses (`watch-payload.ts`), against
+    // the event the activity already references — normalizeHex fails closed, so
+    // a malformed colour drops to undefined and the row falls back to its own
+    // surface rather than painting a black-on-black card.
+    dominantHex: normalizeHex(a.event?.dominantHex) ?? undefined,
+    eventImageURL: a.event?.imageURL?.trim() || undefined,
   };
 }
 

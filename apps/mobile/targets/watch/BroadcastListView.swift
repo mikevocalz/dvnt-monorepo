@@ -50,6 +50,22 @@ private struct BroadcastRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DVNT.Space.tight) {
             HStack(spacing: DVNT.Space.snug) {
+                // The event's identity, in the header line rather than leading
+                // the whole row: the body below is the host's words rendered
+                // VERBATIM, and a leading thumb would take ~20% of the width
+                // off a 40mm screen's two-line preview. The model header's
+                // verbatim rule outranks the artwork.
+                //
+                // Radius.chip (8), not Radius.card (20). Card radius is tuned
+                // for a full-width card; on a 22pt square it renders a circle,
+                // which is the DM avatar idiom and would read as a person
+                // rather than an event.
+                EventArt(
+                    dominantHex: broadcast.dominantHex,
+                    imageURL: broadcast.eventImageURL,
+                    cornerRadius: DVNT.Radius.chip
+                )
+                .frame(width: 22, height: 22)
                 Image(systemName: broadcast.intent.glyph)
                     .font(.system(size: DVNT.TypeScale.Icon.inline))
                     .foregroundStyle(broadcast.intent.accent)

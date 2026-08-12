@@ -45,6 +45,10 @@ export interface Notification {
   event?: {
     id: string;
     title?: string;
+    /** Cover, else an image flyer — resolved from the row already fetched. */
+    imageURL?: string;
+    /** `events.dominant_color`, raw. Normalized at the point of use. */
+    dominantHex?: string;
   } | null;
   postId: string | null;
   commentId: string | null;
@@ -624,12 +628,12 @@ export const notificationsApi = {
       ];
       const eventMap = new Map<
         string,
-        { title: string | null; cover: string | null }
+        { title: string | null; cover: string | null; dominant: string | null }
       >();
       if (eventIds.length > 0) {
         const { data: eventRows } = await supabase
           .from("events")
-          .select("id, title, cover_image_url, flyer_image_url")
+          .select("id, title, cover_image_url, flyer_image_url, dominant_color")
           .in("id", eventIds);
         for (const e of eventRows || []) {
           // Most events keep their artwork in flyer_image_url, not
@@ -646,6 +650,10 @@ export const notificationsApi = {
               (e as any).cover_image_url ||
               (flyerIsImage ? flyer : null) ||
               null,
+            // The watch paints this hex before any image request and is
+            // finished at that point — see EventArt.swift. It is one extra
+            // column on a select that already runs, not a second query.
+            dominant: (e as any).dominant_color || null,
           });
         }
       }
@@ -725,6 +733,8 @@ export const notificationsApi = {
             ? {
                 id: String(entityId),
                 title: eventInfo.title || undefined,
+                imageURL: eventInfo.cover || undefined,
+                dominantHex: eventInfo.dominant || undefined,
               }
             : null,
         };

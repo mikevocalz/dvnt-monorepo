@@ -2,7 +2,9 @@ import SwiftUI
 import WatchKit
 
 /// A host broadcast as the phone projects it. Mirrors `WatchBroadcastDTO` in
-/// `packages/app/src/watch/watch-broadcast-payload.ts` — keep the two in lockstep.
+/// `packages/app/features/watch/watch-broadcast-payload.ts` — keep the two in
+/// lockstep. (This header used to point at `packages/app/src/watch/`, a tree
+/// that does not exist; the projector has only ever lived under `features/`.)
 ///
 /// These are the SAME rows the phone shows in its activity feed (the
 /// `event-broadcast-message` edge function): the watch is a presentation surface,
@@ -19,9 +21,17 @@ struct WatchBroadcast: Identifiable, Codable, Hashable {
     let intent: BroadcastIntent
     let createdAt: Double   // epoch seconds
     let read: Bool
+    /// The event's dominant colour, `#rrggbb`. `EventArt` paints this
+    /// synchronously and is finished, so a row is never an empty box even with
+    /// no network path of its own.
+    let dominantHex: String?
+    /// Event artwork, an upgrade over the hex. The full asset, not a
+    /// watch-sized rendition — Bunny Optimizer is off on the pull zone.
+    let eventImageURL: String?
 
     enum CodingKeys: String, CodingKey {
         case id, eventId, eventTitle, host, title, body, intent, createdAt, read
+        case dominantHex, eventImageURL
     }
 
     init(from decoder: Decoder) throws {
@@ -37,6 +47,10 @@ struct WatchBroadcast: Identifiable, Codable, Hashable {
         intent = BroadcastIntent(rawValue: raw) ?? BroadcastIntent.infer(from: body)
         createdAt = (try? c.decode(Double.self, forKey: .createdAt)) ?? 0
         read = (try? c.decode(Bool.self, forKey: .read)) ?? false
+        // Lenient like the rest of this file: an older phone build sends
+        // neither key, and one malformed row must not blank the list.
+        dominantHex = try? c.decode(String.self, forKey: .dominantHex)
+        eventImageURL = try? c.decode(String.self, forKey: .eventImageURL)
     }
 
     var date: Date? { createdAt > 0 ? Date(timeIntervalSince1970: createdAt) : nil }

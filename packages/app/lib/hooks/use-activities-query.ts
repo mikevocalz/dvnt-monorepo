@@ -67,6 +67,10 @@ export interface Activity {
   event?: {
     id: string;
     title?: string;
+    /** Event artwork. Carried for surfaces that draw the event, e.g. the watch. */
+    imageURL?: string;
+    /** Raw `events.dominant_color`; normalize before handing to a renderer. */
+    dominantHex?: string;
   };
   comment?: string;
   commentId?: string;
@@ -147,6 +151,8 @@ function notificationToActivity(notif: Notification): Activity | null {
         ? {
             id: String(notif.event.id || ""),
             title: notif.event.title,
+            imageURL: notif.event.imageURL,
+            dominantHex: notif.event.dominantHex,
           }
         : undefined,
       comment: notif.content,
