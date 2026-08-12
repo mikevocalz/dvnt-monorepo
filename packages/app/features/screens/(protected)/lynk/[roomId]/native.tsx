@@ -1,24 +1,23 @@
 /**
- * Lynk Live — NATIVE screen. TRUE native transport via Fishjam WHIP/WHEP
- * livestream (docs/lynk-moq-fit.md §6.1; web uses MoQ). Publish + watch render
- * real native `MediaStream`s in `RTCView` — no WebView.
+ * Lynk Live — NATIVE screen. TRUE native MoQ transport via `react-native-moq`
+ * (WS-3; web uses `@moq/*` directly, and the two interop). Publish + watch are
+ * native QUIC with hardware encode/decode — no WebView, no WHIP/WHEP.
  *
  * Transport is hidden behind `useLynkBroadcast`/`useLynkViewer` (native) +
- * `<VideoTile>`; this screen only differs from web in chrome (safe-area,
- * full-bleed, overlay controls). Reuses the existing private Lynk room model.
- * `?isHost=1` (or a publish-capable role) → broadcaster; otherwise viewer.
+ * `<PublisherView>`/`<PublisherTile>`; this screen only differs from web in
+ * chrome (safe-area, full-bleed, overlay controls). Reuses the existing private
+ * Lynk room model. `?isHost=1` (or a publish-capable role) → broadcaster;
+ * otherwise viewer.
  */
 
 import { View, Text, Pressable, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { FishjamProvider } from "@fishjam-cloud/react-native-client";
-import { VideoTile } from "@dvnt/ui";
-import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
+import { PublisherView } from "react-native-moq";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.native";
 import { useLynkViewer } from "@dvnt/app/lib/lynk/useLynkViewer.native";
 import { lynkStateLabel } from "@dvnt/app/lib/lynk/lynkState";
-import { LivestreamTile } from "./LivestreamTile.native";
+import { PublisherTile } from "./PublisherTile.native";
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
@@ -36,16 +35,14 @@ function BroadcasterStage({ roomId }: { roomId: string }) {
   return (
     <View className="flex-1 bg-[#06070d]">
       <ScrollView contentContainerStyle={{ padding: 12, gap: 12, paddingTop: insets.top + 8 }}>
-        <VideoTile
-          stream={(lynk.localStream ?? undefined) as unknown as MediaStream}
-          mirror
-          muted
-          label="You"
-          isSpeaking={lynk.cameraEnabled}
-          className="aspect-video w-full"
-        />
+        <View className="aspect-video w-full overflow-hidden rounded-2xl bg-black">
+          <PublisherView camera={lynk.cameraTrack} style={{ flex: 1 }} />
+          <View className="absolute bottom-2 left-2 rounded-full bg-black/60 px-3 py-1">
+            <Text className="text-xs font-semibold text-white">You</Text>
+          </View>
+        </View>
         {lynk.coPublishers.map((p) => (
-          <LivestreamTile key={p.peerId} token={p.token} label="Cohost" />
+          <PublisherTile key={p.peerId} broadcast={p.broadcast} label="Cohost" />
         ))}
       </ScrollView>
 
@@ -121,12 +118,11 @@ function ViewerStage({ roomId }: { roomId: string }) {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 12, gap: 12, paddingTop: insets.top + 48 }}>
-          {lynk.publishers.map((p) => (
-            <LivestreamTile
+          {lynk.publishers.map((p, i) => (
+            <PublisherTile
               key={p.peerId}
-              token={p.token}
-              label={p.role === "host" ? "Host" : "Cohost"}
-              muted={lynk.muted}
+              broadcast={p.broadcast}
+              label={i === 0 ? "Host" : "Cohost"}
             />
           ))}
         </ScrollView>
@@ -172,9 +168,9 @@ export default function LynkRoomNative() {
     );
   }
 
-  return (
-    <FishjamProvider fishjamId={resolveFishjamAppId()}>
-      {isHost ? <BroadcasterStage roomId={roomId} /> : <ViewerStage roomId={roomId} />}
-    </FishjamProvider>
+  return isHost ? (
+    <BroadcasterStage roomId={roomId} />
+  ) : (
+    <ViewerStage roomId={roomId} />
   );
 }

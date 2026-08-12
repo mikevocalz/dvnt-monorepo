@@ -260,3 +260,38 @@ cutover waits for a stable call domain from WS-1.
 4. `expo-callkit-telecom` phased behind the coordinator interface — approve?
 5. Add `typegpu` (pure-TS dep) + drop the duplicate `react-native-wgpu`
    declaration — approve?
+
+---
+
+## Progress log
+
+**WS-1 (`da41ee6`) — done.** Migration is live: `video_rooms.room_kind` present
+with default `'lynk'`, backfill stamped 58 `call` / 76 `lynk`, and
+`video_rooms_kind_status_idx` exists. `call_create` + `call_join` deployed
+(v1, ACTIVE, `verify_jwt=false`; all 154 functions still `verify_jwt=false`).
+
+**WS-2 (`87d46e9`) — done.** One service worker, call Accept/Decline actions,
+`IncomingCallOverlay` mounted on web. Backend is live: `internal_fn_secrets`
+exists, `call_signals_push_trigger` authenticates with `x-internal-secret`, and
+`send_notification` is deployed at v58.
+
+**WS-3a — done.** Dead mock chain deleted (`rtc/fishjamClient.ts`,
+`hooks/useSneakyLynkRoom.ts`, barrel export). Native transport swapped from
+Fishjam WHIP/WHEP to `react-native-moq@0.2.0`, so both platforms now speak MoQ
+and interop. Correction to the Decision-3 delete list: `lib/lynk/livestreamToken.ts`
+and `LivestreamTile.native.tsx` were deleted **now**, not after burn-in — the
+hook rewrite left them with zero importers, and rollback is a single revert of
+the WS-3a commit, which restores them together with the WHIP hooks.
+
+**WS-3b — not started.** The routed product screens
+(`features/sneaky-lynk/screens/room.web.tsx`, 2,088 lines;
+`features/routes/screens/(protected)/sneaky-lynk/room/[id].tsx`, 2,845 lines)
+still call `@fishjam-cloud/react-native-client` directly and do **not** consume
+`useLynkBroadcast`/`useLynkViewer`. Decision 3's "swap the media layer inside
+the hooks" only reaches the product once those screens are moved onto the hook
+seam. Until then the MoQ path is exercised only by the genesis screens at
+`features/screens/(protected)/lynk/[roomId]/`, which is the burn-in surface.
+
+**Native build note.** `react-native-moq` is a native module (iOS 16.0 floor vs
+our 17.0; Android minSdk 30 vs our 30; SPM `moq-kit` 0.3.0 via `spm_dependency`).
+A new dev build is required before the native MoQ path can run at all.

@@ -5,8 +5,9 @@
  * (`@dvnt/app/features/sneaky-lynk`) — never a deep path into `api/`, `hooks/`,
  * `stores/`, or `ui/`. Route-bound screens under `screens/` are consumed
  * directly by the app routers (apps/web pages, mobile route files) via their own
- * platform-forked paths and are intentionally NOT re-exported here; the native
- * RTC transport (`rtc/`) and test fixtures (`mocks/`) stay feature-private too.
+ * platform-forked paths and are intentionally NOT re-exported here; test
+ * fixtures (`mocks/`) stay feature-private too. The RTC transport lives in
+ * `lib/lynk/` (MoQ) — this feature owns no transport of its own.
  *
  * The capture hooks keep their own STOP-THE-LINE / honest-scope docstrings in
  * `hooks/useSneakyLynkCapture{Protection,Broadcast}.ts` — this barrel only
@@ -25,7 +26,6 @@ export * from "./api/comments";
 export * from "./api/room-stats";
 
 // Hooks — TanStack Query + Zustand selectors + capture protection/broadcast.
-export * from "./hooks/useSneakyLynkRoom";
 export * from "./hooks/useRoomEvents";
 export * from "./hooks/useRoomReactions";
 export * from "./hooks/useRoomCapacityWatcher";
