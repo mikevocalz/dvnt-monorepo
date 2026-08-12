@@ -122,6 +122,35 @@ struct BroadcastDetailView: View {
                         .lineLimit(2)
                 }
 
+                // The flyer, if the broadcast carried one. A banner rather
+                // than the full image: the host's words are the hero on this
+                // screen, and a tall flyer inline would push them off it. Tap
+                // opens the flyer full screen.
+                if let flyer = broadcast.eventImageURL, !flyer.isEmpty {
+                    NavigationLink {
+                        FlyerView(
+                            imageURL: flyer,
+                            dominantHex: broadcast.dominantHex,
+                            title: broadcast.eventTitle
+                        )
+                    } label: {
+                        EventArt(
+                            dominantHex: broadcast.dominantHex,
+                            imageURL: flyer,
+                            cornerRadius: DVNT.Radius.card
+                        )
+                        .frame(height: 76)
+                        .frame(maxWidth: .infinity)
+                        // .frame does not clip a scaledToFill image.
+                        .clipShape(
+                            RoundedRectangle(cornerRadius: DVNT.Radius.card,
+                                             style: .continuous)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open flyer")
+                }
+
                 // The hero — verbatim, no truncation.
                 Text(broadcast.body)
                     .font(DVNT.TypeScale.title(19))
@@ -148,6 +177,74 @@ struct BroadcastDetailView: View {
         }
         .background(DVNT.canvas.ignoresSafeArea())
         .navigationTitle("Message")
+    }
+}
+
+/// The flyer, full screen and scrollable.
+///
+/// A DVNT flyer is routinely far taller than it is wide and a watch screen is
+/// neither, so this is scaledToFit at full width inside a ScrollView: a tall
+/// flyer becomes a long vertical scroll, which the Digital Crown drives for
+/// free (HIG W-DC-01). Deliberately NOT scaledToFill — cropping a flyer hides
+/// the lineup, which is the reason someone opened it.
+struct FlyerView: View {
+    let imageURL: String
+    let dominantHex: String?
+    let title: String
+
+    /// HIG W-AC-04: Reduce Motion means no cross-fade, not a slower one.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ScrollView(.vertical) {
+            AsyncImage(
+                url: fullSizeURL,
+                transaction: Transaction(
+                    animation: reduceMotion ? nil : DVNT.Motion.enter
+                )
+            ) { phase in
+                if case .success(let image) = phase {
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .transition(.opacity)
+                } else {
+                    // Same hex-first rule as EventArt: something branded is on
+                    // screen before the network answers, and a failure is
+                    // indistinguishable from a slow load.
+                    placeholder
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .background(DVNT.canvas.ignoresSafeArea())
+        .navigationTitle(title)
+    }
+
+    /// The row thumb and this screen share one URL, and the phone sized it for
+    /// a 22pt tile (`?width=96`). Blown up full screen that is a blur, so ask
+    /// the optimizer for a screen-sized rendition — 400px covers a 205pt Ultra
+    /// at 2x. Falls back to the URL as given if it will not parse, which is the
+    /// pre-optimizer behaviour rather than a broken image.
+    private var fullSizeURL: URL? {
+        guard var components = URLComponents(string: imageURL) else {
+            return URL(string: imageURL)
+        }
+        var items = (components.queryItems ?? []).filter { $0.name != "width" }
+        items.append(URLQueryItem(name: "width", value: "400"))
+        components.queryItems = items
+        return components.url ?? URL(string: imageURL)
+    }
+
+    @ViewBuilder private var placeholder: some View {
+        Group {
+            if let hex = Color(dvntHex: dominantHex) {
+                hex
+            } else {
+                DVNT.brandGradient.opacity(0.45)
+            }
+        }
+        .frame(height: 140)
     }
 }
 
