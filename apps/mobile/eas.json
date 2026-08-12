@@ -11,6 +11,9 @@
       "ios": {
         "image": "latest"
       },
+      "android": {
+        "resourceClass": "large"
+      },
       "env": {
         "APP_ENV": "development",
         "DATABASE_URL": "${DATABASE_URL}",
