@@ -34,15 +34,47 @@ struct DMListView: View {
     }
 }
 
+/// The sender's face when the payload carried one, else the semantic glyph.
+///
+/// `avatarURL` has been arriving on the wrist since DM sync landed — it is on
+/// `WatchDMDTO`, set by `toWatchDM`, and decoded leniently in `DMModels`. This
+/// row drew `person.fill` unconditionally and threw it away, which read as
+/// "the watch can't show faces" when the face was already in memory.
+///
+/// Reuses `EventArt` rather than a second `AsyncImage`: it already encodes the
+/// house rules — paint first and synchronously, treat the image as an upgrade,
+/// never show a spinner or a grey box — and a square frame with a half-side
+/// corner radius is a disc. Groups and avatar-less members keep the glyph,
+/// which carries meaning a generic gradient disc would throw away.
+private struct DMAvatar: View {
+    let dm: WatchDM
+
+    /// Sized against the 18pt name beside it, not the 22pt event art: this is a
+    /// row accent, and a disc that matches the title's cap height reads as part
+    /// of the line rather than as a thumbnail bolted onto it.
+    private let size: CGFloat = 22
+
+    var body: some View {
+        if let url = dm.avatarURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !url.isEmpty {
+            EventArt(dominantHex: nil, imageURL: url, cornerRadius: size / 2)
+                .frame(width: size, height: size)
+        } else {
+            Image(systemName: dm.isGroup ? "person.2.fill" : "person.fill")
+                .font(.system(size: DVNT.TypeScale.Icon.inline))
+                .foregroundStyle(dm.unread ? DVNT.accent : DVNT.textFaint)
+                .frame(width: size)
+        }
+    }
+}
+
 private struct DMRow: View {
     let dm: WatchDM
 
     var body: some View {
         VStack(alignment: .leading, spacing: DVNT.Space.tight) {
             HStack(spacing: DVNT.Space.snug) {
-                Image(systemName: dm.isGroup ? "person.2.fill" : "person.fill")
-                    .font(.system(size: DVNT.TypeScale.Icon.inline))
-                    .foregroundStyle(dm.unread ? DVNT.accent : DVNT.textFaint)
+                DMAvatar(dm: dm)
                 Text(dm.name)
                     .font(DVNT.TypeScale.title(18))
                     .foregroundColor(.white)
