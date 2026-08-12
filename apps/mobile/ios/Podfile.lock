@@ -3270,7 +3270,7 @@ DEPENDENCIES:
   - EXConstants (from `../../../node_modules/expo-constants/ios`)
   - EXJSONUtils (from `../../../node_modules/expo-json-utils/ios`)
   - EXManifests (from `../../../node_modules/expo-manifests/ios`)
-  - Expo (from `../../../node_modules/expo`)
+  - Expo (from `../node_modules/expo`)
   - expo-dev-client (from `../../../node_modules/expo-dev-client/ios`)
   - expo-dev-launcher (from `../../../node_modules/expo-dev-launcher`)
   - expo-dev-menu (from `../../../node_modules/expo-dev-menu`)
@@ -3505,7 +3505,7 @@ EXTERNAL SOURCES:
   EXManifests:
     :path: "../../../node_modules/expo-manifests/ios"
   Expo:
-    :path: "../../../node_modules/expo"
+    :path: "../node_modules/expo"
   expo-dev-client:
     :path: "../../../node_modules/expo-dev-client/ios"
   expo-dev-launcher:
