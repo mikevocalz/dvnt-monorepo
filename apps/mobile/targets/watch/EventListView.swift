@@ -114,12 +114,64 @@ struct EventsView: View {
 
 // MARK: - Messages
 
-/// Host broadcasts and member conversations. These were entry rows wedged above
-/// the event list; they are their own destination now, which is also what stops
-/// an unread badge from competing with tonight's door for attention.
+/// One entry in the unified inbox. Broadcasts and conversations are different
+/// records with different detail screens, so they are wrapped rather than
+/// flattened into a common struct — each case keeps its own row anatomy and its
+/// own destination, and nothing about either model has to bend to the other.
+private enum InboxEntry: Identifiable {
+    case broadcast(WatchBroadcast)
+    case dm(WatchDM)
+
+    /// Prefixed so a broadcast and a conversation that happen to share an id
+    /// cannot collide in the ForEach.
+    var id: String {
+        switch self {
+        case .broadcast(let b): return "b-\(b.id)"
+        case .dm(let d): return "d-\(d.id)"
+        }
+    }
+
+    /// Epoch seconds. Both models already store this as a Double, so the merge
+    /// is a sort rather than a conversion.
+    var sortKey: Double {
+        switch self {
+        case .broadcast(let b): return b.createdAt
+        case .dm(let d): return d.timestamp
+        }
+    }
+
+    var isUnread: Bool {
+        switch self {
+        case .broadcast(let b): return !b.read
+        case .dm(let d): return d.unread
+        }
+    }
+}
+
+/// Host broadcasts and member conversations, interleaved newest-first.
+///
+/// This was a junction: two rows that led to two lists, so every message cost
+/// two taps and a back-out. On a wrist "who wants me" has to be zero hops from
+/// the swipe — HIG W-NV-05 puts the primary action one tap from launch, and
+/// reading a message is the only reason this tab exists.
+///
+/// Chronology is the whole sort. No unread pinning: a list that reorders itself
+/// as messages are read is a list the wearer cannot build muscle memory for,
+/// and unread already reads at a glance from the row's accent and fill.
+///
+/// `BroadcastListView` and `DMListView` both survive this. The former is still
+/// reached scoped-to-one-event from a ticket's QR screen
+/// (`TicketStackView` -> `BroadcastListView(eventId:)`), and neither is deleted
+/// merely because the junction that used to point at them is gone.
 struct MessagesView: View {
     @EnvironmentObject private var broadcasts: BroadcastStore
     @EnvironmentObject private var dms: DMStore
+
+    private var entries: [InboxEntry] {
+        let merged = broadcasts.broadcasts.map(InboxEntry.broadcast)
+            + dms.dms.map(InboxEntry.dm)
+        return merged.sorted { $0.sortKey > $1.sortKey }
+    }
 
     var body: some View {
         NavigationStack {
@@ -128,21 +180,23 @@ struct MessagesView: View {
                     EmptyMessagesView()
                 } else {
                     List {
-                        if !broadcasts.isEmpty {
-                            NavigationLink {
-                                BroadcastListView()
-                            } label: {
-                                BroadcastsEntryRow(unread: broadcasts.unreadCount)
+                        ForEach(entries) { entry in
+                            switch entry {
+                            case .broadcast(let b):
+                                NavigationLink {
+                                    BroadcastDetailView(broadcast: b)
+                                } label: {
+                                    BroadcastRow(broadcast: b)
+                                }
+                                .listRowBackground(inboxRowFill(unread: entry.isUnread))
+                            case .dm(let d):
+                                NavigationLink {
+                                    DMDetailView(dm: d)
+                                } label: {
+                                    DMRow(dm: d)
+                                }
+                                .listRowBackground(inboxRowFill(unread: entry.isUnread))
                             }
-                            .entryRowBackground()
-                        }
-                        if !dms.isEmpty {
-                            NavigationLink {
-                                DMListView()
-                            } label: {
-                                DMsEntryRow(unread: dms.unreadCount)
-                            }
-                            .entryRowBackground()
                         }
                     }
                     .listStyle(.carousel)
@@ -151,6 +205,13 @@ struct MessagesView: View {
             .navigationTitle("Messages")
             .containerBackground(DVNT.canvas, for: .navigation)
         }
+    }
+
+    /// The same unread treatment both standalone lists already use, applied from
+    /// one place so a mixed list cannot show two different ideas of "unread".
+    private func inboxRowFill(unread: Bool) -> some View {
+        RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous)
+            .fill(unread ? DVNT.hairline : DVNT.Surface.low)
     }
 }
 
@@ -165,13 +226,6 @@ func cardBackground(fill: Color, stroke: Color) -> some View {
             RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous)
                 .strokeBorder(stroke, lineWidth: 1)
         )
-}
-
-extension View {
-    /// Chrome for the privileged entry rows (Broadcasts / Messages / Door).
-    func entryRowBackground() -> some View {
-        listRowBackground(cardBackground(fill: DVNT.Surface.low, stroke: DVNT.hairline))
-    }
 }
 
 /// An art-forward event card. The flyer (or the event's `dominantHex` when the
@@ -248,68 +302,6 @@ private struct CountBadge: View {
             // Flat. The one gradient on this target is the AccessRing.
             .background(Capsule().fill(active ? Color.white : DVNT.Surface.high))
             .accessibilityLabel("\(count) ticket\(count == 1 ? "" : "s")")
-    }
-}
-
-/// Home-list entry into the host-broadcast history, with an unread badge.
-struct BroadcastsEntryRow: View {
-    let unread: Int
-    var body: some View {
-        HStack(spacing: DVNT.Space.base) {
-            Image(systemName: "megaphone.fill")
-                .font(.system(size: DVNT.TypeScale.Icon.row))
-                .foregroundColor(.white)
-            Text("Messages from host")
-                .font(DVNT.TypeScale.body())
-                .foregroundColor(.white)
-                .lineLimit(1)
-            Spacer(minLength: DVNT.Space.tight)
-            if unread > 0 {
-                Text("\(unread)")
-                    .font(DVNT.TypeScale.stamp(14))
-                    // White on signal-red, not black: #FC253A against black type
-                    // is a ~2.6:1 pair, which fails at a glance in a dark venue.
-                    .foregroundColor(.white)
-                    .frame(minWidth: 22, minHeight: 22)
-                    .padding(.horizontal, DVNT.Space.tight)
-                    .background(Capsule().fill(DVNT.signal))
-            }
-        }
-        .padding(.vertical, DVNT.Space.tight)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(unread > 0
-            ? "Messages from host, \(unread) unread"
-            : "Messages from host")
-    }
-}
-
-/// Home-list entry into the member's conversations, with an unread badge.
-struct DMsEntryRow: View {
-    let unread: Int
-    var body: some View {
-        HStack(spacing: DVNT.Space.base) {
-            Image(systemName: "message.fill")
-                .font(.system(size: DVNT.TypeScale.Icon.row))
-                .foregroundColor(.white)
-            Text("Messages")
-                .font(DVNT.TypeScale.body())
-                .foregroundColor(.white)
-                .lineLimit(1)
-            Spacer(minLength: DVNT.Space.tight)
-            if unread > 0 {
-                Text("\(unread)")
-                    .font(DVNT.TypeScale.stamp(14))
-                    .foregroundColor(.black)
-                    .frame(minWidth: 22, minHeight: 22)
-                    .padding(.horizontal, DVNT.Space.tight)
-                    // Cyan, not signal-red: an unread DM is not an emergency,
-                    // and red is spent on the host's urgent broadcasts.
-                    .background(Capsule().fill(DVNT.accent))
-            }
-        }
-        .padding(.vertical, DVNT.Space.tight)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(unread > 0 ? "Messages, \(unread) unread" : "Messages")
     }
 }
 

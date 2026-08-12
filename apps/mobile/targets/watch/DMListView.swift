@@ -68,7 +68,10 @@ private struct DMAvatar: View {
     }
 }
 
-private struct DMRow: View {
+/// Internal rather than private: the unified inbox in `EventListView` composes
+/// this row alongside `BroadcastRow`, so one conversation looks identical
+/// whether it is reached from the inbox or from this standalone list.
+struct DMRow: View {
     let dm: WatchDM
 
     var body: some View {

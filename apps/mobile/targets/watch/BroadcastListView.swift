@@ -44,7 +44,10 @@ struct BroadcastListView: View {
     }
 }
 
-private struct BroadcastRow: View {
+/// Internal rather than private: the unified inbox in `EventListView` composes
+/// this row alongside `DMRow`. This view stays the single definition of what a
+/// broadcast looks like, so the two surfaces cannot drift.
+struct BroadcastRow: View {
     let broadcast: WatchBroadcast
 
     var body: some View {
