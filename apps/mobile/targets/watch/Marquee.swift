@@ -141,28 +141,49 @@ enum EventArtSource {
 struct AvatarMosaic: View {
     let urls: [String]
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 2),
-        GridItem(.flexible(), spacing: 2),
-    ]
+    private static let gap: CGFloat = 2
 
+    /// Measured halves, not a grid.
+    ///
+    /// This was a `LazyVGrid`, and with a non-empty `urls` it took the whole
+    /// Door down — art, scrim and title card — leaving a transparent page. A
+    /// lazy grid asks its content for an intrinsic size; `EventArt` has none (a
+    /// gradient and an `AsyncImage` both size to their parent), so the grid
+    /// resolved to nothing and the ZStack collapsed with it. It never showed up
+    /// on a wrist because the mosaic has always been empty there, and the
+    /// empty-slot gradient happens to survive that same layout pass.
+    ///
+    /// Replacing it with stacks alone was not enough either: tiles asking for
+    /// `maxHeight: .infinity` inflate the ZStack and push the title card out of
+    /// the Door. Reading the proposed size and handing each tile a hard
+    /// half-width/half-height is what keeps the mosaic inside its bounds AND
+    /// leaves the card where it belongs.
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 2) {
-            ForEach(0..<4, id: \.self) { i in
-                Group {
-                    if i < urls.count {
-                        EventArt(dominantHex: nil, imageURL: urls[i], cornerRadius: 0)
-                    } else {
-                        DVNT.brandGradient.opacity(0.35)
-                    }
-                }
-                .aspectRatio(1, contentMode: .fill)
-                .clipShape(
-                    RoundedRectangle(cornerRadius: DVNT.Radius.chip, style: .continuous)
-                )
+        GeometryReader { geo in
+            let w = (geo.size.width - Self.gap) / 2
+            let h = (geo.size.height - Self.gap) / 2
+            VStack(spacing: Self.gap) {
+                HStack(spacing: Self.gap) { tile(0, w, h); tile(1, w, h) }
+                HStack(spacing: Self.gap) { tile(2, w, h); tile(3, w, h) }
             }
         }
         .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func tile(_ i: Int, _ w: CGFloat, _ h: CGFloat) -> some View {
+        Group {
+            if i < urls.count {
+                EventArt(dominantHex: nil, imageURL: urls[i], cornerRadius: 0)
+            } else {
+                // Never grey — a one-sender mosaic is still a composition.
+                DVNT.brandGradient.opacity(0.35)
+            }
+        }
+        .frame(width: max(w, 0), height: max(h, 0))
+        .clipShape(
+            RoundedRectangle(cornerRadius: DVNT.Radius.chip, style: .continuous)
+        )
     }
 }
 
