@@ -80,6 +80,12 @@ verify_jwt = false
 [functions.video_join_room]
 verify_jwt = false
 
+[functions.call_create]
+verify_jwt = false
+
+[functions.call_join]
+verify_jwt = false
+
 [functions.video_refresh_token]
 verify_jwt = false
 

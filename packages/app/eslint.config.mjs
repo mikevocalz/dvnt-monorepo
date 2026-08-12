@@ -134,6 +134,44 @@ export default [
     },
   },
 
+  // ── WS-1: Calls and Sneaky Lynk are separate stacks (Phase-0 decision) ────
+  // The generic rule above still permits importing another feature's PUBLIC
+  // barrel; that's too loose here — call and Lynk share no code by design
+  // (room_kind splits them at the data layer too), so block the barrel import
+  // itself, not just deep internals.
+  {
+    files: ["features/sneaky-lynk/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@dvnt/app/features/call", "@dvnt/app/features/call/**", "@dvnt/app/features/calls", "@dvnt/app/features/calls/**"],
+              message: "Sneaky Lynk and the call stack are separate (WS-1) — no cross-imports.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["features/call/**/*.{ts,tsx}", "features/calls/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@dvnt/app/features/sneaky-lynk", "@dvnt/app/features/sneaky-lynk/**"],
+              message: "The call stack and Sneaky Lynk are separate (WS-1) — no cross-imports.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // ── Hot paths: no NEW barrel files (docs/barrels-decision.md, option c) ────
   // Tree shaking is off in this repo (verified against installed Expo source —
   // it needs EXPO_UNSTABLE_METRO_OPTIMIZE_GRAPH + EXPO_UNSTABLE_TREE_SHAKING,

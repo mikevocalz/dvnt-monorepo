@@ -44,7 +44,7 @@ import {
   usePeers,
 } from "@fishjam-cloud/react-native-client";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { videoApi } from "@dvnt/app/features/video/api";
+import { callRoomsApi } from "@dvnt/app/lib/api/call-rooms";
 import { callSignalsApi } from "@dvnt/app/lib/api/call-signals";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
@@ -614,9 +614,9 @@ export function useVideoCall() {
           ? "Audio Call"
           : "Video Call";
 
-      const createResult = await videoApi.createRoom({
+      const createResult = await callRoomsApi.createCall({
         title,
-        isPublic: false, // CRITICAL: Personal calls must be private (not shown in Sneaky Lynk)
+        participantIds,
         maxParticipants: Math.max(participantIds.length + 1, 10),
       });
 
@@ -635,7 +635,7 @@ export function useVideoCall() {
       s.setCallPhase("joining_room");
       log("Joining room...");
 
-      const joinResult = await videoApi.joinRoom(newRoomId);
+      const joinResult = await callRoomsApi.joinCall(newRoomId);
       log("Join result:", JSON.stringify(joinResult));
       if (!joinResult.ok || !joinResult.data) {
         const msg = joinResult.error?.message || "Failed to join room";
@@ -884,7 +884,7 @@ export function useVideoCall() {
       s.setCallPhase("joining_room");
       log("Joining existing room:", roomId);
 
-      const joinResult = await videoApi.joinRoom(roomId);
+      const joinResult = await callRoomsApi.joinCall(roomId);
       if (!joinResult.ok || !joinResult.data) {
         const msg = joinResult.error?.message || "Failed to join room";
         logError("Room join failed:", msg);
