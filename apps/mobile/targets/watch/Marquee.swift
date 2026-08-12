@@ -39,6 +39,8 @@ struct MarqueePage<Destination: View>: View {
     let title: String
     var stub: String?
     var live: Bool = false
+    /// Draw the wordmark over the art on this Door. Exactly one page sets it.
+    var showsWordmark: Bool = false
     @ViewBuilder let destination: () -> Destination
 
     var body: some View {
@@ -81,6 +83,27 @@ struct MarqueePage<Destination: View>: View {
                     // The single glass surface — chrome floating on artwork.
                     // No-op before watchOS 26; the scrim already covers it.
                     .marqueeChrome()
+                }
+                // The brand moment, and the only one on this device. It sits on
+                // the Door rather than inside the screen behind it because the
+                // Door is what a swipe lands on — a wordmark one tap deep is a
+                // wordmark nobody sees. Over the art, not over black: the
+                // Deviant Gradient behind it is the brand, and the top of a
+                // Door was otherwise dead space.
+                //
+                // Set on the `now` page only. Four Doors each stamped with the
+                // same mark spends it four times and lands it none.
+                .overlay(alignment: .topLeading) {
+                    if showsWordmark {
+                        DVNTLogoView(height: 20)
+                            .padding(.horizontal, DVNT.Space.roomy)
+                            .padding(.top, DVNT.Space.roomy)
+                            // The art is an unknown image, so the mark carries
+                            // its own shadow rather than trusting the flyer to
+                            // be dark where the glyphs land.
+                            .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
+                            .accessibilityHidden(true)
+                    }
                 }
             }
             .buttonStyle(.plain)

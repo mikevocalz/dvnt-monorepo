@@ -29,7 +29,8 @@ struct RootTabs: View {
                 eyebrow: store.isDoorsOpen ? "Live now" : "Tonight",
                 title: store.focus?.title ?? "Nothing tonight",
                 stub: store.nowStub,
-                live: store.isDoorsOpen
+                live: store.isDoorsOpen,
+                showsWordmark: true
             ) { NowView() }
                 .tag(Tab.now)
 
