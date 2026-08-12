@@ -68,10 +68,16 @@ struct MarqueePage<Destination: View>: View {
                                 .foregroundStyle(live ? DVNT.signal : DVNT.OnArt.secondary)
                             if live { LiveDot() }
                         }
-                        Text(title)
-                            .font(DVNT.TypeScale.title(18))
-                            .foregroundStyle(DVNT.OnArt.primary)
-                            .lineLimit(2)
+                        // Guarded like the stub: a Door whose eyebrow and stub
+                        // already say everything ("MESSAGES" / "3 UNREAD") has
+                        // no title worth inventing, and an empty Text would
+                        // still reserve a line of Grotesk over the art.
+                        if !title.isEmpty {
+                            Text(title)
+                                .font(DVNT.TypeScale.title(18))
+                                .foregroundStyle(DVNT.OnArt.primary)
+                                .lineLimit(2)
+                        }
                         if let stub, !stub.isEmpty {
                             Text(stub)
                                 .font(DVNT.TypeScale.numeral(13))
@@ -79,6 +85,13 @@ struct MarqueePage<Destination: View>: View {
                         }
                     }
                     .padding(DVNT.Space.roomy)
+                    // The stub is the last line in the card and the TabView
+                    // draws its page dots across the same band, so "2 UNREAD"
+                    // was sitting underneath them. Extra bottom padding lifts
+                    // the whole block clear of the indicator rather than
+                    // shortening the stub or hiding the dots — both of which
+                    // cost information the wearer uses.
+                    .padding(.bottom, DVNT.Space.roomy)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     // The single glass surface — chrome floating on artwork.
                     // No-op before watchOS 26; the scrim already covers it.
@@ -141,7 +154,9 @@ enum EventArtSource {
 struct AvatarMosaic: View {
     let urls: [String]
 
-    private static let gap: CGFloat = 2
+    /// 4, not 2: at a 2pt gap the corner radius has nowhere to show and the
+    /// four tiles read as one cut-up photo rather than four squares.
+    private static let gap: CGFloat = 4
 
     /// Measured halves, not a grid.
     ///
@@ -174,7 +189,18 @@ struct AvatarMosaic: View {
     private func tile(_ i: Int, _ w: CGFloat, _ h: CGFloat) -> some View {
         Group {
             if i < urls.count {
-                EventArt(dominantHex: nil, imageURL: urls[i], cornerRadius: 0)
+                // Chip radius, not 0. EventArt draws its hairline as a
+                // strokeBorder at whatever radius it is given, so a 0 here put
+                // a square stroke on top of a tile the outer clip had already
+                // rounded — the corners read sharp even though the image was
+                // clipped. Rounded SQUARES, never circles: the design system is
+                // explicit, and it is what keeps the mosaic reading as one
+                // surface rather than four dots.
+                EventArt(
+                    dominantHex: nil,
+                    imageURL: urls[i],
+                    cornerRadius: DVNT.Radius.control
+                )
             } else {
                 // Never grey — a one-sender mosaic is still a composition.
                 DVNT.brandGradient.opacity(0.35)
@@ -182,7 +208,7 @@ struct AvatarMosaic: View {
         }
         .frame(width: max(w, 0), height: max(h, 0))
         .clipShape(
-            RoundedRectangle(cornerRadius: DVNT.Radius.chip, style: .continuous)
+            RoundedRectangle(cornerRadius: DVNT.Radius.control, style: .continuous)
         )
     }
 }

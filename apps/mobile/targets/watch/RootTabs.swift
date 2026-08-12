@@ -53,7 +53,10 @@ struct RootTabs: View {
             MarqueePage(
                 art: .mosaic(dms.recentAvatarURLs),
                 eyebrow: "Messages",
-                title: "From hosts",
+                // No title. It read "From hosts", which stopped being true when
+                // broadcasts and DMs merged into one inbox — and the eyebrow
+                // plus the unread stub already name this Door.
+                title: "",
                 stub: unreadStub
             ) { MessagesView() }
                 .tag(Tab.messages)
