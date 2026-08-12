@@ -19,6 +19,19 @@ struct NowView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: DVNT.Space.roomy) {
+                    // The one brand moment in this target. A 16pt wordmark in
+                    // the corner opposite the clock is functionally invisible,
+                    // and four of them spent the mark four times over without
+                    // ever being seen once. Here it is in content, at a size
+                    // that reads, on the tab the wearer opens first.
+                    //
+                    // HIG W-GL-01: it costs vertical space above the hero, so
+                    // it stays a header — never a splash, never animated, and
+                    // the countdown below it is still what leads the screen.
+                    DVNTLogoView(height: 24)
+                        .padding(.bottom, DVNT.Space.tight)
+                        .accessibilityHidden(true)
+
                     if let group = store.tonight.first {
                         HeroCard(group: group, isTonight: true)
                     } else if let next = store.upcoming.first {
@@ -49,7 +62,9 @@ struct NowView: View {
                     TicketStackView(group: group)
                 }
             }
-            .navigationTitle { DVNTLogoView(height: 16) }
+            // The wordmark moved into content above; a second one in the corner
+            // would be the same mark twice on one screen.
+            .navigationTitle("Now")
             .containerBackground(DVNT.canvas, for: .navigation)
         }
         .onAppear { connectivity.requestSync() }

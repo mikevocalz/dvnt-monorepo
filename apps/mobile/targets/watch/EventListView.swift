@@ -42,7 +42,12 @@ struct TicketsView: View {
                     TicketStackView(group: group)
                 }
             }
-            .navigationTitle { DVNTLogoView(height: 16) }
+            // One brand moment, not four. The wordmark now leads NowView
+            // in content at a size that reads; a 16pt mark in the corner
+            // opposite the clock was spending the mark on every tab
+            // without being legible on any of them. Plain titles here
+            // match DMListView's existing text-title precedent.
+            .navigationTitle("Tickets")
             .containerBackground(DVNT.canvas, for: .navigation)
         }
         .onAppear { connectivity.requestSync() }
@@ -78,7 +83,7 @@ struct EventsView: View {
                     TicketStackView(group: group)
                 }
             }
-            .navigationTitle { DVNTLogoView(height: 16) }
+            .navigationTitle("Events")
             .containerBackground(DVNT.canvas, for: .navigation)
         }
     }
@@ -143,7 +148,7 @@ struct MessagesView: View {
                     .listStyle(.carousel)
                 }
             }
-            .navigationTitle { DVNTLogoView(height: 16) }
+            .navigationTitle("Messages")
             .containerBackground(DVNT.canvas, for: .navigation)
         }
     }
