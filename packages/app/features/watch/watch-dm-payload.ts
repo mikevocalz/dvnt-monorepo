@@ -14,6 +14,7 @@
  */
 
 import type { Conversation } from "@dvnt/app/lib/api/messages";
+import { watchRendition, WATCH_RENDITION } from "./watch-rendition";
 
 export interface WatchDMDTO {
   /** Conversation id (string form; the send path parses it back to an int). */
@@ -63,7 +64,9 @@ export function toWatchDM(c: Conversation): WatchDMDTO {
       ? c.groupName || "Group"
       : c.user?.name || c.user?.username || "DVNT",
     handle: isGroup ? "" : c.user?.username ? `@${c.user.username}` : "",
-    avatarURL: isGroup ? undefined : c.user?.avatar?.trim() || undefined,
+    avatarURL: isGroup
+      ? undefined
+      : watchRendition(c.user?.avatar, WATCH_RENDITION.avatar),
     preview: c.lastMessage ?? "",
     timestamp: toEpochSeconds(c.timestamp),
     unread: !!c.unread,

@@ -13,6 +13,7 @@
 
 import type { Activity } from "@dvnt/app/lib/hooks/use-activities-query";
 import { normalizeHex } from "@dvnt/app/lib/color/normalizeColor";
+import { watchRendition, WATCH_RENDITION } from "./watch-rendition";
 
 /**
  * Coarse intent derived from the message text — STYLING ONLY. The host's words
@@ -47,9 +48,8 @@ export interface WatchBroadcastDTO {
   /**
    * Event artwork, faded in over `dominantHex` if and when it arrives. Strictly
    * an upgrade — failure and timeout are indistinguishable from not having it.
-   * NOT a watch-sized rendition: Bunny Optimizer is off on the pull zone
-   * (`?width=` returns the original byte-for-byte), so this is the full asset
-   * and the hex is what makes that acceptable.
+   * Carries a watch-sized `?width=` transform (see `watch-rendition.ts`); the
+   * hex underneath is still what guarantees the row is never an empty box.
    */
   eventImageURL?: string;
 }
@@ -93,7 +93,10 @@ export function toWatchBroadcast(a: Activity): WatchBroadcastDTO {
     // a malformed colour drops to undefined and the row falls back to its own
     // surface rather than painting a black-on-black card.
     dominantHex: normalizeHex(a.event?.dominantHex) ?? undefined,
-    eventImageURL: a.event?.imageURL?.trim() || undefined,
+    eventImageURL: watchRendition(
+      a.event?.imageURL,
+      WATCH_RENDITION.eventThumb,
+    ),
   };
 }
 

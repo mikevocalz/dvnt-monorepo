@@ -25,8 +25,8 @@ struct WatchBroadcast: Identifiable, Codable, Hashable {
     /// synchronously and is finished, so a row is never an empty box even with
     /// no network path of its own.
     let dominantHex: String?
-    /// Event artwork, an upgrade over the hex. The full asset, not a
-    /// watch-sized rendition — Bunny Optimizer is off on the pull zone.
+    /// Event artwork, an upgrade over the hex. The phone appends a watch-sized
+    /// `?width=` transform, so this is a few KB rather than the full flyer.
     let eventImageURL: String?
 
     enum CodingKeys: String, CodingKey {
