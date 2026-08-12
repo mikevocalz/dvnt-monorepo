@@ -2,7 +2,9 @@
  * CallKeep module barrel export.
  *
  * ALL CallKeep interactions MUST go through this module.
- * Direct imports of 'react-native-callkeep' are FORBIDDEN outside src/services/callkeep/.
+ * Direct imports of 'react-native-callkeep' are FORBIDDEN outside this
+ * directory (`packages/app/features/services/callkeep/`), which is now the
+ * only copy — `apps/mobile/src/services/callkeep/` was a byte-identical fork.
  */
 
 export {

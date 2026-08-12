@@ -63,7 +63,12 @@ export async function deleteAccountPrivileged(): Promise<boolean> {
     getAuthToken,
     beforeDelete: async () => {
       try {
-        const { endAllCalls } = await import("@/src/services/callkeep/callkeep");
+        // One callkeep module, not two. `apps/mobile/src/services/callkeep/`
+        // was a byte-identical copy of the packages/app one with this single
+        // importer — a cutover that edited one would have left the other live.
+        const { endAllCalls } = await import(
+          "@dvnt/app/features/services/callkeep/callkeep"
+        );
         endAllCalls();
       } catch (callkeepErr) {
         console.warn(
