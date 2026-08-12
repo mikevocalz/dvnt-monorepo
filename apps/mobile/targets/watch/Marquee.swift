@@ -76,14 +76,16 @@ struct MarqueePage<Destination: View>: View {
                             Text(title)
                                 .font(DVNT.TypeScale.title(18))
                                 .foregroundStyle(DVNT.OnArt.primary)
-                                .lineLimit(2)
-                                // On a 162pt SE the same string that fits one
-                                // line on a 205pt Ultra wraps to two, and the
-                                // card grows to swallow a third of the Door.
-                                // Shrink to fit before wrapping. The floor is
-                                // 0.85 — below that it stops clearing the 18pt
-                                // title minimum the type scale exists to hold.
-                                .minimumScaleFactor(0.85)
+                                // One line, shrunk to fit — not two lines.
+                                // "Nothing tonight" needs ~150pt at 18pt
+                                // Grotesk Bold and a 162pt SE offers 138pt
+                                // inside the padding, so on the small watch it
+                                // wrapped and the card grew to swallow a third
+                                // of the Door. minimumScaleFactor only engages
+                                // when wrapping is disallowed, which is why
+                                // lineLimit(2) left it wrapping.
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                         if let stub, !stub.isEmpty {
                             Text(stub)
@@ -125,11 +127,14 @@ struct MarqueePage<Destination: View>: View {
                         // watch instead of being 38% of an Ultra and 48% of
                         // an SE.
                         DVNTLogoView(fillWidth: true)
-                            // ~94% of the Door: 6pt a side lands at 94% on a
-                            // 205pt Ultra and 93% on a 162pt SE, close enough
-                            // that the mark reads the same on both without a
-                            // GeometryReader in an overlay.
-                            .padding(.horizontal, 6)
+                            // Exactly 90% of the Door on every watch. Fixed
+                            // padding cannot do this: 10pt a side is 90% on a
+                            // 205pt Ultra but 88% on a 162pt SE. A relative
+                            // frame is the watchOS 10 tool for it and avoids a
+                            // GeometryReader inside an overlay.
+                            .containerRelativeFrame(.horizontal) { w, _ in
+                                w * 0.90
+                            }
                             // Clear of the clock. watchOS draws the time in the
                             // top-right of every app, and at 12pt the wordmark's
                             // T ran underneath it. This drops the mark below
