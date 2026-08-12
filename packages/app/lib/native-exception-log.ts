@@ -109,6 +109,31 @@ function logToConsole(report: NativeExceptionPayload): void {
 }
 
 /**
+ * Ship a prior-session crash record to Sentry as a real EVENT before the
+ * persisted copy is cleared. console.error alone is only a breadcrumb — it
+ * attaches to no event and vanishes with the deleted file, which is exactly
+ * how the 1.0.316 background-crash loop left an empty Sentry dashboard: the
+ * record was read, printed, deleted, and lost. Never throws.
+ */
+function reportToSentry(kind: string, payload: Record<string, unknown>): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Sentry } = require("@dvnt/app/lib/sentry-boot");
+    if (!Sentry?.captureMessage) return; // web fork / not booted
+    Sentry.captureMessage(
+      `[prior-session-crash] ${kind}: ${String(payload.name ?? "")}: ${String(payload.message ?? payload.reason ?? "")}`.slice(0, 500),
+      {
+        level: "fatal",
+        tags: { priorSessionCrash: kind },
+        extra: payload,
+      },
+    );
+  } catch {
+    /* never throw from boot path */
+  }
+}
+
+/**
  * Fire-and-forget. Idempotent within a session.
  * Safe to call multiple times (e.g. from multiple side-effect imports
  * during dev hot-reload) — only the first call does work.
@@ -125,6 +150,7 @@ function readPriorNativeCrashReport(): void {
   try {
     const jsReport = readAndClearLastJSError();
     if (jsReport) {
+      reportToSentry("js", jsReport as unknown as Record<string, unknown>);
       console.error("╔══════════════════════════════════════════════════════════════╗");
       console.error("║  [PRIOR-JS-CRASH] Prior session ended with uncaught JS    ║");
       console.error("╚══════════════════════════════════════════════════════════════╝");
@@ -151,6 +177,7 @@ function readPriorNativeCrashReport(): void {
   readAndClearAsync()
     .then((report) => {
       if (!report) return;
+      reportToSentry("native", report as unknown as Record<string, unknown>);
       logToConsole(report);
     })
     .catch(() => {
