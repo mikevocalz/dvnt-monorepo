@@ -232,30 +232,37 @@ Deno.serve(async (req) => {
       supabaseServiceKey.length > 0 &&
       bearer === supabaseServiceKey;
 
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
+    });
+
     if (!isServiceRole) {
-      const internalSecret = Deno.env.get("INTERNAL_FN_SECRET") || "";
-      if (!internalSecret) {
-        console.error(
-          "[send_notification] INTERNAL_FN_SECRET not set and caller is not service-role — rejecting request",
-        );
-        return new Response(JSON.stringify({ error: "Misconfigured" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
       const provided = req.headers.get("x-internal-secret") || "";
-      if (provided !== internalSecret) {
+      let authorized = false;
+
+      const internalSecret = Deno.env.get("INTERNAL_FN_SECRET") || "";
+      if (internalSecret && provided === internalSecret) authorized = true;
+
+      // DB triggers (e.g. call_signals_push_trigger) can't set Deno secrets,
+      // so they authenticate with a value stored in internal_fn_secrets
+      // instead (RLS deny-all; only this service-role client can read it).
+      if (!authorized && provided) {
+        const { data: row } = await supabase
+          .from("internal_fn_secrets")
+          .select("value")
+          .eq("name", "call_push_trigger")
+          .maybeSingle();
+        if (row?.value && provided === row.value) authorized = true;
+      }
+
+      if (!authorized) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
           status: 401,
           headers: { "Content-Type": "application/json" },
         });
       }
     }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
-    });
 
     const payload: PushNotificationPayload = await req.json();
     const { userId, title, body, data, type } = payload;

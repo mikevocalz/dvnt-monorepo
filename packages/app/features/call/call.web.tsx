@@ -20,7 +20,7 @@
  *   - NativeWind interop OFF. Raw semantic HTML + Tailwind className only. No
  *     <View>/<Text>. State = Zustand only (no useState).
  *   - Tiles fill the screen (object-cover); local PiP rounded-2xl. Controls bar
- *     = circular icon buttons. bg #06070d/black, accent cyan #3FDCFF, end-call rose.
+ *     = circular icon buttons. bg color.ink/black, accent color.cyan, end-call color.signal.
  *   - Navigation via solito useRouter; leave → router.back().
  */
 
@@ -46,9 +46,10 @@ import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useVideoRoomStore } from "@dvnt/app/features/video";
 import type { Participant } from "@dvnt/app/features/video/types";
+import { color } from "@dvnt/app/lib/theme";
 import { useCallUIStore } from "./call-ui-store";
 
-const ACCENT = "#3FDCFF";
+const ACCENT = color.cyan;
 
 // ── <video> tile: binds a MediaStream to a DOM video element via ref ──────────
 // No useState — the stream is attached imperatively in a ref callback (the
@@ -97,7 +98,10 @@ function AvatarFallback({ name, avatar }: { name: string; avatar?: string }) {
     );
   }
   return (
-    <div className="flex h-24 w-24 items-center justify-center rounded-2xl bg-white/10 text-3xl font-semibold text-white">
+    <div
+      className="flex h-24 w-24 items-center justify-center rounded-2xl bg-white/10 text-3xl"
+      style={{ fontFamily: "SpaceGrotesk-Bold", color: color.text }}
+    >
       {(name?.[0] ?? "?").toUpperCase()}
     </div>
   );
@@ -118,7 +122,7 @@ function ControlButton({
   children: React.ReactNode;
 }) {
   const bg = danger
-    ? "bg-rose-500 hover:bg-rose-600"
+    ? "hover:opacity-90"
     : active
       ? "bg-white/15 hover:bg-white/25"
       : "bg-white/30 hover:bg-white/40";
@@ -127,6 +131,7 @@ function ControlButton({
       type="button"
       onClick={onClick}
       aria-label={label}
+      style={danger ? { backgroundColor: color.signal } : undefined}
       className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition-colors ${bg}`}
     >
       {children}
@@ -385,7 +390,12 @@ function CallRoom({ roomId }: { roomId: string }) {
         ) : (
           <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-black">
             <AvatarFallback name={remoteName} avatar={remote?.avatar} />
-            <p className="text-lg font-medium text-white">{statusLabel}</p>
+            <p
+              className="text-lg text-white"
+              style={{ fontFamily: "SpaceGrotesk-SemiBold" }}
+            >
+              {statusLabel}
+            </p>
           </div>
         )}
 
@@ -415,11 +425,16 @@ function CallRoom({ roomId }: { roomId: string }) {
                 connectionStatus === "connected"
                   ? ACCENT
                   : callPhase === "error"
-                    ? "#f43f5e"
+                    ? color.signal
                     : "#facc15",
             }}
           />
-          <span className="text-sm font-medium text-white">{statusLabel}</span>
+          <span
+            className="text-sm text-white"
+            style={{ fontFamily: "Inter-SemiBold" }}
+          >
+            {statusLabel}
+          </span>
         </div>
       </header>
 

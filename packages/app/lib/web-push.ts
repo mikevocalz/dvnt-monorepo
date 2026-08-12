@@ -48,7 +48,7 @@ async function saveSubscription(sub: PushSubscription): Promise<boolean> {
 }
 
 async function subscribe(): Promise<boolean> {
-  const reg = await navigator.serviceWorker.register("/push-sw.js");
+  const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
   await navigator.serviceWorker.ready;
   const sub =
     (await reg.pushManager.getSubscription()) ||

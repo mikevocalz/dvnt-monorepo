@@ -30,6 +30,7 @@ import { Phone, PhoneOff, Video } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { color } from "@dvnt/app/lib/theme";
 import { callSignalsApi, type CallSignal } from "@dvnt/app/lib/api/call-signals";
 import {
   clearCallOnWatch,
@@ -328,7 +329,7 @@ export function IncomingCallOverlay() {
 
 const styles = StyleSheet.create({
   sheetBg: {
-    backgroundColor: "rgba(0,0,0,0.95)",
+    backgroundColor: "rgba(6,7,13,0.95)",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
   },
@@ -354,7 +355,7 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: "rgb(62, 164, 229)",
+    backgroundColor: color.cyan,
   },
   avatar: {
     width: 100,
@@ -365,23 +366,24 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: "rgb(62, 164, 229)",
+    backgroundColor: color.cyan,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarInitial: {
-    color: "#fff",
+    color: color.text,
     fontSize: 40,
-    fontWeight: "800",
+    fontFamily: "SpaceGrotesk-Bold",
   },
   callerName: {
-    color: "#fff",
+    color: color.text,
     fontSize: 28,
-    fontWeight: "700",
+    fontFamily: "SpaceGrotesk-Bold",
   },
   callType: {
-    color: "rgba(255,255,255,0.5)",
+    color: color.textDim,
     fontSize: 16,
+    fontFamily: "Inter-Regular",
   },
   actions: {
     flexDirection: "row",
@@ -408,8 +410,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   actionLabel: {
-    color: "rgba(255,255,255,0.6)",
+    color: color.textDim,
     fontSize: 13,
-    fontWeight: "500",
+    fontFamily: "Inter-SemiBold",
   },
 });
