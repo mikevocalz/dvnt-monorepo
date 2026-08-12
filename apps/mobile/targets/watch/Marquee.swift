@@ -77,6 +77,13 @@ struct MarqueePage<Destination: View>: View {
                                 .font(DVNT.TypeScale.title(18))
                                 .foregroundStyle(DVNT.OnArt.primary)
                                 .lineLimit(2)
+                                // On a 162pt SE the same string that fits one
+                                // line on a 205pt Ultra wraps to two, and the
+                                // card grows to swallow a third of the Door.
+                                // Shrink to fit before wrapping. The floor is
+                                // 0.85 — below that it stops clearing the 18pt
+                                // title minimum the type scale exists to hold.
+                                .minimumScaleFactor(0.85)
                         }
                         if let stub, !stub.isEmpty {
                             Text(stub)
@@ -93,6 +100,11 @@ struct MarqueePage<Destination: View>: View {
                     // cost information the wearer uses.
                     .padding(.bottom, DVNT.Space.roomy)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // A Door assembles instead of appearing — the same
+                    // one-shot fade+rise the event list already uses, so the
+                    // two surfaces move the same way. Reduce Motion turns it
+                    // off entirely (the modifier handles that), never slows it.
+                    .appearStaggered(index: 1)
                     // The single glass surface — chrome floating on artwork.
                     // No-op before watchOS 26; the scrim already covers it.
                     .marqueeChrome()
@@ -106,11 +118,28 @@ struct MarqueePage<Destination: View>: View {
                 //
                 // Set on the `now` page only. Four Doors each stamped with the
                 // same mark spends it four times and lands it none.
-                .overlay(alignment: .topLeading) {
+                .overlay(alignment: .top) {
                     if showsWordmark {
-                        DVNTLogoView(height: 20)
-                            .padding(.horizontal, DVNT.Space.roomy)
-                            .padding(.top, DVNT.Space.roomy)
+                        // Nearly full width, centred. `.top` centres it
+                        // horizontally; fillWidth makes it scale with the
+                        // watch instead of being 38% of an Ultra and 48% of
+                        // an SE.
+                        DVNTLogoView(fillWidth: true)
+                            // ~94% of the Door: 6pt a side lands at 94% on a
+                            // 205pt Ultra and 93% on a 162pt SE, close enough
+                            // that the mark reads the same on both without a
+                            // GeometryReader in an overlay.
+                            .padding(.horizontal, 6)
+                            // Clear of the clock. watchOS draws the time in the
+                            // top-right of every app, and at 12pt the wordmark's
+                            // T ran underneath it. This drops the mark below
+                            // that band instead of fighting a system element
+                            // that cannot be moved.
+                            .padding(.top, 36)
+                            // Assembles with the Door rather than being
+                            // pre-painted on it. Index 0 — the mark lands
+                            // first, the title block follows.
+                            .appearStaggered(index: 0)
                             // The art is an unknown image, so the mark carries
                             // its own shadow rather than trusting the flyer to
                             // be dark where the glyphs land.
@@ -207,6 +236,9 @@ struct AvatarMosaic: View {
             }
         }
         .frame(width: max(w, 0), height: max(h, 0))
+        // Four senders landing in sequence reads as the room filling up; four
+        // appearing at once reads as a screenshot.
+        .appearStaggered(index: i)
         .clipShape(
             RoundedRectangle(cornerRadius: DVNT.Radius.control, style: .continuous)
         )
