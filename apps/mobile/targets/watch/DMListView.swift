@@ -57,8 +57,23 @@ private struct DMAvatar: View {
     var body: some View {
         if let url = dm.avatarURL?.trimmingCharacters(in: .whitespacesAndNewlines),
            !url.isEmpty {
-            EventArt(dominantHex: nil, imageURL: url, cornerRadius: size / 2)
-                .frame(width: size, height: size)
+            // Rounded square, not a disc. `size / 2` made this a circle, which
+            // contradicts the rule AvatarMosaic states outright — rounded
+            // SQUARES, never circles — and meant the same person appeared as a
+            // dot in a row and a square in the Messages mosaic. Radius.chip
+            // matches the broadcast row's event thumb beside it, so every piece
+            // of art in this inbox now has one shape.
+            EventArt(
+                dominantHex: nil,
+                imageURL: url,
+                cornerRadius: DVNT.Radius.chip
+            )
+            .frame(width: size, height: size)
+            // Same reason as the broadcast thumb: the frame alone does not
+            // clip a scaledToFill image.
+            .clipShape(
+                RoundedRectangle(cornerRadius: DVNT.Radius.chip, style: .continuous)
+            )
         } else {
             Image(systemName: dm.isGroup ? "person.2.fill" : "person.fill")
                 .font(.system(size: DVNT.TypeScale.Icon.inline))

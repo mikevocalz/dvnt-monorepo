@@ -69,6 +69,14 @@ struct BroadcastRow: View {
                     cornerRadius: DVNT.Radius.chip
                 )
                 .frame(width: 22, height: 22)
+                // .frame does not clip. EventArt's AsyncImage is scaledToFill,
+                // so it sizes itself past this frame, gets centred, and spills
+                // over the row — its own clipShape clips at ITS bounds, not the
+                // 22pt box imposed from out here. The outer clip is what makes
+                // the thumb a square.
+                .clipShape(
+                    RoundedRectangle(cornerRadius: DVNT.Radius.chip, style: .continuous)
+                )
                 Image(systemName: broadcast.intent.glyph)
                     .font(.system(size: DVNT.TypeScale.Icon.inline))
                     .foregroundStyle(broadcast.intent.accent)
