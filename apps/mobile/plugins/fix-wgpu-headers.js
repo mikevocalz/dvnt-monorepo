@@ -74,6 +74,28 @@ function withFixWgpuHeaders(config) {
         end
         config.build_settings['OTHER_LDFLAGS'] = ldflags
       end
+    end
+
+    # [fix-wgpu-headers] Not wgpu-specific, same pass: under RN-from-source +
+    # dynamic frameworks, jsinspector_modern.framework's headers include
+    # "jsinspector-modern/cdp/CdpJson.h" etc., which live in the SIBLING
+    # frameworks (cdp / network / tracing). Any pod that builds the React
+    # module re-parses those headers and fails unless the siblings' Headers
+    # dirs are searchable (first seen: ReactNativeVideo, build 38b680cf).
+    # Namespaced header layouts, so adding them everywhere cannot collide.
+    jsinspector_headers = [
+      'React-jsinspector/jsinspector_modern.framework/Headers',
+      'React-jsinspectorcdp/jsinspector_moderncdp.framework/Headers',
+      'React-jsinspectornetwork/jsinspector_modernnetwork.framework/Headers',
+      'React-jsinspectortracing/jsinspector_moderntracing.framework/Headers',
+    ].map { |p| '"$(PODS_CONFIGURATION_BUILD_DIR)/' + p + '"' }
+    installer.pods_project.targets.each do |t|
+      t.build_configurations.each do |config|
+        paths = config.build_settings['HEADER_SEARCH_PATHS'] || ['$(inherited)']
+        paths = [paths] if paths.is_a?(String)
+        jsinspector_headers.each { |e| paths << e unless paths.include?(e) }
+        config.build_settings['HEADER_SEARCH_PATHS'] = paths
+      end
     end`;
 
       // Inject just before the closing '  end' of the post_install block
