@@ -385,29 +385,3 @@ Still unverified for WS-5 (needs a build, not a source read): the claim that
 native-before-JS call reporting shrinks the 1.0.315/1.0.316 headless-boot
 SIGABRT surface. That is the actual reason for the migration and it can only be
 confirmed on a device.
-
-**WS-3a REVERTED (2026-08-12).** `react-native-moq@0.2.0` does not compile on
-iOS. An EAS production build failed in the native phase with ~25 Swift errors
-from the package's own MoQKit bindings — `cannot find type 'Container' in
-scope`, `cannot convert value of type 'Data' to expected argument type
-'MoqFrame'`, `value of type 'MoqVideo' has no member 'displayRatio'`,
-`MediaSubscriptionKey does not conform to Hashable`. The package's podspec pins
-`moq-kit` at `exactVersion 0.3.0`, and its Swift expects a different API than
-that version exposes, so it is broken as published rather than
-mis-integrated by us. 0.2.0 is the latest published version — there is no
-upgrade out of it.
-
-This is the risk Decision 3 named ("biggest risk: 0.2.0 is young") taking the
-mitigation it planned: WHIP/WHEP was retained precisely so a revert would be
-hook-internal, and it was. `useLynkBroadcast.native.ts`,
-`useLynkViewer.native.ts`, `livestreamToken.ts` and the genesis native screen
-are back on Fishjam WHIP; the dependency is removed from both manifests.
-
-Kept from WS-3a, because neither depended on MoQ: the dead mock chain
-(`rtc/fishjamClient.ts`, `hooks/useSneakyLynkRoom.ts`) stays deleted, and
-BroadcastModels' stale mirror path stays corrected.
-
-Re-evaluate when react-native-moq publishes past 0.2.0. The transport seam is
-unchanged, so the swap is the same hook-internal edit it was today. Note for
-whoever picks it up: `expo export` and `tsc` both pass with the package
-installed — nothing JS-side catches this. Only a native build does.

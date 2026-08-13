@@ -1,91 +1,113 @@
 /**
- * useLynkViewer (NATIVE) — Fishjam WHIP/WHEP livestream (true native, no WebView).
+ * useLynkViewer (NATIVE) — subscribe to a Lynk room namespace over MoQ, using
+ * `react-native-moq` (true native QUIC + hardware decode, no WebView).
  *
- * A Fishjam livestream is one-streamer → many-viewers, so the room may have N
- * publishers (host + cohost + speakers), each with their own livestream room.
- * This hook polls `lynk-livestream-token` (subscribe) for the current set of
- * active publishers + a viewer token each; the screen renders one
- * `LivestreamViewerTile.native` per publisher, which calls
- * `useLivestreamViewer()` → native `MediaStream` → `<VideoTile stream>` →
- * `RTCView`. No publish affordance — viewer tokens cannot stream.
+ * WS-3: this replaces the Fishjam WHIP/WHEP livestream implementation. The
+ * shape of the change is that discovery stops being a 4s poll of
+ * `lynk-livestream-token` and becomes reactive, exactly like the web hook:
+ *   - subscribe token (namespace-scoped) ← `lynk-moq-token`
+ *   - `useSession(relayUrl)` → connect once the token mints
+ *   - `useBroadcasts(session, namespace)` → one `BroadcastInfo` per live
+ *     publisher, each carrying a `player` the screen binds to `<VideoView>`
+ *   - mute/volume are applied per player
  *
- * Discovery is poll-based here (the equivalent of MoQ's reactive `announced`);
- * Supabase realtime on `video_room_members` is the natural enhancement.
+ * A viewer NEVER publishes — the token is subscribe-only and there is no
+ * publish affordance here. Teardown on `leave()` (call from
+ * unmount/leave/background) is a privacy requirement, not a nicety.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { deriveLynkState } from "./lynkState";
-import type { LynkState } from "./lynkState";
-import {
-  fetchLivestreamSubscribe,
-  type LivestreamSubscribeStream,
-} from "./livestreamToken";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSession, useBroadcasts } from "react-native-moq";
+import type { BroadcastInfo, SessionState } from "react-native-moq";
+import { useMoqToken } from "./useMoqToken";
+import { deriveLynkState, type MoqConnectionStatus } from "./lynkState";
+import type { LynkPublisher, LynkViewerBase } from "./types";
 
-const POLL_MS = 4000;
-
-export interface UseLynkViewerNativeResult {
-  state: LynkState;
-  error: string | null;
-  /** Active publishers + viewer tokens (one RTCView tile each). */
-  publishers: LivestreamSubscribeStream[];
-  viewerCount: number;
-  muted: boolean;
-  setMuted: (m: boolean) => void;
-  volume: number;
-  setVolume: (v: number) => void;
-  leave: () => void;
+/** A discovered publisher plus the native player that renders it. */
+export interface NativeLynkPublisher extends LynkPublisher {
+  broadcast: BroadcastInfo;
 }
 
-export function useLynkViewer(roomId: string | undefined): UseLynkViewerNativeResult {
-  const [publishers, setPublishers] = useState<LivestreamSubscribeStream[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [muted, setMuted] = useState(false);
-  const [volume, setVolume] = useState(1);
-  const [loadedOnce, setLoadedOnce] = useState(false);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const alive = useRef(true);
+export interface UseLynkViewerNativeResult extends LynkViewerBase {
+  publishers: NativeLynkPublisher[];
+}
 
-  const poll = useCallback(async () => {
-    if (!roomId) return;
-    try {
-      const streams = await fetchLivestreamSubscribe(roomId);
-      if (!alive.current) return;
-      setPublishers(streams);
-      setError(null);
-    } catch (e) {
-      if (alive.current) setError(e instanceof Error ? e.message : "Subscribe error");
-    } finally {
-      if (alive.current) setLoadedOnce(true);
-    }
-  }, [roomId]);
+/**
+ * `react-native-moq` session states → the transport-agnostic status
+ * `deriveLynkState` speaks. `idle` is "not started yet" (undefined), and both
+ * `closed` and `error:*` are a drop we expect the session to recover from.
+ */
+export function connectionStatusFromSession(
+  state: SessionState,
+): MoqConnectionStatus | undefined {
+  if (state === "idle") return undefined;
+  if (state === "connecting") return "connecting";
+  if (state === "connected") return "connected";
+  return "disconnected";
+}
 
+export function useLynkViewer(
+  roomId: string | undefined,
+): UseLynkViewerNativeResult {
+  const { token, error: tokenError } = useMoqToken(roomId, "subscribe", !!roomId);
+  const session = useSession(token?.relayUrl ?? "");
+
+  const [muted, setMutedState] = useState(false);
+  const [volume, setVolumeState] = useState(1);
+  const [ended, setEnded] = useState(false);
+
+  const namespace = token?.namespace ?? (roomId ? `lynk/${roomId}` : "");
+  const { connect, disconnect } = session;
+
+  // Connect once the relay URL exists. `session.url` is read at connect() time,
+  // so a token refresh that changes the URL reconnects on the new one.
   useEffect(() => {
-    alive.current = true;
-    void poll();
-    timer.current = setInterval(() => void poll(), POLL_MS);
-    return () => {
-      alive.current = false;
-      if (timer.current) clearInterval(timer.current);
-    };
-  }, [poll]);
+    if (!token?.relayUrl || ended) return;
+    connect();
+    return () => disconnect();
+  }, [token?.relayUrl, ended, connect, disconnect]);
+
+  const broadcasts = useBroadcasts(session, namespace);
+
+  const publishers = useMemo<NativeLynkPublisher[]>(
+    () =>
+      broadcasts.map((b) => ({
+        path: b.path,
+        peerId: b.path.slice(b.path.lastIndexOf("/") + 1),
+        broadcast: b,
+      })),
+    [broadcasts],
+  );
+
+  // Volume is per-player, so re-apply whenever the set of players changes.
+  useEffect(() => {
+    for (const b of broadcasts) b.player.setVolume(muted ? 0 : volume);
+  }, [broadcasts, muted, volume]);
+
+  const setMuted = useCallback((m: boolean) => setMutedState(m), []);
+  const setVolume = useCallback(
+    (v: number) => setVolumeState(Math.max(0, Math.min(1, v))),
+    [],
+  );
 
   const leave = useCallback(() => {
-    if (timer.current) clearInterval(timer.current);
-  }, []);
+    setEnded(true);
+    disconnect();
+  }, [disconnect]);
 
   const state = deriveLynkState({
-    hasToken: loadedOnce,
-    connection: loadedOnce ? "connected" : "connecting",
+    hasToken: !!token,
+    connection: connectionStatusFromSession(session.state),
     hasMedia: publishers.length > 0,
-    ended: false,
-    error: !!error,
+    ended,
+    error: !!tokenError,
   });
 
   return {
     state,
-    error,
+    error: tokenError,
     publishers,
-    viewerCount: 0,
+    viewerCount: 0, // wired by the screen from existing room presence (useRoomEvents)
     muted,
     setMuted,
     volume,
