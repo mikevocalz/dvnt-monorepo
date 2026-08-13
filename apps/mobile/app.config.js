@@ -424,22 +424,18 @@ export default {
             // force-feeds RNAudioAPI and react-native-executorch back to
             // static frameworks via pre_install).
             useFrameworks: "dynamic",
-            // Fallout list from the probe, one pod per observed link failure.
+            // No forceStaticLinking list here on purpose. The first two link
+            // failures looked like per-pod bugs and were not — see
+            // buildReactNativeFromSource below. Once React builds from source,
+            // react-native-get-random-values links `-framework "React"` by
+            // itself, so pinning it static would only hide whether the real fix
+            // works.
             //
-            // react-native-get-random-values: `+[RNGetRandomValues load]`
-            // references `_RCTRegisterModule`, but its podspec never declares a
-            // React-Core dependency. Under static linkage that resolves later,
-            // at app-link time; as its own dynamic framework it has to link
-            // React-Core itself and can't. Building it static force-loads it
-            // into the app target, where the symbol is present.
-            //
-            // This is the same shape as upstream's example Podfile, which
-            // pre_installs RNAudioAPI and react-native-executorch back to
-            // static frameworks — expo-build-properties exposes it as a
-            // supported option, so no custom Podfile hook is needed.
-            // expo-modules-autolinking/scripts/ios/autolinking_manager.rb:59
-            // reads it and hands it to expo_add_modules_to_patch.
-            forceStaticLinking: ["react-native-get-random-values"],
+            // Expo modules ship as XCFrameworks too, and ExpoModulesCore is one
+            // of the 33 pods referencing React-Core from ObjC. Kept consistent
+            // with buildReactNativeFromSource — this is the pair the local pod
+            // install was verified against.
+            usePrecompiledModules: false,
           },
           android: {
             // Raised 24 -> 30 deliberately, to clear the floor `react-native-moq`
@@ -466,7 +462,37 @@ export default {
           //    minimum deployment target of iOS 16.4"
           // Production already had it off and builds clean; development had it
           // on and errored. Prebuilt RN artifacts honour deploymentTarget above.
-          buildReactNativeFromSource: false,
+          //
+          // FLIPPED TO true FOR DYNAMIC LINKAGE (ws3a probe). The old reason
+          // above was a deployment-target clash, and it no longer applies:
+          // ios.deploymentTarget is 17.0 and ./plugins/with-ios-deployment-target
+          // raises every pod to 17.0 in post_install, so nothing compiles at
+          // 15.1 any more.
+          //
+          // The new reason is load-bearing. Under `useFrameworks: dynamic` with
+          // PRECOMPILED React Native, dependent pods get React-Core's
+          // FRAMEWORK_SEARCH_PATHS but no link flag at all — measured, not
+          // guessed: 0 of 222 generated pod xcconfigs contained a React
+          // -framework entry, and ReactNativeIncallManager's OTHER_LDFLAGS was
+          // literally just `$(inherited) -weak_framework "JavaScriptCore"`.
+          // Under static linkage that is invisible, because everything resolves
+          // later when it is all linked into the app.
+          //
+          // That is why builds 7c4c2cb0 and 07d76094 died at link on
+          // react-native-get-random-values and ReactNativeIncallManager — and
+          // it was never going to stop at two: 33 pods in this graph reference
+          // React-Core symbols from Objective-C, including ExpoModulesCore,
+          // RNReanimated, RNScreens, RNGestureHandler, RNSVG, react-native-skia,
+          // RNSentry and NitroModules. forceStaticLinking would have meant
+          // listing nearly the whole native graph.
+          //
+          // Building from source restores the edge: the React-Core pod becomes
+          // React.framework and 53 pod xcconfigs pick up `-framework "React"`.
+          // Verified locally with pod install alone, no EAS build burned.
+          //
+          // THE COST, stated plainly: RN compiles from source on every clean
+          // build, so EAS build times go up materially.
+          buildReactNativeFromSource: true,
           // useHermesV1: !isProd, // Disabled due to version conflicts
         },
       ],
