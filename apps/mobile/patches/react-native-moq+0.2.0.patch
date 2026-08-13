@@ -22,3 +22,200 @@ index d9a587d..ba4ce6a 100644
 +    products: ['Moq']
 +  )
  end
+diff --git a/node_modules/react-native-moq/ios/AudioSource/AudioSource.mm b/node_modules/react-native-moq/ios/AudioSource/AudioSource.mm
+index bf6525d..6ae939d 100644
+--- a/node_modules/react-native-moq/ios/AudioSource/AudioSource.mm
++++ b/node_modules/react-native-moq/ios/AudioSource/AudioSource.mm
+@@ -1,5 +1,9 @@
+ #import "AudioSource.h"
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @implementation AudioSource
+ 
+diff --git a/node_modules/react-native-moq/ios/Camera/Camera.mm b/node_modules/react-native-moq/ios/Camera/Camera.mm
+index 7e6737b..5409e44 100644
+--- a/node_modules/react-native-moq/ios/Camera/Camera.mm
++++ b/node_modules/react-native-moq/ios/Camera/Camera.mm
+@@ -1,5 +1,9 @@
+ #import "Camera.h"
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @implementation Camera
+ 
+diff --git a/node_modules/react-native-moq/ios/Camera/CameraPreviewViewManager.mm b/node_modules/react-native-moq/ios/Camera/CameraPreviewViewManager.mm
+index 4fffc74..1ec2425 100644
+--- a/node_modules/react-native-moq/ios/Camera/CameraPreviewViewManager.mm
++++ b/node_modules/react-native-moq/ios/Camera/CameraPreviewViewManager.mm
+@@ -1,5 +1,9 @@
+ #import <React/RCTViewManager.h>
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @interface CameraPreviewViewManager : RCTViewManager
+ @end
+diff --git a/node_modules/react-native-moq/ios/Camera/MultiCamera.mm b/node_modules/react-native-moq/ios/Camera/MultiCamera.mm
+index 7700ba8..543a887 100644
+--- a/node_modules/react-native-moq/ios/Camera/MultiCamera.mm
++++ b/node_modules/react-native-moq/ios/Camera/MultiCamera.mm
+@@ -1,5 +1,9 @@
+ #import "MultiCamera.h"
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @implementation MultiCamera
+ 
+diff --git a/node_modules/react-native-moq/ios/Camera/MultiCameraPreviewViewManager.mm b/node_modules/react-native-moq/ios/Camera/MultiCameraPreviewViewManager.mm
+index 01e7542..6830b6d 100644
+--- a/node_modules/react-native-moq/ios/Camera/MultiCameraPreviewViewManager.mm
++++ b/node_modules/react-native-moq/ios/Camera/MultiCameraPreviewViewManager.mm
+@@ -1,5 +1,9 @@
+ #import <React/RCTViewManager.h>
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @interface MultiCameraPreviewViewManager : RCTViewManager
+ @end
+diff --git a/node_modules/react-native-moq/ios/DataTrack/DataTrack.mm b/node_modules/react-native-moq/ios/DataTrack/DataTrack.mm
+index c5dba52..0d6b7b3 100644
+--- a/node_modules/react-native-moq/ios/DataTrack/DataTrack.mm
++++ b/node_modules/react-native-moq/ios/DataTrack/DataTrack.mm
+@@ -1,5 +1,9 @@
+ #import "DataTrack.h"
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @implementation DataTrack
+ 
+diff --git a/node_modules/react-native-moq/ios/Microphone/Microphone.mm b/node_modules/react-native-moq/ios/Microphone/Microphone.mm
+index a10916c..e0ac43d 100644
+--- a/node_modules/react-native-moq/ios/Microphone/Microphone.mm
++++ b/node_modules/react-native-moq/ios/Microphone/Microphone.mm
+@@ -1,5 +1,9 @@
+ #import "Microphone.h"
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @implementation Microphone
+ 
+diff --git a/node_modules/react-native-moq/ios/MoQ.mm b/node_modules/react-native-moq/ios/MoQ.mm
+index b41fb14..a18cd34 100644
+--- a/node_modules/react-native-moq/ios/MoQ.mm
++++ b/node_modules/react-native-moq/ios/MoQ.mm
+@@ -1,6 +1,10 @@
+ #import "MoQ.h"
+ #import "PlayerHostObject.h"
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ // TurboModule subclass adding the `getPlayer` JSI method; other methods fall
+ // through to NativeMoQSpecJSI.
+diff --git a/node_modules/react-native-moq/ios/Player/PlayerHostObject.mm b/node_modules/react-native-moq/ios/Player/PlayerHostObject.mm
+index 4863f0a..4bb02ff 100644
+--- a/node_modules/react-native-moq/ios/Player/PlayerHostObject.mm
++++ b/node_modules/react-native-moq/ios/Player/PlayerHostObject.mm
+@@ -1,5 +1,9 @@
+ #include "PlayerHostObject.h"
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ using namespace facebook::jsi;
+ 
+diff --git a/node_modules/react-native-moq/ios/Player/VideoViewManager.mm b/node_modules/react-native-moq/ios/Player/VideoViewManager.mm
+index b61cb88..4958536 100644
+--- a/node_modules/react-native-moq/ios/Player/VideoViewManager.mm
++++ b/node_modules/react-native-moq/ios/Player/VideoViewManager.mm
+@@ -1,5 +1,9 @@
+ #import <React/RCTViewManager.h>
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @interface VideoViewManager : RCTViewManager
+ @end
+diff --git a/node_modules/react-native-moq/ios/Publisher/Publisher.mm b/node_modules/react-native-moq/ios/Publisher/Publisher.mm
+index 5a4a4b6..f5ed18b 100644
+--- a/node_modules/react-native-moq/ios/Publisher/Publisher.mm
++++ b/node_modules/react-native-moq/ios/Publisher/Publisher.mm
+@@ -1,5 +1,9 @@
+ #import "Publisher.h"
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @implementation Publisher
+ 
+diff --git a/node_modules/react-native-moq/ios/ScreenBroadcast/BroadcastPickerViewManager.mm b/node_modules/react-native-moq/ios/ScreenBroadcast/BroadcastPickerViewManager.mm
+index 2416b54..c1ed8ab 100644
+--- a/node_modules/react-native-moq/ios/ScreenBroadcast/BroadcastPickerViewManager.mm
++++ b/node_modules/react-native-moq/ios/ScreenBroadcast/BroadcastPickerViewManager.mm
+@@ -1,5 +1,9 @@
+ #import <React/RCTViewManager.h>
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @interface BroadcastPickerViewManager : RCTViewManager
+ @end
+diff --git a/node_modules/react-native-moq/ios/ScreenBroadcast/ScreenBroadcast.mm b/node_modules/react-native-moq/ios/ScreenBroadcast/ScreenBroadcast.mm
+index 3742110..4a31367 100644
+--- a/node_modules/react-native-moq/ios/ScreenBroadcast/ScreenBroadcast.mm
++++ b/node_modules/react-native-moq/ios/ScreenBroadcast/ScreenBroadcast.mm
+@@ -1,5 +1,9 @@
+ #import "ScreenBroadcast.h"
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @implementation ScreenBroadcast
+ 
+diff --git a/node_modules/react-native-moq/ios/VideoSource/VideoSource.mm b/node_modules/react-native-moq/ios/VideoSource/VideoSource.mm
+index 012659c..752e95b 100644
+--- a/node_modules/react-native-moq/ios/VideoSource/VideoSource.mm
++++ b/node_modules/react-native-moq/ios/VideoSource/VideoSource.mm
+@@ -1,5 +1,9 @@
+ #import "VideoSource.h"
++#if __has_include(<MoQ/MoQ-Swift.h>)
+ #import <MoQ/MoQ-Swift.h>
++#else
++#import "MoQ-Swift.h"
++#endif
+ 
+ @implementation VideoSource
+ 
