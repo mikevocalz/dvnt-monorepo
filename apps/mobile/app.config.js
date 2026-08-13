@@ -393,6 +393,10 @@ export default {
       ],
       appSecurityPlugin,
       "./plugins/with-swift5-compat",
+      // pre_install hook forcing named pods static under dynamic linkage —
+      // expo-build-properties' forceStaticLinking is a no-op when RN builds
+      // from source (see the plugin header for the receipts).
+      "./plugins/with-static-pods",
       // Must run so its post_install pass lands in the generated Podfile.
       ["./plugins/with-ios-deployment-target", { target: "17.0" }],
       [
@@ -430,17 +434,12 @@ export default {
             // below fixed all 53 React-Core dependents at once, so pinning
             // them here would only have hidden the real fix.
             //
-            // FishjamReactNativeWebrtc IS genuinely broken under dynamic: its
-            // FJ*JSI.o objects reference concrete facebook::jsi::* symbols
-            // (HostObject vtables, Value dtors, typeinfo) that stay undefined
-            // even though its xcconfig links -framework "jsi" — while
-            // Reanimated/Screens/skia's JSI usage links clean. Failed
-            // identically with and without MoQ installed (builds b0a10cdf and
-            // 1e013b96), so it is a Fishjam-pod defect, not an interaction.
-            // Building it static resolves its symbols at app link instead —
-            // the mechanism Expo itself uses for ExpoModulesJSI, and the same
-            // shape as upstream moq's example Podfile force-statics.
-            forceStaticLinking: ["FishjamReactNativeWebrtc"],
+            // NOTE: forceStaticLinking is NOT usable here — installer.rb gates
+            // its build-type override on RCT_USE_PREBUILT_RNCORE=1, and
+            // buildReactNativeFromSource below sets it to 0, so the option
+            // logs and then no-ops (proven by build 5e13c670). The static pin
+            // for FishjamReactNativeWebrtc lives in
+            // ./plugins/with-static-pods.js as a raw pre_install hook instead.
             // Expo modules ship as XCFrameworks too, and ExpoModulesCore is one
             // of the 33 pods referencing React-Core from ObjC. Kept consistent
             // with buildReactNativeFromSource — this is the pair the local pod
