@@ -397,6 +397,10 @@ export default {
       // expo-build-properties' forceStaticLinking is a no-op when RN builds
       // from source (see the plugin header for the receipts).
       "./plugins/with-static-pods",
+      // Binary SPM xcframeworks (MoqFFI) get their signature collected once
+      // per consuming context; archive assembly flattens them and collides.
+      // Late app-target phase prunes the per-pod duplicates.
+      "./plugins/with-dedupe-xcframework-signatures",
       // Must run so its post_install pass lands in the generated Podfile.
       ["./plugins/with-ios-deployment-target", { target: "17.0" }],
       [
