@@ -424,13 +424,23 @@ export default {
             // force-feeds RNAudioAPI and react-native-executorch back to
             // static frameworks via pre_install).
             useFrameworks: "dynamic",
-            // No forceStaticLinking list here on purpose. The first two link
-            // failures looked like per-pod bugs and were not — see
-            // buildReactNativeFromSource below. Once React builds from source,
-            // react-native-get-random-values links `-framework "React"` by
-            // itself, so pinning it static would only hide whether the real fix
-            // works.
+            // ONLY genuinely broken-under-dynamic pods belong in this list.
+            // The first two link failures (get-random-values, incall-manager)
+            // looked like candidates and were not — buildReactNativeFromSource
+            // below fixed all 53 React-Core dependents at once, so pinning
+            // them here would only have hidden the real fix.
             //
+            // FishjamReactNativeWebrtc IS genuinely broken under dynamic: its
+            // FJ*JSI.o objects reference concrete facebook::jsi::* symbols
+            // (HostObject vtables, Value dtors, typeinfo) that stay undefined
+            // even though its xcconfig links -framework "jsi" — while
+            // Reanimated/Screens/skia's JSI usage links clean. Failed
+            // identically with and without MoQ installed (builds b0a10cdf and
+            // 1e013b96), so it is a Fishjam-pod defect, not an interaction.
+            // Building it static resolves its symbols at app link instead —
+            // the mechanism Expo itself uses for ExpoModulesJSI, and the same
+            // shape as upstream moq's example Podfile force-statics.
+            forceStaticLinking: ["FishjamReactNativeWebrtc"],
             // Expo modules ship as XCFrameworks too, and ExpoModulesCore is one
             // of the 33 pods referencing React-Core from ObjC. Kept consistent
             // with buildReactNativeFromSource — this is the pair the local pod
