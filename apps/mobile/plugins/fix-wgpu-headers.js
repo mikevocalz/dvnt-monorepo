@@ -109,7 +109,22 @@ function withFixWgpuHeaders(config) {
       end
     end`;
 
-      // Inject just before the closing '  end' of the post_install block
+      // Idempotent by CONTENT, not by marker: a marker-guard means an edited
+      // snippet never re-injects over an existing Podfile (bit us — local
+      // Podfile carried a stale copy while EAS regenerated fresh). Strip any
+      // previous [fix-wgpu-headers] block, then inject the current one.
+      const blockStart = podfile.indexOf("    # [fix-wgpu-headers]");
+      if (blockStart !== -1) {
+        // The injected snippet ends right before the post_install closing
+        // "\n  end\nend" it was inserted against; find the block's end as the
+        // next line that dedents to "  end" at column 2.
+        const rest = podfile.slice(blockStart);
+        const endIdx = rest.indexOf("\n  end\nend");
+        if (endIdx !== -1) {
+          podfile = podfile.slice(0, blockStart).replace(/\n$/, "") +
+            podfile.slice(blockStart + endIdx);
+        }
+      }
       if (!podfile.includes("[fix-wgpu-headers]")) {
         const marker = "\n  end\nend";
         const idx = podfile.lastIndexOf(marker);
