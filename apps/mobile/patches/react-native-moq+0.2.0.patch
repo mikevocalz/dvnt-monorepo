@@ -1,0 +1,24 @@
+diff --git a/node_modules/react-native-moq/MoQ.podspec b/node_modules/react-native-moq/MoQ.podspec
+index d9a587d..ba4ce6a 100644
+--- a/node_modules/react-native-moq/MoQ.podspec
++++ b/node_modules/react-native-moq/MoQ.podspec
+@@ -23,4 +23,19 @@ Pod::Spec.new do |s|
+     requirement: { kind: 'exactVersion', version: '0.3.0' },
+     products: ['MoQKit']
+   )
++
++  # moq-kit 0.3.0's Package.swift declares `moq-swift` as `from: "0.2.27"`,
++  # which SPM reads as >= 0.2.27, < 1.0.0 — so it resolves 0.4.x. moq-swift
++  # maintains 0.2.x in parallel with 0.3/0.4, and the 0.4 line is a breaking
++  # change: MoqError loses InvalidErrorCode, MoqOriginProducer loses publish,
++  # Container disappears, and the frame initialisers gain unsafeFromHandle.
++  # moq-kit 0.3.0 (tagged 2026-07-08) was authored against 0.2.27 exactly —
++  # it is the only version that existed on that date; 0.2.28 landed a day
++  # later. Declaring it here constrains SPM's resolution to the intersection
++  # with moq-kit's own range, pinning it back to what moq-kit compiles against.
++  spm_dependency(s,
++    url: 'https://github.com/moq-dev/moq-swift.git',
++    requirement: { kind: 'exactVersion', version: '0.2.27' },
++    products: ['Moq']
++  )
+ end
