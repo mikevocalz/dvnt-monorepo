@@ -30,13 +30,22 @@ function withFixWgpuHeaders(config) {
     # [fix-wgpu-headers] Ensure wgpu's cpp/ tree is in HEADER_SEARCH_PATHS so
     # qualified includes like "jsi/NativeObject.h" resolve to wgpu's own headers
     # instead of Skia's identically-named copies.
+    #
+    # cpp/rnwgpu matters under dynamic-framework builds: apple/WebGPUModule.h
+    # does a bare #import "RNWebGPUManager.h" and the header lives at
+    # cpp/rnwgpu/. Static builds resolved it through CocoaPods' flattened
+    # Pods/Headers/Private dir, which framework builds don't generate — and
+    # the podspec sets USE_HEADERMAP=NO, so search paths are all that's left.
     installer.pods_project.targets.each do |t|
-      next unless t.name == 'react-native-wgpu'
+      # Pod renamed react-native-wgpu -> react-native-webgpu at 0.8.x; this
+      # plugin matched only the old name for a while and was a silent no-op.
+      next unless ['react-native-webgpu', 'react-native-wgpu'].include?(t.name)
       t.build_configurations.each do |config|
         paths = config.build_settings['HEADER_SEARCH_PATHS'] || ['$(inherited)']
         paths = [paths] if paths.is_a?(String)
         paths << '"$(PODS_TARGET_SRCROOT)/cpp"' unless paths.any? { |p| p.include?('PODS_TARGET_SRCROOT)/cpp"') }
         paths << '"$(PODS_TARGET_SRCROOT)/cpp/jsi"' unless paths.any? { |p| p.include?('cpp/jsi') }
+        paths << '"$(PODS_TARGET_SRCROOT)/cpp/rnwgpu"' unless paths.any? { |p| p.include?('cpp/rnwgpu') }
         config.build_settings['HEADER_SEARCH_PATHS'] = paths
       end
     end`;
