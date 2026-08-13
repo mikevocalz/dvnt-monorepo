@@ -43,9 +43,14 @@ function withFixWgpuHeaders(config) {
       t.build_configurations.each do |config|
         paths = config.build_settings['HEADER_SEARCH_PATHS'] || ['$(inherited)']
         paths = [paths] if paths.is_a?(String)
-        paths << '"$(PODS_TARGET_SRCROOT)/cpp"' unless paths.any? { |p| p.include?('PODS_TARGET_SRCROOT)/cpp"') }
-        paths << '"$(PODS_TARGET_SRCROOT)/cpp/jsi"' unless paths.any? { |p| p.include?('cpp/jsi') }
-        paths << '"$(PODS_TARGET_SRCROOT)/cpp/rnwgpu"' unless paths.any? { |p| p.include?('cpp/rnwgpu') }
+        # The package bare-includes ("GPU.h", "JSIConverter.h", ...) across its
+        # whole tree — written assuming the flattened Private-headers dir that
+        # only static builds get. This is the COMPLETE list of header dirs
+        # under cpp/ (enumerated with find, not discovered build-by-build).
+        %w[cpp cpp/jsi cpp/rnwgpu cpp/rnwgpu/api cpp/rnwgpu/api/descriptors cpp/rnwgpu/async cpp/webgpu].each do |d|
+          entry = '"$(PODS_TARGET_SRCROOT)/' + d + '"'
+          paths << entry unless paths.include?(entry)
+        end
         config.build_settings['HEADER_SEARCH_PATHS'] = paths
       end
     end`;
