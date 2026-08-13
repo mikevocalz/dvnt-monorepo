@@ -61,7 +61,7 @@ function withFixWgpuHeaders(config) {
         # missing link edge.
         fsp = config.build_settings['FRAMEWORK_SEARCH_PATHS'] || ['$(inherited)']
         fsp = [fsp] if fsp.is_a?(String)
-        blob_dir = '"${PODS_CONFIGURATION_BUILD_DIR}/React-RCTBlob"'
+        blob_dir = '"$(PODS_CONFIGURATION_BUILD_DIR)/React-RCTBlob"'
         fsp << blob_dir unless fsp.include?(blob_dir)
         config.build_settings['FRAMEWORK_SEARCH_PATHS'] = fsp
 
