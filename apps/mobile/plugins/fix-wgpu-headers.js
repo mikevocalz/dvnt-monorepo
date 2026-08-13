@@ -76,6 +76,32 @@ function withFixWgpuHeaders(config) {
       end
     end
 
+    # [fix-wgpu-headers] Nitro pods, part 2: adding -I dirs is NOT enough when
+    # headermaps are on. The own-target hmap rewrites "ListenerSubscription.hpp"
+    # to "VisionCamera/ListenerSubscription.hpp", and clang then searches for
+    # the REWRITTEN name — which only exists in the flattened
+    # Pods/Headers/Public/<Module>/ layout that static builds generate and
+    # framework builds leave empty. Disabling headermaps would break the
+    # generated -Swift.h resolution instead, so satisfy the hmap: symlink every
+    # public nitrogen header into Headers/Public/<name>/ for both the target
+    # name and the product module name (hmap prefixes use the module).
+    require 'fileutils'
+    public_root = File.join(installer.sandbox.root.to_s, 'Headers', 'Public')
+    installer.pod_targets.each do |pt|
+      pod_dir = installer.sandbox.pod_dir(pt.pod_name).to_s
+      nitro = File.join(pod_dir, 'nitrogen')
+      next unless File.directory?(nitro)
+      names = [pt.name]
+      names << pt.product_module_name if pt.respond_to?(:product_module_name)
+      headers = Dir.glob(File.join(nitro, 'generated', '{shared,ios}', '**', '*.{h,hpp}'))
+      names.compact.uniq.each do |n|
+        dest = File.join(public_root, n)
+        FileUtils.mkdir_p(dest)
+        headers.each { |hdr| FileUtils.ln_sf(hdr, File.join(dest, File.basename(hdr))) }
+      end
+      Pod::UI.puts "[fix-wgpu-headers] Flattened #{headers.length} nitrogen headers for #{names.compact.uniq.join('/')}"
+    end
+
     # [fix-wgpu-headers] Not wgpu-specific, same pass: under RN-from-source +
     # dynamic frameworks, jsinspector_modern.framework's headers include
     # "jsinspector-modern/cdp/CdpJson.h" etc., which live in the SIBLING
@@ -105,6 +131,11 @@ function withFixWgpuHeaders(config) {
           entry = '"$(PODS_TARGET_SRCROOT)/' + d + '"'
           paths << entry unless paths.include?(entry)
         end
+        # Resolves the hmap-rewritten "<Module>/Header.hpp" form against the
+        # flattened symlink farm built in the pass above. Static builds had
+        # this dir on the path implicitly; framework builds do not.
+        pub = '"$(PODS_ROOT)/Headers/Public"'
+        paths << pub unless paths.include?(pub)
         config.build_settings['HEADER_SEARCH_PATHS'] = paths
       end
     end`;

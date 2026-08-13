@@ -16,6 +16,8 @@
  * build_type must be fixed before CocoaPods generates the pod targets.
  *
  * Current list:
+ *  - VisionCameraBarcodeScanner: links Google MLKit's prebuilt static
+ *    xcframeworks; as a dynamic framework GMLImage/MLKBarcode* stay undefined.
  *  - FishjamReactNativeWebrtc: its FJ*JSI.o objects reference concrete
  *    facebook::jsi::* symbols (HostObject vtables, Value dtors, typeinfo)
  *    that stay undefined when it links as its own dynamic framework, even
@@ -34,7 +36,13 @@ const MARKER = "# ── force-static pods (with-static-pods) ──";
 
 const PRE_INSTALL_SNIPPET = `${MARKER}
 # See apps/mobile/plugins/with-static-pods.js for why each pod is listed.
-STATIC_FRAMEWORK_PODS = ['FishjamReactNativeWebrtc']
+STATIC_FRAMEWORK_PODS = [
+  'FishjamReactNativeWebrtc',
+  # Consumes Google MLKit, which ships prebuilt STATIC xcframeworks
+  # (GMLImage / MLKBarcode* undefined when this pod links as its own dynamic
+  # framework). Same class as upstream moq's RNAudioAPI force-static.
+  'VisionCameraBarcodeScanner',
+]
 pre_install do |installer|
   installer.pod_targets.each do |pod|
     if STATIC_FRAMEWORK_PODS.include?(pod.name)
@@ -48,7 +56,17 @@ end`;
 
 function injectPreInstallHook(podfilePath) {
   let podfile = fs.readFileSync(podfilePath, "utf8");
-  if (podfile.includes(MARKER)) return;
+  // Idempotent by content: strip any previous block (marker through the
+  // closing "end" of the pre_install), then re-inject the current one — a
+  // marker-only guard pins reused Podfiles (local or EAS build cache) to a
+  // stale pod list.
+  const prev = podfile.indexOf(MARKER);
+  if (prev !== -1) {
+    const rest = podfile.slice(prev);
+    const endIdx = rest.indexOf("\nend\n");
+    if (endIdx === -1) throw new Error("[with-static-pods] Corrupt existing block");
+    podfile = podfile.slice(0, prev) + podfile.slice(prev + endIdx + "\nend\n".length).replace(/^\n/, "");
+  }
 
   // A Podfile allows one pre_install block; the generated Expo Podfile has
   // none, so inject ours before the first `target` declaration.
