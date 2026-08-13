@@ -52,6 +52,25 @@ function withFixWgpuHeaders(config) {
           paths << entry unless paths.include?(entry)
         end
         config.build_settings['HEADER_SEARCH_PATHS'] = paths
+
+        # ApplePlatformContext.mm uses RCTBlobManager but the podspec never
+        # declares React-RCTBlob. Static builds resolved the class at app
+        # link; as a dynamic framework the pod must link it itself
+        # (undefined _OBJC_CLASS_$_RCTBlobManager otherwise). The pod builds
+        # regardless (React-Core dependents pull it in) — this only adds the
+        # missing link edge.
+        fsp = config.build_settings['FRAMEWORK_SEARCH_PATHS'] || ['$(inherited)']
+        fsp = [fsp] if fsp.is_a?(String)
+        blob_dir = '"${PODS_CONFIGURATION_BUILD_DIR}/React-RCTBlob"'
+        fsp << blob_dir unless fsp.include?(blob_dir)
+        config.build_settings['FRAMEWORK_SEARCH_PATHS'] = fsp
+
+        ldflags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
+        ldflags = [ldflags] if ldflags.is_a?(String)
+        unless ldflags.join(' ').include?('React_RCTBlob')
+          ldflags += ['-framework', '"React_RCTBlob"']
+        end
+        config.build_settings['OTHER_LDFLAGS'] = ldflags
       end
     end`;
 
