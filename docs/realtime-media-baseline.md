@@ -436,29 +436,3 @@ standalone `swiftc -typecheck` of the watch target ALL pass with the broken
 dependency graph installed. Nothing short of a native build catches an SPM
 resolution problem, so "gates green" on a workstream that adds a native module
 means very little until one runs.
-
-**WS-3a REVERTED AGAIN (2026-08-13) — three upstream bugs deep, one unsolved.**
-Six EAS builds. Each fix was real and moved the failure strictly later, which
-is the only reason to believe them:
-
-1. ~25 moq-kit compile errors -> fixed by pinning moq-swift to 0.2.27
-   (moq-kit declares `from: "0.2.27"`, SPM resolved 0.4.2 across a breaking
-   rewrite).
-2. `'MoQ/MoQ-Swift.h' file not found` -> fixed by guarding all 14 of the
-   package's `.mm` imports with `__has_include`. react-native-moq assumes
-   framework linkage; this app builds pods as static libraries.
-3. `MoqFFI.xcframework-ios.signature couldn't be copied to Signatures because
-   an item with the same name already exists` -> UNSOLVED. The app compiles,
-   links, signs and produces DVNT.app; the archive dies copying XCFramework
-   signatures. Setting `products: []` on the moq-swift entry did NOT fix it, so
-   it is not simply our second declaration duplicating the product.
-
-Reverted so the app builds. `apps/mobile/patches/react-native-moq+0.2.0.patch`
-is KEPT — it carries fixes 1 and 2, which are correct and will be needed again.
-It is inert while the package is uninstalled (the root postinstall tolerates a
-missing package).
-
-Next person: start at bug 3. Likely candidates are the xcframework being
-embedded by more than one of this app's four targets (DVNT, DVNTWatch,
-DVNTWatchComplication, ShareExtension), or a CocoaPods/SPM interaction in the
-embed phase. Reproduce with an EAS build — nothing local catches it.
