@@ -94,6 +94,17 @@ function withFixWgpuHeaders(config) {
         paths = config.build_settings['HEADER_SEARCH_PATHS'] || ['$(inherited)']
         paths = [paths] if paths.is_a?(String)
         jsinspector_headers.each { |e| paths << e unless paths.include?(e) }
+        # Nitro modules: nitrogen generates bare cross-includes
+        # ("ResizeMode.hpp" from the ios/ umbrella, file in shared/c++/) that
+        # static builds resolved via the flattened headers dir. The layout is
+        # identical for every nitrogen package, and a search path to a dir
+        # that doesn't exist is a no-op — so add the trio unconditionally
+        # rather than maintaining a nitro-pod list (first seen:
+        # ReactNativeVideo, build fa65ad1c).
+        %w[nitrogen/generated/shared/c++ nitrogen/generated/ios nitrogen/generated/ios/c++].each do |d|
+          entry = '"$(PODS_TARGET_SRCROOT)/' + d + '"'
+          paths << entry unless paths.include?(entry)
+        end
         config.build_settings['HEADER_SEARCH_PATHS'] = paths
       end
     end`;
