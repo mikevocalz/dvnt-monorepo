@@ -67,8 +67,10 @@ function withFixWgpuHeaders(config) {
 
         ldflags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
         ldflags = [ldflags] if ldflags.is_a?(String)
-        unless ldflags.join(' ').include?('React_RCTBlob')
-          ldflags += ['-framework', '"React_RCTBlob"']
+        # Product MODULE name, not pod name: the React-RCTBlob pod builds
+        # RCTBlob.framework (React-CoreModules links -framework RCTBlob).
+        unless ldflags.join(' ').include?('RCTBlob')
+          ldflags += ['-framework', '"RCTBlob"']
         end
         config.build_settings['OTHER_LDFLAGS'] = ldflags
       end
