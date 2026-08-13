@@ -400,6 +400,30 @@ export default {
         {
           ios: {
             deploymentTarget: "17.0",
+            // PROBE (ws3a): does this app link dynamically at all?
+            //
+            // `react-native-moq` is only ever built by upstream under dynamic
+            // linkage — example/ios/Podfile line 2 is
+            // `ENV['USE_FRAMEWORKS'] = 'dynamic'`, set before anything else
+            // loads. The README documents plain `npm install` + `pod install`
+            // and never mentions linkage, which is why two nights of static
+            // builds produced bugs with no upstream issue to match:
+            //   - `MoQ/MoQ-Swift.h` not found — that umbrella header only
+            //     exists when the pod is a framework.
+            //   - duplicate `MoqFFI.xcframework-ios.signature` at archive —
+            //     with no dynamic framework owning the SPM binary xcframework,
+            //     more than one of our four targets embeds it.
+            // react-native/scripts/cocoapods/spm.rb says it outright: SPM +
+            // static linking "might cause linker errors. Consider using
+            // USE_FRAMEWORKS=dynamic".
+            //
+            // MoQ stays UNINSTALLED for this probe. The only question here is
+            // what the other ~494 Podfile.lock entries do under dynamic
+            // linkage across four targets. Pods shipping prebuilt static
+            // archives are the expected casualties (upstream's own example
+            // force-feeds RNAudioAPI and react-native-executorch back to
+            // static frameworks via pre_install).
+            useFrameworks: "dynamic",
           },
           android: {
             // Raised 24 -> 30 deliberately, to clear the floor `react-native-moq`
