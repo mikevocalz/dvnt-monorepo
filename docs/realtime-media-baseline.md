@@ -385,3 +385,54 @@ Still unverified for WS-5 (needs a build, not a source read): the claim that
 native-before-JS call reporting shrinks the 1.0.315/1.0.316 headless-boot
 SIGABRT surface. That is the actual reason for the migration and it can only be
 confirmed on a device.
+
+**WS-3a RESTORED + PATCHED (2026-08-12, supersedes the REVERTED note above).**
+The revert was correct as a stop-gap and wrong about the cause. Recording both,
+because the misdiagnosis is the reusable lesson.
+
+*What actually failed.* An EAS production build died in the native phase. Every
+error resolved to `SourcePackages/checkouts/moq-kit/ios/Sources/MoQKit/` —
+moq-kit's own Swift. **None** were in `react-native-moq`: its `ios/` folder
+contains no occurrence of any failing symbol. I initially blamed
+react-native-moq and reverted; that was wrong.
+
+*What MoQKit was missing.* moq-kit 0.3.0's handwritten Swift calls into
+`Moq` (the `moq-swift` package) expecting an API that the resolved version did
+not expose:
+
+| Symbol moq-kit expects | State in the resolved `moq-swift` |
+|---|---|
+| `MoqError.InvalidErrorCode` | gone |
+| `MoqOriginProducer.publish` | gone |
+| `Container` (used by `Internal/FFIDebugDescription.swift`) | type no longer exists |
+| `MoqFrame` / `MoqInit` initialisers | now require `unsafeFromHandle:` |
+| `MoqVideo.displayRatio` | gone |
+| `MoqFrame.keyframe` | gone |
+| `MoqContainer.moqKitDescription` | gone |
+| `DataTrackEmitter` frame label | renamed `payload:` -> `frame:` |
+| `MediaSubscriptionKey` | no longer conforms to `Hashable`/`Equatable` |
+
+*Root cause.* moq-kit 0.3.0's `Package.swift` declares
+`.package(url: ".../moq-swift", from: "0.2.27")`. SPM reads `from:` as
+`>= 0.2.27, < 1.0.0`, so it resolved **0.4.2**. moq-swift runs a 0.2.x line in
+parallel with 0.3/0.4 — 0.3.0 is dated 2026-05-31, *older* than 0.2.33
+(2026-07-18) — and the 0.4 line is a breaking rewrite. An unpinned transitive
+dependency drifted; nothing was broken as published.
+
+*The patch.* `apps/mobile/patches/react-native-moq+0.2.0.patch` adds a second
+`spm_dependency` to `MoQ.podspec` declaring `moq-swift` at
+`exactVersion 0.2.27`, which constrains SPM's resolution to the intersection
+with moq-kit's own range. 0.2.27 is the pin because it is the only moq-swift
+that existed when moq-kit 0.3.0 was tagged (moq-kit 2026-07-08; moq-swift
+0.2.27 on 2026-07-05, 0.2.28 on 2026-07-09) — `from: "0.2.27"` was the version
+it was built against, written as a floor.
+
+Hand-written, not generated: patch-package cannot generate in this repo (pnpm,
+no npm lockfile). Verified to apply from a pristine tarball via the root
+postinstall.
+
+*The lesson worth keeping.* `tsc`, `expo export --platform ios`, and a
+standalone `swiftc -typecheck` of the watch target ALL pass with the broken
+dependency graph installed. Nothing short of a native build catches an SPM
+resolution problem, so "gates green" on a workstream that adds a native module
+means very little until one runs.
