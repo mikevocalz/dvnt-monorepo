@@ -1,6 +1,6 @@
 --- a/node_modules/react-native-moq/MoQ.podspec
 +++ b/node_modules/react-native-moq/MoQ.podspec
-@@ -18,9 +18,15 @@
+@@ -18,9 +18,14 @@
  
    install_modules_dependencies(s)
  
@@ -8,8 +8,7 @@
 +  # SPM resolves to 0.4.x across a breaking rewrite — the tag cannot compile.
 +  # moq-kit main fixed this (96b8028, pins moq-swift 0.4.1) but is untagged.
 +  # Drop this patch when moq-kit tags a release and react-native-moq picks it up:
-+  # https://github.com/software-mansion-labs/react-native-moq/issues — see the
-+  # issue filed 2026-08-13.
++  # https://github.com/software-mansion-labs/react-native-moq/issues/1
    spm_dependency(s,
      url: 'https://github.com/software-mansion-labs/moq-kit.git',
 -    requirement: { kind: 'exactVersion', version: '0.3.0' },
