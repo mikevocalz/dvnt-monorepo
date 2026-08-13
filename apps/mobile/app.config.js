@@ -424,6 +424,22 @@ export default {
             // force-feeds RNAudioAPI and react-native-executorch back to
             // static frameworks via pre_install).
             useFrameworks: "dynamic",
+            // Fallout list from the probe, one pod per observed link failure.
+            //
+            // react-native-get-random-values: `+[RNGetRandomValues load]`
+            // references `_RCTRegisterModule`, but its podspec never declares a
+            // React-Core dependency. Under static linkage that resolves later,
+            // at app-link time; as its own dynamic framework it has to link
+            // React-Core itself and can't. Building it static force-loads it
+            // into the app target, where the symbol is present.
+            //
+            // This is the same shape as upstream's example Podfile, which
+            // pre_installs RNAudioAPI and react-native-executorch back to
+            // static frameworks — expo-build-properties exposes it as a
+            // supported option, so no custom Podfile hook is needed.
+            // expo-modules-autolinking/scripts/ios/autolinking_manager.rb:59
+            // reads it and hands it to expo_add_modules_to_patch.
+            forceStaticLinking: ["react-native-get-random-values"],
           },
           android: {
             // Raised 24 -> 30 deliberately, to clear the floor `react-native-moq`
