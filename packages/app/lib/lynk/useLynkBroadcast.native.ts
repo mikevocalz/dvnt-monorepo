@@ -61,7 +61,22 @@ export function useLynkBroadcast(
   const publisher = usePublisher(session);
   // `enabled: false` stops the native capture outright — that IS camera-off on
   // this transport; there is no separate "publish black frames" mode.
-  const camera = useCamera({ enabled: cameraEnabled && !ended });
+  //
+  // videoCodec pinned to h264 per the library's own skill: on Android an
+  // unsupported encoder (usually h265) makes publishing start then silently
+  // stop with NO error — moq-kit reports it as a clean stop. h264 is listed
+  // by getSupportedVideoCodecs() everywhere we ship.
+  const camera = useCamera({
+    enabled: cameraEnabled && !ended,
+    videoCodec: "h264",
+  });
+  // KNOWN GAP (0.2.0): the mic cannot be soft-disabled — MicrophoneOptions is
+  // only { audioCodec?, audioSampleRate? }; the `enabled` flag exists on
+  // upstream main but not in this release. So a muted mic still holds the iOS
+  // audio session in `playAndRecord` and can block other audio libraries
+  // (`insufficientPriority`). Mute still works at the broadcast level (the
+  // track is dropped from `tracks` below). Pass `enabled: micEnabled && !ended`
+  // here the moment a release ships it.
   const mic = useMicrophone();
 
   const { connect, disconnect } = session;
@@ -86,11 +101,17 @@ export function useLynkBroadcast(
 
   const publishedPath = useRef<string | null>(null);
 
+  // Publish only once the session is actually connected — calling publish()
+  // earlier sends the publisher straight to `error:session is not connected`
+  // (it does not queue). Depending on session.state means this effect also
+  // re-fires when the connection lands after Go Live was tapped, so the tap
+  // never has to race the handshake.
   useEffect(() => {
     if (!isLive || !token?.path || ended) return;
+    if (session.state !== "connected") return;
     publish({ path: token.path, tracks });
     publishedPath.current = token.path;
-  }, [isLive, token?.path, tracks, ended, publish]);
+  }, [isLive, token?.path, tracks, ended, publish, session.state]);
 
   const goLive = useCallback(async () => {
     if (!token || isLive) return;
