@@ -34,6 +34,14 @@ const nextConfig: NextConfig = {
   // under React StrictMode's dev double-mount (GlassSurface/GlassHeader).
   // Real fix: bump react-native-reanimated to 4.5.3, then remove this.
   reactStrictMode: false,
+  // ponytail: the TS gate moved OUT of `next build` and into the `build` script
+  // (`tsc --noEmit && next build`). Next runs its checker while the whole
+  // webpack compilation is still resident; on Vercel's 2-core/8GB builder that
+  // combined peak got SIGKILLed by the container OOM killer (the check ran 9.6
+  // min, then .next/routes-manifest.json was missing). Sequential processes
+  // never stack their peaks. `npx tsc --noEmit` is still the floor — it just
+  // runs first, and a type error still fails the deploy.
+  typescript: { ignoreBuildErrors: true },
   // Keep only the genuinely server-only AWS SDK external. Do NOT externalize
   // @payloadcms/storage-s3 / plugin-cloud-storage — they ship the admin's
   // client component (S3ClientUploadHandler, referenced from the import map),
