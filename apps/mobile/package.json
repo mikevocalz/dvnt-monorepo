@@ -195,6 +195,7 @@
     "eas-build-cache-provider": "^18.0.2",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~57.0.0",
+    "expo-atlas": "^0.4.3",
     "metro": "0.84.4",
     "metro-resolver": "0.84.3",
     "patch-package": "^8.0.1",
