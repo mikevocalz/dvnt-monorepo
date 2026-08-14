@@ -73,7 +73,6 @@ import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 
 const COLUMN_GAP = 3;
 const CELL_RADIUS = 12;
-const NUM_COLUMNS = 2;
 const VARIATION = 0.3;
 const EVENT_INTERVAL = 7;
 
@@ -327,6 +326,10 @@ const MasonryCell = memo(function MasonryCell({
     toggleLike();
   }, [toggleLike]);
 
+  // Phone cells (~185pt) wear 14pt glyphs fine; tablet cells (~275pt+)
+  // made them read as specks. Scale with the cell, capped.
+  const iconSize = width >= 240 ? 20 : 14;
+
   const media = post.media?.[0];
   const isTextPost = post.kind === "text";
   const textPostPreview = resolveTextPostPresentation(
@@ -440,7 +443,7 @@ const MasonryCell = memo(function MasonryCell({
               style={styles.overlayAction}
             >
               <Heart
-                size={14}
+                size={iconSize}
                 color={hasLiked ? "#ef4444" : "#fff"}
                 fill={hasLiked ? "#ef4444" : "transparent"}
               />
@@ -457,7 +460,7 @@ const MasonryCell = memo(function MasonryCell({
               style={styles.overlayAction}
             >
               <Bookmark
-                size={14}
+                size={iconSize}
                 color={isBookmarked ? "#3FDCFF" : "#fff"}
                 fill={isBookmarked ? "#3FDCFF" : "transparent"}
               />
@@ -481,24 +484,23 @@ interface PackedPost {
 function packIntoColumns(
   posts: Post[],
   columnWidth: number,
-): [PackedPost[], PackedPost[]] {
-  const col0: PackedPost[] = [];
-  const col1: PackedPost[] = [];
-  let h0 = 0;
-  let h1 = 0;
+  numColumns: number,
+): PackedPost[][] {
+  const cols: PackedPost[][] = Array.from({ length: numColumns }, () => []);
+  const heights = new Array<number>(numColumns).fill(0);
 
   for (const post of posts) {
     const height = Math.round(columnWidth * estimateRatio(post));
-    if (h0 <= h1) {
-      col0.push({ post, height });
-      h0 += height + COLUMN_GAP;
-    } else {
-      col1.push({ post, height });
-      h1 += height + COLUMN_GAP;
+    // Shortest column first — same policy the 2-column version had.
+    let target = 0;
+    for (let i = 1; i < numColumns; i++) {
+      if (heights[i] < heights[target]) target = i;
     }
+    cols[target].push({ post, height });
+    heights[target] += height + COLUMN_GAP;
   }
 
-  return [col0, col1];
+  return cols;
 }
 
 // ─── Build sections: masonry chunks interleaved with event cards ────────────
@@ -550,41 +552,34 @@ function buildSections(posts: Post[], events: Event[]): MasonrySection[] {
 const MasonrySection_ = memo(function MasonrySection_({
   posts,
   columnWidth,
+  numColumns,
   onPress,
 }: {
   posts: Post[];
   columnWidth: number;
+  numColumns: number;
   onPress: (id: string) => void;
 }) {
-  const [col0, col1] = useMemo(
-    () => packIntoColumns(posts, columnWidth),
-    [posts, columnWidth],
+  const columns = useMemo(
+    () => packIntoColumns(posts, columnWidth, numColumns),
+    [posts, columnWidth, numColumns],
   );
 
   return (
     <View style={styles.gridContainer}>
-      <View style={{ width: columnWidth }}>
-        {col0.map(({ post, height }) => (
-          <MasonryCell
-            key={post.id}
-            post={post}
-            width={columnWidth}
-            height={height}
-            onPress={onPress}
-          />
-        ))}
-      </View>
-      <View style={{ width: columnWidth }}>
-        {col1.map(({ post, height }) => (
-          <MasonryCell
-            key={post.id}
-            post={post}
-            width={columnWidth}
-            height={height}
-            onPress={onPress}
-          />
-        ))}
-      </View>
+      {columns.map((col, i) => (
+        <View key={i} style={{ width: columnWidth }}>
+          {col.map(({ post, height }) => (
+            <MasonryCell
+              key={post.id}
+              post={post}
+              width={columnWidth}
+              height={height}
+              onPress={onPress}
+            />
+          ))}
+        </View>
+      ))}
     </View>
   );
 });
@@ -726,9 +721,25 @@ export function MasonryFeed() {
     [filteredPosts, forYouEvents],
   );
 
-  // Layout
+  // Layout. Window width is only the ESTIMATE: on iPadOS the native tab
+  // layout insets the content region (~180pt on the 11"), so sizing columns
+  // from the window overflowed the container and cut the last column off at
+  // the screen edge. onLayout measures the region the feed actually owns.
+  const [containerWidth, setContainerWidth] = useState<number | null>(null);
+  const feedWidth = containerWidth ?? screenWidth;
+  // 2 columns on phones, more as the container allows (~3 on 11" iPad,
+  // 4 on 12.9"), so tablet cells stay near phone cell size instead of
+  // ballooning to half a tablet each.
+  const numColumns = Math.max(2, Math.floor(feedWidth / 300));
   const columnWidth = Math.floor(
-    (screenWidth - COLUMN_GAP * (NUM_COLUMNS + 1)) / NUM_COLUMNS,
+    (feedWidth - COLUMN_GAP * (numColumns + 1)) / numColumns,
+  );
+  const handleContainerLayout = useCallback(
+    (e: { nativeEvent: { layout: { width: number } } }) => {
+      const w = Math.round(e.nativeEvent.layout.width);
+      if (w > 0) setContainerWidth((prev) => (prev === w ? prev : w));
+    },
+    [],
   );
 
   const handlePress = useCallback(
@@ -763,7 +774,11 @@ export function MasonryFeed() {
   // wrong shape here). Stories + events live in their own lanes and
   // must never gate the grid body.
   if (isLoading || !nsfwLoaded) {
-    return <MasonryGridSkeleton columnWidth={columnWidth} />;
+    return (
+      <View style={{ flex: 1 }} onLayout={handleContainerLayout}>
+        <MasonryGridSkeleton columnWidth={columnWidth} />
+      </View>
+    );
   }
 
   // Offline + no cached feed → show a deliberate offline surface
@@ -783,6 +798,7 @@ export function MasonryFeed() {
   }
 
   return (
+    <View style={{ flex: 1 }} onLayout={handleContainerLayout}>
     <LegendList
       ref={listRef}
       // Virtualized at SECTION granularity. Each section already carries its own
@@ -799,6 +815,7 @@ export function MasonryFeed() {
           <MasonrySection_
             posts={item.posts}
             columnWidth={columnWidth}
+            numColumns={numColumns}
             onPress={handlePress}
           />
         )
@@ -846,6 +863,7 @@ export function MasonryFeed() {
         ) : null
       }
     />
+    </View>
   );
 }
 

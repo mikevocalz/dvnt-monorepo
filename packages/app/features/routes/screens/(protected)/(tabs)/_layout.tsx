@@ -36,6 +36,13 @@ export default function TabsLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const supportsBottomAccessory = supportsNativeTabsBottomAccessory();
+  // iPadOS renders native tabs as a TOP bar, so the bottom-anchored
+  // CenterButton overlay ends up orphaned mid-screen with nothing under it —
+  // and the create trigger's deliberately blank label (blank because the
+  // overlay covers it on iPhone) renders as an empty gap in the label-only
+  // top bar. On iPad: no overlay, real label, create lives in the top bar
+  // like its siblings.
+  const isPad = Platform.OS === "ios" && Platform.isPad;
 
   return (
     <View style={{ flex: 1 }}>
@@ -88,7 +95,10 @@ export default function TabsLayout() {
             sf={{ default: "plus", selected: "plus" }}
             md="add"
           />
-          <NativeTabs.Trigger.Label> </NativeTabs.Trigger.Label>
+          {/* Blank on iPhone: the CenterButton overlay covers this slot. */}
+          <NativeTabs.Trigger.Label>
+            {isPad ? "Create" : " "}
+          </NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
 
         <NativeTabs.Trigger name="activity">
@@ -108,26 +118,31 @@ export default function TabsLayout() {
         </NativeTabs.Trigger>
       </NativeTabs>
 
-      {/* Custom CenterButton overlaid on top of the native "create" tab icon */}
-      <View
-        pointerEvents="box-none"
-        style={{
-          position: "absolute",
-          bottom: Platform.OS === "ios" ? insets.bottom - 2 : 8,
-          left: 0,
-          right: 0,
-          alignItems: "center",
-          zIndex: 1000,
-        }}
-      >
-        <View style={{ paddingHorizontal: 26 }}>
-          <CenterButton
-            Icon={Plus}
-            onPress={() => router.push("/(protected)/(tabs)/create")}
-            accessoryPlacement="inline"
-          />
+      {/* Custom CenterButton overlaid on top of the native "create" tab icon.
+          iPhone only — on iPad the tab bar is at the TOP, so the native
+          "Create" item (label above) is the create affordance and this
+          bottom-anchored overlay would float over the feed with no bar. */}
+      {!isPad && (
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: "absolute",
+            bottom: Platform.OS === "ios" ? insets.bottom - 2 : 8,
+            left: 0,
+            right: 0,
+            alignItems: "center",
+            zIndex: 1000,
+          }}
+        >
+          <View style={{ paddingHorizontal: 26 }}>
+            <CenterButton
+              Icon={Plus}
+              onPress={() => router.push("/(protected)/(tabs)/create")}
+              accessoryPlacement="inline"
+            />
+          </View>
         </View>
-      </View>
+      )}
     </View>
   );
 }
