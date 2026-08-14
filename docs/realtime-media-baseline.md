@@ -436,3 +436,43 @@ standalone `swiftc -typecheck` of the watch target ALL pass with the broken
 dependency graph installed. Nothing short of a native build catches an SPM
 resolution problem, so "gates green" on a workstream that adds a native module
 means very little until one runs.
+
+
+**WS-3a GREEN (2026-08-13, supersedes both revert notes).** Build 1.0.340
+(`6464b35`, branch `ws3a-dynamic-linkage-probe`) archives on EAS with
+react-native-moq 0.2.0 installed and submitted to TestFlight. What it took,
+so nobody re-derives it:
+
+- **Dynamic frameworks are non-negotiable** — upstream's example Podfile sets
+  `ENV['USE_FRAMEWORKS'] = 'dynamic'`; static-linkage is unsupported and both
+  header bugs from the revert notes were symptoms of it.
+- **The whole moq SPM stack floats and must be pinned three levels deep**
+  (patch `react-native-moq+0.2.0.patch`): moq-kit main revision `7ed3aeb`
+  (v0.3.0 cannot compile against its own resolution), plus constraint-only
+  pins moq-swift 0.4.1 + moq-swift-ffi 0.3.3 — the exact set moq-kit's
+  Package.resolved blesses. A dependency's Package.resolved is IGNORED when
+  consumed as a dependency. Upstream issue filed:
+  software-mansion-labs/react-native-moq#1 — drop the patch when they tag.
+- **Dynamic linkage exposed 8 latent defects in OTHER pods** (each fixed once,
+  none recurred): React-Core link flags absent under precompiled RN
+  (fix: buildReactNativeFromSource), Fishjam JSI + MLKit-barcode prebuilt
+  statics (fix: plugins/with-static-pods pre_install — expo's
+  forceStaticLinking silently no-ops when RN builds from source),
+  webgpu headers/RCTBlob + jsinspector siblings + nitro headermap rewrites
+  (fix: plugins/fix-wgpu-headers, incl. flattening nitro public headers into
+  Pods/Headers/Public to satisfy hmap-rewritten includes).
+- **The duplicate-signature killer itself**: Xcode collects the MoqFFI binary
+  xcframework's signature once per consuming context (SPM root + MoQ pod
+  subdir) and archive assembly flattens them into one Signatures/ dir.
+  Fix: plugins/with-dedupe-xcframework-signatures (late app-target phase
+  pruning per-pod *.signature duplicates). Reproduced and verified locally
+  before shipping.
+- **Debugging infrastructure that made this converge**: local
+  xcodebuild archive (iOS+watchOS platforms downloaded), EAS log artifacts
+  are brotli-encoded, and both Podfile-injection plugins are now
+  idempotent-by-content — marker guards had them serving stale snippets on
+  cached Podfiles.
+
+Cost accepted: RN compiles from source on every clean EAS build. WS-3b
+(moving the routed product screens onto the hook seam, deleting Fishjam and
+its force-static entry) is unchanged and still open.
