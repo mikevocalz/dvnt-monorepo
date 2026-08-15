@@ -101,9 +101,8 @@ performance concern (First Load JS), not a limit concern.
    Deleting server maps after Sentry has uploaded them roughly halves the two
    largest functions. Not urgent at 25% of the limit — recorded for when it is.
 
-2. **`chunks/1392` is 1.60 MB**, an order of magnitude above the next chunk. It
-   is the shared entry every route pays for. Any First Load JS work starts here;
-   attributing its contents is the next step and is not yet done.
+2. **`chunks/1392` is 1.60 MB**, an order of magnitude above the next chunk.
+   Attributed below — it is Payload admin, and it is *not* first-load.
 
 ### Per-route First Load JS — not captured
 
@@ -123,3 +122,112 @@ The local `vercel build` ran without Postgres on `127.0.0.1:5433`, so
 sets. File tracing is static analysis and does not depend on data, so the
 function sizes hold. The static-output figure (35 MB) is a floor — a build with
 the database reachable would prerender more pages.
+
+---
+
+# B2 — client graph, attributed
+
+Added 2026-08-14, after B0. Two corrections to the section above, both from
+measurement rather than inference.
+
+## How to reproduce
+
+`ANALYZE_SOURCEMAPS=1 pnpm build` in `apps/web`. The flag does two things and is
+off by default:
+
+- `productionBrowserSourceMaps` (`next.config.ts`) — production chunks carry no
+  module paths, so a source map is the only way to attribute bytes to packages.
+- `sourcemaps.deleteSourcemapsAfterUpload: false` for `withSentryConfig` —
+  Sentry deletes client maps after upload, which is correct for a normal build
+  and defeats the analysis. Option name verified against
+  `node_modules/@sentry/nextjs/build/types/config/types.d.ts:239`.
+
+Per-route First Load JS is then the set of `/_next/static/chunks/*.js` referenced
+by each prerendered HTML in `.next/server/app`, summed from disk. This is the
+substitute for the route-size table Next 16 no longer prints and
+`experimental-analyze --output` does not emit.
+
+## Correction — `chunks/1392` is Payload admin, and it is not first-load
+
+B0 called it "the shared entry every route pays for". That was wrong on both
+counts.
+
+Source-map attribution of its 1,679,901 minified bytes (4.11 MB pre-minification
+across 1,525 sources):
+
+| Share | Pre-min KB | Package |
+|---:|---:|---|
+| 41.5% | 1,744 | (app source) |
+| 16.5% | 692 | `react-datepicker` |
+| 7.8% | 329 | `@payloadcms/ui` |
+| 4.3% | 181 | `react-select` |
+| 2.9% | 124 | `date-fns` |
+| 2.6% | 109 | `jsox` |
+| 2.4% | 102 | `@dnd-kit/core` |
+| 2.0% | 84 | `payload` |
+| 1.6% | 67 | `@lexical/table` |
+
+138 route client-reference manifests list it, including `(frontend)/page` — but
+**no prerendered public HTML references it**, so it is lazily loaded, not First
+Load JS. It costs nothing on first paint.
+
+Note the prompt's stop-trigger: admin internals dominating a chunk is exactly the
+case that belongs with the Payload/hygiene work, not here. Nothing was changed.
+
+## The real shared cost: 2,029 KB on every public route
+
+First Load JS, uncompressed, from prerendered HTML:
+
+| Route | KB | Chunks |
+|---|---:|---:|
+| `/feed` | 2,644 | 32 |
+| `/design` | 2,081 | 27 |
+| `/faq` | 2,042 | 28 |
+| `/privacy` | 2,042 | 28 |
+| `/` | 2,036 | 26 |
+| `/pricing` | 2,034 | 27 |
+| `/settings` | 2,033 | 26 |
+| `/_not-found` | 946 | 8 |
+
+25 chunks totalling **2,029 KB** are common to every public route. Attributed:
+
+| Share | Pre-min KB | Package |
+|---:|---:|---|
+| 31.2% | 2,245 | (app source) |
+| 10.5% | 756 | `next` |
+| 10.2% | 734 | `react-native-reanimated` |
+| 10.2% | 733 | `react-native-web` |
+| 5.8% | 414 | `@supabase/auth-js` |
+| 5.0% | 361 | `react-native-gesture-handler` |
+| 4.2% | 305 | `@sentry/core` |
+| 3.6% | 260 | `@sentry/replay` |
+| 2.5% | 183 | `@gorhom/bottom-sheet` |
+| 1.5% | 107 | `@supabase/storage-js` |
+| 1.4% | 104 | `@supabase/postgrest-js` |
+| 1.4% | 99 | `@supabase/realtime-js` |
+| 1.3% | 96 | `@tanstack/query-core` |
+| 1.0% | 74 | `@egjs/hammerjs` |
+
+### Reading it
+
+`react-native-web` + `react-native-reanimated` + `react-native-gesture-handler`
++ `@egjs/hammerjs` is **26.4%**. That is the cost of the universal app running on
+web and it is structural — not waste, and not removable without giving up the
+shared codebase.
+
+**Sentry is 10.2% across four packages, and `@sentry/replay` alone is 260 KB.**
+Session Replay is opt-in functionality on every public route. This is the
+largest genuinely discretionary item in the shared payload and the obvious first
+cut, but it is a product decision and it overlaps the Sentry cost-efficiency
+work — flagged, not changed.
+
+`(app source)` at 31.2% is the largest single bucket and is not yet broken down
+past the workspace boundary. That is the next measurement, and it has not been
+done.
+
+## Budgets — not set
+
+B3 asked for budgets derived from the baseline and a CI guard. Numbers now exist
+to derive them from, but nothing has been set or enforced. Any guard should
+measure `.vercel/output/static` chunk bytes per route the way this section does,
+since the Next 16 route table and `experimental-analyze --output` both omit sizes.
