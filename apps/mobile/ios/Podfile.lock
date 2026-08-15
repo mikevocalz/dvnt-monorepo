@@ -2228,7 +2228,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-webgpu (0.5.15):
+  - react-native-webgpu (0.8.2):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -3270,7 +3270,7 @@ DEPENDENCIES:
   - EXConstants (from `../../../node_modules/expo-constants/ios`)
   - EXJSONUtils (from `../../../node_modules/expo-json-utils/ios`)
   - EXManifests (from `../../../node_modules/expo-manifests/ios`)
-  - Expo (from `../node_modules/expo`)
+  - Expo (from `../../../node_modules/expo`)
   - expo-dev-client (from `../../../node_modules/expo-dev-client/ios`)
   - expo-dev-launcher (from `../../../node_modules/expo-dev-launcher`)
   - expo-dev-menu (from `../../../node_modules/expo-dev-menu`)
@@ -3505,7 +3505,7 @@ EXTERNAL SOURCES:
   EXManifests:
     :path: "../../../node_modules/expo-manifests/ios"
   Expo:
-    :path: "../node_modules/expo"
+    :path: "../../../node_modules/expo"
   expo-dev-client:
     :path: "../../../node_modules/expo-dev-client/ios"
   expo-dev-launcher:
@@ -4002,7 +4002,7 @@ SPEC CHECKSUMS:
   react-native-safe-area-context: a2325922b8594ddd27f98fb13437aec126be2502
   react-native-skia: 9b9e78b85db9a89108afe1424d970386c64dfe97
   react-native-slider: 8824cf332b11bf5149f6576c8c8b32b4f93f82ac
-  react-native-webgpu: e3a27c72a92a1257e3090c4fa9ce89f6130dadae
+  react-native-webgpu: 30d4e0c60a7dba9dcf581bd2b79ab8873bb2ae32
   react-native-webview: 474aeef432561cbd160483cc48796a212f4a9e22
   React-NativeModulesApple: a4713821c9caae40ae33eef933a6e692a6f4a81d
   React-networking: b344a1a41a4729ef859123b7a234f3092761cb25
