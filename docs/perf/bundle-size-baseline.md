@@ -189,45 +189,93 @@ First Load JS, uncompressed, from prerendered HTML:
 | `/settings` | 2,033 | 26 |
 | `/_not-found` | 946 | 8 |
 
-25 chunks totalling **2,029 KB** are common to every public route. Attributed:
+25 chunks totalling **2,029 KB** are common to every public route.
 
-| Share | Pre-min KB | Package |
+### Method correction — attribute shipped bytes, not `sourcesContent`
+
+An earlier revision of this section attributed by summing `sourcesContent`
+length. That is *pre-minification* source, and it ranks packages wrongly: it put
+`@sentry/conventions`' generated `attributes.ts` at 812 KB and first place, when
+that file is 78% comments and its shipped contribution is small enough not to
+reach the top 20. Percentages derived that way were meaningless.
+
+The numbers below decode each chunk's source-map `mappings` and give every
+segment the span from its generated column to the next one — actual bytes of
+minified output per source file. 1,903 KB of the 2,029 KB is attributed (94%);
+the remainder is one shared chunk with no map.
+
+| Share | Shipped KB | Package |
 |---:|---:|---|
-| 31.2% | 2,245 | (app source) |
-| 10.5% | 756 | `next` |
-| 10.2% | 734 | `react-native-reanimated` |
-| 10.2% | 733 | `react-native-web` |
-| 5.8% | 414 | `@supabase/auth-js` |
-| 5.0% | 361 | `react-native-gesture-handler` |
-| 4.2% | 305 | `@sentry/core` |
-| 3.6% | 260 | `@sentry/replay` |
-| 2.5% | 183 | `@gorhom/bottom-sheet` |
-| 1.5% | 107 | `@supabase/storage-js` |
-| 1.4% | 104 | `@supabase/postgrest-js` |
-| 1.4% | 99 | `@supabase/realtime-js` |
-| 1.3% | 96 | `@tanstack/query-core` |
-| 1.0% | 74 | `@egjs/hammerjs` |
+| 13.9% | 265.2 | `next` |
+| 13.8% | 261.9 | next (internals, relative paths) |
+| 12.1% | 230.6 | `react-native-web` |
+| 10.8% | 205.5 | `react-native-reanimated` |
+| 6.2% | 117.6 | `@sentry/replay` |
+| 5.6% | 106.1 | `react-native-gesture-handler` |
+| 5.3% | 100.8 | `@supabase/auth-js` |
+| 4.9% | 93.9 | `@sentry/core` |
+| 2.2% | 42.1 | workspace: `packages/app` |
+| 2.2% | 40.9 | `@gorhom/bottom-sheet` |
+| 2.1% | 39.4 | `@tanstack/query-core` |
+| 1.7% | 32.7 | `sonner` |
+| 1.6% | 31.4 | `@sentry/browser-utils` |
+| 1.6% | 30.8 | `@supabase/realtime-js` |
+| 1.5% | 29.4 | `@sentry/browser` |
+| 1.1% | 21.1 | `@egjs/hammerjs` |
 
 ### Reading it
 
-`react-native-web` + `react-native-reanimated` + `react-native-gesture-handler`
-+ `@egjs/hammerjs` is **26.4%**. That is the cost of the universal app running on
-web and it is structural — not waste, and not removable without giving up the
-shared codebase.
+Grouped:
 
-**Sentry is 10.2% across four packages, and `@sentry/replay` alone is 260 KB.**
-Session Replay is opt-in functionality on every public route. This is the
-largest genuinely discretionary item in the shared payload and the obvious first
-cut, but it is a product decision and it overlaps the Sentry cost-efficiency
-work — flagged, not changed.
+| Group | Shipped KB | Share |
+|---|---:|---:|
+| Next.js (`next` + internals) | 527 | 27.7% |
+| RN-on-web (`react-native-web` + `reanimated` + `gesture-handler` + `hammerjs`) | 563 | 29.6% |
+| Sentry (`replay` + `core` + `browser-utils` + `browser`) | 272 | 14.3% |
+| Supabase (`auth-js` + `realtime` + `phoenix` + `storage` + `postgrest`) | 193 | 10.1% |
+| **Our own workspace code** | **42** | **2.2%** |
 
-`(app source)` at 31.2% is the largest single bucket and is not yet broken down
-past the workspace boundary. That is the next measurement, and it has not been
-done.
+Two conclusions follow, and both contradict the intuition this work started
+from.
 
-## Budgets — not set
+**There is almost nothing of ours to trim.** `packages/app` is 42 KB of a
+2,029 KB payload. Framework and platform libraries are 57% on their own.
+Optimising our own module graph — barrel splitting, RSC boundary moves,
+`optimizePackageImports` over our packages — cannot move a number dominated by
+`next`, `react-native-web`, and `reanimated`.
 
-B3 asked for budgets derived from the baseline and a CI guard. Numbers now exist
-to derive them from, but nothing has been set or enforced. Any guard should
-measure `.vercel/output/static` chunk bytes per route the way this section does,
-since the Next 16 route table and `experimental-analyze --output` both omit sizes.
+**Sentry at 272 KB is the one large discretionary item.** `@sentry/replay`
+alone is 117.6 KB shipped on every public route, and Session Replay is opt-in
+product functionality rather than a technical necessity. Dropping or lazy-loading
+it is worth ~6% of First Load JS. That is a product decision and it overlaps the
+Sentry cost-efficiency work, so it is flagged here with a number and not
+changed.
+
+RN-on-web at 29.6% is the price of the universal codebase. It is not waste and
+there is no version of this app that ships without it.
+
+## B3 — budgets, set and enforced
+
+`pnpm check:bundle` (`scripts/check-bundle-budget.mjs`), run against a build in
+`apps/web/.next`:
+
+| Check | Baseline | Budget | Headroom |
+|---|---:|---:|---:|
+| Worst route (`/feed`) | 2,644 KB | 2,900 KB | ~10% |
+| Shared payload (25 chunks) | 2,029 KB | 2,235 KB | ~10% |
+
+Uncompressed bytes. Both paths are verified: the guard passes at current sizes
+and exits 1 with budgets lowered.
+
+Raise a budget deliberately, with a number and a reason. Never raise one to turn
+a red build green — that is what the attribution mode is for:
+
+```
+ANALYZE_SOURCEMAPS=1 pnpm --filter web build
+node scripts/check-bundle-budget.mjs --attribute
+```
+
+Not wired into CI. The only workflow in `.github/workflows` is
+`verify-edge-functions.yml`; adding a build-and-check job is a separate change
+that needs a decision about build minutes, since the guard needs a full
+`pnpm build` to measure against.
