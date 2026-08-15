@@ -21,7 +21,8 @@
     "verify:parity": "node scripts/verify-port-parity.mjs",
     "verify:watch": "node scripts/verify-watch.mjs",
     "verify:functions": "node scripts/verify-edge-functions.mjs",
-    "verify:functions:live": "node scripts/verify-edge-functions.mjs --live --project-ref npfjanxturvmjyevoyfo"
+    "verify:functions:live": "node scripts/verify-edge-functions.mjs --live --project-ref npfjanxturvmjyevoyfo",
+    "check:bundle": "node scripts/check-bundle-budget.mjs"
   },
   "keywords": [],
   "author": "",
