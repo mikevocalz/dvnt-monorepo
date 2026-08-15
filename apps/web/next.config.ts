@@ -42,6 +42,11 @@ const nextConfig: NextConfig = {
   // never stack their peaks. `npx tsc --noEmit` is still the floor — it just
   // runs first, and a type error still fails the deploy.
   typescript: { ignoreBuildErrors: true },
+  // ponytail: opt-in only. Client source maps are the one way to attribute bytes
+  // in a shared chunk to the packages that put them there — Sentry deletes its
+  // uploads, and the production chunks carry no module paths. Off by default so
+  // normal builds don't pay for it: ANALYZE_SOURCEMAPS=1 pnpm build.
+  productionBrowserSourceMaps: process.env.ANALYZE_SOURCEMAPS === '1',
   // Keep only the genuinely server-only AWS SDK external. Do NOT externalize
   // @payloadcms/storage-s3 / plugin-cloud-storage — they ship the admin's
   // client component (S3ClientUploadHandler, referenced from the import map),
@@ -330,6 +335,10 @@ export default withSentryConfig(
     tunnelRoute: '/monitoring',
     disableLogger: true,
     widenClientFileUpload: true,
+    // Sentry deletes client maps after upload, which is right for a normal
+    // build and defeats ANALYZE_SOURCEMAPS=1. Option name verified against
+    // node_modules/@sentry/nextjs/build/types/config/types.d.ts:239.
+    sourcemaps: { deleteSourcemapsAfterUpload: process.env.ANALYZE_SOURCEMAPS !== '1' },
     release: { name: process.env.SENTRY_RELEASE },
   },
 );
