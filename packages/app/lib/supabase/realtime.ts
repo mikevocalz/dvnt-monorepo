@@ -44,35 +44,48 @@
  * that never resubscribes is fine with a stable topic. The hazard is specifically
  * resubscription — anything in a hook with deps, or in a layout that remounts.
  */
-import type { RealtimeChannel } from "@supabase/supabase-js";
+import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "./client";
 
-let seq = 0;
-
 /**
- * Open a realtime channel that is guaranteed not to be an already-joined one.
+ * Bind freshChannel to a specific client.
  *
- * @param prefix Stable, human-readable topic prefix, e.g. `call_signals:77`.
- *               A unique suffix is appended; sweep matches on this prefix, so
- *               keep it specific enough not to catch other users' channels.
- * @param config Optional channel config, forwarded to supabase.channel().
+ * The sweep below reads `client.getChannels()` and opens on that same client,
+ * so the binding is load-bearing: a freshChannel bound to a different client
+ * than the caller subscribes with would sweep the wrong channel list and hand
+ * back a channel nothing else in the app is listening on. `apps/mobile` keeps
+ * its own client, which is why this is a factory rather than a re-export.
  */
-export function freshChannel(
-  prefix: string,
-  config?: Parameters<typeof supabase.channel>[1],
-): RealtimeChannel {
-  // Sweep siblings from earlier mounts. Fire-and-forget: removeChannel is async
-  // and we must not await here — the whole point is that the topic we are about
-  // to open is different from theirs, so we do not need them gone first.
-  for (const c of supabase.getChannels()) {
-    if (
-      c.topic === `realtime:${prefix}` ||
-      c.topic.startsWith(`realtime:${prefix}:`)
-    ) {
-      void supabase.removeChannel(c);
-    }
-  }
+export function makeFreshChannel(client: SupabaseClient) {
+  let seq = 0;
 
-  const topic = `${prefix}:${++seq}`;
-  return config ? supabase.channel(topic, config) : supabase.channel(topic);
+  /**
+   * Open a realtime channel that is guaranteed not to be an already-joined one.
+   *
+   * @param prefix Stable, human-readable topic prefix, e.g. `call_signals:77`.
+   *               A unique suffix is appended; sweep matches on this prefix, so
+   *               keep it specific enough not to catch other users' channels.
+   * @param config Optional channel config, forwarded to client.channel().
+   */
+  return function freshChannel(
+    prefix: string,
+    config?: Parameters<typeof client.channel>[1],
+  ): RealtimeChannel {
+    // Sweep siblings from earlier mounts. Fire-and-forget: removeChannel is async
+    // and we must not await here — the whole point is that the topic we are about
+    // to open is different from theirs, so we do not need them gone first.
+    for (const c of client.getChannels()) {
+      if (
+        c.topic === `realtime:${prefix}` ||
+        c.topic.startsWith(`realtime:${prefix}:`)
+      ) {
+        void client.removeChannel(c);
+      }
+    }
+
+    const topic = `${prefix}:${++seq}`;
+    return config ? client.channel(topic, config) : client.channel(topic);
+  };
 }
+
+export const freshChannel = makeFreshChannel(supabase);
