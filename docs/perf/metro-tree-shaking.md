@@ -1,134 +1,123 @@
-# WS-A — Metro tree shaking: measured, and blocked upstream
+# WS-A — Metro tree shaking: enabled, −17% per platform
 
-Measured 2026-08-14 on `master`. Verdict up front: **tree shaking is worth
-−18.54% of the Android JS bundle and cannot be turned on today.** One synthetic
-module emitted by `react-native-css@3.0.7` survives the optimize-graph
-serializer as raw ESM, and `hermesc` refuses it. The flags stay off until this
-is fixed upstream or worked around by the NativeWind maintainers.
+Measured 2026-08-14 on `master`. Tree shaking was blocked by one synthetic
+module emitted as raw ESM by `react-native-css@3.0.7`; that is patched, both
+flags are on in the production EAS profiles, and both platforms now build.
 
-## A1 — baseline (flags off)
+**Runtime QA (A5) is still open — see the gate at the bottom before cutting a
+production build.**
 
-`EXPO_ATLAS=1 npx expo export --platform ios --platform android`
+| Platform | Baseline | Shaken | Delta |
+|---|---:|---:|---:|
+| iOS | 23,074,008 B | 19,039,639 B | **−4,034,369 B (−17.48%)** |
+| Android | 23,223,729 B | 19,273,935 B | **−3,949,794 B (−17.01%)** |
 
-| Platform | Hermes bytecode |
-|---|---:|
-| Android | 23,223,729 B |
-| iOS | 23,074,008 B |
+Hermes bytecode, `npx expo export --platform ios --platform android`, flags
+supplied via `.env`.
 
-Atlas artifact: `.expo/atlas.jsonl`, 158,187,086 B. Preserved with the `dist/`
-tree at `/tmp/dvnt-perf/before/` for the duration of this work — **not durable**;
-re-run the export to regenerate.
+## A0 — the flag gates, cited to installed source
 
-`--platform all` is not usable here: web bundling fails on
+`@expo/cli@57.0.13`. Both default `false`.
+
+| Seam | File + symbol |
+|---|---|
+| `EXPO_UNSTABLE_TREE_SHAKING` → `boolish(…, false)` | `build/src/utils/env.js:209-210` |
+| `EXPO_UNSTABLE_METRO_OPTIMIZE_GRAPH` → `boolish(…, false)` | `build/src/utils/env.js:212-213` |
+| `CommandError` if shaking set without optimize-graph | `build/src/start/server/metro/instantiateMetro.js:270-271` |
+| `optimize = props.optimize ?? (environment !== 'node' && mode === 'production' && env.EXPO_UNSTABLE_METRO_OPTIMIZE_GRAPH)` | `build/src/start/server/middleware/metroOptions.js:78` |
+| `usedExports: optimize && env.EXPO_UNSTABLE_TREE_SHAKING` | `build/src/start/server/middleware/metroOptions.js:84` |
+| `optimizeGraph:` / `treeshaking:` pass-through | `build/src/start/server/metro/instantiateMetro.js:307-308` |
+| `experimentalImportSupport: true` default | `@expo/metro-config@57.0.7/build/ExpoMetroConfig.js:345` |
+
+Both flags are production-mode gated and skipped for the `node` environment, so
+dev workflows are untouched by design.
+
+## A1 — baseline
+
+Android 23,223,729 B, iOS 23,074,008 B. Atlas artifact 158,187,086 B.
+
+`--platform all` is not usable: web bundling fails on
 `react-native-watch-connectivity`, whose `dist/index.js` requires `./RNWatch`
-with no web fork. WS-A is native-only, so this baseline is iOS + Android.
+with no web fork. WS-A is native-only, so the baseline is iOS + Android.
 
-## A2 — the size prize, and the wall
+## The blocker, and the patch
 
-Bytecode cannot be generated with the flags on, so the two sides are compared as
-plain JS (`--no-bytecode`), which is a like-for-like measurement:
-
-| Android bundle | Bytes |
-|---|---:|
-| Baseline (flags off) | 15,968,353 |
-| Tree-shaken | 13,007,862 |
-| **Delta** | **−2,960,491 B (−18.54%)** |
-
-Module count is 7,828 either way — the win is intra-module dead-export
-elimination, not dropped modules, which is exactly what `usedExports` does.
-
-With bytecode generation on (the default, and what ships), the export fails:
+With both flags on, `hermesc` failed:
 
 ```
-Failed to generate Hermes bytecode for: node_modules/expo-router/entry.js
 index.js:844745:1: error: 'import' statement requires module mode
 index.js:853525:1: error: 'export' statement requires module mode
-hermesc ... exited with non-zero code: 2
 ```
 
-Reproduced by running `hermesc` directly against the `--no-bytecode` output, which
-pins it to one line and two columns:
+`react-native-css@3.0.7` → `dist/{commonjs,module}/metro/injection-code.js` →
+`getNativeInjectionCode()` synthesises a virtual module as a raw ESM **string**
+so Tailwind survives `lazy()` barriers — its own header comment calls it "a hack
+around Metro's handling of bundles". Normally that source is transformed to CJS
+like any other module; under the optimize-graph serializer it reaches the
+concatenated bundle with `import`/`export` intact, and `hermesc` compiles in
+script mode.
 
-```
-entry-acec3dd516ad758ab08b92b6f07e0d7a.js
-5663:14:     error: 'import' statement requires module mode
-5663:128908: error: 'export' statement requires module mode
-```
+Ruled out by one-variable reruns: Expo Atlas instrumentation, multi-platform
+export, and the bytecode step itself (running `hermesc` by hand on the
+`--no-bytecode` output reproduced both errors at line 5663, cols 14 and 128908).
 
-That line reads:
+`apps/mobile/patches/react-native-css+3.0.7.patch` changes only
+`getNativeInjectionCode` — the emitted module becomes:
 
 ```js
-"use strict";import{StyleCollection}from"react-native-css/native-internal";
-StyleCollection.inject({s:[["pointer-events-auto",…]]});
-…
-},5259,[244]);export{};
+const { StyleCollection } = require("react-native-css/native-internal");
+require("<each css file>");
+StyleCollection.inject({…});
+module.exports = {};
 ```
 
-### Root cause
+`getWebInjectionCode` is untouched; the web path never had the problem.
+`react-native-css` declares a `require` condition for `./native-internal`
+pointing at `dist/commonjs/native-internal/index.js`, so the require resolves.
 
-`react-native-css@3.0.7` →
-`dist/commonjs/metro/injection-code.js` → `getNativeInjectionCode()`:
+The patch was generated by diffing against the published 3.0.7 tarball rather
+than hand-written, and verified by restoring both files to pristine and
+re-applying with `patch-package` (`react-native-css@3.0.7 ✔`).
 
-```js
-return Buffer.from(
-  `import { StyleCollection } from "react-native-css/native-internal";\n` +
-  `${importStatements}\n${contents};export {};`
-);
+Filed upstream: **nativewind/react-native-css#414**. Drop the patch when a
+release carries the fix.
+
+## A2 — enabled
+
+Both flags set in `apps/mobile/.env` (gitignored, local) and in the `preview`,
+`apk`, and `production` profiles in `eas.json`. Not in `development`: it is
+`developmentClient: true` and the flags are production-gated, so it would be
+dead weight.
+
+## Gate still open — A5 runtime QA
+
+**The app has not been run with a shaken bundle.** A bundle that compiles is not
+proof: `expo/expo#41620` is precisely a tree-shaking + Reanimated/Worklets
+failure that builds clean and then dies at launch with `[Worklets] Native part
+of Worklets doesn't seem to be initialized`. This app runs
+`react-native-reanimated@4.5.3` and `react-native-worklets@0.11.3`.
+
+QA is blocked on something unrelated to this work: `expo run:ios
+--configuration Release` fails twice with
+
+```
+xcodebuild: error: Unable to find a destination matching the provided
+destination specifier: { id:333068FF-C5A0-4938-B3D4-B50587BD69F5 }
 ```
 
-It synthesises a virtual module as a raw ESM **string**. Its own header comment
-calls it "a hack around Metro's handling of bundles" — it force-imports the CSS
-files into every bundle so Tailwind survives `lazy()` barriers.
+against a simulator that `simctl list devices booted` confirms is booted. No
+physical device is reachable either — `adb devices` empty, `xctrace` sees only
+the host, `devicectl` reports both iPhones `unavailable` (the iPad shows
+`available (paired)` but has not been built to).
 
-Under the normal pipeline that synthetic source is transformed to CJS like any
-other module. Under `EXPO_UNSTABLE_METRO_OPTIMIZE_GRAPH` +
-`EXPO_UNSTABLE_TREE_SHAKING` the serializer re-emits modules from their ESM
-form, and this one reaches the concatenated bundle with `import` and `export`
-intact. `hermesc` compiles the bundle in script mode, not module mode, so both
-statements are hard errors.
+**Do not cut a production EAS build until a release build has been launched and
+every Reanimated/worklets surface exercised** — gesture-driven UI, animated
+navigation, canvas/story tooling. If `#41620` reproduces, the mitigation is
+side-effect preservation for the affected package or a scoped opt-out, not a
+silent patch.
 
-Installed: `nativewind@5.0.0-preview.4`, `react-native-css@3.0.7`.
+## A3 / A4 — not started
 
-### Ruled out
-
-| Hypothesis | Test | Result |
-|---|---|---|
-| Expo Atlas instrumentation perturbs the serializer | Re-ran with flags + bytecode, `EXPO_ATLAS` unset | Same failure — not Atlas |
-| Only the two-platform export is affected | Android alone | Same failure |
-| The bundle is fine and the bytecode step is at fault | Ran `hermesc` by hand on the `--no-bytecode` bundle | Same two errors — the bundle genuinely contains ESM |
-
-This is **not** `expo/expo#41620` (the Worklets `Native part of Worklets doesn't
-seem to be initialized` release crash). We never reach a running app: the build
-fails at bytecode generation. #41620 remains an open risk for whenever the flags
-do get enabled, and A5 device QA is still owed at that point.
-
-## Status of the remaining WS-A steps
-
-- **A2 (enable)** — deliberately NOT done. Neither flag is set in `.env` or any
-  `eas.json` profile. Setting them today breaks every production build.
-- **A3 (`sideEffects` audit)**, **A4 (barrel audit)** — not started. Both are
-  optimisations *on top of* a working shaking pass; auditing side effects while
-  the pass cannot produce a bundle would be unverifiable.
-- **A5 (release device QA)** — cannot run. `adb devices` is empty, `xcrun
-  xctrace list devices` shows only the host Mac, and `xcrun devicectl list
-  devices` reports both iPhones `unavailable`. No physical device is reachable.
-
-`expo-atlas@^0.4.0` was added to `apps/mobile` devDependencies — `EXPO_ATLAS=1`
-installs it on first use and A1/A6 both require it.
-
-## What would unblock this
-
-In rough order of cost:
-
-1. **Upstream fix in `react-native-css`** — emit the injection module as CJS, or
-   register it through a transformer so the optimize-graph serializer converts
-   it. This is their hack to own; the file already admits it is one.
-2. **Upstream fix in `@expo/cli`** — have the graph-optimize pass run virtual /
-   synthetic modules through the ESM→CJS transform before concatenation.
-3. **Local shim** — intercept the module in `metro.config.js` and hand back a
-   CJS equivalent. Fastest, and it forks a documented upstream hack inside our
-   build; it would need re-verifying on every `react-native-css` bump.
-
-Recommendation: file upstream against `react-native-css` with the reproduction
-above, and hold the flags off. −18.54% is a real prize but not worth carrying a
-fork of someone else's hack through every dependency bump.
+`sideEffects` audit and the barrel audit are optimisations layered on a working
+shaking pass. They are worth doing once A5 is closed and the −17% is confirmed
+to survive a running app.

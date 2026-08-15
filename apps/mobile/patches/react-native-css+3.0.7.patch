@@ -1,0 +1,32 @@
+diff --git a/node_modules/react-native-css/dist/commonjs/metro/injection-code.js b/node_modules/react-native-css/dist/commonjs/metro/injection-code.js
+index 5c34a6f..0b4d73f 100644
+--- a/node_modules/react-native-css/dist/commonjs/metro/injection-code.js
++++ b/node_modules/react-native-css/dist/commonjs/metro/injection-code.js
+@@ -20,8 +20,8 @@ function getWebInjectionCode(filePaths) {
+   return Buffer.from(importStatements);
+ }
+ function getNativeInjectionCode(cssFilePaths, values) {
+-  const importStatements = cssFilePaths.map(filePath => `import "${filePath}";`).join("\n");
++  const importStatements = cssFilePaths.map(filePath => `require("${filePath}");`).join("\n");
+   const contents = values.map(value => `StyleCollection.inject(${JSON.stringify(value)});`).join("\n");
+-  return Buffer.from(`import { StyleCollection } from "react-native-css/native-internal";\n${importStatements}\n${contents};export {};`);
++  return Buffer.from(`const { StyleCollection } = require("react-native-css/native-internal");\n${importStatements}\n${contents};module.exports = {};`);
+ }
+ //# sourceMappingURL=injection-code.js.map
+\ No newline at end of file
+diff --git a/node_modules/react-native-css/dist/module/metro/injection-code.js b/node_modules/react-native-css/dist/module/metro/injection-code.js
+index 669780d..37f0fcf 100644
+--- a/node_modules/react-native-css/dist/module/metro/injection-code.js
++++ b/node_modules/react-native-css/dist/module/metro/injection-code.js
+@@ -15,8 +15,8 @@ export function getWebInjectionCode(filePaths) {
+   return Buffer.from(importStatements);
+ }
+ export function getNativeInjectionCode(cssFilePaths, values) {
+-  const importStatements = cssFilePaths.map(filePath => `import "${filePath}";`).join("\n");
++  const importStatements = cssFilePaths.map(filePath => `require("${filePath}");`).join("\n");
+   const contents = values.map(value => `StyleCollection.inject(${JSON.stringify(value)});`).join("\n");
+-  return Buffer.from(`import { StyleCollection } from "react-native-css/native-internal";\n${importStatements}\n${contents};export {};`);
++  return Buffer.from(`const { StyleCollection } = require("react-native-css/native-internal");\n${importStatements}\n${contents};module.exports = {};`);
+ }
+ //# sourceMappingURL=injection-code.js.map
+\ No newline at end of file
