@@ -993,6 +993,9 @@ importers:
       '@moq/publish':
         specifier: ^0.2.14
         version: 0.2.14(@svta/cml-utils@1.5.0)(@types/react@19.2.14)(react@19.2.3)(zod@4.4.3)
+      '@moq/signals':
+        specifier: ^0.1.8
+        version: 0.1.8(@types/react@19.2.14)(react@19.2.3)
       '@moq/watch':
         specifier: ^0.2.16
         version: 0.2.16(@svta/cml-utils@1.5.0)(@types/react@19.2.14)(react@19.2.3)(zod@4.4.3)
@@ -19956,9 +19959,7 @@ snapshots:
       metro-runtime: 0.84.4
     transitivePeerDependencies:
       - '@babel/core'
-      - bufferutil
       - supports-color
-      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89': {}
 
