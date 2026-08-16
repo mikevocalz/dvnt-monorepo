@@ -62,6 +62,9 @@ importers:
       '@dvnt/functions':
         specifier: workspace:*
         version: link:../../packages/functions
+      '@dvnt/supabase':
+        specifier: workspace:*
+        version: link:../../packages/supabase
       '@dvnt/types':
         specifier: workspace:*
         version: link:../../packages/types
