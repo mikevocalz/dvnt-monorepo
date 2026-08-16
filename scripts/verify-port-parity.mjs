@@ -77,9 +77,9 @@ const WEB_NATIVE_SOURCE_MAP = {
   "debug/debug-ota.web.tsx": "(protected)/debug-ota.tsx",
   "debug/debug-transitions.web.tsx": "(protected)/debug/transitions.tsx",
   "debug/dev-telemetry.web.tsx": "(public)/dev/telemetry.tsx",
-  "sneaky-lynk/billing.web.tsx": "(protected)/sneaky-lynk/billing.tsx",
-  "sneaky-lynk/create.web.tsx": "(protected)/sneaky-lynk/create.tsx",
-  "sneaky-lynk/room.web.tsx": "(protected)/sneaky-lynk/room/[id].tsx",
+  "sneaky-lynk/screens/billing.web.tsx": "(protected)/sneaky-lynk/billing.tsx",
+  "sneaky-lynk/screens/create.web.tsx": "(protected)/sneaky-lynk/create.tsx",
+  "sneaky-lynk/screens/room.web.tsx": "(protected)/sneaky-lynk/room/[id].tsx",
   "events/ticket-detail.web.tsx": "(protected)/ticket/[id].tsx",
   "events/ticket-upgrade.web.tsx": "(protected)/ticket/upgrade/[id].tsx",
   "events/checkout-review.web.tsx": "(protected)/checkout/review.tsx",
@@ -140,6 +140,21 @@ const NATIVE_ONLY_WIRING = new Set([
   // protection — web call uses @fishjam-cloud/react-client directly.
   "useVideoCall", "use-video-call", "useMediaPermissions", "useNativeDriver",
   "camera-result-store", "useCameraResultStore", "useSneakyLynkCaptureProtection",
+  // NativeTabs floating pill clearance — use-tab-bar-inset wraps
+  // useSafeAreaInsets for a detached tab bar that only exists on native. Web
+  // has no such element and no inset to clear.
+  "use-tab-bar-inset", "useTabBarInset",
+  // react-native-reanimated's useReducedMotion. Web honours the same intent
+  // through `@media (prefers-reduced-motion: reduce)` — scanner.web.tsx does.
+  "useReducedMotion",
+  // Story creation flow: native runs a state machine whose states are system
+  // picker SCREENS (PICKER_IMAGE / PICKER_VIDEO) and hands the editor result
+  // back across a navigation boundary. On web the picker is an <input
+  // type="file"> and create + editor share one in-process useEditorStore, so
+  // there is no cross-screen handoff to preserve. Same reasoning as
+  // camera-result-store above.
+  "story-flow-store", "useStoryFlowStore",
+  "story-editor-result-store", "useStoryEditorResultStore",
   // landing-only animation/scroll hooks (platform-divergent rendering)
   "useClock", "useLandingScroll", "useSectionProgress", "useScrollProgress",
 ]);
@@ -482,9 +497,9 @@ const PROMPT14_WEB_SCREENS = [
   "messages/new-message.web.tsx",
   "messages/new-group.web.tsx",
   "settings/messages.web.tsx",
-  "sneaky-lynk/room.web.tsx",
-  "sneaky-lynk/create.web.tsx",
-  "sneaky-lynk/billing.web.tsx",
+  "sneaky-lynk/screens/room.web.tsx",
+  "sneaky-lynk/screens/create.web.tsx",
+  "sneaky-lynk/screens/billing.web.tsx",
 ];
 const MIN_REAL_BYTES = 1500; // a real ported screen is never a thin shell
 const realWebFails = [];

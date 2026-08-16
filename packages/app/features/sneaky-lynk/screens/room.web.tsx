@@ -80,7 +80,7 @@ import {
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
-import { supabase } from "@dvnt/app/lib/supabase/client";
+import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
@@ -1354,29 +1354,30 @@ function RoomInner({
     })();
   }, [id, endRoomHistory, resetRoomStore, router, showToast]);
 
-  // ── Free-host timer gate: subscription lookup + start time ────────────────
+  // ── Free-host timer gate: entitlements + start time ───────────────────────
   // Mirrors the native room — a host on the free plan gets a 5-min countdown
   // and a duration-limit paywall; paid hosts have no timer. Only matters once
   // we're connected and know we're the host.
+  //
+  // Sourced from the canonical resolver (useEntitlements), same as native. This
+  // previously read sneaky_subscriptions directly, which sees only the legacy
+  // standalone-Sneaky rows: it missed every membership_subscriptions row, so a
+  // paid DVNT member hosting on web was treated as free and hit the duration
+  // paywall that native correctly hid from them. I3 — one entitlement read path.
+  const { entitlements, isLoading: entitlementsLoading } = useEntitlements();
+  // Same boolean the legacy check derived (active && plan_id !== "free"):
+  // every paid plan grants unlimited session duration. `null` while unresolved,
+  // which is what the store's tri-state and `showTimer` below expect.
+  const resolvedIsPaidHost = entitlementsLoading
+    ? null
+    : entitlements.sessionMinutes === null;
+
   useEffect(() => {
     if (phase !== "connected" || !isHostRef.current) return;
     if (timerStartedAt == null) setTimerStartedAt(Date.now());
-    if (isPaidHost != null || !authUser?.id) return;
-    let active = true;
-    void (async () => {
-      const { data } = await supabase
-        .from("sneaky_subscriptions")
-        .select("status, plan_id")
-        .eq("host_id", authUser.id)
-        .single();
-      if (active) {
-        setIsPaidHost(data?.status === "active" && data?.plan_id !== "free");
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [phase, authUser?.id, isPaidHost, timerStartedAt, setIsPaidHost, setTimerStartedAt]);
+    if (resolvedIsPaidHost == null || isPaidHost === resolvedIsPaidHost) return;
+    setIsPaidHost(resolvedIsPaidHost);
+  }, [phase, resolvedIsPaidHost, isPaidHost, timerStartedAt, setIsPaidHost, setTimerStartedAt]);
 
   // ── Host moderation (same edge fns as the native ParticipantActions) ───────
   const promote = useCallback(

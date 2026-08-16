@@ -110,12 +110,15 @@ function ToggleRow({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between bg-white/[0.06] rounded-xl px-4 py-4">
-      <span className="flex items-center gap-3">
+    <div className="flex items-center justify-between gap-3 bg-white/[0.06] rounded-xl px-4 py-4">
+      {/* min-w-0 on both flex children: without it a long title or subtitle
+          forces this row past the viewport instead of wrapping. Same guard
+          room.web.tsx uses on its participant rows. */}
+      <span className="flex min-w-0 items-center gap-3">
         <span className="w-10 h-10 rounded-lg bg-[#FC253A]/20 flex items-center justify-center shrink-0">
           {icon}
         </span>
-        <span>
+        <span className="min-w-0">
           <span className="block text-white font-semibold">{title}</span>
           <span className="block text-xs text-white/60">{subtitle}</span>
         </span>
