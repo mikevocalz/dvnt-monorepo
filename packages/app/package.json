@@ -227,6 +227,7 @@
     "@lodev09/react-native-true-sheet": "^3.10.0",
     "@moq/lite": "^0.3.0",
     "@moq/publish": "^0.2.14",
+    "@moq/signals": "^0.1.8",
     "@moq/watch": "^0.2.16",
     "@nandorojo/galeria": "^3.0.0",
     "@react-native-community/datetimepicker": "^9.1.0",
