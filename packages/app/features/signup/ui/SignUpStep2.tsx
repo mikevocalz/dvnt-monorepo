@@ -178,18 +178,9 @@ export function SignUpStep2() {
           elapsedMs: Date.now() - startedAt,
           error: error.message || "Better Auth signup failed",
         });
-        const isBeta =
-          (error as any).code === "BETA_ONLY" ||
-          /beta users access only/i.test(error.message || "");
-        if (isBeta) {
-          toast.error("Beta Users Access Only", {
-            description: "This email isn’t on the beta list yet.",
-          });
-        } else {
-          toast.error("Registration Failed", {
-            description: error.message || "Could not create account",
-          });
-        }
+        toast.error("Registration Failed", {
+          description: error.message || "Could not create account",
+        });
         return;
       }
 
