@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 
 const VideoRoomsScreen = dynamic(
-  () => import('@dvnt/app/features/call/video-rooms.web').then((m) => m.VideoRoomsScreen),
+  () => import('@dvnt/app/features/video/video-rooms.web').then((m) => m.VideoRoomsScreen),
   { ssr: false },
 );
 
