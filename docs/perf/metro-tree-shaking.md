@@ -1,19 +1,58 @@
-# WS-A — Metro tree shaking: enabled, −17% per platform
+# WS-A — Metro tree shaking: REVERTED, it produces an app that cannot boot
 
-Measured 2026-08-14 on `master`. Tree shaking was blocked by one synthetic
-module emitted as raw ESM by `react-native-css@3.0.7`; that is patched, both
-flags are on in the production EAS profiles, and both platforms now build.
+**Status 2026-08-15: tree shaking is off, the `react-native-css` patch is
+deleted, and the EAS profiles are disarmed.** An earlier revision of this
+document claimed −17.48% iOS / −17.01% Android. Those numbers were measured
+against a bundle that crashes on launch. They were never real and are struck
+from the record.
 
-**Runtime QA (A5) is still open — see the gate at the bottom before cutting a
-production build.**
+## What A5 found
 
-| Platform | Baseline | Shaken | Delta |
-|---|---:|---:|---:|
-| iOS | 23,074,008 B | 19,039,639 B | **−4,034,369 B (−17.48%)** |
-| Android | 23,223,729 B | 19,273,935 B | **−3,949,794 B (−17.01%)** |
+The tree-shaken build installed on a physical iPad (iPad Pro 12.9, iOS 26.5.2)
+and died immediately:
 
-Hermes bytecode, `npx expo export --platform ios --platform android`, flags
-supplied via `.env`.
+```
+Unhandled JS Exception: [runtime not ready]:
+ReferenceError: Property 'require' doesn't exist
+  at global (main.jsbundle:1:171569)   jsEngine: hermes, __DEV__: false
+App terminated due to signal 6.
+```
+
+This is **not** `expo/expo#41620`. It is caused by the local patch that was
+applied to get past the build error, and it is the whole reason A5 is a gate:
+the build was green, the bundle was smaller, and the app was 100% dead.
+
+## Why the patch was wrong
+
+`react-native-css@3.0.7`'s `getNativeInjectionCode()` synthesises a virtual
+module as a raw ESM string. Under the optimize-graph serializer that module is
+emitted at the **top level of the bundle, outside any `__d(...)` factory** —
+which is precisely why its `import`/`export` statements survived to reach
+`hermesc` and produced:
+
+```
+error: 'import' statement requires module mode
+```
+
+The patch rewrote that emission to `require(...)` + `module.exports`. That is
+syntactically legal in script mode, so `hermesc` fell silent and the build went
+green — but at top-level bundle scope Metro's `require` is not defined. The
+patch converted a loud build-time failure into a silent runtime crash, which is
+strictly worse: it ships.
+
+The real fix has to put the injection module *inside* a module factory, or keep
+it out of the optimized graph. Emitting different syntax at the same wrong scope
+cannot work.
+
+## Where this leaves it
+
+- Flags removed from `preview`, `apk`, `production` in `eas.json` and from
+  `apps/mobile/.env`.
+- `apps/mobile/patches/react-native-css+3.0.7.patch` deleted.
+- Upstream issue nativewind/react-native-css#414 stands; the CJS workaround
+  suggested in it does NOT work and the issue has been updated to say so.
+- The prize, if it is ever unblocked upstream, is worth measuring again from
+  scratch. Do not trust the old numbers.
 
 ## A0 — the flag gates, cited to installed source
 
@@ -32,92 +71,26 @@ supplied via `.env`.
 Both flags are production-mode gated and skipped for the `node` environment, so
 dev workflows are untouched by design.
 
-## A1 — baseline
+## A1 — baseline (still valid)
 
-Android 23,223,729 B, iOS 23,074,008 B. Atlas artifact 158,187,086 B.
+`EXPO_ATLAS=1 npx expo export --platform ios --platform android`, flags off:
+
+| Platform | Hermes bytecode |
+|---|---:|
+| Android | 23,223,729 B |
+| iOS | 23,074,008 B |
 
 `--platform all` is not usable: web bundling fails on
 `react-native-watch-connectivity`, whose `dist/index.js` requires `./RNWatch`
-with no web fork. WS-A is native-only, so the baseline is iOS + Android.
+with no web fork.
 
-## The blocker, and the patch
+## A5 — the gate did its job
 
-With both flags on, `hermesc` failed:
+Reaching this took clearing four separate blockers: no simulator destinations on
+the scheme, a developer disk image that would not mount until the iPad was
+cabled, four ad-hoc provisioning profiles that predated the iPad's registration,
+and a preview build that could not reach the Sentry upload step without a token.
 
-```
-index.js:844745:1: error: 'import' statement requires module mode
-index.js:853525:1: error: 'export' statement requires module mode
-```
-
-`react-native-css@3.0.7` → `dist/{commonjs,module}/metro/injection-code.js` →
-`getNativeInjectionCode()` synthesises a virtual module as a raw ESM **string**
-so Tailwind survives `lazy()` barriers — its own header comment calls it "a hack
-around Metro's handling of bundles". Normally that source is transformed to CJS
-like any other module; under the optimize-graph serializer it reaches the
-concatenated bundle with `import`/`export` intact, and `hermesc` compiles in
-script mode.
-
-Ruled out by one-variable reruns: Expo Atlas instrumentation, multi-platform
-export, and the bytecode step itself (running `hermesc` by hand on the
-`--no-bytecode` output reproduced both errors at line 5663, cols 14 and 128908).
-
-`apps/mobile/patches/react-native-css+3.0.7.patch` changes only
-`getNativeInjectionCode` — the emitted module becomes:
-
-```js
-const { StyleCollection } = require("react-native-css/native-internal");
-require("<each css file>");
-StyleCollection.inject({…});
-module.exports = {};
-```
-
-`getWebInjectionCode` is untouched; the web path never had the problem.
-`react-native-css` declares a `require` condition for `./native-internal`
-pointing at `dist/commonjs/native-internal/index.js`, so the require resolves.
-
-The patch was generated by diffing against the published 3.0.7 tarball rather
-than hand-written, and verified by restoring both files to pristine and
-re-applying with `patch-package` (`react-native-css@3.0.7 ✔`).
-
-Filed upstream: **nativewind/react-native-css#414**. Drop the patch when a
-release carries the fix.
-
-## A2 — enabled
-
-Both flags set in `apps/mobile/.env` (gitignored, local) and in the `preview`,
-`apk`, and `production` profiles in `eas.json`. Not in `development`: it is
-`developmentClient: true` and the flags are production-gated, so it would be
-dead weight.
-
-## Gate still open — A5 runtime QA
-
-**The app has not been run with a shaken bundle.** A bundle that compiles is not
-proof: `expo/expo#41620` is precisely a tree-shaking + Reanimated/Worklets
-failure that builds clean and then dies at launch with `[Worklets] Native part
-of Worklets doesn't seem to be initialized`. This app runs
-`react-native-reanimated@4.5.3` and `react-native-worklets@0.11.3`.
-
-QA is blocked on something unrelated to this work: `expo run:ios
---configuration Release` fails twice with
-
-```
-xcodebuild: error: Unable to find a destination matching the provided
-destination specifier: { id:333068FF-C5A0-4938-B3D4-B50587BD69F5 }
-```
-
-against a simulator that `simctl list devices booted` confirms is booted. No
-physical device is reachable either — `adb devices` empty, `xctrace` sees only
-the host, `devicectl` reports both iPhones `unavailable` (the iPad shows
-`available (paired)` but has not been built to).
-
-**Do not cut a production EAS build until a release build has been launched and
-every Reanimated/worklets surface exercised** — gesture-driven UI, animated
-navigation, canvas/story tooling. If `#41620` reproduces, the mitigation is
-side-effect preservation for the affected package or a scoped opt-out, not a
-silent patch.
-
-## A3 / A4 — not started
-
-`sideEffects` audit and the barrel audit are optimisations layered on a working
-shaking pass. They are worth doing once A5 is closed and the −17% is confirmed
-to survive a running app.
+All of that was worth it. Every prior signal — local build green, EAS cloud
+build green, `0` module-mode errors, a 17% smaller bundle — pointed the wrong
+way. Only running the binary on hardware revealed the truth.
