@@ -42,6 +42,7 @@
     "@dvnt/app": "workspace:*",
     "@dvnt/core": "workspace:*",
     "@dvnt/functions": "workspace:*",
+    "@dvnt/supabase": "workspace:*",
     "@dvnt/types": "workspace:*",
     "@dvnt/ui": "workspace:*",
     "@expo/html-elements": "^56.0.1",
