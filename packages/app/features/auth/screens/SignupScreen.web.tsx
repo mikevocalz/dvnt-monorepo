@@ -73,13 +73,10 @@ export function SignupScreen() {
             navigate({ to: '/auth/verify-email' });
           }
         } catch (err: any) {
-          const isBeta = err?.code === 'BETA_ONLY' || /beta users access only/i.test(err?.message || '');
           const isExisting =
             err?.code === 'USER_ALREADY_EXISTS' ||
             /already exists/i.test(err?.message || '');
-          if (isBeta) {
-            toast.error('Beta Users Access Only', { description: 'This email isn’t on the beta list yet.' });
-          } else if (isExisting) {
+          if (isExisting) {
             // Policy, stated plainly: one account per person.
             toast.error('One account per person', {
               description:
