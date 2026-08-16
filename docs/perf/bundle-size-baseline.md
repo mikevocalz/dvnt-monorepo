@@ -322,45 +322,59 @@ that needs a decision about build minutes, since the guard needs a full
 
 ---
 
-# Skipping web builds for native-only commits — attempted, does not work here
+# Skipping web builds for native-only commits — working
 
-Recorded 2026-08-15 after breaking a production deploy with it. Read this before
-trying again.
+Native-only branches were each triggering a full web build — 20+ in one day on
+`ws3a`. Now skipped. It took two failed attempts to get there; both are recorded
+because the failure modes are non-obvious.
 
-The goal was real: native-only branches were each triggering a full web build,
-20+ of them in a single day on `ws3a`.
+## What does not work
 
-Two attempts, both wrong:
+**`ignoreCommand` in `apps/web/vercel.json`.** Vercel accepts the key and
+silently ignores it. A docs-and-mobile-only commit went straight from
+`Cloning completed` to `Running "vercel build"` with no ignore step, and the
+project API confirmed `commandForIgnoringBuildStep: null`. It never skipped
+anything. The Ignored Build Step is a **project setting**, not a `vercel.json`
+key.
 
-1. **`ignoreCommand` in `apps/web/vercel.json`.** Vercel accepts the key and
-   silently ignores it. The build log for a docs-and-mobile-only commit went
-   straight from `Cloning completed` to `Running "vercel build"` with no ignore
-   step, and the project API confirmed `commandForIgnoringBuildStep: null`. It
-   never once skipped anything.
+**A bare `git diff HEAD^ HEAD` with `.git` ignored.** Setting the real project
+setting made the step run — and fail the deployment outright:
 
-2. **The real project setting**, via
-   `PATCH /v9/projects/{id} { commandForIgnoringBuildStep }`. This *does* run —
-   and it failed the deployment outright:
+```
+Removed 176 ignored files defined in .vercelignore
+  /.git/config  /.git/HEAD  ...
+Running "git diff --quiet HEAD^ HEAD -- ..."
+warning: Not a git repository. Use --no-index to compare two paths outside a working tree
+```
+
+`.vercelignore` is applied **before** the ignore step runs, so `.git` was gone
+by the time git needed it. Worse, the resulting exit 128 is treated by Vercel as
+a failed build rather than "do not skip" — production went red on a commit that
+was otherwise fine.
+
+## What works
+
+Two changes:
+
+1. **`.git` is no longer in `.vercelignore`.** 34 MB against a ~57 MB upload,
+   cheap next to skipping whole builds, and the step cannot use history without
+   it.
+
+2. **The command can only ever exit 0 or 1:**
 
    ```
-   Removed 176 ignored files defined in .vercelignore
-     /.git/config  /.git/HEAD  ...
-   Running "git diff --quiet HEAD^ HEAD -- :/apps/web :/packages :/pnpm-lock.yaml"
-   warning: Not a git repository. Use --no-index to compare two paths outside a working tree
+   git diff --quiet HEAD^ HEAD -- :/apps/web :/packages :/pnpm-lock.yaml :/.vercelignore && exit 0 || exit 1
    ```
 
-   `.vercelignore:3` is `.git`, and it is applied **before** the ignore step
-   runs. So no git-based ignore command can work on this project: by the time it
-   executes there is no repository to diff. Worse, the non-zero exit from the
-   usage error is treated as a build failure rather than "don't skip", so
-   production went red on a commit that was otherwise fine.
+   git 0 (no changes) → 0, skip. git 1 (changes) → 1, build. git 128 (any error)
+   → 1, build. The 128-as-deploy-failure mode is now impossible; worst case is a
+   build that was not needed.
 
-Both have been reverted — the key is out of `vercel.json` and the project
-setting is back to `null`.
+`:/.vercelignore` is in the watched paths so a change to the ignore rules cannot
+skip its own deploy.
 
-If this is worth revisiting, the constraint to design around is that `.git` is
-gone. Either drop `.git` from `.vercelignore` (and accept the upload cost), or
-use something that does not need history — the Vercel-provided
-`VERCEL_GIT_COMMIT_SHA` plus an API call, or a committed manifest. Do not
-re-attempt a bare `git diff HEAD^ HEAD`; it cannot work and it fails deploys
-rather than skipping them.
+Verified in production both ways: a docs-only commit was `Canceled` in 15s
+(skipped), and the commits before it built normally in 4–5m.
+
+The command lives in the project setting, not in git. That is the trade-off —
+worth knowing when reproducing this project.
