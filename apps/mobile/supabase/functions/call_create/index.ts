@@ -138,6 +138,9 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           title,
           isPublic: false, // personal calls are never Sneaky Lynk-discoverable
+          // Drives the invite copy: without this a 1:1 call arrives as
+          // "Sneaky Lynk invite", which is the wrong product.
+          roomKind: "call",
           hasVideo,
           maxParticipants,
           invitedUserIds: inviteeAuthIds,
