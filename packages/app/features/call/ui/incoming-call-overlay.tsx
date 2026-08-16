@@ -33,6 +33,10 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { color } from "@dvnt/app/lib/theme";
 import { callSignalsApi, type CallSignal } from "@dvnt/app/lib/api/call-signals";
 import {
+  getUUIDFromSessionId,
+  wasCallDisplayed,
+} from "@dvnt/app/features/services/callkeep";
+import {
   clearCallOnWatch,
   pushCallToWatch,
   registerWatchCallHandler,
@@ -143,6 +147,16 @@ export function IncomingCallOverlay() {
     const unsubscribe = callSignalsApi.subscribeToIncomingCalls(
       userId,
       (signal) => {
+        // CallKeep owns the incoming-call UI whenever it managed to show one.
+        // This overlay was added because some incoming calls rendered nowhere,
+        // but it had no CallKeep awareness at all, so a normal call rang the
+        // native UI AND slid this panel up over it — which is not how the app
+        // used to behave. Defer: only take over when CallKeep did not display.
+        // CallKeep maps its device-local UUID to the room id
+        // (persistCallMapping(roomId, callUUID) in NotificationListener).
+        const callUUID = getUUIDFromSessionId(signal.room_id);
+        if (callUUID && wasCallDisplayed(callUUID)) return;
+
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setIncomingCall(signal);
         // Ring the wrist too. The watch can only accept or decline — the room

@@ -24,6 +24,8 @@ export {
   getSessionIdFromUUID,
   getUUIDFromSessionId,
   clearCallMapping,
+  wasCallDisplayed,
+  clearDisplayedCall,
   CALLKEEP_CONSTANTS,
 } from "./callkeep";
 
