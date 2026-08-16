@@ -191,6 +191,38 @@ TurboModule interop (callkeep #857) — the script comments out two 3-arg
 overloads on every install. An Expo Module has no `@ReactMethod` → the patch
 (and `@config-plugins/react-native-callkeep`) is obviated entirely.
 
+**BLOCKED 2026-08-16 — native dependency conflict, verified by install.**
+
+Decision 4 compared the 19 RNCallKeep JS APIs and never looked at the native
+dependency graph. `expo-callkit-telecom@0.4.0`'s podspec declares, unconditionally:
+
+```ruby
+s.static_framework = true
+s.dependency 'WebRTC-SDK'
+s.dependency 'livekit-react-native-webrtc'
+```
+
+and the Swift hard-imports both — `AudioManager.swift:2 import WebRTC`
+(`RTCAudioSessionConfiguration`), `CaptureSessionManager.swift:2
+import livekit_react_native_webrtc` (`WebRTCModuleOptions`). Installing it also
+pulls `@livekit/react-native-webrtc@144.1.2` into node_modules.
+
+This app links **`FishjamWebRTC (124.0.2.3)`**. Adopting the module means two
+WebRTC binary frameworks vending the same `RTC*` Objective-C classes in one
+static-framework build — the duplicate-symbol class of failure WS-3a has been
+fighting on the react-native-moq linkage.
+
+So the API parity verdict above stands and is irrelevant until the transport
+question is answered. Adoption requires one of:
+  1. upstream making the WebRTC deps optional (the module needs them only for
+     audio-session config and multitasking camera access), or
+  2. this app moving off FishjamWebRTC onto the LiveKit WebRTC stack, or
+  3. an app-side fork of the podspec — which re-forks someone else's native
+     dependency graph, the thing that made react-native-moq expensive.
+
+Do NOT re-attempt as a drop-in. The install was performed, verified and backed
+out; nothing is left in the tree.
+
 **Phased plan:** adapter behind `useCallKeepCoordinator`’s existing interface;
 verify the 5 unlisted APIs against `src/` before cutover; if any is real and
 missing, ship the covered surface behind a flag and retain callkeep only for
