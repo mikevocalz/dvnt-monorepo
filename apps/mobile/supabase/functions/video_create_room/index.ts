@@ -113,7 +113,11 @@ async function notifyRoomInvite(
           userId: String(params.recipientIntId),
           title: notificationTitle,
           body: notificationBody,
-          type: isCall ? "call_invite" : "room_invite",
+          // MUST be "call": send_notification only routes a VoIP/PushKit
+          // push (the thing that makes CallKit ring) when type === "call",
+          // and NotificationListener + lib/notifications.ts key off the same
+          // literal. Anything else lands as a plain banner.
+          type: isCall ? "call" : "room_invite",
           data: {
             actorId: String(params.actorIntId),
             senderId: params.actorAuthId,
