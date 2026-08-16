@@ -322,18 +322,21 @@ export function SneakyLynkBillingScreen() {
           type="button"
           onClick={() => router.back()}
           aria-label="Back"
-          className="w-9 h-9 rounded-xl bg-white/8 flex items-center justify-center active:scale-95"
+          className="w-9 h-9 shrink-0 rounded-xl bg-white/8 flex items-center justify-center active:scale-95"
         >
           <ChevronLeft size={20} color="#fff" />
         </button>
-        <h1 className="flex-1 text-[17px] font-semibold">
+        {/* min-w-0 + truncate: the display name is user-facing copy of
+            unbounded length, and flex-1 alone lets it push the icon buttons
+            off a narrow viewport. */}
+        <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold">
           {getLynkDisplayName()} Billing
         </h1>
         <button
           type="button"
           onClick={loadSubscription}
           aria-label="Refresh"
-          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-95"
+          className="w-9 h-9 shrink-0 rounded-xl flex items-center justify-center active:scale-95"
         >
           <RefreshCw size={18} className="text-white/60" />
         </button>
@@ -362,11 +365,11 @@ export function SneakyLynkBillingScreen() {
               >
                 <Crown size={20} color="#8A40CF" />
               </span>
-              <span className="flex-1">
-                <span className="block text-base font-bold">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-base font-bold">
                   {planInfo.name}
                 </span>
-                <span className="block text-sm text-white/60">
+                <span className="block truncate text-sm text-white/60">
                   {planInfo.price}
                 </span>
               </span>
