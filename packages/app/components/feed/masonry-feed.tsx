@@ -45,6 +45,13 @@ import { seedLikeState, usePostLikeState } from "@dvnt/app/lib/hooks/usePostLike
 import { navigateToPost, getPostDetailRoute } from "@dvnt/app/lib/routes/post-routes";
 import { getVideoThumbnail } from "@dvnt/app/lib/media/getVideoThumbnail";
 import { useQuery } from "@tanstack/react-query";
+import {
+  COLUMN_GAP,
+  columnsForWidth,
+  columnWidthFor,
+  packByHeight,
+} from "./masonry-layout";
+
 import { DVNTMediaBadge } from "@dvnt/app/components/media/DVNTMediaBadge";
 import { DVNTGifView } from "@dvnt/app/components/media/DVNTGifView";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
@@ -71,9 +78,7 @@ import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const COLUMN_GAP = 3;
 const CELL_RADIUS = 12;
-const NUM_COLUMNS = 2;
 const VARIATION = 0.3;
 const EVENT_INTERVAL = 7;
 
@@ -194,7 +199,13 @@ function OfflineFeedEmpty({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function MasonryGridSkeleton({ columnWidth }: { columnWidth: number }) {
+function MasonryGridSkeleton({
+  columnWidth,
+  numColumns,
+}: {
+  columnWidth: number;
+  numColumns: number;
+}) {
   const heights = [
     columnWidth * 1.4,
     columnWidth * 1.05,
@@ -213,7 +224,7 @@ function MasonryGridSkeleton({ columnWidth }: { columnWidth: number }) {
       }}
       pointerEvents="none"
     >
-      {[0, 1].map((col) => (
+      {Array.from({ length: numColumns }, (_, col) => col).map((col) => (
         <View
           key={col}
           style={{ flex: 1, paddingHorizontal: COLUMN_GAP / 2 }}
@@ -471,7 +482,7 @@ const MasonryCell = memo(function MasonryCell({
   );
 });
 
-// ─── Pack posts into 2 columns (shortest-first) ────────────────────────────
+// ─── Pack posts into N columns (shortest-first) ────────────────────────────
 
 interface PackedPost {
   post: Post;
@@ -481,24 +492,13 @@ interface PackedPost {
 function packIntoColumns(
   posts: Post[],
   columnWidth: number,
-): [PackedPost[], PackedPost[]] {
-  const col0: PackedPost[] = [];
-  const col1: PackedPost[] = [];
-  let h0 = 0;
-  let h1 = 0;
-
-  for (const post of posts) {
-    const height = Math.round(columnWidth * estimateRatio(post));
-    if (h0 <= h1) {
-      col0.push({ post, height });
-      h0 += height + COLUMN_GAP;
-    } else {
-      col1.push({ post, height });
-      h1 += height + COLUMN_GAP;
-    }
-  }
-
-  return [col0, col1];
+  numColumns: number,
+): PackedPost[][] {
+  return packByHeight(
+    posts,
+    (post) => Math.round(columnWidth * estimateRatio(post)),
+    numColumns,
+  ).map((col) => col.map(({ item, height }) => ({ post: item, height })));
 }
 
 // ─── Build sections: masonry chunks interleaved with event cards ────────────
@@ -550,41 +550,34 @@ function buildSections(posts: Post[], events: Event[]): MasonrySection[] {
 const MasonrySection_ = memo(function MasonrySection_({
   posts,
   columnWidth,
+  numColumns,
   onPress,
 }: {
   posts: Post[];
   columnWidth: number;
+  numColumns: number;
   onPress: (id: string) => void;
 }) {
-  const [col0, col1] = useMemo(
-    () => packIntoColumns(posts, columnWidth),
-    [posts, columnWidth],
+  const columns = useMemo(
+    () => packIntoColumns(posts, columnWidth, numColumns),
+    [posts, columnWidth, numColumns],
   );
 
   return (
     <View style={styles.gridContainer}>
-      <View style={{ width: columnWidth }}>
-        {col0.map(({ post, height }) => (
-          <MasonryCell
-            key={post.id}
-            post={post}
-            width={columnWidth}
-            height={height}
-            onPress={onPress}
-          />
-        ))}
-      </View>
-      <View style={{ width: columnWidth }}>
-        {col1.map(({ post, height }) => (
-          <MasonryCell
-            key={post.id}
-            post={post}
-            width={columnWidth}
-            height={height}
-            onPress={onPress}
-          />
-        ))}
-      </View>
+      {columns.map((cells, colIndex) => (
+        <View key={colIndex} style={{ width: columnWidth }}>
+          {cells.map(({ post, height }) => (
+            <MasonryCell
+              key={post.id}
+              post={post}
+              width={columnWidth}
+              height={height}
+              onPress={onPress}
+            />
+          ))}
+        </View>
+      ))}
     </View>
   );
 });
@@ -727,9 +720,8 @@ export function MasonryFeed() {
   );
 
   // Layout
-  const columnWidth = Math.floor(
-    (screenWidth - COLUMN_GAP * (NUM_COLUMNS + 1)) / NUM_COLUMNS,
-  );
+  const numColumns = columnsForWidth(screenWidth);
+  const columnWidth = columnWidthFor(screenWidth, numColumns);
 
   const handlePress = useCallback(
     (id: string) => {
@@ -763,7 +755,9 @@ export function MasonryFeed() {
   // wrong shape here). Stories + events live in their own lanes and
   // must never gate the grid body.
   if (isLoading || !nsfwLoaded) {
-    return <MasonryGridSkeleton columnWidth={columnWidth} />;
+    return (
+      <MasonryGridSkeleton columnWidth={columnWidth} numColumns={numColumns} />
+    );
   }
 
   // Offline + no cached feed → show a deliberate offline surface
@@ -799,6 +793,7 @@ export function MasonryFeed() {
           <MasonrySection_
             posts={item.posts}
             columnWidth={columnWidth}
+            numColumns={numColumns}
             onPress={handlePress}
           />
         )

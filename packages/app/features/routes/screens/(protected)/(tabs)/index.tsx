@@ -2,6 +2,7 @@ import { View, Text, Pressable } from "react-native";
 import { Main } from "@dvnt/app/components/ui/html";
 import { Feed } from "@dvnt/app/components/feed/feed";
 import { MasonryFeed } from "@dvnt/app/components/feed/masonry-feed";
+import { useIsLargeScreen } from "@dvnt/app/lib/hooks/use-is-large-screen";
 
 import { StoriesBar } from "@dvnt/app/features/stories";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
@@ -73,8 +74,25 @@ export default function HomeScreen() {
     resetFeedScroll();
   }, [feedMode]);
 
+  // Tablet + grid mode: use the width instead of centring a phone column in it.
+  const isLargeScreen = useIsLargeScreen();
+  const isGridWide = feedMode === "masonry" && isLargeScreen;
+
   return (
-    <View className="flex-1 bg-background max-w-3xl w-full self-center">
+    // The max-w-3xl reading column is right for text surfaces, and it is what
+    // every other screen uses. The masonry feed is not a text surface -- it is
+    // a media grid, and on a 1024pt iPad the cap left it 672pt wide with two
+    // narrow columns and 176pt of dead space each side. Grid mode therefore
+    // takes the full width on a tablet and adds a column (see MasonryFeed);
+    // the single-post Feed keeps the reading column, where line length and
+    // media size still want the cap.
+    <View
+      className={
+        isGridWide
+          ? "flex-1 bg-background w-full"
+          : "flex-1 bg-background max-w-3xl w-full self-center"
+      }
+    >
       {/* Header row — spicy toggle right-aligned, matches events header style */}
       <View
         style={{
