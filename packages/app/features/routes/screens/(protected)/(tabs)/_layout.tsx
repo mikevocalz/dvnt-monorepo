@@ -10,6 +10,7 @@ import {
 import { useFeedScrollStore } from "@dvnt/app/lib/stores/feed-scroll-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import "@dvnt/app/lib/perf/tab-prefetches"; // Register prefetch functions for tab navigation
+import { color } from "@dvnt/app/lib/theme";
 
 function isHomeTabPathname(pathname: string): boolean {
   return (
@@ -38,7 +39,13 @@ export default function TabsLayout() {
   const supportsBottomAccessory = supportsNativeTabsBottomAccessory();
 
   return (
-    <View style={{ flex: 1 }}>
+    // Dark-only, same reason as the NativeTabs backgroundColor below: with no
+    // background this wrapper falls through to the system appearance, so on a
+    // Light-appearance device it painted WHITE. Invisible on a phone, where the
+    // content column fills the screen — but every tab screen caps itself
+    // (max-w-3xl, self-center), so on iPad the 176pt gutters either side of the
+    // column were white panels instead of the app background.
+    <View style={{ flex: 1, backgroundColor: color.ink }}>
       <NativeTabs
       minimizeBehavior="onScrollDown"
       // Dark-only: the underlying UITabBar / BottomNavigationView follows
