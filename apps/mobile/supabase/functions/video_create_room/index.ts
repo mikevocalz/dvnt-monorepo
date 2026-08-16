@@ -492,7 +492,16 @@ Deno.serve(async (req) => {
           ],
         );
 
-        if (inviteeRows?.length && inviterRow?.id) {
+        // Personal calls do NOT get a room-invite push. The ring is owned by
+        // the call_signals_push_trigger -> send_call_push_notification()
+        // trigger, which already sends type:'call' on every signal insert —
+        // that is the push send_notification routes to VoIP/PushKit so
+        // CallKit rings. Sending an invite too would be a second, redundant
+        // notification (it is what arrived as "Sneaky Lynk invite"), and
+        // making it type:'call' to fix the copy would have produced TWO call
+        // pushes — callkeep.ts warns that two displayIncomingCall() calls
+        // create two native call entries.
+        if (roomKind !== "call" && inviteeRows?.length && inviterRow?.id) {
           await Promise.all(
             inviteeRows.map((invitee: { id: number; auth_id: string }) =>
               notifyRoomInvite(supabaseUrl, supabaseServiceKey, {
