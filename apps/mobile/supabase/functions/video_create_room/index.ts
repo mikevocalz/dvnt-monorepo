@@ -20,6 +20,9 @@ const CreateRoomSchema = z.object({
   description: z.string().max(500).default(""),
   hasVideo: z.boolean().default(false),
   isPublic: z.boolean().default(false),
+  // Which stack is creating this room. Only affects invite copy/type here;
+  // the discriminator column itself is stamped by the caller (call_create).
+  roomKind: z.enum(["lynk", "call"]).default("lynk"),
   invitedUserIds: z.array(z.string().min(1)).max(100).default([]),
   maxParticipants: z.number().int().min(2).max(50).default(10),
   /**
@@ -76,11 +79,26 @@ async function notifyRoomInvite(
     actorUsername: string | null;
     roomUuid: string;
     roomTitle: string;
+    roomKind: "lynk" | "call";
+    hasVideo: boolean;
   },
 ): Promise<void> {
   const senderHandle = params.actorUsername
     ? `@${params.actorUsername}`
     : "A host";
+
+  // Personal calls are NOT Sneaky Lynk. This function serves both stacks, so
+  // the copy has to follow the room kind rather than assume a Lynk invite —
+  // a 1:1 video call was arriving as "Sneaky Lynk invite".
+  const isCall = params.roomKind === "call";
+  const notificationTitle = isCall
+    ? params.hasVideo
+      ? "Incoming video call"
+      : "Incoming call"
+    : "Sneaky Lynk invite";
+  const notificationBody = isCall
+    ? `${senderHandle} is calling you.`
+    : `${senderHandle} invited you to ${params.roomTitle}.`;
 
   try {
     const response = await fetch(
@@ -93,9 +111,9 @@ async function notifyRoomInvite(
         },
         body: JSON.stringify({
           userId: String(params.recipientIntId),
-          title: "Sneaky Lynk invite",
-          body: `${senderHandle} invited you to ${params.roomTitle}.`,
-          type: "room_invite",
+          title: notificationTitle,
+          body: notificationBody,
+          type: isCall ? "call_invite" : "room_invite",
           data: {
             actorId: String(params.actorIntId),
             senderId: params.actorAuthId,
@@ -193,6 +211,7 @@ Deno.serve(async (req) => {
       isPublic,
       invitedUserIds,
       appOnly,
+      roomKind,
     } = parsed.data;
     let { maxParticipants } = parsed.data;
     console.log("[video_create_room] Parsed data:", {
@@ -479,6 +498,8 @@ Deno.serve(async (req) => {
                 actorUsername: inviterRow.username || null,
                 roomUuid,
                 roomTitle: title,
+                roomKind,
+                hasVideo,
               }),
             ),
           );
