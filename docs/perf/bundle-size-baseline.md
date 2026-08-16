@@ -254,6 +254,46 @@ changed.
 RN-on-web at 29.6% is the price of the universal codebase. It is not waste and
 there is no version of this app that ships without it.
 
+### The last unattributed bucket — resolved
+
+The 13.8% carried as "next (internals, relative paths)" is 309 KB of shipped
+bytes, and it is entirely Next's App Router client:
+
+| Shipped KB | Area |
+|---:|---|
+| 60.7 | `shared/lib/router` |
+| 56.7 | `client/components/segment-cache` |
+| 34.2 | `client/components/router-reducer` |
+| 8.7 | `src/instrumentation-client.ts` (ours — Sentry init) |
+| 5.8 | `client/components/app-router.tsx` |
+| 5.1 | `client/components/layout-router.tsx` |
+
+Next ships its own sources with relative paths carrying no package name, which
+is why they never bucketed. Folding them into the `next` total puts the
+framework at ~565 KB, close to 30% of the shared payload.
+
+**Our own code across the entire shared payload is ~51 KB — 2.7%.** There is no
+meaningful win available in application code. Every remaining lever is a
+framework or platform decision.
+
+### Sentry Replay — measured, considered, kept
+
+`@sentry/replay` is 117.6 KB shipped on every public route (5.8%). It was
+evaluated for removal and kept.
+
+The two ways to drop it from first load are both worse than the saving.
+`lazyLoadIntegration` fetches from Sentry's **CDN**, adding a third-party
+runtime dependency and CSP surface to every page. A self-hosted dynamic
+`import()` cannot split it: `@sentry-internal/replay` is not separately
+resolvable, replay ships inside `@sentry/nextjs`, and that package is already
+statically imported for `Sentry.init`, so webpack keeps it in the initial chunk
+regardless.
+
+That leaves deleting a working, deliberately tuned feature — 5% session
+sampling, 20% error sampling, full masking, `beforeErrorSampling` filtering — to
+save 5.8% of a payload that is 57% framework and platform. Not a good trade.
+Revisit if Sentry ships a self-hosted lazy entry point.
+
 ## B3 — budgets, set and enforced
 
 `pnpm check:bundle` (`scripts/check-bundle-budget.mjs`), run against a build in
