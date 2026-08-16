@@ -478,7 +478,7 @@ function CallRoom({
                   ? ACCENT
                   : callPhase === "error"
                     ? color.signal
-                    : "#facc15",
+                    : color.gold,
             }}
           />
           <span
