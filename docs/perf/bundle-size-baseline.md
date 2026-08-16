@@ -279,3 +279,48 @@ Not wired into CI. The only workflow in `.github/workflows` is
 `verify-edge-functions.yml`; adding a build-and-check job is a separate change
 that needs a decision about build minutes, since the guard needs a full
 `pnpm build` to measure against.
+
+---
+
+# Skipping web builds for native-only commits — attempted, does not work here
+
+Recorded 2026-08-15 after breaking a production deploy with it. Read this before
+trying again.
+
+The goal was real: native-only branches were each triggering a full web build,
+20+ of them in a single day on `ws3a`.
+
+Two attempts, both wrong:
+
+1. **`ignoreCommand` in `apps/web/vercel.json`.** Vercel accepts the key and
+   silently ignores it. The build log for a docs-and-mobile-only commit went
+   straight from `Cloning completed` to `Running "vercel build"` with no ignore
+   step, and the project API confirmed `commandForIgnoringBuildStep: null`. It
+   never once skipped anything.
+
+2. **The real project setting**, via
+   `PATCH /v9/projects/{id} { commandForIgnoringBuildStep }`. This *does* run —
+   and it failed the deployment outright:
+
+   ```
+   Removed 176 ignored files defined in .vercelignore
+     /.git/config  /.git/HEAD  ...
+   Running "git diff --quiet HEAD^ HEAD -- :/apps/web :/packages :/pnpm-lock.yaml"
+   warning: Not a git repository. Use --no-index to compare two paths outside a working tree
+   ```
+
+   `.vercelignore:3` is `.git`, and it is applied **before** the ignore step
+   runs. So no git-based ignore command can work on this project: by the time it
+   executes there is no repository to diff. Worse, the non-zero exit from the
+   usage error is treated as a build failure rather than "don't skip", so
+   production went red on a commit that was otherwise fine.
+
+Both have been reverted — the key is out of `vercel.json` and the project
+setting is back to `null`.
+
+If this is worth revisiting, the constraint to design around is that `.git` is
+gone. Either drop `.git` from `.vercelignore` (and accept the upload cost), or
+use something that does not need history — the Vercel-provided
+`VERCEL_GIT_COMMIT_SHA` plus an API call, or a committed manifest. Do not
+re-attempt a bare `git diff HEAD^ HEAD`; it cannot work and it fails deploys
+rather than skipping them.
