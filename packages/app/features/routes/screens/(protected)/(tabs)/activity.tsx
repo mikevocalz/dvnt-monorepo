@@ -47,6 +47,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import * as privileged from "@dvnt/app/lib/api/privileged";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
 const TABS = [
   "All",
@@ -1176,7 +1177,7 @@ function ActivityScreenContent() {
   }
 
   return (
-    <View className="flex-1 bg-background max-w-3xl w-full self-center">
+    <View className={SCREEN_SHELL}>
       {activeTab === "Liked" ? (
         <LegendList
           data={likedActivities}

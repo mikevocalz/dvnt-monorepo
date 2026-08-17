@@ -63,6 +63,7 @@ import {
   useSpotlightFeed,
   usePromotedEventIds,
 } from "@dvnt/app/lib/hooks/use-promotions";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
 function EventCard({
   event,
@@ -577,7 +578,7 @@ function EventsScreenContent() {
   const showEventSkeletons = isLoading && events.length === 0;
 
   return (
-    <View className="flex-1 bg-background max-w-3xl w-full self-center">
+    <View className={SCREEN_SHELL}>
       <Main className="flex-1">
         {/* Header — date+title left, actions right */}
         <View className="px-4 pt-2 pb-1">

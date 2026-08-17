@@ -63,6 +63,7 @@ import { appendCacheBuster, getAvatarUrl } from "@dvnt/app/lib/media/resolveAvat
 import { ProfileScreenGuard } from "@dvnt/app/features/profile";
 import { ProfilePronounsPill } from "@dvnt/app/features/profile";
 import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
 // mapPostToGridTile is now replaced by safeGridTiles from safe-profile-mappers.ts
 
@@ -608,7 +609,7 @@ function ProfileScreenContent() {
 
   return (
     <View
-      className="flex-1 bg-background max-w-3xl w-full self-center"
+      className={SCREEN_SHELL}
       testID="screen.profile"
     >
       <ScrollView

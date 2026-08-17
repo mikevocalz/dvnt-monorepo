@@ -11,6 +11,7 @@ import { useCallback, memo, useEffect } from "react";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { resetFeedScroll } from "@dvnt/app/lib/stores/feed-scroll-shared";
 import { Motion } from "@legendapp/motion";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
 /**
  * StoriesBar memoized at module level. Rendering it as a sibling of the
@@ -79,7 +80,7 @@ export default function HomeScreen() {
   const isGridWide = feedMode === "masonry" && isLargeScreen;
 
   return (
-    // The max-w-3xl reading column is right for text surfaces, and it is what
+    // The SCREEN_SHELL reading column is right for text surfaces, and it is what
     // every other screen uses. The masonry feed is not a text surface -- it is
     // a media grid, and on a 1024pt iPad the cap left it 672pt wide with two
     // narrow columns and 176pt of dead space each side. Grid mode therefore
@@ -90,7 +91,7 @@ export default function HomeScreen() {
       className={
         isGridWide
           ? "flex-1 bg-background w-full"
-          : "flex-1 bg-background max-w-3xl w-full self-center"
+          : SCREEN_SHELL
       }
     >
       {/* Header row — spicy toggle right-aligned, matches events header style */}

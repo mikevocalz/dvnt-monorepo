@@ -55,6 +55,7 @@ import {
   serializeTextSlidesForMutation,
 } from "@dvnt/app/lib/posts/text-post";
 import { AppTrace, getErrorMessage } from "@dvnt/app/lib/diagnostics/app-trace";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const MEDIA_PREVIEW_SIZE = (SCREEN_WIDTH - 48) / 2;
@@ -617,7 +618,7 @@ function CreateScreenContent() {
   };
 
   return (
-    <View className="flex-1 bg-background max-w-3xl w-full self-center">
+    <View className={SCREEN_SHELL}>
       {/* Header — Close / Title / Post */}
       <View
         style={{

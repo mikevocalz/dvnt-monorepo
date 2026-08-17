@@ -6,6 +6,7 @@ import {
   ScrollView,
   Dimensions,
 } from "react-native";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Link, useRouter, useLocalSearchParams } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
@@ -531,7 +532,7 @@ function SearchScreenContent() {
 
   return (
     <View
-      className="flex-1 bg-background max-w-3xl w-full self-center"
+      className={SCREEN_SHELL}
       style={{ paddingTop: insets.top }}
     >
       {/* Header */}

@@ -48,6 +48,7 @@ import {
   safeGridTiles,
   type SafeGridTile,
 } from "@dvnt/app/lib/utils/safe-profile-mappers";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
 const GRID_GAP = 2;
 
@@ -763,7 +764,7 @@ function UserProfileScreenComponent() {
   return (
     <SafeAreaView
       edges={["top"]}
-      className="flex-1 bg-background max-w-3xl w-full self-center"
+      className={SCREEN_SHELL}
     >
       {/* Header */}
       <View

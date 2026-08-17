@@ -104,6 +104,7 @@ import { SheetHeader } from "@dvnt/app/components/ui/sheet-header";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
 export const unstable_settings = {
   options: {
@@ -1523,7 +1524,7 @@ function ChatScreenContent() {
     >
       <SafeAreaView
         edges={["top"]}
-        className="flex-1 bg-background max-w-3xl w-full self-center"
+        className={SCREEN_SHELL}
       >
         <View className="flex-row items-center gap-3 border-b border-border px-4 py-3">
           <Pressable onPress={() => router.back()} hitSlop={12}>

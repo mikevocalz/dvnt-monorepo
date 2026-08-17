@@ -43,7 +43,7 @@ export default function TabsLayout() {
     // background this wrapper falls through to the system appearance, so on a
     // Light-appearance device it painted WHITE. Invisible on a phone, where the
     // content column fills the screen — but every tab screen caps itself
-    // (max-w-3xl, self-center), so on iPad the 176pt gutters either side of the
+    // (SCREEN_SHELL: max-w-4xl, self-center), so on iPad the gutters either side
     // column were white panels instead of the app background.
     <View style={{ flex: 1, backgroundColor: color.ink }}>
       <NativeTabs

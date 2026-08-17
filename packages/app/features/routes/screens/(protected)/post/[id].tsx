@@ -106,6 +106,7 @@ import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { useTranslation } from "react-i18next";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
 import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 // CRITICAL: Match FeedItem's 4:5 aspect ratio for consistent display
@@ -1517,7 +1518,7 @@ function PostDetailScreenContent() {
   return (
     <SafeAreaView
       edges={["top"]}
-      className="flex-1 bg-background max-w-3xl w-full self-center"
+      className={SCREEN_SHELL}
     >
       <View
         style={{
