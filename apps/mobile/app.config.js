@@ -54,6 +54,12 @@ export default {
     // to Light appearance. App-drawn Views were fine (the palette is black in
     // both schemes), which is why this looked like "some screens are white".
     userInterfaceStyle: "dark",
+    // The colour behind every React view — the RN root view. Unset, it is the
+    // platform default, which measured rgb(242,242,242) on iPad. Invisible on a
+    // phone where content covers the window edge to edge; on a tablet it showed
+    // as light panels either side of every capped screen column. Ink, so the
+    // gutters are the app background at the one level that is behind all of it.
+    backgroundColor: "#06070D",
     splash: {
       image: "./assets/images/splash-icon.png",
       resizeMode: "contain",

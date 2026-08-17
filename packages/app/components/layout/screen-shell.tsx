@@ -38,6 +38,10 @@ export function ScreenShell({
   const isLargeScreen = useIsLargeScreen();
   const paddingHorizontal = fullWidth || !isLargeScreen ? 0 : SCREEN_GUTTER;
 
+  // One layer. The full-bleed backdrop is expo.backgroundColor (the RN root
+  // view), set to ink in app.config.js — that is behind every React view,
+  // including the native container NativeTabs hosts each screen in, so a
+  // per-screen wrapper is not needed to fill the gutters.
   return (
     <View
       className={fullWidth ? "flex-1 bg-background w-full" : SCREEN_SHELL}
