@@ -100,6 +100,8 @@ export {
   useRoomCountdown,
 } from './video/RoomTimer.countdown';
 export type { ConnectionBannerProps, ConnectionPhase } from './video/ConnectionBanner.types';
+export { connectionPhaseFromPeerStatus } from './video/ConnectionBanner.phase';
+export type { FishjamPeerStatus } from './video/ConnectionBanner.phase';
 export type { VideoTileProps, MoqViewerSource } from './video/VideoTile.types';
 
 // ── React-equivalent media wrappers (Phase 0) ────────────────────────────────

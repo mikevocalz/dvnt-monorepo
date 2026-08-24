@@ -14,7 +14,7 @@ const PHASE = {
   degraded: { label: 'Weak connection', color: GOLD, Icon: AlertTriangle },
   reconnecting: { label: 'Reconnecting', color: GOLD, Icon: WifiOff },
   disconnected: { label: 'Disconnected', color: SIGNAL, Icon: WifiOff },
-} as const satisfies Record<Exclude<ConnectionPhase, 'connected'>, unknown>;
+} as const satisfies Record<Exclude<ConnectionPhase, 'connected' | 'idle'>, unknown>;
 
 export function ConnectionBanner({
   phase,
@@ -23,7 +23,8 @@ export function ConnectionBanner({
   action,
   className,
 }: ConnectionBannerProps) {
-  if (phase === 'connected') return null;
+  // `idle` means nothing has been attempted yet — also not a banner.
+  if (phase === 'connected' || phase === 'idle') return null;
   const { label, color, Icon } = PHASE[phase];
 
   return (

@@ -8,11 +8,15 @@ import type { ReactNode } from 'react';
 
 /**
  * One vocabulary for both a personal call (Fishjam) and a Lynk room. Mirrors
- * the room session machine's states minus the two a banner never renders:
- * `idle` (nothing to report) and `ended` (the room is gone; that is a sheet,
- * not a strip).
+ * the room session machine's states minus `ended` — a room that is gone is a
+ * sheet, not a strip.
+ *
+ * `idle` and `connected` both render nothing. Keeping them in the union rather
+ * than making the prop nullable means no call site needs a guard, and a mapping
+ * function can stay total.
  */
 export type ConnectionPhase =
+  | 'idle'
   | 'connecting'
   | 'connected'
   | 'degraded'

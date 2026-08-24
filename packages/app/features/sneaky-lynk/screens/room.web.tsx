@@ -79,7 +79,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ConnectionBanner, RoomTimer } from "@dvnt/ui";
+import { ConnectionBanner, RoomTimer, connectionPhaseFromPeerStatus } from "@dvnt/ui";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -960,6 +960,9 @@ function RoomInner({
   const endRoomHistory = useLynkHistoryStore((s) => s.endRoom);
 
   const { joinRoom, leaveRoom, peerStatus } = useConnection();
+  /** Set once the room has ever been joined. A ref, not state: it only ever
+   *  reads during render alongside peerStatus, which already re-renders. */
+  const everConnectedRef = useRef(false);
   const camera = useCamera();
   const microphone = useMicrophone();
   const peers = usePeers();
@@ -1179,7 +1182,13 @@ function RoomInner({
   // ── Sync Fishjam peerStatus → phase ───────────────────────────────────────
   useEffect(() => {
     if (phase === "closed" || phase === "error" || phase === "prejoin") return;
-    if (peerStatus === "connected") setPhase("connected");
+    if (peerStatus === "connected") {
+      // Session history: once a room has been joined, a later "connecting"
+      // from Fishjam is a RE-connect. The transport cannot tell us this —
+      // PeerStatus has no reconnecting member.
+      everConnectedRef.current = true;
+      setPhase("connected");
+    }
     else if (peerStatus === "error") setErrorState("Peer connection failed");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [peerStatus]);
@@ -1558,15 +1567,7 @@ function RoomInner({
     >
       <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white">
       <ConnectionBanner
-        phase={
-          connecting
-            ? "connecting"
-            : peerStatus === "connected" || peerStatus === "idle"
-              ? "connected"
-              : peerStatus === "connecting"
-                ? "reconnecting"
-                : "disconnected"
-        }
+        phase={connectionPhaseFromPeerStatus(peerStatus, everConnectedRef.current)}
       />
       <CaptureNotificationBannerWeb />
 
