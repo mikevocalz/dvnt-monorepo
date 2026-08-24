@@ -97,6 +97,7 @@ import {
 } from "@dvnt/app/features/sneaky-lynk";
 import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
 import { ConnectionBanner, RoomTimer } from "@dvnt/ui";
+import { HOST_MUTE_COPY } from "@dvnt/app/lib/video/host-mute";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
 import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
@@ -1738,9 +1739,15 @@ function ServerRoom({
   const handleToggleMic = useCallback(async () => {
     const actuallyOn = videoRoomRef.current.isMicOn;
     const nextEnabled = !actuallyOn;
+    const allowed = await videoRoomRef.current.setMicEnabled(nextEnabled);
+    if (!allowed) {
+      // Host is holding the mute. Say so — a control that silently does
+      // nothing reads as the app being broken.
+      showToast("info", "Muted by host", HOST_MUTE_COPY.blocked);
+      return;
+    }
     desiredMicEnabledRef.current = nextEnabled;
-    await videoRoomRef.current.setMicEnabled(nextEnabled);
-  }, []);
+  }, [showToast]);
   const handleToggleVideo = useCallback(async () => {
     const actuallyOn = videoRoomRef.current.isCameraOn;
     const nextEnabled = !actuallyOn;

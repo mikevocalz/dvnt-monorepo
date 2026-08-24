@@ -309,6 +309,17 @@ export function useVideoRoom({
 
   const setMicEnabled = useCallback(
     async (enabled: boolean) => {
+      // The choke point for every path that can start publishing — toggleMic,
+      // the room screens' own handlers, and the post-reconnect media
+      // reconciliation all land here. Guarding only toggleMic left the lock
+      // bypassable, since ServerRoom calls this directly. Muting is never
+      // blocked; the lock only stops the microphone being turned ON.
+      if (enabled) {
+        const store = getStore();
+        if (!canSelfUnmute({ locked: store.hostMuteLocked }, store.localUser?.role === "host")) {
+          return false;
+        }
+      }
       try {
         const mic = microphoneRef.current;
 
@@ -323,13 +334,13 @@ export function useVideoRoom({
               onErrorRef.current?.("Failed to start microphone");
               getStore().setMicOn(false);
               audioSession.setMicMuted(true);
-              return;
+              return true;
             }
           }
 
           getStore().setMicOn(true);
           audioSession.setMicMuted(false);
-          return;
+          return true;
         }
 
         if (mic.isMicrophoneOn) {
@@ -340,7 +351,7 @@ export function useVideoRoom({
               toggleError,
             );
             onErrorRef.current?.("Failed to toggle microphone");
-            return;
+            return true;
           }
         }
 
@@ -350,6 +361,10 @@ export function useVideoRoom({
         console.error("[useVideoRoom] Failed to set microphone state:", error);
         onErrorRef.current?.("Failed to toggle microphone");
       }
+      // Only the host lock returns false. Hardware failures return true and
+      // report themselves through onError — the caller's job here is to say
+      // "you can't unmute yet", not to re-report a broken microphone.
+      return true;
     },
     [getStore],
   );
