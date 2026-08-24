@@ -16,6 +16,11 @@ overrides:
   react-native-nitro-modules: 0.35.6
   lightningcss: 1.30.1
 
+patchedDependencies:
+  react-native-css@3.0.7:
+    hash: d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc
+    path: pnpm-patches/react-native-css@3.0.7.patch
+
 importers:
 
   .:
@@ -97,7 +102,7 @@ importers:
         version: 3.0.0-beta.44(react-dom@19.2.3(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       '@legendapp/motion':
         specifier: ^2.5.3
-        version: 2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+        version: 2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       '@lodev09/react-native-true-sheet':
         specifier: ^3.11.10
         version: 3.11.10(ca11d08568c16a71413b4b02e70a4b6c)
@@ -343,7 +348,7 @@ importers:
         version: 1.17.0(react-native-svg@15.15.4(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       nativewind:
         specifier: 5.0.0-preview.4
-        version: 5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0)
+        version: 5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0)
       pg:
         specifier: ^8.18.0
         version: 8.21.0
@@ -370,7 +375,7 @@ importers:
         version: 1.16.0(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-css:
         specifier: ^3.0.7
-        version: 3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+        version: 3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-gesture-handler:
         specifier: ~2.32.0
         version: 2.32.0(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
@@ -587,7 +592,7 @@ importers:
         version: 3.0.0-beta.44(react-dom@19.2.3(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       '@legendapp/motion':
         specifier: ^2.5.3
-        version: 2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+        version: 2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       '@payloadcms/db-postgres':
         specifier: 4.0.0-canary.26
         version: 4.0.0-canary.26(@opentelemetry/api@1.9.1)(kysely@0.29.2)(payload@4.0.0-canary.26(graphql@16.14.2)(typescript@5.8.3))
@@ -647,7 +652,7 @@ importers:
         version: 1.17.0(react@19.2.3)
       nativewind:
         specifier: 5.0.0-preview.4
-        version: 5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0)
+        version: 5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0)
       next:
         specifier: 16.3.0
         version: 16.3.0(@babel/core@7.28.5)(@opentelemetry/api@1.9.1)(@types/node@20.19.11)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.101.0)
@@ -671,7 +676,7 @@ importers:
         version: 19.2.3(react@19.2.3)
       react-native-css:
         specifier: ^3.0.7
-        version: 3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+        version: 3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-web:
         specifier: 0.21.2
         version: 0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -983,7 +988,7 @@ importers:
         version: 3.0.0-beta.44(react-dom@19.2.3(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       '@legendapp/motion':
         specifier: ^2.5.3
-        version: 2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+        version: 2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       '@lodev09/react-native-true-sheet':
         specifier: ^3.10.0
         version: 3.10.1(d4da9093839d2c969fcf38257a12aa3a)
@@ -1235,7 +1240,7 @@ importers:
         version: 1.17.0(react-native-svg@15.15.4(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       nativewind:
         specifier: 5.0.0-preview.4
-        version: 5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3)
+        version: 5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3)
       pg:
         specifier: ^8.18.0
         version: 8.21.0
@@ -1274,13 +1279,13 @@ importers:
         version: 1.16.0(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-css:
         specifier: ^3.0.7
-        version: 3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+        version: 3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-css-interop:
         specifier: ^0.2.1
         version: 0.2.5(react-native-reanimated@4.5.3(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-safe-area-context@5.7.0(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-svg@15.15.4(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)(tailwindcss@4.3.3)
       react-native-ease:
         specifier: ^0.7.2
-        version: 0.7.2(nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+        version: 0.7.2(nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-gesture-handler:
         specifier: ~2.32.0
         version: 2.32.0(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
@@ -1596,7 +1601,7 @@ importers:
         version: 0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3)
       react-native-css:
         specifier: ^3.0.7
-        version: 3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+        version: 3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-webview:
         specifier: 13.16.1
         version: 13.16.1(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
@@ -1627,7 +1632,7 @@ importers:
         version: 57.0.1(@babel/core@7.28.5)(@expo/dom-webview@56.0.5)(@expo/metro-runtime@57.0.8)(expo-router@57.0.11)(expo-widgets@57.0.8)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-webview@13.16.1(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react-server-dom-webpack@19.2.8(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(webpack@5.107.2(lightningcss@1.30.1)(postcss@8.5.26)))(react@19.2.3)(typescript@6.0.3)
       nativewind:
         specifier: 5.0.0-preview.4
-        version: 5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0)
+        version: 5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0)
       postcss:
         specifier: ^8.5.26
         version: 8.5.26
@@ -8567,6 +8572,7 @@ packages:
   eslint@9.34.0:
     resolution: {integrity: sha512-RNCHRX5EwdrESy3Jc9o8ie8Bog+PeYvvSR8sDGoZxNFTvZ4dlxUB3WzQ3bQMztFrSRODGrLLj8g6OFuGY/aiQg==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -17500,24 +17506,24 @@ snapshots:
       react-dom: 19.2.3(react@19.2.3)
       react-native: 0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3)
 
-  '@legendapp/motion@2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)':
+  '@legendapp/motion@2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@legendapp/tools': 2.0.1(react@19.2.3)
-      nativewind: 5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3)
+      nativewind: 5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3)
       react: 19.2.3
       react-native: 0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3)
 
-  '@legendapp/motion@2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)':
+  '@legendapp/motion@2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@legendapp/tools': 2.0.1(react@19.2.3)
-      nativewind: 5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0)
+      nativewind: 5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0)
       react: 19.2.3
       react-native: 0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3)
 
-  '@legendapp/motion@2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)':
+  '@legendapp/motion@2.5.3(nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@legendapp/tools': 2.0.1(react@19.2.3)
-      nativewind: 5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0)
+      nativewind: 5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0)
       react: 19.2.3
       react-native: 0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3)
 
@@ -19959,7 +19965,9 @@ snapshots:
       metro-runtime: 0.84.4
     transitivePeerDependencies:
       - '@babel/core'
+      - bufferutil
       - supports-color
+      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89': {}
 
@@ -28099,27 +28107,27 @@ snapshots:
 
   napi-postinstall@0.3.3: {}
 
-  nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0):
+  nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0):
     dependencies:
-      react-native-css: 3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+      react-native-css: 3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       tailwindcss: 4.3.0
       tailwindcss-safe-area: 1.3.0(tailwindcss@4.3.0)
 
-  nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3):
+  nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3):
     dependencies:
-      react-native-css: 3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+      react-native-css: 3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       tailwindcss: 4.3.3
       tailwindcss-safe-area: 1.3.0(tailwindcss@4.3.3)
 
-  nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0):
+  nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0):
     dependencies:
-      react-native-css: 3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+      react-native-css: 3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       tailwindcss: 4.3.0
       tailwindcss-safe-area: 1.3.0(tailwindcss@4.3.0)
 
-  nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0):
+  nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.0):
     dependencies:
-      react-native-css: 3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+      react-native-css: 3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       tailwindcss: 4.3.0
       tailwindcss-safe-area: 1.3.0(tailwindcss@4.3.0)
 
@@ -29110,7 +29118,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
+  react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
     dependencies:
       '@expo/metro-config': 57.0.7(expo@57.0.1)(typescript@6.0.3)
       '@types/debug': 4.1.13
@@ -29124,7 +29132,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
+  react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@5.8.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
     dependencies:
       '@expo/metro-config': 57.0.7(expo@57.0.11)(typescript@5.8.3)
       '@types/debug': 4.1.13
@@ -29138,7 +29146,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
+  react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.11)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
     dependencies:
       '@expo/metro-config': 57.0.7(expo@57.0.11)(typescript@6.0.3)
       '@types/debug': 4.1.13
@@ -29171,12 +29179,12 @@ snapshots:
       use-latest-callback: 0.2.4(react@19.2.3)
     optional: true
 
-  react-native-ease@0.7.2(nativewind@5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
+  react-native-ease@0.7.2(nativewind@5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
     dependencies:
       react: 19.2.3
       react-native: 0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3)
     optionalDependencies:
-      nativewind: 5.0.0-preview.4(react-native-css@3.0.7(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3)
+      nativewind: 5.0.0-preview.4(react-native-css@3.0.7(patch_hash=d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc)(@expo/metro-config@57.0.7(expo@57.0.1)(typescript@6.0.3))(lightningcss@1.30.1)(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(tailwindcss@4.3.3)
 
   react-native-gesture-handler@2.32.0(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
     dependencies:
