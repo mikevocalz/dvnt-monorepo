@@ -683,12 +683,12 @@ function ChatPanel({
               <div key={c.id} className="flex items-start gap-2">
                 <SquareAvatar
                   uri={c.author?.avatar}
-                  name={c.author?.displayName || c.author?.username || "?"}
+                  name={getSneakyUserLabel(c.author)}
                   size={28}
                 />
                 <div className="min-w-0 flex-1">
                   <span className="text-xs font-semibold text-white/70">
-                    {isOwn ? "You" : c.author?.displayName || c.author?.username || "Guest"}
+                    {isOwn ? "You" : getSneakyUserLabel(c.author)}
                   </span>
                   <p
                     className={`mt-0.5 break-words rounded-2xl px-3 py-1.5 text-sm ${

@@ -1,5 +1,5 @@
 /**
- * node --test packages/app/features/sneaky-lynk/ui/user-labels.test.ts
+ * node --test packages/app/lib/user-label.test.ts
  *
  * These assertions exist because the web room did not use this function. It
  * resolved labels as `anonLabel || displayName || username`, with no
@@ -14,7 +14,7 @@ import {
   getSneakyUserLabel,
   getSneakyUserHandle,
   normalizeSneakyAnonLabel,
-} from "./user-labels.ts";
+} from "./user-label.ts";
 
 test("an anonymous user never leaks a real name, even with no anon label", () => {
   const leaky = {

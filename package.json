@@ -22,7 +22,7 @@
     "verify:watch": "node scripts/verify-watch.mjs",
     "verify:sentry": "node scripts/verify-sentry.mjs",
     "verify:lynk": "node scripts/verify-lynk.mjs",
-    "test:lynk-session": "node --test packages/app/features/sneaky-lynk/session/machine.test.ts packages/ui/src/video/RoomTimer.countdown.test.ts packages/ui/src/video/ConnectionBanner.phase.test.ts packages/app/features/sneaky-lynk/ui/user-labels.test.ts packages/app/features/sneaky-lynk/ui/hand-queue.test.ts packages/app/lib/video/host-mute.test.ts",
+    "test:lynk-session": "node --test packages/app/features/sneaky-lynk/session/machine.test.ts packages/ui/src/video/RoomTimer.countdown.test.ts packages/ui/src/video/ConnectionBanner.phase.test.ts packages/app/lib/user-label.test.ts packages/app/features/sneaky-lynk/ui/hand-queue.test.ts packages/app/lib/video/host-mute.test.ts",
     "verify:functions": "node scripts/verify-edge-functions.mjs",
     "verify:functions:live": "node scripts/verify-edge-functions.mjs --live --project-ref npfjanxturvmjyevoyfo",
     "check:bundle": "node scripts/check-bundle-budget.mjs"

@@ -4,6 +4,7 @@
  */
 
 import React from "react";
+import { getSneakyUserLabel } from "@dvnt/app/lib/user-label";
 import { View, Text, Pressable } from "react-native";
 import { RTCView } from "@fishjam-cloud/react-native-client";
 import { Image } from "expo-image";
@@ -44,7 +45,16 @@ export function VideoTile({
     anonLabel,
   } = participant;
 
-  const resolvedName = anonLabel || username || displayName || "Guest";
+  // getSneakyUserLabel gates on isAnonymous FIRST. The chain this replaces
+  // (anonLabel || username || displayName) fell through to the real name
+  // whenever anonLabel was missing — and initials are derived from this, so it
+  // leaked twice.
+  const resolvedName = getSneakyUserLabel({
+    isAnonymous,
+    anonLabel,
+    username,
+    displayName,
+  });
   const initials = resolvedName.slice(0, 2).toUpperCase();
 
   return (
