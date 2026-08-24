@@ -88,6 +88,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
 import { getSneakyUserLabel } from "../ui/user-labels";
+import { useRoomSession } from "../session/useRoomSession";
 import { buildHandQueue, HAND_QUEUE_COPY } from "../ui/hand-queue";
 import {
   applyHostMuteEvent,
@@ -1037,6 +1038,10 @@ function RoomInner({
   /** Set once the room has ever been joined. A ref, not state: it only ever
    *  reads during render alongside peerStatus, which already re-renders. */
   const everConnectedRef = useRef(false);
+  // Same session machine as native, fed from Fishjam's peerStatus. It owns
+  // "is this room live" and the observability seam follows it. The banner
+  // still reads peerStatus directly — see the native counterpart.
+  useRoomSession(peerStatus);
   const camera = useCamera();
   const microphone = useMicrophone();
   const peers = usePeers();

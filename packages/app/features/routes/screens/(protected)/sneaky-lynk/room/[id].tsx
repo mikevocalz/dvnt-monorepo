@@ -98,6 +98,7 @@ import {
 import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
 import { ConnectionBanner, RoomTimer } from "@dvnt/ui";
 import { HOST_MUTE_COPY } from "@dvnt/app/lib/video/host-mute";
+import { useRoomSession } from "@dvnt/app/features/sneaky-lynk/session/useRoomSession";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
 import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
@@ -1159,6 +1160,13 @@ function ServerRoom({
           | "connected"
           | "reconnecting"
           | "disconnected");
+  // The session machine owns "is this room live", and the observability seam
+  // hangs off it — app-hang tracking and profiling are suppressed for exactly
+  // as long as the session is up, rather than for as long as this component
+  // happens to be mounted. The banner still reads from connectionState above;
+  // moving it onto the machine changes what a user sees during a drop and
+  // wants a device to confirm (WS-3).
+  useRoomSession(videoRoom.connectionState.status);
   const previousConnectionStateRef = useRef(connectionState);
   const appStateRef = useRef(AppState.currentState);
   const isHostRef = useRef(isHost);

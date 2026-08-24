@@ -189,4 +189,45 @@ console.log(
     ` (${legacy} older two-file forks not yet converted; see docs/structure-target.md §5)`,
 );
 
+// --- 7. The session machine and the observability seam are actually used -----
+// Both shipped tested and unreferenced for a dozen commits. A state machine
+// with 15 passing assertions and no consumer is worse than none: the tests
+// read as coverage of behaviour that never runs.
+const consumers = (needle, exclude) =>
+  execFileSync(
+    "sh",
+    [
+      "-c",
+      // --untracked: a new consumer that is not staged yet still counts.
+      `git grep -l --untracked ${JSON.stringify(needle)} -- 'packages/app/**/*.ts' 'packages/app/**/*.tsx' || true`,
+    ],
+    { cwd: root, encoding: "utf8" },
+  )
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .filter((f) => !f.includes(".test.") && !exclude.test(f));
+
+const machineUsers = consumers("./machine", /session\/machine\.ts$/);
+assert.ok(
+  machineUsers.length > 0,
+  "session/machine.ts has no non-test consumer — it is dead code wearing a test suite",
+);
+
+const seamUsers = consumers("enterRoomObservability", /sneaky-lynk\/observability\.ts$/);
+assert.ok(
+  seamUsers.length > 0,
+  "enterRoomObservability is never called — app-hang tracking still runs through a live room",
+);
+
+// Both legs, not just one: a seam only one platform honours is a divergence.
+const sessionLegs = consumers("useRoomSession", /session\/useRoomSession\.ts$/);
+const hasNative = sessionLegs.some((f) => f.includes("(protected)/sneaky-lynk/room/"));
+const hasWeb = sessionLegs.some((f) => f.endsWith("room.web.tsx"));
+assert.ok(hasNative, "the native room does not drive the session machine");
+assert.ok(hasWeb, "the web room does not drive the session machine");
+console.log(
+  `7. OK — session machine driven by both legs, observability seam has ${seamUsers.length} caller(s)`,
+);
+
 console.log("\nverify-lynk: all sections pass");
