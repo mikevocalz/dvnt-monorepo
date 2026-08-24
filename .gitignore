@@ -25,3 +25,7 @@ CLAUDE.md.vercel
 
 # Gradle build output from workspace packages with native android/ dirs.
 packages/*/android/build/
+
+# Gradle build state — daemon locks, file hashes, caches. Never reproducible,
+# never useful in a diff, and regenerated on every build.
+.gradle/
