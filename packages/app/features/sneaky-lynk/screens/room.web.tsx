@@ -86,6 +86,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
+import { getSneakyUserLabel } from "../ui/user-labels";
 import { EjectModal } from "../ui/EjectModal";
 import type { EjectKind } from "../ui/EjectModal.types";
 import { classifySneakyLynkError } from "../errors";
@@ -710,8 +711,10 @@ function HandQueuePanel({
         ) : (
           order.map((userId, i) => {
             const m = byId.get(userId);
-            const name =
-              m?.anonLabel || m?.displayName || m?.username || "Guest";
+            // getSneakyUserLabel, not a hand-rolled fallback chain: it gates
+            // on isAnonymous FIRST, so a missing anonLabel yields "Anonymous"
+            // rather than falling through to the person's real name.
+            const name = getSneakyUserLabel(m);
             return (
               <div
                 key={userId}
@@ -772,7 +775,7 @@ function ParticipantsPanel({
     >
       <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
         {active.map((m) => {
-          const name = m.anonLabel || m.displayName || m.username || "Guest";
+          const name = getSneakyUserLabel(m);
           const isSelf = m.userId === localUserId;
           const isRoomHost = m.role === "host";
           return (
