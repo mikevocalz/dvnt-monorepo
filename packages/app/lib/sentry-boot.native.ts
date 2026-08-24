@@ -1,7 +1,8 @@
 /**
  * Sentry boot — NATIVE (dvnt-mobile). Imported first by the root layout.
- * All symbols verified against @sentry/react-native 8.22.0 (installed —
- * apps/mobile/package.json:69):
+ * All symbols verified against @sentry/react-native 8.23.0 (installed —
+ * apps/mobile/package.json:69). Re-checked on the 8.22 -> 8.23 bump: every
+ * citation below still holds at the same line.
  *   - expoRouterIntegration (dist/js/tracing/expoRouterIntegration.d.ts) —
  *     navigation transactions + TTID without a manual nav-container ref.
  *   - turboModuleContextIntegration (dist/js/integrations/exports.d.ts:30),
@@ -9,7 +10,7 @@
  *   - enableAppHangTracking / enableUserInteractionTracing (dist/js/options.d.ts).
  * Session replay is gone (audit 2.3): mobileReplayIntegration is no longer
  * pushed here, and the SDK only adds its own when replaysSessionSampleRate /
- * replaysOnErrorSampleRate is set (default.js:117-121) — neither is.
+ * replaysOnErrorSampleRate is set (default.js:117) — neither is.
  * The `.ts` sibling is the no-op web fork.
  */
 import * as Sentry from "@sentry/react-native";
@@ -58,7 +59,7 @@ export function bootSentry(): void {
     integrations: [
       Sentry.expoRouterIntegration(),
       // 2.4 — the single largest quota item. The SDK installs this by default
-      // (default.js:126-129) with enableAggregateStats on, which captureEvents
+      // (default.js:128) with enableAggregateStats on, which captureEvents
       // a billed `level:'info'` event every 30 s per session
       // (turboModuleContextFlush.js:66-68, DEFAULT_AGGREGATE_FLUSH_INTERVAL_MS
       // = 30000). 120 events/hour/session against a 5,000/month quota.
