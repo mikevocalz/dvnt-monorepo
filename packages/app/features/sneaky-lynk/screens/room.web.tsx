@@ -71,6 +71,7 @@ import {
   Crown,
   UserX,
   UserMinus,
+  Volume2,
   VolumeX,
   Clock,
   X,
@@ -835,6 +836,7 @@ function ParticipantsPanel({
   onDemote,
   onKick,
   onMute,
+  onUnmute,
 }: {
   open: boolean;
   onClose: () => void;
@@ -845,6 +847,7 @@ function ParticipantsPanel({
   onDemote: (userId: string) => void;
   onKick: (userId: string) => void;
   onMute: (userId: string) => void;
+  onUnmute: (userId: string) => void;
 }) {
   const active = members.filter((m) => m.status === "active");
   return (
@@ -880,8 +883,17 @@ function ParticipantsPanel({
                 <span className="flex items-center gap-1.5">
                   <button
                     type="button"
+                    onClick={() => onUnmute(m.userId)}
+                    aria-label={`Let ${name} unmute`}
+                    title="Lift the mute — they choose when to speak"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
+                  >
+                    <Mic size={14} />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onMute(m.userId)}
-                    aria-label="Mute"
+                    aria-label={`Mute ${name}`}
                     className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
                   >
                     <MicOff size={14} />
@@ -1480,6 +1492,31 @@ function RoomInner({
     [id, showToast],
   );
 
+  /** Releases the host mute. Does NOT turn the participant's microphone on —
+   *  it hands the control back and they decide (lib/video/host-mute). */
+  const unmuteOne = useCallback(
+    (userId: string) => {
+      void (async () => {
+        const res = await videoApi.unmutePeer({ roomId: id, targetUserId: userId });
+        if (!res.ok) {
+          showToast("error", "Couldn't unmute", res.error?.message || "Try again.");
+        }
+      })();
+    },
+    [id, showToast],
+  );
+
+  const unmuteAll = useCallback(() => {
+    void (async () => {
+      const res = await videoApi.unmuteAll(id);
+      if (res.ok) {
+        showToast("success", "Unmuted everyone", "Participants can unmute themselves again.");
+      } else {
+        showToast("error", "Couldn't unmute all", res.error?.message || "Try again.");
+      }
+    })();
+  }, [id, showToast]);
+
   const muteAll = useCallback(() => {
     void (async () => {
       const res = await videoApi.muteAll(id);
@@ -1730,14 +1767,29 @@ function RoomInner({
             <Users size={14} /> {participantCount}
           </button>
           {isHost ? (
-            <button
-              type="button"
-              onClick={muteAll}
-              aria-label="Mute everyone"
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 text-rose-300 hover:bg-white/15"
-            >
-              <VolumeX size={16} />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={muteAll}
+                aria-label="Mute everyone"
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 hover:bg-white/15"
+                style={{ color: ROSE }}
+              >
+                <VolumeX size={16} />
+              </button>
+              {/* Mute-all locks everyone out of their own microphone, so the
+                  release has to be reachable from the same place. Without it a
+                  host could mute the room and have no way to give it back. */}
+              <button
+                type="button"
+                onClick={unmuteAll}
+                aria-label="Let everyone unmute"
+                title="Lift the mute — participants choose when to speak"
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 text-white/80 hover:bg-white/15"
+              >
+                <Volume2 size={16} />
+              </button>
+            </>
           ) : null}
         </span>
       </header>
@@ -1895,6 +1947,7 @@ function RoomInner({
         onDemote={demote}
         onKick={kick}
         onMute={muteOne}
+        onUnmute={unmuteOne}
       />
 
       {/* Free-host duration-limit paywall */}
