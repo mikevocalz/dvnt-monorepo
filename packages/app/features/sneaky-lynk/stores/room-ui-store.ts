@@ -55,6 +55,9 @@ interface RoomUIStore {
    *  them into one sentence is what let the web modal claim a ban was just a
    *  removal. */
   eject: { kind: EjectKind; reason?: string } | null;
+  /** The host is holding this participant muted. While true they cannot turn
+   *  their own microphone on — see lib/video/host-mute. */
+  hostMuteLocked: boolean;
 
   setInitStarted: (v: boolean) => void;
   setPhase: (v: RoomPhase) => void;
@@ -70,6 +73,7 @@ interface RoomUIStore {
   setTimerStartedAt: (v: number) => void;
   setShowTimeUp: (v: boolean) => void;
   setEject: (v: { kind: EjectKind; reason?: string } | null) => void;
+  setHostMuteLocked: (v: boolean) => void;
   reset: () => void;
 }
 
@@ -87,6 +91,7 @@ const initialUIState = {
   timerStartedAt: null as number | null,
   showTimeUp: false,
   eject: null as { kind: EjectKind; reason?: string } | null,
+  hostMuteLocked: false,
 };
 
 export const useRoomUIStore = create<RoomUIStore>((set) => ({
@@ -106,5 +111,6 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setTimerStartedAt: (timerStartedAt) => set({ timerStartedAt }),
   setShowTimeUp: (showTimeUp) => set({ showTimeUp }),
   setEject: (eject) => set({ eject }),
+  setHostMuteLocked: (hostMuteLocked) => set({ hostMuteLocked }),
   reset: () => set({ ...initialUIState }),
 }));

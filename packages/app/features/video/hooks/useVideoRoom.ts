@@ -40,6 +40,7 @@ import {
 import { AppState, type AppStateStatus } from "react-native";
 import { videoApi } from "../api";
 import { useVideoRoomStore } from "../stores/video-room-store";
+import { applyHostMuteEvent, canSelfUnmute, shouldStopMic } from "@dvnt/app/lib/video/host-mute";
 import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import type {
   ConnectionState,
@@ -405,38 +406,34 @@ export function useVideoRoom({
         case "room_ended":
           handleRoomEnded();
           break;
+        // Host mute is a LOCK, not a remote microphone switch: muting stops
+        // publishing and blocks self-unmute; lifting it restores the
+        // participant's control WITHOUT opening their mic. See
+        // lib/video/host-mute — this used to call setMicEnabled(true), which
+        // let a host open any participant's microphone.
         case "mute_peer":
-          // Host requested we mute — turn off mic if it's on
-          if (event.targetId === getStore().localUser?.id) {
+        case "mute_all":
+        case "unmute_peer":
+        case "unmute_all": {
+          const store = getStore();
+          const ctx = {
+            isHost: store.localUser?.role === "host",
+            targetsSelf: event.targetId === store.localUser?.id,
+          };
+          const next = applyHostMuteEvent(
+            { locked: store.hostMuteLocked },
+            event.type,
+            ctx,
+          );
+          if (next.locked !== store.hostMuteLocked) {
+            store.setHostMuteLocked(next.locked);
+          }
+          if (shouldStopMic(event.type, ctx)) {
             console.log("[useVideoRoom] Muted by host");
             void setMicEnabled(false);
           }
           break;
-        case "mute_all": {
-          // Host muted everyone — mute unless we ARE the host
-          const localRole = getStore().localUser?.role;
-          if (localRole !== "host") {
-            console.log("[useVideoRoom] Muted by host (mute all)");
-            void setMicEnabled(false);
-          }
-          break;
         }
-        case "unmute_all": {
-          // Host unmuted everyone — re-enable mic unless we ARE the host
-          const localRole2 = getStore().localUser?.role;
-          if (localRole2 !== "host") {
-            console.log("[useVideoRoom] Unmuted by host (unmute all)");
-            void setMicEnabled(true);
-          }
-          break;
-        }
-        case "unmute_peer":
-          // Host is allowing us to unmute — turn mic back on
-          if (event.targetId === getStore().localUser?.id) {
-            console.log("[useVideoRoom] Unmuted by host");
-            void setMicEnabled(true);
-          }
-          break;
         case "role_changed":
           // Our role was changed by the host
           if (event.targetId === getStore().localUser?.id) {
@@ -631,15 +628,26 @@ export function useVideoRoom({
     }
   }, [setCameraEnabled]);
 
+  /** Returns false when the host is holding the mute — the caller surfaces
+   *  HOST_MUTE_COPY.blocked rather than failing silently. Muting yourself is
+   *  always allowed; the lock only blocks turning the microphone ON. */
   const toggleMic = useCallback(async () => {
-    if (micToggleInFlightRef.current) return;
+    if (micToggleInFlightRef.current) return true;
+    const store = getStore();
+    const wantEnabled = !store.isMicOn;
+    if (
+      wantEnabled &&
+      !canSelfUnmute({ locked: store.hostMuteLocked }, store.localUser?.role === "host")
+    ) {
+      return false;
+    }
     micToggleInFlightRef.current = true;
-    const wantEnabled = !getStore().isMicOn;
     try {
       await setMicEnabled(wantEnabled);
     } finally {
       micToggleInFlightRef.current = false;
     }
+    return true;
   }, [getStore, setMicEnabled]);
 
   const switchCamera = useCallback(async () => {

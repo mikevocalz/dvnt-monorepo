@@ -88,6 +88,12 @@ import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
 import { getSneakyUserLabel } from "../ui/user-labels";
 import { buildHandQueue, HAND_QUEUE_COPY } from "../ui/hand-queue";
+import {
+  applyHostMuteEvent,
+  canSelfUnmute,
+  shouldStopMic,
+  HOST_MUTE_COPY,
+} from "@dvnt/app/lib/video/host-mute";
 import { EjectModal } from "../ui/EjectModal";
 import type { EjectKind } from "../ui/EjectModal.types";
 import { classifySneakyLynkError } from "../errors";
@@ -406,17 +412,23 @@ function useRoomMembersSync(roomId: string, localUserId: string | undefined) {
 function useRoomModerationWatcher(
   roomId: string,
   userId: string | undefined,
+  isHost: boolean,
+  hostMuteLocked: boolean,
   // Structured, not pre-flattened: kick, ban and room-ended are three
   // different facts and the modal renders each differently.
   onEject: (kind: EjectKind, reason?: string) => void,
-  /** Host silenced this participant. Muting needs no consent — anyone can
-   *  unmute themselves — so it is applied directly, as native does. */
-  onHostMute: () => void,
+  /** Host moderation of the local microphone. `locked` is the host holding the
+   *  mute; `stopMic` is whether this event also stops publishing. */
+  onHostMute: (locked: boolean, stopMic: boolean) => void,
 ) {
   const onEjectRef = useRef(onEject);
   onEjectRef.current = onEject;
   const onHostMuteRef = useRef(onHostMute);
   onHostMuteRef.current = onHostMute;
+  const isHostRef = useRef(isHost);
+  isHostRef.current = isHost;
+  const hostMuteLockedRef = useRef(hostMuteLocked);
+  hostMuteLockedRef.current = hostMuteLocked;
   useEffect(() => {
     if (!roomId || !userId) return;
     const unsubscribe = videoApi.subscribeToRoomEvents(
@@ -429,15 +441,24 @@ function useRoomModerationWatcher(
         }
         // Host moderation. Web listened for none of these, so a host muting a
         // web participant was silently a no-op — the host was told it worked
-        // and the microphone kept running.
-        if (event.type === "mute_all" || (event.type === "mute_peer" && event.targetId === userId)) {
-          onHostMuteRef.current();
+        // and the microphone kept running. The lock rule is shared with native
+        // (lib/video/host-mute): mute stops publishing AND blocks self-unmute;
+        // unmute lifts the block without opening the microphone.
+        if (
+          event.type === "mute_peer" ||
+          event.type === "mute_all" ||
+          event.type === "unmute_peer" ||
+          event.type === "unmute_all"
+        ) {
+          const ctx = { isHost: isHostRef.current, targetsSelf: event.targetId === userId };
+          const next = applyHostMuteEvent(
+            { locked: hostMuteLockedRef.current },
+            event.type,
+            ctx,
+          );
+          onHostMuteRef.current(next.locked, shouldStopMic(event.type, ctx));
           return;
         }
-        // `unmute_peer` / `unmute_all` are deliberately NOT handled. Native
-        // turns the microphone back on unconditionally, which activates a
-        // participant's mic without their consent. Web does not copy that; a
-        // host permitting speech is not the same as a host taking the mic.
         if (event.targetId && event.targetId === userId) {
           const payload = event.payload as { action?: string; reason?: string } | undefined;
           onEjectRef.current(payload?.action === "ban" ? "ban" : "kick", payload?.reason);
@@ -1041,6 +1062,8 @@ function RoomInner({
   const setAppOnlyPhase = useRoomUIStore((s) => s.setAppOnly);
   const setErrorState = useRoomUIStore((s) => s.setError);
   const setMicOn = useRoomUIStore((s) => s.setMicOn);
+  const hostMuteLocked = useRoomUIStore((s) => s.hostMuteLocked);
+  const setHostMuteLocked = useRoomUIStore((s) => s.setHostMuteLocked);
   const setCameraOn = useRoomUIStore((s) => s.setCameraOn);
 
   // Web-only moderation/paywall surfaces (Law 3: panels/dialogs, not sheets).
@@ -1108,7 +1131,9 @@ function RoomInner({
     realUsername: authUser?.username ?? undefined,
   });
 
-  useRoomModerationWatcher(id, authUser?.id, (kind, reason) => {
+  // isHostRef, not the derived `isHost` below it: the ref is kept current from
+  // the peer's server role (line ~1219) and is the value in scope this early.
+  useRoomModerationWatcher(id, authUser?.id, isHostRef.current, hostMuteLocked, (kind, reason) => {
     try {
       leaveRoomRef.current();
     } catch {
@@ -1122,17 +1147,20 @@ function RoomInner({
     }
     setEject({ kind, reason });
   },
-  () => {
-    // Host mute: stop publishing and reflect it in the control bar, so the
-    // participant can see they were muted rather than wondering why nobody
-    // is responding.
-    try {
-      micRef.current.stopMicrophone();
-    } catch {
-      // ignore
+  (locked, stopMic) => {
+    // Lifting the lock restores control; it never starts publishing.
+    setHostMuteLocked(locked);
+    if (stopMic) {
+      try {
+        micRef.current.stopMicrophone();
+      } catch {
+        // ignore
+      }
+      setMicOn(false);
+      showToast("info", "Muted", HOST_MUTE_COPY.mutedByHost);
+    } else if (!locked) {
+      showToast("info", "Unmuted", HOST_MUTE_COPY.released);
     }
-    setMicOn(false);
-    showToast("info", "Muted", "The host muted you.");
   });
 
   // ── JOIN: sneaky-lynk peer token → Fishjam joinRoom → start media ──────────
@@ -1287,11 +1315,21 @@ function RoomInner({
 
   // ── Controls ──────────────────────────────────────────────────────────────
   const toggleMic = useCallback(() => {
+    // Muting yourself is always allowed. Turning the microphone back ON is not,
+    // while the host is holding the mute — otherwise the lock is decoration.
+    const turningOn = !micRef.current.isMicrophoneOn;
+    if (
+      turningOn &&
+      !canSelfUnmute({ locked: hostMuteLocked }, isHostRef.current)
+    ) {
+      showToast("info", "Muted by host", HOST_MUTE_COPY.blocked);
+      return;
+    }
     void (async () => {
       await micRef.current.toggleMicrophone();
       setMicOn(micRef.current.isMicrophoneOn);
     })();
-  }, [setMicOn]);
+  }, [setMicOn, hostMuteLocked, showToast]);
 
   const toggleCamera = useCallback(() => {
     void (async () => {
