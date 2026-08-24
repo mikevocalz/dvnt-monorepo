@@ -226,8 +226,19 @@ const hasNative = sessionLegs.some((f) => f.includes("(protected)/sneaky-lynk/ro
 const hasWeb = sessionLegs.some((f) => f.endsWith("room.web.tsx"));
 assert.ok(hasNative, "the native room does not drive the session machine");
 assert.ok(hasWeb, "the web room does not drive the session machine");
+// Recovery must be ACTED on, not merely tracked. The machine knew the backoff
+// and the budget for a dozen commits while nothing called it; a leg that drives
+// the session but supplies no onReconnect is back in that state — the banner
+// says "Reconnecting" and nothing ever reconnects.
+for (const leg of sessionLegs) {
+  assert.match(
+    strip(read(leg)),
+    /onReconnect\s*:/,
+    `${leg} drives the session machine but supplies no onReconnect — it would show "Reconnecting" forever without retrying`,
+  );
+}
 console.log(
-  `7. OK — session machine driven by both legs, observability seam has ${seamUsers.length} caller(s)`,
+  `7. OK — ${sessionLegs.length} legs drive the session AND supply recovery; seam has ${seamUsers.length} caller(s)`,
 );
 
 console.log("\nverify-lynk: all sections pass");

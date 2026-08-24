@@ -96,9 +96,9 @@ import {
   GPU_REACTION_CAP,
 } from "@dvnt/app/features/sneaky-lynk";
 import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
-import { ConnectionBanner, RoomTimer } from "@dvnt/ui";
+import { ConnectionBanner, RoomTimer, type ConnectionPhase } from "@dvnt/ui";
 import { HOST_MUTE_COPY } from "@dvnt/app/lib/video/host-mute";
-import { useRoomSession } from "@dvnt/app/features/sneaky-lynk/session/useRoomSession";
+import { bannerPhaseFor, useRoomSession } from "@dvnt/app/features/sneaky-lynk/session/useRoomSession";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
 import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
@@ -1166,7 +1166,13 @@ function ServerRoom({
   // happens to be mounted. The banner still reads from connectionState above;
   // moving it onto the machine changes what a user sees during a drop and
   // wants a device to confirm (WS-3).
-  useRoomSession(videoRoom.connectionState.status);
+  // videoRoom.join already re-mints the peer token and re-attaches, and it
+  // returns false rather than throwing, which is exactly the contract the
+  // machine's budget expects. Held in a ref inside the hook, so its identity
+  // changing between renders does not restart the retry loop.
+  const session = useRoomSession(videoRoom.connectionState.status, {
+    onReconnect: videoRoom.join,
+  });
   const previousConnectionStateRef = useRef(connectionState);
   const appStateRef = useRef(AppState.currentState);
   const isHostRef = useRef(isHost);
@@ -2184,6 +2190,7 @@ function ServerRoom({
         insets={insets}
         connectionState={connectionState}
         hostMuteLocked={videoRoom.hostMuteLocked}
+        bannerPhase={bannerPhaseFor(session)}
         isHost={!!isHost}
         roomTitle={roomTitle}
         participantCount={totalParticipants}
@@ -2406,6 +2413,7 @@ function RoomLayout({
   insets,
   connectionState,
   hostMuteLocked,
+  bannerPhase,
   isHost,
   roomTitle,
   participantCount,
@@ -2450,6 +2458,10 @@ function RoomLayout({
   /** Host is holding the local participant muted — the mic control says so
    *  rather than silently refusing (lib/video/host-mute). */
   hostMuteLocked?: boolean;
+  /** Banner phase from the session machine. `connectionState` above still
+   *  drives this screen's media/teardown effects; only the banner moves, since
+   *  the machine is what can tell a first join from a reconnect. */
+  bannerPhase?: ConnectionPhase;
   isHost: boolean;
   localRole:
     | "host"
@@ -2550,7 +2562,7 @@ function RoomLayout({
         }}
       />
 
-      <ConnectionBanner phase={connectionState} />
+      <ConnectionBanner phase={bannerPhase ?? connectionState} />
       {presenceEvent ? <PresenceToast event={presenceEvent} /> : null}
 
       <View className="flex-1" style={{ paddingTop: insets.top }}>
