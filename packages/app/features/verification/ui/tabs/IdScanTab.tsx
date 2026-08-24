@@ -8,7 +8,7 @@ import {
   useCameraPermission,
   usePhotoOutput,
 } from "react-native-vision-camera";
-// TextRecognition removed due to GoogleMLKit version conflict - see CLAUDE.md
+// TextRecognition removed due to GoogleMLKit version conflict - see docs/engineering-contract.md
 // TODO: Re-add OCR when compatible version is available
 import * as ImagePicker from "expo-image-picker";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";

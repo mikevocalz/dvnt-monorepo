@@ -296,7 +296,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         // INVARIANT: API MUST return sender as "user" or "other" (string literals).
         // Any other value (object, ID, undefined) = broken contract → default to "other"
-        // to prevent showing YOUR messages as theirs. SEE: CLAUDE.md messages section.
+        // to prevent showing YOUR messages as theirs. SEE: docs/engineering-contract.md messages section.
         if (__DEV__ && msg.sender !== "user" && msg.sender !== "other") {
           console.error(
             `[ChatStore] INVARIANT VIOLATION: msg.sender must be "user" or "other", got:`,

@@ -12,7 +12,7 @@
  * getting back into it. What it deliberately does NOT own:
  *   - hand queue, roles, mute state → `stores/room-store.ts` already owns them
  *   - capacity and entitlement decisions → server-authoritative; the machine
- *     only consumes the verdict as an event (AGENTS.md I3)
+ *     only consumes the verdict as an event (docs/engineering-contract.md I3)
  *   - host succession → also server-authoritative; the machine reacts to
  *     HOST_ENDED, it never elects
  *

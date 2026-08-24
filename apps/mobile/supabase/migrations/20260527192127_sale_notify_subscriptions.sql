@@ -26,7 +26,7 @@ CREATE INDEX IF NOT EXISTS sale_notify_subscriptions_event_idx
 CREATE INDEX IF NOT EXISTS sale_notify_subscriptions_user_idx
   ON public.sale_notify_subscriptions (user_id);
 
--- Service role bypasses RLS but explicit GRANT is required per CLAUDE.md
+-- Service role bypasses RLS but explicit GRANT is required per docs/engineering-contract.md
 -- so privileged edge functions can read/write.
 GRANT ALL ON public.sale_notify_subscriptions TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.sale_notify_subscriptions_id_seq TO service_role;

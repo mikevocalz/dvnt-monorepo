@@ -141,7 +141,7 @@ are nonetheless **directly callable**. Just call them; do not search first.
   ceiling, leave ONE runnable check behind for non-trivial logic. Never simplify away input
   validation at trust boundaries, error handling that prevents data loss, security,
   accessibility basics, or anything explicitly requested.
-- Repo law (`CLAUDE.md` → `AGENTS.md`): TS clean is the floor; verified APIs only — if a
+- Repo law (`docs/engineering-contract.md` → `docs/engineering-contract.md`): TS clean is the floor; verified APIs only — if a
   webhook field can't be confirmed against the current published API version, STOP and flag it
   by name; Zustand for app/business state, `useState` for local UI ephemera only; web rail
   Stripe / mobile rail RevenueCat / join Supabase, never let the client read entitlement from a

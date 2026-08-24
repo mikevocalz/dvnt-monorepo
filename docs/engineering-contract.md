@@ -67,7 +67,7 @@ Gated surface: **Lynk Private Rooms / Sneaky Lynk**.
   native, entitled — no second purchase. Verified before shipping either rail. #1 test.
 
 ## Deliverables (ordered, each gates the next)
-- **D0** Scaffold (this file, `CLAUDE.md`, `TASKS.md`, `config/defaults.json`, `doc/`)
+- **D0** Scaffold (this file, `docs/engineering-contract.md`, `TASKS.md`, `config/defaults.json`, `doc/`)
 - **D1** `doc/processor-risk.md` — Stripe go/no-go. BLOCKS web payment.
 - **D2** `doc/entitlement-model.md` — Supabase schema, both webhooks, identity bridge. BLOCKS both rails.
 - **D3** apps/web Stripe rail (Checkout, webhook edge fn, Zustand+TanStack entitlement hook). **No RevenueCat imports on web.**

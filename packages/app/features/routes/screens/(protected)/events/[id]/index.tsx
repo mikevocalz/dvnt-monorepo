@@ -570,7 +570,7 @@ function EventDetailScreenContent() {
   // syncing via useEffect (the previous approach) creates a race when
   // the user likes from the feed card while the detail screen is
   // mounted — the mirror lags one render behind the cache. See
-  // CLAUDE.md PREVENTION.md (banned pattern: cache-mirror useState/store).
+  // docs/engineering-contract.md PREVENTION.md (banned pattern: cache-mirror useState/store).
   const isLiked = eventData?.isLiked ?? false;
 
   const toggleLikeMutation = useToggleEventLike();

@@ -1,5 +1,5 @@
 // OCR Scanner disabled - react-native-vision-camera-text-recognition removed due to GoogleMLKit version conflict
-// See CLAUDE.md for details. TODO: Re-add OCR when compatible version is available
+// See docs/engineering-contract.md for details. TODO: Re-add OCR when compatible version is available
 import {
   Camera,
   type CameraRef,

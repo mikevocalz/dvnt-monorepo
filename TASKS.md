@@ -1,11 +1,11 @@
 # TASKS — DVNT Web-First Build-Out
 
-See [AGENTS.md](./AGENTS.md) for the full contract (bar, invariants, constraints).
+See [docs/engineering-contract.md](./docs/engineering-contract.md) for the full contract (bar, invariants, constraints).
 Each deliverable below maps to a gate; do not start the next until the prior gate is green.
 
 ## D0 — Scaffold ✅
-- [x] `AGENTS.md`
-- [x] `CLAUDE.md`
+- [x] `docs/engineering-contract.md`
+- [x] `docs/engineering-contract.md`
 - [x] `TASKS.md`
 - [x] `config/defaults.json`
 - [x] `doc/` directory

@@ -1,12 +1,12 @@
 # DVNT Code Standards
 
 Companion to [`docs/structure-target.md`](./structure-target.md) (the WS-6 structure
-target) and the engineering contract in [`AGENTS.md`](../AGENTS.md). This document
+target) and the engineering contract in [`docs/engineering-contract.md`](../docs/engineering-contract.md). This document
 codifies **how code is shaped** in this monorepo: the feature anatomy, the universal
 component pattern, naming, store rules, and the module boundaries that the lint config
 now enforces.
 
-Precedence: `AGENTS.md` (the contract — bar, stack, invariants) wins on _what_ to build;
+Precedence: `docs/engineering-contract.md` (the contract — bar, stack, invariants) wins on _what_ to build;
 this file governs _how_ it is structured. Neither overrides the other.
 
 ---
@@ -104,7 +104,7 @@ feature-private. (See `docs/structure-target.md` §5 for the current promotion b
 
 ## 4 · Store rules (Zustand + MMKV)
 
-Per `AGENTS.md` (Client state: **Zustand only**) and `CLAUDE.md`:
+Per `docs/engineering-contract.md` (Client state: **Zustand only**) and `docs/engineering-contract.md`:
 
 - **Zustand only for app/business state.** `useState` is for **local UI ephemera only**
   (a hover flag, an uncontrolled input mid-edit). Anything another component, screen, or
@@ -178,5 +178,5 @@ and `useSneakyLynkCaptureBroadcast.ts`. The convention:
   would need re-checking if the surrounding code changes.
 
 The voice is precise and defensive: state the trade-off and the failure mode defended
-against, then the code. It is the prose form of the `AGENTS.md` output discipline —
+against, then the code. It is the prose form of the `docs/engineering-contract.md` output discipline —
 "state the trade-off + failure mode defended against, in one line, then the code."
