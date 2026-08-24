@@ -303,7 +303,39 @@ export default {
       // succeed without it (stacks stay unsymbolicated until it's added).
       [
         "@sentry/react-native/expo",
-        { organization: "5th-galaxy-studios", project: "dvnt-mobile" },
+        {
+          organization: "5th-galaxy-studios",
+          project: "dvnt-mobile",
+          // 2.7: without this, Sentry is dark until the JS bundle evaluates —
+          // bootSentry() runs at features/routes/screens/_layout.tsx:185, so a
+          // crash before that point is invisible. useNativeInit has the plugin
+          // insert RNSentrySDK.init into MainApplication.onCreate and the iOS
+          // AppDelegate during prebuild (plugin/build/withSentryAndroid.js:112,
+          // :118), arming the native SDK first.
+          //
+          // apps/mobile/android/ and ios/ are COMMITTED prebuild output, so
+          // this reaches a build only after `npx expo prebuild --clean`. The
+          // regenerated native diff wants reviewing before it ships — see
+          // docs/sentry-budget.md.
+          useNativeInit: true,
+          // Written to sentry.options.json and read by the native SDK before
+          // any JS runs. Deliberately narrow: only what a pre-bundle crash
+          // needs, mirroring the JS defaults so the native side never starts
+          // with the settings WS-0 removed. Verified option names:
+          // plugin/build/withSentry.d.ts:8,10.
+          options: {
+            // Same publishable client key as the JS init.
+            dsn: "https://8d9aa6e1efeafb58611a687fea5c8548@o4511776624541696.ingest.us.sentry.io/4511776736608256",
+            // The three that cost quota or main-thread time if they default on.
+            attachScreenshot: false,
+            attachViewHierarchy: false,
+            enableAutoPerformanceTracing: false,
+            // Native init exists to catch pre-JS crashes; it should not also be
+            // sampling traces or profiles before the app has drawn a frame.
+            tracesSampleRate: 0,
+            profilesSampleRate: 0,
+          },
+        },
       ],
       // Links native targets (Apple Watch app + watch complication) outside /ios
       // via CNG. Auto-discovers apps/mobile/targets/*/expo-target.config.js.

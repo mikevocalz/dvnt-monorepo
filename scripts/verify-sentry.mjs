@@ -250,6 +250,30 @@ assert.match(
 );
 console.log("10. OK — profiling defaults off, hang threshold explicit");
 
+// --- 11. The plugin entry carries the native-init decision -------------------
+// Phase-0 item 2. Without useNativeInit the SDK is dark until the JS bundle
+// evaluates (bootSentry runs at features/routes/screens/_layout.tsx:185), so a
+// crash before that point is invisible — which is the state finding 2.7
+// described. Asserted so it cannot be dropped in a config tidy-up.
+const appConfig = read("apps/mobile/app.config.js");
+assert.match(
+  appConfig,
+  /useNativeInit:\s*true/,
+  "app.config.js must set useNativeInit — otherwise Sentry misses every pre-bundle crash",
+);
+// The native side must not start with the settings WS-0 removed on the JS side.
+for (const [opt, why] of [
+  ["attachViewHierarchy: false", "a main-thread view-tree walk at error time"],
+  ["attachScreenshot: false", "screenshots are not masked by the RN SDK"],
+  ["profilesSampleRate: 0", "profiling is billed and its allowance is unverified"],
+]) {
+  assert.ok(
+    appConfig.includes(opt),
+    `native init options must pin ${opt} — ${why}`,
+  );
+}
+console.log("11. OK — native init on, and its options mirror the JS defaults");
+
 console.log("\nverify-sentry: all sections pass");
 
 function stripComments(src) {
