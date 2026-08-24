@@ -73,7 +73,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ConnectionBanner, RoomTimer, connectionPhaseFromPeerStatus } from "@dvnt/ui";
+import { ConnectionBanner, RoomTimer } from "@dvnt/ui";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -81,7 +81,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
 import { getSneakyUserLabel } from "../ui/user-labels";
-import { useRoomSession } from "../session/useRoomSession";
+import { bannerPhaseFor, useRoomSession } from "../session/useRoomSession";
 import { buildHandQueue, HAND_QUEUE_COPY } from "../ui/hand-queue";
 import {
   ChatPanel,
@@ -479,7 +479,39 @@ function RoomInner({
   // Same session machine as native, fed from Fishjam's peerStatus. It owns
   // "is this room live" and the observability seam follows it. The banner
   // still reads peerStatus directly — see the native counterpart.
-  useRoomSession(peerStatus);
+  const setServerEndsAt = useRoomUIStore((s) => s.setServerEndsAt);
+  /**
+   * Re-establish the room after a drop: fresh peer token, re-attach. Same
+   * identity and role — the token is minted for this user against this room,
+   * so the roster sees no leave/join pair.
+   *
+   * ponytail: the token+attach pair is written twice, here and in the initial
+   * join effect, which additionally owns the error surfaces, the cancel guard
+   * and the media start. Collapsing them means refactoring the working
+   * first-join path; fold them together once a device has run a real reconnect.
+   */
+  const rejoinRoom = useCallback(async (): Promise<boolean> => {
+    const result = await sneakyLynkApi.joinRoom(id, joinAnonymousRef.current);
+    if (!result.ok || !result.data) return false;
+    const { token, peer, user: joinedUser, room } = result.data;
+    setServerEndsAt(room.endsAt ?? null);
+    try {
+      await joinRoomRef.current({
+        peerToken: token,
+        peerMetadata: {
+          userId: joinedUser.id,
+          username: joinedUser.username,
+          avatar: joinedUser.avatar,
+          role: peer.role,
+        },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [id, setServerEndsAt]);
+
+  const session = useRoomSession(peerStatus, { onReconnect: rejoinRoom });
   const camera = useCamera();
   const microphone = useMicrophone();
   const peers = usePeers();
@@ -505,6 +537,8 @@ function RoomInner({
   // Web UI/connection phase store (no useState).
   const phase = useRoomUIStore((s) => s.phase);
   const joinAnonymous = useRoomUIStore((s) => s.joinAnonymous);
+  const joinAnonymousRef = useRef(joinAnonymous);
+  joinAnonymousRef.current = joinAnonymous;
   const closedReason = useRoomUIStore((s) => s.closedReason);
   const errorMessage = useRoomUIStore((s) => s.errorMessage);
   const isMicOn = useRoomUIStore((s) => s.isMicOn);
@@ -528,7 +562,6 @@ function RoomInner({
   const setIsPaidHost = useRoomUIStore((s) => s.setIsPaidHost);
   const timerStartedAt = useRoomUIStore((s) => s.timerStartedAt);
   const serverEndsAt = useRoomUIStore((s) => s.serverEndsAt);
-  const setServerEndsAt = useRoomUIStore((s) => s.setServerEndsAt);
   const setTimerStartedAt = useRoomUIStore((s) => s.setTimerStartedAt);
   const showTimeUp = useRoomUIStore((s) => s.showTimeUp);
   const setShowTimeUp = useRoomUIStore((s) => s.setShowTimeUp);
@@ -1159,9 +1192,9 @@ function RoomInner({
       onCaptureAttempt={(kind) => captureBroadcast.notifyLocalCapture(kind)}
     >
       <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white">
-      <ConnectionBanner
-        phase={connectionPhaseFromPeerStatus(peerStatus, everConnectedRef.current)}
-      />
+      {/* The session machine is the single source now — it is what knows a
+          first join from a reconnect, and what is driving the retries. */}
+      <ConnectionBanner phase={bannerPhaseFor(session)} />
       <CaptureNotificationBannerWeb />
 
       {/* Header */}

@@ -146,3 +146,28 @@ test("every state except idle can be left for 'ended' — no state can strand a 
     assert.equal(transition(s, { type: "LEAVE" }).state, "ended", `${state} cannot be left`);
   }
 });
+
+// ── Recovery policy the adapter acts on ──────────────────────────────────────
+
+test("a drop schedules attempts at growing delays, then gives up", () => {
+  let s = drive(createSession(3), { type: "JOIN" }, { type: "JOIN_GRANTED" }, { type: "TRANSPORT_LOST" });
+  const delays: number[] = [];
+  while (shouldAttemptReconnect(s)) {
+    delays.push(reconnectDelayMs(s));
+    s = transition(s, { type: "RECONNECT_FAILED" });
+  }
+  assert.deepEqual(delays, [500, 1000, 2000], "backoff must grow between attempts");
+  assert.equal(s.state, "ended");
+  assert.equal(s.endReason, "reconnect_exhausted");
+});
+
+test("a room that ended is never retried", () => {
+  const s = drive(joined(), { type: "TRANSPORT_LOST" }, { type: "HOST_ENDED" });
+  assert.equal(shouldAttemptReconnect(s), false, "retrying a closed room hammers the relay for nothing");
+});
+
+test("leaving mid-reconnect stops the retry loop", () => {
+  const s = drive(joined(), { type: "TRANSPORT_LOST" }, { type: "LEAVE" });
+  assert.equal(shouldAttemptReconnect(s), false);
+  assert.equal(s.endReason, "left");
+});
