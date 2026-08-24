@@ -1,4 +1,5 @@
 internal import Expo
+import RNSentry
 internal import EXUpdates
 import React
 import ReactAppDependencyProvider
@@ -14,7 +15,7 @@ class AppDelegate: ExpoAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-
+    RNSentrySDK.start()
     // ── DVNT Uncaught NSException Diagnostic Handler ─────────────────────
     // Installed by plugins/with-uncaught-exception-handler.js
     // __DVNT_UNCAUGHT_EXCEPTION_HANDLER_INSTALLED__
