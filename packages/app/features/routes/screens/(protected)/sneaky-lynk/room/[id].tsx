@@ -2820,7 +2820,8 @@ function RoomLayout({
             drives visibility from the `visible` prop via index. */}
         <EjectModal
           visible={showEjectModal}
-          payload={ejectPayload}
+          kind={ejectPayload?.action ?? null}
+          reason={ejectPayload?.reason}
           onDismiss={onEjectDismiss}
         />
 

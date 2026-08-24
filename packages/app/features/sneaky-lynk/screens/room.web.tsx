@@ -86,6 +86,8 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
+import { EjectModal } from "../ui/EjectModal";
+import type { EjectKind } from "../ui/EjectModal.types";
 import { classifySneakyLynkError } from "../errors";
 import { videoApi } from "@dvnt/app/features/video/api";
 import { useRoomReactions, GPU_REACTION_CAP } from "../hooks/useRoomReactions";
@@ -390,13 +392,15 @@ function useRoomMembersSync(roomId: string, localUserId: string | undefined) {
   return members;
 }
 
-/** Eject / room-ended watcher — `videoApi.subscribeToRoomEvents`. When the
- *  host kicks/bans the local user (or ends the room) we surface the native
- *  EjectModal copy as a web banner, then leave. */
+/** Eject / room-ended watcher — `videoApi.subscribeToRoomEvents`. When the host
+ *  kicks/bans the local user, or ends the room, this reports WHICH of the three
+ *  happened; EjectModal renders the difference and the user acknowledges it. */
 function useEjectWatcher(
   roomId: string,
   userId: string | undefined,
-  onEject: (reason: string) => void,
+  // Structured, not pre-flattened: kick, ban and room-ended are three
+  // different facts and the modal renders each differently.
+  onEject: (kind: EjectKind, reason?: string) => void,
 ) {
   const onEjectRef = useRef(onEject);
   onEjectRef.current = onEject;
@@ -407,16 +411,12 @@ function useEjectWatcher(
       userId,
       (event) => {
         if (event.type === "room_ended") {
-          onEjectRef.current("This Lynk has ended.");
+          onEjectRef.current("room_ended");
           return;
         }
         if (event.targetId && event.targetId === userId) {
-          const action = (event.payload as any)?.action;
-          onEjectRef.current(
-            action === "ban"
-              ? "You were removed from this Lynk by the host."
-              : "You were removed from this Lynk.",
-          );
+          const payload = event.payload as { action?: string; reason?: string } | undefined;
+          onEjectRef.current(payload?.action === "ban" ? "ban" : "kick", payload?.reason);
         }
       },
     );
@@ -920,28 +920,6 @@ function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
   );
 }
 
-// ── Eject banner (web equivalent of native EjectModal) ────────────────────────
-function EjectBanner({ reason, onDismiss }: { reason: string; onDismiss: () => void }) {
-  return (
-    <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 px-6 text-center">
-      <div className="w-full max-w-sm">
-        <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-500/20">
-          <UserX size={32} className="text-rose-400" />
-        </span>
-        <h2 className="text-xl font-bold text-white">Removed from Lynk</h2>
-        <p className="mt-2 text-sm text-white/60">{reason}</p>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="mt-7 w-full rounded-full bg-white/8 py-3.5 font-semibold text-white hover:bg-white/15"
-        >
-          Back
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── Inner room (rendered INSIDE FishjamProvider so SDK hooks are valid) ───────
 function RoomInner({
   id,
@@ -1007,8 +985,8 @@ function RoomInner({
   const setTimerStartedAt = useRoomUIStore((s) => s.setTimerStartedAt);
   const showTimeUp = useRoomUIStore((s) => s.showTimeUp);
   const setShowTimeUp = useRoomUIStore((s) => s.setShowTimeUp);
-  const ejectReason = useRoomUIStore((s) => s.ejectReason);
-  const setEjectReason = useRoomUIStore((s) => s.setEjectReason);
+  const eject = useRoomUIStore((s) => s.eject);
+  const setEject = useRoomUIStore((s) => s.setEject);
 
   // Stable refs so callbacks/effects never capture stale SDK objects.
   const joinRoomRef = useRef(joinRoom);
@@ -1063,7 +1041,7 @@ function RoomInner({
     realUsername: authUser?.username ?? undefined,
   });
 
-  useEjectWatcher(id, authUser?.id, (reason) => {
+  useEjectWatcher(id, authUser?.id, (kind, reason) => {
     try {
       leaveRoomRef.current();
     } catch {
@@ -1075,7 +1053,7 @@ function RoomInner({
     } catch {
       // ignore
     }
-    setEjectReason(reason);
+    setEject({ kind, reason });
   });
 
   // ── JOIN: sneaky-lynk peer token → Fishjam joinRoom → start media ──────────
@@ -1801,11 +1779,13 @@ function RoomInner({
       <TimeUpDialog open={showTimeUp} onUpgrade={onUpgrade} onLeave={leave} />
 
       {/* Eject banner (kicked / banned / room ended) */}
-      {ejectReason ? (
-        <EjectBanner
-          reason={ejectReason}
+      {eject ? (
+        <EjectModal
+          visible
+          kind={eject.kind}
+          reason={eject.reason}
           onDismiss={() => {
-            setEjectReason(null);
+            setEject(null);
             resetRoomStore();
             endRoomHistory(id);
             router.back();
