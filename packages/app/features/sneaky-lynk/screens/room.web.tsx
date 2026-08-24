@@ -396,18 +396,27 @@ function useRoomMembersSync(roomId: string, localUserId: string | undefined) {
   return members;
 }
 
-/** Eject / room-ended watcher — `videoApi.subscribeToRoomEvents`. When the host
- *  kicks/bans the local user, or ends the room, this reports WHICH of the three
- *  happened; EjectModal renders the difference and the user acknowledges it. */
-function useEjectWatcher(
+/** Host-moderation watcher — `videoApi.subscribeToRoomEvents`.
+ *
+ *  Reports which of kick / ban / room-ended happened so EjectModal can render
+ *  the difference, and applies host mute. Web previously subscribed for ejects
+ *  only, so `mute_peer` and `mute_all` fell on the floor: a host muting a web
+ *  participant got a "Participant has been muted" toast while that
+ *  participant's microphone kept publishing. */
+function useRoomModerationWatcher(
   roomId: string,
   userId: string | undefined,
   // Structured, not pre-flattened: kick, ban and room-ended are three
   // different facts and the modal renders each differently.
   onEject: (kind: EjectKind, reason?: string) => void,
+  /** Host silenced this participant. Muting needs no consent — anyone can
+   *  unmute themselves — so it is applied directly, as native does. */
+  onHostMute: () => void,
 ) {
   const onEjectRef = useRef(onEject);
   onEjectRef.current = onEject;
+  const onHostMuteRef = useRef(onHostMute);
+  onHostMuteRef.current = onHostMute;
   useEffect(() => {
     if (!roomId || !userId) return;
     const unsubscribe = videoApi.subscribeToRoomEvents(
@@ -418,6 +427,17 @@ function useEjectWatcher(
           onEjectRef.current("room_ended");
           return;
         }
+        // Host moderation. Web listened for none of these, so a host muting a
+        // web participant was silently a no-op — the host was told it worked
+        // and the microphone kept running.
+        if (event.type === "mute_all" || (event.type === "mute_peer" && event.targetId === userId)) {
+          onHostMuteRef.current();
+          return;
+        }
+        // `unmute_peer` / `unmute_all` are deliberately NOT handled. Native
+        // turns the microphone back on unconditionally, which activates a
+        // participant's mic without their consent. Web does not copy that; a
+        // host permitting speech is not the same as a host taking the mic.
         if (event.targetId && event.targetId === userId) {
           const payload = event.payload as { action?: string; reason?: string } | undefined;
           onEjectRef.current(payload?.action === "ban" ? "ban" : "kick", payload?.reason);
@@ -1088,7 +1108,7 @@ function RoomInner({
     realUsername: authUser?.username ?? undefined,
   });
 
-  useEjectWatcher(id, authUser?.id, (kind, reason) => {
+  useRoomModerationWatcher(id, authUser?.id, (kind, reason) => {
     try {
       leaveRoomRef.current();
     } catch {
@@ -1101,6 +1121,18 @@ function RoomInner({
       // ignore
     }
     setEject({ kind, reason });
+  },
+  () => {
+    // Host mute: stop publishing and reflect it in the control bar, so the
+    // participant can see they were muted rather than wondering why nobody
+    // is responding.
+    try {
+      micRef.current.stopMicrophone();
+    } catch {
+      // ignore
+    }
+    setMicOn(false);
+    showToast("info", "Muted", "The host muted you.");
   });
 
   // ── JOIN: sneaky-lynk peer token → Fishjam joinRoom → start media ──────────
