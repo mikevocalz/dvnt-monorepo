@@ -233,6 +233,23 @@ assert.ok(
 );
 console.log(`9. OK — web rail: ${WEB_CONFIGS.length} configs filtered + sampled, replay gate wired`);
 
+// --- 10. The two billed-by-default knobs stay decided ------------------------
+// profilesSampleRate is a BILLED category that appeared in no budget line, and
+// the app-hang threshold at the 2s default reports normal cold starts as
+// freezes. Both are now explicit; a silent revert to an SDK default is a quota
+// regression nobody would see in a diff.
+assert.match(
+  expoInit,
+  /profilesSampleRate:\s*config\.profilesSampleRate\s*\?\?\s*0\b/,
+  "profiling must default OFF — its free-tier allowance is unverified",
+);
+assert.match(
+  expoInit,
+  /appHangTimeoutInterval:/,
+  "app-hang tracking must carry an explicit threshold, not the 2s SDK default",
+);
+console.log("10. OK — profiling defaults off, hang threshold explicit");
+
 console.log("\nverify-sentry: all sections pass");
 
 function stripComments(src) {

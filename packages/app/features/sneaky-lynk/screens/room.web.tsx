@@ -430,7 +430,7 @@ function WebViewerDisclosureChip() {
   return (
     <span
       role="status"
-      className="flex items-center gap-2 rounded-lg border border-amber-300/35 bg-amber-300/12 px-2.5 py-1.5 text-[11px] font-semibold leading-tight text-amber-100"
+      className="flex items-center gap-2 rounded-lg border border-[#F5C518]/35 bg-[#F5C518]/12 px-2.5 py-1.5 text-[11px] font-semibold leading-tight text-[#F5C518]"
     >
       <ShieldAlert size={13} className="shrink-0" />
       Web viewers in room — capture protection limited on web
@@ -1090,7 +1090,7 @@ function RoomInner({
 
           <a
             href={`dvnt://sneaky-lynk/room/${id}`}
-            className="w-full max-w-xs rounded-full px-6 py-4 text-center font-bold text-black active:scale-95"
+            className="w-full max-w-xs rounded-lg px-6 py-4 text-center font-bold text-black active:scale-95"
             style={{ backgroundColor: ACCENT }}
           >
             Open in the DVNT app
@@ -1112,7 +1112,7 @@ function RoomInner({
           <button
             type="button"
             onClick={() => router.back()}
-            className="mt-8 rounded-full bg-white/8 px-6 py-3 text-sm font-semibold active:scale-95"
+            className="mt-8 rounded-lg bg-white/8 px-6 py-3 text-sm font-semibold active:scale-95"
           >
             Back
           </button>
@@ -1133,7 +1133,7 @@ function RoomInner({
           <button
             type="button"
             onClick={() => router.back()}
-            className="rounded-full bg-white/8 px-6 py-4 font-semibold active:scale-95"
+            className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
           >
             Back
           </button>
@@ -1146,12 +1146,12 @@ function RoomInner({
     return (
       <RoomShell title={roomTitle} onBack={() => router.back()}>
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-          <h2 className="text-xl font-bold mb-3 text-rose-400">Couldn&apos;t join</h2>
+          <h2 className="text-xl font-bold mb-3 text-[#FC253A]">Couldn&apos;t join</h2>
           <p className="text-white/60 mb-8">{errorMessage}</p>
           <button
             type="button"
             onClick={() => router.back()}
-            className="rounded-full bg-white/8 px-6 py-4 font-semibold active:scale-95"
+            className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
           >
             Back
           </button>
@@ -1248,7 +1248,7 @@ function RoomInner({
               type="button"
               onClick={openHandQueue}
               aria-label={`${raisedHandCount} raised hands`}
-              className="flex items-center gap-1 rounded-xl border border-pink-400/40 bg-pink-400/20 px-2.5 py-1.5 text-xs font-extrabold text-pink-100"
+              className="flex items-center gap-1 rounded-xl border border-[#FF5BFC]/40 bg-[#FF5BFC]/20 px-2.5 py-1.5 text-xs font-extrabold text-[#FF5BFC]"
             >
               <Hand size={13} /> {raisedHandCount}
             </button>
@@ -1298,7 +1298,7 @@ function RoomInner({
 
       {connecting ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4">
-          <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-cyan-500 animate-spin" />
+          <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
           <p className="text-white/60">Connecting…</p>
         </div>
       ) : (
@@ -1593,7 +1593,7 @@ function PreJoinScreen({
         <button
           type="button"
           onClick={() => onJoin(joinAnonymous)}
-          className="w-full max-w-md rounded-full py-4 text-center font-bold text-white active:scale-[0.99]"
+          className="w-full max-w-md rounded-lg py-4 text-center font-bold text-white active:scale-[0.99]"
           style={{ backgroundColor: ROSE }}
         >
           {joinAnonymous ? "Join Anonymously" : "Join Lynk"}
@@ -1668,7 +1668,7 @@ export function SneakyLynkRoomScreen() {
   if (phase === "looking-up") {
     return (
       <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 bg-[#06070d] text-white">
-        <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-cyan-500 animate-spin" />
+        <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
         <p className="text-white/60">Loading Lynk…</p>
       </div>
     );
@@ -1686,7 +1686,7 @@ export function SneakyLynkRoomScreen() {
           <button
             type="button"
             onClick={() => router.back()}
-            className="rounded-full bg-white/8 px-6 py-4 font-semibold active:scale-95"
+            className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
           >
             Back
           </button>

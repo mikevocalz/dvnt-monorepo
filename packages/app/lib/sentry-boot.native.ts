@@ -46,7 +46,8 @@ export function bootSentry(): void {
     expoUpdateId: Updates.updateId ?? undefined,
     updateChannel: Updates.channel ?? undefined,
     platform: Platform.OS as "ios" | "android",
-    profilesSampleRate: 0.1,
+    // Off until the free-tier profile-hour allowance is read; see expo.ts.
+    profilesSampleRate: 0,
     // 2.12: the shared policy, not a private copy. The inline sampler this
     // replaces had neither the chatty->0 bucket nor the Sneaky Lynk boost, so
     // mobile was paying for health/presence spans and dropping 85% of room

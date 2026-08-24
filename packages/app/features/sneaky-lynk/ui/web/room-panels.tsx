@@ -170,7 +170,7 @@ export function ChatPanel({
       open={open}
       onClose={onClose}
       title="Chat"
-      icon={<MessageCircle size={18} className="text-cyan-400" />}
+      icon={<MessageCircle size={18} className="text-[#3FDCFF]" />}
     >
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {comments.length === 0 ? (
@@ -193,7 +193,7 @@ export function ChatPanel({
                   </span>
                   <p
                     className={`mt-0.5 break-words rounded-2xl px-3 py-1.5 text-sm ${
-                      isOwn ? "bg-cyan-500/20 text-white" : "bg-white/8 text-white/90"
+                      isOwn ? "bg-[#3FDCFF]/20 text-white" : "bg-white/8 text-white/90"
                     } ${c.isOptimistic ? "opacity-60" : ""}`}
                   >
                     {c.body}
@@ -213,12 +213,12 @@ export function ChatPanel({
           type="text"
           placeholder="Message…"
           maxLength={500}
-          className="flex-1 rounded-full bg-white/8 px-4 py-2.5 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+          className="flex-1 rounded-lg bg-white/8 px-4 py-2.5 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-1 focus:ring-[#3FDCFF]"
         />
         <button
           type="submit"
           aria-label="Send"
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-cyan-500 text-black hover:bg-cyan-400"
+          className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#3FDCFF] text-black hover:bg-[#3FDCFF]"
         >
           <Send size={18} />
         </button>
@@ -354,7 +354,7 @@ export function ParticipantsPanel({
       open={open}
       onClose={onClose}
       title={`In the room · ${active.length}`}
-      icon={<Users size={18} className="text-cyan-400" />}
+      icon={<Users size={18} className="text-[#3FDCFF]" />}
     >
       <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
         {active.map((m) => {
@@ -373,7 +373,7 @@ export function ParticipantsPanel({
                   {isSelf ? " (you)" : ""}
                 </span>
                 {m.role !== "listener" ? (
-                  <span className="text-[11px] uppercase tracking-wide text-cyan-400/80">
+                  <span className="text-[11px] uppercase tracking-wide text-[#3FDCFF]/80">
                     {m.role}
                   </span>
                 ) : null}
@@ -402,7 +402,7 @@ export function ParticipantsPanel({
                       type="button"
                       onClick={() => onDemote(m.userId)}
                       aria-label="Demote to listener"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#F5C518]/20 text-[#F5C518] hover:bg-[#F5C518]/30"
                     >
                       <UserMinus size={14} />
                     </button>
@@ -411,7 +411,7 @@ export function ParticipantsPanel({
                       type="button"
                       onClick={() => onPromote(m.userId)}
                       aria-label="Promote to co-host"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#3FDCFF]/20 text-[#3FDCFF] hover:bg-[#3FDCFF]/30"
                     >
                       <Crown size={14} />
                     </button>
@@ -420,7 +420,7 @@ export function ParticipantsPanel({
                     type="button"
                     onClick={() => onKick(m.userId)}
                     aria-label="Remove from room"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FC253A]/20 text-[#FC253A] hover:bg-[#FC253A]/30"
                   >
                     <UserX size={14} />
                   </button>

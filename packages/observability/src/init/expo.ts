@@ -31,8 +31,10 @@ export interface ExpoSentryConfig {
   sampleRate?: number;
   /** Sample rate for performance traces (0-1). Default: 0.3 */
   tracesSampleRate?: number;
-  /** Sample rate for profiles (0-1). Default: 0.1 */
+  /** Sample rate for profiles (0-1). Default: 0 — see the init below. */
   profilesSampleRate?: number;
+  /** Seconds before the native watchdog calls it a hang. Default: 5. */
+  appHangTimeoutSeconds?: number;
   /** Extra integrations appended to the SDK defaults (router, replay, feedback). */
   integrations?: unknown[];
   /** Dynamic sampler — wins over tracesSampleRate when provided. */
@@ -89,7 +91,12 @@ export function initExpoSentry(Sentry: any, config: ExpoSentryConfig): void {
     ...(config.tracesSampler
       ? { tracesSampler: config.tracesSampler }
       : { tracesSampleRate: config.tracesSampleRate ?? 0.3 }),
-    profilesSampleRate: config.profilesSampleRate ?? 0.1,
+    // 2.13: profiling is a BILLED category and appears in no budget line. The
+    // free-tier allowance is unverified, so the default is off rather than a
+    // rate nobody has costed — an unverified spend against a quota already at
+    // 113% is the thing that drops real errors. Opt in per-app once the
+    // allowance is read off Settings -> Subscription.
+    profilesSampleRate: config.profilesSampleRate ?? 0,
     ...(config.tracePropagationTargets
       ? { tracePropagationTargets: config.tracePropagationTargets }
       : {}),
@@ -136,8 +143,22 @@ export function initExpoSentry(Sentry: any, config: ExpoSentryConfig): void {
     // Enable automatic performance instrumentation
     enableAutoPerformanceTracing: true,
 
-    // ANR / app-hang detection (native watchdogs)
+    // ANR / app-hang detection (native watchdogs).
+    //
+    // 2.2: the SDK default is 2s, which a cold start on a mid-range Android or
+    // a heavy screen mount exceeds routinely — those fire as hangs and burn
+    // quota describing normal behaviour. 5s still catches a real freeze (the
+    // threshold a user perceives as "stuck" is around 3-5s) without reporting
+    // work that completes.
+    //
+    // A live room is handled separately: features/sneaky-lynk/observability
+    // pauses hang tracking for the duration, because the main thread is
+    // committed to media there and a watchdog cannot tell that from a freeze.
+    //
+    // ponytail: 5s is reasoned, not measured. Calibrate against a real
+    // worst-case join once one has been recorded on device.
     enableAppHangTracking: true,
+    appHangTimeoutInterval: config.appHangTimeoutSeconds ?? 5,
 
     // 2.6: SDK default (options.d.ts:309). A span per touch is not worth
     // its cost in a room; dead-tap analysis is not why we are here.

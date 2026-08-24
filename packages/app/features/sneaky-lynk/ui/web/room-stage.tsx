@@ -87,7 +87,7 @@ export function ControlButton({
   children: React.ReactNode;
 }) {
   const bg = danger
-    ? "bg-rose-500 hover:bg-rose-600"
+    ? "bg-[#FC253A] hover:bg-[#FC253A]"
     : active
       ? "bg-white/15 hover:bg-white/25"
       : "bg-white/30 hover:bg-white/40";
@@ -96,6 +96,8 @@ export function ControlButton({
       type="button"
       onClick={onClick}
       aria-label={label}
+      // Circular by this screen's own convention ("control buttons circular"),
+      // which the design system allows alongside status dots and the shutter.
       className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition-colors ${bg}`}
     >
       {children}
@@ -128,14 +130,14 @@ export function FloatingReactions({
 
 export function ReactionBar({ onSend }: { onSend: (emoji: string) => void }) {
   return (
-    <div className="flex items-center gap-1 rounded-full bg-white/8 px-2 py-1">
+    <div className="flex items-center gap-1 rounded-lg bg-white/8 px-2 py-1">
       {REACTION_EMOJIS.map((emoji) => (
         <button
           key={emoji}
           type="button"
           onClick={() => onSend(emoji)}
           aria-label={`React ${emoji}`}
-          className="rounded-full px-1.5 py-0.5 text-lg transition-transform hover:scale-125"
+          className="rounded-lg px-1.5 py-0.5 text-lg transition-transform hover:scale-125"
         >
           {emoji}
         </button>
@@ -158,7 +160,7 @@ export function TimeUpDialog({
     <div className="absolute inset-0 z-[60] flex items-end justify-center bg-black/90 px-3 pb-[calc(env(safe-area-inset-bottom)+80px)] sm:items-center sm:px-0 sm:pb-0">
       <div className="w-full max-w-md rounded-3xl bg-[#0b0d14] px-6 pb-8 pt-7">
         <span
-          className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full"
+          className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl"
           style={{ backgroundColor: `${PURPLE}20` }}
         >
           <Crown size={26} color={PURPLE} />
@@ -171,7 +173,7 @@ export function TimeUpDialog({
         <button
           type="button"
           onClick={onUpgrade}
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-full py-3.5 font-bold text-white"
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg py-3.5 font-bold text-white"
           style={{ backgroundColor: PURPLE }}
         >
           <Zap size={16} /> Upgrade plan
@@ -179,7 +181,7 @@ export function TimeUpDialog({
         <button
           type="button"
           onClick={onLeave}
-          className="mt-3 w-full rounded-full bg-white/8 py-3.5 font-semibold text-white/80 hover:bg-white/15"
+          className="mt-3 w-full rounded-lg bg-white/8 py-3.5 font-semibold text-white/80 hover:bg-white/15"
         >
           Leave Lynk
         </button>
