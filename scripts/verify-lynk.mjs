@@ -127,4 +127,36 @@ assert.deepStrictEqual(
 );
 console.log("5. OK — session machine has no platform or transport import");
 
+// --- 6. Promoted components carry the whole four-file shape ------------------
+// A half-promotion is worse than none: a missing .web.tsx resolves to the inert
+// base and the component silently renders nothing on that platform, which looks
+// like a layout bug rather than a missing file.
+const uiVideo = join(root, "packages/ui/src/video");
+const bases = execFileSync(
+  "sh",
+  ["-c", `ls ${JSON.stringify(uiVideo)} | grep -E '^[A-Z][A-Za-z]*\\.tsx$'`],
+  { encoding: "utf8" },
+)
+  .trim()
+  .split("\n")
+  .filter(Boolean)
+  .map((f) => f.replace(/\.tsx$/, ""));
+assert.ok(bases.length > 0, "found no promoted components — the scan drifted");
+for (const name of bases) {
+  for (const suffix of [".types.ts", ".tsx", ".web.tsx", ".native.tsx"]) {
+    assert.ok(
+      existsSync(join(uiVideo, name + suffix)),
+      `${name} is promoted but missing ${name}${suffix} — code-standards §2 four-file shape`,
+    );
+  }
+  // The base must be inert, or it would render on top of the platform file.
+  const base = readFileSync(join(uiVideo, `${name}.tsx`), "utf8");
+  assert.match(
+    base,
+    new RegExp(`export function ${name}\\([^)]*\\):\\s*null`),
+    `${name}.tsx must be the inert base (returns null) — Metro/web resolve a platform file`,
+  );
+}
+console.log(`6. OK — ${bases.length} promoted components have all four files and an inert base`);
+
 console.log("\nverify-lynk: all sections pass");

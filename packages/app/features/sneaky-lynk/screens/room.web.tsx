@@ -79,6 +79,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { ConnectionBanner } from "@dvnt/ui";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -425,26 +426,6 @@ function useEjectWatcher(
     );
     return unsubscribe;
   }, [roomId, userId]);
-}
-
-// ── Connection banner (reconnecting / lost) ───────────────────────────────────
-function ConnectionBanner({ status }: { status: string }) {
-  if (status === "connected" || status === "idle") return null;
-  const reconnecting = status === "connecting";
-  return (
-    <div
-      className="absolute inset-x-0 top-0 z-30 flex items-center justify-center gap-2 py-1.5 text-xs font-semibold"
-      style={{
-        backgroundColor: reconnecting
-          ? "rgba(250, 204, 21, 0.92)"
-          : "rgba(252, 37, 58, 0.92)",
-        color: reconnecting ? "#1a1a00" : "#fff",
-      }}
-    >
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-      {reconnecting ? "Reconnecting…" : "Connection lost"}
-    </div>
-  );
 }
 
 function CaptureNotificationBannerWeb() {
@@ -1620,7 +1601,17 @@ function RoomInner({
       onCaptureAttempt={(kind) => captureBroadcast.notifyLocalCapture(kind)}
     >
       <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white">
-      <ConnectionBanner status={connecting ? "connecting" : peerStatus} />
+      <ConnectionBanner
+        phase={
+          connecting
+            ? "connecting"
+            : peerStatus === "connected" || peerStatus === "idle"
+              ? "connected"
+              : peerStatus === "connecting"
+                ? "reconnecting"
+                : "disconnected"
+        }
+      />
       <CaptureNotificationBannerWeb />
 
       {/* Header */}

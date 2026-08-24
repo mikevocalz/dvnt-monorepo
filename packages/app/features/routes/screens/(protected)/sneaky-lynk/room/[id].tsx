@@ -55,7 +55,6 @@ import {
   ListenerGrid,
   ControlsBar,
   REACTION_EMOJIS,
-  ConnectionBanner,
   EjectModal,
   ChatSheet,
   RoomTimer,
@@ -98,6 +97,7 @@ import {
   GPU_REACTION_CAP,
 } from "@dvnt/app/features/sneaky-lynk";
 import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
+import { ConnectionBanner } from "@dvnt/ui";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
 import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
@@ -2516,7 +2516,7 @@ function RoomLayout({
         }}
       />
 
-      <ConnectionBanner state={connectionState} />
+      <ConnectionBanner phase={connectionState} />
       {presenceEvent ? <PresenceToast event={presenceEvent} /> : null}
 
       <View className="flex-1" style={{ paddingTop: insets.top }}>

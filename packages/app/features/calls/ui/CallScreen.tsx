@@ -43,7 +43,7 @@ import {
   PermsDeniedStage,
 } from "./stages/TerminalStages";
 import { DevHud } from "./DevHud";
-import { ConnectionBanner } from "@dvnt/app/features/video";
+import { ConnectionBanner } from "@dvnt/ui";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -389,10 +389,10 @@ export function CallScreen({
       {connectionStatus !== "connected" && mode !== "RECONNECTING" && (
           <View style={styles.bannerWrap}>
             <ConnectionBanner
-              connectionState={{
-                status: connectionStatus,
-                error: error || undefined,
-              }}
+              // "error" is the only value outside the shared vocabulary; a
+              // call in that state is down, and `detail` carries the why.
+              phase={connectionStatus === "error" ? "disconnected" : connectionStatus}
+              detail={error || undefined}
             />
           </View>
         )}

@@ -90,6 +90,8 @@ export type { DrawerProps } from './form/Drawer';
 
 // ── Shared video tile (Lynk MoQ livestream + Fishjam calls) ──────────────────
 export { VideoTile } from './video/VideoTile';
+export { ConnectionBanner } from './video/ConnectionBanner';
+export type { ConnectionBannerProps, ConnectionPhase } from './video/ConnectionBanner.types';
 export type { VideoTileProps, MoqViewerSource } from './video/VideoTile.types';
 
 // ── React-equivalent media wrappers (Phase 0) ────────────────────────────────
