@@ -33,8 +33,6 @@ export interface ExpoSentryConfig {
   tracesSampleRate?: number;
   /** Sample rate for profiles (0-1). Default: 0.1 */
   profilesSampleRate?: number;
-  /** Enable session replay. Default: false */
-  replaysEnabled?: boolean;
   /** Extra integrations appended to the SDK defaults (router, replay, feedback). */
   integrations?: unknown[];
   /** Dynamic sampler — wins over tracesSampleRate when provided. */
@@ -44,6 +42,9 @@ export interface ExpoSentryConfig {
   /** Enable Sentry Logs (structured logging). Default: false. Verified option
    *  `enableLogs` — @sentry/core options.d.ts:530. Powers the logs.ts seam. */
   enableLogs?: boolean;
+  /** Appended to MOBILE_IGNORE_ERRORS. Verified: `ignoreErrors` —
+   *  @sentry/core options.d.ts (ClientOptions). */
+  ignoreErrors?: (string | RegExp)[];
 }
 
 /**
@@ -93,6 +94,13 @@ export function initExpoSentry(Sentry: any, config: ExpoSentryConfig): void {
       ? { tracePropagationTargets: config.tracePropagationTargets }
       : {}),
 
+    // Noise floor — neither rail had one before (audit §2 table). Deliberately
+    // has no built-in list: the org this repo's DSN reports to could not be
+    // read from here (token sees org `deviant`, 0 issues/90d; the audit cites
+    // `5th-galaxy-studios`), so any default list would be guessed noise.
+    // ponytail: caller-supplied only — populate from the real top-issues list.
+    ...(config.ignoreErrors ? { ignoreErrors: config.ignoreErrors } : {}),
+
     // Privacy
     beforeSend: createBeforeSend(),
     beforeSendTransaction: createBeforeSendTransaction(),
@@ -117,15 +125,13 @@ export function initExpoSentry(Sentry: any, config: ExpoSentryConfig): void {
       },
     },
 
-    // Don't send in development
-    enableInExpoDevelopment: false,
-
     // §2.4: screenshots are NOT masked by the RN SDK — a crash frame can
     // contain DMs or profile content, so they never leave the device.
     attachScreenshot: false,
 
-    // Attach view hierarchy for debugging (structure only, no pixels/text)
-    attachViewHierarchy: true,
+    // 2.1: SDK default (options.d.ts:231). `true` installs a main-thread
+    // native view-tree walk at error time — the first half of the crash loop.
+    attachViewHierarchy: false,
 
     // Enable automatic performance instrumentation
     enableAutoPerformanceTracing: true,
@@ -133,11 +139,9 @@ export function initExpoSentry(Sentry: any, config: ExpoSentryConfig): void {
     // ANR / app-hang detection (native watchdogs)
     enableAppHangTracking: true,
 
-    // Taps become spans — dead-tap patterns show up in traces.
-    enableUserInteractionTracing: true,
-
-    // Enable Hermes symbolication
-    enableHermes: true,
+    // 2.6: SDK default (options.d.ts:309). A span per touch is not worth
+    // its cost in a room; dead-tap analysis is not why we are here.
+    enableUserInteractionTracing: false,
   });
 
   // Wire up the observability layer

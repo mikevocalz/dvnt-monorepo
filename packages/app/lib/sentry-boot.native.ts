@@ -1,12 +1,15 @@
 /**
  * Sentry boot — NATIVE (dvnt-mobile). Imported first by the root layout.
- * All symbols verified against @sentry/react-native 8.14.0:
+ * All symbols verified against @sentry/react-native 8.22.0 (installed —
+ * apps/mobile/package.json:69):
  *   - expoRouterIntegration (dist/js/tracing/expoRouterIntegration.d.ts) —
  *     navigation transactions + TTID without a manual nav-container ref.
- *   - mobileReplayIntegration (dist/js/replay/mobilereplay.d.ts) — §2.4 full
- *     masking (maskAllText + maskAllImages + maskAllVectors are its defaults;
- *     set explicitly anyway so a default change can't unmask us).
+ *   - turboModuleContextIntegration (dist/js/integrations/exports.d.ts:30),
+ *     TurboModuleContextOptions (turboModuleContext.d.ts:15-35).
  *   - enableAppHangTracking / enableUserInteractionTracing (dist/js/options.d.ts).
+ * Session replay is gone (audit 2.3): mobileReplayIntegration is no longer
+ * pushed here, and the SDK only adds its own when replaysSessionSampleRate /
+ * replaysOnErrorSampleRate is set (default.js:117-121) — neither is.
  * The `.ts` sibling is the no-op web fork.
  */
 import * as Sentry from "@sentry/react-native";
@@ -14,6 +17,7 @@ import Constants from "expo-constants";
 import * as Updates from "expo-updates";
 import { Platform } from "react-native";
 import { initExpoSentry } from "@dvnt/observability/init/expo";
+import { dvntTracesSampler } from "@dvnt/observability/sampling";
 
 export { Sentry };
 
@@ -43,20 +47,27 @@ export function bootSentry(): void {
     updateChannel: Updates.channel ?? undefined,
     platform: Platform.OS as "ios" | "android",
     profilesSampleRate: 0.1,
-    // A1: boost the product-question flows to 1.0, 0.15 elsewhere.
-    tracesSampler: (ctx) => {
-      const name = ctx.name || "";
-      if (/onboarding|welcome|verification|checkout|auth/i.test(name)) return 1.0;
-      return 0.15;
-    },
+    // 2.12: the shared policy, not a private copy. The inline sampler this
+    // replaces had neither the chatty->0 bucket nor the Sneaky Lynk boost, so
+    // mobile was paying for health/presence spans and dropping 85% of room
+    // joins — the traces the room work needs. See @dvnt/observability/sampling.
+    tracesSampler: dvntTracesSampler,
     // Stitch app → Supabase edge → DB traces.
     tracePropagationTargets: [/npfjanxturvmjyevoyfo\.supabase\.co/],
     integrations: [
       Sentry.expoRouterIntegration(),
-      Sentry.mobileReplayIntegration({
-        maskAllText: true,
-        maskAllImages: true,
-        maskAllVectors: true,
+      // 2.4 — the single largest quota item. The SDK installs this by default
+      // (default.js:126-129) with enableAggregateStats on, which captureEvents
+      // a billed `level:'info'` event every 30 s per session
+      // (turboModuleContextFlush.js:66-68, DEFAULT_AGGREGATE_FLUSH_INTERVAL_MS
+      // = 30000). 120 events/hour/session against a 5,000/month quota.
+      // A non-default instance appended after the defaults wins the name
+      // collision (@sentry/core integration.js:8-19 filterDuplicates), so the
+      // wrapping stays — only the periodic billed flush and the slow-call
+      // breadcrumbs go. Native-crash attribution (#6163) is unaffected.
+      Sentry.turboModuleContextIntegration({
+        enableAggregateStats: false,
+        slowCallThresholdMs: 0,
       }),
     ],
   });

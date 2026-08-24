@@ -1,10 +1,13 @@
 /**
  * Global JS Error Handler — OTA-safe
  *
+ * One job: persist the last uncaught JS error to MMKV so the NEXT session can
+ * report it. That is all. Sentry owns reporting; this owns survival across a
+ * process death, which Sentry cannot do from inside the dying process.
+ *
  * What this catches:
  *   1. Any uncaught JavaScript exception via ErrorUtils.setGlobalHandler
- *   2. Any unhandled Promise rejection
- *   3. Errors thrown from TurboModule async returns that bubble back to JS
+ *   2. Errors thrown from TurboModule async returns that bubble back to JS
  *      (some throwing native methods convert their NSException into a
  *      jsi::JSError that DOES surface in JS — those are catchable here)
  *
@@ -34,6 +37,8 @@ import { mmkv } from "@dvnt/app/lib/mmkv-zustand";
 
 interface PersistedJSError {
   timestamp: string;
+  /** `promise-rejection` is never written any more (see the header) — the
+   *  member stays so records persisted by an older build still parse. */
   source: "errorutils" | "promise-rejection";
   isFatal?: boolean;
   message: string;
@@ -91,7 +96,7 @@ function captureError(
 }
 
 /**
- * Install both error handlers. Idempotent — calling twice is a no-op.
+ * Install the ErrorUtils handler. Idempotent — calling twice is a no-op.
  */
 export function installGlobalErrorHandler(): void {
   if (_installed) return;
@@ -135,37 +140,13 @@ export function installGlobalErrorHandler(): void {
     // ErrorUtils not present (e.g. running outside RN) — skip.
   }
 
-  // ── 2. Unhandled promise rejections ──────────────────────────────
-  // Hermes implements the promise-rejection-tracker if you opt in via
-  // `HermesInternal.enablePromiseRejectionTracker`. Without that hook
-  // we still get reasonable coverage from `unhandledrejection` event
-  // listeners which RN polyfills via `promise.config.js`-style setup.
-  try {
-    const hermes = (globalThis as unknown as {
-      HermesInternal?: {
-        enablePromiseRejectionTracker?: (opts: {
-          allRejections: boolean;
-          onUnhandled: (id: number, rejection: unknown) => void;
-        }) => void;
-      };
-    }).HermesInternal;
-    if (hermes?.enablePromiseRejectionTracker) {
-      hermes.enablePromiseRejectionTracker({
-        allRejections: true,
-        onUnhandled: (_id, rejection) => {
-          try {
-            const report = captureError(rejection, "promise-rejection");
-            logBanner(report);
-            persist(report);
-          } catch {
-            /* ignore */
-          }
-        },
-      });
-    }
-  } catch {
-    // Hermes unavailable — skip.
-  }
+  // 2.7: unhandled promise rejections are NOT handled here. Hermes'
+  // `enablePromiseRejectionTracker` is single-slot — the last caller wins —
+  // and the SDK's reactNativeErrorHandlersIntegration claims it from
+  // Sentry.init (reactnativeerrorhandlers.js:37-41), which runs at
+  // features/routes/screens/_layout.tsx:185, after this module's import on
+  // line 5. A second registration here is silently replaced, so it was dead
+  // code that made the MMKV rejection path look live. Sentry owns rejections.
 }
 
 /**
