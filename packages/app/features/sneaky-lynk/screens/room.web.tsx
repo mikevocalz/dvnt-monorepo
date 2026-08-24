@@ -79,7 +79,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ConnectionBanner } from "@dvnt/ui";
+import { ConnectionBanner, RoomTimer } from "@dvnt/ui";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -108,10 +108,6 @@ const ACCENT = "#3FDCFF";
 const ROSE = "#FC253A";
 const PURPLE = "#8A40CF";
 
-/** Free Sneaky Lynk session length — mirrors `FREE_ROOM_DURATION_MS` in the
- *  native `RoomTimer`. Free hosts get a 5-minute countdown then a paywall. */
-const FREE_ROOM_DURATION_MS = 5 * 60 * 1000;
-const COUNTDOWN_THRESHOLD_MS = 60 * 1000;
 const REACTION_EMOJIS = ["❤️", "🔥", "👏", "😮", "😂", "🙌"];
 
 /** A room member as projected for the web moderation panels — the web-safe
@@ -840,46 +836,6 @@ function ParticipantsPanel({
         })}
       </div>
     </SidePanel>
-  );
-}
-
-// ── Free-host countdown badge (mirrors native RoomTimer) ──────────────────────
-function WebRoomTimer({
-  startedAt,
-  onTimeUp,
-}: {
-  startedAt: number;
-  onTimeUp: () => void;
-}) {
-  const [remainingMs, setRemainingMs] = useState(() =>
-    Math.max(0, FREE_ROOM_DURATION_MS - (Date.now() - startedAt)),
-  );
-  const onTimeUpRef = useRef(onTimeUp);
-  onTimeUpRef.current = onTimeUp;
-  const firedRef = useRef(false);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const remaining = Math.max(0, FREE_ROOM_DURATION_MS - (Date.now() - startedAt));
-      setRemainingMs(remaining);
-      if (remaining <= 0 && !firedRef.current) {
-        firedRef.current = true;
-        clearInterval(interval);
-        onTimeUpRef.current();
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [startedAt]);
-
-  if (remainingMs > COUNTDOWN_THRESHOLD_MS || remainingMs <= 0) return null;
-  const totalSeconds = Math.ceil(remainingMs / 1000);
-  const display = `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60)
-    .toString()
-    .padStart(2, "0")}`;
-  return (
-    <span className="flex animate-pulse items-center gap-1.5 rounded-lg bg-rose-500/90 px-2.5 py-1.5 text-[13px] font-bold text-white">
-      <Clock size={14} /> {display}
-    </span>
   );
 }
 
@@ -1646,7 +1602,7 @@ function RoomInner({
         </div>
         <span className="flex shrink-0 items-center gap-1.5">
           {showTimer ? (
-            <WebRoomTimer
+            <RoomTimer
               startedAt={timerStartedAt}
               onTimeUp={() => {
                 setShowTimeUp(true);

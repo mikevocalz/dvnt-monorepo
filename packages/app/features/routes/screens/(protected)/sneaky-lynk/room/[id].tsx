@@ -57,7 +57,6 @@ import {
   REACTION_EMOJIS,
   EjectModal,
   ChatSheet,
-  RoomTimer,
   RoomParticipantsSheet,
   HandQueueSheet,
   RemoteAudioLayer,
@@ -97,7 +96,7 @@ import {
   GPU_REACTION_CAP,
 } from "@dvnt/app/features/sneaky-lynk";
 import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
-import { ConnectionBanner } from "@dvnt/ui";
+import { ConnectionBanner, RoomTimer } from "@dvnt/ui";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
 import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
@@ -2774,9 +2773,12 @@ function RoomLayout({
             onParticipantPress={onParticipantPress}
             stageHeight={stageContentHeight}
             hostOverlay={
-              !hideTimer ? (
+              // No startedAt means no server fact to count down from. Falling
+              // back to mount time would invent one, and two clients in the
+              // same room would then disagree about when it ends.
+              !hideTimer && timerStartedAt != null ? (
                 <RoomTimer
-                  key={timerStartedAt ?? "mount"}
+                  key={timerStartedAt}
                   onTimeUp={onTimeUp ?? onLeave}
                   startedAt={timerStartedAt}
                 />
