@@ -221,7 +221,12 @@ assert.ok(
 );
 
 // Both legs, not just one: a seam only one platform honours is a divergence.
-const sessionLegs = consumers("useRoomSession", /session\/useRoomSession\.ts$/);
+// A "leg" CALLS the hook. Importing a type from the module does not make a
+// file a room leg — moq-transport.ts imports RoomTransportStatus and is an
+// adapter, not a screen.
+const sessionLegs = consumers("useRoomSession", /session\/useRoomSession\.ts$/).filter((f) =>
+  /useRoomSession\s*\(/.test(strip(read(f))),
+);
 const hasNative = sessionLegs.some((f) => f.includes("(protected)/sneaky-lynk/room/"));
 const hasWeb = sessionLegs.some((f) => f.endsWith("room.web.tsx"));
 assert.ok(hasNative, "the native room does not drive the session machine");
