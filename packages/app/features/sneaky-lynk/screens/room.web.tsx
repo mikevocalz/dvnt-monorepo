@@ -87,6 +87,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
 import { getSneakyUserLabel } from "../ui/user-labels";
+import { buildHandQueue, HAND_QUEUE_COPY } from "../ui/hand-queue";
 import { EjectModal } from "../ui/EjectModal";
 import type { EjectKind } from "../ui/EjectModal.types";
 import { classifySneakyLynkError } from "../errors";
@@ -110,6 +111,8 @@ import { useRoomUIStore } from "../stores/room-ui-store";
 const ACCENT = "#3FDCFF";
 const ROSE = "#FC253A";
 const PURPLE = "#8A40CF";
+/** Deviant gradient stop 3 — likes/social, and the raised-hand marker. */
+const MAGENTA = "#FF5BFC";
 
 const REACTION_EMOJIS = ["❤️", "🔥", "👏", "😮", "😂", "🙌"];
 
@@ -687,58 +690,95 @@ function HandQueuePanel({
   onClose,
   order,
   members,
-  onPromote,
+  onInviteToSpeak,
+  onLowerHand,
+  onLowerAll,
 }: {
   open: boolean;
   onClose: () => void;
   order: string[];
   members: WebMember[];
-  onPromote: (userId: string) => void;
+  onInviteToSpeak: (userId: string) => void;
+  onLowerHand: (userId: string) => void;
+  onLowerAll: () => void;
 }) {
-  const byId = new Map(members.map((m) => [m.userId, m]));
+  // Queue semantics, labels and copy are shared with native — see ui/hand-queue.
+  const queue = buildHandQueue(
+    order,
+    members.map((m) => ({
+      userId: m.userId,
+      username: m.username,
+      displayName: m.displayName,
+      avatar: m.avatar,
+      isAnonymous: m.isAnonymous,
+      anonLabel: m.anonLabel,
+    })),
+  );
+
   return (
     <SidePanel
       open={open}
       onClose={onClose}
-      title={`Raised hands · ${order.length}`}
-      icon={<Hand size={18} className="text-pink-400" />}
+      title={`${HAND_QUEUE_COPY.title} · ${queue.length}`}
+      icon={<Hand size={18} color={MAGENTA} />}
     >
       <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
-        {order.length === 0 ? (
+        {queue.length === 0 ? (
           <p className="mt-8 text-center text-sm text-white/40">
-            No raised hands right now.
+            {HAND_QUEUE_COPY.empty}
           </p>
         ) : (
-          order.map((userId, i) => {
-            const m = byId.get(userId);
-            // getSneakyUserLabel, not a hand-rolled fallback chain: it gates
-            // on isAnonymous FIRST, so a missing anonLabel yields "Anonymous"
-            // rather than falling through to the person's real name.
-            const name = getSneakyUserLabel(m);
-            return (
-              <div
-                key={userId}
-                className="flex items-center gap-3 rounded-xl bg-white/[0.04] px-3 py-2"
+          queue.map((entry) => (
+            <div
+              key={entry.userId}
+              className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2"
+            >
+              <span className="w-4 shrink-0 text-center font-mono text-xs font-bold text-white/40">
+                {entry.position}
+              </span>
+              <SquareAvatar uri={entry.avatar} name={entry.label} size={36} />
+              <span
+                className={`flex-1 truncate text-sm font-medium ${
+                  entry.departed ? "italic text-white/40" : "text-white"
+                }`}
               >
-                <span className="text-xs font-bold tabular-nums text-white/40">
-                  {i + 1}
-                </span>
-                <SquareAvatar uri={m?.avatar} name={name} size={36} />
-                <span className="flex-1 truncate text-sm font-medium text-white">
-                  {name}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onPromote(userId)}
-                  className="flex items-center gap-1 rounded-full bg-cyan-500/20 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/30"
-                >
-                  <Crown size={13} /> Bring up
-                </button>
-              </div>
-            );
-          })
+                {entry.label}
+              </span>
+              {entry.departed ? null : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onInviteToSpeak(entry.userId)}
+                    className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
+                    style={{ backgroundColor: `${ACCENT}20`, color: ACCENT }}
+                  >
+                    <Crown size={13} /> {HAND_QUEUE_COPY.invite}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onLowerHand(entry.userId)}
+                    aria-label={`${HAND_QUEUE_COPY.lower} ${entry.label}`}
+                    className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-semibold text-white/60 transition-colors hover:bg-white/[0.08] hover:text-white"
+                  >
+                    {HAND_QUEUE_COPY.lower}
+                  </button>
+                </>
+              )}
+            </div>
+          ))
         )}
       </div>
+      {queue.length > 0 ? (
+        <footer className="border-t border-white/10 px-4 py-3">
+          <button
+            type="button"
+            onClick={onLowerAll}
+            className="w-full rounded-lg bg-white/[0.08] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/15"
+          >
+            {HAND_QUEUE_COPY.lowerAll}
+          </button>
+        </footer>
+      ) : null}
     </SidePanel>
   );
 }
@@ -959,6 +999,10 @@ function RoomInner({
   const openHandQueue = useRoomStore((s) => s.openHandQueue);
   const closeHandQueue = useRoomStore((s) => s.closeHandQueue);
   const raisedHandOrder = useRoomStore((s) => s.raisedHandOrder);
+  // Lowering a hand is local moderation state, exactly as on native
+  // (handleLowerHand / handleLowerAll) — no server round-trip.
+  const setRaisedHand = useRoomStore((s) => s.setRaisedHand);
+  const clearRaisedHands = useRoomStore((s) => s.clearRaisedHands);
   const promoteListener = useRoomStore((s) => s.promoteListener);
   const removeCoHost = useRoomStore((s) => s.removeCoHost);
 
@@ -1759,8 +1803,13 @@ function RoomInner({
         onClose={closeHandQueue}
         order={raisedHandOrder}
         members={members}
-        onPromote={(uid) => {
+        onInviteToSpeak={(uid) => {
           promote(uid);
+          closeHandQueue();
+        }}
+        onLowerHand={(uid) => setRaisedHand(uid, false)}
+        onLowerAll={() => {
+          clearRaisedHands();
           closeHandQueue();
         }}
       />
