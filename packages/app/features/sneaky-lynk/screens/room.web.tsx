@@ -1089,6 +1089,8 @@ function RoomInner({
   const isPaidHost = useRoomUIStore((s) => s.isPaidHost);
   const setIsPaidHost = useRoomUIStore((s) => s.setIsPaidHost);
   const timerStartedAt = useRoomUIStore((s) => s.timerStartedAt);
+  const serverEndsAt = useRoomUIStore((s) => s.serverEndsAt);
+  const setServerEndsAt = useRoomUIStore((s) => s.setServerEndsAt);
   const setTimerStartedAt = useRoomUIStore((s) => s.setTimerStartedAt);
   const showTimeUp = useRoomUIStore((s) => s.showTimeUp);
   const setShowTimeUp = useRoomUIStore((s) => s.setShowTimeUp);
@@ -1213,6 +1215,10 @@ function RoomInner({
       }
 
       const { token, peer, user: joinedUser, room } = result.data;
+      // The server's session deadline (video_rooms.ends_at). `undefined` means
+      // a backend predating the gate, and the entitlement fallback below still
+      // applies; `null` means unlimited; a value means count down to THIS.
+      setServerEndsAt(room.endsAt ?? null);
       setRoomSnapshot({
         id: room.id,
         createdBy: "",
@@ -1686,7 +1692,19 @@ function RoomInner({
   const connecting = phase === "joining" || phase === "connecting";
   const isHost = isHostRef.current;
   const raisedHandCount = raisedHandOrder.length;
-  const showTimer = isHost && isPaidHost === false && timerStartedAt != null;
+  // The server decides whether this session is limited; the client displays it.
+  // Falls back to the entitlement read only when the backend returned no
+  // endsAt field at all (pre-deploy), which is the only case the client still
+  // has to guess.
+  const serverLimited = serverEndsAt != null;
+  const showTimer =
+    isHost &&
+    timerStartedAt != null &&
+    (serverEndsAt !== undefined ? serverLimited : isPaidHost === false);
+  const timerDurationMs =
+    serverEndsAt != null && timerStartedAt != null
+      ? new Date(serverEndsAt).getTime() - timerStartedAt
+      : undefined;
 
   return (
     <SecureCaptureBoundary
@@ -1742,6 +1760,7 @@ function RoomInner({
           {showTimer ? (
             <RoomTimer
               startedAt={timerStartedAt}
+              durationMs={timerDurationMs}
               onTimeUp={() => {
                 setShowTimeUp(true);
                 // Free session is over — stop broadcasting so no camera/mic keeps

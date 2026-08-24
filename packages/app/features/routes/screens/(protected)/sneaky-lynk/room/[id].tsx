@@ -2231,7 +2231,19 @@ function ServerRoom({
         raisedHandCount={raisedHandOrder.length}
         onOpenHandQueue={isHost ? openHandQueue : undefined}
         onTimeUp={handleTimeUp}
-        hideTimer={isHost && isPaidHost}
+        // The server decides whether this session is limited (video_rooms
+        // .ends_at); the entitlement read is only the fallback for a backend
+        // that predates the gate and returns no field at all.
+        hideTimer={
+          videoRoom.serverEndsAt !== undefined
+            ? videoRoom.serverEndsAt === null
+            : isHost && isPaidHost
+        }
+        timerDurationMs={
+          videoRoom.serverEndsAt != null && timerStartedAt != null
+            ? new Date(videoRoom.serverEndsAt).getTime() - timerStartedAt
+            : undefined
+        }
         timerStartedAt={timerStartedAt}
       />
 
@@ -2430,6 +2442,7 @@ function RoomLayout({
   onOpenHandQueue,
   onTimeUp,
   hideTimer,
+  timerDurationMs,
   timerStartedAt,
 }: {
   insets: any;
@@ -2479,6 +2492,8 @@ function RoomLayout({
   onOpenHandQueue?: () => void;
   onTimeUp?: () => void;
   hideTimer?: boolean;
+  /** Derived from the server deadline; undefined keeps the free-tier default. */
+  timerDurationMs?: number;
   timerStartedAt?: number;
 }) {
   // GPU reactions carry a real 50-concurrent cap; the RN overlay stays capped
@@ -2801,6 +2816,7 @@ function RoomLayout({
                   key={timerStartedAt}
                   onTimeUp={onTimeUp ?? onLeave}
                   startedAt={timerStartedAt}
+                  durationMs={timerDurationMs}
                 />
               ) : null
             }

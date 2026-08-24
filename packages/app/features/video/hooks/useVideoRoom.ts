@@ -546,6 +546,10 @@ export function useVideoRoom({
       tokenExpiresAtRef.current = new Date(expiresAt);
       currentJtiRef.current = peer.id;
 
+      // The server's session deadline. Stored, not interpreted — the client
+      // timer counts down to it and video_join_room enforces it.
+      getStore().setServerEndsAt(room.endsAt ?? null);
+
       // Update store with room + localUser
       const s = getStore();
       s.setRoom({
@@ -848,6 +852,7 @@ export function useVideoRoom({
     isCameraOn: store.isCameraOn,
     isMicOn: store.isMicOn,
     hostMuteLocked: store.hostMuteLocked,
+    serverEndsAt: store.serverEndsAt,
     isFrontCamera: store.isFrontCamera,
     isEjected: store.isEjected,
     ejectReason: store.ejectReason,

@@ -94,6 +94,10 @@ interface VideoRoomStoreState {
   /** The host is holding this participant muted. While true they cannot turn
    *  their own microphone on — see lib/video/host-mute. */
   hostMuteLocked: boolean;
+  /** Server session deadline from the join response. `undefined` = backend
+   *  predates the gate, `null` = unlimited. Display only — video_join_room
+   *  enforces it. */
+  serverEndsAt: string | null | undefined;
   isFrontCamera: boolean;
   isSpeakerOn: boolean;
   localStream: MediaStream | null;
@@ -142,6 +146,7 @@ interface VideoRoomStoreActions {
   setCameraOn: (on: boolean) => void;
   setMicOn: (on: boolean) => void;
   setHostMuteLocked: (locked: boolean) => void;
+  setServerEndsAt: (v: string | null) => void;
   toggleCamera: () => void;
   toggleMic: () => void;
   setFrontCamera: (front: boolean) => void;
@@ -191,6 +196,7 @@ const initialState: VideoRoomStoreState = {
   isCameraOn: false,
   isMicOn: false,
   hostMuteLocked: false,
+  serverEndsAt: undefined as string | null | undefined,
   isFrontCamera: true,
   isSpeakerOn: true,
   localStream: null,
@@ -316,6 +322,7 @@ export const useVideoRoomStore = create<VideoRoomStore>((set, get) => ({
   },
   setMicOn: (isMicOn) => set({ isMicOn }),
   setHostMuteLocked: (hostMuteLocked) => set({ hostMuteLocked }),
+  setServerEndsAt: (serverEndsAt) => set({ serverEndsAt }),
   toggleCamera: () => {
     const { callType, isCameraOn } = get();
     if (!isCameraOn && callType === "audio") {

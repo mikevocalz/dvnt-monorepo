@@ -58,6 +58,10 @@ interface RoomUIStore {
   /** The host is holding this participant muted. While true they cannot turn
    *  their own microphone on — see lib/video/host-mute. */
   hostMuteLocked: boolean;
+  /** Server session deadline (video_rooms.ends_at) from the join response.
+   *  `undefined` = backend predates the gate, `null` = unlimited, ISO = limited.
+   *  The timer DISPLAYS this; it never decides it. */
+  serverEndsAt: string | null | undefined;
 
   setInitStarted: (v: boolean) => void;
   setPhase: (v: RoomPhase) => void;
@@ -74,6 +78,7 @@ interface RoomUIStore {
   setShowTimeUp: (v: boolean) => void;
   setEject: (v: { kind: EjectKind; reason?: string } | null) => void;
   setHostMuteLocked: (v: boolean) => void;
+  setServerEndsAt: (v: string | null) => void;
   reset: () => void;
 }
 
@@ -92,6 +97,7 @@ const initialUIState = {
   showTimeUp: false,
   eject: null as { kind: EjectKind; reason?: string } | null,
   hostMuteLocked: false,
+  serverEndsAt: undefined as string | null | undefined,
 };
 
 export const useRoomUIStore = create<RoomUIStore>((set) => ({
@@ -112,5 +118,6 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setShowTimeUp: (showTimeUp) => set({ showTimeUp }),
   setEject: (eject) => set({ eject }),
   setHostMuteLocked: (hostMuteLocked) => set({ hostMuteLocked }),
+  setServerEndsAt: (serverEndsAt) => set({ serverEndsAt }),
   reset: () => set({ ...initialUIState }),
 }));
