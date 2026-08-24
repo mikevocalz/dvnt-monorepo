@@ -847,6 +847,7 @@ export function useVideoRoom({
     connectionState: store.connectionState,
     isCameraOn: store.isCameraOn,
     isMicOn: store.isMicOn,
+    hostMuteLocked: store.hostMuteLocked,
     isFrontCamera: store.isFrontCamera,
     isEjected: store.isEjected,
     ejectReason: store.ejectReason,

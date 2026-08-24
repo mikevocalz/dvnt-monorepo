@@ -1882,9 +1882,22 @@ function RoomInner({
           <ControlButton
             onClick={toggleMic}
             active={isMicOn}
-            label={isMicOn ? "Mute" : "Unmute"}
+            label={
+              hostMuteLocked
+                ? "Muted by host"
+                : isMicOn
+                  ? "Mute"
+                  : "Unmute"
+            }
           >
-            {isMicOn ? <Mic size={24} /> : <MicOff size={24} />}
+            {/* Held muted reads as a state to understand, not a failure, so
+                it takes gold #F5C518 rather than signal. Same treatment as
+                the native control. */}
+            {isMicOn ? (
+              <Mic size={24} />
+            ) : (
+              <MicOff size={24} color={hostMuteLocked ? "#F5C518" : undefined} />
+            )}
           </ControlButton>
 
           {roomHasVideo ? (

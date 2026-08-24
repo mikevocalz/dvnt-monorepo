@@ -2183,6 +2183,7 @@ function ServerRoom({
       <RoomLayout
         insets={insets}
         connectionState={connectionState}
+        hostMuteLocked={videoRoom.hostMuteLocked}
         isHost={!!isHost}
         roomTitle={roomTitle}
         participantCount={totalParticipants}
@@ -2392,6 +2393,7 @@ function ServerRoom({
 function RoomLayout({
   insets,
   connectionState,
+  hostMuteLocked,
   isHost,
   roomTitle,
   participantCount,
@@ -2432,6 +2434,9 @@ function RoomLayout({
 }: {
   insets: any;
   connectionState: "connecting" | "connected" | "reconnecting" | "disconnected";
+  /** Host is holding the local participant muted — the mic control says so
+   *  rather than silently refusing (lib/video/host-mute). */
+  hostMuteLocked?: boolean;
   isHost: boolean;
   localRole:
     | "host"
@@ -2813,6 +2818,7 @@ function RoomLayout({
 
         <ControlsBar
           isMuted={effectiveMuted}
+          hostMuteLocked={hostMuteLocked}
           isVideoEnabled={effectiveVideoOn}
           handRaised={isHandRaised}
           hasVideo={hasVideo ?? true}
