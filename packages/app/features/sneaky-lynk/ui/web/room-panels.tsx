@@ -132,6 +132,17 @@ export function SidePanel({
   );
 }
 
+/**
+ * Room chat.
+ *
+ * Consecutive messages from the same person are grouped: the avatar and name
+ * appear once and the following lines indent under them. Repeating both on
+ * every line — which is what this did — turns a normal back-and-forth into a
+ * wall of duplicated identity and pushes the actual words into a narrow column.
+ *
+ * Timestamps appear on the first message of each group. A live room is a
+ * timeline; "when was that said" was unanswerable.
+ */
 export function ChatPanel({
   open,
   onClose,
@@ -159,7 +170,11 @@ export function ChatPanel({
       e.preventDefault();
       const el = inputRef.current;
       if (!el) return;
-      onSend(el.value);
+      // Guarded: the input fed onSend raw, so Enter on an empty field posted a
+      // blank message into the room.
+      const body = el.value.trim();
+      if (!body) return;
+      onSend(body);
       el.value = "";
     },
     [onSend],
@@ -170,27 +185,49 @@ export function ChatPanel({
       open={open}
       onClose={onClose}
       title="Chat"
-      icon={<MessageCircle size={18} className="text-[#3FDCFF]" />}
+      icon={<MessageCircle size={18} color="#3FDCFF" />}
     >
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div ref={scrollRef} className="flex-1 space-y-1 overflow-y-auto px-4 py-3">
         {comments.length === 0 ? (
           <p className="mt-8 text-center text-sm text-white/40">
             No messages yet. Say hi 👋
           </p>
         ) : (
-          comments.map((c) => {
+          comments.map((c, idx) => {
             const isOwn = c.authorId === currentUserId;
+            const prev = comments[idx - 1];
+            // Same author in an unbroken run reads as one turn, not N turns.
+            const grouped = !!prev && prev.authorId === c.authorId;
+            const name = isOwn ? "You" : getSneakyUserLabel(c.author);
+            const time = c.createdAt
+              ? new Date(c.createdAt).toLocaleTimeString([], {
+                  hour: "numeric",
+                  minute: "2-digit",
+                })
+              : null;
             return (
-              <div key={c.id} className="flex items-start gap-2">
-                <SquareAvatar
-                  uri={c.author?.avatar}
-                  name={getSneakyUserLabel(c.author)}
-                  size={28}
-                />
+              <div key={c.id} className={grouped ? "flex gap-2" : "mt-3 flex gap-2"}>
+                <span className="w-7 shrink-0">
+                  {grouped ? null : (
+                    <SquareAvatar uri={c.author?.avatar} name={name} size={28} />
+                  )}
+                </span>
                 <div className="min-w-0 flex-1">
-                  <span className="text-xs font-semibold text-white/70">
-                    {isOwn ? "You" : getSneakyUserLabel(c.author)}
-                  </span>
+                  {grouped ? null : (
+                    <span className="flex items-baseline gap-2">
+                      <span className="truncate text-xs font-semibold text-white/70">
+                        {name}
+                      </span>
+                      {time ? (
+                        // Mono for the clock — the design system's rule for
+                        // temporal data, and it stops timestamps jittering as
+                        // digits change width.
+                        <span className="shrink-0 font-mono text-[10px] text-white/30">
+                          {time}
+                        </span>
+                      ) : null}
+                    </span>
+                  )}
                   <p
                     className={`mt-0.5 break-words rounded-2xl px-3 py-1.5 text-sm ${
                       isOwn ? "bg-[#3FDCFF]/20 text-white" : "bg-white/8 text-white/90"
@@ -217,8 +254,9 @@ export function ChatPanel({
         />
         <button
           type="submit"
-          aria-label="Send"
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#3FDCFF] text-black hover:bg-[#3FDCFF]"
+          aria-label="Send message"
+          // The hover colour matched the base, so the control gave no feedback.
+          className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#3FDCFF] text-black transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
         >
           <Send size={18} />
         </button>

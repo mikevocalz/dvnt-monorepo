@@ -95,7 +95,6 @@ import {
   useRoomReactions,
   GPU_REACTION_CAP,
 } from "@dvnt/app/features/sneaky-lynk";
-import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
 import { ConnectionBanner, RoomTimer, type ConnectionPhase } from "@dvnt/ui";
 import { HOST_MUTE_COPY } from "@dvnt/app/lib/video/host-mute";
 import { bannerPhaseFor, useRoomSession } from "@dvnt/app/features/sneaky-lynk/session/useRoomSession";
@@ -2513,15 +2512,14 @@ function RoomLayout({
   timerDurationMs?: number;
   timerStartedAt?: number;
 }) {
-  // GPU reactions carry a real 50-concurrent cap; the RN overlay stays capped
-  // at 6 because each one there is an animated view. `gpuReactions` only flips
-  // true once the overlay reports it has a device, an atlas AND a pipeline, so
-  // a failure anywhere in that chain leaves the RN path exactly as it was.
-  const [gpuReactions, setGpuReactions] = useState(false);
+  // Capped at the RN default (6 concurrent) because each reaction here is an
+  // animated view. The higher GPU cap went with the GPU overlay: it only
+  // applied once that overlay reported a device, an atlas AND a pipeline, and
+  // the same flag suppressed the RN renderer — so any failure in that chain
+  // showed nothing at all rather than falling back.
   const { reactions, sendReaction } = useRoomReactions({
     roomId,
     currentUser: localUser,
-    cap: gpuReactions ? GPU_REACTION_CAP : undefined,
   });
   // Bottom padding below the speaker grid so the controls bar never
   // clips participant name labels rendered on the last row of tiles.
@@ -2842,12 +2840,6 @@ function RoomLayout({
 
         <RemoteAudioLayer participants={allParticipants} />
 
-        <GpuReactionOverlay
-          reactions={reactions}
-          emojis={REACTION_EMOJIS}
-          paused={isChatOpen}
-          onAvailabilityChange={setGpuReactions}
-        />
 
         <ControlsBar
           isMuted={effectiveMuted}
@@ -2857,7 +2849,10 @@ function RoomLayout({
           hasVideo={hasVideo ?? true}
           localRole={localRole}
           overlayOpen={isChatOpen}
-          floatingReactions={gpuReactions ? [] : reactions}
+          // One renderer, matching web. The GPU overlay suppressed this whenever
+          // it reported available, so a canvas that failed to draw made
+          // reactions silently invisible — the same defect on both legs.
+          floatingReactions={reactions}
           onLeave={onLeave}
           onToggleMute={onToggleMic}
           onToggleVideo={onToggleVideo}

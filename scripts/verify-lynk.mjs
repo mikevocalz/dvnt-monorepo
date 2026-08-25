@@ -257,4 +257,25 @@ console.log(
   `7. OK — ${sessionLegs.length} legs drive the session AND supply recovery; ${heartbeatCallers.length} send heartbeats; seam has ${seamUsers.length} caller(s)`,
 );
 
+// --- 8. Reactions have exactly one renderer per leg -------------------------
+// Both legs used to hand the DOM/RN renderer an empty array whenever a WebGPU
+// overlay reported itself available, so a canvas that failed to draw made
+// reactions silently invisible. Two renderers racing over one signal is the
+// bug; a check is cheaper than rediscovering it from a user report.
+for (const leg of [
+  "packages/app/features/sneaky-lynk/screens/room.web.tsx",
+  "packages/app/features/routes/screens/(protected)/sneaky-lynk/room/[id].tsx",
+]) {
+  const src = strip(read(leg));
+  assert.ok(
+    !/GpuReactionOverlay/.test(src),
+    `${leg} renders reactions twice — the GPU overlay suppresses the other renderer and vanishes on init failure`,
+  );
+  assert.ok(
+    !/reactions\s*:\s*\[\]|Reactions=\{[^}]*\?\s*\[\]/.test(src),
+    `${leg} conditionally blanks its reactions — that is how they disappeared`,
+  );
+}
+console.log("8. OK — one reaction renderer per leg");
+
 console.log("\nverify-lynk: all sections pass");
