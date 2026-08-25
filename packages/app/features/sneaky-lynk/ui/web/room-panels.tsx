@@ -325,6 +325,21 @@ export function HandQueuePanel({
   );
 }
 
+/**
+ * Who is in the room, and the host's controls over them.
+ *
+ * Sectioned by role rather than one flat list. A room with a host, two speakers
+ * and forty listeners is not a list of forty-three equal rows — the host is
+ * looking for the people who can talk, and a flat list buries them. Section
+ * headers carry counts so "how many are here" is answered without counting.
+ *
+ * Per-row status ("speaking", "muted", "muted by you") because a mic glyph
+ * alone cannot distinguish someone who chose to mute from someone the host
+ * muted, and those need different actions.
+ *
+ * Mute-everyone lives in a footer, separated from per-row controls: it is the
+ * one action here that affects people who are not on screen.
+ */
 export function ParticipantsPanel({
   open,
   onClose,
@@ -336,6 +351,8 @@ export function ParticipantsPanel({
   onKick,
   onMute,
   onUnmute,
+  onMuteAll,
+  speakingByUserId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -347,89 +364,129 @@ export function ParticipantsPanel({
   onKick: (userId: string) => void;
   onMute: (userId: string) => void;
   onUnmute: (userId: string) => void;
+  onMuteAll?: () => void;
+  /** Live voice activity, so a row can say "speaking" rather than just showing a mic. */
+  speakingByUserId?: Record<string, boolean>;
 }) {
   const active = members.filter((m) => m.status === "active");
+  const onStage = active.filter((m) => m.role !== "listener");
+  const listening = active.filter((m) => m.role === "listener");
+
+  const row = (m: WebMember) => {
+    const isSelf = m.userId === localUserId;
+    const isRoomHost = m.role === "host";
+    const name = getSneakyUserLabel(m);
+    const speaking = !!speakingByUserId?.[m.userId];
+    return (
+      <div
+        key={m.userId}
+        className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2"
+      >
+        <SquareAvatar uri={m.avatar} name={name} size={36} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-white">
+            {name}
+            {isSelf ? " (you)" : ""}
+          </span>
+          <span className="flex items-center gap-1.5 text-[11px] text-white/45">
+            {m.role !== "listener" ? (
+              <span className="uppercase tracking-wide text-[#3FDCFF]/80">{m.role}</span>
+            ) : null}
+            {speaking ? <span className="text-[#3FDCFF]">speaking</span> : null}
+          </span>
+        </span>
+        {isHost && !isSelf && !isRoomHost ? (
+          <span className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onUnmute(m.userId)}
+              aria-label={`Let ${name} unmute`}
+              title="Lift the mute — they choose when to speak"
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
+            >
+              <Mic size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onMute(m.userId)}
+              aria-label={`Mute ${name}`}
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
+            >
+              <MicOff size={14} />
+            </button>
+            {m.role === "co-host" ? (
+              <button
+                type="button"
+                onClick={() => onDemote(m.userId)}
+                aria-label={`Remove co-host from ${name}`}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
+              >
+                <UserMinus size={14} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onPromote(m.userId)}
+                aria-label={`Make ${name} a co-host`}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#3FDCFF]/20 text-[#3FDCFF] hover:bg-[#3FDCFF]/30"
+              >
+                <Crown size={14} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onKick(m.userId)}
+              aria-label={`Remove ${name} from the room`}
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FC253A]/20 text-[#FC253A] hover:bg-[#FC253A]/30"
+            >
+              <UserX size={14} />
+            </button>
+          </span>
+        ) : null}
+      </div>
+    );
+  };
+
+  const section = (label: string, rows: WebMember[]) =>
+    rows.length ? (
+      <section className="space-y-2">
+        <h3 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-white/40">
+          {label} · {rows.length}
+        </h3>
+        {rows.map(row)}
+      </section>
+    ) : null;
+
   return (
     <SidePanel
       open={open}
       onClose={onClose}
       title={`In the room · ${active.length}`}
-      icon={<Users size={18} className="text-[#3FDCFF]" />}
+      icon={<Users size={18} color="#3FDCFF" />}
     >
-      <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
-        {active.map((m) => {
-          const name = getSneakyUserLabel(m);
-          const isSelf = m.userId === localUserId;
-          const isRoomHost = m.role === "host";
-          return (
-            <div
-              key={m.userId}
-              className="flex items-center gap-3 rounded-xl bg-white/[0.04] px-3 py-2"
-            >
-              <SquareAvatar uri={m.avatar} name={name} size={36} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-white">
-                  {name}
-                  {isSelf ? " (you)" : ""}
-                </span>
-                {m.role !== "listener" ? (
-                  <span className="text-[11px] uppercase tracking-wide text-[#3FDCFF]/80">
-                    {m.role}
-                  </span>
-                ) : null}
-              </span>
-              {isHost && !isSelf && !isRoomHost ? (
-                <span className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => onUnmute(m.userId)}
-                    aria-label={`Let ${name} unmute`}
-                    title="Lift the mute — they choose when to speak"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
-                  >
-                    <Mic size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onMute(m.userId)}
-                    aria-label={`Mute ${name}`}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
-                  >
-                    <MicOff size={14} />
-                  </button>
-                  {m.role === "co-host" ? (
-                    <button
-                      type="button"
-                      onClick={() => onDemote(m.userId)}
-                      aria-label="Demote to listener"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#F5C518]/20 text-[#F5C518] hover:bg-[#F5C518]/30"
-                    >
-                      <UserMinus size={14} />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onPromote(m.userId)}
-                      aria-label="Promote to co-host"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#3FDCFF]/20 text-[#3FDCFF] hover:bg-[#3FDCFF]/30"
-                    >
-                      <Crown size={14} />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => onKick(m.userId)}
-                    aria-label="Remove from room"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FC253A]/20 text-[#FC253A] hover:bg-[#FC253A]/30"
-                  >
-                    <UserX size={14} />
-                  </button>
-                </span>
-              ) : null}
-            </div>
-          );
-        })}
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
+        {active.length === 0 ? (
+          <p className="mt-8 text-center text-sm text-white/40">
+            Nobody else is here yet.
+          </p>
+        ) : (
+          <>
+            {section("On stage", onStage)}
+            {section("Listening", listening)}
+          </>
+        )}
       </div>
+      {isHost && onMuteAll && active.length > 1 ? (
+        <footer className="border-t border-white/10 px-4 py-3">
+          <button
+            type="button"
+            onClick={onMuteAll}
+            className="w-full rounded-lg bg-white/[0.08] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/15"
+          >
+            Mute everyone
+          </button>
+        </footer>
+      ) : null}
     </SidePanel>
   );
 }

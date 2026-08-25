@@ -1051,6 +1051,18 @@ function RoomInner({
     };
   });
 
+  // useVAD is keyed by Fishjam peer id; the participants panel lists members by
+  // our user id. Map once here rather than making the panel know about peers.
+  const speakingByUserId: Record<string, boolean> = {};
+  for (const peer of remotePeers) {
+    const meta = ((peer.metadata as any)?.peer ?? peer.metadata) as any;
+    const uid = meta?.userId;
+    if (uid) speakingByUserId[uid] = !!speakingByPeer[peer.id];
+  }
+  if (authUser?.id && peers.localPeer?.id) {
+    speakingByUserId[authUser.id] = !!speakingByPeer[peers.localPeer.id];
+  }
+
   const localTile: Tile = {
     key: "local",
     name: localName,
@@ -1476,6 +1488,8 @@ function RoomInner({
         onKick={kick}
         onMute={muteOne}
         onUnmute={unmuteOne}
+        onMuteAll={muteAll}
+        speakingByUserId={speakingByUserId}
       />
 
       {/* Free-host duration-limit paywall */}
