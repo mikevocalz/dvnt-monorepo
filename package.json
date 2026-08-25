@@ -20,6 +20,9 @@
     "postinstall": "(patch-package --patch-dir apps/mobile/patches || true) && for f in apps/mobile/scripts/patch-callkeep.sh apps/mobile/scripts/patch-expo-dev-launcher.sh apps/mobile/scripts/patch-insta-story.sh apps/mobile/scripts/patch-react-native-gradle-plugin.sh apps/mobile/scripts/patch-screen-transitions.sh apps/mobile/scripts/patch-vision-camera.sh; do [ -f \"$f\" ] && bash \"$f\" || true; done",
     "verify:parity": "node scripts/verify-port-parity.mjs",
     "verify:watch": "node scripts/verify-watch.mjs",
+    "verify:sentry": "node scripts/verify-sentry.mjs",
+    "verify:lynk": "node scripts/verify-lynk.mjs",
+    "test:lynk-session": "node --test packages/app/features/sneaky-lynk/session/machine.test.ts packages/ui/src/video/RoomTimer.countdown.test.ts packages/ui/src/video/ConnectionBanner.phase.test.ts packages/app/lib/user-label.test.ts packages/app/features/sneaky-lynk/ui/hand-queue.test.ts packages/app/lib/video/host-mute.test.ts packages/app/features/sneaky-lynk/session/moq-transport.test.ts packages/app/features/sneaky-lynk/ui/grid-layout.test.ts",
     "verify:functions": "node scripts/verify-edge-functions.mjs",
     "verify:functions:live": "node scripts/verify-edge-functions.mjs --live --project-ref npfjanxturvmjyevoyfo",
     "check:bundle": "node scripts/check-bundle-budget.mjs"
@@ -34,6 +37,9 @@
     "turbo": "^2.9.17"
   },
   "pnpm": {
+    "patchedDependencies": {
+      "react-native-css@3.0.7": "pnpm-patches/react-native-css@3.0.7.patch"
+    },
     "overrides": {
       "react": "19.2.3",
       "react-dom": "19.2.3",

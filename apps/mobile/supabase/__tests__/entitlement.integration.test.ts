@@ -10,7 +10,7 @@
  * don't race; nothing is cleaned up between tests by design — Postgres
  * holds the data and the user_id namespace keeps cases isolated.
  *
- * What this proves (the invariants from AGENTS.md):
+ * What this proves (the invariants from docs/engineering-contract.md):
  *   I2  — same event id → upsert returns true once, then false. Webhook
  *         dedup (stripe_events / rc_events) is enforced one layer up.
  *   I3  — `is_entitled(uid)` returns the same answer whether the row

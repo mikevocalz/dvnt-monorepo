@@ -6,7 +6,7 @@
 
 -- Drop 33 legacy Payload CMS + pre-Better-Auth tables. Verified
 -- isolated: no live table has a foreign key pointing into any of
--- these. Per CLAUDE.md, Payload CMS has been REMOVED from this app
+-- these. Per docs/engineering-contract.md, Payload CMS has been REMOVED from this app
 -- since 2026-02-06. The tables sat as dead schema until now.
 --
 -- CASCADE is safe here because all FK references are internal

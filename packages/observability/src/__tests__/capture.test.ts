@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
+  crashSignature,
   captureHandledError,
   captureFlowFailure,
   captureMessageFlowFailure,
@@ -232,5 +233,48 @@ describe('captureModerationDebugEvent', () => {
     // Ensure no private notes
     expect(JSON.stringify(ctx)).not.toContain('privateNotes');
     expect(JSON.stringify(ctx)).not.toContain('private_notes');
+  });
+});
+
+describe('crashSignature', () => {
+  it('collapses per-launch pointers and ids so a relaunch loop dedupes', () => {
+    const a = crashSignature('native', {
+      name: 'NSInvalidArgumentException',
+      reason: '-[__NSCFString objectForKey:]: unrecognized selector sent to instance 0x600001a2c480',
+    });
+    const b = crashSignature('native', {
+      name: 'NSInvalidArgumentException',
+      reason: '-[__NSCFString objectForKey:]: unrecognized selector sent to instance 0x7fe93c40b120',
+    });
+    expect(a).toBe(b);
+  });
+
+  it('keeps genuinely different crashes apart', () => {
+    const selector = crashSignature('native', {
+      name: 'NSInvalidArgumentException',
+      reason: 'unrecognized selector sent to instance 0x1',
+    });
+    const range = crashSignature('native', {
+      name: 'NSRangeException',
+      reason: 'index 2 beyond bounds',
+    });
+    expect(selector).not.toBe(range);
+  });
+
+  it('separates the JS and native rails even for identical text', () => {
+    expect(crashSignature('js', { name: 'TypeError', message: 'x is not a function' })).not.toBe(
+      crashSignature('native', { name: 'TypeError', message: 'x is not a function' }),
+    );
+  });
+
+  it('reads message or reason, whichever the rail supplies', () => {
+    expect(crashSignature('js', { name: 'E', message: 'boom' })).toBe(
+      crashSignature('js', { name: 'E', reason: 'boom' }),
+    );
+  });
+
+  it('bounds the signature so a megabyte reason cannot become a megabyte key', () => {
+    const sig = crashSignature('js', { name: 'E', message: 'x'.repeat(50_000) });
+    expect(sig.length).toBeLessThan(260);
   });
 });

@@ -269,6 +269,22 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Session expiry — the duration twin of the capacity gate below. `ends_at`
+    // is written by video_create_room from the server-resolved plan; NULL means
+    // unlimited. Before this existed the free tier's 5 minutes lived only in the
+    // client's RoomTimer, so a client that did not run the countdown ran the
+    // room forever.
+    //
+    // Structured like `room_full` so the client can render an upgrade surface
+    // rather than a bare error, and reuse the flow it already has.
+    if (room.ends_at && new Date(room.ends_at) <= new Date()) {
+      return errorResponse("conflict", "This Lynk's session has ended", {
+        reason: "session_expired",
+        endsAt: room.ends_at,
+        isHost: userId === room.host_id,
+      });
+    }
+
     // Check participant count
     const { data: participantCount } = await supabase.rpc(
       "count_active_participants",
@@ -612,6 +628,11 @@ Deno.serve(async (req) => {
           // badge). The disclosure chip does NOT read it — that is driven by
           // live presence, and an app-only room simply never has a web peer.
           appOnly: room.app_only === true,
+          // The server's session deadline. NULL = unlimited. The client's
+          // RoomTimer counts down to THIS rather than deriving a limit from
+          // created_at plus a constant it holds itself — same fact, one owner.
+          // Distinct from `expiresAt` below, which is the Fishjam token's life.
+          endsAt: room.ends_at ?? null,
           fishjamRoomId,
         },
         token: fishjamToken,

@@ -90,6 +90,11 @@ export interface JoinRoomResponse {
     /** App-only room — web clients are refused a peer token by
      *  `video_join_room`. Absent on backends predating that gate. */
     appOnly?: boolean;
+    /** Server-side session deadline, ISO. `null` = unlimited (paid tiers).
+     *  Absent on backends predating the gate, which is why the client keeps a
+     *  fallback — see RoomTimer's call sites. The client DISPLAYS this; it
+     *  does not decide it. */
+    endsAt?: string | null;
     fishjamRoomId: string;
   };
   token: string;

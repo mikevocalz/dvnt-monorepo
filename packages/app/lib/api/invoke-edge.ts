@@ -4,7 +4,7 @@
  *
  *   1. Fetching the Better Auth token and attaching it as both
  *      Authorization and x-auth-token (the custom header bypasses the
- *      Supabase gateway's JWT check, per CLAUDE.md).
+ *      Supabase gateway's JWT check, per docs/engineering-contract.md).
  *   2. Normalising responses where the SDK has sometimes returned a
  *      JSON string instead of a parsed object.
  *

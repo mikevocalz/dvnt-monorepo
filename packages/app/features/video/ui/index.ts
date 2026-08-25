@@ -5,7 +5,7 @@
 export { VideoTile, VideoTileSkeleton } from "./VideoTile";
 export { ControlsBar, ControlsBarCompact } from "./ControlsBar";
 export { ParticipantsSheet } from "./ParticipantsSheet";
-export { ConnectionBanner, NetworkQualityIndicator } from "./ConnectionBanner";
+export { NetworkQualityIndicator } from "./NetworkQualityIndicator";
 export {
   EjectModal,
   ConfirmKickModal,

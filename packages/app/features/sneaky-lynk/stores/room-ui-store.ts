@@ -8,6 +8,7 @@
  */
 
 import { create } from "zustand";
+import type { EjectKind } from "../ui/EjectModal.types";
 import type { SneakyRoom } from "@dvnt/app/features/sneaky-lynk/types";
 
 export type RoomPhase =
@@ -49,7 +50,18 @@ interface RoomUIStore {
   showTimeUp: boolean;
   /** Pinned banner shown when the host kicks/bans the local user or ends the
    *  room (mirrors the native EjectModal). */
-  ejectReason: string | null;
+  /** Why this session ended without the user choosing it. Structured: a kick,
+   *  a ban and a room simply ending are three different facts, and flattening
+   *  them into one sentence is what let the web modal claim a ban was just a
+   *  removal. */
+  eject: { kind: EjectKind; reason?: string } | null;
+  /** The host is holding this participant muted. While true they cannot turn
+   *  their own microphone on — see lib/video/host-mute. */
+  hostMuteLocked: boolean;
+  /** Server session deadline (video_rooms.ends_at) from the join response.
+   *  `undefined` = backend predates the gate, `null` = unlimited, ISO = limited.
+   *  The timer DISPLAYS this; it never decides it. */
+  serverEndsAt: string | null | undefined;
 
   setInitStarted: (v: boolean) => void;
   setPhase: (v: RoomPhase) => void;
@@ -64,7 +76,9 @@ interface RoomUIStore {
   setIsPaidHost: (v: boolean) => void;
   setTimerStartedAt: (v: number) => void;
   setShowTimeUp: (v: boolean) => void;
-  setEjectReason: (v: string | null) => void;
+  setEject: (v: { kind: EjectKind; reason?: string } | null) => void;
+  setHostMuteLocked: (v: boolean) => void;
+  setServerEndsAt: (v: string | null) => void;
   reset: () => void;
 }
 
@@ -81,7 +95,9 @@ const initialUIState = {
   isPaidHost: null as boolean | null,
   timerStartedAt: null as number | null,
   showTimeUp: false,
-  ejectReason: null as string | null,
+  eject: null as { kind: EjectKind; reason?: string } | null,
+  hostMuteLocked: false,
+  serverEndsAt: undefined as string | null | undefined,
 };
 
 export const useRoomUIStore = create<RoomUIStore>((set) => ({
@@ -100,6 +116,8 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setIsPaidHost: (isPaidHost) => set({ isPaidHost }),
   setTimerStartedAt: (timerStartedAt) => set({ timerStartedAt }),
   setShowTimeUp: (showTimeUp) => set({ showTimeUp }),
-  setEjectReason: (ejectReason) => set({ ejectReason }),
+  setEject: (eject) => set({ eject }),
+  setHostMuteLocked: (hostMuteLocked) => set({ hostMuteLocked }),
+  setServerEndsAt: (serverEndsAt) => set({ serverEndsAt }),
   reset: () => set({ ...initialUIState }),
 }));

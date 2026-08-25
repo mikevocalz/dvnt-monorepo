@@ -14,7 +14,7 @@ blocked until the backend is deployed and the branch is proven native-compatible
 - `scripts/release/preflight-ota-safety.ts --channel=production` returned
   `NATIVE BUILD REQUIRED` because the branch diff includes `app.config.js`.
 - `pnpm typecheck` is not clean under the project tsconfig. The new mixed-cart
-  source files pass targeted checks, but CLAUDE.md sets zero tolerance for any
+  source files pass targeted checks, but docs/engineering-contract.md sets zero tolerance for any
   TypeScript errors before OTA.
 - `pnpm test:e2e:cart` cannot run locally because `maestro` is not installed.
 - Mixed-cart requires Supabase migrations and Edge Functions to be deployed

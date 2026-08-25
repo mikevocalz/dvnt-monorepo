@@ -9,7 +9,7 @@
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
-    "noEmit": true,
+    "noEmit": true, "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "esModuleInterop": true,
     "module": "esnext",

@@ -251,7 +251,7 @@ export function useEventsFeedRealtime(enabled = true): void {
                   youtubeVideoUrl: next.youtube_video_url ?? e.youtubeVideoUrl,
                   // Derived display fields (event.date is a day number,
                   // event.month is "JUN", event.time is "8:00 PM" —
-                  // see CLAUDE.md ⚠️ Events date warning). Without these
+                  // see docs/engineering-contract.md ⚠️ Events date warning). Without these
                   // the card badge keeps the old day after a date edit.
                   ...(dateParts
                     ? {

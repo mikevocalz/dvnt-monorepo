@@ -12,7 +12,11 @@
       "react-native-screen-transitions": [
         "../../node_modules/react-native-screen-transitions/lib/typescript/shared/index.d.ts"
       ]
-    }
+    },
+    // Lets session/machine.test.ts import "./machine.ts" with the explicit
+    // extension Node's own type-stripping test runner requires. Safe because
+    // expo/tsconfig.base sets noEmit — nothing compiles out of this package.
+    "allowImportingTsExtensions": true
   },
   "include": ["**/*.ts", "**/*.tsx", "types/**/*.d.ts"],
   "exclude": ["node_modules"]

@@ -55,10 +55,8 @@ import {
   ListenerGrid,
   ControlsBar,
   REACTION_EMOJIS,
-  ConnectionBanner,
   EjectModal,
   ChatSheet,
-  RoomTimer,
   RoomParticipantsSheet,
   HandQueueSheet,
   RemoteAudioLayer,
@@ -97,7 +95,11 @@ import {
   useRoomReactions,
   GPU_REACTION_CAP,
 } from "@dvnt/app/features/sneaky-lynk";
-import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
+import { ConnectionBanner, RoomTimer, type ConnectionPhase } from "@dvnt/ui";
+import { HOST_MUTE_COPY } from "@dvnt/app/lib/video/host-mute";
+import { bannerPhaseFor, useRoomSession } from "@dvnt/app/features/sneaky-lynk/session/useRoomSession";
+import { isActive } from "@dvnt/app/features/sneaky-lynk/session/machine";
+import { useRoomHeartbeat } from "@dvnt/app/features/sneaky-lynk/hooks/useRoomHeartbeat";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
 import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
@@ -1159,6 +1161,22 @@ function ServerRoom({
           | "connected"
           | "reconnecting"
           | "disconnected");
+  // The session machine owns "is this room live", and the observability seam
+  // hangs off it — app-hang tracking and profiling are suppressed for exactly
+  // as long as the session is up, rather than for as long as this component
+  // happens to be mounted. The banner still reads from connectionState above;
+  // moving it onto the machine changes what a user sees during a drop and
+  // wants a device to confirm (WS-3).
+  // videoRoom.join already re-mints the peer token and re-attaches, and it
+  // returns false rather than throwing, which is exactly the contract the
+  // machine's budget expects. Held in a ref inside the hook, so its identity
+  // changing between renders does not restart the retry loop.
+  const session = useRoomSession(videoRoom.connectionState.status, {
+    onReconnect: videoRoom.join,
+  });
+  // See the web leg: without this every member reports no last_seen_at and
+  // video_list_rooms keeps the room "Live" for twelve hours.
+  useRoomHeartbeat(id, isActive(session));
   const previousConnectionStateRef = useRef(connectionState);
   const appStateRef = useRef(AppState.currentState);
   const isHostRef = useRef(isHost);
@@ -1739,9 +1757,15 @@ function ServerRoom({
   const handleToggleMic = useCallback(async () => {
     const actuallyOn = videoRoomRef.current.isMicOn;
     const nextEnabled = !actuallyOn;
+    const allowed = await videoRoomRef.current.setMicEnabled(nextEnabled);
+    if (!allowed) {
+      // Host is holding the mute. Say so — a control that silently does
+      // nothing reads as the app being broken.
+      showToast("info", "Muted by host", HOST_MUTE_COPY.blocked);
+      return;
+    }
     desiredMicEnabledRef.current = nextEnabled;
-    await videoRoomRef.current.setMicEnabled(nextEnabled);
-  }, []);
+  }, [showToast]);
   const handleToggleVideo = useCallback(async () => {
     const actuallyOn = videoRoomRef.current.isCameraOn;
     const nextEnabled = !actuallyOn;
@@ -2169,6 +2193,8 @@ function ServerRoom({
       <RoomLayout
         insets={insets}
         connectionState={connectionState}
+        hostMuteLocked={videoRoom.hostMuteLocked}
+        bannerPhase={bannerPhaseFor(session)}
         isHost={!!isHost}
         roomTitle={roomTitle}
         participantCount={totalParticipants}
@@ -2216,7 +2242,19 @@ function ServerRoom({
         raisedHandCount={raisedHandOrder.length}
         onOpenHandQueue={isHost ? openHandQueue : undefined}
         onTimeUp={handleTimeUp}
-        hideTimer={isHost && isPaidHost}
+        // The server decides whether this session is limited (video_rooms
+        // .ends_at); the entitlement read is only the fallback for a backend
+        // that predates the gate and returns no field at all.
+        hideTimer={
+          videoRoom.serverEndsAt !== undefined
+            ? videoRoom.serverEndsAt === null
+            : isHost && isPaidHost
+        }
+        timerDurationMs={
+          videoRoom.serverEndsAt != null && timerStartedAt != null
+            ? new Date(videoRoom.serverEndsAt).getTime() - timerStartedAt
+            : undefined
+        }
         timerStartedAt={timerStartedAt}
       />
 
@@ -2378,6 +2416,8 @@ function ServerRoom({
 function RoomLayout({
   insets,
   connectionState,
+  hostMuteLocked,
+  bannerPhase,
   isHost,
   roomTitle,
   participantCount,
@@ -2414,10 +2454,18 @@ function RoomLayout({
   onOpenHandQueue,
   onTimeUp,
   hideTimer,
+  timerDurationMs,
   timerStartedAt,
 }: {
   insets: any;
   connectionState: "connecting" | "connected" | "reconnecting" | "disconnected";
+  /** Host is holding the local participant muted — the mic control says so
+   *  rather than silently refusing (lib/video/host-mute). */
+  hostMuteLocked?: boolean;
+  /** Banner phase from the session machine. `connectionState` above still
+   *  drives this screen's media/teardown effects; only the banner moves, since
+   *  the machine is what can tell a first join from a reconnect. */
+  bannerPhase?: ConnectionPhase;
   isHost: boolean;
   localRole:
     | "host"
@@ -2460,17 +2508,18 @@ function RoomLayout({
   onOpenHandQueue?: () => void;
   onTimeUp?: () => void;
   hideTimer?: boolean;
+  /** Derived from the server deadline; undefined keeps the free-tier default. */
+  timerDurationMs?: number;
   timerStartedAt?: number;
 }) {
-  // GPU reactions carry a real 50-concurrent cap; the RN overlay stays capped
-  // at 6 because each one there is an animated view. `gpuReactions` only flips
-  // true once the overlay reports it has a device, an atlas AND a pipeline, so
-  // a failure anywhere in that chain leaves the RN path exactly as it was.
-  const [gpuReactions, setGpuReactions] = useState(false);
+  // Capped at the RN default (6 concurrent) because each reaction here is an
+  // animated view. The higher GPU cap went with the GPU overlay: it only
+  // applied once that overlay reported a device, an atlas AND a pipeline, and
+  // the same flag suppressed the RN renderer — so any failure in that chain
+  // showed nothing at all rather than falling back.
   const { reactions, sendReaction } = useRoomReactions({
     roomId,
     currentUser: localUser,
-    cap: gpuReactions ? GPU_REACTION_CAP : undefined,
   });
   // Bottom padding below the speaker grid so the controls bar never
   // clips participant name labels rendered on the last row of tiles.
@@ -2516,7 +2565,7 @@ function RoomLayout({
         }}
       />
 
-      <ConnectionBanner state={connectionState} />
+      <ConnectionBanner phase={bannerPhase ?? connectionState} />
       {presenceEvent ? <PresenceToast event={presenceEvent} /> : null}
 
       <View className="flex-1" style={{ paddingTop: insets.top }}>
@@ -2774,11 +2823,15 @@ function RoomLayout({
             onParticipantPress={onParticipantPress}
             stageHeight={stageContentHeight}
             hostOverlay={
-              !hideTimer ? (
+              // No startedAt means no server fact to count down from. Falling
+              // back to mount time would invent one, and two clients in the
+              // same room would then disagree about when it ends.
+              !hideTimer && timerStartedAt != null ? (
                 <RoomTimer
-                  key={timerStartedAt ?? "mount"}
+                  key={timerStartedAt}
                   onTimeUp={onTimeUp ?? onLeave}
                   startedAt={timerStartedAt}
+                  durationMs={timerDurationMs}
                 />
               ) : null
             }
@@ -2787,21 +2840,19 @@ function RoomLayout({
 
         <RemoteAudioLayer participants={allParticipants} />
 
-        <GpuReactionOverlay
-          reactions={reactions}
-          emojis={REACTION_EMOJIS}
-          paused={isChatOpen}
-          onAvailabilityChange={setGpuReactions}
-        />
 
         <ControlsBar
           isMuted={effectiveMuted}
+          hostMuteLocked={hostMuteLocked}
           isVideoEnabled={effectiveVideoOn}
           handRaised={isHandRaised}
           hasVideo={hasVideo ?? true}
           localRole={localRole}
           overlayOpen={isChatOpen}
-          floatingReactions={gpuReactions ? [] : reactions}
+          // One renderer, matching web. The GPU overlay suppressed this whenever
+          // it reported available, so a canvas that failed to draw made
+          // reactions silently invisible — the same defect on both legs.
+          floatingReactions={reactions}
           onLeave={onLeave}
           onToggleMute={onToggleMic}
           onToggleVideo={onToggleVideo}
@@ -2818,7 +2869,8 @@ function RoomLayout({
             drives visibility from the `visible` prop via index. */}
         <EjectModal
           visible={showEjectModal}
-          payload={ejectPayload}
+          kind={ejectPayload?.action ?? null}
+          reason={ejectPayload?.reason}
           onDismiss={onEjectDismiss}
         />
 

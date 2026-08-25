@@ -151,7 +151,7 @@ Per rule 8 (Native/runtime patches must not be assumed safe for OTA):
 | Action taken | OTA-safe? |
 |---|---|
 | Removed `@rive-app__react-native@0.2.1.patch` | Yes — was never applied, no native code shipped to users changes. |
-| Rebuilt `react-native-insta-story+2.0.2.patch` so it applies | **No (JS-side native module change)** — the next bundle would now correctly inject `pause`/`resume` into the JS callback signature. Since this change is **JS-only** (the patch edits `lib/src/StoryListItem.js`), it *would* be deliverable via OTA. But: the user-visible behavior change ("story pauses while typing a reply") is a real semantic change, not just a refactor. Per CLAUDE.md's OTA hardening rules, ship it via a staged OTA (canary → verify → real) and watch for regressions in the story viewer flow. |
+| Rebuilt `react-native-insta-story+2.0.2.patch` so it applies | **No (JS-side native module change)** — the next bundle would now correctly inject `pause`/`resume` into the JS callback signature. Since this change is **JS-only** (the patch edits `lib/src/StoryListItem.js`), it *would* be deliverable via OTA. But: the user-visible behavior change ("story pauses while typing a reply") is a real semantic change, not just a refactor. Per docs/engineering-contract.md's OTA hardening rules, ship it via a staged OTA (canary → verify → real) and watch for regressions in the story viewer flow. |
 
 The other items (`KEEP`, `REBUILD-FOR-SDK56`) are documentation-only at this point — no code shipped, no OTA / build implication.
 

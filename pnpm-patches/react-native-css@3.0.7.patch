@@ -1,0 +1,32 @@
+diff --git a/dist/commonjs/metro/injection-code.js b/dist/commonjs/metro/injection-code.js
+index 5c34a6f..fd85d3b 100644
+--- a/dist/commonjs/metro/injection-code.js
++++ b/dist/commonjs/metro/injection-code.js
+@@ -20,8 +20,8 @@ function getWebInjectionCode(filePaths) {
+   return Buffer.from(importStatements);
+ }
+ function getNativeInjectionCode(cssFilePaths, values) {
+-  const importStatements = cssFilePaths.map(filePath => `import "${filePath}";`).join("\n");
++  const importStatements = cssFilePaths.map(filePath => `require("${filePath}");`).join("\n");
+   const contents = values.map(value => `StyleCollection.inject(${JSON.stringify(value)});`).join("\n");
+-  return Buffer.from(`import { StyleCollection } from "react-native-css/native-internal";\n${importStatements}\n${contents};export {};`);
++  return Buffer.from(`const { StyleCollection } = require("react-native-css/native-internal");\n${importStatements}\n${contents}`);
+ }
+ //# sourceMappingURL=injection-code.js.map
+\ No newline at end of file
+diff --git a/dist/module/metro/injection-code.js b/dist/module/metro/injection-code.js
+index 669780d..49f66cf 100644
+--- a/dist/module/metro/injection-code.js
++++ b/dist/module/metro/injection-code.js
+@@ -15,8 +15,8 @@ export function getWebInjectionCode(filePaths) {
+   return Buffer.from(importStatements);
+ }
+ export function getNativeInjectionCode(cssFilePaths, values) {
+-  const importStatements = cssFilePaths.map(filePath => `import "${filePath}";`).join("\n");
++  const importStatements = cssFilePaths.map(filePath => `require("${filePath}");`).join("\n");
+   const contents = values.map(value => `StyleCollection.inject(${JSON.stringify(value)});`).join("\n");
+-  return Buffer.from(`import { StyleCollection } from "react-native-css/native-internal";\n${importStatements}\n${contents};export {};`);
++  return Buffer.from(`const { StyleCollection } = require("react-native-css/native-internal");\n${importStatements}\n${contents}`);
+ }
+ //# sourceMappingURL=injection-code.js.map
+\ No newline at end of file

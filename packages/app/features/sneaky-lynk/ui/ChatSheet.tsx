@@ -14,6 +14,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
+import { getSneakyUserLabel } from "@dvnt/app/lib/user-label";
 import {
   View,
   Text,
@@ -98,7 +99,7 @@ function formatTime(dateStr: string): string {
 
 function getCommentAuthorLabel(comment: RoomComment | null): string {
   if (!comment) return "guest";
-  return comment.author?.username || comment.author?.displayName || "guest";
+  return getSneakyUserLabel(comment.author);
 }
 
 function renderCommentBody(body: string, mentions: Mention[]) {
@@ -141,7 +142,7 @@ const CommentBubble = memo(function CommentBubble({
   const opacity = comment.isOptimistic ? 0.6 : 1;
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const lastTapRef = useRef<number>(0);
-  const authorName = comment.author?.username || comment.author?.displayName || "Guest";
+  const authorName = getSneakyUserLabel(comment.author);
   const avatarName = comment.author?.username || authorName;
 
   const groupedReactions = useMemo(
@@ -689,7 +690,17 @@ export function ChatSheet({
       depth,
       mentions,
       createdAt: new Date().toISOString(),
-      author: { username: currentUser.username, displayName: currentUser.displayName, avatar: currentUser.avatar, isVerified: currentUser.isVerified },
+      // Carry our own anonymity into the optimistic row too — without it the
+      // sender briefly sees their real name on their own message before the
+      // server row replaces it, which is the moment they would notice.
+      author: {
+        username: currentUser.username,
+        displayName: currentUser.displayName,
+        avatar: currentUser.isAnonymous ? "" : currentUser.avatar,
+        isVerified: currentUser.isVerified,
+        isAnonymous: currentUser.isAnonymous,
+        anonLabel: currentUser.anonLabel,
+      },
       isOptimistic: true,
     };
 

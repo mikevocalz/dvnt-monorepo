@@ -18,6 +18,26 @@ import type {
 } from './types';
 import { sanitizeForSentry } from './sanitize';
 
+/**
+ * Stable identity for a prior-session crash, so a relaunch loop reports the
+ * crash once instead of once per launch (audit 2.8 — a fatal event per launch
+ * multiplies during exactly the incident that needs quota headroom).
+ *
+ * Pointers, ids and counters inside a crash reason differ every launch and
+ * would defeat the dedupe, so they are collapsed before hashing.
+ */
+export function crashSignature(
+  kind: string,
+  payload: { name?: unknown; message?: unknown; reason?: unknown },
+): string {
+  const name = String(payload.name ?? '');
+  const detail = String(payload.message ?? payload.reason ?? '')
+    .replace(/0x[0-9a-f]+/gi, '0xX')
+    .replace(/\b\d{3,}\b/g, 'N')
+    .slice(0, 200);
+  return `${kind}|${name}|${detail}`;
+}
+
 let _sentry: SentrySDK | null = null;
 
 export function setSentryInstance(sentry: SentrySDK): void {

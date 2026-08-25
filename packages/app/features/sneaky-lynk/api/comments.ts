@@ -35,6 +35,11 @@ export interface RoomComment {
     displayName: string;
     avatar: string;
     isVerified: boolean;
+    /** Anonymity is per-ROOM (video_room_members), not per-user. Carried on the
+     *  author so every chat surface can resolve the label through
+     *  lib/user-label instead of guessing from the name fields. */
+    isAnonymous?: boolean;
+    anonLabel?: string | null;
   };
   // Client-side only
   replies?: RoomComment[];
@@ -45,6 +50,7 @@ export type RoomCommentAuthor = NonNullable<RoomComment["author"]>;
 
 async function lookupRoomCommentAuthor(
   authorId: string,
+  roomId?: string,
 ): Promise<RoomCommentAuthor | undefined> {
   const { data: userData } = await supabase
     .from("users")
@@ -54,11 +60,34 @@ async function lookupRoomCommentAuthor(
 
   if (!userData) return undefined;
 
+  // Live messages go through here, so without this an anonymous author is
+  // named the moment they speak even though the initial fetch hid them.
+  let anon: { isAnonymous: boolean; anonLabel: string | null } = {
+    isAnonymous: false,
+    anonLabel: null,
+  };
+  if (roomId) {
+    const { data: member } = await supabase
+      .from("video_room_members")
+      .select("is_anonymous, anon_label")
+      .eq("room_id", roomId)
+      .eq("user_id", authorId)
+      .maybeSingle();
+    if (member) {
+      anon = {
+        isAnonymous: !!(member as any).is_anonymous,
+        anonLabel: (member as any).anon_label ?? null,
+      };
+    }
+  }
+
   return {
     username: userData.username || "unknown",
     displayName: userData.first_name || userData.username || "unknown",
-    avatar: (userData.avatar as any)?.url || "",
+    avatar: anon.isAnonymous ? "" : (userData.avatar as any)?.url || "",
     isVerified: userData.verified || false,
+    isAnonymous: anon.isAnonymous,
+    anonLabel: anon.anonLabel,
   };
 }
 
@@ -81,6 +110,27 @@ export async function fetchRoomComments(
 
   // Batch-lookup authors
   const authorIds = [...new Set((data || []).map((c: any) => c.author_id))];
+
+  // Anonymity is per-ROOM, not per-user — video_room_members.is_anonymous /
+  // anon_label (migration 20260314_anon_lynk_members). Joining the author
+  // against `users` alone, as this did, cannot know that the person is
+  // anonymous in THIS room, so every chat message rendered their real name.
+  let anonMap: Record<string, { isAnonymous: boolean; anonLabel: string | null }> = {};
+  if (authorIds.length > 0) {
+    const { data: members } = await supabase
+      .from("video_room_members")
+      .select("user_id, is_anonymous, anon_label")
+      .eq("room_id", roomId)
+      .in("user_id", authorIds);
+    if (members) {
+      for (const m of members as any[]) {
+        anonMap[m.user_id] = {
+          isAnonymous: !!m.is_anonymous,
+          anonLabel: m.anon_label ?? null,
+        };
+      }
+    }
+  }
   let authorsMap: Record<string, any> = {};
   if (authorIds.length > 0) {
     const { data: users } = await supabase
@@ -112,8 +162,14 @@ export async function fetchRoomComments(
         ? {
             username: author.username || "unknown",
             displayName: author.first_name || author.username || "unknown",
-            avatar: (author.avatar as any)?.url || "",
+            // An anonymous author gets no avatar: the picture identifies them
+            // just as surely as the name does.
+            avatar: anonMap[row.author_id]?.isAnonymous
+              ? ""
+              : (author.avatar as any)?.url || "",
             isVerified: author.verified || false,
+            isAnonymous: anonMap[row.author_id]?.isAnonymous ?? false,
+            anonLabel: anonMap[row.author_id]?.anonLabel ?? null,
           }
         : undefined,
     };
@@ -192,7 +248,7 @@ export function subscribeToRoomComments(
             ? options?.resolveAuthor?.(row.author_id)
             : undefined) ||
           (row.author_id
-            ? await lookupRoomCommentAuthor(row.author_id)
+            ? await lookupRoomCommentAuthor(row.author_id, roomId)
             : undefined);
 
         onNewComment({

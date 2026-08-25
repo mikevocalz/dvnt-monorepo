@@ -49,6 +49,7 @@ import { useParams, useRouter, useSearchParams } from "solito/navigation";
 import {
   FishjamProvider,
   useConnection,
+  useVAD,
   useCamera,
   useMicrophone,
   usePeers,
@@ -67,28 +68,53 @@ import {
   CircleDot,
   PhoneOff,
   MessageCircle,
-  Send,
-  Crown,
-  UserX,
-  UserMinus,
+  Volume2,
   VolumeX,
-  Clock,
-  X,
-  Zap,
   Smartphone,
   ShieldAlert,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { ConnectionBanner, RoomTimer } from "@dvnt/ui";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
+import { getSneakyUserLabel } from "../ui/user-labels";
+import { bannerPhaseFor, useRoomSession } from "../session/useRoomSession";
+import { isActive } from "../session/machine";
+import { useRoomHeartbeat } from "../hooks/useRoomHeartbeat";
+import { useRoomReactions } from "../hooks/useRoomReactions";
+import { buildHandQueue, HAND_QUEUE_COPY } from "../ui/hand-queue";
+import {
+  ChatPanel,
+  HandQueuePanel,
+  ParticipantsPanel,
+  SidePanel,
+  SquareAvatar,
+  type WebMember,
+} from "../ui/web/room-panels";
+import {
+  ControlButton,
+  FloatingReactions,
+  REACTION_EMOJIS,
+  ReactionBar,
+  StageTile,
+  TimeUpDialog,
+  VideoTile,
+  type Tile,
+} from "../ui/web/room-stage";
+import {
+  applyHostMuteEvent,
+  canSelfUnmute,
+  shouldStopMic,
+  HOST_MUTE_COPY,
+} from "@dvnt/app/lib/video/host-mute";
+import { EjectModal } from "../ui/EjectModal";
+import type { EjectKind } from "../ui/EjectModal.types";
 import { classifySneakyLynkError } from "../errors";
 import { videoApi } from "@dvnt/app/features/video/api";
-import { useRoomReactions, GPU_REACTION_CAP } from "../hooks/useRoomReactions";
-import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
 import { useSneakyLynkCaptureBroadcast } from "../hooks/useSneakyLynkCaptureBroadcast";
 import {
   fetchRoomComments,
@@ -106,26 +132,12 @@ import { useRoomUIStore } from "../stores/room-ui-store";
 const ACCENT = "#3FDCFF";
 const ROSE = "#FC253A";
 const PURPLE = "#8A40CF";
+/** Deviant gradient stop 3 — likes/social, and the raised-hand marker. */
+const MAGENTA = "#FF5BFC";
 
-/** Free Sneaky Lynk session length — mirrors `FREE_ROOM_DURATION_MS` in the
- *  native `RoomTimer`. Free hosts get a 5-minute countdown then a paywall. */
-const FREE_ROOM_DURATION_MS = 5 * 60 * 1000;
-const COUNTDOWN_THRESHOLD_MS = 60 * 1000;
-const REACTION_EMOJIS = ["❤️", "🔥", "👏", "😮", "😂", "🙌"];
 
 /** A room member as projected for the web moderation panels — the web-safe
  *  shape returned by `videoApi.subscribeToMembers` / `getRoomMembers`. */
-interface WebMember {
-  userId: string;
-  role: string;
-  status: string;
-  handRaised: boolean;
-  username?: string;
-  displayName?: string;
-  avatar?: string;
-  isAnonymous?: boolean;
-  anonLabel?: string | null;
-}
 
 function isClosedRoomError(message?: string | null) {
   if (!message) return false;
@@ -133,111 +145,10 @@ function isClosedRoomError(message?: string | null) {
 }
 
 // ── <video> tile — binds a MediaStream imperatively (no useState) ─────────────
-function VideoTile({
-  stream,
-  muted,
-  mirror,
-  className,
-}: {
-  stream: MediaStream | null | undefined;
-  muted: boolean;
-  mirror?: boolean;
-  className: string;
-}) {
-  const attach = useCallback(
-    (el: HTMLVideoElement | null) => {
-      if (el && el.srcObject !== (stream ?? null)) el.srcObject = stream ?? null;
-    },
-    [stream],
-  );
-  return (
-    <video
-      ref={attach}
-      autoPlay
-      playsInline
-      muted={muted}
-      disablePictureInPicture
-      controlsList="nodownload noplaybackrate noremoteplayback"
-      draggable={false}
-      onContextMenu={(event) => event.preventDefault()}
-      onDragStart={(event) => event.preventDefault()}
-      className={className}
-      style={mirror ? { transform: "scaleX(-1)" } : undefined}
-    />
-  );
-}
 
 // Rounded-SQUARE avatar (never circular).
-function SquareAvatar({
-  uri,
-  name,
-  size,
-}: {
-  uri?: string;
-  name: string;
-  size: number;
-}) {
-  if (uri) {
-    return (
-      <img
-        src={uri}
-        alt={name}
-        className="rounded-2xl object-cover"
-        style={{ width: size, height: size }}
-      />
-    );
-  }
-  return (
-    <span
-      className="rounded-2xl bg-white/10 flex items-center justify-center font-semibold text-white"
-      style={{ width: size, height: size, fontSize: size * 0.4 }}
-    >
-      {(name?.[0] ?? "?").toUpperCase()}
-    </span>
-  );
-}
 
-function ControlButton({
-  onClick,
-  active,
-  danger,
-  label,
-  children,
-}: {
-  onClick: () => void;
-  active?: boolean;
-  danger?: boolean;
-  label: string;
-  children: React.ReactNode;
-}) {
-  const bg = danger
-    ? "bg-rose-500 hover:bg-rose-600"
-    : active
-      ? "bg-white/15 hover:bg-white/25"
-      : "bg-white/30 hover:bg-white/40";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition-colors ${bg}`}
-    >
-      {children}
-    </button>
-  );
-}
 
-type Tile = {
-  key: string;
-  name: string;
-  avatar?: string;
-  isLocal: boolean;
-  isHost: boolean;
-  isCoHost: boolean;
-  videoStream: MediaStream | null;
-  isCameraOn: boolean;
-  isMicOn: boolean;
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WEB room hooks — encapsulate the SHARED realtime/data wiring the native
@@ -393,16 +304,33 @@ function useRoomMembersSync(roomId: string, localUserId: string | undefined) {
   return members;
 }
 
-/** Eject / room-ended watcher — `videoApi.subscribeToRoomEvents`. When the
- *  host kicks/bans the local user (or ends the room) we surface the native
- *  EjectModal copy as a web banner, then leave. */
-function useEjectWatcher(
+/** Host-moderation watcher — `videoApi.subscribeToRoomEvents`.
+ *
+ *  Reports which of kick / ban / room-ended happened so EjectModal can render
+ *  the difference, and applies host mute. Web previously subscribed for ejects
+ *  only, so `mute_peer` and `mute_all` fell on the floor: a host muting a web
+ *  participant got a "Participant has been muted" toast while that
+ *  participant's microphone kept publishing. */
+function useRoomModerationWatcher(
   roomId: string,
   userId: string | undefined,
-  onEject: (reason: string) => void,
+  isHost: boolean,
+  hostMuteLocked: boolean,
+  // Structured, not pre-flattened: kick, ban and room-ended are three
+  // different facts and the modal renders each differently.
+  onEject: (kind: EjectKind, reason?: string) => void,
+  /** Host moderation of the local microphone. `locked` is the host holding the
+   *  mute; `stopMic` is whether this event also stops publishing. */
+  onHostMute: (locked: boolean, stopMic: boolean) => void,
 ) {
   const onEjectRef = useRef(onEject);
   onEjectRef.current = onEject;
+  const onHostMuteRef = useRef(onHostMute);
+  onHostMuteRef.current = onHostMute;
+  const isHostRef = useRef(isHost);
+  isHostRef.current = isHost;
+  const hostMuteLockedRef = useRef(hostMuteLocked);
+  hostMuteLockedRef.current = hostMuteLocked;
   useEffect(() => {
     if (!roomId || !userId) return;
     const unsubscribe = videoApi.subscribeToRoomEvents(
@@ -410,41 +338,37 @@ function useEjectWatcher(
       userId,
       (event) => {
         if (event.type === "room_ended") {
-          onEjectRef.current("This Lynk has ended.");
+          onEjectRef.current("room_ended");
+          return;
+        }
+        // Host moderation. Web listened for none of these, so a host muting a
+        // web participant was silently a no-op — the host was told it worked
+        // and the microphone kept running. The lock rule is shared with native
+        // (lib/video/host-mute): mute stops publishing AND blocks self-unmute;
+        // unmute lifts the block without opening the microphone.
+        if (
+          event.type === "mute_peer" ||
+          event.type === "mute_all" ||
+          event.type === "unmute_peer" ||
+          event.type === "unmute_all"
+        ) {
+          const ctx = { isHost: isHostRef.current, targetsSelf: event.targetId === userId };
+          const next = applyHostMuteEvent(
+            { locked: hostMuteLockedRef.current },
+            event.type,
+            ctx,
+          );
+          onHostMuteRef.current(next.locked, shouldStopMic(event.type, ctx));
           return;
         }
         if (event.targetId && event.targetId === userId) {
-          const action = (event.payload as any)?.action;
-          onEjectRef.current(
-            action === "ban"
-              ? "You were removed from this Lynk by the host."
-              : "You were removed from this Lynk.",
-          );
+          const payload = event.payload as { action?: string; reason?: string } | undefined;
+          onEjectRef.current(payload?.action === "ban" ? "ban" : "kick", payload?.reason);
         }
       },
     );
     return unsubscribe;
   }, [roomId, userId]);
-}
-
-// ── Connection banner (reconnecting / lost) ───────────────────────────────────
-function ConnectionBanner({ status }: { status: string }) {
-  if (status === "connected" || status === "idle") return null;
-  const reconnecting = status === "connecting";
-  return (
-    <div
-      className="absolute inset-x-0 top-0 z-30 flex items-center justify-center gap-2 py-1.5 text-xs font-semibold"
-      style={{
-        backgroundColor: reconnecting
-          ? "rgba(250, 204, 21, 0.92)"
-          : "rgba(252, 37, 58, 0.92)",
-        color: reconnecting ? "#1a1a00" : "#fff",
-      }}
-    >
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-      {reconnecting ? "Reconnecting…" : "Connection lost"}
-    </div>
-  );
 }
 
 function CaptureNotificationBannerWeb() {
@@ -508,7 +432,7 @@ function WebViewerDisclosureChip() {
   return (
     <span
       role="status"
-      className="flex items-center gap-2 rounded-lg border border-amber-300/35 bg-amber-300/12 px-2.5 py-1.5 text-[11px] font-semibold leading-tight text-amber-100"
+      className="flex items-center gap-2 rounded-lg border border-[#F5C518]/35 bg-[#F5C518]/12 px-2.5 py-1.5 text-[11px] font-semibold leading-tight text-[#F5C518]"
     >
       <ShieldAlert size={13} className="shrink-0" />
       Web viewers in room — capture protection limited on web
@@ -517,493 +441,21 @@ function WebViewerDisclosureChip() {
 }
 
 // ── Floating reactions overlay (emoji rise + fade) ────────────────────────────
-function FloatingReactions({
-  reactions,
-}: {
-  reactions: { id: string; emoji: string }[];
-}) {
-  return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-28 z-30 flex justify-center">
-      <div className="relative h-40 w-40">
-        {reactions.map((r, i) => (
-          <span
-            key={r.id}
-            className="absolute bottom-0 animate-[lynk-float_2.4s_ease-out_forwards] text-3xl"
-            style={{ left: `${20 + ((i * 23) % 60)}%` }}
-          >
-            {r.emoji}
-          </span>
-        ))}
-      </div>
-      <style>{`@keyframes lynk-float{0%{opacity:0;transform:translateY(0) scale(.6)}15%{opacity:1}100%{opacity:0;transform:translateY(-150px) scale(1.2)}}`}</style>
-    </div>
-  );
-}
 
 // ── Reaction bar (emoji quick-row) ────────────────────────────────────────────
-function ReactionBar({ onSend }: { onSend: (emoji: string) => void }) {
-  return (
-    <div className="flex items-center gap-1 rounded-full bg-white/8 px-2 py-1">
-      {REACTION_EMOJIS.map((emoji) => (
-        <button
-          key={emoji}
-          type="button"
-          onClick={() => onSend(emoji)}
-          aria-label={`React ${emoji}`}
-          className="rounded-full px-1.5 py-0.5 text-lg transition-transform hover:scale-125"
-        >
-          {emoji}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 // ── Side-panel shell (web replacement for native bottom-sheets) ───────────────
-function SidePanel({
-  open,
-  onClose,
-  title,
-  icon,
-  children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  if (!open) return null;
-  return (
-    <>
-      <button
-        type="button"
-        aria-label="Close panel"
-        onClick={onClose}
-        className="absolute inset-0 z-40 bg-black/50 sm:bg-black/30"
-      />
-      <aside
-        className="absolute inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-white/10 bg-[#0b0d14] shadow-2xl"
-        role="dialog"
-        aria-label={title}
-      >
-        <header className="flex items-center justify-between border-b border-white/8 px-4 py-3">
-          <span className="flex items-center gap-2 text-base font-semibold text-white">
-            {icon}
-            {title}
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white hover:bg-white/15"
-          >
-            <X size={16} />
-          </button>
-        </header>
-        {children}
-      </aside>
-    </>
-  );
-}
 
 // ── Chat panel (room comments) ────────────────────────────────────────────────
-function ChatPanel({
-  open,
-  onClose,
-  comments,
-  onSend,
-  currentUserId,
-}: {
-  open: boolean;
-  onClose: () => void;
-  comments: RoomComment[];
-  onSend: (body: string) => void;
-  currentUserId: string | undefined;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (open && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [open, comments.length]);
-
-  const submit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      const el = inputRef.current;
-      if (!el) return;
-      onSend(el.value);
-      el.value = "";
-    },
-    [onSend],
-  );
-
-  return (
-    <SidePanel
-      open={open}
-      onClose={onClose}
-      title="Chat"
-      icon={<MessageCircle size={18} className="text-cyan-400" />}
-    >
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        {comments.length === 0 ? (
-          <p className="mt-8 text-center text-sm text-white/40">
-            No messages yet. Say hi 👋
-          </p>
-        ) : (
-          comments.map((c) => {
-            const isOwn = c.authorId === currentUserId;
-            return (
-              <div key={c.id} className="flex items-start gap-2">
-                <SquareAvatar
-                  uri={c.author?.avatar}
-                  name={c.author?.displayName || c.author?.username || "?"}
-                  size={28}
-                />
-                <div className="min-w-0 flex-1">
-                  <span className="text-xs font-semibold text-white/70">
-                    {isOwn ? "You" : c.author?.displayName || c.author?.username || "Guest"}
-                  </span>
-                  <p
-                    className={`mt-0.5 break-words rounded-2xl px-3 py-1.5 text-sm ${
-                      isOwn ? "bg-cyan-500/20 text-white" : "bg-white/8 text-white/90"
-                    } ${c.isOptimistic ? "opacity-60" : ""}`}
-                  >
-                    {c.body}
-                  </p>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-      <form
-        onSubmit={submit}
-        className="flex items-center gap-2 border-t border-white/8 px-3 py-3"
-      >
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="Message…"
-          maxLength={500}
-          className="flex-1 rounded-full bg-white/8 px-4 py-2.5 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-        />
-        <button
-          type="submit"
-          aria-label="Send"
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-cyan-500 text-black hover:bg-cyan-400"
-        >
-          <Send size={18} />
-        </button>
-      </form>
-    </SidePanel>
-  );
-}
 
 // ── Hand-queue panel (host moderation, FIFO order) ────────────────────────────
-function HandQueuePanel({
-  open,
-  onClose,
-  order,
-  members,
-  onPromote,
-}: {
-  open: boolean;
-  onClose: () => void;
-  order: string[];
-  members: WebMember[];
-  onPromote: (userId: string) => void;
-}) {
-  const byId = new Map(members.map((m) => [m.userId, m]));
-  return (
-    <SidePanel
-      open={open}
-      onClose={onClose}
-      title={`Raised hands · ${order.length}`}
-      icon={<Hand size={18} className="text-pink-400" />}
-    >
-      <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
-        {order.length === 0 ? (
-          <p className="mt-8 text-center text-sm text-white/40">
-            No raised hands right now.
-          </p>
-        ) : (
-          order.map((userId, i) => {
-            const m = byId.get(userId);
-            const name =
-              m?.anonLabel || m?.displayName || m?.username || "Guest";
-            return (
-              <div
-                key={userId}
-                className="flex items-center gap-3 rounded-xl bg-white/[0.04] px-3 py-2"
-              >
-                <span className="text-xs font-bold tabular-nums text-white/40">
-                  {i + 1}
-                </span>
-                <SquareAvatar uri={m?.avatar} name={name} size={36} />
-                <span className="flex-1 truncate text-sm font-medium text-white">
-                  {name}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onPromote(userId)}
-                  className="flex items-center gap-1 rounded-full bg-cyan-500/20 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/30"
-                >
-                  <Crown size={13} /> Bring up
-                </button>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </SidePanel>
-  );
-}
 
 // ── Participants panel (host: mute / promote / remove) ────────────────────────
-function ParticipantsPanel({
-  open,
-  onClose,
-  members,
-  isHost,
-  localUserId,
-  onPromote,
-  onDemote,
-  onKick,
-  onMute,
-}: {
-  open: boolean;
-  onClose: () => void;
-  members: WebMember[];
-  isHost: boolean;
-  localUserId: string | undefined;
-  onPromote: (userId: string) => void;
-  onDemote: (userId: string) => void;
-  onKick: (userId: string) => void;
-  onMute: (userId: string) => void;
-}) {
-  const active = members.filter((m) => m.status === "active");
-  return (
-    <SidePanel
-      open={open}
-      onClose={onClose}
-      title={`In the room · ${active.length}`}
-      icon={<Users size={18} className="text-cyan-400" />}
-    >
-      <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
-        {active.map((m) => {
-          const name = m.anonLabel || m.displayName || m.username || "Guest";
-          const isSelf = m.userId === localUserId;
-          const isRoomHost = m.role === "host";
-          return (
-            <div
-              key={m.userId}
-              className="flex items-center gap-3 rounded-xl bg-white/[0.04] px-3 py-2"
-            >
-              <SquareAvatar uri={m.avatar} name={name} size={36} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-white">
-                  {name}
-                  {isSelf ? " (you)" : ""}
-                </span>
-                {m.role !== "listener" ? (
-                  <span className="text-[11px] uppercase tracking-wide text-cyan-400/80">
-                    {m.role}
-                  </span>
-                ) : null}
-              </span>
-              {isHost && !isSelf && !isRoomHost ? (
-                <span className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => onMute(m.userId)}
-                    aria-label="Mute"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
-                  >
-                    <MicOff size={14} />
-                  </button>
-                  {m.role === "co-host" ? (
-                    <button
-                      type="button"
-                      onClick={() => onDemote(m.userId)}
-                      aria-label="Demote to listener"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
-                    >
-                      <UserMinus size={14} />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onPromote(m.userId)}
-                      aria-label="Promote to co-host"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30"
-                    >
-                      <Crown size={14} />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => onKick(m.userId)}
-                    aria-label="Remove from room"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30"
-                  >
-                    <UserX size={14} />
-                  </button>
-                </span>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-    </SidePanel>
-  );
-}
-
-// ── Free-host countdown badge (mirrors native RoomTimer) ──────────────────────
-function WebRoomTimer({
-  startedAt,
-  onTimeUp,
-}: {
-  startedAt: number;
-  onTimeUp: () => void;
-}) {
-  const [remainingMs, setRemainingMs] = useState(() =>
-    Math.max(0, FREE_ROOM_DURATION_MS - (Date.now() - startedAt)),
-  );
-  const onTimeUpRef = useRef(onTimeUp);
-  onTimeUpRef.current = onTimeUp;
-  const firedRef = useRef(false);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const remaining = Math.max(0, FREE_ROOM_DURATION_MS - (Date.now() - startedAt));
-      setRemainingMs(remaining);
-      if (remaining <= 0 && !firedRef.current) {
-        firedRef.current = true;
-        clearInterval(interval);
-        onTimeUpRef.current();
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [startedAt]);
-
-  if (remainingMs > COUNTDOWN_THRESHOLD_MS || remainingMs <= 0) return null;
-  const totalSeconds = Math.ceil(remainingMs / 1000);
-  const display = `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60)
-    .toString()
-    .padStart(2, "0")}`;
-  return (
-    <span className="flex animate-pulse items-center gap-1.5 rounded-lg bg-rose-500/90 px-2.5 py-1.5 text-[13px] font-bold text-white">
-      <Clock size={14} /> {display}
-    </span>
-  );
-}
 
 // ── Duration-limit paywall (web equivalent of SneakySubscriptionModal) ────────
-function TimeUpDialog({
-  open,
-  onUpgrade,
-  onLeave,
-}: {
-  open: boolean;
-  onUpgrade: () => void;
-  onLeave: () => void;
-}) {
-  if (!open) return null;
-  return (
-    <div className="absolute inset-0 z-[60] flex items-end justify-center bg-black/90 px-3 pb-[calc(env(safe-area-inset-bottom)+80px)] sm:items-center sm:px-0 sm:pb-0">
-      <div className="w-full max-w-md rounded-3xl bg-[#0b0d14] px-6 pb-8 pt-7">
-        <span
-          className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full"
-          style={{ backgroundColor: `${PURPLE}20` }}
-        >
-          <Crown size={26} color={PURPLE} />
-        </span>
-        <h2 className="text-center text-xl font-bold text-white">Time&apos;s up</h2>
-        <p className="mt-2 text-center text-sm text-white/60">
-          Your session reached the 5-minute limit on the free plan. Upgrade to
-          host bigger, longer Lynks.
-        </p>
-        <button
-          type="button"
-          onClick={onUpgrade}
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-full py-3.5 font-bold text-white"
-          style={{ backgroundColor: PURPLE }}
-        >
-          <Zap size={16} /> Upgrade plan
-        </button>
-        <button
-          type="button"
-          onClick={onLeave}
-          className="mt-3 w-full rounded-full bg-white/8 py-3.5 font-semibold text-white/80 hover:bg-white/15"
-        >
-          Leave Lynk
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ── Stage tile (one participant). `large` = featured host/co-host (wide,
 //    top-of-stage); otherwise a compact square in the grid below. ─────────────
-function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
-  return (
-    <div
-      className={`relative overflow-hidden rounded-2xl border border-white/8 bg-white/[0.04] ${
-        large ? "aspect-video" : "aspect-square"
-      }`}
-    >
-      {tile.isCameraOn && tile.videoStream ? (
-        <VideoTile
-          stream={tile.videoStream}
-          muted={tile.isLocal}
-          mirror={tile.isLocal}
-          className="h-full w-full object-cover"
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center">
-          <SquareAvatar uri={tile.avatar} name={tile.name} size={large ? 104 : 72} />
-        </div>
-      )}
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5">
-        <span className="truncate text-xs font-medium">
-          {tile.name}
-          {tile.isHost ? " · host" : tile.isCoHost ? " · co-host" : ""}
-        </span>
-        {tile.isMicOn ? (
-          <Mic size={12} className="text-white/80 shrink-0" />
-        ) : (
-          <MicOff size={12} className="text-white/50 shrink-0" />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Eject banner (web equivalent of native EjectModal) ────────────────────────
-function EjectBanner({ reason, onDismiss }: { reason: string; onDismiss: () => void }) {
-  return (
-    <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 px-6 text-center">
-      <div className="w-full max-w-sm">
-        <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-500/20">
-          <UserX size={32} className="text-rose-400" />
-        </span>
-        <h2 className="text-xl font-bold text-white">Removed from Lynk</h2>
-        <p className="mt-2 text-sm text-white/60">{reason}</p>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="mt-7 w-full rounded-full bg-white/8 py-3.5 font-semibold text-white hover:bg-white/15"
-        >
-          Back
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ── Inner room (rendered INSIDE FishjamProvider so SDK hooks are valid) ───────
 function RoomInner({
@@ -1023,6 +475,49 @@ function RoomInner({
   const endRoomHistory = useLynkHistoryStore((s) => s.endRoom);
 
   const { joinRoom, leaveRoom, peerStatus } = useConnection();
+  /** Set once the room has ever been joined. A ref, not state: it only ever
+   *  reads during render alongside peerStatus, which already re-renders. */
+  const everConnectedRef = useRef(false);
+  // Same session machine as native, fed from Fishjam's peerStatus. It owns
+  // "is this room live" and the observability seam follows it. The banner
+  // still reads peerStatus directly — see the native counterpart.
+  const setServerEndsAt = useRoomUIStore((s) => s.setServerEndsAt);
+  /**
+   * Re-establish the room after a drop: fresh peer token, re-attach. Same
+   * identity and role — the token is minted for this user against this room,
+   * so the roster sees no leave/join pair.
+   *
+   * ponytail: the token+attach pair is written twice, here and in the initial
+   * join effect, which additionally owns the error surfaces, the cancel guard
+   * and the media start. Collapsing them means refactoring the working
+   * first-join path; fold them together once a device has run a real reconnect.
+   */
+  const rejoinRoom = useCallback(async (): Promise<boolean> => {
+    const result = await sneakyLynkApi.joinRoom(id, joinAnonymousRef.current);
+    if (!result.ok || !result.data) return false;
+    const { token, peer, user: joinedUser, room } = result.data;
+    setServerEndsAt(room.endsAt ?? null);
+    try {
+      await joinRoomRef.current({
+        peerToken: token,
+        peerMetadata: {
+          userId: joinedUser.id,
+          username: joinedUser.username,
+          avatar: joinedUser.avatar,
+          role: peer.role,
+        },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [id, setServerEndsAt]);
+
+  const session = useRoomSession(peerStatus, { onReconnect: rejoinRoom });
+  // Keeps this member fresh so the browse list stops showing the room as Live
+  // once everyone has gone. Tied to the session, not the mount: a room that is
+  // still joining should not yet advertise a live host.
+  useRoomHeartbeat(id, isActive(session));
   const camera = useCamera();
   const microphone = useMicrophone();
   const peers = usePeers();
@@ -1038,12 +533,18 @@ function RoomInner({
   const openHandQueue = useRoomStore((s) => s.openHandQueue);
   const closeHandQueue = useRoomStore((s) => s.closeHandQueue);
   const raisedHandOrder = useRoomStore((s) => s.raisedHandOrder);
+  // Lowering a hand is local moderation state, exactly as on native
+  // (handleLowerHand / handleLowerAll) — no server round-trip.
+  const setRaisedHand = useRoomStore((s) => s.setRaisedHand);
+  const clearRaisedHands = useRoomStore((s) => s.clearRaisedHands);
   const promoteListener = useRoomStore((s) => s.promoteListener);
   const removeCoHost = useRoomStore((s) => s.removeCoHost);
 
   // Web UI/connection phase store (no useState).
   const phase = useRoomUIStore((s) => s.phase);
   const joinAnonymous = useRoomUIStore((s) => s.joinAnonymous);
+  const joinAnonymousRef = useRef(joinAnonymous);
+  joinAnonymousRef.current = joinAnonymous;
   const closedReason = useRoomUIStore((s) => s.closedReason);
   const errorMessage = useRoomUIStore((s) => s.errorMessage);
   const isMicOn = useRoomUIStore((s) => s.isMicOn);
@@ -1056,6 +557,8 @@ function RoomInner({
   const setAppOnlyPhase = useRoomUIStore((s) => s.setAppOnly);
   const setErrorState = useRoomUIStore((s) => s.setError);
   const setMicOn = useRoomUIStore((s) => s.setMicOn);
+  const hostMuteLocked = useRoomUIStore((s) => s.hostMuteLocked);
+  const setHostMuteLocked = useRoomUIStore((s) => s.setHostMuteLocked);
   const setCameraOn = useRoomUIStore((s) => s.setCameraOn);
 
   // Web-only moderation/paywall surfaces (Law 3: panels/dialogs, not sheets).
@@ -1064,11 +567,12 @@ function RoomInner({
   const isPaidHost = useRoomUIStore((s) => s.isPaidHost);
   const setIsPaidHost = useRoomUIStore((s) => s.setIsPaidHost);
   const timerStartedAt = useRoomUIStore((s) => s.timerStartedAt);
+  const serverEndsAt = useRoomUIStore((s) => s.serverEndsAt);
   const setTimerStartedAt = useRoomUIStore((s) => s.setTimerStartedAt);
   const showTimeUp = useRoomUIStore((s) => s.showTimeUp);
   const setShowTimeUp = useRoomUIStore((s) => s.setShowTimeUp);
-  const ejectReason = useRoomUIStore((s) => s.ejectReason);
-  const setEjectReason = useRoomUIStore((s) => s.setEjectReason);
+  const eject = useRoomUIStore((s) => s.eject);
+  const setEject = useRoomUIStore((s) => s.setEject);
 
   // Stable refs so callbacks/effects never capture stale SDK objects.
   const joinRoomRef = useRef(joinRoom);
@@ -1105,11 +609,9 @@ function RoomInner({
   // because each reaction there is a keyframed <span>. Only flips true once the
   // overlay has a device, an atlas and a pipeline — any failure keeps the DOM
   // path exactly as it was.
-  const [gpuReactions, setGpuReactions] = useState(false);
   const { reactions, sendReaction } = useRoomReactions({
     roomId: id,
     currentUser,
-    cap: gpuReactions ? GPU_REACTION_CAP : undefined,
   });
   const { comments, send: sendChat } = useRoomChat(id, currentUser);
   const members = useRoomMembersSync(id, authUser?.id);
@@ -1123,7 +625,9 @@ function RoomInner({
     realUsername: authUser?.username ?? undefined,
   });
 
-  useEjectWatcher(id, authUser?.id, (reason) => {
+  // isHostRef, not the derived `isHost` below it: the ref is kept current from
+  // the peer's server role (line ~1219) and is the value in scope this early.
+  useRoomModerationWatcher(id, authUser?.id, isHostRef.current, hostMuteLocked, (kind, reason) => {
     try {
       leaveRoomRef.current();
     } catch {
@@ -1135,7 +639,22 @@ function RoomInner({
     } catch {
       // ignore
     }
-    setEjectReason(reason);
+    setEject({ kind, reason });
+  },
+  (locked, stopMic) => {
+    // Lifting the lock restores control; it never starts publishing.
+    setHostMuteLocked(locked);
+    if (stopMic) {
+      try {
+        micRef.current.stopMicrophone();
+      } catch {
+        // ignore
+      }
+      setMicOn(false);
+      showToast("info", "Muted", HOST_MUTE_COPY.mutedByHost);
+    } else if (!locked) {
+      showToast("info", "Unmuted", HOST_MUTE_COPY.released);
+    }
   });
 
   // ── JOIN: sneaky-lynk peer token → Fishjam joinRoom → start media ──────────
@@ -1171,6 +690,10 @@ function RoomInner({
       }
 
       const { token, peer, user: joinedUser, room } = result.data;
+      // The server's session deadline (video_rooms.ends_at). `undefined` means
+      // a backend predating the gate, and the entitlement fallback below still
+      // applies; `null` means unlimited; a value means count down to THIS.
+      setServerEndsAt(room.endsAt ?? null);
       setRoomSnapshot({
         id: room.id,
         createdBy: "",
@@ -1242,7 +765,13 @@ function RoomInner({
   // ── Sync Fishjam peerStatus → phase ───────────────────────────────────────
   useEffect(() => {
     if (phase === "closed" || phase === "error" || phase === "prejoin") return;
-    if (peerStatus === "connected") setPhase("connected");
+    if (peerStatus === "connected") {
+      // Session history: once a room has been joined, a later "connecting"
+      // from Fishjam is a RE-connect. The transport cannot tell us this —
+      // PeerStatus has no reconnecting member.
+      everConnectedRef.current = true;
+      setPhase("connected");
+    }
     else if (peerStatus === "error") setErrorState("Peer connection failed");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [peerStatus]);
@@ -1284,11 +813,21 @@ function RoomInner({
 
   // ── Controls ──────────────────────────────────────────────────────────────
   const toggleMic = useCallback(() => {
+    // Muting yourself is always allowed. Turning the microphone back ON is not,
+    // while the host is holding the mute — otherwise the lock is decoration.
+    const turningOn = !micRef.current.isMicrophoneOn;
+    if (
+      turningOn &&
+      !canSelfUnmute({ locked: hostMuteLocked }, isHostRef.current)
+    ) {
+      showToast("info", "Muted by host", HOST_MUTE_COPY.blocked);
+      return;
+    }
     void (async () => {
       await micRef.current.toggleMicrophone();
       setMicOn(micRef.current.isMicrophoneOn);
     })();
-  }, [setMicOn]);
+  }, [setMicOn, hostMuteLocked, showToast]);
 
   const toggleCamera = useCallback(() => {
     void (async () => {
@@ -1439,6 +978,31 @@ function RoomInner({
     [id, showToast],
   );
 
+  /** Releases the host mute. Does NOT turn the participant's microphone on —
+   *  it hands the control back and they decide (lib/video/host-mute). */
+  const unmuteOne = useCallback(
+    (userId: string) => {
+      void (async () => {
+        const res = await videoApi.unmutePeer({ roomId: id, targetUserId: userId });
+        if (!res.ok) {
+          showToast("error", "Couldn't unmute", res.error?.message || "Try again.");
+        }
+      })();
+    },
+    [id, showToast],
+  );
+
+  const unmuteAll = useCallback(() => {
+    void (async () => {
+      const res = await videoApi.unmuteAll(id);
+      if (res.ok) {
+        showToast("success", "Unmuted everyone", "Participants can unmute themselves again.");
+      } else {
+        showToast("error", "Couldn't unmute all", res.error?.message || "Try again.");
+      }
+    })();
+  }, [id, showToast]);
+
   const muteAll = useCallback(() => {
     void (async () => {
       const res = await videoApi.muteAll(id);
@@ -1459,6 +1023,16 @@ function RoomInner({
     : authUser?.username || authUser?.name || "You";
 
   const remotePeers = peers.remotePeers || [];
+  // Real voice activity, not a guess. Fishjam drives remote VAD from backend
+  // vadNotification messages and polls the mic for the local peer
+  // (@fishjam-cloud/react-client useVAD.d.ts). Without this the stage gives no
+  // clue who is talking, which is the single thing a grid of faces must convey.
+  const speakingByPeer = useVAD({
+    peerIds: [
+      ...(peers.localPeer?.id ? [peers.localPeer.id] : []),
+      ...remotePeers.map((p) => p.id),
+    ],
+  });
   const remoteTiles: Tile[] = remotePeers.map((peer) => {
     const meta = ((peer.metadata as any)?.peer ?? peer.metadata) as any;
     const cam = peer.cameraTrack as any;
@@ -1473,8 +1047,21 @@ function RoomInner({
       videoStream: cam?.stream ?? null,
       isCameraOn: !!(cam?.stream || cam?.track || cam?.trackId),
       isMicOn: !!(mic?.stream || mic?.track || mic?.trackId),
+      isSpeaking: !!speakingByPeer[peer.id],
     };
   });
+
+  // useVAD is keyed by Fishjam peer id; the participants panel lists members by
+  // our user id. Map once here rather than making the panel know about peers.
+  const speakingByUserId: Record<string, boolean> = {};
+  for (const peer of remotePeers) {
+    const meta = ((peer.metadata as any)?.peer ?? peer.metadata) as any;
+    const uid = meta?.userId;
+    if (uid) speakingByUserId[uid] = !!speakingByPeer[peer.id];
+  }
+  if (authUser?.id && peers.localPeer?.id) {
+    speakingByUserId[authUser.id] = !!speakingByPeer[peers.localPeer.id];
+  }
 
   const localTile: Tile = {
     key: "local",
@@ -1486,6 +1073,7 @@ function RoomInner({
     videoStream: localStream,
     isCameraOn,
     isMicOn,
+    isSpeaking: !!(peers.localPeer?.id && speakingByPeer[peers.localPeer.id]),
   };
 
   const stageTiles = [localTile, ...remoteTiles];
@@ -1530,7 +1118,7 @@ function RoomInner({
 
           <a
             href={`dvnt://sneaky-lynk/room/${id}`}
-            className="w-full max-w-xs rounded-full px-6 py-4 text-center font-bold text-black active:scale-95"
+            className="w-full max-w-xs rounded-lg px-6 py-4 text-center font-bold text-black active:scale-95"
             style={{ backgroundColor: ACCENT }}
           >
             Open in the DVNT app
@@ -1552,7 +1140,7 @@ function RoomInner({
           <button
             type="button"
             onClick={() => router.back()}
-            className="mt-8 rounded-full bg-white/8 px-6 py-3 text-sm font-semibold active:scale-95"
+            className="mt-8 rounded-lg bg-white/8 px-6 py-3 text-sm font-semibold active:scale-95"
           >
             Back
           </button>
@@ -1573,7 +1161,7 @@ function RoomInner({
           <button
             type="button"
             onClick={() => router.back()}
-            className="rounded-full bg-white/8 px-6 py-4 font-semibold active:scale-95"
+            className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
           >
             Back
           </button>
@@ -1586,12 +1174,12 @@ function RoomInner({
     return (
       <RoomShell title={roomTitle} onBack={() => router.back()}>
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-          <h2 className="text-xl font-bold mb-3 text-rose-400">Couldn&apos;t join</h2>
+          <h2 className="text-xl font-bold mb-3 text-[#FC253A]">Couldn&apos;t join</h2>
           <p className="text-white/60 mb-8">{errorMessage}</p>
           <button
             type="button"
             onClick={() => router.back()}
-            className="rounded-full bg-white/8 px-6 py-4 font-semibold active:scale-95"
+            className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
           >
             Back
           </button>
@@ -1603,7 +1191,19 @@ function RoomInner({
   const connecting = phase === "joining" || phase === "connecting";
   const isHost = isHostRef.current;
   const raisedHandCount = raisedHandOrder.length;
-  const showTimer = isHost && isPaidHost === false && timerStartedAt != null;
+  // The server decides whether this session is limited; the client displays it.
+  // Falls back to the entitlement read only when the backend returned no
+  // endsAt field at all (pre-deploy), which is the only case the client still
+  // has to guess.
+  const serverLimited = serverEndsAt != null;
+  const showTimer =
+    isHost &&
+    timerStartedAt != null &&
+    (serverEndsAt !== undefined ? serverLimited : isPaidHost === false);
+  const timerDurationMs =
+    serverEndsAt != null && timerStartedAt != null
+      ? new Date(serverEndsAt).getTime() - timerStartedAt
+      : undefined;
 
   return (
     <SecureCaptureBoundary
@@ -1620,7 +1220,9 @@ function RoomInner({
       onCaptureAttempt={(kind) => captureBroadcast.notifyLocalCapture(kind)}
     >
       <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white">
-      <ConnectionBanner status={connecting ? "connecting" : peerStatus} />
+      {/* The session machine is the single source now — it is what knows a
+          first join from a reconnect, and what is driving the retries. */}
+      <ConnectionBanner phase={bannerPhaseFor(session)} />
       <CaptureNotificationBannerWeb />
 
       {/* Header */}
@@ -1655,8 +1257,9 @@ function RoomInner({
         </div>
         <span className="flex shrink-0 items-center gap-1.5">
           {showTimer ? (
-            <WebRoomTimer
+            <RoomTimer
               startedAt={timerStartedAt}
+              durationMs={timerDurationMs}
               onTimeUp={() => {
                 setShowTimeUp(true);
                 // Free session is over — stop broadcasting so no camera/mic keeps
@@ -1673,7 +1276,7 @@ function RoomInner({
               type="button"
               onClick={openHandQueue}
               aria-label={`${raisedHandCount} raised hands`}
-              className="flex items-center gap-1 rounded-xl border border-pink-400/40 bg-pink-400/20 px-2.5 py-1.5 text-xs font-extrabold text-pink-100"
+              className="flex items-center gap-1 rounded-xl border border-[#FF5BFC]/40 bg-[#FF5BFC]/20 px-2.5 py-1.5 text-xs font-extrabold text-[#FF5BFC]"
             >
               <Hand size={13} /> {raisedHandCount}
             </button>
@@ -1687,14 +1290,29 @@ function RoomInner({
             <Users size={14} /> {participantCount}
           </button>
           {isHost ? (
-            <button
-              type="button"
-              onClick={muteAll}
-              aria-label="Mute everyone"
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 text-rose-300 hover:bg-white/15"
-            >
-              <VolumeX size={16} />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={muteAll}
+                aria-label="Mute everyone"
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 hover:bg-white/15"
+                style={{ color: ROSE }}
+              >
+                <VolumeX size={16} />
+              </button>
+              {/* Mute-all locks everyone out of their own microphone, so the
+                  release has to be reachable from the same place. Without it a
+                  host could mute the room and have no way to give it back. */}
+              <button
+                type="button"
+                onClick={unmuteAll}
+                aria-label="Let everyone unmute"
+                title="Lift the mute — participants choose when to speak"
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 text-white/80 hover:bg-white/15"
+              >
+                <Volume2 size={16} />
+              </button>
+            </>
           ) : null}
         </span>
       </header>
@@ -1708,17 +1326,24 @@ function RoomInner({
 
       {connecting ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4">
-          <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-cyan-500 animate-spin" />
+          <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
           <p className="text-white/60">Connecting…</p>
         </div>
       ) : (
         <>
           {/* Speaker / video stage — host (+ co-hosts) own the top, large. */}
-          <section className="flex-1 space-y-3 overflow-y-auto px-4 py-2">
+          {/* The stage grew one breakpoint wider at each size instead of
+              staying capped at max-w-2xl (672px). On a tablet that cap left the
+              room as a phone column floating in dead space, which is what made
+              the aspect ratio read as wrong — the tiles were not mis-shaped, the
+              stage was refusing the width. */}
+          <section className="flex-1 space-y-3 overflow-y-auto px-4 py-2 md:px-6 lg:px-8">
             {featuredTiles.length > 0 ? (
               <div
-                className={`mx-auto grid w-full max-w-2xl gap-3 ${
-                  featuredTiles.length === 1 ? "grid-cols-1" : "grid-cols-2"
+                className={`mx-auto grid w-full gap-3 md:gap-4 ${
+                  featuredTiles.length === 1
+                    ? "max-w-2xl grid-cols-1 md:max-w-3xl lg:max-w-4xl"
+                    : "max-w-2xl grid-cols-2 md:max-w-5xl lg:max-w-6xl"
                 }`}
               >
                 {featuredTiles.map((tile) => (
@@ -1727,7 +1352,7 @@ function RoomInner({
               </div>
             ) : null}
             {otherTiles.length > 0 ? (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="mx-auto grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-3 md:max-w-5xl md:grid-cols-4 md:gap-4 lg:max-w-6xl lg:grid-cols-5">
                 {otherTiles.map((tile) => (
                   <StageTile key={tile.key} tile={tile} />
                 ))}
@@ -1767,13 +1392,10 @@ function RoomInner({
         </>
       )}
 
-      {/* Floating reactions overlay */}
-      <GpuReactionOverlay
-        reactions={reactions}
-        emojis={REACTION_EMOJIS}
-        onAvailabilityChange={setGpuReactions}
-      />
-      <FloatingReactions reactions={gpuReactions ? [] : reactions} />
+      {/* One renderer. The GPU overlay used to suppress this one whenever it
+          reported available, so a canvas that failed to initialise made
+          reactions silently invisible. */}
+      <FloatingReactions reactions={reactions} />
 
       {/* Controls bar */}
       <footer className="relative z-10 flex flex-col items-center gap-3 pb-8 pt-2">
@@ -1782,9 +1404,22 @@ function RoomInner({
           <ControlButton
             onClick={toggleMic}
             active={isMicOn}
-            label={isMicOn ? "Mute" : "Unmute"}
+            label={
+              hostMuteLocked
+                ? "Muted by host"
+                : isMicOn
+                  ? "Mute"
+                  : "Unmute"
+            }
           >
-            {isMicOn ? <Mic size={24} /> : <MicOff size={24} />}
+            {/* Held muted reads as a state to understand, not a failure, so
+                it takes gold #F5C518 rather than signal. Same treatment as
+                the native control. */}
+            {isMicOn ? (
+              <Mic size={24} />
+            ) : (
+              <MicOff size={24} color={hostMuteLocked ? "#F5C518" : undefined} />
+            )}
           </ControlButton>
 
           {roomHasVideo ? (
@@ -1830,8 +1465,13 @@ function RoomInner({
         onClose={closeHandQueue}
         order={raisedHandOrder}
         members={members}
-        onPromote={(uid) => {
+        onInviteToSpeak={(uid) => {
           promote(uid);
+          closeHandQueue();
+        }}
+        onLowerHand={(uid) => setRaisedHand(uid, false)}
+        onLowerAll={() => {
+          clearRaisedHands();
           closeHandQueue();
         }}
       />
@@ -1847,17 +1487,22 @@ function RoomInner({
         onDemote={demote}
         onKick={kick}
         onMute={muteOne}
+        onUnmute={unmuteOne}
+        onMuteAll={muteAll}
+        speakingByUserId={speakingByUserId}
       />
 
       {/* Free-host duration-limit paywall */}
       <TimeUpDialog open={showTimeUp} onUpgrade={onUpgrade} onLeave={leave} />
 
       {/* Eject banner (kicked / banned / room ended) */}
-      {ejectReason ? (
-        <EjectBanner
-          reason={ejectReason}
+      {eject ? (
+        <EjectModal
+          visible
+          kind={eject.kind}
+          reason={eject.reason}
           onDismiss={() => {
-            setEjectReason(null);
+            setEject(null);
             resetRoomStore();
             endRoomHistory(id);
             router.back();
@@ -1982,7 +1627,7 @@ function PreJoinScreen({
         <button
           type="button"
           onClick={() => onJoin(joinAnonymous)}
-          className="w-full max-w-md rounded-full py-4 text-center font-bold text-white active:scale-[0.99]"
+          className="w-full max-w-md rounded-lg py-4 text-center font-bold text-white active:scale-[0.99]"
           style={{ backgroundColor: ROSE }}
         >
           {joinAnonymous ? "Join Anonymously" : "Join Lynk"}
@@ -2057,7 +1702,7 @@ export function SneakyLynkRoomScreen() {
   if (phase === "looking-up") {
     return (
       <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 bg-[#06070d] text-white">
-        <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-cyan-500 animate-spin" />
+        <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
         <p className="text-white/60">Loading Lynk…</p>
       </div>
     );
@@ -2075,7 +1720,7 @@ export function SneakyLynkRoomScreen() {
           <button
             type="button"
             onClick={() => router.back()}
-            className="rounded-full bg-white/8 px-6 py-4 font-semibold active:scale-95"
+            className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
           >
             Back
           </button>

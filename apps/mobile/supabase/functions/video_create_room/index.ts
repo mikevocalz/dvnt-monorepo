@@ -327,6 +327,18 @@ Deno.serve(async (req) => {
     }
     console.log("[video_create_room] Final max participants:", maxParticipants);
 
+    // Session length gets the same treatment as the participant cap: resolved
+    // here from the plan, written onto the room, enforced at the door. The
+    // client timer counts down to this value instead of deciding it — it had
+    // been the only thing stopping a free room running forever.
+    // NULL = unlimited (any paid tier, or a plan without a limit).
+    const FREE_TIER_SESSION_MINUTES = 5;
+    const isPaidTier = planMaxParticipants > 5 || membershipCap !== null;
+    const endsAt = isPaidTier
+      ? null
+      : new Date(Date.now() + FREE_TIER_SESSION_MINUTES * 60_000).toISOString();
+    console.log("[video_create_room] Session ends_at:", endsAt ?? "unlimited");
+
     // Rate limit check
     console.log("[video_create_room] Checking rate limit...");
     const { data: canCreate, error: rateError } = await supabase.rpc(
@@ -383,6 +395,7 @@ Deno.serve(async (req) => {
       participant_count: 1,
       status: "open",
       uuid: roomUuid,
+      ends_at: endsAt,
     };
 
     let roomQuery = supabase.from("video_rooms").insert(roomInsert).select();

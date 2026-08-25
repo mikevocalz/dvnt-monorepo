@@ -31,6 +31,7 @@ import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import type { VideoParticipant } from "./VideoGrid";
 import { getSneakyUserLabel } from "./user-labels";
+import { HAND_QUEUE_COPY } from "./hand-queue";
 
 interface HandQueueSheetProps {
   visible: boolean;
@@ -109,7 +110,7 @@ export function HandQueueSheet({
         ? isAnon
           ? "Anonymous"
           : getSneakyUserLabel(participant.user)
-        : "Left the room";
+        : HAND_QUEUE_COPY.departed;
 
       return (
         <View
@@ -213,7 +214,7 @@ export function HandQueueSheet({
                     { color: colors.primaryForeground },
                   ]}
                 >
-                  Invite to speak
+                  {HAND_QUEUE_COPY.invite}
                 </Text>
               </Pressable>
               <Pressable
@@ -233,7 +234,7 @@ export function HandQueueSheet({
                     { color: colors.destructive },
                   ]}
                 >
-                  Lower
+                  {HAND_QUEUE_COPY.lower}
                 </Text>
               </Pressable>
             </View>
@@ -365,7 +366,7 @@ export function HandQueueSheet({
             <Text
               style={[styles.emptyBody, { color: colors.mutedForeground }]}
             >
-              Raised hands will show up here in the order they're raised.
+              {HAND_QUEUE_COPY.empty}
             </Text>
           </View>
         }
@@ -385,7 +386,7 @@ export function HandQueueSheet({
               <Text
                 style={[styles.lowerAllLabel, { color: colors.mutedForeground }]}
               >
-                Lower all hands
+                {HAND_QUEUE_COPY.lowerAll}
               </Text>
             </Pressable>
           ) : null

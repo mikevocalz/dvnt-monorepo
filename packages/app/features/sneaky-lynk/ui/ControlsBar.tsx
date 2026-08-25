@@ -38,6 +38,11 @@ export const REACTION_EMOJIS = ["😂", "😢", "😊", "😈", "🥵", "💝"];
 
 interface ControlsBarProps {
   isMuted: boolean;
+  /** The host is holding this participant muted (lib/video/host-mute). The
+   *  control still renders — hiding it would leave someone wondering where
+   *  their microphone went — but it says who is holding it and why pressing
+   *  does nothing. */
+  hostMuteLocked?: boolean;
   isVideoEnabled: boolean;
   handRaised: boolean;
   hasVideo: boolean;
@@ -298,6 +303,7 @@ function ControlButton({
 
 export function ControlsBar({
   isMuted,
+  hostMuteLocked = false,
   isVideoEnabled,
   handRaised,
   hasVideo,
@@ -513,11 +519,21 @@ export function ControlsBar({
           }}
         >
           <ControlButton
-            label={isMuted ? "Unmute microphone" : "Mute microphone"}
+            label={
+              hostMuteLocked
+                ? "Muted by host — you can't unmute yet"
+                : isMuted
+                  ? "Unmute microphone"
+                  : "Mute microphone"
+            }
             active={!isMuted}
             onPress={onToggleMute}
             icon={
-              isMuted ? (
+              hostMuteLocked ? (
+                // gold #F5C518 — the urgency token, not signal: being held
+                // muted is a state to understand, not a failure.
+                <MicOff size={21} color="#F5C518" />
+              ) : isMuted ? (
                 <MicOff size={21} color="#F87171" />
               ) : (
                 <Mic size={21} color="#F8FAFC" />

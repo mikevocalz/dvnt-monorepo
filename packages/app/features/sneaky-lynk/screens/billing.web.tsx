@@ -344,7 +344,7 @@ export function SneakyLynkBillingScreen() {
 
       {isLoading && !subscription ? (
         <div className="flex flex-col items-center justify-center py-24">
-          <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-cyan-500 animate-spin" />
+          <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
         </div>
       ) : (
         <main className="mx-auto w-full max-w-2xl px-4 py-4 flex flex-col gap-3">

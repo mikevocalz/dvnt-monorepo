@@ -73,6 +73,10 @@ export interface JoinRoomResponse {
     id: string;
     title: string;
     sweetSpicyMode?: "sweet" | "spicy";
+    /** Server session deadline (video_rooms.ends_at). `undefined` = backend
+     *  predates the gate, `null` = unlimited, ISO = limited. The client timer
+     *  displays this; video_join_room is what actually enforces it. */
+    endsAt?: string | null;
     fishjamRoomId: string;
   };
   token: string;

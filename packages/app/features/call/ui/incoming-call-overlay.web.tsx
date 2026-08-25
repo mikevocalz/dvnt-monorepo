@@ -17,6 +17,7 @@ import { Phone, PhoneOff, Video } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { color } from "@dvnt/app/lib/theme";
 import { callSignalsApi, type CallSignal } from "@dvnt/app/lib/api/call-signals";
+import { useWebRingtone } from "./use-web-ringtone";
 
 const RING_TIMEOUT_MS = 30000;
 
@@ -25,6 +26,36 @@ export function IncomingCallOverlay() {
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [incomingCall, setIncomingCall] = useState<CallSignal | null>(null);
+  // Destructured: the hook returns a fresh object each render, so depending
+  // on it would restart the ring on every render. start/stop are stable.
+  const { start: startRing, stop: stopRing } = useWebRingtone();
+
+  // Ring for as long as there is a call to answer, and only that long. Tied to
+  // `incomingCall` rather than started/stopped in the handlers so that every
+  // way a call can end — accepted, declined, the 30s timeout, the caller
+  // hanging up, this component unmounting — stops the tone without each path
+  // having to remember to.
+  useEffect(() => {
+    if (!incomingCall) return;
+    let cancelled = false;
+    const previousTitle = typeof document !== "undefined" ? document.title : "";
+
+    void startRing().then((audible) => {
+      if (cancelled || audible || typeof document === "undefined") return;
+      // The browser refused audio because this tab has had no user gesture.
+      // Say so in the one channel that is always allowed, rather than leaving
+      // the callee with a silent overlay they may not be looking at.
+      document.title = "Incoming call — DVNT";
+    });
+
+    return () => {
+      cancelled = true;
+      stopRing();
+      if (typeof document !== "undefined" && previousTitle) {
+        document.title = previousTitle;
+      }
+    };
+  }, [incomingCall, startRing, stopRing]);
 
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return;

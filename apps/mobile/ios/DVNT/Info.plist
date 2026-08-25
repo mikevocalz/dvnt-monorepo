@@ -103,6 +103,8 @@
 	</array>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>RCTRootViewBackgroundColor</key>
+	<integer>4278585101</integer>
 	<key>RNAS_PREVENT_RECENT_SCREENSHOTS</key>
 	<true/>
 	<key>UIBackgroundModes</key>

@@ -4,7 +4,7 @@
 -- statement array the ledger recorded, so the repo now replays to the
 -- schema production actually runs. Already recorded as applied.
 
--- Drops 84 indexes on legacy Payload CMS tables. Per CLAUDE.md:
+-- Drops 84 indexes on legacy Payload CMS tables. Per docs/engineering-contract.md:
 -- "Payload CMS — REMOVED, never reference". The tables themselves
 -- still exist but are unused by the live app (all reads/writes
 -- happen through Better Auth + Supabase Edge Functions). The

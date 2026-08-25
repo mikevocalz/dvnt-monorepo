@@ -30,7 +30,7 @@ react-native-canvas-kit is a **Konva-style retained-mode scene graph rendered th
 | `react-native-worklets >=0.5.0` | `0.11.3` | ✅ satisfied; kit uses `scheduleOnRN` (`Transformer index.tsx:3`, `useStageGestures.ts:12`) |
 | `react` / `react-native` (`*`) | SDK-provided | ✅ |
 
-- **New Arch + SDK 57:** kit is pure-JS/Skia; no native linkage to break under New Arch. The prompt states SDK 57; `AGENTS.md:13` records "Expo SDK 56 / RN 0.86" — **reconcile the SDK number with Mike before shipping** (does not affect the kit's JS-only compatibility, but the doc pair disagrees).
+- **New Arch + SDK 57:** kit is pure-JS/Skia; no native linkage to break under New Arch. The prompt states SDK 57; `docs/engineering-contract.md:13` records "Expo SDK 56 / RN 0.86" — **reconcile the SDK number with Mike before shipping** (does not affect the kit's JS-only compatibility, but the doc pair disagrees).
 - **tsc baseline (this pass, pre-change):** `packages/app` `tsc --noEmit` → exit 0; `apps/mobile` `tsc --noEmit` → exit 0. The WS-1 scaffold keeps both at exit 0 (§6).
 
 ---
@@ -99,7 +99,7 @@ Legend: **native** = kit provides it directly · **shim** = single adapter funct
 - Wire `CanvasKitStage` into the live `EditorScreen` element+brush layer behind the hybrid (media/filters/export stay in `EditorCanvas`). **Not done** because the transform/gesture swap changes touch behavior that REGRESSION_LOCK requires be verified on-device (INV-PERF-2 60fps, INV-RENDER-6 touch pass-through, cancel/back matrices) — unverifiable in this environment.
 - Knip-clean removal of the replaced files **after** the live swap + on-device proof: `components/gestures/ElementGestureOverlay.tsx`, `components/gestures/shared-element-transforms.ts`, `hooks/useElementTransform.ts`, `hooks/useGestures.ts`, and the `forceRender` live-stroke path in `EditorScreen.tsx`/`LiveStrokeRenderer`. **Do not delete yet** — they are still imported by the live screen; deleting now breaks tsc mid-flight (and `useElementTransform` is also used by `AnimatedGifStickerLayer.tsx:57`, which the GIF overlay keeps).
 - Upstream asks: `Stage` canvas-ref/snapshot pass-through (#18); neon/arrow brush styles (#10).
-- Reconcile SDK 56 (`AGENTS.md:13`) vs SDK 57 (prompt).
+- Reconcile SDK 56 (`docs/engineering-contract.md:13`) vs SDK 57 (prompt).
 
 ---
 
@@ -107,4 +107,4 @@ Legend: **native** = kit provides it directly · **shim** = single adapter funct
 
 Kit (all under `node_modules/react-native-canvas-kit/`): `src/index.tsx`, `lib/typescript/src/index.d.ts`, `src/core/types.ts`, `src/core/assertReanimatedVersion.ts`, `src/components/Stage.tsx`, `src/components/transformer/index.tsx`, `src/components/shapes/Image.tsx`, `src/components/shapes/Text.tsx`, `src/components/brush/BrushLayer.tsx`, `src/components/brush/brushes.ts`, `src/components/internal/useStageGestures.ts`.
 
-Editor: `packages/app/features/stories-editor/{types/index.ts, constants/index.ts, stores/editor-store.ts, screens/EditorScreen.tsx, components/canvas/EditorCanvas.tsx, components/canvas/AnimatedGifStickerLayer.tsx, components/gestures/ElementGestureOverlay.tsx, components/gestures/shared-element-transforms.ts, hooks/useElementTransform.ts, hooks/useGestures.ts, utils/{geometry.ts,export.ts,text-support.ts}}`, `packages/app/features/story/story-editor.web.tsx`, `packages/app/features/stories-editor/{STORY_EDITOR_AUDIT.md,REGRESSION_LOCK.md,EDITOR_REDESIGN.md}`, `docs/two-rail-baseline.md`, `AGENTS.md`.
+Editor: `packages/app/features/stories-editor/{types/index.ts, constants/index.ts, stores/editor-store.ts, screens/EditorScreen.tsx, components/canvas/EditorCanvas.tsx, components/canvas/AnimatedGifStickerLayer.tsx, components/gestures/ElementGestureOverlay.tsx, components/gestures/shared-element-transforms.ts, hooks/useElementTransform.ts, hooks/useGestures.ts, utils/{geometry.ts,export.ts,text-support.ts}}`, `packages/app/features/story/story-editor.web.tsx`, `packages/app/features/stories-editor/{STORY_EDITOR_AUDIT.md,REGRESSION_LOCK.md,EDITOR_REDESIGN.md}`, `docs/two-rail-baseline.md`, `docs/engineering-contract.md`.
