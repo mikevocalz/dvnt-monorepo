@@ -99,6 +99,8 @@ import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReaction
 import { ConnectionBanner, RoomTimer, type ConnectionPhase } from "@dvnt/ui";
 import { HOST_MUTE_COPY } from "@dvnt/app/lib/video/host-mute";
 import { bannerPhaseFor, useRoomSession } from "@dvnt/app/features/sneaky-lynk/session/useRoomSession";
+import { isActive } from "@dvnt/app/features/sneaky-lynk/session/machine";
+import { useRoomHeartbeat } from "@dvnt/app/features/sneaky-lynk/hooks/useRoomHeartbeat";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
 import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
@@ -1173,6 +1175,9 @@ function ServerRoom({
   const session = useRoomSession(videoRoom.connectionState.status, {
     onReconnect: videoRoom.join,
   });
+  // See the web leg: without this every member reports no last_seen_at and
+  // video_list_rooms keeps the room "Live" for twelve hours.
+  useRoomHeartbeat(id, isActive(session));
   const previousConnectionStateRef = useRef(connectionState);
   const appStateRef = useRef(AppState.currentState);
   const isHostRef = useRef(isHost);

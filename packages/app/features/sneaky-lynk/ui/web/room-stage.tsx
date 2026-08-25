@@ -35,6 +35,10 @@ export type Tile = {
   videoStream: MediaStream | null;
   isCameraOn: boolean;
   isMicOn: boolean;
+  /** Currently the active speaker — the tile gets a ring, the way WhatsApp and
+   *  Discord mark who is talking. Without it a silent grid gives no clue where
+   *  to look. */
+  isSpeaking?: boolean;
 };
 
 export const REACTION_EMOJIS = ["❤️", "🔥", "👏", "😮", "😂", "🙌"];
@@ -105,25 +109,57 @@ export function ControlButton({
   );
 }
 
+/**
+ * Floating reaction burst.
+ *
+ * Single renderer, deliberately. A WebGPU overlay used to draw these with the
+ * DOM path suppressed whenever the GPU reported available — so any failure to
+ * initialise the canvas made reactions silently invisible, which is how they
+ * came to "not work". Six emoji drifting up the screen do not need a GPU, and a
+ * path that can vanish is worse than one that is slightly less clever.
+ *
+ * Spread across the full stage rather than a 160px box: reactions used to stack
+ * inside `h-40 w-40` centred at the bottom, so more than two overlapped into an
+ * unreadable pile. Position and timing are derived from the reaction id, so
+ * every emoji takes its own path and re-renders do not make them jump.
+ *
+ * Honours prefers-reduced-motion by holding them still and fading — the
+ * information is "someone reacted", and that survives without the travel.
+ */
 export function FloatingReactions({
   reactions,
 }: {
   reactions: { id: string; emoji: string }[];
 }) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-28 z-30 flex justify-center">
-      <div className="relative h-40 w-40">
-        {reactions.map((r, i) => (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 bottom-24 top-0 z-30 overflow-hidden"
+    >
+      {reactions.map((r) => {
+        // Deterministic per-id jitter: stable across renders, varied between
+        // reactions. A shared path would read as one animation, not many people.
+        let h = 0;
+        for (let i = 0; i < r.id.length; i += 1) h = (h * 31 + r.id.charCodeAt(i)) | 0;
+        const spread = Math.abs(h) % 100;
+        const drift = ((Math.abs(h >> 3) % 60) - 30) / 10;
+        const duration = 2.2 + ((Math.abs(h >> 7) % 12) / 10);
+        const scale = 0.9 + ((Math.abs(h >> 11) % 5) / 10);
+        return (
           <span
             key={r.id}
-            className="absolute bottom-0 animate-[lynk-float_2.4s_ease-out_forwards] text-3xl"
-            style={{ left: `${20 + ((i * 23) % 60)}%` }}
+            className="lynk-reaction absolute bottom-0 select-none text-4xl motion-reduce:animate-none"
+            style={{
+              left: `${6 + spread * 0.88}%`,
+              animationDuration: `${duration}s`,
+              ["--lynk-drift" as string]: `${drift}rem`,
+              ["--lynk-scale" as string]: String(scale),
+            }}
           >
             {r.emoji}
           </span>
-        ))}
-      </div>
-      <style>{`@keyframes lynk-float{0%{opacity:0;transform:translateY(0) scale(.6)}15%{opacity:1}100%{opacity:0;transform:translateY(-150px) scale(1.2)}}`}</style>
+        );
+      })}
     </div>
   );
 }
@@ -193,8 +229,15 @@ export function TimeUpDialog({
 export function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border border-white/8 bg-white/[0.04] ${
+      // Speaking is a RING, not a background or a glow: it reads at thumbnail
+      // size, survives on top of video, and costs no contrast against the tile.
+      // Cyan rather than signal — someone talking is not an alert.
+      className={`relative overflow-hidden rounded-2xl border bg-white/[0.04] transition-[box-shadow,border-color] duration-200 ${
         large ? "aspect-video" : "aspect-square"
+      } ${
+        tile.isSpeaking
+          ? "border-[#3FDCFF]/70 shadow-[0_0_0_2px_rgba(63,220,255,0.45)]"
+          : "border-white/8"
       }`}
     >
       {tile.isCameraOn && tile.videoStream ? (
@@ -209,16 +252,26 @@ export function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
           <SquareAvatar uri={tile.avatar} name={tile.name} size={large ? 104 : 72} />
         </div>
       )}
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5">
-        <span className="truncate text-xs font-medium">
-          {tile.name}
-          {tile.isHost ? " · host" : tile.isCoHost ? " · co-host" : ""}
+      {/* Muted reads as a badge in the corner, the way Discord and Skype show
+          it, so it is legible at thumbnail size and against moving video. A
+          dimmed inline icon in a name row was invisible on a busy tile. */}
+      {!tile.isMicOn ? (
+        <span
+          className="absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-lg bg-black/65 backdrop-blur-sm"
+          aria-label={`${tile.name} is muted`}
+        >
+          <MicOff size={13} className="text-white/90" />
         </span>
-        {tile.isMicOn ? (
-          <Mic size={12} className="text-white/80 shrink-0" />
-        ) : (
-          <MicOff size={12} className="text-white/50 shrink-0" />
-        )}
+      ) : null}
+      <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/75 to-transparent px-2 pb-1.5 pt-4">
+        <span className="truncate text-xs font-medium">{tile.name}</span>
+        {tile.isHost || tile.isCoHost ? (
+          // Role as a chip, not a suffix on the name: it stops the role being
+          // truncated away first on a narrow tile.
+          <span className="shrink-0 rounded bg-white/15 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-white/80">
+            {tile.isHost ? "Host" : "Co-host"}
+          </span>
+        ) : null}
       </div>
     </div>
   );

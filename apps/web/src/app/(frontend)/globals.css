@@ -168,3 +168,41 @@ body {
     display: none;
   }
 }
+
+/* Sneaky Lynk reaction burst.
+   Defined once here rather than in a <style> tag inside the component, which
+   re-injected the same keyframes on every render. Each reaction supplies its
+   own duration, drift and scale via custom properties so a burst reads as
+   several people rather than one animation played N times. */
+@keyframes lynk-reaction-float {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.6);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--lynk-drift, 0), -60vh, 0) scale(var(--lynk-scale, 1.2));
+  }
+}
+
+.lynk-reaction {
+  animation-name: lynk-reaction-float;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: forwards;
+  will-change: transform, opacity;
+}
+
+/* Reduced motion keeps the signal (someone reacted) and drops the travel. */
+@media (prefers-reduced-motion: reduce) {
+  .lynk-reaction {
+    animation: lynk-reaction-fade 1.6s ease-out forwards;
+  }
+  @keyframes lynk-reaction-fade {
+    0% { opacity: 0; }
+    15% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+}

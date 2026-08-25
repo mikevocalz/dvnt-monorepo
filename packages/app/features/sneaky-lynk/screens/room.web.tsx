@@ -49,6 +49,7 @@ import { useParams, useRouter, useSearchParams } from "solito/navigation";
 import {
   FishjamProvider,
   useConnection,
+  useVAD,
   useCamera,
   useMicrophone,
   usePeers,
@@ -82,6 +83,9 @@ import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
 import { getSneakyUserLabel } from "../ui/user-labels";
 import { bannerPhaseFor, useRoomSession } from "../session/useRoomSession";
+import { isActive } from "../session/machine";
+import { useRoomHeartbeat } from "../hooks/useRoomHeartbeat";
+import { useRoomReactions } from "../hooks/useRoomReactions";
 import { buildHandQueue, HAND_QUEUE_COPY } from "../ui/hand-queue";
 import {
   ChatPanel,
@@ -111,8 +115,6 @@ import { EjectModal } from "../ui/EjectModal";
 import type { EjectKind } from "../ui/EjectModal.types";
 import { classifySneakyLynkError } from "../errors";
 import { videoApi } from "@dvnt/app/features/video/api";
-import { useRoomReactions, GPU_REACTION_CAP } from "../hooks/useRoomReactions";
-import { GpuReactionOverlay } from "@dvnt/app/features/gpu/reactions/GpuReactionOverlay";
 import { useSneakyLynkCaptureBroadcast } from "../hooks/useSneakyLynkCaptureBroadcast";
 import {
   fetchRoomComments,
@@ -512,6 +514,10 @@ function RoomInner({
   }, [id, setServerEndsAt]);
 
   const session = useRoomSession(peerStatus, { onReconnect: rejoinRoom });
+  // Keeps this member fresh so the browse list stops showing the room as Live
+  // once everyone has gone. Tied to the session, not the mount: a room that is
+  // still joining should not yet advertise a live host.
+  useRoomHeartbeat(id, isActive(session));
   const camera = useCamera();
   const microphone = useMicrophone();
   const peers = usePeers();
@@ -603,11 +609,9 @@ function RoomInner({
   // because each reaction there is a keyframed <span>. Only flips true once the
   // overlay has a device, an atlas and a pipeline — any failure keeps the DOM
   // path exactly as it was.
-  const [gpuReactions, setGpuReactions] = useState(false);
   const { reactions, sendReaction } = useRoomReactions({
     roomId: id,
     currentUser,
-    cap: gpuReactions ? GPU_REACTION_CAP : undefined,
   });
   const { comments, send: sendChat } = useRoomChat(id, currentUser);
   const members = useRoomMembersSync(id, authUser?.id);
@@ -1019,6 +1023,16 @@ function RoomInner({
     : authUser?.username || authUser?.name || "You";
 
   const remotePeers = peers.remotePeers || [];
+  // Real voice activity, not a guess. Fishjam drives remote VAD from backend
+  // vadNotification messages and polls the mic for the local peer
+  // (@fishjam-cloud/react-client useVAD.d.ts). Without this the stage gives no
+  // clue who is talking, which is the single thing a grid of faces must convey.
+  const speakingByPeer = useVAD({
+    peerIds: [
+      ...(peers.localPeer?.id ? [peers.localPeer.id] : []),
+      ...remotePeers.map((p) => p.id),
+    ],
+  });
   const remoteTiles: Tile[] = remotePeers.map((peer) => {
     const meta = ((peer.metadata as any)?.peer ?? peer.metadata) as any;
     const cam = peer.cameraTrack as any;
@@ -1033,6 +1047,7 @@ function RoomInner({
       videoStream: cam?.stream ?? null,
       isCameraOn: !!(cam?.stream || cam?.track || cam?.trackId),
       isMicOn: !!(mic?.stream || mic?.track || mic?.trackId),
+      isSpeaking: !!speakingByPeer[peer.id],
     };
   });
 
@@ -1046,6 +1061,7 @@ function RoomInner({
     videoStream: localStream,
     isCameraOn,
     isMicOn,
+    isSpeaking: !!(peers.localPeer?.id && speakingByPeer[peers.localPeer.id]),
   };
 
   const stageTiles = [localTile, ...remoteTiles];
@@ -1304,11 +1320,18 @@ function RoomInner({
       ) : (
         <>
           {/* Speaker / video stage — host (+ co-hosts) own the top, large. */}
-          <section className="flex-1 space-y-3 overflow-y-auto px-4 py-2">
+          {/* The stage grew one breakpoint wider at each size instead of
+              staying capped at max-w-2xl (672px). On a tablet that cap left the
+              room as a phone column floating in dead space, which is what made
+              the aspect ratio read as wrong — the tiles were not mis-shaped, the
+              stage was refusing the width. */}
+          <section className="flex-1 space-y-3 overflow-y-auto px-4 py-2 md:px-6 lg:px-8">
             {featuredTiles.length > 0 ? (
               <div
-                className={`mx-auto grid w-full max-w-2xl gap-3 ${
-                  featuredTiles.length === 1 ? "grid-cols-1" : "grid-cols-2"
+                className={`mx-auto grid w-full gap-3 md:gap-4 ${
+                  featuredTiles.length === 1
+                    ? "max-w-2xl grid-cols-1 md:max-w-3xl lg:max-w-4xl"
+                    : "max-w-2xl grid-cols-2 md:max-w-5xl lg:max-w-6xl"
                 }`}
               >
                 {featuredTiles.map((tile) => (
@@ -1317,7 +1340,7 @@ function RoomInner({
               </div>
             ) : null}
             {otherTiles.length > 0 ? (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="mx-auto grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-3 md:max-w-5xl md:grid-cols-4 md:gap-4 lg:max-w-6xl lg:grid-cols-5">
                 {otherTiles.map((tile) => (
                   <StageTile key={tile.key} tile={tile} />
                 ))}
@@ -1357,13 +1380,10 @@ function RoomInner({
         </>
       )}
 
-      {/* Floating reactions overlay */}
-      <GpuReactionOverlay
-        reactions={reactions}
-        emojis={REACTION_EMOJIS}
-        onAvailabilityChange={setGpuReactions}
-      />
-      <FloatingReactions reactions={gpuReactions ? [] : reactions} />
+      {/* One renderer. The GPU overlay used to suppress this one whenever it
+          reported available, so a canvas that failed to initialise made
+          reactions silently invisible. */}
+      <FloatingReactions reactions={reactions} />
 
       {/* Controls bar */}
       <footer className="relative z-10 flex flex-col items-center gap-3 pb-8 pt-2">

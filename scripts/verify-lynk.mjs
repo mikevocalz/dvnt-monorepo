@@ -242,8 +242,19 @@ for (const leg of sessionLegs) {
     `${leg} drives the session machine but supplies no onReconnect — it would show "Reconnecting" forever without retrying`,
   );
 }
+// The heartbeat is the same class of bug the session machine was: an API
+// written, exported, and never called. Without a caller every member reports
+// no last_seen_at, and video_list_rooms keeps a dead room "Live" for TWELVE
+// hours instead of ninety seconds.
+const heartbeatCallers = consumers("useRoomHeartbeat", /hooks\/useRoomHeartbeat\.ts$/).filter(
+  (f) => /useRoomHeartbeat\s*\(/.test(strip(read(f))),
+);
+assert.ok(
+  heartbeatCallers.length >= 2,
+  `both room legs must send presence heartbeats; found ${heartbeatCallers.length} caller(s). Stale rooms stay listed as Live for 12h without them.`,
+);
 console.log(
-  `7. OK — ${sessionLegs.length} legs drive the session AND supply recovery; seam has ${seamUsers.length} caller(s)`,
+  `7. OK — ${sessionLegs.length} legs drive the session AND supply recovery; ${heartbeatCallers.length} send heartbeats; seam has ${seamUsers.length} caller(s)`,
 );
 
 console.log("\nverify-lynk: all sections pass");
