@@ -1,6 +1,33 @@
 # DVNT — next session handoff
 
-Repo: `/Users/mikevocalz/dvnt-monorepo`, branch `master`, HEAD `caa8207 watch: per-feature switches in iPhone Settings` (clean for tracked files; untracked noise only).
+Repo: `/Users/mikevocalz/dvnt-monorepo`, branch `master`, HEAD `2ccafe5 merge: ws3a — moq
+0.3.0 native transport, call surfaces on the design language` (clean tree, **not pushed**).
+
+## Status corrections (2026-09-03)
+
+Most of what follows was written on 2026-08-10 and has since been overtaken. Read these first:
+
+- **§0 is DONE.** `axiom-wear-os` and `wear-os-design-guidelines` were authored and are
+  installed in `~/.claude/skills/`.
+- **§1 is partly DONE.** The Wear OS module landed 2026-08-11 (`f118a57`) at
+  `apps/mobile/wear/`, outside `android/` because CNG deletes `android/` on prebuild;
+  `apps/mobile/plugins/with-wear-os.js` re-copies it and appends `include ':wear'`.
+  The JS→Android bridge (`DVNTWearBridge`) closed in `7abd313`. `:wear:assembleDebug`
+  builds. **Still missing: `docs/wear-baseline.md` (Phase 0), `scripts/verify-wear.mjs`,
+  the Wear OS entry in `SettingsScreen.android.tsx`, and any run on a device or a paired
+  emulator.** The Phase 0 audience gate still applies before further Wear work.
+  Landmine to respect: `with-live-activity-android.js` copies a ReactPackage into the app
+  module but never registers it in `PackageList(this).packages.apply { }`, so
+  `NativeModules.DVNTLiveNotification` is undefined at runtime. Any new Android
+  ReactPackage needs BOTH a copy mod and a `withMainApplication` mod.
+- **§4 item 1 is DONE.** `incoming-call-overlay.tsx` has Reanimated entrance + ring pulse,
+  `@legendapp/motion`, and `expo-haptics` on every action.
+- **ws3a is merged** (2026-09-03). It was 54 commits ahead of master while master was 67
+  ahead of it — same-day divergence. Carries react-native-moq 0.3.0 (patch dropped),
+  `with-static-pods.js` + `with-dedupe-xcframework-signatures.js`, the call surfaces on the
+  DVNT design language, the iPad white-side-panel fix, and the duplicate-invite-push fix.
+  **WS-3b is still open**: route the product screens onto `useLynkBroadcast` /
+  `useLynkViewer` and delete Fishjam plus its force-static entry.
 
 ## 0. Skills — READ FIRST
 
