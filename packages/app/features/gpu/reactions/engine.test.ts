@@ -72,3 +72,14 @@ test("a full ring of spawns stays inside the buffer", () => {
   assert.equal(lastOffset + INSTANCE_STRIDE, REACTION_CAPACITY * INSTANCE_STRIDE);
   assert.ok(REACTION_CAPACITY >= 50, "ring must cover the 50-concurrent target");
 });
+
+test("the vertex shader actually consumes the atlas index", () => {
+  // Regression guard for the first on-device bug: atlasIndex was declared in
+  // the Instance struct but never read, so out.uv spanned the WHOLE atlas and
+  // every reaction quad rendered the full emoji grid ("one button shows all
+  // emojis"). The struct-order test above cannot catch a dead field.
+  const vs = SHADER.slice(SHADER.indexOf("@vertex"), SHADER.indexOf("@fragment"));
+  assert.ok(vs.includes("inst.atlasIndex"), "vs must read inst.atlasIndex");
+  assert.ok(vs.includes("u.atlasCols"), "vs must scale uv by u.atlasCols");
+  assert.match(vs, /out\.uv = \(cell \+ base\) \/ cols/, "uv must be cell-relative");
+});

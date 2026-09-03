@@ -400,6 +400,9 @@ importers:
       react-native-mmkv:
         specifier: ^4.3.1
         version: 4.3.1(react-native-nitro-modules@0.35.6(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+      react-native-moq:
+        specifier: 0.3.0
+        version: 0.3.0(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-nitro-image:
         specifier: ^0.14.0
         version: 0.14.0(react-native-nitro-modules@0.35.6(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
@@ -1313,6 +1316,9 @@ importers:
       react-native-mmkv:
         specifier: ^4.3.1
         version: 4.3.1(react-native-nitro-modules@0.35.6(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+      react-native-moq:
+        specifier: 0.3.0
+        version: 0.3.0(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-nitro-image:
         specifier: ^0.14.0
         version: 0.14.0(react-native-nitro-modules@0.35.6(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
@@ -12028,6 +12034,12 @@ packages:
   react-native-modalbox@2.0.2:
     resolution: {integrity: sha512-uSuoZ+siPPNqWGyw8NXhA/Aots7mOx2+qijFoeovequY0kczZEPZDd0ARHbzg+1cE3H3AATJEwGdkVA8lUxs0g==}
 
+  react-native-moq@0.3.0:
+    resolution: {integrity: sha512-Apzm4VciBAtNdDcf55D2YLJyaIyPYYUODHp79CqqgRsbk9waCtY9Z3JGQGl35epotgofWOJ0vugKDUTQrTcd2w==}
+    peerDependencies:
+      react: 19.2.3
+      react-native: 0.86.0
+
   react-native-nitro-fetch@1.4.0:
     resolution: {integrity: sha512-M09Ep0sHBL/Y66Ye75Y3DYgBYSZMXjPOtTA6qIaQzjDFdwrigqbGj8Mv/QvnmWE2eBhdFPQjKP2zQtAe0sI+YQ==}
     peerDependencies:
@@ -19965,9 +19977,7 @@ snapshots:
       metro-runtime: 0.84.4
     transitivePeerDependencies:
       - '@babel/core'
-      - bufferutil
       - supports-color
-      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89': {}
 
@@ -29273,6 +29283,11 @@ snapshots:
   react-native-modalbox@2.0.2:
     dependencies:
       prop-types: 15.8.1
+
+  react-native-moq@0.3.0(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
+    dependencies:
+      react: 19.2.3
+      react-native: 0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3)
 
   react-native-nitro-fetch@1.4.0(react-native-nitro-modules@0.35.6(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
     dependencies:

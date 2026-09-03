@@ -338,6 +338,10 @@ const MasonryCell = memo(function MasonryCell({
     toggleLike();
   }, [toggleLike]);
 
+  // Phone cells (~185pt) wear 14pt glyphs fine; tablet cells (~275pt+)
+  // made them read as specks. Scale with the cell, capped.
+  const iconSize = width >= 240 ? 20 : 14;
+
   const media = post.media?.[0];
   const isTextPost = post.kind === "text";
   const textPostPreview = resolveTextPostPresentation(
@@ -451,7 +455,7 @@ const MasonryCell = memo(function MasonryCell({
               style={styles.overlayAction}
             >
               <Heart
-                size={14}
+                size={iconSize}
                 color={hasLiked ? "#ef4444" : "#fff"}
                 fill={hasLiked ? "#ef4444" : "transparent"}
               />
@@ -468,7 +472,7 @@ const MasonryCell = memo(function MasonryCell({
               style={styles.overlayAction}
             >
               <Bookmark
-                size={14}
+                size={iconSize}
                 color={isBookmarked ? "#3FDCFF" : "#fff"}
                 fill={isBookmarked ? "#3FDCFF" : "transparent"}
               />
@@ -719,9 +723,21 @@ export function MasonryFeed() {
     [filteredPosts, forYouEvents],
   );
 
-  // Layout
-  const numColumns = columnsForWidth(screenWidth);
-  const columnWidth = columnWidthFor(screenWidth, numColumns);
+  // Layout. Window width is only the ESTIMATE: on iPadOS the native tab
+  // layout insets the content region (~180pt on the 11"), so sizing columns
+  // from the window overflowed the container and cut the last column off at
+  // the screen edge. onLayout measures the region the feed actually owns.
+  const [containerWidth, setContainerWidth] = useState<number | null>(null);
+  const feedWidth = containerWidth ?? screenWidth;
+  const numColumns = columnsForWidth(feedWidth);
+  const columnWidth = columnWidthFor(feedWidth, numColumns);
+  const handleContainerLayout = useCallback(
+    (e: { nativeEvent: { layout: { width: number } } }) => {
+      const w = Math.round(e.nativeEvent.layout.width);
+      if (w > 0) setContainerWidth((prev) => (prev === w ? prev : w));
+    },
+    [],
+  );
 
   const handlePress = useCallback(
     (id: string) => {
@@ -756,7 +772,9 @@ export function MasonryFeed() {
   // must never gate the grid body.
   if (isLoading || !nsfwLoaded) {
     return (
-      <MasonryGridSkeleton columnWidth={columnWidth} numColumns={numColumns} />
+      <View style={{ flex: 1 }} onLayout={handleContainerLayout}>
+        <MasonryGridSkeleton columnWidth={columnWidth} numColumns={numColumns} />
+      </View>
     );
   }
 
@@ -777,6 +795,7 @@ export function MasonryFeed() {
   }
 
   return (
+    <View style={{ flex: 1 }} onLayout={handleContainerLayout}>
     <LegendList
       ref={listRef}
       // Virtualized at SECTION granularity. Each section already carries its own
@@ -841,6 +860,7 @@ export function MasonryFeed() {
         ) : null
       }
     />
+    </View>
   );
 }
 

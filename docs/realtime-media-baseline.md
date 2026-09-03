@@ -469,28 +469,42 @@ dependency graph installed. Nothing short of a native build catches an SPM
 resolution problem, so "gates green" on a workstream that adds a native module
 means very little until one runs.
 
-**WS-3a REVERTED AGAIN (2026-08-13) — three upstream bugs deep, one unsolved.**
-Six EAS builds. Each fix was real and moved the failure strictly later, which
-is the only reason to believe them:
 
-1. ~25 moq-kit compile errors -> fixed by pinning moq-swift to 0.2.27
-   (moq-kit declares `from: "0.2.27"`, SPM resolved 0.4.2 across a breaking
-   rewrite).
-2. `'MoQ/MoQ-Swift.h' file not found` -> fixed by guarding all 14 of the
-   package's `.mm` imports with `__has_include`. react-native-moq assumes
-   framework linkage; this app builds pods as static libraries.
-3. `MoqFFI.xcframework-ios.signature couldn't be copied to Signatures because
-   an item with the same name already exists` -> UNSOLVED. The app compiles,
-   links, signs and produces DVNT.app; the archive dies copying XCFramework
-   signatures. Setting `products: []` on the moq-swift entry did NOT fix it, so
-   it is not simply our second declaration duplicating the product.
+**WS-3a GREEN (2026-08-13, supersedes both revert notes).** Build 1.0.340
+(`6464b35`, branch `ws3a-dynamic-linkage-probe`) archives on EAS with
+react-native-moq 0.2.0 installed and submitted to TestFlight. What it took,
+so nobody re-derives it:
 
-Reverted so the app builds. `apps/mobile/patches/react-native-moq+0.2.0.patch`
-is KEPT — it carries fixes 1 and 2, which are correct and will be needed again.
-It is inert while the package is uninstalled (the root postinstall tolerates a
-missing package).
+- **Dynamic frameworks are non-negotiable** — upstream's example Podfile sets
+  `ENV['USE_FRAMEWORKS'] = 'dynamic'`; static-linkage is unsupported and both
+  header bugs from the revert notes were symptoms of it.
+- **The whole moq SPM stack floats and must be pinned three levels deep**
+  (patch `react-native-moq+0.2.0.patch`): moq-kit main revision `7ed3aeb`
+  (v0.3.0 cannot compile against its own resolution), plus constraint-only
+  pins moq-swift 0.4.1 + moq-swift-ffi 0.3.3 — the exact set moq-kit's
+  Package.resolved blesses. A dependency's Package.resolved is IGNORED when
+  consumed as a dependency. Upstream issue filed:
+  software-mansion-labs/react-native-moq#1 — drop the patch when they tag.
+- **Dynamic linkage exposed 8 latent defects in OTHER pods** (each fixed once,
+  none recurred): React-Core link flags absent under precompiled RN
+  (fix: buildReactNativeFromSource), Fishjam JSI + MLKit-barcode prebuilt
+  statics (fix: plugins/with-static-pods pre_install — expo's
+  forceStaticLinking silently no-ops when RN builds from source),
+  webgpu headers/RCTBlob + jsinspector siblings + nitro headermap rewrites
+  (fix: plugins/fix-wgpu-headers, incl. flattening nitro public headers into
+  Pods/Headers/Public to satisfy hmap-rewritten includes).
+- **The duplicate-signature killer itself**: Xcode collects the MoqFFI binary
+  xcframework's signature once per consuming context (SPM root + MoQ pod
+  subdir) and archive assembly flattens them into one Signatures/ dir.
+  Fix: plugins/with-dedupe-xcframework-signatures (late app-target phase
+  pruning per-pod *.signature duplicates). Reproduced and verified locally
+  before shipping.
+- **Debugging infrastructure that made this converge**: local
+  xcodebuild archive (iOS+watchOS platforms downloaded), EAS log artifacts
+  are brotli-encoded, and both Podfile-injection plugins are now
+  idempotent-by-content — marker guards had them serving stale snippets on
+  cached Podfiles.
 
-Next person: start at bug 3. Likely candidates are the xcframework being
-embedded by more than one of this app's four targets (DVNT, DVNTWatch,
-DVNTWatchComplication, ShareExtension), or a CocoaPods/SPM interaction in the
-embed phase. Reproduce with an EAS build — nothing local catches it.
+Cost accepted: RN compiles from source on every clean EAS build. WS-3b
+(moving the routed product screens onto the hook seam, deleting Fishjam and
+its force-static entry) is unchanged and still open.

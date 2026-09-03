@@ -140,7 +140,16 @@ fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VSOut
   let corner = cornerOf(vi);
   let half = 0.085 * scale;
   out.pos = vec4f(x + corner.x * half / u.aspect, y + corner.y * half, 0.0, 1.0);
-  out.uv = (corner + vec2f(1.0)) * 0.5;
+  // Sample ONE atlas cell, not the whole texture: without this every quad
+  // renders the full emoji grid ("one button shows all emojis"). The atlas is
+  // square (size = cols * CELL), rows top-down, so both axes divide by cols.
+  // v flips because texture row 0 is the image top while corner.y=+1 is the
+  // quad top — the old (corner+1)*0.5 mapping drew everything upside down.
+  let cols = u.atlasCols;
+  let idx = f32(inst.atlasIndex);
+  let cell = vec2f(idx % cols, floor(idx / cols));
+  let base = vec2f((corner.x + 1.0) * 0.5, (1.0 - corner.y) * 0.5);
+  out.uv = (cell + base) / cols;
   out.alpha = 1.0 - t * t;
   return out;
 }

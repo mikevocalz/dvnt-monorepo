@@ -431,6 +431,14 @@ export default {
       ],
       appSecurityPlugin,
       "./plugins/with-swift5-compat",
+      // pre_install hook forcing named pods static under dynamic linkage —
+      // expo-build-properties' forceStaticLinking is a no-op when RN builds
+      // from source (see the plugin header for the receipts).
+      "./plugins/with-static-pods",
+      // Binary SPM xcframeworks (MoqFFI) get their signature collected once
+      // per consuming context; archive assembly flattens them and collides.
+      // Late app-target phase prunes the per-pod duplicates.
+      "./plugins/with-dedupe-xcframework-signatures",
       // Must run so its post_install pass lands in the generated Podfile.
       ["./plugins/with-ios-deployment-target", { target: "17.0" }],
       [
@@ -438,6 +446,47 @@ export default {
         {
           ios: {
             deploymentTarget: "17.0",
+            // PROBE (ws3a): does this app link dynamically at all?
+            //
+            // `react-native-moq` is only ever built by upstream under dynamic
+            // linkage — example/ios/Podfile line 2 is
+            // `ENV['USE_FRAMEWORKS'] = 'dynamic'`, set before anything else
+            // loads. The README documents plain `npm install` + `pod install`
+            // and never mentions linkage, which is why two nights of static
+            // builds produced bugs with no upstream issue to match:
+            //   - `MoQ/MoQ-Swift.h` not found — that umbrella header only
+            //     exists when the pod is a framework.
+            //   - duplicate `MoqFFI.xcframework-ios.signature` at archive —
+            //     with no dynamic framework owning the SPM binary xcframework,
+            //     more than one of our four targets embeds it.
+            // react-native/scripts/cocoapods/spm.rb says it outright: SPM +
+            // static linking "might cause linker errors. Consider using
+            // USE_FRAMEWORKS=dynamic".
+            //
+            // MoQ stays UNINSTALLED for this probe. The only question here is
+            // what the other ~494 Podfile.lock entries do under dynamic
+            // linkage across four targets. Pods shipping prebuilt static
+            // archives are the expected casualties (upstream's own example
+            // force-feeds RNAudioAPI and react-native-executorch back to
+            // static frameworks via pre_install).
+            useFrameworks: "dynamic",
+            // ONLY genuinely broken-under-dynamic pods belong in this list.
+            // The first two link failures (get-random-values, incall-manager)
+            // looked like candidates and were not — buildReactNativeFromSource
+            // below fixed all 53 React-Core dependents at once, so pinning
+            // them here would only have hidden the real fix.
+            //
+            // NOTE: forceStaticLinking is NOT usable here — installer.rb gates
+            // its build-type override on RCT_USE_PREBUILT_RNCORE=1, and
+            // buildReactNativeFromSource below sets it to 0, so the option
+            // logs and then no-ops (proven by build 5e13c670). The static pin
+            // for FishjamReactNativeWebrtc lives in
+            // ./plugins/with-static-pods.js as a raw pre_install hook instead.
+            // Expo modules ship as XCFrameworks too, and ExpoModulesCore is one
+            // of the 33 pods referencing React-Core from ObjC. Kept consistent
+            // with buildReactNativeFromSource — this is the pair the local pod
+            // install was verified against.
+            usePrecompiledModules: false,
           },
           android: {
             // Raised 24 -> 30 deliberately, to clear the floor `react-native-moq`
@@ -464,7 +513,37 @@ export default {
           //    minimum deployment target of iOS 16.4"
           // Production already had it off and builds clean; development had it
           // on and errored. Prebuilt RN artifacts honour deploymentTarget above.
-          buildReactNativeFromSource: false,
+          //
+          // FLIPPED TO true FOR DYNAMIC LINKAGE (ws3a probe). The old reason
+          // above was a deployment-target clash, and it no longer applies:
+          // ios.deploymentTarget is 17.0 and ./plugins/with-ios-deployment-target
+          // raises every pod to 17.0 in post_install, so nothing compiles at
+          // 15.1 any more.
+          //
+          // The new reason is load-bearing. Under `useFrameworks: dynamic` with
+          // PRECOMPILED React Native, dependent pods get React-Core's
+          // FRAMEWORK_SEARCH_PATHS but no link flag at all — measured, not
+          // guessed: 0 of 222 generated pod xcconfigs contained a React
+          // -framework entry, and ReactNativeIncallManager's OTHER_LDFLAGS was
+          // literally just `$(inherited) -weak_framework "JavaScriptCore"`.
+          // Under static linkage that is invisible, because everything resolves
+          // later when it is all linked into the app.
+          //
+          // That is why builds 7c4c2cb0 and 07d76094 died at link on
+          // react-native-get-random-values and ReactNativeIncallManager — and
+          // it was never going to stop at two: 33 pods in this graph reference
+          // React-Core symbols from Objective-C, including ExpoModulesCore,
+          // RNReanimated, RNScreens, RNGestureHandler, RNSVG, react-native-skia,
+          // RNSentry and NitroModules. forceStaticLinking would have meant
+          // listing nearly the whole native graph.
+          //
+          // Building from source restores the edge: the React-Core pod becomes
+          // React.framework and 53 pod xcconfigs pick up `-framework "React"`.
+          // Verified locally with pod install alone, no EAS build burned.
+          //
+          // THE COST, stated plainly: RN compiles from source on every clean
+          // build, so EAS build times go up materially.
+          buildReactNativeFromSource: true,
           // useHermesV1: !isProd, // Disabled due to version conflicts
         },
       ],

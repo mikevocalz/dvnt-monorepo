@@ -15,7 +15,7 @@
  */
 // Explicit extension: this module is exercised by `node --test`, whose ESM
 // resolver requires it. Metro and the Next build both resolve it too.
-import { getSneakyUserLabel } from "./user-labels.ts";
+import { getSneakyUserLabel } from "./user-labels";
 
 export interface HandRaiser {
   userId: string;
