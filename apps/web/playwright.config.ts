@@ -53,6 +53,21 @@ export default defineConfig({
     // Mints the storage state every other project reuses (P13 WS-1).
     { name: "setup", testMatch: /auth\.setup\.ts/ },
 
+    // Unauthenticated lane. Deliberately has NO setup dependency and no
+    // storage state: the login page, the public event page and `/` must all
+    // render for a signed-out visitor, and gating them behind the audit
+    // account would mean never testing the state a first-time user arrives in.
+    {
+      name: "public-1440",
+      testMatch: /public\/.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      name: "public-375",
+      testMatch: /public\/.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], viewport: { width: 375, height: 812 } },
+    },
+
     {
       name: "chromium-desktop-1440",
       dependencies: ["setup"],
