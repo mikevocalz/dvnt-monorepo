@@ -166,6 +166,15 @@ const TRANSPORT_STATUS_BY_LYNK_STATE: Record<LynkState, RoomTransportStatus> = {
   error: "error",
 };
 
+/**
+ * Room events that actually remove someone from the room.
+ *
+ * Deliberately a whitelist. The alternative — "anything targeted at me that I
+ * did not otherwise handle" — is what ejected a user at the moment the host
+ * promoted them.
+ */
+const EJECT_EVENT_TYPES = new Set(["eject", "member_kicked", "member_banned"]);
+
 /** Roles that may publish — mirrors PUBLISH_ROLES in the lynk-moq-token
  *  edge function. Module scope on purpose: it is called from the tile map,
  *  which runs before the stage split that used to declare it. */
@@ -395,7 +404,17 @@ function useRoomModerationWatcher(
           onHostMuteRef.current(next.locked, shouldStopMic(event.type, ctx));
           return;
         }
-        if (event.targetId && event.targetId === userId) {
+        // ONLY these three are ejections. This used to be a catch-all — any
+        // targeted event the branches above did not claim was treated as a
+        // kick — so `role_changed` ejected the user it was promoting. Being
+        // made a co-host tore your transport down and showed you a "removed
+        // from the room" modal. The native leg never had this: it uses an
+        // explicit switch (useVideoRoom.handleRoomEvent).
+        //
+        // `video_kick_user` emits `eject` + `member_kicked`; `video_ban_user`
+        // emits `eject` + `member_banned`. Everything else targeted at us —
+        // role_changed, member_joined, token_issued — is not an ejection.
+        if (EJECT_EVENT_TYPES.has(event.type) && event.targetId === userId) {
           const payload = event.payload as { action?: string; reason?: string } | undefined;
           onEjectRef.current(payload?.action === "ban" ? "ban" : "kick", payload?.reason);
         }
