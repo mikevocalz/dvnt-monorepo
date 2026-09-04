@@ -195,3 +195,35 @@ audio-only** on a video call (Whereby "join with cam off"), and `handleAccept`
 carries the call type into the room — previously it dropped `callType`, so an
 audio call was answered with the camera on and a video call could not be
 answered audio-only. Button gap made responsive for the 3-control layout at 375.
+
+## WS-2 video flyer — RPC fix applied + verified (2026-09-04)
+
+The blocked root cause from the previous entry is fixed for the DETAIL hero.
+
+- **`get_event_detail` now returns `video_flyer_url` + `video_poster_url`.**
+  Applied to production (`npfjanxturvmjyevoyfo`) via MCP and captured as a
+  migration: `apps/mobile/supabase/migrations/20260904140000_get_event_detail_video_flyer.sql`.
+  Verified at the DB: `get_event_detail(72)` / `(56)` now carry the flyer URL;
+  other events still resolve; `supabase advisors` shows no new findings
+  (the SECURITY DEFINER WARNs on it are pre-existing and unrelated).
+
+- **`.mov` is intentionally not rendered.** Event 72's flyer is a `.mov`
+  (QuickTime), which `resolve-renderable.ts:88-89` marks `browserUnsupported`,
+  so the hero shows a placeholder rather than a broken video — correct, honest
+  behaviour. Event 56 is the `.mp4` (browser-playable) case; only two events in
+  the whole DB have a video flyer.
+
+Remaining, deliberately NOT done here:
+
+1. **List/card RPCs still omit the column.** `get_events_home` (two overloads)
+   and `get_events_for_you` have the identical omission, so event CARDS can't
+   autoplay a flyer video (they fall back to the poster/image). Left for a
+   separate change: editing three overloaded 4KB feed functions is a feed-wide
+   blast radius that deserves its own verification pass.
+
+2. **`/feed/events/[id]` renders a "Use DVNT like an app" interstitial in the
+   test browser** instead of the event detail — so `get_event_detail` was never
+   called from that route in the harness, and the end-to-end browser render of
+   the mp4 hero could not be confirmed there. This is a separate routing/PWA
+   issue, not the flyer fix (the fix is DB-verified). Needs its own look:
+   whether the authed feed detail route is gated behind a PWA-install prompt.
