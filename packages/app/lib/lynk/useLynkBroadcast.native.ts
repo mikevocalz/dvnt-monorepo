@@ -19,6 +19,13 @@
  * Teardown on `end()` stops publishing and releases the camera — a stream that
  * keeps publishing after you navigate away is a privacy incident, so the screen
  * MUST call `end()` on unmount/leave/background.
+ *
+ * `canPublish` exists so a screen with BOTH kinds of member (a Sneaky Lynk room:
+ * speakers publish, listeners only watch) can hold ONE hook unconditionally.
+ * With it false no publish token is minted — `lynk-moq-token` denies `publish`
+ * for a non-speaker role, and an unconditional request would put every listener
+ * into `error` — the camera/mic never start, and the hook degrades to the
+ * composed viewer.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -47,8 +54,13 @@ export interface UseLynkBroadcastNativeResult extends LynkBroadcastBase {
 
 export function useLynkBroadcast(
   roomId: string | undefined,
+  canPublish = true,
 ): UseLynkBroadcastNativeResult {
-  const { token, error: tokenError } = useMoqToken(roomId, "publish", !!roomId);
+  const { token, error: tokenError } = useMoqToken(
+    roomId,
+    "publish",
+    !!roomId && canPublish,
+  );
   // Compose the viewer for co-publisher discovery (separate subscribe token).
   const viewer = useLynkViewer(roomId);
 
@@ -67,17 +79,13 @@ export function useLynkBroadcast(
   // stop with NO error — moq-kit reports it as a clean stop. h264 is listed
   // by getSupportedVideoCodecs() everywhere we ship.
   const camera = useCamera({
-    enabled: cameraEnabled && !ended,
+    enabled: cameraEnabled && !ended && canPublish,
     videoCodec: "h264",
   });
-  // KNOWN GAP (0.2.0): the mic cannot be soft-disabled — MicrophoneOptions is
-  // only { audioCodec?, audioSampleRate? }; the `enabled` flag exists on
-  // upstream main but not in this release. So a muted mic still holds the iOS
-  // audio session in `playAndRecord` and can block other audio libraries
-  // (`insufficientPriority`). Mute still works at the broadcast level (the
-  // track is dropped from `tracks` below). Pass `enabled: micEnabled && !ended`
-  // here the moment a release ships it.
-  const mic = useMicrophone();
+  // `enabled` soft-disables capture (0.3.0 added it to MicrophoneOptions). It
+  // matters beyond mute: an idle iOS capture holds the audio session in
+  // `playAndRecord` and can starve other audio libraries (`insufficientPriority`).
+  const mic = useMicrophone({ enabled: micEnabled && !ended && canPublish });
 
   const { connect, disconnect } = session;
   const { publish, stop } = publisher;
@@ -114,15 +122,18 @@ export function useLynkBroadcast(
   }, [isLive, token?.path, tracks, ended, publish, session.state]);
 
   const goLive = useCallback(async () => {
-    if (!token || isLive) return;
+    if (!token || isLive || !canPublish) return;
     setIsLive(true);
-  }, [token, isLive]);
+  }, [token, isLive, canPublish]);
 
   const setCameraEnabled = useCallback(
     (on: boolean) => setCameraEnabledState(on),
     [],
   );
-  const setMicEnabled = useCallback((on: boolean) => setMicEnabledState(on), []);
+  const setMicEnabled = useCallback(
+    (on: boolean) => setMicEnabledState(on),
+    [],
+  );
 
   const end = useCallback(() => {
     setEnded(true);

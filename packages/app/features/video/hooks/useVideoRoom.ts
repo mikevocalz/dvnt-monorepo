@@ -1,21 +1,27 @@
 /**
  * useVideoRoom Hook
- * Main hook for managing video room state with Fishjam
+ * Main hook for managing video room state.
+ *
+ * WS-3b: the media transport is MoQ (`useLynkBroadcast` → `react-native-moq`),
+ * not Fishjam. Everything ELSE — join/leave, roles, ejection, host mute, token
+ * refresh, room events — is Supabase and is unchanged; only the media seam moved.
+ * Speakers publish and listeners subscribe through the SAME hook, gated by
+ * `canPublish`, because hooks cannot be called conditionally.
  *
  * ╔══════════════════════════════════════════════════════════════════════╗
  * ║  RENDER-STABILITY GUARDRAIL — READ BEFORE EDITING                  ║
  * ║                                                                    ║
  * ║  All room state lives in useVideoRoomStore (Zustand).              ║
- * ║  This hook orchestrates Fishjam SDK ↔ store sync.                  ║
+ * ║  This hook orchestrates transport ↔ store sync.                    ║
  * ║                                                                    ║
  * ║  1. NO useCallback may list store state or prop callbacks in deps. ║
  * ║     Read them from store.getState() / refs instead.                ║
  * ║                                                                    ║
  * ║  2. NO useEffect may depend on store state or derived callbacks.   ║
- * ║     Use [] for one-time subscriptions; use primitive Fishjam       ║
- * ║     values (peerStatus, reconnectionStatus) only where needed.     ║
+ * ║     Use [] for one-time subscriptions; use primitive transport     ║
+ * ║     values (media.state) only where needed.                        ║
  * ║                                                                    ║
- * ║  3. Fishjam SDK refs (joinRoom, leaveRoom) are ref-wrapped        ║
+ * ║  3. Transport callbacks (end, setCameraEnabled…) are ref-wrapped  ║
  * ║     because their identity is NOT guaranteed stable across         ║
  * ║     reconnects.                                                    ║
  * ║                                                                    ║
@@ -29,25 +35,24 @@
  * ╚══════════════════════════════════════════════════════════════════════╝
  */
 
-import { useCallback, useEffect, useRef } from "react";
-import {
-  useConnection,
-  useCamera,
-  useMicrophone,
-  usePeers,
-  useScreenShare,
-} from "@fishjam-cloud/react-native-client";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.native";
 import { AppState, type AppStateStatus } from "react-native";
 import { videoApi } from "../api";
 import { useVideoRoomStore } from "../stores/video-room-store";
-import { applyHostMuteEvent, canSelfUnmute, shouldStopMic } from "@dvnt/app/lib/video/host-mute";
+import {
+  applyHostMuteEvent,
+  canSelfUnmute,
+  shouldStopMic,
+} from "@dvnt/app/lib/video/host-mute";
 import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
+import { mergeParticipants } from "../lynk-participants";
 import type {
   ConnectionState,
-  Participant,
   EjectPayload,
   MemberRole,
   RoomEvent,
+  RoomMember,
 } from "../types";
 
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 min before expiry
@@ -72,70 +77,6 @@ interface UseVideoRoomOptions {
   ) => void;
 }
 
-function resolvePeerTracks(peer: any) {
-  const videoTrack =
-    peer.cameraTrack ??
-    peer.videoTrack ??
-    peer.tracks?.find((track: any) => track.metadata?.type === "camera") ??
-    null;
-  const audioTrack =
-    peer.microphoneTrack ??
-    peer.audioTrack ??
-    peer.tracks?.find((track: any) => track.metadata?.type === "microphone") ??
-    null;
-
-  return { videoTrack, audioTrack };
-}
-
-function isTrackActive(track: any): boolean {
-  if (!track) return false;
-
-  const mediaTrack = track.track ?? null;
-  if (mediaTrack) {
-    if (mediaTrack.readyState === "ended") return false;
-    if (typeof mediaTrack.enabled === "boolean" && !mediaTrack.enabled) {
-      return false;
-    }
-    return true;
-  }
-
-  const stream = track.stream ?? null;
-  if (stream && typeof stream.getTracks === "function") {
-    const liveTracks = stream
-      .getTracks()
-      .filter((item: MediaStreamTrack | null | undefined) => {
-        return item && item.readyState !== "ended";
-      });
-
-    if (liveTracks.length > 0) {
-      return liveTracks.some((item: MediaStreamTrack) => item.enabled !== false);
-    }
-
-    if (typeof stream.active === "boolean") {
-      return stream.active;
-    }
-  }
-
-  return !!(track.trackId || stream);
-}
-
-function getPeerIdentity(peer: any): string {
-  const metadata = (peer.metadata as Record<string, unknown>) || {};
-  const userId = metadata.userId;
-
-  return typeof userId === "string" && userId.length > 0 ? userId : peer.id;
-}
-
-function getPeerScore(peer: any): number {
-  const { videoTrack, audioTrack } = resolvePeerTracks(peer);
-
-  return (
-    (isTrackActive(videoTrack) ? 4 : videoTrack ? 1 : 0) +
-    (isTrackActive(audioTrack) ? 4 : audioTrack ? 1 : 0) +
-    (peer.screenShareVideoTrack ? 1 : 0)
-  );
-}
-
 export function useVideoRoom({
   roomId,
   anonymous = false,
@@ -143,17 +84,23 @@ export function useVideoRoom({
   onRoomEnded,
   onError,
 }: UseVideoRoomOptions) {
-  const { joinRoom, leaveRoom, peerStatus, reconnectionStatus } =
-    useConnection();
-  const cameraHook = useCamera();
-  const microphoneHook = useMicrophone();
-  const screenShareHook = useScreenShare();
-  const peersHook = usePeers();
-
   // ── Store access ──────────────────────────────────────────────────
   // Subscribe to full state for return value; use getState() in callbacks.
   const store = useVideoRoomStore();
   const getStore = useVideoRoomStore.getState;
+
+  // ── Media transport (MoQ) ─────────────────────────────────────────
+  // Role decides publish capability, and it only exists after video_join_room
+  // resolves — before that `canPublish` is false, so no publish token is
+  // requested and `lynk-moq-token` is never asked to deny one. When the role
+  // lands the hook mints, connects and goes live on its own.
+  const localRole = store.localUser?.role;
+  const canPublish =
+    localRole === "host" || localRole === "co-host" || localRole === "speaker";
+  const media = useLynkBroadcast(roomId || undefined, canPublish);
+
+  // The roster carries identity for remote tiles (MoQ paths carry none).
+  const [members, setMembers] = useState<RoomMember[]>([]);
 
   // ── Internal refs (timers, subscriptions) ───────────────────────────
   const tokenExpiresAtRef = useRef<Date | null>(null);
@@ -186,68 +133,42 @@ export function useVideoRoom({
   const anonymousRef = useRef(anonymous);
   anonymousRef.current = anonymous;
 
-  // Prevents: callbacks depending on Fishjam SDK refs whose identity
-  // may change across reconnects
-  const joinRoomRef = useRef(joinRoom);
-  joinRoomRef.current = joinRoom;
-  const leaveRoomRef = useRef(leaveRoom);
-  leaveRoomRef.current = leaveRoom;
+  // Prevents: callbacks depending on transport identities, which change
+  // across reconnects (token refresh rebuilds the session).
+  const mediaRef = useRef(media);
+  mediaRef.current = media;
 
-  // Prevents: toggleCamera/toggleMic depending on cameraHook/microphoneHook
-  const cameraRef = useRef(cameraHook);
-  cameraRef.current = cameraHook;
-  const microphoneRef = useRef(microphoneHook);
-  microphoneRef.current = microphoneHook;
+  // The transport owns local capture state; mirror it into the store so the
+  // Sneaky Lynk controls can't drift from what is actually being published.
+  // Gated on `canPublish`, not on `isLive`: capture is what the mic/camera
+  // buttons reflect, and a listener has none. Keying it on isLive instead
+  // would report a speaker's camera as off during the go-live handshake.
+  useEffect(() => {
+    getStore().setCameraOn(media.cameraEnabled && canPublish);
+  }, [media.cameraEnabled, canPublish, getStore]);
 
   useEffect(() => {
-    // Fishjam is the source of truth for local camera state. Mirror it into the
-    // room store so the Sneaky Lynk controls don't drift after failed toggles
-    // or async track publication.
-    const camera = cameraRef.current;
-    getStore().setCameraOn(!!camera.isCameraOn);
-  }, [cameraHook.isCameraOn, cameraHook.cameraStream, getStore]);
+    getStore().setMicOn(media.micEnabled && canPublish);
+  }, [media.micEnabled, canPublish, getStore]);
 
   useEffect(() => {
-    const microphone = microphoneRef.current;
-    getStore().setMicOn(!!microphone.isMicrophoneOn);
-  }, [
-    microphoneHook.isMicrophoneOn,
-    microphoneHook.microphoneStream,
-    getStore,
-  ]);
-
-  useEffect(() => {
-    const currentCamera = cameraHook.currentCamera;
-    if (!currentCamera) return;
-
-    const deviceLabel = `${currentCamera.label || ""}`.toLowerCase();
-    if (deviceLabel.includes("back") || deviceLabel.includes("rear")) {
-      getStore().setFrontCamera(false);
-      return;
-    }
-
-    if (deviceLabel.includes("front")) {
-      getStore().setFrontCamera(true);
-    }
-  }, [cameraHook.currentCamera, getStore]);
+    getStore().setFrontCamera(media.cameraTrack.position !== "back");
+  }, [media.cameraTrack.position, getStore]);
 
   // ── Connection state sync ───────────────────────────────────────────
-  // Deps: only primitive Fishjam status values. Store bails out if unchanged.
+  // Deps: one primitive transport state. Store bails out if unchanged.
   useEffect(() => {
-    let newStatus: ConnectionState["status"] = "disconnected";
-
-    if (peerStatus === "connected") {
-      newStatus = "connected";
-    } else if (peerStatus === "connecting") {
-      newStatus = "connecting";
-    } else if (reconnectionStatus === "reconnecting") {
-      newStatus = "reconnecting";
-    } else if (peerStatus === "error") {
-      newStatus = "error";
-    }
-
-    getStore().setConnectionStatus(newStatus);
-  }, [peerStatus, reconnectionStatus, getStore]);
+    const byState: Record<string, ConnectionState["status"]> = {
+      idle: "disconnected",
+      "requesting-token": "connecting",
+      connecting: "connecting",
+      live: "connected",
+      reconnecting: "reconnecting",
+      ended: "disconnected",
+      error: "error",
+    };
+    getStore().setConnectionStatus(byState[media.state] ?? "disconnected");
+  }, [media.state, getStore]);
 
   // ── Stable callbacks (deps: [] only) ────────────────────────────────
   // All mutable values read from store.getState() or refs.
@@ -259,41 +180,10 @@ export function useVideoRoom({
     }
   }, []);
 
-  const getPreferredCameraId = useCallback((facing: "front" | "back") => {
-    const devices = cameraRef.current.cameraDevices || [];
-    // Accept BOTH human-label values ("front"/"back") AND the WebRTC
-    // spec values that react-native-webrtc exposes on facingMode:
-    //   front  ↔  "user"
-    //   back   ↔  "environment"
-    // Older devices expose `position`, newer builds expose `facingMode`;
-    // some Android builds only populate the `label`. We check all of
-    // them so the matcher works on every platform Fishjam runs on.
-    const needles =
-      facing === "front"
-        ? ["front", "user", "facingmodeuser"]
-        : ["back", "environment", "facingmodeenvironment", "rear"];
-
-    const match = devices.find((device: any) => {
-      const label = String(device?.label || "").toLowerCase();
-      const deviceId = String(device?.deviceId || "").toLowerCase();
-      const position = String(device?.position || "").toLowerCase();
-      const facingMode = String(device?.facingMode || "").toLowerCase();
-      return needles.some(
-        (n) =>
-          label.includes(n) ||
-          deviceId.includes(n) ||
-          position.includes(n) ||
-          facingMode.includes(n),
-      );
-    });
-
-    return match?.deviceId;
-  }, []);
-
   const handleEject = useCallback(
     (payload: EjectPayload) => {
       getStore().setEjected(payload);
-      leaveRoomRef.current();
+      mediaRef.current.end();
       clearTokenTimer();
       onEjectedRef.current?.(payload);
     },
@@ -302,7 +192,7 @@ export function useVideoRoom({
 
   const handleRoomEnded = useCallback(() => {
     getStore().setRoomEnded();
-    leaveRoomRef.current();
+    mediaRef.current.end();
     clearTokenTimer();
     onRoomEndedRef.current?.();
   }, [clearTokenTimer, getStore]);
@@ -316,54 +206,20 @@ export function useVideoRoom({
       // blocked; the lock only stops the microphone being turned ON.
       if (enabled) {
         const store = getStore();
-        if (!canSelfUnmute({ locked: store.hostMuteLocked }, store.localUser?.role === "host")) {
+        if (
+          !canSelfUnmute(
+            { locked: store.hostMuteLocked },
+            store.localUser?.role === "host",
+          )
+        ) {
           return false;
         }
       }
-      try {
-        const mic = microphoneRef.current;
-
-        if (enabled) {
-          if (!mic.isMicrophoneOn) {
-            const toggleError = await mic.toggleMicrophone();
-            if (toggleError) {
-              console.error(
-                "[useVideoRoom] Failed to start microphone:",
-                toggleError,
-              );
-              onErrorRef.current?.("Failed to start microphone");
-              getStore().setMicOn(false);
-              audioSession.setMicMuted(true);
-              return true;
-            }
-          }
-
-          getStore().setMicOn(true);
-          audioSession.setMicMuted(false);
-          return true;
-        }
-
-        if (mic.isMicrophoneOn) {
-          const toggleError = await mic.toggleMicrophone();
-          if (toggleError) {
-            console.error(
-              "[useVideoRoom] Failed to stop microphone:",
-              toggleError,
-            );
-            onErrorRef.current?.("Failed to toggle microphone");
-            return true;
-          }
-        }
-
-        getStore().setMicOn(false);
-        audioSession.setMicMuted(true);
-      } catch (error) {
-        console.error("[useVideoRoom] Failed to set microphone state:", error);
-        onErrorRef.current?.("Failed to toggle microphone");
-      }
-      // Only the host lock returns false. Hardware failures return true and
-      // report themselves through onError — the caller's job here is to say
-      // "you can't unmute yet", not to re-report a broken microphone.
+      // MoQ mute is a re-publish with the track dropped, so there is no
+      // failure path to report — unlike Fishjam's toggle, which could reject.
+      mediaRef.current.setMicEnabled(enabled);
+      getStore().setMicOn(enabled);
+      audioSession.setMicMuted(!enabled);
       return true;
     },
     [getStore],
@@ -371,38 +227,8 @@ export function useVideoRoom({
 
   const setCameraEnabled = useCallback(
     async (enabled: boolean) => {
-      try {
-        const camera = cameraRef.current;
-
-        if (enabled) {
-          if (!camera.isCameraOn) {
-            const toggleError = await camera.toggleCamera();
-            if (toggleError) {
-              console.error("[useVideoRoom] Failed to start camera:", toggleError);
-              onErrorRef.current?.("Failed to start camera");
-              getStore().setCameraOn(false);
-              return;
-            }
-          }
-
-          getStore().setCameraOn(true);
-          return;
-        }
-
-        if (camera.isCameraOn) {
-          const toggleError = await camera.toggleCamera();
-          if (toggleError) {
-            console.error("[useVideoRoom] Failed to stop camera:", toggleError);
-            onErrorRef.current?.("Failed to toggle camera");
-            return;
-          }
-        }
-
-        getStore().setCameraOn(false);
-      } catch (error) {
-        console.error("[useVideoRoom] Failed to set camera state:", error);
-        onErrorRef.current?.("Failed to toggle camera");
-      }
+      mediaRef.current.setCameraEnabled(enabled);
+      getStore().setCameraOn(enabled);
     },
     [getStore],
   );
@@ -491,22 +317,9 @@ export function useVideoRoom({
             return;
           }
 
-          // Reconnect with new token — read localUser from store
-          const { localUser } = getStore();
-          leaveRoomRef.current();
-          await joinRoomRef.current({
-            peerToken: result.data!.token,
-            peerMetadata: {
-              userId: localUser?.id,
-              username: localUser?.username,
-              displayName: localUser?.displayName,
-              avatar: localUser?.avatar,
-              role: localUser?.role,
-              isAnonymous: localUser?.isAnonymous || false,
-              anonLabel: localUser?.anonLabel || null,
-            },
-          });
-
+          // No media reconnect: the MoQ publish/subscribe tokens carry their
+          // own 60s-before-expiry refresh inside `useMoqToken`. This call
+          // renews the ROOM session only (and is what surfaces an eject).
           tokenExpiresAtRef.current = new Date(result.data!.expiresAt);
           scheduleTokenRefresh(tokenExpiresAtRef.current);
         } catch (err) {
@@ -531,13 +344,10 @@ export function useVideoRoom({
 
       if (!result.ok) {
         getStore().setConnectionStatus("error", result.error?.message);
-        onErrorRef.current?.(
-          result.error?.message || "Failed to join room",
-          {
-            code: result.error?.code,
-            detail: result.error?.detail,
-          },
-        );
+        onErrorRef.current?.(result.error?.message || "Failed to join room", {
+          code: result.error?.code,
+          detail: result.error?.detail,
+        });
         return false;
       }
 
@@ -574,19 +384,18 @@ export function useVideoRoom({
         anonLabel: user.anonLabel || null,
       });
 
-      // Connect to Fishjam — use ref for stable identity
-      await joinRoomRef.current({
-        peerToken: token,
-        peerMetadata: {
-          userId: user.id,
-          username: user.username,
-          displayName: user.displayName || user.username,
-          avatar: user.avatar,
-          role: peer.role,
-          isAnonymous: user.isAnonymous || false,
-          anonLabel: user.anonLabel || null,
-        },
-      });
+      // Media needs no explicit join: writing localUser above flips
+      // `canPublish`, which mints the MoQ token, connects the session and
+      // trips the go-live effect below.
+      //
+      // Deliberately NOT `mediaRef.current.goLive()` here: mediaRef still
+      // holds the PREVIOUS render's hook, where canPublish is false and the
+      // token is null, so the call would no-op and the speaker would sit
+      // connected but silent.
+
+      // Identity for remote tiles comes from the roster, not from the
+      // transport — MoQ paths carry no metadata.
+      setMembers(await videoApi.getRoomMembers(roomId));
 
       // Schedule token refresh
       scheduleTokenRefresh(tokenExpiresAtRef.current);
@@ -607,6 +416,9 @@ export function useVideoRoom({
             eventType,
             member.userId,
           );
+          // Re-read rather than patch: joins, leaves and role changes all land
+          // here and the roster is small (max 10 members per room).
+          void videoApi.getRoomMembers(roomId).then(setMembers);
         },
       );
 
@@ -625,7 +437,7 @@ export function useVideoRoom({
     clearTokenTimer();
     unsubscribeEventsRef.current?.();
     unsubscribeMembersRef.current?.();
-    leaveRoomRef.current();
+    mediaRef.current.end();
 
     const s = getStore();
     s.setConnectionStatus("disconnected");
@@ -641,11 +453,11 @@ export function useVideoRoom({
     cameraToggleInFlightRef.current = true;
 
     try {
-      await setCameraEnabled(!cameraRef.current.isCameraOn);
+      await setCameraEnabled(!getStore().isCameraOn);
     } finally {
       cameraToggleInFlightRef.current = false;
     }
-  }, [setCameraEnabled]);
+  }, [setCameraEnabled, getStore]);
 
   /** Returns false when the host is holding the mute — the caller surfaces
    *  HOST_MUTE_COPY.blocked rather than failing silently. Muting yourself is
@@ -656,7 +468,10 @@ export function useVideoRoom({
     const wantEnabled = !store.isMicOn;
     if (
       wantEnabled &&
-      !canSelfUnmute({ locked: store.hostMuteLocked }, store.localUser?.role === "host")
+      !canSelfUnmute(
+        { locked: store.hostMuteLocked },
+        store.localUser?.role === "host",
+      )
     ) {
       return false;
     }
@@ -675,49 +490,22 @@ export function useVideoRoom({
     }
     cameraSwitchInFlightRef.current = true;
     try {
-      const currentCameraId = cameraRef.current.currentCamera?.deviceId;
-      const nextFacing = getStore().isFrontCamera ? "back" : "front";
-      const targetCameraId = getPreferredCameraId(nextFacing);
-
-      // NOTE: we intentionally do NOT use `track._switchCamera()` here.
-      // It's marked `@deprecated` in
-      // @fishjam-cloud/react-native-webrtc/src/MediaStreamTrack.ts:118
-      // and — the root-cause of the "flip camera doesn't work for the
-      // host" bug — it reads `_settings.facingMode` to decide direction.
-      // Fishjam starts cameras by deviceId, which leaves
-      // `_settings.facingMode` undefined, so the toggle silently
-      // resolves to `'user'` every time and no-ops on a device that
-      // was already front-facing. Always use the supported
-      // `selectCamera(deviceId)` path instead — it internally calls
-      // `tsClient.replaceTrack` so remote peers see the new camera
-      // immediately.
-
-      if (targetCameraId && targetCameraId !== currentCameraId) {
-        const selectError = await cameraRef.current.selectCamera(targetCameraId);
-        if (!selectError) {
-          getStore().setFrontCamera(nextFacing === "front");
-          return;
-        }
-        console.warn(
-          "[useVideoRoom] selectCamera failed:",
-          selectError,
-        );
-      }
-
-      console.warn("[useVideoRoom] No camera-switch path available", {
-        nextFacing,
-        targetCameraId,
-        currentCameraId,
-        devices: cameraRef.current.cameraDevices?.length ?? 0,
-      });
-      onErrorRef.current?.("Couldn't reverse camera");
+      // `flip()` is the whole camera-switch API on this transport: it swaps the
+      // capture position in native code and the published track follows. The
+      // old Fishjam path had to enumerate devices and call selectCamera(id)
+      // because its deprecated _switchCamera() read an unset facingMode — none
+      // of that applies here. Note the camera is a device SINGLETON: flipping
+      // affects every consumer in the process.
+      mediaRef.current.cameraTrack.flip();
+      // Optimistic; the position effect above reconciles from the track itself.
+      getStore().setFrontCamera(!getStore().isFrontCamera);
     } catch (error) {
       console.error("[useVideoRoom] switchCamera failed:", error);
       onErrorRef.current?.("Couldn't reverse camera");
     } finally {
       cameraSwitchInFlightRef.current = false;
     }
-  }, [getPreferredCameraId, getStore]);
+  }, [getStore]);
 
   // ── Admin actions ──────────────────────────────────────────────────
   // Only depend on roomId (static for hook lifetime).
@@ -757,52 +545,32 @@ export function useVideoRoom({
     return result.ok;
   }, [roomId]);
 
-  // ── Participants sync ──────────────────────────────────────────────
-  // REF: Fishjam SDK v0.25 PeerWithTracks exposes distinguished tracks:
-  //   peer.cameraTrack, peer.microphoneTrack (Track | undefined)
-  // REF: https://docs.fishjam.io/tutorials/react-native-quick-start
+  // ── Go live ────────────────────────────────────────────────────────
+  // Publishing starts as soon as we hold BOTH a publish-capable role and a
+  // minted token. `goLive` no-ops without a token and changes identity when
+  // one arrives, so this effect re-runs exactly once more at that point.
   useEffect(() => {
-    // Use remotePeers (peers is deprecated in v0.25)
-    const allPeers = peersHook.remotePeers || peersHook.peers || [];
-    const peersByUserId = new Map<string, any>();
+    if (!canPublish || media.isLive) return;
+    void media.goLive();
+  }, [canPublish, media.isLive, media.goLive]);
 
-    allPeers.forEach((peer: any) => {
-      const identity = getPeerIdentity(peer);
-      const existingPeer = peersByUserId.get(identity);
-
-      if (!existingPeer || getPeerScore(peer) >= getPeerScore(existingPeer)) {
-        peersByUserId.set(identity, peer);
-      }
-    });
-
-    const participants: Participant[] = Array.from(peersByUserId.values()).map(
-      (peer: any) => {
-      const metadata = (peer.metadata as Record<string, unknown>) || {};
-      const { videoTrack, audioTrack } = resolvePeerTracks(peer);
-
-      return {
-        odId: peer.id,
-        oderId: peer.id,
-        userId: getPeerIdentity(peer),
-        username: metadata.username as string | undefined,
-        displayName:
-          (metadata.displayName as string | undefined) ||
-          (metadata.username as string | undefined),
-        avatar: metadata.avatar as string | undefined,
-        role: (metadata.role as MemberRole) || "participant",
-        isLocal: false,
-        isCameraOn: isTrackActive(videoTrack),
-        isMicOn: isTrackActive(audioTrack),
-        isScreenSharing: !!peer.screenShareVideoTrack,
-        videoTrack,
-        audioTrack,
-        isAnonymous: (metadata.isAnonymous as boolean) || false,
-        anonLabel: (metadata.anonLabel as string) || null,
-      };
-    });
-
-    getStore().setParticipants(participants);
-  }, [peersHook.remotePeers, peersHook.peers, getStore]);
+  // ── Participants sync ──────────────────────────────────────────────
+  // Roster (identity, role, hand) × live MoQ publishers (media), joined on the
+  // peer id both sides derive from the user. See `lynk-participants.ts`.
+  useEffect(() => {
+    getStore().setParticipants(
+      mergeParticipants({
+        members,
+        publishers: media.coPublishers.map((p) => ({
+          peerId: p.peerId,
+          broadcast: p.broadcast,
+          hasVideo: p.broadcast.videoTracks.length > 0,
+          hasAudio: p.broadcast.audioTracks.length > 0,
+        })),
+        localUserId: getStore().localUser?.id,
+      }),
+    );
+  }, [members, media.coPublishers, getStore]);
 
   // ── App state listener ─────────────────────────────────────────────
   // One-time subscription. Reads connection status from store.
@@ -837,7 +605,7 @@ export function useVideoRoom({
       clearTokenTimer();
       unsubscribeEventsRef.current?.();
       unsubscribeMembersRef.current?.();
-      leaveRoomRef.current();
+      mediaRef.current.end();
       getStore().reset();
     };
   }, [clearTokenTimer, getStore]);
@@ -866,8 +634,16 @@ export function useVideoRoom({
     kickUser,
     banUser,
     endRoom,
-    camera: cameraHook,
-    microphone: microphoneHook,
-    screenShare: screenShareHook,
+    // Transport surface the screen needs directly. `camera`/`microphone`/
+    // `screenShare` (raw Fishjam hook objects) are gone: capture state is in
+    // the store, and MoQ screen share is a separate out-of-process broadcast
+    // that nothing publishes yet.
+    /** Bind to `<PublisherView camera={...} />` for the local preview. */
+    cameraTrack: media.cameraTrack,
+    /** Humane transport state — drives "Connecting…" / "Reconnecting…" copy. */
+    mediaState: media.state,
+    mediaError: media.error,
+    isLive: media.isLive,
+    canPublish,
   };
 }

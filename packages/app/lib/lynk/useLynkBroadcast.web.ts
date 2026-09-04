@@ -35,8 +35,13 @@ export interface UseLynkBroadcastResult extends LynkBroadcastBase {
 
 export function useLynkBroadcast(
   roomId: string | undefined,
+  canPublish = true,
 ): UseLynkBroadcastResult {
-  const { token, error: tokenError } = useMoqToken(roomId, "publish", !!roomId);
+  const { token, error: tokenError } = useMoqToken(
+    roomId,
+    "publish",
+    !!roomId && canPublish,
+  );
   // Compose the viewer for co-publisher discovery + canvas mounting.
   const viewer = useLynkViewer(roomId);
 
@@ -92,6 +97,7 @@ export function useLynkBroadcast(
   );
 
   const goLive = useCallback(async () => {
+    if (!canPublish) return;
     if (!reload || !camera || !mic || !token || broadcastRef.current) return;
     broadcastRef.current = new Publish.Broadcast({
       connection: reload.established,
@@ -101,7 +107,7 @@ export function useLynkBroadcast(
       audio: { enabled: true, source: mic.source },
     });
     setIsLive(true);
-  }, [reload, camera, mic, token]);
+  }, [reload, camera, mic, token, canPublish]);
 
   const setCameraEnabled = useCallback(
     (on: boolean) => {

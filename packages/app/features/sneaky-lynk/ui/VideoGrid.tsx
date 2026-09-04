@@ -2,7 +2,7 @@
  * VideoGrid Component
  * Zoom-like adaptive video grid for all participants.
  * Layout adapts: 1=full, 2=split, 3-4=2x2, 5-6=3x2, etc.
- * Shows RTCView for camera-on participants, avatar placeholder for camera-off.
+ * Shows live MoQ media for camera-on participants, avatar placeholder otherwise.
  */
 
 import React, { memo, useMemo, useEffect } from "react";
@@ -14,7 +14,6 @@ import {
   useWindowDimensions,
   StyleSheet,
 } from "react-native";
-import { RTCView } from "@fishjam-cloud/react-native-client";
 import { LinearGradient } from "expo-linear-gradient";
 import {
   BadgeCheck,
@@ -26,6 +25,7 @@ import {
   Hand,
 } from "lucide-react-native";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
+import { RoomVideo } from "./RoomVideo";
 import { getSneakyUserLabel } from "./user-labels";
 import type { SneakyUser } from "../types";
 import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
@@ -49,8 +49,10 @@ export interface VideoParticipant {
   isLocal: boolean;
   isCameraOn: boolean;
   isMicOn: boolean;
-  videoTrack?: any;
-  audioTrack?: any;
+  /** Remote participant's live MoQ `BroadcastInfo`. */
+  broadcast?: unknown;
+  /** Local participant's own capture track (`CameraTrack`). */
+  localCamera?: any;
   isHandRaised?: boolean;
   isFrontCamera?: boolean;
 }
@@ -128,21 +130,16 @@ export const VideoTile = memo(function VideoTile({
     user,
     isCameraOn,
     isMicOn,
-    videoTrack,
+    broadcast,
+    localCamera,
     isLocal,
     role,
     isHandRaised,
     isFrontCamera,
   } = participant;
-  const MediaStreamCtor = globalThis.MediaStream as
-    | (new (tracks?: any[]) => MediaStream)
-    | undefined;
-  const resolvedVideoStream =
-    videoTrack?.stream ??
-    (videoTrack?.track && MediaStreamCtor
-      ? new MediaStreamCtor([videoTrack.track])
-      : null);
-  const showVideo = isCameraOn && !!resolvedVideoStream;
+  // Local tile renders our own capture track; remote tiles render the
+  // participant's live MoQ broadcast. Camera-off falls through to the avatar.
+  const showVideo = isCameraOn && !!(isLocal ? localCamera : broadcast);
   const isAnon = user.isAnonymous;
   const label = getSneakyUserLabel(user);
   const showHostIdentityPill = role === "host";
@@ -239,10 +236,9 @@ export const VideoTile = memo(function VideoTile({
           style={[styles.tile, { width: "100%", height: "100%" }]}
         >
           {showVideo ? (
-            <RTCView
-              mediaStream={resolvedVideoStream}
-              style={StyleSheet.absoluteFill}
-              objectFit="cover"
+            <RoomVideo
+              broadcast={broadcast}
+              camera={isLocal ? localCamera : null}
               mirror={isLocal && isFrontCamera !== false}
             />
           ) : (

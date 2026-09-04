@@ -286,6 +286,8 @@ export const videoApi = {
         hand_raised,
         joined_at,
         left_at,
+        is_anonymous,
+        anon_label,
         users!inner(username, avatar)
       `,
       )
@@ -304,6 +306,9 @@ export const videoApi = {
       leftAt: m.left_at,
       username: m.users?.username,
       avatar: m.users?.avatar?.url,
+      // Needed to derive the MoQ peer id — see `lynk-participants.ts`.
+      isAnonymous: m.is_anonymous ?? false,
+      anonLabel: m.anon_label ?? null,
     }));
   },
 

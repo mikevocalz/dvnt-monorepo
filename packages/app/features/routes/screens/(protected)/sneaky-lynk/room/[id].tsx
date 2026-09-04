@@ -37,11 +37,7 @@ import {
   useCameraPermission,
   useMicrophonePermission,
 } from "react-native-vision-camera";
-import {
-  useCamera,
-  useMicrophone,
-  useInitializeDevices,
-} from "@fishjam-cloud/react-native-client";
+import { useCamera, useMicrophone } from "react-native-moq";
 import { useVideoRoom } from "@dvnt/app/features/video";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
@@ -540,7 +536,7 @@ function SneakyLynkRoomScreenContent({
   );
 }
 
-// ── LocalRoom: direct Fishjam camera/mic, NO useVideoRoom ──────────
+// ── LocalRoom: direct MoQ capture, NO useVideoRoom ─────────────────
 
 function LocalRoom({
   id,
@@ -557,9 +553,6 @@ function LocalRoom({
   const insets = useSafeAreaInsets();
   const authUser = useAuthStore((s) => s.user);
   const showToast = useUIStore((s) => s.showToast);
-  const fishjamCamera = useCamera();
-  const fishjamMic = useMicrophone();
-  const { initializeDevices } = useInitializeDevices();
   const endRoom = useLynkHistoryStore((s) => s.endRoom);
 
   // VisionCamera permissions for native camera preview
@@ -571,16 +564,6 @@ function LocalRoom({
     hasPermission: hasMicPermission,
     requestPermission: requestMicPermission,
   } = useMicrophonePermission();
-
-  // Keep refs to the latest camera/mic so effects never use stale closures.
-  const cameraRef = useRef(fishjamCamera);
-  const micRef = useRef(fishjamMic);
-  useEffect(() => {
-    cameraRef.current = fishjamCamera;
-  }, [fishjamCamera]);
-  useEffect(() => {
-    micRef.current = fishjamMic;
-  }, [fishjamMic]);
 
   const {
     isHandRaised,
@@ -636,14 +619,14 @@ function LocalRoom({
       ]);
 
       if (cancelled) return;
-
-      try {
-        await initializeDevices({
-          enableVideo: roomHasVideo && cameraGranted,
-          enableAudio: microphoneGranted,
-        });
-      } catch (error) {
-        console.warn("[SneakyLynk:Local] Failed to initialize devices:", error);
+      // No device init step on this transport: capture starts and stops from
+      // the `enabled` flags below. Permissions are still ours to request —
+      // a missing one shows as a black preview, not an error.
+      if (roomHasVideo && !cameraGranted) {
+        console.warn("[SneakyLynk:Local] Camera permission denied");
+      }
+      if (!microphoneGranted) {
+        console.warn("[SneakyLynk:Local] Microphone permission denied");
       }
     })();
 
@@ -651,41 +634,24 @@ function LocalRoom({
       cancelled = true;
       reset();
     };
-  }, [
-    initializeDevices,
-    requestCamPermission,
-    requestMicPermission,
-    reset,
-    roomHasVideo,
-  ]);
+  }, [requestCamPermission, requestMicPermission, reset, roomHasVideo]);
 
-  // Start audio session + mic on mount
+  // Local capture. Nothing is published here — this is the solo practice space
+  // — so these exist for the preview and to make mute mean something: with
+  // `enabled: false` the hardware actually stops, which also releases the iOS
+  // audio session rather than holding it in playAndRecord.
+  const camera = useCamera({
+    enabled: effectiveVideoOn,
+    videoCodec: "h264",
+  });
+  const mic = useMicrophone({ enabled: localMicEnabled });
+
+  // Audio session for the room (no CallKit for Lynk rooms — they are social
+  // rooms, not private calls, so audio always routes to the speaker).
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // Configure audio session BEFORE starting mic (no CallKit for Lynk rooms)
-        // Lynks are social rooms, not private calls. Always route audio to speaker.
-        audioSession.startForLynk(true);
-        console.log("[SneakyLynk:Local] Starting mic");
-        const toggleError = await micRef.current.toggleMicrophone();
-        if (toggleError) {
-          throw toggleError;
-        }
-        if (!cancelled) {
-          setLocalMicEnabled(true);
-          console.log("[SneakyLynk:Local] Mic started");
-        }
-      } catch (e) {
-        console.warn("[SneakyLynk:Local] Failed to start mic:", e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      micRef.current.stopMicrophone();
-      audioSession.stop();
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    audioSession.startForLynk(true);
+    return () => audioSession.stop();
+  }, []);
 
   // Speaking indicator
   useEffect(() => {
@@ -771,71 +737,23 @@ function LocalRoom({
 
     showToast("info", "Share Cancelled", "Invite sharing was dismissed.");
   }, [id, roomTitle, showToast]);
-  const handleToggleMic = useCallback(async () => {
+  const handleToggleMic = useCallback(() => {
+    // Capture follows the flag (see `useMicrophone` above) — there is no async
+    // toggle that can fail, so there is nothing to catch or roll back.
     const wantEnabled = !localMicEnabled;
-    try {
-      if (wantEnabled && !micRef.current.isMicrophoneOn) {
-        const toggleError = await micRef.current.toggleMicrophone();
-        if (toggleError) {
-          throw toggleError;
-        }
-      } else if (!wantEnabled && micRef.current.isMicrophoneOn) {
-        const toggleError = await micRef.current.toggleMicrophone();
-        if (toggleError) {
-          throw toggleError;
-        }
-      }
-
-      audioSession.setMicMuted(!wantEnabled);
-      setLocalMicEnabled(wantEnabled);
-    } catch (error) {
-      console.warn("[SneakyLynk:Local] Failed to toggle mic:", error);
-      showToast(
-        "error",
-        "Microphone unavailable",
-        "We couldn't change the microphone state. Please try again.",
-      );
-    }
-  }, [localMicEnabled, showToast]);
+    audioSession.setMicMuted(!wantEnabled);
+    setLocalMicEnabled(wantEnabled);
+  }, [localMicEnabled]);
   const handleToggleVideo = useCallback(() => {
     setLocalVideoOn((prev) => !prev);
   }, []);
   const handleSwitchCamera = useCallback(async () => {
-    const devices = cameraRef.current.cameraDevices || [];
-    const nextFacing = isFrontCamera ? "back" : "front";
+    // `flip()` swaps capture position natively — no device enumeration, and no
+    // deprecated _switchCamera() facingMode trap. See useVideoRoom.switchCamera.
+    camera.flip();
+    setIsFrontCamera((prev) => !prev);
+  }, [camera]);
 
-    // See the matching comment in features/video/hooks/useVideoRoom.ts —
-    // the track's `_switchCamera()` is deprecated AND buggy for us
-    // because Fishjam starts cameras by deviceId (facingMode left
-    // undefined). Always use `selectCamera(deviceId)` directly.
-    const nextCamera = devices.find((device: any) => {
-      const label = String(device?.label || "").toLowerCase();
-      const deviceId = String(device?.deviceId || "").toLowerCase();
-      const position = String(device?.position || "").toLowerCase();
-      const facingMode = String(device?.facingMode || "").toLowerCase();
-      return (
-        label.includes(nextFacing) ||
-        deviceId.includes(nextFacing) ||
-        position.includes(nextFacing) ||
-        facingMode.includes(nextFacing)
-      );
-    });
-
-    if (nextCamera?.deviceId) {
-      const error = await cameraRef.current.selectCamera(nextCamera.deviceId);
-      if (!error) {
-        setIsFrontCamera((prev) => !prev);
-        return;
-      }
-      console.warn("[SneakyLynk:Local] selectCamera failed:", error);
-    }
-
-    showToast(
-      "error",
-      "Camera unavailable",
-      "We couldn't reverse the camera in this Lynk.",
-    );
-  }, [isFrontCamera, showToast]);
   const handleToggleHand = useCallback(async () => {
     if (handToggleInFlightRef.current) return;
 
@@ -892,7 +810,9 @@ function LocalRoom({
     isLocal: true,
     isCameraOn: effectiveVideoOn,
     isMicOn: !effectiveMuted,
-    videoTrack: undefined, // local room uses native camera preview
+    // The practice space had no preview at all: its tile rendered from a
+    // Fishjam stream that was never wired to one. The capture track is.
+    localCamera: camera,
     isHandRaised,
     isFrontCamera,
   });
@@ -993,7 +913,6 @@ function ServerRoom({
   const showToast = useUIStore((s) => s.showToast);
   const authUser = useAuthStore((s) => s.user);
   const endRoomHistory = useLynkHistoryStore((s) => s.endRoom);
-  const { initializeDevices } = useInitializeDevices();
 
   // VisionCamera permissions for native camera fallback
   const { requestPermission: requestCamPermission } = useCameraPermission();
@@ -1255,16 +1174,13 @@ function ServerRoom({
 
       if (cancelled) return;
 
-      try {
-        await initializeDevices({
-          enableVideo: roomHasVideo && cameraGranted,
-          enableAudio: microphoneGranted,
-        });
-      } catch (error) {
-        console.warn(
-          "[SneakyLynk:Server] Failed to initialize devices:",
-          error,
-        );
+      // Capture starts from `useLynkBroadcast`'s enabled flags once the role
+      // is known; there is no device-init step to await. Permissions stay ours.
+      if (roomHasVideo && !cameraGranted) {
+        console.warn("[SneakyLynk:Server] Camera permission denied");
+      }
+      if (!microphoneGranted) {
+        console.warn("[SneakyLynk:Server] Microphone permission denied");
       }
     })();
 
@@ -1273,7 +1189,6 @@ function ServerRoom({
       reset();
     };
   }, [
-    initializeDevices,
     requestCamPermission,
     requestMicPermission,
     reset,
@@ -1491,14 +1406,13 @@ function ServerRoom({
     if (connectionState !== "connected") return;
     if (videoRoom.participants.length === 0) return;
     if (!desiredMicEnabledRef.current) return;
-    if (videoRoom.isMicOn || videoRoom.microphone.isMicrophoneOn) return;
+    // Was `microphone.isMicrophoneOn` (Fishjam's hardware truth). On MoQ the
+    // equivalent "desired but not actually going out" signal is: the store says
+    // mic-on AND we are publishing.
+    if (videoRoom.isMicOn && videoRoom.isLive) return;
 
     const timer = setTimeout(async () => {
-      if (
-        videoRoomRef.current.isMicOn ||
-        videoRoomRef.current.microphone.isMicrophoneOn
-      )
-        return;
+      if (videoRoomRef.current.isMicOn && videoRoomRef.current.isLive) return;
       console.warn(
         "[SneakyLynk:Server] MIC_SAFETY: remote peers present but mic is still off, force-starting",
       );
@@ -1514,7 +1428,7 @@ function ServerRoom({
     connectionState,
     videoRoom.participants.length,
     videoRoom.isMicOn,
-    videoRoom.microphone.isMicrophoneOn,
+    videoRoom.isLive,
   ]);
 
   // Speaking indicator - only clear when muted, don't auto-set when unmuted
@@ -2141,7 +2055,9 @@ function ServerRoom({
 
   // ── Build flat VideoParticipant[] for VideoGrid ──────────────────
   const remotePeers = videoRoom.participants || [];
-  const localCameraStream = videoRoom.camera?.cameraStream || null;
+  // MoQ has no local MediaStream — the preview is the capture track itself,
+  // rendered by `<PublisherView>` inside RoomVideo.
+  const localCamera = videoRoom.cameraTrack;
 
   const allParticipants: VideoParticipant[] = [];
 
@@ -2153,7 +2069,7 @@ function ServerRoom({
     isLocal: true,
     isCameraOn: effectiveVideoOn,
     isMicOn: !effectiveMuted,
-    videoTrack: localCameraStream ? { stream: localCameraStream } : undefined,
+    localCamera,
     isHandRaised,
     isFrontCamera: videoRoom.isFrontCamera,
   });
@@ -2171,8 +2087,7 @@ function ServerRoom({
       isLocal: false,
       isCameraOn: p.isCameraOn || false,
       isMicOn: p.isMicOn || false,
-      videoTrack: p.videoTrack,
-      audioTrack: p.audioTrack,
+      broadcast: p.broadcast,
       isHandRaised: !!raisedHands[peerId],
     });
   });

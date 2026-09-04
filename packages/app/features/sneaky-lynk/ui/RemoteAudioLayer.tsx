@@ -1,74 +1,54 @@
-import React, { useMemo } from "react";
-import { View } from "react-native";
-import { RTCView } from "@fishjam-cloud/react-native-client";
-import type { MediaStream } from "@fishjam-cloud/react-native-webrtc";
+/**
+ * Audio for participants whose video is NOT mounted.
+ *
+ * On Fishjam this was a 1×1 hidden `RTCView` per remote audio track, because
+ * RTCView was what attached the audio sink. On MoQ audio arrives through a
+ * player, and the video tile only mounts one when the participant is on camera
+ * — so a camera-off speaker would be silent. This mounts an audio-only player
+ * for exactly those participants.
+ *
+ * Renders nothing: `useAudioPlayer` is the output device, so each player needs
+ * its own component instance (hooks cannot be looped).
+ */
+
+import React, { useEffect, useMemo } from "react";
+import { useAudioPlayer, type BroadcastInfo } from "react-native-moq";
 import type { VideoParticipant } from "./VideoGrid";
 
 interface RemoteAudioLayerProps {
   participants: VideoParticipant[];
 }
 
+function ParticipantAudio({ broadcast }: { broadcast: BroadcastInfo }) {
+  const player = useAudioPlayer(broadcast);
+
+  useEffect(() => {
+    player.play();
+    return () => player.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [broadcast.path]);
+
+  return null;
+}
+
 export function RemoteAudioLayer({ participants }: RemoteAudioLayerProps) {
-  const remoteAudioParticipants = useMemo(
+  const audioOnly = useMemo(
     () =>
-      participants
-        .map((participant) => {
-          if (participant.isLocal || !participant.audioTrack) return null;
-
-          const track = participant.audioTrack;
-          const MediaStreamCtor = globalThis.MediaStream as unknown as
-            | (new (tracks?: any[]) => MediaStream)
-            | undefined;
-          const mediaStream =
-            track.stream ??
-            (track.track && MediaStreamCtor
-              ? new MediaStreamCtor([track.track])
-              : null);
-
-          if (!mediaStream) return null;
-
-          return {
-            participant,
-            mediaStream,
-            trackId: track.trackId ?? track.track?.id ?? "audio",
-          };
-        })
-        .filter(
-          (
-            entry,
-          ): entry is {
-            participant: VideoParticipant;
-            mediaStream: MediaStream;
-            trackId: string;
-          } => entry !== null,
-        ),
+      participants.filter(
+        (p) =>
+          !p.isLocal &&
+          !!p.broadcast &&
+          // On camera → the tile's video player already carries the audio.
+          !p.isCameraOn,
+      ),
     [participants],
   );
 
-  if (remoteAudioParticipants.length === 0) {
-    return null;
-  }
-
   return (
-    <View
-      pointerEvents="none"
-      style={{
-        position: "absolute",
-        width: 1,
-        height: 1,
-        opacity: 0.01,
-        overflow: "hidden",
-      }}
-    >
-      {remoteAudioParticipants.map((participant) => (
-        <RTCView
-          key={`${participant.participant.id}:${participant.trackId}`}
-          mediaStream={participant.mediaStream}
-          style={{ width: 1, height: 1 }}
-          objectFit="contain"
-          mirror={false}
-        />
+    <>
+      {audioOnly.map((p) => (
+        <ParticipantAudio key={p.id} broadcast={p.broadcast as BroadcastInfo} />
       ))}
-    </View>
+    </>
   );
 }

@@ -3,7 +3,18 @@
  */
 
 export type RoomStatus = "open" | "ended";
-export type MemberRole = "host" | "co-host" | "moderator" | "participant";
+/**
+ * Mirrors the DB check constraint (20260317_video_host_controls.sql):
+ * host | co-host | moderator | speaker | participant. `speaker` was missing
+ * here while both the DB and `lynk-moq-token`'s PUBLISH_ROLES used it, so a
+ * speaker typed as a non-publisher on the client.
+ */
+export type MemberRole =
+  | "host"
+  | "co-host"
+  | "moderator"
+  | "speaker"
+  | "participant";
 export type MemberStatus = "active" | "left" | "kicked" | "banned";
 export type EventType =
   | "room_created"
@@ -120,8 +131,15 @@ export interface Participant {
   isCameraOn: boolean;
   isMicOn: boolean;
   isScreenSharing: boolean;
+  /** Fishjam track objects — the web room's `RTCView`/`<video>` source. */
   videoTrack?: any;
   audioTrack?: any;
+  /**
+   * MoQ `BroadcastInfo` for this participant when they are on air (native).
+   * `unknown` keeps `react-native-moq` out of the web type graph; the native
+   * tile is the only thing that narrows it.
+   */
+  broadcast?: unknown;
   isAnonymous?: boolean;
   anonLabel?: string | null;
   isHandRaised?: boolean;
