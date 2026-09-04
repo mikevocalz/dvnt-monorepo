@@ -1361,6 +1361,8 @@ function RoomInner({
         data-room-phase={phase}
         data-room-role={localRole ?? "none"}
         data-can-publish={canPublish ? "true" : "false"}
+        data-camera-on={isCameraOn ? "true" : "false"}
+        data-has-local-stream={lynk.localStream ? "true" : "false"}
         className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white"
       >
       {/* The session machine is the single source now — it is what knows a

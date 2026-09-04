@@ -70,26 +70,67 @@ export function useLynkBroadcast(
 
   const isBrowser = typeof window !== "undefined";
 
-  // Lazily create the publish connection + media sources (browser only).
-  if (isBrowser) {
-    if (!reloadRef.current) {
-      reloadRef.current = new Moq.Connection.Reload({
-        url: urlSignal.current,
-        enabled: true,
-      });
-    }
-    // Constructed DISABLED — the effect below opens the devices once we know
-    // this member may publish. See the header note.
-    if (!cameraRef.current) {
-      cameraRef.current = new Publish.Source.Camera({ enabled: false });
-    }
-    if (!micRef.current) {
-      micRef.current = new Publish.Source.Microphone({ enabled: false });
-    }
-  }
-  const reload = reloadRef.current;
-  const camera = cameraRef.current;
-  const mic = micRef.current;
+  /**
+   * Connection + media sources live in an EFFECT, not in render.
+   *
+   * They used to be created lazily during render (`if (!cameraRef.current)`)
+   * and closed from an unmount cleanup. Those two halves disagree: React
+   * re-runs effects without re-rendering (StrictMode does it on every mount,
+   * and a Fast Refresh does it too), so the cleanup closed the camera, the
+   * second effect pass found the same closed instance, and no render ever
+   * happened to build a new one. `close()` closes the device's signal Effect —
+   * the loop that watches `enabled` and calls getUserMedia — so from that
+   * point the camera was permanently deaf: `enabled` flipped true, `source`
+   * stayed undefined, and the local preview never rendered while role,
+   * canPublish and cameraOn all said it should. Remote peers saw an avatar.
+   *
+   * Creating them here and holding them in STATE means a teardown is always
+   * followed by a rebuild and a re-render that picks the new ones up.
+   */
+  const [devices, setDevices] = useState<{
+    reload: Moq.Connection.Reload;
+    camera: Publish.Source.Camera;
+    mic: Publish.Source.Microphone;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isBrowser) return;
+    const reload = new Moq.Connection.Reload({
+      url: urlSignal.current,
+      enabled: true,
+    });
+    // Constructed DISABLED — the enable effects below open the devices once we
+    // know this member may publish. See the header note.
+    const camera = new Publish.Source.Camera({ enabled: false });
+    const mic = new Publish.Source.Microphone({ enabled: false });
+    reloadRef.current = reload;
+    cameraRef.current = camera;
+    micRef.current = mic;
+    // A new transport is by definition not an ended one.
+    //
+    // `ended` is STATE, and `end()` runs from an unmount cleanup — but React
+    // re-runs effects without unmounting the component, so the flag survived a
+    // teardown that the devices did not. Everything downstream reads
+    // `cameraEnabled && !ended && canPublish`, so the camera stayed disabled
+    // forever: the room said the camera was on, the roster said you could
+    // publish, and no track was ever opened.
+    setEnded(false);
+    setIsLive(false);
+    setDevices({ reload, camera, mic });
+    return () => {
+      camera.close();
+      mic.close();
+      reload.close();
+      reloadRef.current = null;
+      cameraRef.current = null;
+      micRef.current = null;
+      setDevices(null);
+    };
+  }, [isBrowser]);
+
+  const reload = devices?.reload ?? null;
+  const camera = devices?.camera ?? null;
+  const mic = devices?.mic ?? null;
 
   useEffect(() => {
     if (token?.relayUrl) urlSignal.current.set(new URL(token.relayUrl));
@@ -163,10 +204,22 @@ export function useLynkBroadcast(
     setIsLive(false);
     broadcastRef.current?.close();
     broadcastRef.current = null;
+    // Null these, don't just close them.
+    //
+    // `close()` closes the device's signal Effect — the loop that watches
+    // `enabled` and calls getUserMedia. The refs are created lazily with
+    // `if (!cameraRef.current)`, so a closed-but-non-null ref is reused on the
+    // next mount and can NEVER open again: `enabled` flips true, nothing is
+    // listening, `source` stays undefined, and the local preview never
+    // renders while every other signal (role, canPublish, cameraOn) says it
+    // should. The broadcast and connection refs were already nulled here; the
+    // media sources were the two that were not.
+    // Privacy teardown — this is what turns the camera light off. Nulling is
+    // deliberately NOT done here: the effect above owns the lifecycle, and
+    // `ended` already gates the enable effects.
     cameraRef.current?.close();
     micRef.current?.close();
     reloadRef.current?.close();
-    reloadRef.current = null;
     viewer.leave();
   }, [viewer]);
 
