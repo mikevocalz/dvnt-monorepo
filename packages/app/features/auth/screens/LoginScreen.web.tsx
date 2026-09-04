@@ -176,7 +176,10 @@ export function LoginScreen() {
             />
 
             <View style={styles.forgotRow}>
-              <Pressable onPress={() => router.push('/auth/forgot-password')}>
+              <Pressable
+                onPress={() => router.push('/auth/forgot-password')}
+                accessibilityRole="link"
+              >
                 <Text style={[styles.link, { color: P }]}>Forgot password?</Text>
               </Pressable>
             </View>
@@ -246,7 +249,10 @@ export function LoginScreen() {
 
             <View style={styles.signupRow}>
               <Text style={styles.muted}>Don't have an account?</Text>
-              <Pressable onPress={() => router.push('/auth/signup')}>
+              <Pressable
+                onPress={() => router.push('/auth/signup')}
+                accessibilityRole="link"
+              >
                 <Text style={[styles.link, styles.signupLink, { color: P }]}>Sign up</Text>
               </Pressable>
             </View>

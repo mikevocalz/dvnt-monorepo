@@ -10,10 +10,19 @@ That confirmation is the first task of WS-1, not something this run establishes.
 
 | ID | Route | Signal | Status |
 |---|---|---|---|
-| E2E-1 | `/` | `pageerror: Internal Next.js error: Router action dispatched before initialization.` | Unconfirmed — reproduce on a prod build. Next dev raises this when a router action fires before hydration completes; a test that navigates immediately can provoke it. Real if it survives `next start`. |
-| E2E-2 | `/auth/login` | `pageerror: Invalid or unexpected token` | **Highest priority.** A JS parse error means a served chunk is malformed — that is not a normal dev artifact. Login is the gate for the entire suite (WS-1). |
-| E2E-3 | `/events` | E2E-1 + E2E-2 signals, plus `Failed to load resource: 429 (Too Many Requests)` | The 429 is likely a rate limit on the events read path hit by an unauthenticated visitor. Worth confirming which origin returns it before triaging. |
-| E2E-4 | `/auth/login` | No `link` matching `/sign ?up\|join dvnt\|create account/i` in the accessibility tree | Directly relevant to P1 §2's "Sign Up hidden below the fold on Login" P0. The control may be a `button`, or rendered as non-semantic text — which is itself the finding. Widen the locator to any role, then re-assert the fold position. |
+| E2E-1 | `/` | `pageerror: Internal Next.js error: Router action dispatched before initialization.` | **Not a defect.** Does not reproduce on `next build && next start`. Dev-only. |
+| E2E-2 | `/auth/login` | `pageerror: Invalid or unexpected token` | **Not a defect.** Does not reproduce on a production build — an unminified dev chunk artifact. |
+| E2E-3 | `/events` | E2E-1 + E2E-2 signals, plus `Failed to load resource: 429 (Too Many Requests)` | **Not reproduced** on the production build. The 429 was dev-loop request volume, not a product rate limit. Re-open if it appears in a clean run. |
+| E2E-4 | `/auth/login` + 13 more files | Sign-up, forgot-password AND the primary Sign in button rendered as `generic` in the a11y tree — no role, no name | **REAL — fixed.** WCAG 2.1 AA 4.1.2 (Name, Role, Value). `components/ui/button.tsx` used a bare `Pressable`; react-native-web renders that as a plain `<div>`, so no button in the app announced itself as a control. Fixed at the component (role + disabled/busy state) plus `accessibilityRole="link"` on the two navigating Pressables in `LoginScreen.web.tsx`. 13 files consume that Button, so this was app-wide, not login-specific. |
+
+## Correction to P1 §2's P0
+
+P1 §2 flags **"Sign Up hidden below the fold on Login"**. That framing is wrong.
+Measured on the production build, the sign-up control sits **above the fold at
+both 1440 and 375**. The actual defect was that it was not exposed as a control
+at all — a `generic` div a screen reader never announces and a keyboard user
+cannot reach by role. Fixing the layout would have changed nothing; fixing the
+semantics fixed it. Worth correcting in the prompt before WS-0.6 is scoped.
 
 ## Not a defect (recorded so it is not re-investigated)
 
