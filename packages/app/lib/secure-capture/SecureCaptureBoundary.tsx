@@ -88,10 +88,32 @@ function SecureCaptureBoundaryInner({
       ? process.env?.EXPO_PUBLIC_SNEAKY_LYNK_WEB_CAPTURE_PROTECTION
       : undefined;
   const protectionEnabled = enabled && shouldEnableWebSecureCapture(rawFlag);
-  const devtoolsPrevent =
-    protectionEnabled &&
-    typeof process !== "undefined" &&
-    process.env?.NODE_ENV === "production";
+  /**
+   * STRUCK 2026-09-04: `devtoolsPrevent` is off, permanently.
+   *
+   * `react-anticapture` implements it by REPLACING document.body:
+   *
+   *     document.body.innerHTML =
+   *       '<p>Please close devtools/console to continue.</p>'
+   *
+   * Not the boundary — the whole document. And the detection is a heuristic on
+   * viewport geometry, which mobile Safari trips on its own: granting camera
+   * access shows a permission banner, the viewport resizes, and the guard wipes
+   * the app. Reported from a real phone on dvntapp.live with the room never
+   * rendering at all.
+   *
+   * The precondition this feature needs — reliable devtools detection in a
+   * browser — does not exist. Its failure mode is destroying the page for a
+   * legitimate user, while the thing it deters costs an attacker one line to
+   * undo (it only blanks the DOM; the data is already in the client). A guard
+   * whose false positives are worse than its true positives is not deterrence.
+   *
+   * The deterrence that DOES hold is untouched and is what this boundary is
+   * actually for: screenshot/clipboard blocking, text selection, blackout on
+   * focus loss and tab hide, the forensic watermark, and the tiered capture
+   * signals in `useSecureCaptureGuard`.
+   */
+  const devtoolsPrevent = false;
 
   const { blackoutReason } = useSecureCaptureGuard({
     enabled: protectionEnabled,
