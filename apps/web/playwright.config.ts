@@ -21,6 +21,12 @@
 
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
+import dotenv from "dotenv";
+
+// Load e2e credentials from the config, not the shell. `source .env.e2e.local`
+// breaks the moment a value contains `&` (the App-Store review password does),
+// and dotenv parses the raw bytes without shell interpretation.
+dotenv.config({ path: path.join(__dirname, ".env.e2e.local") });
 
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 const fixture = (f: string) => path.join(__dirname, "e2e/fixtures", f);

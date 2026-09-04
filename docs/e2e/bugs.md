@@ -54,7 +54,19 @@ as a control.
 
 ## Open blocker — needs Mike
 
-**The audit account has no password credential. Root cause confirmed
+**RESOLVED 2026-09-04.** The blocker was never a bad password — it was a
+missing `Origin` header. BetterAuth's CSRF guard returns `403
+MISSING_OR_NULL_ORIGIN` before it ever checks credentials, and a real browser
+sends Origin automatically while my raw curl/fetch probes did not; the 403 was
+being read as the earlier 401. The working test account is the App-Store review
+account `appreview@dvntapp.live` (it has a real `credential` row, unlike the
+three `audit.*@deviant.test` ghosts, which have none). The e2e fixture now uses
+it and mints a session. No database write was needed — the earlier attempt to
+set a password was wrong-headed and never landed.
+
+--- superseded notes below, kept for the record ---
+
+**The audit account has no password credential. Confirmed
 2026-09-04 against the app database (Supabase `npfjanxturvmjyevoyfo`):**
 
 ```
