@@ -101,6 +101,7 @@ interface DraftFields {
   ticketPrice: string;
   maxAttendees: string;
   youtubeUrl: string;
+  attachLynkRoom: boolean;
   ticketingEnabled: boolean;
   visibility: VisibilityOption;
   ageRestriction: AgeRestriction;
@@ -164,6 +165,7 @@ interface CreateEventActions {
   setTicketPrice: (v: string) => void;
   setMaxAttendees: (v: string) => void;
   setYoutubeUrl: (v: string) => void;
+  setAttachLynkRoom: (v: boolean) => void;
   setTicketingEnabled: (v: boolean) => void;
   setVisibility: (v: VisibilityOption) => void;
   setAgeRestriction: (v: AgeRestriction) => void;
@@ -238,6 +240,7 @@ const DRAFT_DEFAULTS: DraftFields = {
   ticketPrice: "",
   maxAttendees: "",
   youtubeUrl: "",
+  attachLynkRoom: false,
   ticketingEnabled: false,
   visibility: "public",
   ageRestriction: "none",
@@ -301,6 +304,7 @@ export const useCreateEventStore = create<CreateEventState>()(
       setTicketPrice: (v) => set({ ticketPrice: v }),
       setMaxAttendees: (v) => set({ maxAttendees: v }),
       setYoutubeUrl: (v) => set({ youtubeUrl: v }),
+      setAttachLynkRoom: (v) => set({ attachLynkRoom: v }),
       setTicketingEnabled: (v) => set({ ticketingEnabled: v }),
       setVisibility: (v) => set({ visibility: v }),
       setAgeRestriction: (v) => set({ ageRestriction: v }),
@@ -450,6 +454,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         ticketPrice: state.ticketPrice,
         maxAttendees: state.maxAttendees,
         youtubeUrl: state.youtubeUrl,
+        attachLynkRoom: state.attachLynkRoom,
         ticketingEnabled: state.ticketingEnabled,
         visibility: state.visibility,
         ageRestriction: state.ageRestriction,

@@ -185,6 +185,17 @@ Deno.serve(async (req) => {
     if (maxAttendees != null && maxAttendees > 0) {
       insertPayload.max_attendees = Math.floor(maxAttendees);
     }
+    // Sneaky Lynk room this event is hosted in. A uuid or nothing — never a
+    // half-written value, and never a reason to fail the event insert: the
+    // room is a companion to the event, not a precondition for it.
+    const lynkRoomId = text(body.lynkRoomId);
+    if (
+      lynkRoomId &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lynkRoomId)
+    ) {
+      insertPayload.lynk_room_id = lynkRoomId;
+    }
+
     if (locationLat != null) insertPayload.location_lat = locationLat;
     if (locationLng != null) insertPayload.location_lng = locationLng;
     if (text(body.locationName)) insertPayload.location_name = text(body.locationName);

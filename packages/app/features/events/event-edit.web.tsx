@@ -410,7 +410,11 @@ export function EventEditScreen() {
       }
 
       showToast("success", "Saved", "Event updated successfully");
-      router.back();
+      // Go to the event, not `router.back()`. Back is wherever you came from,
+      // and this screen is reachable by direct URL and from the host menu — so
+      // saving could land you on about:blank, having just been told the save
+      // worked. The event you edited is the only correct destination.
+      router.push(`/feed/events/${id}`);
     } catch (error: any) {
       console.error("[EditEvent] Save error:", error);
       showToast("error", "Error", error?.message || "Failed to save changes");

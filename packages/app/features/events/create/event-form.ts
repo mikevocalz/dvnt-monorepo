@@ -98,6 +98,8 @@ export interface EventFormDraft {
   perks: string[];
   disclaimers: string;
   youtubeUrl: string;
+  /** Host this event inside a Sneaky Lynk room (created on publish). */
+  attachLynkRoom: boolean;
   ticketingEnabled: boolean;
   ticketPrice: string;
   maxAttendees: string;
@@ -192,6 +194,8 @@ export interface BuiltEventMedia {
    *  still flyer for display when both are set. Static contexts always
    *  use `flyerImageUrl` (never the video). */
   videoFlyerUrl?: string;
+  /** `video_rooms.uuid` of the Sneaky Lynk created for this event, if any. */
+  lynkRoomId?: string;
 }
 
 export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {}) {
@@ -213,6 +217,9 @@ export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {})
     flyerImageUrl: media.flyerImageUrl,
     videoFlyerUrl: media.videoFlyerUrl,
     youtubeVideoUrl: d.youtubeUrl.trim() || undefined,
+    // Set by the create screen once the companion room exists. The event is
+    // still valid without it — see `lynkRoomId` in create-event.
+    lynkRoomId: media.lynkRoomId,
     locationLat: d.locationData?.latitude,
     locationLng: d.locationData?.longitude,
     locationName: d.locationData?.name,

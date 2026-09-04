@@ -44,6 +44,7 @@ import {
   RotateCcw,
   Ban,
   Trash2,
+  Radio,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { eventsApi } from "@dvnt/app/lib/api/events";
@@ -615,7 +616,12 @@ export function EventDetailScreen() {
     .map((m: any) => resolvePosterUrl({ url: m?.url, type: m?.type }))
     .filter((u: string | null): u is string => !!u);
   const countdown = (() => {
-    const start = new Date(e.date || e.fullDate || "");
+    // `fullDate` FIRST. `e.date` is the day-of-month chip the event CARD
+    // draws ("18"), not a date — `new Date("18")` is either invalid or the
+    // year 2018, and since it is truthy the real ISO value was never reached.
+    // Every other screen already orders these correctly; this one rendered
+    // "Date TBA" on an event that has a date.
+    const start = new Date(e.fullDate || e.date || "");
     if (Number.isNaN(start.getTime())) return "";
     const ms = start.getTime() - Date.now();
     if (ms <= 0) return "";
@@ -698,7 +704,7 @@ export function EventDetailScreen() {
       }
       // Only carry a future date — a duplicated past event must not default
       // to an unbookable date.
-      const srcDate = e.date || e.fullDate ? new Date(e.date || e.fullDate) : null;
+      const srcDate = e.fullDate || e.date ? new Date(e.fullDate || e.date) : null;
       if (srcDate && !Number.isNaN(srcDate.getTime()) && srcDate.getTime() > Date.now()) {
         store.setEventDate(srcDate.toISOString());
         if (e.endDate) store.setEndDate(e.endDate);
@@ -971,7 +977,7 @@ export function EventDetailScreen() {
           <div className="flex items-center gap-1.5 text-[#379ED8] text-sm font-semibold">
             <Calendar size={15} />
             {fmt(
-              e.date || e.fullDate,
+              e.fullDate || e.date,
               (e as any).event_tz ?? (e as any).eventTz,
               (e as any).is_online ?? (e as any).isOnline,
             )}
@@ -1222,6 +1228,34 @@ export function EventDetailScreen() {
               <div className="rounded-xl overflow-hidden bg-black">
                 <LiteYouTubeEmbed id={yt} title="Event video" />
               </div>
+            </Section>
+          ) : null}
+
+          {/* Sneaky Lynk — the room this event is hosted in.
+              Above Lineup on purpose: when an event HAS a room, "where do I
+              go" outranks "who is playing". The card states the room is
+              private and that entry follows the event's guest list, because a
+              guest who taps into a refusal learns that too late. */}
+          {e.lynkRoomId ? (
+            <Section title="Sneaky Lynk" Icon={Radio}>
+              <button
+                type="button"
+                data-lynk-room={e.lynkRoomId}
+                onClick={() => router.push(`/feed/sneaky-lynk/room/${e.lynkRoomId}`)}
+                className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 text-left transition-colors hover:bg-white/[0.1]"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#8A40CF]/20">
+                  <Radio size={18} className="text-[#8A40CF]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-white">
+                    {isHost ? "Open your event's Lynk" : "Join the event's Lynk"}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-white/55">
+                    Private video room · only people on this event&apos;s list get in
+                  </span>
+                </span>
+              </button>
             </Section>
           ) : null}
 

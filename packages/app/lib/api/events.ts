@@ -308,6 +308,7 @@ export const eventsApi = {
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           images: parseJsonbArray(event.images),
           youtubeVideoUrl: event.youtube_video_url || null,
+          lynkRoomId: event.lynk_room_id || null,
           price: Number(event.price) || 0,
           likes: Number(event.likes_count) || 0,
           isLiked: event.is_liked || false,
@@ -395,6 +396,7 @@ export const eventsApi = {
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           images: parseJsonbArray(event.images),
           youtubeVideoUrl: event.youtube_video_url || null,
+          lynkRoomId: event.lynk_room_id || null,
           price: Number(event.price) || 0,
           likes: Number(event.likes_count) || 0,
           isLiked: event.is_liked || false,
@@ -642,6 +644,8 @@ export const eventsApi = {
         flyerImageUrl: ev.flyer_image_url || null,
         flyerVideoUrl: resolveFlyerVideoUrl(ev) || null,
         youtubeVideoUrl: ev.youtube_video_url || null,
+        // Sneaky Lynk room this event is hosted in (video_rooms.uuid).
+        lynkRoomId: ev.lynk_room_id || null,
         price: Number(ev.price) || 0,
         likes: Number(data.likes_count) || 0,
         isLiked: data.is_liked || false,
@@ -919,6 +923,8 @@ export const eventsApi = {
       if (updates.perks !== undefined) updateData.perks = updates.perks || null;
       if (updates.youtubeVideoUrl !== undefined)
         updateData.youtube_video_url = updates.youtubeVideoUrl || null;
+      if (updates.lynkRoomId !== undefined)
+        updateData.lynk_room_id = updates.lynkRoomId || null;
       if (updates.locationLat !== undefined)
         updateData.location_lat = updates.locationLat;
       if (updates.locationLng !== undefined)

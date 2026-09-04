@@ -58,6 +58,7 @@ import { addonsApi } from "@dvnt/app/lib/api/addons";
 import { draftAddonToCreateParams } from "@dvnt/app/features/events/create/addon-form";
 import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
@@ -278,10 +279,50 @@ export function CreateEventScreen() {
         }
       }
 
+      // Companion Sneaky Lynk room. Created BEFORE the event so its uuid can
+      // go in with the insert — one row, one truth, no second write that can
+      // half-fail. If the room cannot be created the event still publishes:
+      // an event without its room is a real event, an event that failed to
+      // publish because a room failed is not.
+      let lynkRoomId: string | undefined;
+      if (s.attachLynkRoom) {
+        try {
+          const room = await withTimeout(
+            sneakyLynkApi.createRoom({
+              title: s.title.trim() || "Event Lynk",
+              topic: s.eventType || "",
+              description: s.description.trim(),
+              hasVideo: true,
+              // Private: the guest list is the event's, enforced at the door
+              // by the event, not by a public room anyone can walk into.
+              isPublic: false,
+            }),
+            20000,
+            "create-lynk-room",
+          );
+          if (room.ok && room.data?.room?.id) {
+            lynkRoomId = String(room.data.room.id);
+          } else {
+            showToast(
+              "warning",
+              "Lynk room not created",
+              "The event will publish without it. You can add one from Edit.",
+            );
+          }
+        } catch {
+          showToast(
+            "warning",
+            "Lynk room not created",
+            "The event will publish without it. You can add one from Edit.",
+          );
+        }
+      }
+
       const payload = buildEventInsert(s, {
         image,
         flyerImageUrl,
         videoFlyerUrl,
+        lynkRoomId,
         images: galleryUrls.map((url) => ({ type: "image", url })),
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -725,6 +766,29 @@ export function CreateEventScreen() {
                     />
                   </label>
                 </div>
+              </Field>
+
+              <Field label="Sneaky Lynk room">
+                <label className="flex items-start gap-3 rounded-xl bg-white/[0.04] px-4 py-3">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-[#8A40CF]"
+                    checked={s.attachLynkRoom}
+                    onChange={(e) => s.setAttachLynkRoom(e.target.checked)}
+                  />
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium text-white">
+                      Host this event in a Sneaky Lynk
+                    </span>
+                    {/* Says what it DOES, not what it is. A checkbox whose
+                        consequence is a second object being created has to
+                        name that consequence before the tap, not after. */}
+                    <span className="mt-0.5 block text-xs text-white/55">
+                      Creates a private video room for this event. Guests join it
+                      from the event page — you can start it any time.
+                    </span>
+                  </span>
+                </label>
               </Field>
 
               <Field label="YouTube video (optional)">
