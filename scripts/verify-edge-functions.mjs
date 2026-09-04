@@ -57,6 +57,50 @@ if (unpinned.length) {
   );
 }
 
+// ── 1b. every remote import carries a version ──────────────────────────────
+// `npm:@fishjam-cloud/js-server-sdk` shipped with no version, so Deno resolved
+// whatever was latest AT DEPLOY TIME. 0.30.0 renamed `createMoqToken` to
+// `createMoqAccess` and every Lynk MoQ join — web and native — started coming
+// back `internal_error`, with no client change to blame and nothing red in CI.
+// A floating specifier means the deployed code is not the code in this repo.
+const REMOTE = /["'](npm:|https:\/\/esm\.sh\/|https:\/\/deno\.land\/)([^"']+)["']/g;
+
+/** Does this specifier name a version? `@1.2.3`, `@v3.22.4` or a bare major. */
+function isVersioned(scheme, rest) {
+  if (scheme.includes("deno.land")) {
+    // deno.land/x/<pkg>@<ver>/mod.ts — the version rides a path segment.
+    return rest.split("/").some((seg) => /@v?\d/.test(seg));
+  }
+  // npm:/esm.sh — <name>@<ver> or @<scope>/<name>@<ver>.
+  const parts = rest.split("/");
+  const pkg = rest.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+  return pkg.lastIndexOf("@") > 0;
+}
+
+const floating = [];
+for (const dir of [...shipped, "_shared"]) {
+  const base = join(FN_DIR, dir);
+  let files;
+  try {
+    files = readdirSync(base).filter((f) => f.endsWith(".ts"));
+  } catch {
+    continue;
+  }
+  for (const f of files) {
+    const src = readFileSync(join(base, f), "utf8");
+    for (const m of src.matchAll(REMOTE)) {
+      if (!isVersioned(m[1], m[2])) floating.push(`${dir}/${f}: ${m[1]}${m[2]}`);
+    }
+  }
+}
+if (floating.length) {
+  fail(
+    `${floating.length} remote import(s) in edge functions carry no version`,
+    `Deno resolves these at DEPLOY time, so the running code can change without a commit:\n` +
+      floating.map((f) => `  ${f}`).join("\n"),
+  );
+}
+
 // ── 2. the beta signup gate has not come back ──────────────────────────────
 // Only flags a LIVE throw; the explanatory comment left behind is fine.
 const authSrc = readFileSync(join(FN_DIR, "auth/index.ts"), "utf8");
@@ -105,7 +149,7 @@ if (process.argv.includes("--live")) {
 }
 
 // ── report ─────────────────────────────────────────────────────────────────
-console.log(`  static: ${shipped.length} shipped functions, ${unpinned.length} unpinned`);
+console.log(`  static: ${shipped.length} shipped functions, ${unpinned.length} unpinned, ${floating.length} floating import(s)`);
 if (!failures.length) {
   console.log("\n✔ edge functions OK");
   process.exit(0);

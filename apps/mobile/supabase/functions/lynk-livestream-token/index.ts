@@ -21,7 +21,11 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
-import { FishjamClient } from "npm:@fishjam-cloud/js-server-sdk";
+// PINNED — see lynk-moq-token for what a floating specifier cost us. The
+// three calls below (createRoom / createLivestreamStreamerToken /
+// createLivestreamViewerToken) all still exist in 0.30.0, so this one was
+// working; it was one rename away from the same silent break.
+import { FishjamClient } from "npm:@fishjam-cloud/js-server-sdk@0.30.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {

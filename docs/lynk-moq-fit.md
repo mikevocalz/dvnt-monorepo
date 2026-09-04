@@ -158,9 +158,9 @@ Either way the transport hides behind the **same VideoTile + `useLynkBroadcast`/
    participants/listeners get a **subscriber token**. This maps *more naturally*
    onto MoQ than a 2-publisher cap, because of prefix-scoped namespace discovery:
    - Each publisher publishes to its own sub-path: `lynk/${roomId}/${peerId}`
-     (host/cohost/speaker alike). Token: `createMoqToken({ publishPath: "lynk/${roomId}/${peerId}" })`
+     (host/cohost/speaker alike). Token: `createMoqAccess({ publishPath: "lynk/${roomId}/${peerId}" })`
      — *specific* path, so a speaker can only publish as itself.
-   - Viewers subscribe to the room namespace: `createMoqToken({ subscribePath: "lynk/${roomId}" })`
+   - Viewers subscribe to the room namespace: `createMoqAccess({ subscribePath: "lynk/${roomId}" })`
      — *broad*, so `connection.announced` surfaces **every** live publisher and
      the viewer mounts one tile per announced path (1, 2, … N speakers) with no
      reload. "Promote listener → speaker" = server issues that user a publish
@@ -178,7 +178,7 @@ Either way the transport hides behind the **same VideoTile + `useLynkBroadcast`/
 
 | Piece | Path |
 |---|---|
-| Edge Function (createMoqToken, role-scoped, reuses video_join_room gate) | `apps/mobile/supabase/functions/lynk-moq-token/index.ts` |
+| Edge Function (createMoqAccess, role-scoped, reuses video_join_room gate) | `apps/mobile/supabase/functions/lynk-moq-token/index.ts` |
 | State machine | `packages/app/lib/lynk/lynkState.ts` |
 | Token hook (intent-scoped, 1h refresh) | `packages/app/lib/lynk/useMoqToken.ts` |
 | Shared hook contracts | `packages/app/lib/lynk/types.ts` |
@@ -225,7 +225,7 @@ the prompt matches Fishjam's MoQ product essentially verbatim:
   `@moq/lite` + `@moq/watch` (subscriber); `@moq/watch/ui` + `@moq/watch/element`
   web components for pure-viewer embeds.
 - **Server token:** `@fishjam-cloud/js-server-sdk` →
-  `createMoqToken({ publishPath })` / `createMoqToken({ subscribePath })`
+  `createMoqAccess({ publishPath })` / `createMoqAccess({ subscribePath })`
   (Deno edge import: `npm:@fishjam-cloud/js-server-sdk`).
 - **Relay:** `https://relay.fishjam.io/${FISHJAM_ID}?jwt=${token}`. The
   `FISHJAM_ID` is the automatic root namespace — never included in paths.
@@ -237,7 +237,7 @@ the prompt matches Fishjam's MoQ product essentially verbatim:
   publishers in the namespace. We use **specific** publish paths per peer
   (`lynk/${roomId}/${peerId}`) + **broad** subscribe (`lynk/${roomId}`) — see §5.2.
 - **Forbidden:** the sandbox flow `fetch(${SANDBOX_API_URL}/moq/${PATH}/publisher)`
-  / `…/subscriber`. Production = `createMoqToken()` behind our authorization.
+  / `…/subscriber`. Production = `createMoqAccess()` behind our authorization.
 
 **Decision: build the prompt as written** — MoQ via Fishjam relay. Web is
 fully supported now (WebCodecs → `<canvas>` via `Watch.MultiBackend`; publish via

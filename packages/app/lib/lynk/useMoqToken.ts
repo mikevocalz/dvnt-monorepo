@@ -3,7 +3,7 @@
  *
  * Calls the `lynk-moq-token` Edge Function, which mirrors the calling feature's
  * `video_join_room` auth + private-room gate and mints a Fishjam
- * `createMoqToken({ publishPath | subscribePath })`. A `publish` token can only
+ * `createMoqAccess({ publishPath | subscribePath })`. A `publish` token can only
  * publish as the caller's own peer path; a `subscribe` token discovers the whole
  * room namespace and can never publish.
  *

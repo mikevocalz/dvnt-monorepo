@@ -113,7 +113,7 @@ iOS-web gets “open to answer”.
 | Maturity | CAUTION | npm `react-native-moq` latest **0.2.0** (2026-07-10); releases 0.0.1→0.2.0 since 2025-10; SM Labs, active |
 | Interop native↔web | PASS | “A stream published from the browser with `@moq/publish` can be watched with `react-native-moq`, and vice versa” (RN-subscribing tutorial) |
 | Version alignment | PASS | tutorials pinned at docs 0.29.0 = our Fishjam SDK line (all `@fishjam-cloud/*` at 0.29.0); `@moq/lite ^0.3.0`, `@moq/publish ^0.2.14`, `@moq/watch ^0.2.16` installed |
-| Tokens | PASS (already built) | `lynk-moq-token` mints `createMoqToken({publishPath\|subscribePath})` via `npm:@fishjam-cloud/js-server-sdk`, publish = `lynk/${roomId}/${peerId}` (specific), subscribe = `lynk/${roomId}` (broad), behind the same session + role/ban gate as `video_join_room`; relay root-namespace rule matches the explanation doc (FISHJAM_ID never in paths) |
+| Tokens | PASS (already built) | `lynk-moq-token` mints `createMoqAccess({publishPath\|subscribePath})` via `npm:@fishjam-cloud/js-server-sdk`, publish = `lynk/${roomId}/${peerId}` (specific), subscribe = `lynk/${roomId}` (broad), behind the same session + role/ban gate as `video_join_room`; relay root-namespace rule matches the explanation doc (FISHJAM_ID never in paths) |
 
 Biggest risk: 0.2.0 is young. Mitigation: WHIP/WHEP stays live through burn-in
 (see delete list), and the transport seam means a revert is hook-internal.

@@ -259,6 +259,11 @@ export function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
 
   return (
     <div
+      // The ring is colour-only, so nothing but a human eye can read it. This
+      // attribute is the observable seam the e2e asserts on, and the hook an
+      // a11y pass will hang a live region off.
+      data-speaking={tile.isSpeaking ? "true" : "false"}
+      data-tile={tile.isLocal ? "local" : tile.key}
       // Speaking is a RING, not a background or a glow: it reads at thumbnail
       // size, survives on top of video, and costs no contrast against the tile.
       // Cyan rather than signal — someone talking is not an alert.

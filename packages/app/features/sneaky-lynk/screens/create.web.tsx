@@ -126,6 +126,9 @@ function ToggleRow({
       <button
         type="button"
         role="switch"
+        // The switch carried no accessible name — a screen reader announced
+        // "switch, on" with no clue what it toggles. The row title is the name.
+        aria-label={title}
         aria-checked={value}
         onClick={() => onChange(!value)}
         style={{
