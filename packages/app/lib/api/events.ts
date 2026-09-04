@@ -1728,6 +1728,58 @@ export const eventsApi = {
   },
 
   /**
+   * Edit one of YOUR OWN event comments.
+   *
+   * Goes through the `event-comment-mutate` Edge Function rather than writing
+   * the row directly, because ownership cannot be enforced in RLS here: this app
+   * authenticates with Better-Auth, so `auth.uid()` is null inside Postgres. The
+   * table's public UPDATE/DELETE policies were dropped alongside this — before
+   * that, anyone with the anon key could rewrite anyone's comment.
+   */
+  async updateEventComment(commentId: string, content: string) {
+    const { requireBetterAuthToken } = await import("../auth/identity");
+    const token = await requireBetterAuthToken();
+
+    const { data, error } = await supabase.functions.invoke(
+      "event-comment-mutate",
+      {
+        body: {
+          action: "update",
+          commentId: parseInt(commentId, 10),
+          content,
+        },
+        headers: { "x-auth-token": token },
+      },
+    );
+
+    if (error) throw error;
+    if (!data?.ok) {
+      throw new Error(data?.error?.message || "Couldn't update that comment");
+    }
+    return data.data as { id: string; content: string; createdAt: string };
+  },
+
+  /** Delete one of YOUR OWN event comments. Same authorization seam as above. */
+  async deleteEventComment(commentId: string) {
+    const { requireBetterAuthToken } = await import("../auth/identity");
+    const token = await requireBetterAuthToken();
+
+    const { data, error } = await supabase.functions.invoke(
+      "event-comment-mutate",
+      {
+        body: { action: "delete", commentId: parseInt(commentId, 10) },
+        headers: { "x-auth-token": token },
+      },
+    );
+
+    if (error) throw error;
+    if (!data?.ok) {
+      throw new Error(data?.error?.message || "Couldn't delete that comment");
+    }
+    return { id: commentId, deleted: true };
+  },
+
+  /**
    * Add event comment
    */
   async addEventComment(eventId: string, commentContent: string) {

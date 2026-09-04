@@ -260,6 +260,9 @@ verify_jwt = false
 [functions.lynk-livestream-token]
 verify_jwt = false
 
+[functions.event-comment-mutate]
+verify_jwt = false
+
 [functions.lynk-moq-token]
 verify_jwt = false
 

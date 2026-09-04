@@ -86,3 +86,80 @@ export function useCreateEventComment() {
     },
   });
 }
+
+/**
+ * Edit your own event comment.
+ *
+ * Optimistic, like the create mutation next to it: the edit is the whole
+ * interaction, so waiting on a round trip to see your own words change reads as
+ * a broken button. Rolls back on failure — the server is the one that decides
+ * whether you own the comment.
+ */
+export function useUpdateEventComment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { eventId: string; commentId: string; text: string }) =>
+      eventsApi.updateEventComment(data.commentId, data.text),
+    onMutate: async (variables) => {
+      const key = eventCommentKeys.event(variables.eventId);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previousComments = queryClient.getQueryData(key);
+
+      queryClient.setQueryData(key, (old: any) =>
+        Array.isArray(old)
+          ? old.map((c: any) =>
+              String(c.id) === String(variables.commentId)
+                ? { ...c, content: variables.text }
+                : c,
+            )
+          : old,
+      );
+      return { previousComments, key };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previousComments !== undefined) {
+        queryClient.setQueryData(context.key, context.previousComments);
+      }
+    },
+    onSettled: (_data, _err, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: eventCommentKeys.event(variables.eventId),
+      });
+    },
+  });
+}
+
+/** Delete your own event comment. Optimistic removal, restored on failure. */
+export function useDeleteEventComment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { eventId: string; commentId: string }) =>
+      eventsApi.deleteEventComment(data.commentId),
+    onMutate: async (variables) => {
+      const key = eventCommentKeys.event(variables.eventId);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previousComments = queryClient.getQueryData(key);
+
+      queryClient.setQueryData(key, (old: any) =>
+        Array.isArray(old)
+          ? old.filter(
+              (c: any) => String(c.id) !== String(variables.commentId),
+            )
+          : old,
+      );
+      return { previousComments, key };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previousComments !== undefined) {
+        queryClient.setQueryData(context.key, context.previousComments);
+      }
+    },
+    onSettled: (_data, _err, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: eventCommentKeys.event(variables.eventId),
+      });
+    },
+  });
+}
