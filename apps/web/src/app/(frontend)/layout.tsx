@@ -6,6 +6,7 @@ import { ImageProvider } from "@dvnt/ui/image-provider";
 import { SiteChrome } from "@/components/site-chrome";
 import { WebVitalsReporter } from "@/components/web-vitals-reporter";
 import { WebToaster } from "@/components/web-toaster";
+import { CohostInviteWatcher } from "@/components/cohost-invite-watcher";
 import { RNWStyleRegistry } from "./registry";
 import { RegisterSW } from "@/components/pwa/register-sw";
 import "./globals.css";
@@ -104,6 +105,10 @@ export default function FrontendLayout({
               {/* Single web toast host — the RNW auth screens call sonner's
                   `toast.*`; without this nothing rendered (silent login errors). */}
               <WebToaster />
+              {/* Raises the co-host invite toast wherever you are in the app —
+                  an invite is time-bounded, so it cannot wait for you to open
+                  Notifications. */}
+              <CohostInviteWatcher />
             </ApiProvider>
           </ImageProvider>
         </RNWStyleRegistry>

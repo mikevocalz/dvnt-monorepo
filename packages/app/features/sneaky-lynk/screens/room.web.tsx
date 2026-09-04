@@ -1710,7 +1710,17 @@ export function SneakyLynkRoomScreen() {
   const roomHasVideo = hasVideoParam !== "0";
   const isServerRoom = !id.startsWith("space-") && id !== "my-room";
   const isCreator = isHostParam === "1";
-  const shouldGateJoin = isServerRoom && !isCreator;
+  /**
+   * Arriving from an ACCEPTED co-host invite skips the pre-join gate.
+   *
+   * You already answered the question that screen asks — you tapped "Join as
+   * co-host", the server granted the seat and wrote your membership. Showing
+   * "Choose how you want to appear / Join Lynk" after that is the same decision
+   * a second time, and it is the exact dead stop this flow was built to remove.
+   * Anonymity is not offered because a co-host is a named role.
+   */
+  const viaInvite = search?.get("viaInvite") === "1";
+  const shouldGateJoin = isServerRoom && !isCreator && !viaInvite;
 
   const phase = useRoomUIStore((s) => s.phase);
   const roomSnapshot = useRoomUIStore((s) => s.roomSnapshot);

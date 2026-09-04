@@ -52,6 +52,7 @@ import { useActivityStore } from "@dvnt/app/lib/stores/activity-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
 import { useBootstrapNotifications } from "@dvnt/app/lib/hooks/use-bootstrap-notifications";
+import { PendingCohostInvites } from "@dvnt/app/features/sneaky-lynk/ui/web/CohostInvites";
 import { notificationsApiClient } from "@dvnt/app/lib/api/notifications";
 import { notificationKeys } from "@dvnt/app/lib/hooks/use-notifications-query";
 import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
@@ -865,6 +866,11 @@ export function ActivityScreen() {
             </span>
           ) : null}
         </div>
+
+      {/* Pending co-host invitations sit ABOVE the feed: they are the only rows
+          here that expire, and an invite you scroll past is an invite you
+          missed. Renders nothing when there are none. */}
+      <PendingCohostInvites />
         {!showLiked && unreadCount > 0 ? (
           <button
             type="button"
