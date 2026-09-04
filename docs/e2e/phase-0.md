@@ -50,7 +50,17 @@ web surfaces, which is where verification effort goes:
   rather than trusting a saved state that may encode a failed login.
 - `SENTRY_ENVIRONMENT=e2e` on the dev server so runs never touch the production
   error budget (`docs/sentry-budget.md`).
-- Browsers are NOT installed yet: run `npx playwright install chromium webkit`.
+- Browsers: Chromium projects run `channel: "chrome"` against the installed
+  Chrome 152 (Playwright's bundled Chromium download stalls on this host — see
+  below). WebKit 2215 (v26.0) IS installed and verified launching + driving the
+  app under the `webkit-media` project.
+- **Playwright's downloader hangs under node 26 on this host** — the
+  out-of-process downloader sits at 0% CPU on the redirect and never completes,
+  though the CDN itself is fine (curl pulls the 79 MB WebKit zip in ~2s). If a
+  browser needs (re)installing, work around it:
+  `curl -sL <cdn.playwright.dev build url> -o wk.zip && unzip -q wk.zip -d ~/Library/Caches/ms-playwright/webkit-2215 && touch ~/Library/Caches/ms-playwright/webkit-2215/INSTALLATION_COMPLETE`
+  Get the exact build url from `npx playwright install webkit --dry-run`. The
+  `mac-14` arm64 build runs correctly even though the dry-run lists `mac-15`.
 
 ## 4 · Env matrix (values redacted; `apps/web/.env.e2e.local`, gitignored)
 
