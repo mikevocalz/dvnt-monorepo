@@ -221,9 +221,22 @@ Remaining, deliberately NOT done here:
    separate change: editing three overloaded 4KB feed functions is a feed-wide
    blast radius that deserves its own verification pass.
 
-2. **`/feed/events/[id]` renders a "Use DVNT like an app" interstitial in the
-   test browser** instead of the event detail — so `get_event_detail` was never
-   called from that route in the harness, and the end-to-end browser render of
-   the mp4 hero could not be confirmed there. This is a separate routing/PWA
-   issue, not the flyer fix (the fix is DB-verified). Needs its own look:
-   whether the authed feed detail route is gated behind a PWA-install prompt.
+2. **FIXED — `/feed/events/[id]` never loaded the event.** Not a PWA gate: the
+   detail screen read `params.slug`, but the `[id]` route provides `params.id`,
+   so `resolvedId` stayed undefined, `useEvent("")` never fetched, and the page
+   rendered nothing (the PWA dialog + feed rail were all that showed). Fixed in
+   event-detail.web.tsx by resolving a numeric `params.id` directly, slug
+   matching retained as fallback. VERIFIED end-to-end: /feed/events/56 now calls
+   get_event_detail (vfu=true) and its .mp4 flyer autoplays — muted, playsInline,
+   currentTime advancing, readyState 4.
+
+3. **FIXED — the list/card RPCs now return the column too.** get_events_for_you
+   and both get_events_home overloads updated + verified (has_vfu_col=true on all
+   four event RPCs; get_events_for_you returns 56/72 with the flyer). Migration
+   20260904140100. Advisors: no new findings. Pre-existing note: the two
+   get_events_home overloads are ambiguous for a 10-arg call (11-arg defaults
+   p_nsfw) — predates this change, both updated identically.
+
+The WS-2 video-flyer feature is now working end to end on web: detail hero
+autoplays for .mp4 flyers, .mov correctly shows a placeholder, cards carry the
+data. Only two events in the DB have a video flyer (56 .mp4, 72 .mov).

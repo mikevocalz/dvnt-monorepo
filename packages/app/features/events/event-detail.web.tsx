@@ -238,8 +238,15 @@ export function EventDetailScreen() {
   const params = useParams();
   const router = useRouter();
   const pathname = usePathname() ?? "";
+  // This screen mounts at BOTH /events/[slug] and /feed/events/[id]. The [id]
+  // route hands us a numeric id directly — read it, or the slug-only path below
+  // leaves resolvedId undefined, useEvent("") never fetches, and the detail
+  // silently never loads (no get_event_detail call, no hero, no flyer).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const slug = String((params as any)?.slug ?? "");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const idParam = String((params as any)?.id ?? "");
+  const directId = /^\d+$/.test(idParam) ? Number(idParam) : undefined;
   const { data: events, isLoading } = useEvents();
   const listEvent = matchBySlug(events, slug);
   // The cached list is filtered (upcoming only), so it can't resolve past events.
@@ -257,7 +264,8 @@ export function EventDetailScreen() {
       return res.ok ? res.json() : [];
     },
   });
-  const resolvedId = listEvent?.id ?? matchBySlug(slugIndex, slug)?.id;
+  const resolvedId =
+    directId ?? listEvent?.id ?? matchBySlug(slugIndex, slug)?.id;
   const { data: full } = useEvent(resolvedId ? String(resolvedId) : "");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const e = (full ?? listEvent) as any;
