@@ -27,6 +27,17 @@ export interface EjectModalProps {
   /** Acknowledgement. Eject is modal on both platforms by design — there is no
    *  dismiss-by-tapping-away, because the user has to learn why they are out. */
   onDismiss: () => void;
+  /**
+   * Seconds left before the room leaves on the user's behalf, or null for the
+   * kinds that wait for a tap.
+   *
+   * Only `room_ended` counts down. A kick or a ban is information the person
+   * has to actually read — hurrying them off that screen is how someone ends up
+   * not knowing why they can't get back in. A room simply ending is different:
+   * nothing is left to stay for, and holding a dead room on screen until it is
+   * acknowledged is a chore, not a choice.
+   */
+  autoLeaveIn?: number | null;
 }
 
 /** Copy lives with the contract so both legs cannot drift apart again. */

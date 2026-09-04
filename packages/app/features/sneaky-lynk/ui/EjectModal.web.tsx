@@ -30,7 +30,13 @@ const KIND = {
   room_ended: { color: "rgba(255,255,255,0.60)", Icon: DoorClosed },
 } as const;
 
-export function EjectModal({ visible, kind, reason, onDismiss }: EjectModalProps) {
+export function EjectModal({
+  visible,
+  kind,
+  reason,
+  onDismiss,
+  autoLeaveIn,
+}: EjectModalProps) {
   if (!visible || !kind) return null;
   const { color, Icon } = KIND[kind];
   const copy = EJECT_COPY[kind];
@@ -53,6 +59,14 @@ export function EjectModal({ visible, kind, reason, onDismiss }: EjectModalProps
           {copy.title}
         </h2>
         <p className="mt-2 text-sm text-white/60">{copy.body}</p>
+        {/* The countdown is stated in words as well as on the button: a number
+            ticking down inside a label is not an explanation, and someone who
+            looks up mid-count should not have to infer what it means. */}
+        {typeof autoLeaveIn === "number" ? (
+          <p className="mt-3 text-sm text-white/55" role="status" aria-live="polite">
+            Taking you back to Lynks in {autoLeaveIn}s.
+          </p>
+        ) : null}
         {reason ? (
           <p className="mt-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/70">
             {reason}
@@ -64,7 +78,9 @@ export function EjectModal({ visible, kind, reason, onDismiss }: EjectModalProps
           autoFocus
           className="mt-7 w-full rounded-lg bg-white/[0.08] py-3.5 font-semibold text-white transition-colors hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
         >
-          {copy.cta}
+          {typeof autoLeaveIn === "number"
+            ? `${copy.cta} (${autoLeaveIn})`
+            : copy.cta}
         </button>
       </div>
     </div>

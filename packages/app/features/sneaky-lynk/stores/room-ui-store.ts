@@ -69,6 +69,8 @@ interface RoomUIStore {
    *  them into one sentence is what let the web modal claim a ban was just a
    *  removal. */
   eject: { kind: EjectKind; reason?: string } | null;
+  /** Seconds left before a finished room exits itself. Null when not counting. */
+  ejectCountdown: number | null;
   /** The host is holding this participant muted. While true they cannot turn
    *  their own microphone on — see lib/video/host-mute. */
   hostMuteLocked: boolean;
@@ -93,6 +95,7 @@ interface RoomUIStore {
   setTimerStartedAt: (v: number) => void;
   setShowTimeUp: (v: boolean) => void;
   setEject: (v: { kind: EjectKind; reason?: string } | null) => void;
+  setEjectCountdown: (v: number | null) => void;
   setHostMuteLocked: (v: boolean) => void;
   setServerEndsAt: (v: string | null) => void;
   reset: () => void;
@@ -114,6 +117,7 @@ const initialUIState = {
   timerStartedAt: null as number | null,
   showTimeUp: false,
   eject: null as { kind: EjectKind; reason?: string } | null,
+  ejectCountdown: null as number | null,
   hostMuteLocked: false,
   serverEndsAt: undefined as string | null | undefined,
 };
@@ -137,6 +141,7 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setTimerStartedAt: (timerStartedAt) => set({ timerStartedAt }),
   setShowTimeUp: (showTimeUp) => set({ showTimeUp }),
   setEject: (eject) => set({ eject }),
+  setEjectCountdown: (ejectCountdown) => set({ ejectCountdown }),
   setHostMuteLocked: (hostMuteLocked) => set({ hostMuteLocked }),
   setServerEndsAt: (serverEndsAt) => set({ serverEndsAt }),
   reset: () => set({ ...initialUIState }),

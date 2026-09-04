@@ -175,6 +175,12 @@ const TRANSPORT_STATUS_BY_LYNK_STATE: Record<LynkState, RoomTransportStatus> = {
  */
 const EJECT_EVENT_TYPES = new Set(["eject", "member_kicked", "member_banned"]);
 
+/** Seconds a user gets to read "this Lynk ended" before we take them out. */
+const ROOM_ENDED_GRACE_SECONDS = 10;
+
+/** Where a finished room returns you: the Lynk list, in the messages inbox. */
+const LYNKS_LIST_ROUTE = "/feed/messages";
+
 /** Roles that may publish — mirrors PUBLISH_ROLES in the lynk-moq-token
  *  edge function. Module scope on purpose: it is called from the tile map,
  *  which runs before the stage split that used to declare it. */
@@ -603,6 +609,8 @@ function RoomInner({
   const setShowTimeUp = useRoomUIStore((s) => s.setShowTimeUp);
   const eject = useRoomUIStore((s) => s.eject);
   const setEject = useRoomUIStore((s) => s.setEject);
+  const ejectCountdown = useRoomUIStore((s) => s.ejectCountdown);
+  const setEjectCountdown = useRoomUIStore((s) => s.setEjectCountdown);
 
   // Stable ref so callbacks/effects never capture a stale transport object —
   // the hook's callbacks are not identity-stable across a reconnect.
@@ -819,6 +827,36 @@ function RoomInner({
     if (!roomHasVideo) lynkRef.current.setCameraEnabled(false);
   }, [roomHasVideo]);
 
+  /**
+   * The host ended the room: count down, then leave on the user's behalf.
+   *
+   * A room that has ended has nothing left to look at, and making someone
+   * acknowledge a dead room before it will let them out is a chore. Ten seconds
+   * is long enough to read what happened and still tap through early — the
+   * button stays live the whole time, so this shortens the exit rather than
+   * taking it over.
+   *
+   * ONLY `room_ended`. A kick or a ban has to be read; hurrying someone off that
+   * screen is how they end up not knowing why they cannot rejoin.
+   */
+  useEffect(() => {
+    if (eject?.kind !== "room_ended") {
+      setEjectCountdown(null);
+      return;
+    }
+    setEjectCountdown(ROOM_ENDED_GRACE_SECONDS);
+    const tick = setInterval(() => {
+      const next = (useRoomUIStore.getState().ejectCountdown ?? 1) - 1;
+      setEjectCountdown(next);
+      if (next <= 0) {
+        clearInterval(tick);
+        leaveForLynksRef.current();
+      }
+    }, 1000);
+    return () => clearInterval(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eject?.kind]);
+
   // ── Connection watchdog: never leave the user on an infinite spinner ───────
   // Purely additive — only fires if we're still joining/connecting after 25s.
   // Turns a silent "won't connect" into a visible, retryable error.
@@ -869,6 +907,27 @@ function RoomInner({
   const toggleCamera = useCallback(() => {
     lynkRef.current.setCameraEnabled(!lynkRef.current.cameraEnabled);
   }, []);
+
+  /**
+   * Exit to the Lynks list — where every Lynk is — rather than `router.back()`.
+   * Back is wherever you happened to come from, which for a deep link or an
+   * accepted invite is outside the app entirely.
+   */
+  const leaveForLynks = useCallback(() => {
+    setEject(null);
+    setEjectCountdown(null);
+    try {
+      lynkRef.current.end();
+    } catch {
+      // The room is already gone; leaving is what matters.
+    }
+    resetRoomStore();
+    endRoomHistory(id);
+    router.push(LYNKS_LIST_ROUTE);
+  }, [endRoomHistory, id, resetRoomStore, router, setEject, setEjectCountdown]);
+  // Ref so the countdown's interval never captures a stale closure.
+  const leaveForLynksRef = useRef(leaveForLynks);
+  leaveForLynksRef.current = leaveForLynks;
 
   const handToggleInFlight = useRef(false);
   const toggleHand = useCallback(() => {
@@ -1560,12 +1619,8 @@ function RoomInner({
           visible
           kind={eject.kind}
           reason={eject.reason}
-          onDismiss={() => {
-            setEject(null);
-            resetRoomStore();
-            endRoomHistory(id);
-            router.back();
-          }}
+          autoLeaveIn={eject.kind === "room_ended" ? ejectCountdown : null}
+          onDismiss={leaveForLynks}
         />
       ) : null}
       </main>
