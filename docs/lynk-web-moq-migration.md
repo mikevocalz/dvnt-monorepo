@@ -26,16 +26,19 @@ Supabase roster joined on peer id (mirrors native `lynk-participants.ts`).
 - Tiles: `peer.cameraTrack` → `attachCanvas` for remote, `localStream` for self.
 - Session machine: `peerStatus` → `deriveLynkState` (already the genesis pattern).
 
-## The BLOCKER — a product decision, not a swap
-**`useVAD` (voice activity detection) drives every speaking indicator, and MoQ
-has NO equivalent.** react-native-moq doesn't expose VAD; the web `@moq` layer
-doesn't either. Migrating as-is SILENTLY LOSES speaking rings — a core Lynk
-affordance. Options, needing your call:
-  1. Build VAD client-side: Web Audio `AnalyserNode` RMS on the local track for
-     self, plus a lightweight presence/VAD signal over the existing Supabase
-     channel for remotes. Real work, but keeps the feature.
-  2. Ship without remote VAD initially (self-only speaking ring), add remote later.
-  3. Defer the web migration until VAD-over-MoQ is designed.
+## VAD — SOLVED (was mis-flagged as a blocker)
+MoQ carries no `useVAD`, but it doesn't need to — the audio is right here, so
+speaking detection is a client-side RMS computation, not a missing feature:
+- **Web**: `lib/lynk/useSpeakingDetection.web.ts` (built + tested) — a Web Audio
+  `AnalyserNode` on any MediaStream (the local capture, or a remote publisher's
+  decoded audio), RMS + hysteresis so a ring doesn't flicker between words. Zero
+  new deps.
+- **Native**: `react-native-moq`'s `useAudioChunks({ format: 'pcm-f32' })`
+  delivers decoded PCM per publisher → same RMS. Zero new deps. (`react-native-
+  audio-api` is the native `AnalyserNode` analog but is not needed and not
+  installed.)
+The pure decision (`decideSpeaking`) has a node:test covering threshold, the
+hang window, and word-gap anti-flicker.
 
 ## Recommendation
 Given the web room is 1,749 lines of direct Fishjam coupling AND the VAD gap,
