@@ -23,7 +23,11 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
 import { collectPageErrors } from "../support/session";
+
+const PEER_STATE = path.join(__dirname, "../.auth/peer.json");
 
 /** Records every getUserMedia constraint the page asks for, before app code runs. */
 async function spyOnGetUserMedia(page: Page) {
@@ -183,17 +187,86 @@ test.describe("sneaky lynk — MoQ transport", () => {
     }
   });
 
-  test.fixme(
-    "two clients: remote canvas paints, remote ring arrives, listener does not hang",
-    async () => {
-      // Needs a SECOND authenticated identity. `coPublishers` filters out our
-      // own peer id and the roster filters out our own user id, so two tabs on
-      // one account see nothing of each other — the test would pass vacuously.
-      // Unblock by adding E2E_PEER_EMAIL / E2E_PEER_PASSWORD for a second audit
-      // account, then: host in context A, join by room URL in context B, and
-      // assert (a) B leaves "Connecting…" with canPublish false, (b) A's tile
-      // for B has a canvas with non-transparent pixels, (c) B speaking flips
-      // A's `[data-tile=<B.userId>][data-speaking=true]`.
-    },
-  );
+  test("two clients: a listener does not hang, and a promoted peer paints and speaks", async ({
+    page,
+    browser,
+  }) => {
+    // Needs a second REAL identity — see peer.setup.ts for why one account
+    // cannot stand in. Skips cleanly when it is not configured.
+    test.skip(
+      !fs.existsSync(PEER_STATE),
+      "no peer identity: set E2E_PEER_EMAIL / E2E_PEER_PASSWORD in apps/web/.env.e2e.local",
+    );
+
+    const peerCtx = await browser.newContext({
+      storageState: PEER_STATE,
+      permissions: ["camera", "microphone"],
+    });
+    const peer = await peerCtx.newPage();
+    let roomId = "";
+
+    try {
+      // ── Host publishes ────────────────────────────────────────────────────
+      roomId = await createRoom(page, `E2E MoQ pair ${Date.now()}`, true);
+      await expect(page.locator('[data-tile="local"]')).toBeVisible({ timeout: 60_000 });
+
+      // ── Peer joins as a plain participant → canPublish false ─────────────
+      // THE LISTENER REGRESSION: with no publish token, `deriveLynkState`
+      // reported `requesting-token` forever and the room never left its
+      // spinner. Reaching the stage at all is the assertion.
+      await peer.goto(`/feed/sneaky-lynk/room/${roomId}?hasVideo=1`, { waitUntil: "load" });
+      const joinButton = peer.getByRole("button", { name: /join lynk|join anonymously/i });
+      if (await joinButton.count()) await joinButton.first().click();
+      await expect(
+        peer.locator('[data-tile="local"]'),
+        "a listener never reached the stage — the publish-token state trap is back",
+      ).toBeVisible({ timeout: 60_000 });
+
+      // A listener publishes nothing, so it must never open a device.
+      await expect(peer.locator('[data-tile="local"] video')).toHaveCount(0);
+
+      // The host sees them on the roster before they ever publish.
+      const peerTile = page.locator('[data-tile]:not([data-tile="local"])').first();
+      await expect(peerTile).toBeVisible({ timeout: 30_000 });
+
+      // ── Host promotes the peer → they publish ────────────────────────────
+      await page.getByRole("button", { name: "Participants" }).click();
+      await page.getByRole("button", { name: /invite to speak|promote/i }).first().click();
+
+      // ── Remote media actually arrives ────────────────────────────────────
+      // The canvas is sized by the DECODER, so an intrinsic size that is no
+      // longer the 300x150 HTML default is proof a frame was decoded and
+      // painted. Reading pixels back is not reliable across the renderer's
+      // backing store; this is.
+      const peerCanvas = peerTile.locator("canvas");
+      await expect(peerCanvas).toBeVisible({ timeout: 60_000 });
+      await expect
+        .poll(
+          () =>
+            peerCanvas.evaluate(
+              (c: HTMLCanvasElement) => `${c.width}x${c.height}`,
+            ),
+          {
+            timeout: 60_000,
+            message: "the remote canvas never left its default size — no frame decoded",
+          },
+        )
+        .not.toBe("300x150");
+
+      // ── Speaking presence crosses the Supabase channel ───────────────────
+      // The peer's own VAD reads its fake mic and broadcasts the boolean; this
+      // asserts the HOST received it. Nothing in MoQ carries this.
+      await expect
+        .poll(() => peerTile.getAttribute("data-speaking"), {
+          timeout: 60_000,
+          message:
+            "the host never saw the peer speaking — useSpeakingPresence is not crossing the channel",
+        })
+        .toBe("true");
+    } finally {
+      await leaveRoom(peer).catch(() => {});
+      await peerCtx.close();
+      await leaveRoom(page);
+    }
+  });
 });

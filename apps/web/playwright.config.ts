@@ -69,7 +69,9 @@ export default defineConfig({
     // Mints the storage state every other project reuses (P13 WS-1).
     {
       name: "setup",
-      testMatch: /auth\.setup\.ts/,
+      // Both identities. `peer.setup.ts` skips itself when its credentials are
+      // absent, so a machine with only the audit account is unaffected.
+      testMatch: /(auth|peer)\.setup\.ts/,
       // Needs the channel too — without a `use` block it falls back to the
       // bundled Chromium that will not download on this host.
       use: { ...devices["Desktop Chrome"], channel: "chrome" },
