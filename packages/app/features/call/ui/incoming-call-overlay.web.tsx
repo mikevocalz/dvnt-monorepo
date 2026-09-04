@@ -76,15 +76,24 @@ export function IncomingCallOverlay() {
     return unsubscribe;
   }, [isAuthenticated, user?.id]);
 
-  const handleAccept = useCallback(async () => {
-    if (!incomingCall) return;
-    const roomId = incomingCall.room_id;
-    try {
-      await callSignalsApi.updateSignalStatus(incomingCall.id, "accepted");
-    } catch {}
-    setIncomingCall(null);
-    router.push(`/feed/call/${roomId}`);
-  }, [incomingCall, router]);
+  const handleAccept = useCallback(
+    async (audioOnly = false) => {
+      if (!incomingCall) return;
+      const roomId = incomingCall.room_id;
+      try {
+        await callSignalsApi.updateSignalStatus(incomingCall.id, "accepted");
+      } catch {}
+      setIncomingCall(null);
+      // Carry the call type into the room. Previously this always dropped it,
+      // so `call.web.tsx` fell back to its `video` default — an audio call was
+      // answered with the camera on, and there was no way to answer a video
+      // call audio-only (Whereby "join with cam off"). Audio when the call is
+      // audio OR the receiver chose audio-only; video otherwise.
+      const asAudio = audioOnly || incomingCall.call_type === "audio";
+      router.push(`/feed/call/${roomId}${asAudio ? "?callType=audio" : ""}`);
+    },
+    [incomingCall, router],
+  );
 
   const handleDecline = useCallback(async () => {
     if (!incomingCall) return;
@@ -141,7 +150,7 @@ export function IncomingCallOverlay() {
         </p>
       </div>
 
-      <div className="flex items-center gap-20">
+      <div className="flex items-center gap-10 sm:gap-16">
         <div className="flex flex-col items-center gap-2">
           <button
             type="button"
@@ -160,10 +169,34 @@ export function IncomingCallOverlay() {
           </span>
         </div>
 
+        {/* Answer audio-only — offered only for a video call, since an audio
+            call is already audio. Lets the receiver pick up without the camera
+            (Whereby's "join with cam off"), which the design demands as a
+            first-class option, not a toggle found after connecting. */}
+        {incomingCall.call_type !== "audio" && !incomingCall.is_group ? (
+          <div className="flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleAccept(true)}
+              aria-label="Answer audio-only"
+              className="flex h-16 w-16 items-center justify-center rounded-full transition-opacity hover:opacity-90"
+              style={{ backgroundColor: "#1b1f2b" }}
+            >
+              <Phone size={28} color="#fff" />
+            </button>
+            <span
+              className="text-xs"
+              style={{ color: color.textDim, fontFamily: "Inter-SemiBold" }}
+            >
+              Audio only
+            </span>
+          </div>
+        ) : null}
+
         <div className="flex flex-col items-center gap-2">
           <button
             type="button"
-            onClick={handleAccept}
+            onClick={() => handleAccept(false)}
             aria-label="Accept"
             className="flex h-16 w-16 items-center justify-center rounded-full transition-opacity hover:opacity-90"
             style={{ backgroundColor: "#34C759" }}

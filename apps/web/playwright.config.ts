@@ -63,7 +63,6 @@ export default defineConfig({
     // strictly more debuggable than an mp4. Turn it back on if ffmpeg lands.
     video: "off",
     screenshot: "only-on-failure",
-    permissions: ["camera", "microphone"],
   },
 
   projects: [
@@ -103,6 +102,7 @@ export default defineConfig({
         viewport: { width: 1440, height: 900 },
         storageState: "e2e/.auth/audit.json",
         launchOptions: { args: fakeMediaArgs },
+        permissions: ["camera", "microphone"],
       },
     },
     {
@@ -115,6 +115,7 @@ export default defineConfig({
         viewport: { width: 1024, height: 768 },
         storageState: "e2e/.auth/audit.json",
         launchOptions: { args: fakeMediaArgs },
+        permissions: ["camera", "microphone"],
       },
     },
     {
@@ -127,6 +128,7 @@ export default defineConfig({
         viewport: { width: 768, height: 1024 },
         storageState: "e2e/.auth/audit.json",
         launchOptions: { args: fakeMediaArgs },
+        permissions: ["camera", "microphone"],
       },
     },
     {
@@ -140,19 +142,22 @@ export default defineConfig({
         isMobile: false, // Chromium desktop channel; touch emulation is per-spec
         storageState: "e2e/.auth/audit.json",
         launchOptions: { args: fakeMediaArgs },
+        permissions: ["camera", "microphone"],
       },
     },
     {
       // Autoplay/poster cases only — WebKit cannot fake media devices the way
       // Chromium can, so WebRTC specs are excluded from this project by tag.
       name: "webkit-media",
-      testIgnore: /public\//,
-      dependencies: ["setup"],
+      // No testIgnore: `grep: /@media/` already scopes this project to tagged
+      // tests wherever they live, and its @media specs sit under specs/public/.
+      // No setup dependency: it runs signed-out.
       grep: /@media/,
       use: {
         ...devices["Desktop Safari"],
         viewport: { width: 1440, height: 900 },
-        storageState: "e2e/.auth/audit.json",
+        // Signed-out: these are public autoplay/render checks, and it removes
+        // the setup dependency's authed nav from the login smoke.
       },
     },
   ],

@@ -139,6 +139,12 @@ export const DB = {
     youtubeVideoUrl: "youtube_video_url",
     flyerImageUrl: "flyer_image_url",
     flyerImageMeta: "flyer_image_meta",
+    // The canonical video-flyer columns. They were absent from this map, so
+    // resolveFlyerVideoUrl fell back to scanning legacy image columns and never
+    // saw a flyer stored in the dedicated column — events using it rendered no
+    // video (event detail, event card).
+    videoFlyerUrl: "video_flyer_url",
+    videoPosterUrl: "video_poster_url",
     createdAt: "created_at",
   },
   spotlightCampaigns: {

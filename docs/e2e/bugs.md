@@ -151,3 +151,47 @@ the solo suite — recorded, not run.
 - Connected multi-party call and room (remote tiles, host mute-all, eject,
   degraded/reconnecting banners) — need `mikevocalz` present (P13 §2).
 - WebKit `@media` autoplay project — browser download stalls on this host.
+
+## WS-2 video flyer — DARK on web (found + partially fixed 2026-09-04)
+
+**Every event that stored its flyer in the canonical `video_flyer_url` column
+renders NO video anywhere on web — event detail and event cards both.** Found
+while writing the WebKit autoplay spec: events 72 and 56 have a `video_flyer_url`
+but render no `<video>`. Three stacked causes, two fixed in this pass, one
+blocked:
+
+1. **FIXED — `video_flyer_url` was absent from the DB column map**
+   (`packages/app/lib/supabase/db-map.ts`). Added `videoFlyerUrl` +
+   `videoPosterUrl`, so `resolveFlyerVideoUrl` can reference the real column.
+2. **FIXED — `isVideoUrl` matched only file extensions**
+   (`packages/app/lib/api/events.ts`). Bunny stores flyer videos extensionless
+   under a path segment (`dvnt.b-cdn.net/post-video/<id>`, `.../event-video/<id>`
+   — the create path writes `event-video`), so the check missed every real
+   flyer. Now also matches `/(post|flyer|event|story)-video/`, the same set the
+   detail screen's `VIDEO_RE` uses. `resolveFlyerVideoUrl` now reads the
+   dedicated column first.
+3. **BLOCKED — the event RPCs do not return `video_flyer_url`.** Verified
+   against the DB: `get_event_detail`, `get_events_home`, and
+   `get_events_for_you` all have `returns_vfu = false`. The client mapping now
+   handles the column correctly, but the column never reaches the client because
+   the Postgres functions don't select it. **This is the root cause and it is a
+   production DB-function change across 3 RPCs — STOP-and-report per prompt
+   law.** Not attempted blind.
+
+Proposed fix (needs Mike's sign-off, then a migration with backfill notes):
+add `video_flyer_url` and `video_poster_url` to the `event` JSON each of the
+three RPCs returns. Until then the WS-2 autoplay specs (`video-flyer.spec.ts`)
+correctly SKIP — the contract they assert (muted + playsInline + advancing
+currentTime, no blank hero without a poster) is right and will activate the
+moment the column is surfaced.
+
+The two client fixes are safe on their own (read-mapping, no schema change) and
+also fix legacy events whose video URL reaches the client via the `image` field.
+
+## E2E-CALL-1 — FIXED (2026-09-04)
+
+The incoming-call overlay (`incoming-call-overlay.web.tsx`) now offers **Answer
+audio-only** on a video call (Whereby "join with cam off"), and `handleAccept`
+carries the call type into the room — previously it dropped `callType`, so an
+audio call was answered with the camera on and a video call could not be
+answered audio-only. Button gap made responsive for the 3-control layout at 375.

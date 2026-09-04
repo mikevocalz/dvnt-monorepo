@@ -66,7 +66,14 @@ function parseJsonbArray(value: unknown): any[] {
 
 /** Returns true if the URL points to a video file */
 function isVideoUrl(url: string): boolean {
-  return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url);
+  // Bunny stores flyer/post videos under a kind-named path segment with NO file
+  // extension (e.g. dvnt.b-cdn.net/post-video/<id>, .../event-video/<id>), so an
+  // extension-only test missed every real flyer video. Match the path segment
+  // too — same set the detail screen's VIDEO_RE uses.
+  return (
+    /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url) ||
+    /\/(post|flyer|event|story)-video\//i.test(url)
+  );
 }
 
 /** True for URLs an <img> can render for OTHER viewers: hosted http(s), not a video file. */
@@ -106,9 +113,12 @@ function resolveEventImage(event: any): string {
 
 /** Returns the flyer video URL if the flyer is a video, otherwise undefined */
 function resolveFlyerVideoUrl(event: any): string | undefined {
-  // Legacy rows stored the flyer video in image/cover_image_url with
-  // flyer_image_url empty — check those too so the card can play it.
+  // The dedicated column comes first — a flyer stored there (the create path's
+  // videoFlyerUrl) was previously invisible, because this only scanned the
+  // legacy image columns below. Legacy rows kept the video in
+  // image/cover_image_url with flyer_image_url empty, so those still count.
   const candidates = [
+    event[DB.events.videoFlyerUrl],
     event[DB.events.flyerImageUrl],
     event[DB.events.coverImageUrl],
     event["image"],
