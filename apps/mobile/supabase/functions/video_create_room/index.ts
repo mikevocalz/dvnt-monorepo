@@ -366,18 +366,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Record rate limit attempt
-    const { error: recordError } = await supabase.rpc("record_rate_limit", {
-      p_user_id: userId,
-      p_action: "create",
-      p_room_id: null,
-    });
-    if (recordError) {
-      console.error(
-        "[video_create_room] Record rate limit error:",
-        recordError.message,
-      );
-    }
+    // The attempt is NOT recorded here. See the record below, after the room
+    // actually exists.
 
     // Create room
     console.log("[video_create_room] Creating room...");
@@ -460,6 +450,33 @@ Deno.serve(async (req) => {
       return errorResponse("internal_error", "Failed to add host to room");
     }
     console.log("[video_create_room] Host added");
+
+    // Record the rate-limit attempt HERE, not before the insert.
+    //
+    // It used to be recorded straight after the check, so a create that failed
+    // afterwards — plan lookup, a Fishjam hiccup, the insert itself — still
+    // burned one of the host's 5-per-5-minutes. Five failures in a row locked a
+    // legitimate host out for five minutes ON TOP of whatever had broken: the
+    // app punishing a user for the app's own error. Only a room that exists,
+    // with its host row committed, counts against the budget now.
+    //
+    // Deliberately after the host insert, not just the room insert: a failed
+    // member insert deletes the room above, so that path created nothing either.
+    // Abuse is still bounded — five SUCCESSFUL rooms in five minutes is the cap,
+    // which is what the limit was always meant to say.
+    const { error: recordError } = await supabase.rpc("record_rate_limit", {
+      p_user_id: userId,
+      p_action: "create",
+      p_room_id: null,
+    });
+    if (recordError) {
+      // Non-fatal: the room is real and the caller gets it. A missed record
+      // costs one slot of accounting, never a room.
+      console.error(
+        "[video_create_room] Record rate limit error:",
+        recordError.message,
+      );
+    }
 
     if (!isPublic && invitedUserIds.length > 0) {
       const uniqueInviteeIds = [
