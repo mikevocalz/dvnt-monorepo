@@ -227,6 +227,12 @@ const nextConfig: NextConfig = {
         __dirname,
         'src/platform/qrcode-svg.web.tsx',
       ),
+      // Native TurboModule package — the Lynk room's native transport. Shared
+      // barrels drag it web-side; the shim cuts the edge. See the file header.
+      'react-native-moq$': path.resolve(
+        __dirname,
+        'src/platform/react-native-moq.web.ts',
+      ),
       '@fishjam-cloud/react-native-client$': path.resolve(
         __dirname,
         'src/platform/fishjam-react-native-client.web.tsx',

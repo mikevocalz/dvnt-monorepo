@@ -26,3 +26,10 @@ packages/*/android/build/
 # Gradle build state — daemon locks, file hashes, caches. Never reproducible,
 # never useful in a diff, and regenerated on every build.
 .gradle/
+
+# Playwright e2e (P13) — credentials, traces and reports never get committed
+.env.e2e.local
+apps/web/e2e/.auth/
+apps/web/e2e/report/
+apps/web/e2e/results/
+test-results/
