@@ -50,7 +50,10 @@ for (const route of ROUTES) {
     // A blank <body> is the failure mode this whole suite exists to catch:
     // the route 200s and renders nothing because a client component threw.
     await expect(page.locator("body")).not.toBeEmpty();
-    await page.waitForLoadState("networkidle");
+    // NOT networkidle: `next dev` holds an HMR socket open, so it never fires.
+    // "load" is a real event that does, and the body assertion above already
+    // proves the app rendered rather than throwing on hydration.
+    await page.waitForLoadState("load");
 
     await testInfo.attach(`${route.name}-${testInfo.project.use.viewport?.width}`, {
       body: await page.screenshot({ fullPage: false }),

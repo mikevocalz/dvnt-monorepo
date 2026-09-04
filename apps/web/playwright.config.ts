@@ -7,6 +7,13 @@
  * and Safari is the browser that will refuse to autoplay them if `muted` +
  * `playsInline` ever regress — Chromium will happily hide that bug.
  *
+ * Every Chromium project runs on `channel: "chrome"` — the Google Chrome already
+ * installed on this machine (152.0.7977.77) — rather than Playwright's bundled
+ * build. The bundled download stalls on this host (the out-of-process downloader
+ * sits at ~0s CPU indefinitely), and driving real Chrome is closer to what users
+ * run anyway. Swap to the bundled build by dropping `channel` if CI needs a
+ * version-pinned browser.
+ *
  * Media is faked at the browser level so WebRTC specs are deterministic AND
  * assertable: the Y4M/WAV fixtures make tracks non-silent, so an audio-call
  * test can assert RMS > threshold instead of asserting a track merely exists.
@@ -44,7 +51,11 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     trace: "retain-on-failure",
-    video: "retain-on-failure",
+    // Video is off, not "retain-on-failure": it needs Playwright's bundled
+    // ffmpeg, which is part of the same download that stalls on this host. The
+    // trace already carries a DOM+screenshot timeline you can scrub, which is
+    // strictly more debuggable than an mp4. Turn it back on if ffmpeg lands.
+    video: "off",
     screenshot: "only-on-failure",
     permissions: ["camera", "microphone"],
   },
@@ -60,12 +71,14 @@ export default defineConfig({
     {
       name: "public-1440",
       testMatch: /public\/.*\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      use: { ...devices["Desktop Chrome"],
+        channel: "chrome", viewport: { width: 1440, height: 900 } },
     },
     {
       name: "public-375",
       testMatch: /public\/.*\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"], viewport: { width: 375, height: 812 } },
+      use: { ...devices["Desktop Chrome"],
+        channel: "chrome", viewport: { width: 375, height: 812 } },
     },
 
     {
@@ -73,6 +86,7 @@ export default defineConfig({
       dependencies: ["setup"],
       use: {
         ...devices["Desktop Chrome"],
+        channel: "chrome",
         viewport: { width: 1440, height: 900 },
         storageState: "e2e/.auth/audit.json",
         launchOptions: { args: fakeMediaArgs },
@@ -83,6 +97,7 @@ export default defineConfig({
       dependencies: ["setup"],
       use: {
         ...devices["Desktop Chrome"],
+        channel: "chrome",
         viewport: { width: 1024, height: 768 },
         storageState: "e2e/.auth/audit.json",
         launchOptions: { args: fakeMediaArgs },
@@ -93,6 +108,7 @@ export default defineConfig({
       dependencies: ["setup"],
       use: {
         ...devices["Desktop Chrome"],
+        channel: "chrome",
         viewport: { width: 768, height: 1024 },
         storageState: "e2e/.auth/audit.json",
         launchOptions: { args: fakeMediaArgs },
@@ -103,6 +119,7 @@ export default defineConfig({
       dependencies: ["setup"],
       use: {
         ...devices["Desktop Chrome"],
+        channel: "chrome",
         viewport: { width: 375, height: 812 },
         isMobile: false, // Chromium desktop channel; touch emulation is per-spec
         storageState: "e2e/.auth/audit.json",
@@ -128,7 +145,11 @@ export default defineConfig({
     : {
         command: "pnpm dev",
         url: BASE_URL,
-        reuseExistingServer: true,
+        // NOT `true`. A stale server on :3000 silently invalidates the whole
+        // run — a next-server left over from before an upgrade answered `/`
+        // with 200 and every other route with 404, which reads exactly like a
+        // routing regression. Opt back in explicitly when iterating locally.
+        reuseExistingServer: !!process.env.E2E_REUSE_SERVER,
         // Sentry runs in a dedicated e2e environment so verification traffic
         // never eats the production error budget (docs/sentry-budget.md).
         env: { SENTRY_ENVIRONMENT: "e2e", NEXT_PUBLIC_SENTRY_ENVIRONMENT: "e2e" },
