@@ -29,8 +29,10 @@ setup("sign in as the audit account", async ({ page }) => {
 
   await page.goto("/auth/login");
 
-  await page.getByLabel(/email/i).fill(email!);
-  await page.getByLabel(/password/i).fill(password!);
+  // Exact labels: a loose /password/i also matches the "Show password" toggle,
+  // and a strict-mode violation there reads like a missing field.
+  await page.getByLabel("Email", { exact: true }).fill(email!);
+  await page.getByLabel("Password", { exact: true }).fill(password!);
   await page.getByRole("button", { name: /log ?in|sign ?in/i }).click();
 
   // Landing on the feed is the proof the session exists; waiting for a URL is

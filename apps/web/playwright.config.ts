@@ -62,7 +62,13 @@ export default defineConfig({
 
   projects: [
     // Mints the storage state every other project reuses (P13 WS-1).
-    { name: "setup", testMatch: /auth\.setup\.ts/ },
+    {
+      name: "setup",
+      testMatch: /auth\.setup\.ts/,
+      // Needs the channel too — without a `use` block it falls back to the
+      // bundled Chromium that will not download on this host.
+      use: { ...devices["Desktop Chrome"], channel: "chrome" },
+    },
 
     // Unauthenticated lane. Deliberately has NO setup dependency and no
     // storage state: the login page, the public event page and `/` must all

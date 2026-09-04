@@ -31,6 +31,12 @@ export function Button({
     <Pressable
       disabled={disabled || loading}
       onPress={onPress}
+      // This file shadows button.tsx on web, so the role has to be set HERE
+      // too — fixing only the native file left every web button as a bare
+      // <div> ("generic" in the a11y tree: no role, not announced, not
+      // reachable as a control). A link-variant button is a link, not a button.
+      accessibilityRole={isLink ? "link" : "button"}
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
       style={[
         styles.base,
         variant === "default" && styles.default,

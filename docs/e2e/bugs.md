@@ -37,3 +37,36 @@ semantics fixed it. Worth correcting in the prompt before WS-0.6 is scoped.
   download that stalls on this host. Traces carry a DOM+screenshot timeline.
 - **Browsers**: Chromium projects run `channel: "chrome"` against the installed
   Chrome 152. WebKit (the `@media` autoplay project) still needs its download.
+
+
+## Round 2 — a11y, found by the authenticated lane (2026-09-04)
+
+All four fixed and verified in the rendered accessibility tree on a production
+build. Every one was a `generic` node before, i.e. present visually but absent
+as a control.
+
+| ID | Component | Was | Now |
+|---|---|---|---|
+| E2E-5 | `components/ui/button.web.tsx` | `generic` — **`button.tsx` shadowed by a `.web.tsx` sibling, so fixing the native file alone changed nothing on web** | `button "Sign in"`, with disabled/busy state; link-variant reports as `link` |
+| E2E-6 | `components/ui/input.web.tsx` | Label was loose `<Text>` bound to nothing; the field's only accessible name was its placeholder, which disappears once the user types | `textbox "Email"` / `textbox "Password"` via `aria-labelledby`, plus `aria-describedby`/`aria-invalid` on error |
+| E2E-7 | `input.web.tsx` password toggle | Icon-only `Pressable` with no name — announced as nothing | `button "Show password"` / `"Hide password"` |
+| E2E-8 | `LoginScreen.web.tsx` | "Sign up" and "Forgot password?" were role-less `Pressable`s | `link` (they navigate, they do not act) |
+
+## Open blocker — needs Mike
+
+**The audit account cannot sign in against this build.**
+`POST /api/auth/sign-in/email` returns
+`401 {"code":"INVALID_EMAIL_OR_PASSWORD"}` for `audit.20260404134239@deviant.test`.
+The form, the button and the request are all correct — BetterAuth rejects the
+credentials, so the account either does not exist in the database this local
+build points at, or the password differs. Every authenticated workstream
+(WS-3 through WS-7) is blocked until this resolves.
+
+## Security note for WS-8 (CI)
+
+Playwright's `error-context.md` and trace capture **the filled password in the
+DOM snapshot**. Local artifacts are gitignored and were purged after this run,
+but P13 WS-8 proposes uploading traces as CI artifacts — that would publish the
+audit password to anyone who can read a build. Before wiring CI: either mask the
+field (`page.addInitScript` to strip values on snapshot), scope traces to
+`off` for the setup project, or restrict artifact access.
