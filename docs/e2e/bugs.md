@@ -54,13 +54,37 @@ as a control.
 
 ## Open blocker — needs Mike
 
-**The audit account cannot sign in against this build.**
-`POST /api/auth/sign-in/email` returns
-`401 {"code":"INVALID_EMAIL_OR_PASSWORD"}` for `audit.20260404134239@deviant.test`.
-The form, the button and the request are all correct — BetterAuth rejects the
-credentials, so the account either does not exist in the database this local
-build points at, or the password differs. Every authenticated workstream
-(WS-3 through WS-7) is blocked until this resolves.
+**The audit account has no password credential. Root cause confirmed
+2026-09-04 against the app database (Supabase `npfjanxturvmjyevoyfo`):**
+
+```
+user id       lUrDhlfPFnpaE9od0Ckq89dWn2NZnMkS
+created       2026-04-04
+emailVerified false
+account rows  NO-ACCOUNT-ROWS      <-- no credential provider at all
+has_password  false
+```
+
+The `user` row exists and matches on both email and username, but BetterAuth's
+`account` table holds **no row** for it, so there is no stored password to
+compare against. `401 INVALID_EMAIL_OR_PASSWORD` is therefore correct behaviour,
+not a bug — the same 401 comes back from `/api/auth/sign-in/username`. This is
+the "magic-link ghost user" shape: a `user` row created without a credential.
+
+The password `Dvnt_Audit_2026!` has never been attached to this account in this
+database. Nothing in the harness or the login screen can fix that.
+
+**Unblocking needs a decision from Mike — this is the production project, so no
+writes were made.** Options, cheapest first:
+1. Set a password for the account (BetterAuth reset flow, or the dashboard).
+   Needs inbox access for `@deviant.test` if done by email link.
+2. Authorise a direct `account`-row insert with a BetterAuth-format hash.
+   A credential write to the production auth table — needs explicit sign-off.
+3. Point the e2e run at a staging database where the account can be seeded
+   freely. Cleanest long-term, and it also keeps `[AUDIT 2026-09]` teardown
+   (P13 §2) off production.
+
+WS-3 through WS-7 stay blocked until one is chosen.
 
 ## Security note for WS-8 (CI)
 
