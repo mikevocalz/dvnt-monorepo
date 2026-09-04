@@ -1,55 +1,87 @@
-# Sneaky Lynk web room → MoQ migration plan
+# Sneaky Lynk web room → MoQ migration
 
-Status 2026-09-04. The web product room (`features/sneaky-lynk/screens/room.web.tsx`,
-1,749 lines) is the ONLY Lynk surface still on Fishjam. Genesis rooms
-(`/feed/lynk/[roomId]`) are MoQ on both platforms; the native product room is MoQ
-on branch `ws3b-lynk-moq-product-screens` (unmerged, needs a dev build).
+Status 2026-09-04: **DONE**. `features/sneaky-lynk/screens/room.web.tsx` — the
+Sneaky Lynk product room, the surface `/feed/sneaky-lynk/room/[id]` renders — is
+on MoQ. The native product room is MoQ on this same branch
+(`ws3b-lynk-moq-product-screens`, still awaiting a device test).
 
-## What the web room uses from Fishjam (all direct, no adapter)
-`@fishjam-cloud/react-client`: `FishjamProvider`, `useConnection`
-(join/leave/`peerStatus`), `useCamera`, `useMicrophone`, `usePeers`
-(`remotePeers` with `.cameraTrack`/`.microphoneTrack`/`.metadata`), **`useVAD`**.
-Session machine is fed from `peerStatus`; participant tiles read `peer.cameraTrack`.
+Still on Fishjam, and NOT in this change: `features/video/video-room.web.tsx`
+(a parallel web port of the same native room, served at `/video/room/[id]`) and
+`features/call/call.web.tsx` (1:1 calls). The video-room twin is the next
+candidate — decide whether to port it or retire the route, since it duplicates a
+screen that is now on a different transport.
 
-## What the web MoQ hooks already provide (proven in the genesis room)
-`lib/lynk/useLynkBroadcast.web.ts` + `useLynkViewer.web.ts`:
-`goLive`, `cameraEnabled`/`micEnabled` + setters, `localStream` (MediaStream for
-the local `<video>`), `coPublishers` (discovery-driven), `attachCanvas(path, el)`
-for remote tiles, and a `deriveLynkState` machine. Identity comes from the
-Supabase roster joined on peer id (mirrors native `lynk-participants.ts`).
+## What moved
 
-## The mechanical part (doable)
-- Drop `FishjamProvider`; the MoQ hooks own their own session.
-- `useConnection`/`useCamera`/`useMicrophone` → `useLynkBroadcast(id, canPublish)`.
-- `peers.remotePeers` (+ metadata) → roster × `coPublishers` join, same shape as
-  the native `mergeParticipants`.
-- Tiles: `peer.cameraTrack` → `attachCanvas` for remote, `localStream` for self.
-- Session machine: `peerStatus` → `deriveLynkState` (already the genesis pattern).
+Media only. Join/leave, roles, ejection, host mute, chat, reactions, hand queue,
+capture protection and billing are Supabase and are untouched.
 
-## VAD — SOLVED (was mis-flagged as a blocker)
-MoQ carries no `useVAD`, but it doesn't need to — the audio is right here, so
-speaking detection is a client-side RMS computation, not a missing feature:
-- **Web**: `lib/lynk/useSpeakingDetection.web.ts` (built + tested) — a Web Audio
-  `AnalyserNode` on any MediaStream (the local capture, or a remote publisher's
-  decoded audio), RMS + hysteresis so a ring doesn't flicker between words. Zero
-  new deps.
-- **Native**: `react-native-moq`'s `useAudioChunks({ format: 'pcm-f32' })`
-  delivers decoded PCM per publisher → same RMS. Zero new deps. (`react-native-
-  audio-api` is the native `AnalyserNode` analog but is not needed and not
-  installed.)
-The pure decision (`decideSpeaking`) has a node:test covering threshold, the
-hang window, and word-gap anti-flicker.
+| Was (`@fishjam-cloud/react-client`)      | Is                                              |
+| ---------------------------------------- | ----------------------------------------------- |
+| `FishjamProvider` wrapper                | none — the MoQ hooks own their session          |
+| `useConnection` (join/leave/peerStatus)  | `useLynkBroadcast(id, canPublish)` + `.end()`   |
+| `useCamera` / `useMicrophone`            | `lynk.setCameraEnabled` / `setMicEnabled`       |
+| `usePeers().remotePeers` + metadata      | roster × `lynk.coPublishers`, joined on peer id |
+| `peer.cameraTrack` → `<video>`           | `attachCanvas(path, el)` → `<canvas>`           |
+| `useVAD`                                 | `useSpeakingDetection` + `useSpeakingPresence`  |
+| `peerStatus` → session machine           | `lynk.state` → `TRANSPORT_STATUS_BY_LYNK_STATE` |
 
-## Recommendation
-Given the web room is 1,749 lines of direct Fishjam coupling AND the VAD gap,
-the cheaper path may be **convergence**: the genesis web room
-(`/feed/lynk/[roomId]/web.tsx`) already runs the MoQ web experience. Evaluate
-making it the canonical product room and retiring `room.web.tsx`, rather than
-porting 1,749 lines. That is a bigger product/routing decision (the product room
-has host-mute, eject, hand-queue, capture-protection, billing timer the genesis
-room may not) — so it needs a deliberate comparison, not a blind rewrite.
+## The three decisions worth knowing
 
-## Not started here — why
-This is its own PR. Executing a 1,749-line rewrite of a LIVE web room with a
-known feature-loss (VAD) inside an unrelated batch would be reckless. The plan +
-the VAD decision come first.
+**Identity.** A MoQ path (`lynk/<roomId>/<peerId>`) carries no metadata, so a
+remote tile is a Supabase roster row joined to a discovered publisher on the peer
+id. `peerIdForMember` (`features/video/lynk-participants.ts`) is in LOCKSTEP with
+`peerIdFor` in the `lynk-moq-token` edge function — drift is silent, so change
+both in the same PR.
+
+**Voice activity.** MoQ carries no VAD, and `@moq/watch` exposes no analyser on a
+remote publisher's decoded audio, so a remote ring cannot be measured locally.
+The direction that works is the one every client already has: measure your OWN
+microphone (`useSpeakingDetection`, RMS + hysteresis on `react-native-audio-api`)
+and broadcast the boolean on the room's existing Supabase channel
+(`useSpeakingPresence`) — the same mechanism as `useRoomReactions`, so no new
+dependency and no server work. Sends are edge-triggered: one message when you
+start talking, one when you stop. The merge rule is pure and tested
+(`lib/lynk/speaking-presence.test.ts`).
+
+**Remote tiles always mount their canvas.** Mounting the canvas is what
+subscribes to a publisher — audio included — so it is never conditional on
+knowing whether their camera is on. The avatar sits BEHIND the canvas and shows
+through, because an untouched canvas is transparent. That also sidesteps the
+fact that web MoQ discovery announces a path, not a track list. The path and the
+attach function are passed to `StageTile` separately and memoized into one ref
+there: `attachCanvas(path, null)` closes the subscription, so a ref that changed
+identity every render would tear the stream down on every chat keystroke.
+
+## Fixed on the way through (both platforms)
+
+- **Listeners were stuck at "Connecting…" forever.** `canPublish` false means no
+  publish token is requested, so `deriveLynkState({ hasToken: false })` sat at
+  `requesting-token` permanently. Both `useLynkBroadcast` hooks now report the
+  composed viewer's state for a non-publisher, which is the connection they
+  actually have. This also affected the native room on this branch.
+- **The web hook opened the camera on mount**, regardless of role, so a listener
+  in an audio-only room got a camera permission prompt for a device they can
+  never publish. The sources are now constructed disabled and one effect drives
+  `enabled = flag && !ended && canPublish` — the rule the native hook already had.
+- **The room phase no longer gates on media.** Being in the room is a Supabase
+  fact; a listener whose room has nobody on air yet had a working roster and chat
+  behind a full-screen spinner. Transport health is `ConnectionBanner`'s job.
+
+## Known gaps (deliberate)
+
+- A remote tile's camera/mic badges read "on" for any publisher: web MoQ
+  discovery gives no track list. The speaking ring is the signal that is real.
+  If the muted badge lies too often, broadcast mic state on the `speaking`
+  channel — it is the same shape.
+- A client that vanishes mid-word leaves its last `speaking: true` behind until
+  the roster drops the member (which removes the tile with it). Add a TTL +
+  heartbeat if it ever reads as stuck.
+- Screen share: no room publishes one yet, on either platform.
+
+## Verified
+
+`tsc --noEmit` clean on `packages/app`, `packages/ui`, `apps/web`;
+`pnpm --filter web build` green; `node --test` on the speaking-detection and
+speaking-presence units. **Not yet run against a live relay with two clients** —
+that is the remaining check, same as the native leg.

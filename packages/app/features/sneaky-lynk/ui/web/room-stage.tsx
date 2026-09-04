@@ -32,7 +32,23 @@ export type Tile = {
   isLocal: boolean;
   isHost: boolean;
   isCoHost: boolean;
+  /** Local tile only — the camera capture, bound to a `<video>`. */
   videoStream: MediaStream | null;
+  /**
+   * Remote tile only — MoQ decodes into a `<canvas>`, so a remote participant
+   * has no MediaStream to bind. Mounting the canvas is also what starts their
+   * AUDIO, so it is always rendered, never conditional on knowing whether their
+   * camera is on (web MoQ discovery announces a path, not a track list). An
+   * untouched canvas is transparent, so the avatar behind it shows through
+   * until frames arrive.
+   *
+   * The PATH and the attach function are passed separately, not a pre-bound
+   * ref: `attachCanvas(path, null)` closes the subscription, so a ref whose
+   * identity changed every render would tear the stream down and rebuild it on
+   * every keystroke in the chat. `StageTile` memoizes them into one stable ref.
+   */
+  canvasPath?: string;
+  attachCanvas?: (path: string, el: HTMLCanvasElement | null) => void;
   isCameraOn: boolean;
   isMicOn: boolean;
   /** Currently the active speaker — the tile gets a ring, the way WhatsApp and
@@ -231,6 +247,16 @@ export function TimeUpDialog({
 }
 
 export function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
+  const { canvasPath, attachCanvas } = tile;
+  // Stable across re-renders, so the MoQ backend is created once per publisher
+  // and closed only when the tile really goes away.
+  const canvasRef = useCallback(
+    (el: HTMLCanvasElement | null) => {
+      if (canvasPath && attachCanvas) attachCanvas(canvasPath, el);
+    },
+    [canvasPath, attachCanvas],
+  );
+
   return (
     <div
       // Speaking is a RING, not a background or a glow: it reads at thumbnail
@@ -244,18 +270,27 @@ export function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
           : "border-white/8"
       }`}
     >
-      {tile.isCameraOn && tile.videoStream ? (
+      {/* Avatar is the FLOOR of the tile, not an alternative to it: the canvas
+          above it is transparent until MoQ decodes a frame, so a camera-off
+          participant reads as their avatar while their audio still plays. */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <SquareAvatar uri={tile.avatar} name={tile.name} size={large ? 104 : 72} />
+      </div>
+      {canvasPath ? (
+        <canvas
+          ref={canvasRef}
+          draggable={false}
+          onContextMenu={(event) => event.preventDefault()}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      ) : tile.isCameraOn && tile.videoStream ? (
         <VideoTile
           stream={tile.videoStream}
           muted={tile.isLocal}
           mirror={tile.isLocal}
-          className="h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-cover"
         />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center">
-          <SquareAvatar uri={tile.avatar} name={tile.name} size={large ? 104 : 72} />
-        </div>
-      )}
+      ) : null}
       {/* Muted reads as a badge in the corner, the way Discord and Skype show
           it, so it is legible at thumbnail size and against moving video. A
           dimmed inline icon in a name row was invisible on a busy tile. */}

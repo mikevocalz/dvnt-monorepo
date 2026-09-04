@@ -11,6 +11,12 @@
  *     subscribe-scoped connection — MoQ tokens are single-purpose, so a publisher
  *     needs both a publish token to send and a subscribe token to watch others)
  *
+ * Capture is gated on `canPublish`, exactly like the native sibling: the
+ * sources are constructed DISABLED and a single effect drives
+ * `enabled = flag && !ended && canPublish`. Constructing them enabled opened the
+ * camera the instant the hook mounted, so a listener in an audio-only Sneaky
+ * Lynk room got a camera permission prompt for a device they can never publish.
+ *
  * Teardown on `end()` stops the camera/mic publish — a stream that keeps
  * publishing after you navigate away is a privacy incident, so the screen MUST
  * call `end()` on unmount/leave/background.
@@ -29,6 +35,12 @@ import type { LynkBroadcastBase, LynkPublisher } from "./types";
 export interface UseLynkBroadcastResult extends LynkBroadcastBase {
   /** Local camera preview for the broadcaster's own tile. */
   localStream: MediaStream | null;
+  /**
+   * The local microphone capture, for client-side VAD (`useSpeakingDetection`).
+   * MoQ carries no voice-activity signal, so a speaking ring is computed from
+   * this stream rather than received from the transport.
+   */
+  localAudioStream: MediaStream | null;
   /** Attach/detach a `<canvas>` for a co-publisher path (the cohost). */
   attachCanvas: (path: string, canvas: HTMLCanvasElement | null) => void;
 }
@@ -66,11 +78,13 @@ export function useLynkBroadcast(
         enabled: true,
       });
     }
+    // Constructed DISABLED — the effect below opens the devices once we know
+    // this member may publish. See the header note.
     if (!cameraRef.current) {
-      cameraRef.current = new Publish.Source.Camera({ enabled: true });
+      cameraRef.current = new Publish.Source.Camera({ enabled: false });
     }
     if (!micRef.current) {
-      micRef.current = new Publish.Source.Microphone({ enabled: true });
+      micRef.current = new Publish.Source.Microphone({ enabled: false });
     }
   }
   const reload = reloadRef.current;
@@ -96,6 +110,32 @@ export function useLynkBroadcast(
     [cameraTrack],
   );
 
+  // `mic.source` is `Signal<Audio.Source | undefined>`, and Audio.Source is
+  // either the track itself or `{ track, kind }` — normalize to the track.
+  const micSource = (mic?.source ??
+    new Signal<Publish.Audio.Source | undefined>(undefined)) as Getter<
+    Publish.Audio.Source | undefined
+  >;
+  const micSourceValue = useSignalValue(micSource);
+  const micTrack =
+    micSourceValue && "track" in micSourceValue
+      ? micSourceValue.track
+      : micSourceValue;
+  const localAudioStream = useMemo(
+    () => (micTrack ? new MediaStream([micTrack]) : null),
+    [micTrack],
+  );
+
+  // Capture follows the flags AND the role. Same rule as the native hook, where
+  // it is `useCamera({ enabled: cameraEnabled && !ended && canPublish })`.
+  useEffect(() => {
+    camera?.enabled.set(cameraEnabled && !ended && canPublish);
+  }, [camera, cameraEnabled, ended, canPublish]);
+
+  useEffect(() => {
+    mic?.enabled.set(micEnabled && !ended && canPublish);
+  }, [mic, micEnabled, ended, canPublish]);
+
   const goLive = useCallback(async () => {
     if (!canPublish) return;
     if (!reload || !camera || !mic || !token || broadcastRef.current) return;
@@ -109,20 +149,14 @@ export function useLynkBroadcast(
     setIsLive(true);
   }, [reload, camera, mic, token, canPublish]);
 
-  const setCameraEnabled = useCallback(
-    (on: boolean) => {
-      setCameraEnabledState(on);
-      camera?.enabled.set(on);
-    },
-    [camera],
-  );
-  const setMicEnabled = useCallback(
-    (on: boolean) => {
-      setMicEnabledState(on);
-      mic?.enabled.set(on);
-    },
-    [mic],
-  );
+  // State only — the effect above is what touches the device, so the gate can
+  // never be bypassed by a toggle that fires before the role has landed.
+  const setCameraEnabled = useCallback((on: boolean) => {
+    setCameraEnabledState(on);
+  }, []);
+  const setMicEnabled = useCallback((on: boolean) => {
+    setMicEnabledState(on);
+  }, []);
 
   const end = useCallback(() => {
     setEnded(true);
@@ -145,19 +179,26 @@ export function useLynkBroadcast(
     [viewer.publishers, token?.peerId],
   );
 
-  const state = deriveLynkState({
-    hasToken: !!token,
-    connection: reload ? status : undefined,
-    hasMedia: isLive,
-    ended,
-    error: !!tokenError,
-  });
+  // A listener requests NO publish token (`canPublish` false), so the publish
+  // lifecycle has nothing to report and `deriveLynkState` would sit at
+  // `requesting-token` forever. Their real state is the composed viewer's — the
+  // subscribe connection is the one they actually have.
+  const state = canPublish
+    ? deriveLynkState({
+        hasToken: !!token,
+        connection: reload ? status : undefined,
+        hasMedia: isLive,
+        ended,
+        error: !!tokenError,
+      })
+    : viewer.state;
 
   return {
     state,
-    error: tokenError,
+    error: canPublish ? tokenError : viewer.error,
     isLive,
     localStream,
+    localAudioStream,
     cameraEnabled,
     micEnabled,
     setCameraEnabled,

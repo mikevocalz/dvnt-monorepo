@@ -33,6 +33,13 @@ interface RoomUIStore {
   errorMessage: string | null;
   isMicOn: boolean;
   isCameraOn: boolean;
+  /**
+   * The role `video_join_room` resolved for this member. State, not a ref: the
+   * MoQ transport only mints a PUBLISH token for host/co-host/speaker, so
+   * `canPublish` has to re-render the hook when the role lands. A ref would
+   * leave a host stuck as a silent listener.
+   */
+  localRole: string | null;
 
   /**
    * WEB-only surfaces with no native-useState equivalent. The native room
@@ -72,6 +79,7 @@ interface RoomUIStore {
   setError: (message: string) => void;
   setMicOn: (v: boolean) => void;
   setCameraOn: (v: boolean) => void;
+  setLocalRole: (v: string | null) => void;
   setParticipantsOpen: (v: boolean) => void;
   setIsPaidHost: (v: boolean) => void;
   setTimerStartedAt: (v: number) => void;
@@ -91,6 +99,7 @@ const initialUIState = {
   errorMessage: null as string | null,
   isMicOn: false,
   isCameraOn: false,
+  localRole: null as string | null,
   isParticipantsOpen: false,
   isPaidHost: null as boolean | null,
   timerStartedAt: null as number | null,
@@ -112,6 +121,7 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setError: (errorMessage) => set({ phase: "error", errorMessage }),
   setMicOn: (isMicOn) => set({ isMicOn }),
   setCameraOn: (isCameraOn) => set({ isCameraOn }),
+  setLocalRole: (localRole) => set({ localRole }),
   setParticipantsOpen: (isParticipantsOpen) => set({ isParticipantsOpen }),
   setIsPaidHost: (isPaidHost) => set({ isPaidHost }),
   setTimerStartedAt: (timerStartedAt) => set({ timerStartedAt }),

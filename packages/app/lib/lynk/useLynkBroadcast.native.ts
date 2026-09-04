@@ -157,17 +157,23 @@ export function useLynkBroadcast(
     ? publisher.lastError || publisher.state.slice("error:".length)
     : null;
 
-  const state = deriveLynkState({
-    hasToken: !!token,
-    connection: connectionStatusFromSession(session.state),
-    hasMedia: publisher.state === "publishing",
-    ended,
-    error: !!tokenError || !!publisherError,
-  });
+  // A listener requests NO publish token (`canPublish` false), so the publish
+  // lifecycle has nothing to report and `deriveLynkState` would sit at
+  // `requesting-token` forever — the screen would never leave "Connecting…".
+  // Their real state is the composed viewer's. Mirrors the web sibling.
+  const state = canPublish
+    ? deriveLynkState({
+        hasToken: !!token,
+        connection: connectionStatusFromSession(session.state),
+        hasMedia: publisher.state === "publishing",
+        ended,
+        error: !!tokenError || !!publisherError,
+      })
+    : viewer.state;
 
   return {
     state,
-    error: tokenError ?? publisherError,
+    error: canPublish ? tokenError ?? publisherError : viewer.error,
     isLive,
     cameraTrack: camera,
     cameraEnabled,

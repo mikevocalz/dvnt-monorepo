@@ -4,10 +4,23 @@
  * Sneaky Lynk Room — WEB (port of native
  * `app/(protected)/sneaky-lynk/room/[id].tsx`).
  *
- * The native room wraps `@fishjam-cloud/react-native-client` (native-only) +
- * VisionCamera + a screen-capture guard. On web we use the REAL web SDK
- * `@fishjam-cloud/react-client` — `FishjamProvider`, `useConnection`,
- * `useCamera`, `useMicrophone`, `usePeers` — exactly like `call.web.tsx`.
+ * TRANSPORT: MoQ (`useLynkBroadcast.web` → `@moq/*`), the same transport the
+ * native room moved to in WS-3b and the genesis rooms already run. Fishjam is
+ * gone from this screen: no `FishjamProvider`, no `useConnection` / `useCamera`
+ * / `useMicrophone` / `usePeers` / `useVAD`.
+ *
+ * What that changes, and what it does not:
+ *   - Media only. Join/leave, roles, ejection, host mute, chat, reactions,
+ *     hand queue and billing are Supabase and are untouched.
+ *   - Identity: a MoQ path (`lynk/<roomId>/<peerId>`) carries no metadata, so
+ *     remote tiles are the Supabase roster joined to discovered publishers on
+ *     the peer id — `peerIdForMember` in `features/video/lynk-participants.ts`,
+ *     which is in LOCKSTEP with the `lynk-moq-token` edge function.
+ *   - Remote video is a `<canvas>` (WebCodecs), not a MediaStream.
+ *   - Voice activity: MoQ has no `useVAD` and `@moq/watch` exposes no analyser
+ *     for a remote publisher, so each client measures its OWN microphone
+ *     (`useSpeakingDetection`) and broadcasts the boolean on the room's
+ *     Supabase channel (`useSpeakingPresence`) — the `useRoomReactions` pattern.
  *
  * Law 1 (data is sacred): the PORTABLE sneaky-lynk hooks/mutations are wired
  * verbatim —
@@ -15,7 +28,6 @@
  *   - Join (peer token): `sneakyLynkApi.joinRoom(id, anonymous)` (Supabase edge
  *     fn `video_join_room`) → { token, peer, user, room } — the SAME token path
  *     native uses.
- *   - `resolveFishjamAppId()` for the FishjamProvider id.
  *   - Hand raise: `sneakyLynkApi.toggleHand(id, raised)`.
  *   - Leave/end: `sneakyLynkApi.leaveRoom(id)` (non-host) /
  *     `sneakyLynkApi.endRoom(id)` (host) + `useLynkHistoryStore.endRoom(...)`.
@@ -47,14 +59,6 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "solito/navigation";
 import {
-  FishjamProvider,
-  useConnection,
-  useVAD,
-  useCamera,
-  useMicrophone,
-  usePeers,
-} from "@fishjam-cloud/react-client";
-import {
   ArrowLeft,
   Radio,
   Mic,
@@ -75,14 +79,22 @@ import {
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ConnectionBanner, RoomTimer } from "@dvnt/ui";
-import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
+import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.web";
+import { useSpeakingDetection } from "@dvnt/app/lib/lynk/useSpeakingDetection.web";
+import { useSpeakingPresence } from "@dvnt/app/lib/lynk/useSpeakingPresence";
+import { peerIdForMember } from "@dvnt/app/features/video/lynk-participants";
+import type { LynkState } from "@dvnt/app/lib/lynk/lynkState";
 import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
 import { getSneakyUserLabel } from "../ui/user-labels";
-import { bannerPhaseFor, useRoomSession } from "../session/useRoomSession";
+import {
+  bannerPhaseFor,
+  useRoomSession,
+  type RoomTransportStatus,
+} from "../session/useRoomSession";
 import { isActive } from "../session/machine";
 import { useRoomHeartbeat } from "../hooks/useRoomHeartbeat";
 import { useRoomReactions } from "../hooks/useRoomReactions";
@@ -138,6 +150,21 @@ const MAGENTA = "#FF5BFC";
 
 /** A room member as projected for the web moderation panels — the web-safe
  *  shape returned by `videoApi.subscribeToMembers` / `getRoomMembers`. */
+
+/**
+ * MoQ lifecycle → the session machine's vocabulary. `requesting-token` is a
+ * connect step, not an idle one: the room is already trying, and reporting idle
+ * would leave the banner silent through the slowest part of a join.
+ */
+const TRANSPORT_STATUS_BY_LYNK_STATE: Record<LynkState, RoomTransportStatus> = {
+  idle: "idle",
+  "requesting-token": "connecting",
+  connecting: "connecting",
+  live: "connected",
+  reconnecting: "reconnecting",
+  ended: "disconnected",
+  error: "error",
+};
 
 function isClosedRoomError(message?: string | null) {
   if (!message) return false;
@@ -457,7 +484,7 @@ function WebViewerDisclosureChip() {
 // ── Stage tile (one participant). `large` = featured host/co-host (wide,
 //    top-of-stage); otherwise a compact square in the grid below. ─────────────
 
-// ── Inner room (rendered INSIDE FishjamProvider so SDK hooks are valid) ───────
+// ── Inner room (MoQ transport + the Supabase room domain) ────────────────────
 function RoomInner({
   id,
   paramTitle,
@@ -474,53 +501,32 @@ function RoomInner({
   const showToast = useUIStore((s) => s.showToast);
   const endRoomHistory = useLynkHistoryStore((s) => s.endRoom);
 
-  const { joinRoom, leaveRoom, peerStatus } = useConnection();
-  /** Set once the room has ever been joined. A ref, not state: it only ever
-   *  reads during render alongside peerStatus, which already re-renders. */
-  const everConnectedRef = useRef(false);
-  // Same session machine as native, fed from Fishjam's peerStatus. It owns
-  // "is this room live" and the observability seam follows it. The banner
-  // still reads peerStatus directly — see the native counterpart.
   const setServerEndsAt = useRoomUIStore((s) => s.setServerEndsAt);
-  /**
-   * Re-establish the room after a drop: fresh peer token, re-attach. Same
-   * identity and role — the token is minted for this user against this room,
-   * so the roster sees no leave/join pair.
-   *
-   * ponytail: the token+attach pair is written twice, here and in the initial
-   * join effect, which additionally owns the error surfaces, the cancel guard
-   * and the media start. Collapsing them means refactoring the working
-   * first-join path; fold them together once a device has run a real reconnect.
-   */
-  const rejoinRoom = useCallback(async (): Promise<boolean> => {
-    const result = await sneakyLynkApi.joinRoom(id, joinAnonymousRef.current);
-    if (!result.ok || !result.data) return false;
-    const { token, peer, user: joinedUser, room } = result.data;
-    setServerEndsAt(room.endsAt ?? null);
-    try {
-      await joinRoomRef.current({
-        peerToken: token,
-        peerMetadata: {
-          userId: joinedUser.id,
-          username: joinedUser.username,
-          avatar: joinedUser.avatar,
-          role: peer.role,
-        },
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  }, [id, setServerEndsAt]);
 
-  const session = useRoomSession(peerStatus, { onReconnect: rejoinRoom });
+  // ── Media transport (MoQ) ─────────────────────────────────────────────────
+  // The role only exists once `video_join_room` resolves, so `canPublish` is
+  // false until then: no publish token is requested, `lynk-moq-token` is never
+  // asked to deny one (it denies `publish` for a listener), and the camera/mic
+  // stay closed. When the role lands the hook mints, connects and goes live.
+  const localRole = useRoomUIStore((s) => s.localRole);
+  const canPublish =
+    localRole === "host" || localRole === "co-host" || localRole === "speaker";
+  const lynk = useLynkBroadcast(id || undefined, canPublish);
+
+  // Same session machine as native, now fed from the MoQ lifecycle. It owns
+  // "is this room live" and the observability seam follows it.
+  //
+  // No `onReconnect`: `Moq.Connection.Reload` owns transport recovery, so the
+  // machine observes `reconnecting → live` rather than driving a rejoin. The
+  // Fishjam version had to re-mint a peer token by hand because its transport
+  // could not reconnect itself.
+  const session = useRoomSession(
+    TRANSPORT_STATUS_BY_LYNK_STATE[lynk.state] ?? "idle",
+  );
   // Keeps this member fresh so the browse list stops showing the room as Live
   // once everyone has gone. Tied to the session, not the mount: a room that is
   // still joining should not yet advertise a live host.
   useRoomHeartbeat(id, isActive(session));
-  const camera = useCamera();
-  const microphone = useMicrophone();
-  const peers = usePeers();
 
   // Shared sneaky-lynk room-domain state.
   const isHandRaised = useRoomStore((s) => s.isHandRaised);
@@ -543,8 +549,6 @@ function RoomInner({
   // Web UI/connection phase store (no useState).
   const phase = useRoomUIStore((s) => s.phase);
   const joinAnonymous = useRoomUIStore((s) => s.joinAnonymous);
-  const joinAnonymousRef = useRef(joinAnonymous);
-  joinAnonymousRef.current = joinAnonymous;
   const closedReason = useRoomUIStore((s) => s.closedReason);
   const errorMessage = useRoomUIStore((s) => s.errorMessage);
   const isMicOn = useRoomUIStore((s) => s.isMicOn);
@@ -574,15 +578,11 @@ function RoomInner({
   const eject = useRoomUIStore((s) => s.eject);
   const setEject = useRoomUIStore((s) => s.setEject);
 
-  // Stable refs so callbacks/effects never capture stale SDK objects.
-  const joinRoomRef = useRef(joinRoom);
-  joinRoomRef.current = joinRoom;
-  const leaveRoomRef = useRef(leaveRoom);
-  leaveRoomRef.current = leaveRoom;
-  const cameraRef = useRef(camera);
-  cameraRef.current = camera;
-  const micRef = useRef(microphone);
-  micRef.current = microphone;
+  // Stable ref so callbacks/effects never capture a stale transport object —
+  // the hook's callbacks are not identity-stable across a reconnect.
+  const lynkRef = useRef(lynk);
+  lynkRef.current = lynk;
+  const setLocalRole = useRoomUIStore((s) => s.setLocalRole);
   const isHostRef = useRef(isCreator);
   const isCoHostRef = useRef(false);
   // Per-MOUNT join guard. Must be a local ref, NOT the global store's
@@ -629,13 +629,7 @@ function RoomInner({
   // the peer's server role (line ~1219) and is the value in scope this early.
   useRoomModerationWatcher(id, authUser?.id, isHostRef.current, hostMuteLocked, (kind, reason) => {
     try {
-      leaveRoomRef.current();
-    } catch {
-      // ignore
-    }
-    try {
-      cameraRef.current.stopCamera();
-      micRef.current.stopMicrophone();
+      lynkRef.current.end();
     } catch {
       // ignore
     }
@@ -646,7 +640,7 @@ function RoomInner({
     setHostMuteLocked(locked);
     if (stopMic) {
       try {
-        micRef.current.stopMicrophone();
+        lynkRef.current.setMicEnabled(false);
       } catch {
         // ignore
       }
@@ -657,7 +651,9 @@ function RoomInner({
     }
   });
 
-  // ── JOIN: sneaky-lynk peer token → Fishjam joinRoom → start media ──────────
+  // ── JOIN: `video_join_room` → roster, role, deadline. NOT the media path.
+  //    MoQ mints its own token from `lynk-moq-token` inside `useLynkBroadcast`,
+  //    keyed off the role this call resolves. ────────────────────────────────
   useEffect(() => {
     if (joinFiredRef.current || !id) return;
     joinFiredRef.current = true;
@@ -689,7 +685,7 @@ function RoomInner({
         return;
       }
 
-      const { token, peer, user: joinedUser, room } = result.data;
+      const { peer, user: joinedUser, room } = result.data;
       // The server's session deadline (video_rooms.ends_at). `undefined` means
       // a backend predating the gate, and the entitlement fallback below still
       // applies; `null` means unlimited; a value means count down to THIS.
@@ -720,40 +716,10 @@ function RoomInner({
       isCoHostRef.current = peer.role === "co-host";
 
       setPhase("connecting");
-      try {
-        await joinRoomRef.current({
-          peerToken: token,
-          peerMetadata: {
-            userId: joinedUser.id,
-            username: joinedUser.username,
-            avatar: joinedUser.avatar,
-            role: peer.role,
-          },
-        });
-      } catch (err: any) {
-        if (cancelled) return;
-        setErrorState(err?.message || "WebRTC connection failed");
-        return;
-      }
-      if (cancelled) return;
-
-      // Start media — mic always, camera only for video rooms.
-      try {
-        if (!micRef.current.isMicrophoneOn) await micRef.current.toggleMicrophone();
-        setMicOn(true);
-      } catch {
-        // mic failure non-fatal
-      }
-      if (roomHasVideo) {
-        try {
-          if (!cameraRef.current.isCameraOn) await cameraRef.current.toggleCamera();
-          setCameraOn(true);
-        } catch {
-          // camera failure non-fatal — audio-only
-        }
-      }
-      if (cancelled) return;
-      setPhase("connected");
+      // Publishing the role is what starts the transport: `canPublish` flips,
+      // the publish token mints, and the go-live effect below fires. A listener
+      // keeps `canPublish` false and only ever subscribes.
+      setLocalRole(peer.role);
     })();
 
     return () => {
@@ -762,19 +728,45 @@ function RoomInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, joinAnonymous, roomHasVideo]);
 
-  // ── Sync Fishjam peerStatus → phase ───────────────────────────────────────
+  // ── Go live ───────────────────────────────────────────────────────────────
+  // Publishing starts once we hold BOTH a publish-capable role and a minted
+  // token. `goLive` no-ops without a token and changes identity when one
+  // arrives, so this re-runs exactly once more at that point. Same effect as
+  // the native room — deliberately NOT called inside the join effect, where
+  // `lynkRef` still holds the render whose token was null.
+  useEffect(() => {
+    if (!canPublish || lynk.isLive) return;
+    void lynk.goLive();
+  }, [canPublish, lynk.isLive, lynk.goLive]);
+
+  // ── Room phase ────────────────────────────────────────────────────────────
+  // Being IN the room is a Supabase fact (`video_join_room` resolved a role),
+  // not a media fact. Gating the whole screen on media meant a listener — who
+  // never publishes, and whose room may have nobody on air yet — sat on a
+  // full-screen spinner with a working roster and chat behind it. Transport
+  // health is what `ConnectionBanner` (fed by the session machine) is for.
   useEffect(() => {
     if (phase === "closed" || phase === "error" || phase === "prejoin") return;
-    if (peerStatus === "connected") {
-      // Session history: once a room has been joined, a later "connecting"
-      // from Fishjam is a RE-connect. The transport cannot tell us this —
-      // PeerStatus has no reconnecting member.
-      everConnectedRef.current = true;
-      setPhase("connected");
-    }
-    else if (peerStatus === "error") setErrorState("Peer connection failed");
+    if (lynk.state === "error") setErrorState(lynk.error || "Connection failed");
+    else if (localRole) setPhase("connected");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [peerStatus]);
+  }, [lynk.state, lynk.error, localRole]);
+
+  // The transport owns capture; mirror it into the UI store so the mic/camera
+  // buttons can never drift from what is actually being published.
+  useEffect(() => {
+    setMicOn(lynk.micEnabled && canPublish);
+  }, [lynk.micEnabled, canPublish, setMicOn]);
+
+  useEffect(() => {
+    setCameraOn(lynk.cameraEnabled && canPublish && roomHasVideo);
+  }, [lynk.cameraEnabled, canPublish, roomHasVideo, setCameraOn]);
+
+  // An audio-only room must never open the camera. Set before the role lands,
+  // so the capture gate in `useLynkBroadcast` never sees `cameraEnabled` true.
+  useEffect(() => {
+    if (!roomHasVideo) lynkRef.current.setCameraEnabled(false);
+  }, [roomHasVideo]);
 
   // ── Connection watchdog: never leave the user on an infinite spinner ───────
   // Purely additive — only fires if we're still joining/connecting after 25s.
@@ -793,16 +785,13 @@ function RoomInner({
   }, [phase, setErrorState]);
 
   // ── Cleanup on unmount (mirrors native leave/reset) ───────────────────────
+  // `useLynkBroadcast` tears its own transport down on unmount; this is belt
+  // and braces plus the domain reset. A stream still publishing after you
+  // navigate away is a privacy incident, so it is called explicitly.
   useEffect(() => {
     return () => {
       try {
-        leaveRoomRef.current();
-      } catch {
-        // ignore
-      }
-      try {
-        cameraRef.current.stopCamera();
-        micRef.current.stopMicrophone();
+        lynkRef.current.end();
       } catch {
         // ignore
       }
@@ -815,7 +804,7 @@ function RoomInner({
   const toggleMic = useCallback(() => {
     // Muting yourself is always allowed. Turning the microphone back ON is not,
     // while the host is holding the mute — otherwise the lock is decoration.
-    const turningOn = !micRef.current.isMicrophoneOn;
+    const turningOn = !lynkRef.current.micEnabled;
     if (
       turningOn &&
       !canSelfUnmute({ locked: hostMuteLocked }, isHostRef.current)
@@ -823,18 +812,12 @@ function RoomInner({
       showToast("info", "Muted by host", HOST_MUTE_COPY.blocked);
       return;
     }
-    void (async () => {
-      await micRef.current.toggleMicrophone();
-      setMicOn(micRef.current.isMicrophoneOn);
-    })();
-  }, [setMicOn, hostMuteLocked, showToast]);
+    lynkRef.current.setMicEnabled(turningOn);
+  }, [hostMuteLocked, showToast]);
 
   const toggleCamera = useCallback(() => {
-    void (async () => {
-      await cameraRef.current.toggleCamera();
-      setCameraOn(cameraRef.current.isCameraOn);
-    })();
-  }, [setCameraOn]);
+    lynkRef.current.setCameraEnabled(!lynkRef.current.cameraEnabled);
+  }, []);
 
   const handToggleInFlight = useRef(false);
   const toggleHand = useCallback(() => {
@@ -882,7 +865,7 @@ function RoomInner({
         // ignore — leaving is idempotent
       } finally {
         try {
-          leaveRoomRef.current();
+          lynkRef.current.end();
         } catch {
           // ignore
         }
@@ -1016,52 +999,60 @@ function RoomInner({
     router.push("/feed/sneaky-lynk/billing");
   }, [router, setShowTimeUp]);
 
-  // ── Build tiles from local + remote peers ─────────────────────────────────
-  const localStream = camera.cameraStream ?? null;
+  // ── Voice activity ────────────────────────────────────────────────────────
+  // Own mic → RMS + hysteresis, locally. Everyone else's speaking state arrives
+  // on the room's Supabase channel because MoQ carries no VAD and `@moq/watch`
+  // gives no analyser for a remote publisher's decoded audio. See
+  // `lib/lynk/speaking-presence.ts`.
+  const isSelfSpeaking =
+    useSpeakingDetection(lynk.localAudioStream) && isMicOn;
+  const remoteSpeaking = useSpeakingPresence({
+    roomId: id,
+    userId: authUser?.id,
+    speaking: isSelfSpeaking,
+  });
+  const speakingByUserId: Record<string, boolean> = { ...remoteSpeaking };
+  if (authUser?.id) speakingByUserId[authUser.id] = isSelfSpeaking;
+
+  // ── Build tiles: local capture + roster × discovered MoQ publishers ───────
+  // A MoQ path carries no metadata, so identity is the Supabase roster and the
+  // join key is the peer id BOTH sides derive from the user — `peerIdForMember`
+  // mirrors `peerIdFor` in the `lynk-moq-token` edge function.
   const localName = joinAnonymous
     ? "You"
     : authUser?.username || authUser?.name || "You";
 
-  const remotePeers = peers.remotePeers || [];
-  // Real voice activity, not a guess. Fishjam drives remote VAD from backend
-  // vadNotification messages and polls the mic for the local peer
-  // (@fishjam-cloud/react-client useVAD.d.ts). Without this the stage gives no
-  // clue who is talking, which is the single thing a grid of faces must convey.
-  const speakingByPeer = useVAD({
-    peerIds: [
-      ...(peers.localPeer?.id ? [peers.localPeer.id] : []),
-      ...remotePeers.map((p) => p.id),
-    ],
-  });
-  const remoteTiles: Tile[] = remotePeers.map((peer) => {
-    const meta = ((peer.metadata as any)?.peer ?? peer.metadata) as any;
-    const cam = peer.cameraTrack as any;
-    const mic = peer.microphoneTrack as any;
-    return {
-      key: peer.id,
-      name: meta?.username ?? "Guest",
-      avatar: meta?.avatar,
-      isLocal: false,
-      isHost: meta?.role === "host",
-      isCoHost: meta?.role === "co-host",
-      videoStream: cam?.stream ?? null,
-      isCameraOn: !!(cam?.stream || cam?.track || cam?.trackId),
-      isMicOn: !!(mic?.stream || mic?.track || mic?.trackId),
-      isSpeaking: !!speakingByPeer[peer.id],
-    };
-  });
-
-  // useVAD is keyed by Fishjam peer id; the participants panel lists members by
-  // our user id. Map once here rather than making the panel know about peers.
-  const speakingByUserId: Record<string, boolean> = {};
-  for (const peer of remotePeers) {
-    const meta = ((peer.metadata as any)?.peer ?? peer.metadata) as any;
-    const uid = meta?.userId;
-    if (uid) speakingByUserId[uid] = !!speakingByPeer[peer.id];
-  }
-  if (authUser?.id && peers.localPeer?.id) {
-    speakingByUserId[authUser.id] = !!speakingByPeer[peers.localPeer.id];
-  }
+  const publisherByPeerId = new Map(lynk.coPublishers.map((p) => [p.peerId, p]));
+  const remoteTiles: Tile[] = members
+    .filter((m) => m.status === "active" && m.userId !== authUser?.id)
+    .map((member) => {
+      const publisher = publisherByPeerId.get(
+        peerIdForMember(member.userId, member.anonLabel),
+      );
+      return {
+        key: member.userId,
+        name: member.displayName || member.username || "Guest",
+        avatar: member.avatar,
+        isLocal: false,
+        isHost: member.role === "host",
+        isCoHost: member.role === "co-host",
+        videoStream: null,
+        // Mounting the canvas is what subscribes to this publisher — audio
+        // included — so it is attached for every publisher, camera or not.
+        canvasPath: publisher?.path,
+        attachCanvas: lynk.attachCanvas,
+        // ponytail: web MoQ discovery announces a PATH, not a track list, so a
+        // publisher's camera/mic state is not knowable here (the native tile
+        // reads `broadcast.videoTracks`, which the web viewer has no analog
+        // for). "On air" is the honest approximation, and the speaking ring —
+        // which IS real, broadcast per client — carries the live signal. If the
+        // muted badge starts lying too often, broadcast mic state on the same
+        // channel as `speaking`.
+        isCameraOn: !!publisher,
+        isMicOn: !!publisher,
+        isSpeaking: !!speakingByUserId[member.userId],
+      } satisfies Tile;
+    });
 
   const localTile: Tile = {
     key: "local",
@@ -1070,10 +1061,10 @@ function RoomInner({
     isLocal: true,
     isHost: isHostRef.current,
     isCoHost: isCoHostRef.current,
-    videoStream: localStream,
+    videoStream: lynk.localStream,
     isCameraOn,
     isMicOn,
-    isSpeaking: !!(peers.localPeer?.id && speakingByPeer[peers.localPeer.id]),
+    isSpeaking: isSelfSpeaking,
   };
 
   const stageTiles = [localTile, ...remoteTiles];
@@ -1264,10 +1255,8 @@ function RoomInner({
                 setShowTimeUp(true);
                 // Free session is over — stop broadcasting so no camera/mic keeps
                 // running behind the upgrade sheet.
-                cameraRef.current.stopCamera();
-                micRef.current.stopMicrophone();
-                setCameraOn(false);
-                setMicOn(false);
+                lynkRef.current.setCameraEnabled(false);
+                lynkRef.current.setMicEnabled(false);
               }}
             />
           ) : null}
@@ -1637,7 +1626,7 @@ function PreJoinScreen({
   );
 }
 
-// ── Public entry: pre-join gate + FishjamProvider wrapper ─────────────────────
+// ── Public entry: pre-join gate → the room ───────────────────────────────────
 export function SneakyLynkRoomScreen() {
   const router = useRouter();
   const params = useParams();
@@ -1734,15 +1723,15 @@ export function SneakyLynkRoomScreen() {
     return <PreJoinScreen roomTitle={roomTitle} onJoin={handleJoin} onBack={() => router.back()} />;
   }
 
+  // No provider: the MoQ hooks own their own connection and token, so the room
+  // mounts directly.
   return (
-    <FishjamProvider fishjamId={resolveFishjamAppId()}>
-      <RoomInner
-        id={id}
-        paramTitle={paramTitle}
-        roomHasVideo={roomHasVideo}
-        isCreator={isCreator}
-      />
-    </FishjamProvider>
+    <RoomInner
+      id={id}
+      paramTitle={paramTitle}
+      roomHasVideo={roomHasVideo}
+      isCreator={isCreator}
+    />
   );
 }
 
