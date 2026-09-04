@@ -7,11 +7,22 @@
  * platforms) with an `AnalyserNode`, reporting "speaking" from short-term RMS
  * with hysteresis so a ring doesn't flicker between words.
  *
- * Web source binding: a live MediaStream can't be tapped directly by
- * react-native-audio-api (it has no createMediaStreamSource), so the stream is
- * attached to a hidden muted <audio> element and read via
- * `createMediaElementSource`. The element's audio is routed INTO the graph and
- * the analyser is NOT connected to the destination, so nothing double-plays.
+ * Web source binding: react-native-audio-api's web build has no
+ * `createMediaStreamSource`, only `createMediaElementSource`. The first version
+ * of this hook therefore parked the stream on a hidden muted <audio> element and
+ * tapped that — and it read SILENCE. Chrome does not reliably route a
+ * `srcObject` MediaStream through `createMediaElementSource`; the graph gets a
+ * dead node, the RMS is flat zero, and the speaking ring never lights. A live
+ * two-client run is what surfaced it; the unit test covers `decideSpeaking`,
+ * which was never the broken part.
+ *
+ * The fix keeps react-native-audio-api as the engine — so the RMS + hysteresis
+ * is literally the same code path as native — and reaches through to the one
+ * node its web build does not wrap. `AudioContext.context` is the underlying
+ * `globalThis.AudioContext` and every wrapper exposes its `node`, so the source
+ * is created natively and connected native-to-native. The analyser is never
+ * connected to the destination, so nothing double-plays.
+ *
  * On native the same hook is backed by AudioRecorder (see the native sibling).
  *
  * One context per stream, torn down on change/unmount — a leaked AudioContext
@@ -42,24 +53,24 @@ export function useSpeakingDetection(
       return;
     }
 
-    // Hidden element carries the stream; react-native-audio-api taps it.
-    const el = document.createElement("audio");
-    el.srcObject = stream;
-    el.muted = true;
-    el.play().catch(() => {});
-
     const ctx = new AudioContext();
-    // createMediaElementSource redirects the element's audio into the graph;
-    // connecting only to the analyser (never to ctx.destination) keeps it silent.
-    // The unified react-native-audio-api types barrel exposes the NATIVE
-    // signature (AudioTagHandle); the web build (AudioContext.web) actually
-    // accepts an HTMLMediaElement (AudioContext.web.d.ts). Cast at this one
-    // boundary — the runtime is correct.
-    const source = ctx.createMediaElementSource(el as unknown as never);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
     analyser.smoothingTimeConstant = 0.6;
-    source.connect(analyser);
+
+    // The two casts are the same boundary the file has always had: the unified
+    // `react-native-audio-api` types barrel publishes the NATIVE signatures,
+    // while webpack resolves the `.web` build at runtime. `AudioContext.web`
+    // exposes `.context` (the real AudioContext) and `AudioNode.web` exposes
+    // `.node` (the real node) — see web-core/*.web.d.ts. The runtime is correct;
+    // only the barrel's types are the wrong platform.
+    const nativeCtx = (ctx as unknown as { context: globalThis.AudioContext })
+      .context;
+    const nativeAnalyser = (
+      analyser as unknown as { node: globalThis.AnalyserNode }
+    ).node;
+    const source = nativeCtx.createMediaStreamSource(stream);
+    source.connect(nativeAnalyser);
 
     const buf = new Float32Array(analyser.fftSize);
     let raf = 0;
@@ -85,7 +96,6 @@ export function useSpeakingDetection(
         source.disconnect();
       } catch {}
       void ctx.close();
-      el.srcObject = null;
       setSpeaking(false);
     };
   }, [stream, threshold, hangMs]);

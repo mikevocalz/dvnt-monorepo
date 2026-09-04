@@ -43,6 +43,13 @@ const fakeMediaArgs = [
 
 export default defineConfig({
   testDir: "./e2e/specs",
+  // Writes the fake-capture fixtures below if they are absent. They were
+  // missing outright until 2026-09-04, and Chrome does not complain about a
+  // bad --use-file-for-fake-*-capture path: it silently produces no video
+  // track and silent audio, so every media assertion fails looking like an app
+  // bug. Generating them is also why they are not committed — raw Y4M is
+  // uncompressed.
+  globalSetup: "./e2e/support/media-fixtures.ts",
   // Serial: every spec drives ONE shared audit account against a shared
   // backend. Parallel runs would race each other's rooms, RSVPs and drafts.
   workers: 1,
