@@ -16,7 +16,16 @@
  * Known web follow-ups (present on mobile, queued next): multi-tier ticket
  * editor and co-organizer search. Single-tier ticketing is fully wired here.
  */
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useId,
+  Children,
+  cloneElement,
+  isValidElement,
+  type ReactElement,
+} from "react";
 import { useRouter } from "solito/navigation";
 import {
   Calendar,
@@ -102,14 +111,34 @@ function Field({
   error?: string;
   children: React.ReactNode;
 }) {
+  // Bind the label to the control. Previously the <label> stood next to the
+  // input with no `htmlFor`, so the field's only accessible name was its
+  // placeholder — which vanishes once typed into (WCAG 2.1 AA 3.3.2 / 1.3.1).
+  // The single control child is cloned to receive the id + error wiring.
+  const id = useId();
+  const errorId = error ? `${id}-error` : undefined;
+  const only = Children.count(children) === 1 ? children : null;
+  const bound =
+    only && isValidElement(only)
+      ? cloneElement(only as ReactElement<any>, {
+          id: (only as ReactElement<any>).props.id ?? id,
+          "aria-describedby": errorId,
+          "aria-invalid": error ? true : undefined,
+          "aria-required": required || undefined,
+        })
+      : children;
   return (
     <div className="flex flex-col gap-1">
-      <label className={labelCls}>
+      <label className={labelCls} htmlFor={id}>
         {label}
         {required ? <span className="text-[#3FDCFF]"> *</span> : null}
       </label>
-      {children}
-      {error ? <span className={errCls}>{error}</span> : null}
+      {bound}
+      {error ? (
+        <span className={errCls} id={errorId} role="alert">
+          {error}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -574,6 +603,7 @@ export function CreateEventScreen() {
                     <input
                       type="file"
                       accept="video/*"
+                      aria-label="Upload video flyer"
                       className="hidden"
                       onChange={onVideoFlyerPick}
                     />
@@ -624,6 +654,7 @@ export function CreateEventScreen() {
                     <input
                       type="file"
                       accept="image/*"
+                      aria-label="Upload flyer image"
                       className="hidden"
                       onChange={onImageFlyerPick}
                     />
@@ -680,6 +711,7 @@ export function CreateEventScreen() {
                       type="file"
                       accept="image/*"
                       multiple
+                      aria-label="Upload gallery images"
                       className="hidden"
                       onChange={(e) => {
                         const files = e.target.files;
@@ -837,10 +869,13 @@ export function CreateEventScreen() {
 
             <Section title="Visibility & audience">
               <Field label="Who can see this">
-                <div className="flex gap-2">
+                <div className="flex gap-2" role="radiogroup" aria-label="Who can see this">
                   {(["public", "private", "link_only"] as const).map((v) => (
                     <button
                       key={v}
+                      type="button"
+                      role="radio"
+                      aria-checked={s.visibility === v}
                       onClick={() => s.setVisibility(v)}
                       className={`flex-1 h-9 rounded-xl text-sm font-medium capitalize ${
                         s.visibility === v
@@ -854,10 +889,13 @@ export function CreateEventScreen() {
                 </div>
               </Field>
               <Field label="Age restriction">
-                <div className="flex gap-2">
+                <div className="flex gap-2" role="radiogroup" aria-label="Age restriction">
                   {(["none", "18+", "21+"] as const).map((a) => (
                     <button
                       key={a}
+                      type="button"
+                      role="radio"
+                      aria-checked={s.ageRestriction === a}
                       onClick={() => s.setAgeRestriction(a)}
                       className={`flex-1 h-9 rounded-xl text-sm font-medium ${
                         s.ageRestriction === a

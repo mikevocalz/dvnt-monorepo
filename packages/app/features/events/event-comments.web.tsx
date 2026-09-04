@@ -337,6 +337,7 @@ function EventCommentComposer({
             }
           }}
           placeholder="Add a comment… (@ to mention)"
+          aria-label="Add a comment"
           className="flex-1 bg-transparent text-[15px] text-white outline-none placeholder:text-white/40"
         />
         <button

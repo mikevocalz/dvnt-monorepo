@@ -204,6 +204,7 @@ function ReplyComposer({
           placeholder={
             replyTo ? `Reply to @${replyTo.username}…` : "Add a reply…"
           }
+          aria-label={replyTo ? `Reply to ${replyTo.username}` : "Add a reply"}
           className="flex-1 bg-transparent text-[15px] text-white outline-none placeholder:text-white/40"
         />
         <button

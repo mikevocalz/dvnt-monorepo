@@ -30,10 +30,9 @@ class CopySkiaPlugin {
 }
 
 const nextConfig: NextConfig = {
-  // ponytail: dev-only unblock — reanimated 4.4.1's web _updatePropsJS crashes
-  // under React StrictMode's dev double-mount (GlassSurface/GlassHeader).
-  // Real fix: bump react-native-reanimated to 4.5.3, then remove this.
-  reactStrictMode: false,
+  // reactStrictMode left at the Next default (true). The reanimated 4.4.1
+  // _updatePropsJS double-mount crash that forced it off is gone since the
+  // 4.5.3 bump; verified `/` renders clean under StrictMode.
   // ponytail: the TS gate moved OUT of `next build` and into the `build` script
   // (`tsc --noEmit && next build`). Next runs its checker while the whole
   // webpack compilation is still resident; on Vercel's 2-core/8GB builder that

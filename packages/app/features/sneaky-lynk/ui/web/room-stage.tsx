@@ -100,6 +100,10 @@ export function ControlButton({
       type="button"
       onClick={onClick}
       aria-label={label}
+      // Toggle state was colour-only; expose it so a screen reader can tell a
+      // muted mic from a live one. `danger` (Leave) is an action, not a toggle,
+      // so it stays unpressed.
+      aria-pressed={danger ? undefined : !!active}
       // Circular by this screen's own convention ("control buttons circular"),
       // which the design system allows alongside status dots and the shutter.
       className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition-colors ${bg}`}

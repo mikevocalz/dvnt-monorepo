@@ -443,6 +443,8 @@ function CallRoom({
           <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-black">
             <AvatarFallback name={remoteName} avatar={remote?.avatar} />
             <p
+              role="status"
+              aria-live="polite"
               className="text-lg text-white"
               style={{ fontFamily: "SpaceGrotesk-SemiBold" }}
             >
