@@ -136,6 +136,7 @@ import {
 } from "../api/comments";
 import type { SneakyUser } from "@dvnt/app/features/sneaky-lynk/types";
 import { useRoomStore } from "../stores/room-store";
+import { eventsApi } from "@dvnt/app/lib/api/events";
 import { stageGridClass } from "../ui/stage-grid";
 import { useLynkHistoryStore } from "../stores/lynk-history-store";
 import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
@@ -953,6 +954,29 @@ function RoomInner({
   const leaveForLynksRef = useRef(leaveForLynks);
   leaveForLynksRef.current = leaveForLynks;
 
+  // The event this room belongs to, if any.
+  //
+  // A room reached from an event page took the event's title and then said
+  // nothing about it — so once you were inside, the room was a video call with
+  // a familiar name and no way back to the thing it was for. Read-only: no
+  // event just means no chip.
+  const [lynkEvent, setLynkEvent] = useState<{
+    id: string;
+    title: string;
+    slug: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    void (async () => {
+      const found = await eventsApi.getEventByLynkRoom(id);
+      if (!cancelled) setLynkEvent(found);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
   const handToggleInFlight = useRef(false);
   const toggleHand = useCallback(() => {
     if (handToggleInFlight.current) return;
@@ -1396,8 +1420,21 @@ function RoomInner({
               </span>
             ) : null}
           </span>
-          <span className="flex items-center gap-1 text-xs text-white/50">
-            <Users size={12} /> {participantCount}
+          <span className="flex items-center gap-2 text-xs text-white/50">
+            <span className="flex items-center gap-1">
+              <Users size={12} /> {participantCount}
+            </span>
+            {lynkEvent ? (
+              <button
+                type="button"
+                data-lynk-event={lynkEvent.id}
+                onClick={() => router.push(`/feed/events/${lynkEvent.id}`)}
+                className="max-w-[32vw] truncate rounded-md bg-[#8A40CF]/25 px-1.5 py-0.5 text-[10px] font-semibold text-[#D9B8FF] hover:bg-[#8A40CF]/40"
+                title={`Go to ${lynkEvent.title}`}
+              >
+                {lynkEvent.title}
+              </button>
+            ) : null}
           </span>
         </div>
         <span className="flex shrink-0 items-center gap-1.5">

@@ -777,6 +777,30 @@ export const eventsApi = {
   /**
    * Get user's RSVP status for event
    */
+  /**
+   * The event a Sneaky Lynk room belongs to, if any.
+   *
+   * The room is the inside of the event; without this the room is a video
+   * call with a familiar title and no way back to the thing it is for.
+   * Read-only and failure-tolerant: no event just means no chip.
+   */
+  async getEventByLynkRoom(roomUuid: string) {
+    if (!roomUuid) return null;
+    const { data, error } = await supabase
+      .from("events")
+      .select("id, title, share_slug")
+      .eq("lynk_room_id", roomUuid)
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error("[Events] getEventByLynkRoom:", error.message);
+      return null;
+    }
+    return data
+      ? { id: String(data.id), title: data.title as string, slug: (data as any).share_slug as string | null }
+      : null;
+  },
+
   async getUserRsvp(eventId: string) {
     try {
       const authId = await getCurrentUserAuthId();
