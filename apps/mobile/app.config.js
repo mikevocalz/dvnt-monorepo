@@ -298,6 +298,10 @@ export default {
       output: webOutput,
     },
     plugins: [
+      // react-native-audio-api: Web Audio API on iOS/Android (used for Lynk VAD
+      // via AnalyserNode). The config plugin wires the native module + iOS
+      // background-audio/microphone entitlements on prebuild.
+      "react-native-audio-api",
       // Sentry (dvnt-mobile): native symbol upload + source maps on EAS builds.
       // Needs SENTRY_AUTH_TOKEN in EAS secrets for the upload step; builds
       // succeed without it (stacks stay unsymbolicated until it's added).

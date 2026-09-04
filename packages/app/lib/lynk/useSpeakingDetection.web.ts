@@ -1,39 +1,26 @@
 /**
- * Speaking detection (VAD) for the web Lynk room — pure Web Audio, no deps.
+ * Speaking detection (VAD) for the web Lynk room, on react-native-audio-api.
  *
- * MoQ carries no VAD (unlike Fishjam's useVAD), but it doesn't need to: the
- * audio is right here. This taps a MediaStream (the local capture, or a remote
- * publisher's decoded audio) with an AnalyserNode and reports "speaking" from
- * short-term RMS with hysteresis, so a ring doesn't flicker on every syllable.
+ * MoQ carries no VAD (unlike Fishjam's useVAD), but it doesn't need to — the
+ * audio is right here. Uses react-native-audio-api's `AudioContext` (the same
+ * engine mobile uses, so the RMS/hysteresis logic is identical across
+ * platforms) with an `AnalyserNode`, reporting "speaking" from short-term RMS
+ * with hysteresis so a ring doesn't flicker between words.
  *
- * One AnalyserNode per stream, torn down when the stream changes or unmounts —
- * a leaked AudioContext keeps the mic/tab "in use" and drains battery.
+ * Web source binding: a live MediaStream can't be tapped directly by
+ * react-native-audio-api (it has no createMediaStreamSource), so the stream is
+ * attached to a hidden muted <audio> element and read via
+ * `createMediaElementSource`. The element's audio is routed INTO the graph and
+ * the analyser is NOT connected to the destination, so nothing double-plays.
+ * On native the same hook is backed by AudioRecorder (see the native sibling).
+ *
+ * One context per stream, torn down on change/unmount — a leaked AudioContext
+ * keeps the tab's audio "in use" and drains battery.
  */
 
 import { useEffect, useRef, useState } from "react";
-
-/**
- * Pure speaking decision: given the current RMS and the timestamp of the last
- * voice-level sample, is the participant speaking now? Extracted so the
- * threshold + hysteresis behaviour is testable without a DOM/AudioContext.
- * Returns the next `lastVoiceMs` alongside the boolean.
- */
-export function decideSpeaking(
-  rms: number,
-  lastVoiceMs: number,
-  nowMs: number,
-  opts: { threshold: number; hangMs: number },
-): { speaking: boolean; lastVoiceMs: number } {
-  const lastVoice = rms >= opts.threshold ? nowMs : lastVoiceMs;
-  return { speaking: nowMs - lastVoice < opts.hangMs, lastVoiceMs: lastVoice };
-}
-
-export interface SpeakingOptions {
-  /** RMS above this (0..1) starts "speaking". Tuned for voice over noise. */
-  threshold?: number;
-  /** Hold "speaking" this long after RMS drops, so gaps between words don't flicker. */
-  hangMs?: number;
-}
+import { AudioContext } from "react-native-audio-api";
+import { decideSpeaking, type SpeakingOptions } from "./speaking-detection";
 
 /** True while the stream carries voice-level audio. Null stream → false. */
 export function useSpeakingDetection(
@@ -47,21 +34,28 @@ export function useSpeakingDetection(
       setSpeaking(false);
       return;
     }
-    // A stream with no live audio track (camera-only) never speaks.
-    const hasAudio = stream.getAudioTracks().some((t) => t.readyState === "live");
+    const hasAudio = stream
+      .getAudioTracks()
+      .some((t) => t.readyState === "live");
     if (!hasAudio) {
       setSpeaking(false);
       return;
     }
 
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext })
-        .webkitAudioContext;
-    if (!AudioCtx) return;
+    // Hidden element carries the stream; react-native-audio-api taps it.
+    const el = document.createElement("audio");
+    el.srcObject = stream;
+    el.muted = true;
+    el.play().catch(() => {});
 
-    const ctx = new AudioCtx();
-    const source = ctx.createMediaStreamSource(stream);
+    const ctx = new AudioContext();
+    // createMediaElementSource redirects the element's audio into the graph;
+    // connecting only to the analyser (never to ctx.destination) keeps it silent.
+    // The unified react-native-audio-api types barrel exposes the NATIVE
+    // signature (AudioTagHandle); the web build (AudioContext.web) actually
+    // accepts an HTMLMediaElement (AudioContext.web.d.ts). Cast at this one
+    // boundary — the runtime is correct.
+    const source = ctx.createMediaElementSource(el as unknown as never);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
     analyser.smoothingTimeConstant = 0.6;
@@ -73,7 +67,6 @@ export function useSpeakingDetection(
 
     const tick = () => {
       analyser.getFloatTimeDomainData(buf);
-      // RMS of the time-domain samples — the direct measure of loudness.
       let sum = 0;
       for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
       const rms = Math.sqrt(sum / buf.length);
@@ -88,9 +81,11 @@ export function useSpeakingDetection(
 
     return () => {
       cancelAnimationFrame(raf);
-      source.disconnect();
-      // close() returns a promise; we don't await teardown.
+      try {
+        source.disconnect();
+      } catch {}
       void ctx.close();
+      el.srcObject = null;
       setSpeaking(false);
     };
   }, [stream, threshold, hangMs]);

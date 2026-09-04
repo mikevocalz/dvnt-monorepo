@@ -13,7 +13,7 @@
     "generate:types": "cross-env NODE_OPTIONS=--no-deprecation payload generate:types",
     "migrate": "cross-env NODE_OPTIONS=--no-deprecation payload migrate",
     "migrate:create": "cross-env NODE_OPTIONS=--no-deprecation payload migrate:create",
-    "postinstall": "node -e \"require('fs').copyFileSync(require.resolve('canvaskit-wasm/bin/full/canvaskit.wasm'), 'public/canvaskit.wasm')\""
+    "postinstall": "node -e \"require('fs').copyFileSync(require.resolve('canvaskit-wasm/bin/full/canvaskit.wasm'), 'public/canvaskit.wasm')\" && npx --no-install setup-rn-audio-api-web public || true"
   },
   "dependencies": {
     "@dvnt/api": "workspace:*",

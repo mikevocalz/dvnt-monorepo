@@ -3,7 +3,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decideSpeaking } from "./useSpeakingDetection.web.ts";
+import { decideSpeaking } from "./speaking-detection.ts";
 
 const O = { threshold: 0.045, hangMs: 350 };
 
@@ -34,10 +34,13 @@ test("a sample exactly at threshold counts as voice", () => {
 test("brief gaps between words do not flicker off", () => {
   let last = 0;
   // word, 100ms gap, word — never crosses the 350ms hang
-  let s = decideSpeaking(0.2, last, 0, O); last = s.lastVoiceMs;
+  let s = decideSpeaking(0.2, last, 0, O);
+  last = s.lastVoiceMs;
   assert.equal(s.speaking, true);
-  s = decideSpeaking(0.0, last, 100, O); last = s.lastVoiceMs;
+  s = decideSpeaking(0.0, last, 100, O);
+  last = s.lastVoiceMs;
   assert.equal(s.speaking, true, "100ms gap stays speaking");
-  s = decideSpeaking(0.2, last, 200, O); last = s.lastVoiceMs;
+  s = decideSpeaking(0.2, last, 200, O);
+  last = s.lastVoiceMs;
   assert.equal(s.speaking, true);
 });
