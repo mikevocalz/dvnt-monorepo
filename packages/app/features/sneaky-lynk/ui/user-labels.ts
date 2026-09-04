@@ -13,5 +13,5 @@ export {
   normalizeSneakyAnonLabel,
 // Relative with an explicit extension: hand-queue.ts is exercised by
 // `node --test`, whose resolver understands neither the @dvnt/app alias nor an
-// extensionless TS specifier.
-} from "../../../lib/user-label";
+// extensionless TS specifier. See the note in hand-queue.ts.
+} from "../../../lib/user-label.ts";

@@ -255,6 +255,13 @@ const EQUIVALENT_WIRING = {
   // presence: web reads presence via the useUserPresence hook.
   usePresenceStore: ["useUserPresence"],
   "presence-store": ["useUserPresence", "use-user-presence"],
+  // MoQ transport: capture is owned by the hook, not the screen. The native
+  // LocalRoom still calls react-native-moq's useCamera/useMicrophone directly
+  // because it binds the track to <PublisherView camera={...} />; on web the
+  // same capture lives inside useLynkBroadcast (Publish.Source.Camera /
+  // .Microphone), so the screen holds one hook instead of three.
+  useCamera: ["useLynkBroadcast"],
+  useMicrophone: ["useLynkBroadcast"],
 };
 
 // Strip block + line comments so `use[A-Z]` / store paths inside comments don't

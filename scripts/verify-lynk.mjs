@@ -232,16 +232,33 @@ const hasWeb = sessionLegs.some((f) => f.endsWith("room.web.tsx"));
 assert.ok(hasNative, "the native room does not drive the session machine");
 assert.ok(hasWeb, "the web room does not drive the session machine");
 // Recovery must be ACTED on, not merely tracked. The machine knew the backoff
-// and the budget for a dozen commits while nothing called it; a leg that drives
-// the session but supplies no onReconnect is back in that state — the banner
-// says "Reconnecting" and nothing ever reconnects.
+// and the budget for a dozen commits while nothing called it, and a leg that
+// only TRACKS `reconnecting` is back in that state: the banner says
+// "Reconnecting" and nothing ever reconnects.
+//
+// There are now two legitimate ways to act on it, and a leg must do one:
+//   - supply `onReconnect` — the native leg does, because `useVideoRoom.join`
+//     re-mints the token and re-attaches;
+//   - or drive the session from a transport that reconnects ITSELF, which the
+//     web room does since it moved to MoQ: `Moq.Connection.Reload` owns
+//     recovery, so the leg observes `reconnecting → live` rather than driving
+//     it, and a hand-written rejoin would race the transport's own.
+const SELF_RECONNECTING = /useLynkBroadcast\s*\(/;
 for (const leg of sessionLegs) {
-  assert.match(
-    strip(read(leg)),
-    /onReconnect\s*:/,
-    `${leg} drives the session machine but supplies no onReconnect — it would show "Reconnecting" forever without retrying`,
+  const src = strip(read(leg));
+  assert.ok(
+    /onReconnect\s*:/.test(src) || SELF_RECONNECTING.test(src),
+    `${leg} drives the session machine but neither supplies onReconnect nor uses a self-reconnecting transport — it would show "Reconnecting" forever without retrying`,
   );
 }
+// ...and "the transport reconnects itself" is CHECKED, not taken on trust. If
+// `Connection.Reload` is ever swapped for a plain connection, the web room
+// silently loses recovery — it has no onReconnect to fall back on.
+assert.match(
+  strip(read("packages/app/lib/lynk/useLynkBroadcast.web.ts")),
+  /Connection\.Reload/,
+  "useLynkBroadcast.web no longer builds a reconnecting connection, and the web room relies on that INSTEAD of onReconnect",
+);
 // The heartbeat is the same class of bug the session machine was: an API
 // written, exported, and never called. Without a caller every member reports
 // no last_seen_at, and video_list_rooms keeps a dead room "Live" for TWELVE

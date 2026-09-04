@@ -14,8 +14,12 @@
  *     anonymous participants ended up showing real names to the host.
  */
 // Explicit extension: this module is exercised by `node --test`, whose ESM
-// resolver requires it. Metro and the Next build both resolve it too.
-import { getSneakyUserLabel } from "./user-labels";
+// resolver requires it for a relative TS specifier. Metro and the Next build
+// resolve it too, and every tsconfig that sees this file now sets
+// `allowImportingTsExtensions` (all of them are noEmit). Dropping the `.ts`
+// does not fail a typecheck — it fails `pnpm test:lynk-session` at RUNTIME,
+// which is how it went unnoticed for a merge.
+import { getSneakyUserLabel } from "./user-labels.ts";
 
 export interface HandRaiser {
   userId: string;
