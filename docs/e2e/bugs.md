@@ -106,3 +106,48 @@ but P13 WS-8 proposes uploading traces as CI artifacts — that would publish th
 audit password to anyone who can read a build. Before wiring CI: either mask the
 field (`page.addInitScript` to strip values on snapshot), scope traces to
 `off` for the setup project, or restrict artifact access.
+
+## Authenticated lane — recon + first specs (2026-09-04)
+
+Four surfaces mapped by parallel subagents, then covered by solo-testable specs
+(no second party, no seeding, no publishing real content). All findings below
+are a11y unless marked. Fishjam is the live transport on web, so connected
+multi-party call/room states need a second participant and are out of scope for
+the solo suite — recorded, not run.
+
+### Specs added (all green / honest-skip)
+- `event-create.spec.ts` — both routes render the same composer; required fields
+  reachable; empty publish surfaces an `alert` and does NOT redirect. 1440 + 375.
+- `call.spec.ts` — outgoing audio call renders a non-blank stage; End/Mute carry
+  aria-labels.
+- `lynk-room.spec.ts` — create/billing/room render authed; host room stage never
+  blank. (No hard entitlement gate: a free host gets a 5-min timer, and the audit
+  account has zero subscription rows, so it IS a free host.)
+- `comments.spec.ts` — discovers a post from the feed at runtime; skips cleanly
+  when the feed is empty (the audit account follows no one, so it is).
+
+### Findings (fixme in-spec, precise)
+| ID | Where | Finding |
+|---|---|---|
+| E2E-EVT-1 | `event-create.web.tsx` | Title/Type/Start/Venue labels are unbound `<generic>`; the input's only accessible name is its placeholder. WCAG 3.3.2 / 1.3.1. |
+| E2E-EVT-2 | `event-create.web.tsx:841-871` | Visibility/Age toggle groups are role-less `<button>`s, selection is colour-only — no `role=radio`/`aria-pressed`. Invisible to AT and `getByRole`. |
+| E2E-EVT-3 | `event-create.web.tsx:574,624` | Both flyer file inputs are hidden `<input type=file>` with no name — announced as "file, button". |
+| E2E-CALL-1 | `incoming-call-overlay.web.tsx` | **Product gap, not a11y.** Single "Accept" button, no "Answer audio-only"; Accept routes without `callType` so answered calls default to video. P13 WS-4 requires answer-as-audio. |
+| E2E-CALL-2 | `call.web.tsx:449,488` | Call status text is a plain `<p>`, no `role=status`/`aria-live` — phase changes are silent to a screen reader. |
+| E2E-LYNK-1 | `room-stage.tsx` | mic/camera/hand toggles convey state by colour+icon only, no `aria-pressed`. |
+| E2E-LYNK-2 | `room.web.tsx` TimeUpDialog | free-tier 5-min dialog is not `role=dialog`/`aria-modal` and does not trap focus (EjectModal is a proper `alertdialog`). |
+| E2E-LYNK-3 | `room.web.tsx:1327` | connecting spinner has no `role=status`/live region. |
+| E2E-CMT-1 | `comments.web.tsx:164` | composer `<input>` has no bound label/aria-label — placeholder only. |
+| E2E-CMT-2 | `threaded-comment.tsx` | Reply / "View replies (N)" / Like are role-less Pressables; Like has no accessible name at all. No sort control exists on any comment surface. |
+
+### Corrections to Phase 0 / the prompts
+- P13 Phase 0 assumed the web call screen uses `deriveCallUiMode`/`calls/ui/**`.
+  It does not — that stage system is native-only. The web screen is
+  `call.web.tsx`, driven by `callPhase`/`connectionStatus`. WS-4 specs target it.
+- P13 §1.5's entitlement wording (unentitled → billing wall) is wrong for the
+  room: there is no join wall, only a free-tier duration timer.
+
+### Still blocked / out of solo scope
+- Connected multi-party call and room (remote tiles, host mute-all, eject,
+  degraded/reconnecting banners) — need `mikevocalz` present (P13 §2).
+- WebKit `@media` autoplay project — browser download stalls on this host.

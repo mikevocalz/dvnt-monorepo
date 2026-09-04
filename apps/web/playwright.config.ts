@@ -95,6 +95,7 @@ export default defineConfig({
 
     {
       name: "chromium-desktop-1440",
+      testIgnore: /public\//,
       dependencies: ["setup"],
       use: {
         ...devices["Desktop Chrome"],
@@ -106,6 +107,7 @@ export default defineConfig({
     },
     {
       name: "chromium-tablet-1024",
+      testIgnore: /public\//,
       dependencies: ["setup"],
       use: {
         ...devices["Desktop Chrome"],
@@ -117,6 +119,7 @@ export default defineConfig({
     },
     {
       name: "chromium-tablet-768",
+      testIgnore: /public\//,
       dependencies: ["setup"],
       use: {
         ...devices["Desktop Chrome"],
@@ -128,6 +131,7 @@ export default defineConfig({
     },
     {
       name: "chromium-mobile-375",
+      testIgnore: /public\//,
       dependencies: ["setup"],
       use: {
         ...devices["Desktop Chrome"],
@@ -142,6 +146,7 @@ export default defineConfig({
       // Autoplay/poster cases only — WebKit cannot fake media devices the way
       // Chromium can, so WebRTC specs are excluded from this project by tag.
       name: "webkit-media",
+      testIgnore: /public\//,
       dependencies: ["setup"],
       grep: /@media/,
       use: {
