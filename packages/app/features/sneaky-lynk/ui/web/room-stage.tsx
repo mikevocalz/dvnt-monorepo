@@ -51,6 +51,9 @@ export type Tile = {
   attachCanvas?: (path: string, el: HTMLCanvasElement | null) => void;
   isCameraOn: boolean;
   isMicOn: boolean;
+  /** Their ROLE can publish (host / co-host / speaker), so they get a stage
+   *  tile rather than an avatar in the audience row. */
+  isPublisher?: boolean;
   /** Currently the active speaker — the tile gets a ring, the way WhatsApp and
    *  Discord mark who is talking. Without it a silent grid gives no clue where
    *  to look. */

@@ -22,7 +22,7 @@
  * account sees zero co-publishers by construction.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { collectPageErrors } from "../support/session";
@@ -53,6 +53,7 @@ const gumCalls = (page: Page) =>
  * a room that was correctly audio-only.
  */
 async function createRoom(page: Page, title: string, video: boolean): Promise<string> {
+  await suppressInstallPrompt(page);
   await page.goto("/feed/sneaky-lynk/create", { waitUntil: "load" });
   await expect(page).not.toHaveURL(/\/auth\//);
   await page.locator("#lynk-title").fill(title);
@@ -78,6 +79,34 @@ async function createRoom(page: Page, title: string, video: boolean): Promise<st
     );
   }
   return new URL(page.url()).pathname.split("/").pop()!;
+}
+
+/**
+ * Pre-set the PWA promo's dismissal flag so it never opens.
+ *
+ * "Use DVNT like an app" is a MODAL on a 1.5s timer
+ * (components/pwa-install.web.tsx:138) and on a fresh profile it lands straight
+ * over the Lynk pre-join screen, with "Join Lynk" behind it. The audit account's
+ * storage state had dismissed it long ago, so only the second identity ever met
+ * it — the exact class of bug a one-account test cannot see.
+ *
+ * Setting the flag beats clicking "Not now": the click races the timer, and a
+ * test that sometimes wins that race is worse than one that never runs it.
+ *
+ * Product note, not test friction: a first-time visitor opening a room link
+ * meets an install ad over the join button 1.5s in.
+ */
+const PWA_DISMISS_KEY = "dvnt-pwa-install-dismissed";
+
+async function suppressInstallPrompt(target: Page | BrowserContext) {
+  await target.addInitScript((key) => {
+    try {
+      localStorage.setItem(key, "1");
+    } catch {
+      // A context with storage blocked still runs the test; the promo is not
+      // what is under test.
+    }
+  }, PWA_DISMISS_KEY);
 }
 
 /** Host leave → `endRoom`. Best-effort: a failed cleanup must not mask a failure. */
@@ -202,6 +231,7 @@ test.describe("sneaky lynk — MoQ transport", () => {
       storageState: PEER_STATE,
       permissions: ["camera", "microphone"],
     });
+    await suppressInstallPrompt(peerCtx);
     const peer = await peerCtx.newPage();
     let roomId = "";
 
@@ -215,8 +245,16 @@ test.describe("sneaky lynk — MoQ transport", () => {
       // reported `requesting-token` forever and the room never left its
       // spinner. Reaching the stage at all is the assertion.
       await peer.goto(`/feed/sneaky-lynk/room/${roomId}?hasVideo=1`, { waitUntil: "load" });
-      const joinButton = peer.getByRole("button", { name: /join lynk|join anonymously/i });
-      if (await joinButton.count()) await joinButton.first().click();
+      // A non-creator always meets the pre-join gate. WAIT for it — `count()`
+      // is an instant check with no auto-wait, and this route is `ssr: false`,
+      // so at `load` the React tree has not mounted and the button count is 0.
+      // The old code silently skipped the click and then blamed the stage.
+      const joinButton = peer.getByRole("button", { name: /^join lynk$/i });
+      await expect(
+        joinButton,
+        "the peer never reached the pre-join gate",
+      ).toBeVisible({ timeout: 30_000 });
+      await joinButton.click();
       await expect(
         peer.locator('[data-tile="local"]'),
         "a listener never reached the stage — the publish-token state trap is back",
@@ -225,19 +263,41 @@ test.describe("sneaky lynk — MoQ transport", () => {
       // A listener publishes nothing, so it must never open a device.
       await expect(peer.locator('[data-tile="local"] video')).toHaveCount(0);
 
-      // The host sees them on the roster before they ever publish.
-      const peerTile = page.locator('[data-tile]:not([data-tile="local"])').first();
-      await expect(peerTile).toBeVisible({ timeout: 30_000 });
+      // The host sees them — in the AUDIENCE, not on the stage. A listener has
+      // no media to show, and putting them in the speaker grid is what made
+      // every participant render twice.
+      await expect(
+        page.locator("[data-listener]"),
+        "the host does not see the listener in the audience row",
+      ).toHaveCount(1, { timeout: 30_000 });
+      await expect(
+        page.locator('[data-tile]:not([data-tile="local"])'),
+        "a listener should not occupy a stage tile",
+      ).toHaveCount(0);
 
       // ── Host promotes the peer → they publish ────────────────────────────
       await page.getByRole("button", { name: "Participants" }).click();
-      await page.getByRole("button", { name: /invite to speak|promote/i }).first().click();
+      // The panel's accessible name is "Make <name> a co-host"
+      // (ui/web/room-panels.tsx:468) — not "promote", which is the prop name,
+      // not the label. Match the real copy.
+      const promote = page.getByRole("button", { name: /make .* a co-host/i }).first();
+      await expect(
+        promote,
+        "the host cannot see a promote action for the peer",
+      ).toBeVisible({ timeout: 30_000 });
+      await promote.click();
 
       // ── Remote media actually arrives ────────────────────────────────────
       // The canvas is sized by the DECODER, so an intrinsic size that is no
       // longer the 300x150 HTML default is proof a frame was decoded and
       // painted. Reading pixels back is not reliable across the renderer's
       // backing store; this is.
+      // Promotion moves them from the audience onto the stage.
+      const peerTile = page.locator('[data-tile]:not([data-tile="local"])').first();
+      await expect(
+        peerTile,
+        "the promoted co-host never reached the stage",
+      ).toBeVisible({ timeout: 60_000 });
       const peerCanvas = peerTile.locator("canvas");
       await expect(peerCanvas).toBeVisible({ timeout: 60_000 });
       await expect

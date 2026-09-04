@@ -40,6 +40,13 @@ interface RoomUIStore {
    * leave a host stuck as a silent listener.
    */
   localRole: string | null;
+  /**
+   * OUR user id as the SERVER knows it (`video_join_room`'s user payload).
+   * This is the id written to `video_room_members.user_id` and the one
+   * `peerIdFor` builds the MoQ path from. The auth store's id is not the same
+   * value, so every roster comparison has to use this one.
+   */
+  localUserId: string | null;
 
   /**
    * WEB-only surfaces with no native-useState equivalent. The native room
@@ -80,6 +87,7 @@ interface RoomUIStore {
   setMicOn: (v: boolean) => void;
   setCameraOn: (v: boolean) => void;
   setLocalRole: (v: string | null) => void;
+  setLocalUserId: (v: string | null) => void;
   setParticipantsOpen: (v: boolean) => void;
   setIsPaidHost: (v: boolean) => void;
   setTimerStartedAt: (v: number) => void;
@@ -100,6 +108,7 @@ const initialUIState = {
   isMicOn: false,
   isCameraOn: false,
   localRole: null as string | null,
+  localUserId: null as string | null,
   isParticipantsOpen: false,
   isPaidHost: null as boolean | null,
   timerStartedAt: null as number | null,
@@ -122,6 +131,7 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setMicOn: (isMicOn) => set({ isMicOn }),
   setCameraOn: (isCameraOn) => set({ isCameraOn }),
   setLocalRole: (localRole) => set({ localRole }),
+  setLocalUserId: (localUserId) => set({ localUserId }),
   setParticipantsOpen: (isParticipantsOpen) => set({ isParticipantsOpen }),
   setIsPaidHost: (isPaidHost) => set({ isPaidHost }),
   setTimerStartedAt: (timerStartedAt) => set({ timerStartedAt }),

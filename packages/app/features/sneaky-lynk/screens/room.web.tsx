@@ -166,6 +166,13 @@ const TRANSPORT_STATUS_BY_LYNK_STATE: Record<LynkState, RoomTransportStatus> = {
   error: "error",
 };
 
+/** Roles that may publish — mirrors PUBLISH_ROLES in the lynk-moq-token
+ *  edge function. Module scope on purpose: it is called from the tile map,
+ *  which runs before the stage split that used to declare it. */
+function isPublisherRole(role?: string | null) {
+  return role === "host" || role === "co-host" || role === "speaker";
+}
+
 function isClosedRoomError(message?: string | null) {
   if (!message) return false;
   return /no longer open|already ended|has ended|room not found|not found/i.test(message);
@@ -583,6 +590,16 @@ function RoomInner({
   const lynkRef = useRef(lynk);
   lynkRef.current = lynk;
   const setLocalRole = useRoomUIStore((s) => s.setLocalRole);
+  const setLocalUserId = useRoomUIStore((s) => s.setLocalUserId);
+  /**
+   * Who WE are, per the server. `authUser.id` is a different value from
+   * `video_room_members.user_id`, which made every self-comparison in this
+   * screen silently false: the host saw a second tile of themselves in the
+   * grid, and a promoted co-host never found their own row to learn the new
+   * role. Falls back to the auth id only until the join response lands.
+   */
+  const storedLocalUserId = useRoomUIStore((s) => s.localUserId);
+  const localUserId = storedLocalUserId ?? authUser?.id;
   const isHostRef = useRef(isCreator);
   const isCoHostRef = useRef(false);
   // Per-MOUNT join guard. Must be a local ref, NOT the global store's
@@ -614,7 +631,21 @@ function RoomInner({
     currentUser,
   });
   const { comments, send: sendChat } = useRoomChat(id, currentUser);
-  const members = useRoomMembersSync(id, authUser?.id);
+  const members = useRoomMembersSync(id, localUserId);
+
+  // ── Role changes reach us on the ROSTER, not in the join response ─────────
+  // `localRole` is what gates `canPublish`, and it was only ever set once, from
+  // `video_join_room`. So a listener the host promoted to co-host stayed a
+  // listener on this client forever: no publish token, camera and mic still
+  // shut, and the only way out was to leave and rejoin. Fishjam never showed
+  // this because publishing there was not gated on the role at all.
+  //
+  // `videoApi.subscribeToMembers` already delivers the updated row, so the fix
+  // is to treat the roster as the source of truth for our own role too.
+  useEffect(() => {
+    const me = members.find((m) => m.userId === localUserId);
+    if (me?.role && me.role !== localRole) setLocalRole(me.role);
+  }, [members, authUser?.id, localRole, setLocalRole]);
   const captureBroadcast = useSneakyLynkCaptureBroadcast({
     roomId: id,
     roomTitle: roomSnapshot?.title || paramTitle || undefined,
@@ -627,7 +658,7 @@ function RoomInner({
 
   // isHostRef, not the derived `isHost` below it: the ref is kept current from
   // the peer's server role (line ~1219) and is the value in scope this early.
-  useRoomModerationWatcher(id, authUser?.id, isHostRef.current, hostMuteLocked, (kind, reason) => {
+  useRoomModerationWatcher(id, localUserId, isHostRef.current, hostMuteLocked, (kind, reason) => {
     try {
       lynkRef.current.end();
     } catch {
@@ -712,6 +743,7 @@ function RoomInner({
         listeners: 0,
         fishjamRoomId: room.fishjamRoomId,
       });
+      setLocalUserId(joinedUser.id);
       isHostRef.current = peer.role === "host";
       isCoHostRef.current = peer.role === "co-host";
 
@@ -1008,11 +1040,11 @@ function RoomInner({
     useSpeakingDetection(lynk.localAudioStream) && isMicOn;
   const remoteSpeaking = useSpeakingPresence({
     roomId: id,
-    userId: authUser?.id,
+    userId: localUserId,
     speaking: isSelfSpeaking,
   });
   const speakingByUserId: Record<string, boolean> = { ...remoteSpeaking };
-  if (authUser?.id) speakingByUserId[authUser.id] = isSelfSpeaking;
+  if (localUserId) speakingByUserId[localUserId] = isSelfSpeaking;
 
   // ── Build tiles: local capture + roster × discovered MoQ publishers ───────
   // A MoQ path carries no metadata, so identity is the Supabase roster and the
@@ -1024,7 +1056,7 @@ function RoomInner({
 
   const publisherByPeerId = new Map(lynk.coPublishers.map((p) => [p.peerId, p]));
   const remoteTiles: Tile[] = members
-    .filter((m) => m.status === "active" && m.userId !== authUser?.id)
+    .filter((m) => m.status === "active" && m.userId !== localUserId)
     .map((member) => {
       const publisher = publisherByPeerId.get(
         peerIdForMember(member.userId, member.anonLabel),
@@ -1051,6 +1083,7 @@ function RoomInner({
         isCameraOn: !!publisher,
         isMicOn: !!publisher,
         isSpeaking: !!speakingByUserId[member.userId],
+        isPublisher: isPublisherRole(member.role),
       } satisfies Tile;
     });
 
@@ -1067,7 +1100,16 @@ function RoomInner({
     isSpeaking: isSelfSpeaking,
   };
 
-  const stageTiles = [localTile, ...remoteTiles];
+  // Who belongs ON the stage: the people who can actually publish. Everyone
+  // else is an audience member and belongs in the row underneath.
+  //
+  // These were the same list, so every remote participant rendered TWICE — a
+  // video tile in the grid AND an avatar in "In the room". A Lynk is speakers
+  // on a stage with listeners below it; the screen was not saying that.
+  const remotePublisherTiles = remoteTiles.filter((t) => t.isPublisher);
+  const listenerTiles = remoteTiles.filter((t) => !t.isPublisher);
+
+  const stageTiles = [localTile, ...remotePublisherTiles];
   // The host (and any co-hosts) own the top of the stage — large and prominent;
   // everyone else with a tile sits in the smaller grid beneath. Falls back to a
   // uniform grid if somehow no host/co-host tile is present.
@@ -1080,7 +1122,7 @@ function RoomInner({
   // can grow large; virtualize it. Rendered as a horizontal row of avatars.
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const rowVirtualizer = useVirtualizer({
-    count: remoteTiles.length,
+    count: listenerTiles.length,
     horizontal: true,
     getScrollElement: () => listScrollRef.current,
     estimateSize: () => 96,
@@ -1326,13 +1368,17 @@ function RoomInner({
               room as a phone column floating in dead space, which is what made
               the aspect ratio read as wrong — the tiles were not mis-shaped, the
               stage was refusing the width. */}
-          <section className="flex-1 space-y-3 overflow-y-auto px-4 py-2 md:px-6 lg:px-8">
+          {/* `justify-center` + a height-aware cap: the grid sizes tiles from
+              WIDTH (aspect-video), so on a tall viewport they used a third of
+              the stage and floated at the top over a large void. Now the stage
+              centres and the tiles are also bounded by the space available. */}
+          <section className="flex flex-1 flex-col justify-center gap-3 overflow-y-auto px-4 py-2 md:px-6 lg:px-8">
             {featuredTiles.length > 0 ? (
               <div
                 className={`mx-auto grid w-full gap-3 md:gap-4 ${
                   featuredTiles.length === 1
-                    ? "max-w-2xl grid-cols-1 md:max-w-3xl lg:max-w-4xl"
-                    : "max-w-2xl grid-cols-2 md:max-w-5xl lg:max-w-6xl"
+                    ? "max-w-[min(100%,calc((100dvh-22rem)*16/9))] grid-cols-1"
+                    : "max-w-[min(100%,calc((100dvh-22rem)*32/9))] grid-cols-2"
                 }`}
               >
                 {featuredTiles.map((tile) => (
@@ -1350,7 +1396,7 @@ function RoomInner({
           </section>
 
           {/* Listener row — TanStack Virtual (horizontal) */}
-          {remoteTiles.length > 0 ? (
+          {listenerTiles.length > 0 ? (
             <div className="px-4 pb-1">
               <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/40">
                 In the room
@@ -1360,10 +1406,15 @@ function RoomInner({
                   style={{ width: rowVirtualizer.getTotalSize(), height: "100%", position: "relative" }}
                 >
                   {rowVirtualizer.getVirtualItems().map((vItem) => {
-                    const t = remoteTiles[vItem.index];
+                    const t = listenerTiles[vItem.index];
                     return (
                       <div
                         key={t.key}
+                        // Mirrors `data-tile` on the stage: the audience is a
+                        // distinct place a participant can be, so it has to be
+                        // distinguishable from "on stage" by something other
+                        // than a human reading avatars.
+                        data-listener={t.key}
                         className="absolute top-0 flex flex-col items-center gap-1"
                         style={{ left: vItem.start, width: vItem.size, height: "100%" }}
                       >
@@ -1471,7 +1522,7 @@ function RoomInner({
         onClose={() => setParticipantsOpen(false)}
         members={members}
         isHost={isHost}
-        localUserId={authUser?.id}
+        localUserId={localUserId}
         onPromote={promote}
         onDemote={demote}
         onKick={kick}

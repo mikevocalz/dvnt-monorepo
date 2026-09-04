@@ -34,15 +34,23 @@ setup("sign in as the peer account", async ({ page }) => {
 
   // Two identities that resolve to the same user would silently recreate the
   // one-account problem this file exists to solve.
+  // "auth-storage", not "auth-store" — the persist key in
+  // lib/stores/auth-store.ts:459 is not the store's variable name.
   const peerId = await page.evaluate(() => {
     try {
-      const raw = localStorage.getItem("auth-store");
+      const raw = localStorage.getItem("auth-storage");
       return raw ? JSON.parse(raw)?.state?.user?.id ?? null : null;
     } catch {
       return null;
     }
   });
   expect(peerId, "could not read the peer's user id from the auth store").toBeTruthy();
+  // Two logins that resolve to the same user would silently recreate the
+  // one-account problem this file exists to solve.
+  expect(
+    process.env.E2E_PEER_EMAIL,
+    "the peer and audit accounts must be different identities",
+  ).not.toBe(process.env.E2E_AUDIT_EMAIL);
 
   fs.mkdirSync(path.dirname(PEER_STATE), { recursive: true });
   await page.context().storageState({ path: PEER_STATE });
