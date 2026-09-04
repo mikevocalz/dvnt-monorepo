@@ -39,7 +39,7 @@ import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-auth-token",
+    "authorization, x-client-info, apikey, content-type, x-auth-token, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -80,8 +80,20 @@ function errorResponse(
   );
 }
 
-/** Roles allowed to publish media in the broadcast (multi-speaker model). */
-const PUBLISH_ROLES = new Set(["host", "co-host", "speaker"]);
+/**
+ * Roles allowed to publish media in the broadcast.
+ *
+ * `participant` is the role EVERY joiner gets (video_join_room:360), so leaving
+ * it out meant a Lynk was a broadcast: the host published, and every guest was
+ * a silent, invisible viewer the host could not see. That is not what a Lynk
+ * is. A room is capped at 2..50 and plan-limited at creation
+ * (video_create_room:27), so "everyone who joins is on camera" is bounded —
+ * this is the Zoom model, not an open firehose.
+ *
+ * A guest still chooses camera/mic in pre-join and can arrive with both off;
+ * publishing is a CAPABILITY here, never a state.
+ */
+const PUBLISH_ROLES = new Set(["host", "co-host", "speaker", "participant"]);
 
 /** Path-safe peer id derived from the user (anon users get a stable anon id). */
 function peerIdFor(userId: string, anonLabel: string | null): string {

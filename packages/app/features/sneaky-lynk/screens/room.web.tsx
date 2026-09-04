@@ -136,6 +136,7 @@ import {
 } from "../api/comments";
 import type { SneakyUser } from "@dvnt/app/features/sneaky-lynk/types";
 import { useRoomStore } from "../stores/room-store";
+import { stageGridClass } from "../ui/stage-grid";
 import { useLynkHistoryStore } from "../stores/lynk-history-store";
 import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
 import { SecureCaptureBoundary } from "@dvnt/app/lib/secure-capture";
@@ -185,7 +186,15 @@ const LYNKS_LIST_ROUTE = "/feed/messages";
  *  edge function. Module scope on purpose: it is called from the tile map,
  *  which runs before the stage split that used to declare it. */
 function isPublisherRole(role?: string | null) {
-  return role === "host" || role === "co-host" || role === "speaker";
+  return (
+    role === "host" ||
+    role === "co-host" ||
+    role === "speaker" ||
+    // Every joiner is a `participant`. Excluding them put each guest in the
+    // audience strip as a bare avatar, so a host hosting three people saw
+    // their own tile and nothing else. Guests belong on the stage.
+    role === "participant"
+  );
 }
 
 function isClosedRoomError(message?: string | null) {
@@ -541,8 +550,11 @@ function RoomInner({
   // asked to deny one (it denies `publish` for a listener), and the camera/mic
   // stay closed. When the role lands the hook mints, connects and goes live.
   const localRole = useRoomUIStore((s) => s.localRole);
-  const canPublish =
-    localRole === "host" || localRole === "co-host" || localRole === "speaker";
+  // Mirrors PUBLISH_ROLES in `lynk-moq-token`. `participant` — the role every
+  // joiner gets — belongs here: without it a guest never asked for a publish
+  // token, so the host was hosting people who could see and hear but could
+  // never be seen or heard. Camera/mic still start from the pre-join choice.
+  const canPublish = isPublisherRole(localRole);
   const lynk = useLynkBroadcast(id || undefined, canPublish);
 
   // Same session machine as native, now fed from the MoQ lifecycle. It owns
@@ -636,6 +648,7 @@ function RoomInner({
   // pre-join reset runs) and skip the join entirely — the room then mounts but
   // never calls video_join_room. A ref is fresh on every mount.
   const joinFiredRef = useRef(false);
+  const joinCompletedRef = useRef(false);
 
   // Local identity projected as a SneakyUser for reactions/chat authorship.
   const currentUser: SneakyUser = {
@@ -779,10 +792,21 @@ function RoomInner({
       // the publish token mints, and the go-live effect below fires. A listener
       // keeps `canPublish` false and only ever subscribes.
       setLocalRole(peer.role);
+      joinCompletedRef.current = true;
     })();
 
     return () => {
       cancelled = true;
+      // A join that never resolved must not leave its guard standing.
+      //
+      // `joinFiredRef` was set on entry and never cleared, so a teardown
+      // mid-flight cancelled the attempt AND blocked every retry: the room sat
+      // on "Connecting…" with no error, forever. `roomHasVideo` is in this
+      // effect's deps, so a re-run is not hypothetical — and React StrictMode
+      // does exactly this on every mount in development, which is how it was
+      // caught. `video_join_room` is idempotent for an existing member, so
+      // re-firing is safe.
+      if (!joinCompletedRef.current) joinFiredRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, joinAnonymous, roomHasVideo]);
@@ -981,7 +1005,11 @@ function RoomInner({
         }
         resetRoomStore();
         endRoomHistory(id);
-        router.back();
+        // Same exit as the countdown: the Lynks list, never `router.back()`.
+        // Back is wherever you came from, and for a deep link, a refresh, or an
+        // accepted invite that is OUTSIDE the app — so the tap did nothing and
+        // you stayed in the room you just tried to hang up on.
+        router.push(LYNKS_LIST_ROUTE);
       }
     })();
   }, [id, endRoomHistory, resetRoomStore, router, showToast]);
@@ -1188,11 +1216,6 @@ function RoomInner({
   const listenerTiles = remoteTiles.filter((t) => !t.isPublisher);
 
   const stageTiles = [localTile, ...remotePublisherTiles];
-  // The host (and any co-hosts) own the top of the stage — large and prominent;
-  // everyone else with a tile sits in the smaller grid beneath. Falls back to a
-  // uniform grid if somehow no host/co-host tile is present.
-  const featuredTiles = stageTiles.filter((t) => t.isHost || t.isCoHost);
-  const otherTiles = stageTiles.filter((t) => !t.isHost && !t.isCoHost);
   const roomTitle = roomSnapshot?.title || paramTitle || getLynkDisplayName();
   const participantCount = stageTiles.length;
 
@@ -1330,7 +1353,16 @@ function RoomInner({
       logEvents
       onCaptureAttempt={(kind) => captureBroadcast.notifyLocalCapture(kind)}
     >
-      <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white">
+      <main
+        // Observable seam, same idea as `data-tile` / `data-speaking`: the role
+        // and the publish capability are what decide whether anyone can see or
+        // hear you, and they were previously readable only from React state —
+        // so a test could see a silent room but never say WHY it was silent.
+        data-room-phase={phase}
+        data-room-role={localRole ?? "none"}
+        data-can-publish={canPublish ? "true" : "false"}
+        className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white"
+      >
       {/* The session machine is the single source now — it is what knows a
           first join from a reconnect, and what is driving the retries. */}
       <ConnectionBanner phase={bannerPhaseFor(session)} />
@@ -1450,27 +1482,23 @@ function RoomInner({
               WIDTH (aspect-video), so on a tall viewport they used a third of
               the stage and floated at the top over a large void. Now the stage
               centres and the tiles are also bounded by the space available. */}
-          <section className="flex flex-1 flex-col justify-center gap-3 overflow-y-auto px-4 py-2 md:px-6 lg:px-8">
-            {featuredTiles.length > 0 ? (
-              <div
-                className={`mx-auto grid w-full gap-3 md:gap-4 ${
-                  featuredTiles.length === 1
-                    ? "max-w-[min(100%,calc((100dvh-22rem)*16/9))] grid-cols-1"
-                    : "max-w-[min(100%,calc((100dvh-22rem)*32/9))] grid-cols-2"
-                }`}
-              >
-                {featuredTiles.map((tile) => (
-                  <StageTile key={tile.key} tile={tile} large />
-                ))}
-              </div>
-            ) : null}
-            {otherTiles.length > 0 ? (
-              <div className="mx-auto grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-3 md:max-w-5xl md:grid-cols-4 md:gap-4 lg:max-w-6xl lg:grid-cols-5">
-                {otherTiles.map((tile) => (
-                  <StageTile key={tile.key} tile={tile} />
-                ))}
-              </div>
-            ) : null}
+          {/* ONE uniform grid. The host was drawn large on top with guests in a
+              5-up strip beneath, which at five people read as one person and
+              four thumbnails. Zoom, Teams and Riverside all draw equal tiles at
+              this headcount and mark the talker with a ring instead — which is
+              what `data-speaking` on each tile already does. `auto-rows-fr`
+              plus a filling tile means N people share the stage evenly rather
+              than the grid growing past the fold. */}
+          <section className="flex min-h-0 flex-1 items-center justify-center px-4 py-2 md:px-6 lg:px-8">
+            <div
+              className={`mx-auto grid h-full max-h-[calc(100dvh-20rem)] w-full max-w-6xl auto-rows-fr gap-3 md:gap-4 ${stageGridClass(
+                stageTiles.length,
+              )}`}
+            >
+              {stageTiles.map((tile) => (
+                <StageTile key={tile.key} tile={tile} />
+              ))}
+            </div>
           </section>
 
           {/* Listener row — TanStack Virtual (horizontal) */}

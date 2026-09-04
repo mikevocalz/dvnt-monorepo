@@ -13,9 +13,16 @@ import { useEffect, useState } from "react";
  * levels-adjusts it.
  *
  * That goal sets the styling: plain text, no chrome. A bordered, blurred,
- * shadowed card at 18% opacity (the previous treatment) was loud enough over
- * live video that the watermark shipped disabled — which is the worst of both
+ * shadowed card at 18% opacity (the first treatment) was loud enough over live
+ * video that the watermark shipped disabled — which is the worst of both
  * worlds. Near-invisible at rest, legible under levels, is the target.
+ *
+ * `mix-blend-screen` is what the second treatment got wrong. Screen blending
+ * only ever LIGHTENS, so over the dark frame a live room actually is, 6% white
+ * text stopped being a watermark and became diagonal streaks across everyone's
+ * face — reported as "lines going through my video". Normal compositing at
+ * 3.5% is invisible over both a dark room and a blown-out window, and still
+ * comes back under a levels adjustment, which is the only thing it owes.
  *
  * `pointer-events-none` + `aria-hidden` are load-bearing: the overlay covers
  * the whole stage and must never intercept a tap or reach a screen reader.
@@ -73,9 +80,9 @@ export function SneakyLynkWatermarkOverlay({
       // z-0: above the video tiles (unpositioned / z-auto) but below the room
       // header, controls, banners, and blackout, which all carry a positive
       // z-index. The watermark must never sit on top of a control.
-      className="pointer-events-none absolute inset-0 z-0 overflow-hidden mix-blend-screen"
+      className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
     >
-      <div className="absolute -inset-32 grid rotate-[-24deg] grid-cols-4 gap-x-8 gap-y-6 opacity-[0.06]">
+      <div className="absolute -inset-32 grid rotate-[-24deg] grid-cols-4 gap-x-8 gap-y-6 opacity-[0.035]">
         {Array.from({ length: CELL_COUNT }).map((_, index) => (
           <span
             key={index}

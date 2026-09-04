@@ -249,7 +249,16 @@ export function TimeUpDialog({
   );
 }
 
-export function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
+/**
+ * One person on the stage.
+ *
+ * No `large` prop any more. It existed so the host could be drawn at
+ * `aspect-video` while everyone else got a small `aspect-square` — which
+ * cropped 16:9 camera output to a box AND said, at a glance, that the guests
+ * mattered less. Every tile now fills its grid cell; the grid owns the shape,
+ * the speaking ring owns the emphasis.
+ */
+export function StageTile({ tile }: { tile: Tile }) {
   const { canvasPath, attachCanvas } = tile;
   // Stable across re-renders, so the MoQ backend is created once per publisher
   // and closed only when the tile really goes away.
@@ -270,9 +279,7 @@ export function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
       // Speaking is a RING, not a background or a glow: it reads at thumbnail
       // size, survives on top of video, and costs no contrast against the tile.
       // Cyan rather than signal — someone talking is not an alert.
-      className={`relative overflow-hidden rounded-2xl border bg-white/[0.04] transition-[box-shadow,border-color] duration-200 ${
-        large ? "aspect-video" : "aspect-square"
-      } ${
+      className={`relative h-full min-h-0 w-full overflow-hidden rounded-2xl border bg-white/[0.04] transition-[box-shadow,border-color] duration-200 ${
         tile.isSpeaking
           ? "border-[#3FDCFF]/70 shadow-[0_0_0_2px_rgba(63,220,255,0.45)]"
           : "border-white/8"
@@ -282,7 +289,7 @@ export function StageTile({ tile, large }: { tile: Tile; large?: boolean }) {
           above it is transparent until MoQ decodes a frame, so a camera-off
           participant reads as their avatar while their audio still plays. */}
       <div className="absolute inset-0 flex items-center justify-center">
-        <SquareAvatar uri={tile.avatar} name={tile.name} size={large ? 104 : 72} />
+        <SquareAvatar uri={tile.avatar} name={tile.name} size={88} />
       </div>
       {canvasPath ? (
         <canvas

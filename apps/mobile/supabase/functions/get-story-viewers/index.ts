@@ -14,7 +14,7 @@ import { verifySession } from "../_shared/verify-session.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-auth-token",
+    "authorization, x-client-info, apikey, content-type, x-auth-token, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 

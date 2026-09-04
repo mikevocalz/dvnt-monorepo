@@ -109,7 +109,7 @@ console.log("[Auth] AUTH_BASE_URL:", AUTH_BASE_URL);
 // harmless for them. (This was the cause of web "Failed to fetch" on login.)
 const CORS_BASE: Record<string, string> = {
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, cookie, set-cookie",
+    "authorization, x-client-info, apikey, content-type, cookie, set-cookie, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Credentials": "true",
   "Access-Control-Expose-Headers": "set-auth-token, set-cookie",

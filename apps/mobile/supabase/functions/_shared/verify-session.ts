@@ -82,6 +82,8 @@ export async function verifySession(
 const ALLOWED_ORIGINS = [
   "http://localhost:8081", // Expo dev server
   "http://localhost:19006", // Expo web
+  "http://localhost:3000", // Next web dev server + the Playwright e2e lane
+  "http://127.0.0.1:3000",
   "https://dvnt.app", // Future web domain
   "https://dvntapp.live", // Production web (custom domain)
   "https://www.dvntapp.live",
@@ -121,7 +123,7 @@ export function corsHeaders(req?: Request): Record<string, string> {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers":
-      "Content-Type, Authorization, apikey, x-client-info, x-auth-token",
+      "Content-Type, Authorization, apikey, x-client-info, x-auth-token, sentry-trace, baggage",
     ...(origin ? { Vary: "Origin" } : {}),
   };
 }
@@ -134,7 +136,7 @@ export const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, apikey, x-client-info, x-auth-token",
+    "Content-Type, Authorization, apikey, x-client-info, x-auth-token, sentry-trace, baggage",
 };
 
 /**

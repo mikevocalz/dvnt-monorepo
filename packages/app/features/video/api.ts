@@ -275,6 +275,20 @@ export const videoApi = {
     const internalRoomId = await resolveRealtimeRoomId(roomId);
     if (!internalRoomId) return [];
 
+    // TWO queries, joined here, rather than one PostgREST embed.
+    //
+    // This read was `users!inner(username, avatar)`, and there is no foreign
+    // key between `video_room_members.user_id` (a text auth id) and `users`, so
+    // PostgREST answered every single call with
+    // `PGRST200: Could not find relationship`. The `return []` below then
+    // swallowed it — so the roster was ALWAYS empty, silently. That is why a
+    // host saw their own tile and nobody else's: remote tiles are built from
+    // this list, and this list never had anyone in it.
+    //
+    // The fix is not an FK. Adding one would put a constraint on the join
+    // write path, where a failed insert costs someone their seat in a live
+    // room. Two reads and a Map cost one extra round trip and can't fail
+    // that way.
     const { data, error } = await supabase
       .from("video_room_members")
       .select(
@@ -287,29 +301,56 @@ export const videoApi = {
         joined_at,
         left_at,
         is_anonymous,
-        anon_label,
-        users!inner(username, avatar)
+        anon_label
       `,
       )
       .eq("room_id", internalRoomId)
       .eq("status", "active");
 
-    if (error || !data) return [];
+    if (error || !data) {
+      // Loud on purpose. The silent version of this line hid the bug above for
+      // as long as the feature has existed.
+      if (error) console.error("[video] roster query failed:", error.message);
+      return [];
+    }
 
-    return data.map((m: any) => ({
-      roomId: m.room_id,
-      userId: m.user_id,
-      role: m.role,
-      status: m.status,
-      handRaised: !!m.hand_raised,
-      joinedAt: m.joined_at,
-      leftAt: m.left_at,
-      username: m.users?.username,
-      avatar: m.users?.avatar?.url,
-      // Needed to derive the MoQ peer id — see `lynk-participants.ts`.
-      isAnonymous: m.is_anonymous ?? false,
-      anonLabel: m.anon_label ?? null,
-    }));
+    const authIds = [...new Set(data.map((m: any) => m.user_id).filter(Boolean))];
+    const profileByAuthId = new Map<string, { username?: string; avatar?: any }>();
+    if (authIds.length > 0) {
+      const { data: users, error: usersError } = await supabase
+        .from("users")
+        // `avatar` is a relation (`avatar_id` -> media), not a column — the
+        // same shape every other user read in the app uses.
+        .select("auth_id, username, first_name, avatar:avatar_id(url)")
+        .in("auth_id", authIds);
+      if (usersError) {
+        // A missing profile costs a name and an avatar, never a tile — the
+        // member still renders as "Guest".
+        console.error("[video] roster profiles failed:", usersError.message);
+      }
+      for (const u of users ?? []) {
+        profileByAuthId.set((u as any).auth_id, u as any);
+      }
+    }
+
+    return data.map((m: any) => {
+      const profile = profileByAuthId.get(m.user_id);
+      return {
+        roomId: m.room_id,
+        userId: m.user_id,
+        role: m.role,
+        status: m.status,
+        handRaised: !!m.hand_raised,
+        joinedAt: m.joined_at,
+        leftAt: m.left_at,
+        username: profile?.username,
+        displayName: (profile as any)?.first_name || profile?.username,
+        avatar: profile?.avatar?.url,
+        // Needed to derive the MoQ peer id — see `lynk-participants.ts`.
+        isAnonymous: m.is_anonymous ?? false,
+        anonLabel: m.anon_label ?? null,
+      };
+    });
   },
 
   /**

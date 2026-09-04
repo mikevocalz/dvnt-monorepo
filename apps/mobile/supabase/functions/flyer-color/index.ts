@@ -19,7 +19,7 @@ import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 function json(d: unknown, s = 200): Response {
