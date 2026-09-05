@@ -102,7 +102,7 @@ function EventCard({
         stiffness: 300,
         delay: index * 0.15,
       }}
-      className="max-w-2xl w-full self-center"
+      className="max-w-5xl w-full self-center"
     >
       <Motion.View
         className="rounded-3xl overflow-hidden mb-5"
@@ -329,6 +329,9 @@ function EventCard({
   );
 }
 
+/** Matches the `max-w-5xl` column this screen renders in (Tailwind 5xl = 1024). */
+const EVENTS_MAX_WIDTH = 1024;
+
 function EventsScreenContent() {
   const router = useRouter();
   const { colors } = useColorScheme();
@@ -339,14 +342,23 @@ function EventsScreenContent() {
   const trace = useScreenTrace("Events");
   useBootstrapEvents();
 
-  // Responsive grid — 2-col on tablet
+  // Responsive grid — columns follow the available width
   const { width: screenWidth } = useWindowDimensions();
   const isLargeScreen = useIsLargeScreen();
-  const numColumns = isLargeScreen ? 2 : 1;
-  const gridGap = isLargeScreen ? 12 : 0;
-  const cardWidth = isLargeScreen
-    ? (Math.min(screenWidth, 768) - 32 - gridGap) / 2
-    : screenWidth - 12;
+  // Columns follow the REAL width, and the grid is no longer capped at 768.
+  //
+  // `Math.min(screenWidth, 768)` meant a bigger iPad got more empty space
+  // rather than more content — the definition of not responsive. A 1024pt iPad
+  // laid out exactly like a 768pt one and parked the difference in the
+  // gutters. Now the canvas grows and a third column appears when there is
+  // genuinely room for one at a sane card width.
+  const contentWidth = Math.min(screenWidth, EVENTS_MAX_WIDTH);
+  const numColumns = contentWidth >= 1000 ? 3 : contentWidth >= 700 ? 2 : 1;
+  const gridGap = numColumns > 1 ? 12 : 0;
+  const cardWidth =
+    numColumns > 1
+      ? (contentWidth - 32 - gridGap * (numColumns - 1)) / numColumns
+      : screenWidth - 12;
   // PORTRAIT, because a DVNT flyer is authored 3:5 portrait
   // (`BuiltEventMedia.flyerImageUrl`) and these cards render it with
   // `resizeMode="cover"`. At 0.85 (landscape) and 1.0 (square) the card threw
@@ -997,8 +1009,12 @@ function EventsScreenContent() {
                           <View
                             style={{
                               paddingHorizontal: 16,
-                              flexDirection: isLargeScreen ? "row" : "column",
-                              flexWrap: isLargeScreen ? "wrap" : "nowrap",
+                              // Driven by the computed column count, not by
+                              // `isLargeScreen`: those disagreed between 700 and
+                              // 768pt, where cards were sized for a grid the
+                              // container still stacked.
+                              flexDirection: numColumns > 1 ? "row" : "column",
+                              flexWrap: numColumns > 1 ? "wrap" : "nowrap",
                               gap: gridGap,
                             }}
                           >
@@ -1006,7 +1022,7 @@ function EventsScreenContent() {
                               <View
                                 key={event.id}
                                 style={
-                                  isLargeScreen
+                                  numColumns > 1
                                     ? { width: cardWidth }
                                     : undefined
                                 }
