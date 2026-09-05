@@ -29,6 +29,8 @@ import {
   Radio,
   Mic,
   MicOff,
+  Video,
+  VideoOff,
   Hand,
 } from "lucide-react-native";
 import React, { useState, useEffect, useCallback, useRef } from "react";
@@ -38,6 +40,7 @@ import {
   useMicrophonePermission,
 } from "react-native-vision-camera";
 import { useCamera, useMicrophone } from "react-native-moq";
+import { RoomVideo } from "@dvnt/app/features/sneaky-lynk/ui/RoomVideo";
 import { useVideoRoom } from "@dvnt/app/features/video";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
@@ -303,6 +306,16 @@ function ClosedRoomScreen({
   );
 }
 
+/**
+ * Where leaving a Lynk goes: the Lynks list, never `router.back()`.
+ *
+ * Back is wherever you happened to come from, and for a deep link, a push
+ * notification, an accepted invite or a cold start that is outside the app
+ * entirely — so hanging up did nothing and you stayed in the room you had just
+ * tried to leave. Same constant and same reason as the web room.
+ */
+const LYNKS_LIST_ROUTE = "/messages";
+
 // ── Pre-Join Screen ──────────────────────────────────────────────────
 
 function PreJoinScreen({
@@ -311,11 +324,22 @@ function PreJoinScreen({
   onBack,
 }: {
   roomTitle: string;
-  onJoin: (anonymous: boolean) => void;
+  onJoin: (anonymous: boolean, cameraOn: boolean, micOn: boolean) => void;
   onBack: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [anonymous, setAnonymous] = React.useState(false);
+  const [cameraOn, setCameraOn] = React.useState(true);
+  const [micOn, setMicOn] = React.useState(true);
+
+  /**
+   * Self-preview, same as the web pre-join.
+   *
+   * This screen asked "how do you want to appear" and showed you nothing — you
+   * found out what the room could see AFTER it could see it. Its own camera,
+   * released when this screen unmounts, so the room's capture starts clean.
+   */
+  const previewCamera = useCamera({ enabled: cameraOn });
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -335,8 +359,18 @@ function PreJoinScreen({
         <View className="w-6" />
       </View>
 
-      {/* Content */}
-      <View className="flex-1 items-center justify-center px-6">
+      {/* Content.
+          `max-w-md self-center` is the whole iPad fix: every card here was
+          `w-full` inside a full-bleed padding box, so on a 1024pt iPad the
+          safety copy and the toggles stretched the entire width and the screen
+          read as a settings page rather than a door. Phones are unchanged —
+          the cap is wider than they are. Same column width as the web
+          pre-join, so the two rails describe the same screen. */}
+      <ScrollView
+        contentContainerClassName="flex-grow items-center justify-center px-6 py-6"
+        showsVerticalScrollIndicator={false}
+      >
+       <View className="w-full max-w-md self-center items-center">
         <View className="w-20 h-20 rounded-full bg-primary/20 items-center justify-center mb-6">
           <Radio size={40} color="#FC253A" />
         </View>
@@ -344,9 +378,60 @@ function PreJoinScreen({
         <Text className="text-2xl font-bold text-foreground text-center mb-2">
           {roomTitle || getLynkDisplayName()}
         </Text>
-        <Text className="text-muted-foreground text-center mb-10">
+        <Text className="text-muted-foreground text-center mb-6">
           Choose how you want to appear in this room
         </Text>
+
+        {/* Self-preview + the two decisions that matter at a door. Mirrored,
+            because an unmirrored preview reads as someone else. */}
+        <View className="w-full rounded-2xl overflow-hidden bg-black border border-border mb-4">
+          <View className="w-full aspect-video">
+            {cameraOn && previewCamera ? (
+              <RoomVideo camera={previewCamera} mirror />
+            ) : (
+              <View className="flex-1 items-center justify-center gap-2">
+                <VideoOff size={26} color="#ffffff73" />
+                <Text className="text-xs text-muted-foreground">
+                  Camera off — you&apos;ll join as your avatar
+                </Text>
+              </View>
+            )}
+          </View>
+          <View className="flex-row items-center justify-center gap-3 px-4 py-3 border-t border-border">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: cameraOn }}
+              accessibilityLabel={cameraOn ? "Turn camera off" : "Turn camera on"}
+              onPress={() => setCameraOn((v) => !v)}
+              hitSlop={8}
+              className={`w-11 h-11 rounded-full items-center justify-center ${
+                cameraOn ? "bg-secondary" : "bg-primary"
+              }`}
+            >
+              {cameraOn ? (
+                <Video size={18} color="#fff" />
+              ) : (
+                <VideoOff size={18} color="#fff" />
+              )}
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: micOn }}
+              accessibilityLabel={micOn ? "Mute microphone" : "Unmute microphone"}
+              onPress={() => setMicOn((v) => !v)}
+              hitSlop={8}
+              className={`w-11 h-11 rounded-full items-center justify-center ${
+                micOn ? "bg-secondary" : "bg-primary"
+              }`}
+            >
+              {micOn ? (
+                <Mic size={18} color="#fff" />
+              ) : (
+                <MicOff size={18} color="#fff" />
+              )}
+            </Pressable>
+          </View>
+        </View>
 
         <View className="w-full rounded-2xl bg-secondary px-5 py-4 mb-4">
           <Text className="text-foreground font-semibold mb-2">
@@ -395,14 +480,15 @@ function PreJoinScreen({
 
         {/* Join Button */}
         <Pressable
-          onPress={() => onJoin(anonymous)}
+          onPress={() => onJoin(anonymous, cameraOn, micOn)}
           className="w-full py-4 rounded-full bg-primary items-center active:bg-primary/80"
         >
           <Text className="text-white font-bold text-base">
             {anonymous ? "Join Anonymously" : "Join Lynk"}
           </Text>
         </Pressable>
-      </View>
+       </View>
+      </ScrollView>
     </View>
   );
 }
@@ -444,6 +530,10 @@ function SneakyLynkRoomScreenContent({
   // Pre-join state for server rooms (joiners, not creators)
   const [hasJoined, setHasJoined] = useState(!isServerRoom || isCreator);
   const [joinAnonymous, setJoinAnonymous] = useState(false);
+  // How you said you wanted to arrive at the door. The room used to start
+  // camera and mic regardless, which made the pre-join choice decoration.
+  const [joinCameraOn, setJoinCameraOn] = useState(true);
+  const [joinMicOn, setJoinMicOn] = useState(true);
   const [roomLookup, setRoomLookup] = useState<{
     loading: boolean;
     room: SneakyRoom | null;
@@ -470,10 +560,15 @@ function SneakyLynkRoomScreenContent({
     };
   }, [id, shouldGateJoin]);
 
-  const handleJoin = useCallback((anonymous: boolean) => {
-    setJoinAnonymous(anonymous);
-    setHasJoined(true);
-  }, []);
+  const handleJoin = useCallback(
+    (anonymous: boolean, cameraOn: boolean, micOn: boolean) => {
+      setJoinAnonymous(anonymous);
+      setJoinCameraOn(cameraOn);
+      setJoinMicOn(micOn);
+      setHasJoined(true);
+    },
+    [],
+  );
 
   if (shouldGateJoin && roomLookup.loading) {
     return (
@@ -521,6 +616,8 @@ function SneakyLynkRoomScreenContent({
         paramTitle={paramTitle}
         roomHasVideo={roomHasVideo}
         anonymous={joinAnonymous}
+        initialCameraOn={joinCameraOn}
+        initialMicOn={joinMicOn}
         initialRoom={roomLookup.room}
         billing={billing}
       />
@@ -898,6 +995,8 @@ function ServerRoom({
   paramTitle,
   roomHasVideo = true,
   anonymous = false,
+  initialCameraOn = true,
+  initialMicOn = true,
   initialRoom = null,
   billing = null,
 }: {
@@ -905,6 +1004,9 @@ function ServerRoom({
   paramTitle?: string;
   roomHasVideo?: boolean;
   anonymous?: boolean;
+  /** The pre-join answer. Applied once publishing becomes possible. */
+  initialCameraOn?: boolean;
+  initialMicOn?: boolean;
   initialRoom?: SneakyRoom | null;
   billing?: SneakyBilling | null;
 }) {
@@ -963,8 +1065,12 @@ function ServerRoom({
     null,
   );
   const presenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const desiredMicEnabledRef = useRef(true);
-  const desiredVideoEnabledRef = useRef(roomHasVideo);
+  // Seeded from the pre-join answer, not from `true`. `reconcileDesiredMedia`
+  // already applies these on join / reconnect / foreground, so seeding them is
+  // the whole carry-through: you arrive the way you said you would, and a
+  // reconnect does not quietly turn your camera back on.
+  const desiredMicEnabledRef = useRef(initialMicOn);
+  const desiredVideoEnabledRef = useRef(roomHasVideo && initialCameraOn);
   const handToggleInFlightRef = useRef(false);
   const shareInFlightRef = useRef(false);
   const reportInFlightRef = useRef(false);
@@ -1618,14 +1724,14 @@ function ServerRoom({
 
       reset();
       endRoomHistory(id, storeListeners.length);
-      router.back();
+      router.push(LYNKS_LIST_ROUTE);
       return;
     }
 
     // Non-host: navigate first, then reconcile with the server.
     reset();
     endRoomHistory(id, storeListeners.length);
-    router.back();
+    router.push(LYNKS_LIST_ROUTE);
 
     // Fire-and-forget — the user is already gone. Surface a background
     // log for ops; do NOT toast on failure because the user's already

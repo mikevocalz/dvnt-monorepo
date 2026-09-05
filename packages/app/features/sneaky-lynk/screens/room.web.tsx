@@ -137,6 +137,7 @@ import {
 import type { SneakyUser } from "@dvnt/app/features/sneaky-lynk/types";
 import { useRoomStore } from "../stores/room-store";
 import { eventsApi } from "@dvnt/app/lib/api/events";
+import { isPublisherRole } from "../publish-roles";
 import { stageGridClass } from "../ui/stage-grid";
 import { useLynkHistoryStore } from "../stores/lynk-history-store";
 import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
@@ -182,21 +183,6 @@ const ROOM_ENDED_GRACE_SECONDS = 10;
 
 /** Where a finished room returns you: the Lynk list, in the messages inbox. */
 const LYNKS_LIST_ROUTE = "/feed/messages";
-
-/** Roles that may publish — mirrors PUBLISH_ROLES in the lynk-moq-token
- *  edge function. Module scope on purpose: it is called from the tile map,
- *  which runs before the stage split that used to declare it. */
-function isPublisherRole(role?: string | null) {
-  return (
-    role === "host" ||
-    role === "co-host" ||
-    role === "speaker" ||
-    // Every joiner is a `participant`. Excluding them put each guest in the
-    // audience strip as a bare avatar, so a host hosting three people saw
-    // their own tile and nothing else. Guests belong on the stage.
-    role === "participant"
-  );
-}
 
 function isClosedRoomError(message?: string | null) {
   if (!message) return false;

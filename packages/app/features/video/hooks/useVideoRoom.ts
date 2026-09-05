@@ -37,6 +37,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.native";
+import { isPublisherRole } from "@dvnt/app/features/sneaky-lynk/publish-roles";
 import { AppState, type AppStateStatus } from "react-native";
 import { videoApi } from "../api";
 import { useVideoRoomStore } from "../stores/video-room-store";
@@ -95,8 +96,12 @@ export function useVideoRoom({
   // requested and `lynk-moq-token` is never asked to deny one. When the role
   // lands the hook mints, connects and goes live on its own.
   const localRole = store.localUser?.role;
-  const canPublish =
-    localRole === "host" || localRole === "co-host" || localRole === "speaker";
+  // Shared with the web room AND with `lynk-moq-token`. This list used to be
+  // spelled out here and disagreed with the server: `participant` — the role
+  // every joiner gets — was missing, so a guest never asked for a publish
+  // token and the host was hosting people who could see and hear but could
+  // never be seen or heard.
+  const canPublish = isPublisherRole(localRole);
   const media = useLynkBroadcast(roomId || undefined, canPublish);
 
   // The roster carries identity for remote tiles (MoQ paths carry none).
