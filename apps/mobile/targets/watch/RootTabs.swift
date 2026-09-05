@@ -1,18 +1,15 @@
 import SwiftUI
 
-/// The app's top-level IA. Four parallel destinations, one swipe apart — now
-/// drawn as Doors (see `Marquee.swift`) rather than as four bare screens.
+/// The app's top-level IA. Four parallel destinations, one swipe apart.
 ///
-/// Replaces a single flat `List` that stacked broadcasts, DMs, the door and
-/// every event — tonight's and one three months out — into one undifferentiated
-/// stream. On a 40mm screen in a dark room that made the member do the sorting.
+/// Now, Tickets, and Events retain DVNT's art-led Door treatment. Inbox is the
+/// deliberate exception: a wrist message destination must land on people and
+/// messages immediately instead of spending another tap on decorative chrome.
 ///
 /// **Horizontal paging, deliberately.** `TicketStackView` already binds the
 /// Digital Crown to `.verticalPage` for paging through passes. A vertical root
-/// would nest vertical-on-vertical and make the Crown ambiguous — HIG W-DC-03.
-/// W-NV-02 puts top-level sections on horizontal swipe for exactly this reason,
-/// and four tabs is inside its five-tab ceiling. The design spec asked for
-/// `.verticalPage`; that is the one part of it not adopted, and this is why.
+/// would nest vertical-on-vertical and make the Crown ambiguous. Keeping root
+/// paging horizontal also leaves vertical Crown movement to lists and threads.
 struct RootTabs: View {
     @EnvironmentObject private var store: TicketStore
     @EnvironmentObject private var broadcasts: BroadcastStore
@@ -50,22 +47,14 @@ struct RootTabs: View {
             ) { EventsView() }
                 .tag(Tab.events)
 
-            MarqueePage(
-                art: .mosaic(dms.recentAvatarURLs),
-                eyebrow: "Messages",
-                // No title. It read "From hosts", which stopped being true when
-                // broadcasts and DMs merged into one inbox — and the eyebrow
-                // plus the unread stub already name this Door.
-                title: "",
-                stub: unreadStub
-            ) { MessagesView() }
+            // Inbox is content-first. The previous full-screen Messages Door
+            // added an unnecessary tap before the only content a wearer came
+            // here to see. `MessagesView` owns its NavigationStack and opens
+            // directly into the unified DM + host-broadcast list.
+            MessagesView()
                 .tag(Tab.messages)
         }
         .tabViewStyle(.page)
-        // Flat black, not a washed brand gradient. The gradient is spent on two
-        // elements on this watch (AccessRing and the rail); behind a whole tab
-        // it is a section background the design system rules out, and on OLED it
-        // lights pixels for nothing.
         .containerBackground(DVNT.canvas, for: .tabView)
         .overlay(alignment: .trailing) {
             GradientRail(index: tab.rawValue, count: Tab.allCases.count)
@@ -78,9 +67,9 @@ struct RootTabs: View {
         return .event(imageURL: group.imageURL, dominantHex: group.dominantHex)
     }
 
-    /// Broadcasts + DMs share one Messages surface, so the stub counts both.
-    private var unreadStub: String? {
-        let n = broadcasts.unreadCount + dms.unreadCount
-        return n > 0 ? "\(n) UNREAD" : nil
+    /// Broadcasts + DMs share one Inbox surface, so its unread count remains
+    /// useful to complications/other chrome even though the Door is gone.
+    private var unreadCount: Int {
+        broadcasts.unreadCount + dms.unreadCount
     }
 }
