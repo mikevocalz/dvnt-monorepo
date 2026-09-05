@@ -11,7 +11,15 @@
  * Styling = raw semantic tags + Tailwind; media via @dvnt/ui Image (next/image);
  * routing via Solito. Avatars/story tiles are rounded squares (never circles).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
 import { Heart, Bookmark, Play, Grid3x3, Plus } from "lucide-react";
@@ -19,10 +27,12 @@ import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use
 import { useEvents } from "@dvnt/app/lib/hooks/use-events";
 // Event cards rendered in the feed on mobile and never on web, because this
 // screen only ever fetched posts. Same builder the native masonry uses.
+import { EVENT_INTERVAL } from "@dvnt/app/components/feed/feed-sections";
 import {
-  buildFeedSections,
-  EVENT_INTERVAL,
-} from "@dvnt/app/components/feed/feed-sections";
+  FeedEventCard,
+  type FeedEventCardData,
+} from "@dvnt/app/components/event/FeedEventCard.web";
+import type { Event } from "@dvnt/app/lib/hooks/use-events";
 import { useFeedRealtime } from "@dvnt/app/lib/hooks/use-feed-realtime";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { useToggleBookmark } from "@dvnt/app/lib/hooks/use-bookmarks";
@@ -57,6 +67,59 @@ function estimateRatio(post: Post): number {
   else if (post.hasMultipleImages || (post.media?.length ?? 0) > 1) base = 1.0;
   else if (media?.type === "gif") base = 0.75;
   return base + (hashId(post.id) * 2 - 1) * VARIATION;
+}
+
+/**
+ * Contains a single event card. One card throwing used to take the whole feed
+ * with it — React unmounts the nearest boundary, and with none here that was
+ * the page, which is how a bad card rendered as a black screen in production.
+ * A card that cannot render is now simply absent.
+ */
+class EventCardBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: Error) {
+    console.error("[Feed] event card failed to render:", error);
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+/**
+ * Feed `Event` -> the web card's data. The card takes a flat display shape
+ * rather than the query model, so the mapping lives here instead of widening
+ * the component. Attendees can arrive as a count or as an avatar array.
+ */
+function toFeedEventCardData(e: Event): FeedEventCardData {
+  const attendees =
+    typeof e.attendees === "number"
+      ? e.attendees
+      : Array.isArray(e.attendees)
+        ? e.attendees.length
+        : 0;
+  return {
+    id: String(e.id),
+    title: e.title,
+    category: e.category ?? null,
+    dateDay: e.date ?? null,
+    month: e.month ?? null,
+    location: e.location ?? null,
+    time: e.time ?? null,
+    attendeeCount: e.totalAttendees ?? attendees,
+    promoted: e.isPromoted ?? false,
+    media: {
+      eventId: e.id,
+      videoFlyerUrl: e.flyerVideoUrl ?? null,
+      staticFlyerUrl: e.image ?? null,
+      title: e.title,
+    },
+  };
 }
 
 // A still-image cover for any post type. Video / live-photo / animated posts
@@ -135,33 +198,51 @@ export function HomeScreen() {
   // recomputed from a mix of estimated and freshly-measured heights.) Each
   // column is a normal vertical flex stack, so the browser wraps the images at
   // their real natural heights.
-  // Masonry runs interleaved with full-width event cards, matching mobile.
-  const sections = useMemo(
-    () => buildFeedSections(posts, feedEvents ?? [], EVENT_INTERVAL),
-    [posts, feedEvents],
-  );
+  // ONE masonry over the whole feed, with event cards packed in as tiles.
+  //
+  // The first attempt chunked posts into a separate masonry per run with the
+  // event card as a full-width break between them. On a desktop that produced
+  // sixteen stacks of one to three tiles with ragged seams and large empty
+  // gaps — measured on production — because every chunk restarted the column
+  // packing. Treating an event as just another tile keeps the columns tall and
+  // balanced, which is what a masonry is for.
+  type Tile =
+    | { kind: "post"; key: string; post: Post }
+    | { kind: "event"; key: string; event: Event };
 
-  // Packs one masonry run into balanced columns. Was applied to the whole feed
-  // at once; now runs per section so an event card can sit between runs.
-  const packColumns = useCallback(
-    (chunk: Post[]): Post[][] => {
-      const cols = Array.from({ length: numColumns }, () => ({
-        items: [] as Post[],
-        h: 0,
-      }));
-      for (const post of chunk) {
-        let min = 0;
-        for (let c = 1; c < numColumns; c++) {
-          if (cols[c].h < cols[min].h) min = c;
-        }
-        cols[min].items.push(post);
-        cols[min].h += estimateRatio(post) * columnWidth + GAP;
+  const columns = useMemo(() => {
+    const events = feedEvents ?? [];
+    // Interleave into a single ordered list first, so events are spread through
+    // the feed rather than clustered at the end.
+    const tiles: Tile[] = [];
+    let e = 0;
+    posts.forEach((post, i) => {
+      tiles.push({ kind: "post", key: `p-${post.id}`, post });
+      if ((i + 1) % EVENT_INTERVAL === 0 && e < events.length) {
+        tiles.push({ kind: "event", key: `e-${events[e].id}`, event: events[e] });
+        e++;
       }
-      return cols.map((c) => c.items);
-    },
-    [numColumns, columnWidth],
-  );
+    });
 
+    const cols = Array.from({ length: numColumns }, () => ({
+      items: [] as Tile[],
+      h: 0,
+    }));
+    for (const tile of tiles) {
+      let min = 0;
+      for (let c = 1; c < numColumns; c++) {
+        if (cols[c].h < cols[min].h) min = c;
+      }
+      cols[min].items.push(tile);
+      // The event card is a fixed 200px hero plus its padding; a post is
+      // measured from its own aspect ratio.
+      cols[min].h +=
+        tile.kind === "event"
+          ? 224 + GAP
+          : estimateRatio(tile.post) * columnWidth + GAP;
+    }
+    return cols.map((c) => c.items);
+  }, [posts, feedEvents, numColumns, columnWidth]);
 
   // Infinite scroll — observe a sentinel near the end of the list inside the
   // scroller (replaces the virtualizer's last-item heuristic).
@@ -222,42 +303,29 @@ export function HomeScreen() {
             style={{ width: containerWidth }}
             aria-label="Feed"
           >
-            {sections.map((section) =>
-              // REVERTED on web. Rendering the native FeedEventCard here threw
-              // React error #130 (`args[]=undefined` — rendering undefined as a
-              // component) and painted the whole feed black in production. The
-              // web build and typecheck both passed, so this only shows up at
-              // runtime: something in that card's import chain resolves to
-              // undefined under the Next bundler even though the types resolve.
-              //
-              // Event cards on web need a card proven to render here — most
-              // likely components/event/FeedEventCard.web.tsx, which already
-              // exists and is used by the design page — not this one. Until
-              // then the feed shows posts, which is what it did before.
-              section.type === "event" ? null : (
+            <div className="flex" style={{ gap: GAP }}>
+              {columns.map((col, ci) => (
                 <div
-                  key={section.key}
-                  className="flex"
-                  style={{ gap: GAP, paddingBottom: GAP }}
+                  key={ci}
+                  className="flex flex-col"
+                  style={{ width: columnWidth, gap: GAP }}
                 >
-                  {packColumns(section.posts).map((col, ci) => (
-                    <div
-                      key={ci}
-                      className="flex flex-col"
-                      style={{ width: columnWidth, gap: GAP }}
-                    >
-                      {col.map((post) => (
-                        <MasonryCell
-                          key={post.id}
-                          post={post}
-                          fallbackHeight={cellHeight(post)}
-                        />
-                      ))}
-                    </div>
-                  ))}
+                  {col.map((tile) =>
+                    tile.kind === "event" ? (
+                      <EventCardBoundary key={tile.key}>
+                        <FeedEventCard data={toFeedEventCardData(tile.event)} />
+                      </EventCardBoundary>
+                    ) : (
+                      <MasonryCell
+                        key={tile.key}
+                        post={tile.post}
+                        fallbackHeight={cellHeight(tile.post)}
+                      />
+                    ),
+                  )}
                 </div>
-              ),
-            )}
+              ))}
+            </div>
             <div ref={sentinelRef} aria-hidden style={{ height: 1 }} />
             {isFetchingNextPage ? (
               <p className="text-white/40 text-center text-sm pt-4">Loading…</p>
