@@ -123,4 +123,5 @@ export interface AppUser {
   avatar?: string; bio?: string; website?: string; links?: string[]; location?: string;
   hashtags?: string[]; isVerified: boolean; postsCount: number; followersCount: number;
   followingCount: number; gender?: string; pronouns?: string;
+  sexuality?: string[]; eventAudience?: string;
 }

@@ -7,12 +7,13 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -39,6 +40,8 @@ const UpdateProfileSchema = z
     links: z.array(z.string().max(200)).max(4).optional(),
     pronouns: z.string().max(50).optional(),
     gender: z.string().max(50).optional(),
+    sexuality: z.array(z.string().max(30)).max(12).optional(),
+    eventAudience: z.string().max(40).optional(),
   })
   .refine((data) => Object.values(data).some((v) => v !== undefined), {
     message: "At least one field must be provided",
@@ -121,8 +124,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    const token = authHeader.replace("Bearer ", "");
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!supabaseUrl || !supabaseServiceKey) {
@@ -135,22 +136,16 @@ Deno.serve(async (req) => {
 
     console.log("[Edge:update-profile] Received request with token");
 
-    // 2. Verify Better Auth session
-    // Verify Better Auth session via direct DB lookup
-    const { data: sessionData, error: sessionError } = await supabaseAdmin
-      .from("session")
-      .select("id, token, userId, expiresAt")
-      .eq("token", token)
-      .single();
-
-    if (sessionError || !sessionData) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabaseAdmin, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    if (new Date(sessionData.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
 
-    const authUserId = sessionData.userId;
+    const authUserId = sessionResult.userId;
     console.log(
       "[Edge:update-profile] Authenticated user auth_id:",
       authUserId,
@@ -208,6 +203,12 @@ Deno.serve(async (req) => {
     }
     if (updates.gender !== undefined) {
       updateData.gender = updates.gender;
+    }
+    if (updates.sexuality !== undefined) {
+      updateData.sexuality = updates.sexuality;
+    }
+    if (updates.eventAudience !== undefined) {
+      updateData.event_audience = updates.eventAudience;
     }
 
     // Username change — check uniqueness before updating
@@ -285,6 +286,8 @@ Deno.serve(async (req) => {
         links,
         pronouns,
         gender,
+        sexuality,
+        event_audience,
         verified,
         followers_count,
         following_count,
@@ -416,6 +419,8 @@ Deno.serve(async (req) => {
           links: normalizeLinks(updatedUser.links),
           pronouns: updatedUser.pronouns,
           gender: updatedUser.gender,
+          sexuality: updatedUser.sexuality || [],
+          eventAudience: updatedUser.event_audience,
           avatar: (updatedUser.avatar as any)?.url,
           isVerified: updatedUser.verified || false,
           postsCount: updatedUser.posts_count || 0,

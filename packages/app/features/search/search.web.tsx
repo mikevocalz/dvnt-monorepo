@@ -23,7 +23,7 @@
  * but renders a graceful "open on mobile" notice instead of the native picker.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "solito/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Debouncer } from "@tanstack/pacer";
@@ -39,6 +39,7 @@ import {
   MapPin,
   BadgeCheck,
 } from "lucide-react";
+import { WebAvatar } from "@dvnt/app/components/ui/web-avatar";
 import { useSearchStore } from "@dvnt/app/lib/stores/search-store";
 import {
   useDiscoverData,
@@ -58,12 +59,6 @@ const CDN_URL =
   process.env.EXPO_PUBLIC_BUNNY_CDN_URL ||
   "https://dvnt.b-cdn.net";
 
-function getAvatarUrl(avatar: string | null | undefined): string {
-  if (!avatar) return "https://i.pravatar.cc/150?img=0";
-  if (avatar.startsWith("http")) return avatar;
-  return `${CDN_URL}/${avatar}`;
-}
-
 // A still cover for any post type — never a video URL (an <img> can't render mp4).
 const VIDEO_URL_RE =
   /post-video|\.mp4(\?|$)|\.mov(\?|$)|\.m3u8(\?|$)|\.webm(\?|$)/i;
@@ -77,13 +72,27 @@ function coverFor(post: Post): string {
 }
 
 // ── Post grid tile (Explore / search posts / hashtag) ───────────────
-function PostTile({ post }: { post: Post }) {
+function PostTile({ post, big = false }: { post: Post; big?: boolean }) {
   const router = useRouter();
   const media = post.media?.[0];
   const isVideo = post.type === "video" || media?.type === "video";
   const isCarousel = post.hasMultipleImages || (post.media?.length ?? 0) > 1;
   const isText = post.kind === "text" || (post.textSlides?.length ?? 0) > 0;
-  const cover = coverFor(post);
+  const rawCover = coverFor(post);
+  // A cover URL that 404s would show the browser's broken-image glyph — treat a
+  // load failure as "no cover" and fall through to the video/placeholder path.
+  const [coverFailed, setCoverFailed] = useState(false);
+  const cover = coverFailed ? "" : rawCover;
+  // No still image? If the only media we have is a video, paint its first frame
+  // via <video preload="metadata"> (#t=0.1 nudges the frame, not a black poster).
+  // Gate on the URL being a video — NOT the post.type flag, which is unreliable
+  // (some video posts aren't tagged type:"video"). HLS can't frame-grab without
+  // hls.js, so those keep the "No preview" fallback.
+  const firstMediaUrl = media?.url ?? "";
+  const videoSrc =
+    !cover && VIDEO_URL_RE.test(firstMediaUrl) ? firstMediaUrl : "";
+  const canFrameGrab = videoSrc !== "" && !/\.m3u8(\?|$)/i.test(videoSrc);
+  const showVideoBadge = isVideo || canFrameGrab;
 
   const textPreview = isText
     ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
@@ -100,7 +109,9 @@ function PostTile({ post }: { post: Post }) {
     <div
       onClick={open}
       role="button"
-      className="group relative aspect-square w-full overflow-hidden rounded-xl bg-white/5 cursor-pointer"
+      className={`group relative w-full overflow-hidden rounded-xl bg-white/5 cursor-pointer ${
+        big ? "col-span-2 row-span-2" : "aspect-square"
+      }`}
     >
       {isText ? (
         <div
@@ -122,6 +133,16 @@ function PostTile({ post }: { post: Post }) {
           src={cover}
           alt={post.caption ?? ""}
           loading="lazy"
+          onError={() => setCoverFailed(true)}
+          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+        />
+      ) : canFrameGrab ? (
+        <video
+          src={`${videoSrc}#t=0.1`}
+          muted
+          playsInline
+          preload="metadata"
+          tabIndex={-1}
           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
         />
       ) : (
@@ -130,72 +151,54 @@ function PostTile({ post }: { post: Post }) {
         </div>
       )}
 
-      {isVideo || isCarousel ? (
+      {showVideoBadge || isCarousel ? (
         <span className="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-lg bg-black/50 backdrop-blur-sm">
-          {isVideo ? (
+          {showVideoBadge ? (
             <Play size={12} color="#fff" fill="#fff" />
           ) : (
             <Grid3x3 size={12} color="#fff" />
           )}
         </span>
       ) : null}
+
+      {/* Hover reveal: author handle over a bottom gradient (feed idiom). */}
+      <span className="pointer-events-none absolute inset-x-0 bottom-0 flex h-14 items-end bg-gradient-to-t from-black/70 to-transparent px-2.5 pb-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+        <span className="truncate text-xs font-semibold text-white">
+          @{post.author?.username}
+        </span>
+      </span>
     </div>
   );
 }
 
-// ── Virtualized post grid (TanStack Virtual, lanes = columns) ───────
-function PostGrid({ posts, columns }: { posts: Post[]; columns: number }) {
-  const parentRef = useRef<HTMLDivElement>(null);
-  const rowCount = Math.ceil(posts.length / columns);
-
-  const virtualizer = useVirtualizer({
-    count: rowCount,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 0, // measured below
-    overscan: 6,
-  });
-
-  // Row height = (containerWidth - gaps) / columns (square cells) + gap.
-  useEffect(() => {
-    virtualizer.measure();
-  }, [columns, posts.length, virtualizer]);
-
+/**
+ * Explore/search post grid — plain CSS grid, NOT virtualized.
+ *
+ * The previous TanStack-Virtual version estimated every row at 0 inside a
+ * non-scrolling parent, so getTotalSize() was 0 and the grid painted NOTHING
+ * on web — the "discover renders in-app but not on web" bug. Discover is
+ * bounded (≤40 posts) so a plain grid is correct; same call the feed masonry
+ * made when its virtualizer mis-stacked. (First issue caught by web Sentry.)
+ *
+ * `mosaic` (explore only): dense grid where video/text tiles earn a 2×2 cell
+ * on a cadence — the page's one signature element. Search results stay
+ * uniform squares for scannability.
+ */
+function PostGrid({ posts, mosaic = false }: { posts: Post[]; mosaic?: boolean }) {
   return (
-    <div ref={parentRef} className="w-full">
-      <div
-        className="relative w-full"
-        style={{ height: virtualizer.getTotalSize() }}
-      >
-        {virtualizer.getVirtualItems().map((row) => {
-          const start = row.index * columns;
-          const rowPosts = posts.slice(start, start + columns);
-          return (
-            <div
-              key={row.key}
-              data-index={row.index}
-              ref={virtualizer.measureElement}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                transform: `translateY(${row.start}px)`,
-              }}
-            >
-              <div
-                className="grid gap-1.5 pb-1.5"
-                style={{
-                  gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-                }}
-              >
-                {rowPosts.map((post) => (
-                  <PostTile key={post.id} post={post} />
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <div
+      className="grid grid-cols-3 gap-1.5 md:grid-cols-4"
+      style={mosaic ? { gridAutoFlow: "dense", gridAutoRows: "minmax(0, auto)" } : undefined}
+    >
+      {posts.map((post, i) => {
+        const eyecatcher =
+          post.type === "video" ||
+          post.media?.[0]?.type === "video" ||
+          post.kind === "text";
+        // A big cell roughly every 7 tiles, only for tiles that reward it.
+        const big = mosaic && eyecatcher && i % 7 === 1;
+        return <PostTile key={post.id} post={post} big={big} />;
+      })}
     </div>
   );
 }
@@ -227,12 +230,7 @@ function DiscoverProfiles({ users }: { users: DiscoverDTO["users"] }) {
               onClick={() => router.push(`/profile/${user.username}`)}
               className="flex w-[140px] shrink-0 flex-col items-center rounded-2xl border border-white/[0.06] bg-[rgba(30,30,30,0.8)] py-4 transition hover:border-cyan-400/30 hover:bg-[rgba(40,40,46,0.9)] active:scale-[0.98]"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={getAvatarUrl(user.avatar)}
-                alt={user.username}
-                className="h-16 w-16 rounded-xl object-cover bg-white/10"
-              />
+              <WebAvatar avatar={user.avatar} username={user.username} size={64} />
               <div className="mt-2 flex w-full items-center justify-center gap-1 px-2">
                 <span className="min-w-0 truncate text-sm font-semibold text-white">
                   {user.name}
@@ -299,12 +297,7 @@ function UserRows({ users }: { users: any[] }) {
                 onClick={() => router.push(`/profile/${user.username}`)}
                 className="flex w-full items-center gap-3 border-b border-white/8 py-3 text-left active:bg-white/5"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={getAvatarUrl(user.avatar)}
-                  alt={user.username || "User"}
-                  className="h-11 w-11 shrink-0 rounded-xl object-cover bg-white/10"
-                />
+                <WebAvatar avatar={user.avatar} username={user.username} size={44} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold text-white">
                     {user.username}
@@ -322,11 +315,6 @@ function UserRows({ users }: { users: any[] }) {
       </div>
     </div>
   );
-}
-
-function GridColumns(): number {
-  if (typeof window === "undefined") return 3;
-  return window.innerWidth >= 768 ? 4 : 3;
 }
 
 export function SearchScreen() {
@@ -396,8 +384,6 @@ export function SearchScreen() {
     clearSearch();
   };
 
-  const columns = GridColumns();
-
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
       {/* Sticky header with search input */}
@@ -455,7 +441,7 @@ export function SearchScreen() {
                 </p>
               </div>
               {searchResults.length > 0 ? (
-                <PostGrid posts={searchResults} columns={columns} />
+                <PostGrid posts={searchResults} />
               ) : (
                 <EmptyState
                   icon={<Hash size={48} color="#666" />}
@@ -479,7 +465,7 @@ export function SearchScreen() {
                   <h3 className="mb-3 text-base font-semibold text-white">
                     Posts
                   </h3>
-                  <PostGrid posts={searchResults} columns={columns} />
+                  <PostGrid posts={searchResults} />
                 </section>
               ) : null}
 
@@ -551,7 +537,7 @@ export function SearchScreen() {
                     <p className="text-xs text-white/45">From across the community</p>
                   </div>
                 </div>
-                <PostGrid posts={discoverPosts} columns={columns} />
+                <PostGrid posts={discoverPosts} mosaic />
               </section>
             ) : null}
 

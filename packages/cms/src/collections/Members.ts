@@ -31,6 +31,8 @@ export const Members: CollectionConfig = {
     delete: isAdminPlus,
   },
   admin: {
+    group: 'App mirror — auto-synced',
+    description: 'Live app users, synced every 10 minutes. Edits here update the app.',
     useAsTitle: 'username',
     defaultColumns: ['avatarUrl', 'username', 'email', 'role', 'status', 'openReportsAgainst', 'createdAt'],
     listSearchableFields: ['username', 'email'],

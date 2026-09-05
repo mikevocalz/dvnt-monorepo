@@ -75,9 +75,12 @@ html[data-theme='dark'] {
 /* Primary actions → DVNT magenta. */
 .btn--style-primary,
 button.btn--style-primary {
-  background: var(--dvnt-magenta) !important;
-  border-color: var(--dvnt-magenta) !important;
-  color: #0a0a14 !important;
+  /* The app's CTA gradient (RSVP / Create account) — blue is DVNT's primary;
+   * magenta is an accent, not a button color (design-language audit). */
+  background: linear-gradient(90deg, #379ed8, #874e9f) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  font-weight: 700;
 }
 .btn--style-primary:hover {
   filter: brightness(1.06);
@@ -86,8 +89,8 @@ button.btn--style-primary {
 /* Active nav + links pick up the brand. */
 .nav__link--active,
 .nav__link.active {
-  color: var(--dvnt-magenta) !important;
-  box-shadow: inset 3px 0 0 var(--dvnt-magenta);
+  color: #3ea4e5 !important;
+  box-shadow: inset 3px 0 0 #3ea4e5;
 }
 a:not(.btn):hover {
   color: var(--dvnt-cyan);
@@ -115,17 +118,19 @@ html[data-theme='dark'],
   --ramp-grey-600: #161a28;
   --ramp-grey-500: #232a3b;
 
-  /* Brand → DVNT magenta (primary actions, active nav, focus). */
-  --color-bg-brand: #ff5bfc;
-  --color-bg-brand-hover: #ff74fd;
-  --color-bg-brand-pressed: #e84fe6;
-  --color-bg-brand-secondary: rgba(255, 91, 252, 0.14);
-  --color-bg-brand-tertiary: rgba(255, 91, 252, 0.1);
-  --color-text-brand: #ff5bfc;
-  --color-border-brand: #ff5bfc;
-  --color-bg-selected: rgba(255, 91, 252, 0.16);
-  --color-bg-selected-hover: rgba(255, 91, 252, 0.22);
-  --color-bg-selected-strong: rgba(255, 91, 252, 0.28);
+  /* Brand → the APP's primary blue rgb(62,164,229); selected states tint
+   * blue like the app's chips. Magenta stays an accent (badges, dots) —
+   * matching dvntapp.live, where blue is primary and pink punctuates. */
+  --color-bg-brand: #3ea4e5;
+  --color-bg-brand-hover: #4fb2f0;
+  --color-bg-brand-pressed: #2f8fd0;
+  --color-bg-brand-secondary: rgba(62, 164, 229, 0.14);
+  --color-bg-brand-tertiary: rgba(62, 164, 229, 0.1);
+  --color-text-brand: #3ea4e5;
+  --color-border-brand: #3ea4e5;
+  --color-bg-selected: rgba(62, 164, 229, 0.16);
+  --color-bg-selected-hover: rgba(62, 164, 229, 0.22);
+  --color-bg-selected-strong: rgba(62, 164, 229, 0.28);
 }
 
 /* Deviant gradient wash behind the whole admin shell. */
@@ -163,10 +168,18 @@ a:not(.btn):not(.nav__link):hover {
    * which collapses the sidebar column to 0 so the nav overlaps the content.
    * Our `.template-default.template-default--nav-hydrated` selector is (0,2,0)
    * and wins — restoring a real sidebar column so nothing overlaps. */
-  .template-default.template-default--nav-hydrated,
+  /* Respect the collapse toggle: only the OPEN state gets the sidebar
+   * column; closed collapses to 0 and hides the nav — previously all
+   * states were forced open, which made the header toggle a dead button. */
   .template-default.template-default--nav-open,
-  .template-default {
+  .template-default:not(.template-default--nav-hydrated) {
     grid-template-columns: var(--nav-width, 275px) auto !important;
+  }
+  .template-default.template-default--nav-hydrated:not(.template-default--nav-open) {
+    grid-template-columns: 0 auto !important;
+  }
+  .template-default.template-default--nav-hydrated:not(.template-default--nav-open) .nav {
+    visibility: hidden;
   }
   /* Sidebar-only chrome: right edge, drop shadow + a specular sheen. */
   .nav {
@@ -424,3 +437,17 @@ a:not(.btn):not(.nav__link):hover {
 .dvnt-sync__msg { font-size: 13px; }
 .dvnt-sync__msg--ok { color: #3fdcff; }
 .dvnt-sync__msg--err { color: #fca5a5; }
+
+/* ── Sidebar group labels — DVNT eyebrow treatment ─────────────────────────
+   Collections are grouped (Content / App mirror / Moderation / Observability /
+   Access); style the group toggles like the app's letterspaced eyebrows so the
+   sidebar reads as sections, not a flat list. */
+.nav-group__toggle {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(245, 245, 244, 0.5);
+}
+.nav-group__toggle:hover { color: #3fdcff; }
+.nav-group { margin-bottom: 6px; }

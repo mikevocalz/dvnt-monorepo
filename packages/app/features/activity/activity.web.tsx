@@ -22,7 +22,7 @@
  * State (active tab) lives in a tiny zustand store (never useState for tab).
  */
 
-import { useEffect, useMemo, useReducer, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { create } from "zustand";
 import { useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -37,6 +37,7 @@ import {
   CheckCheck,
   Calendar,
   Radio,
+  ImageOff,
 } from "lucide-react";
 
 import {
@@ -46,10 +47,12 @@ import {
   type Activity,
   type LikedActivity,
 } from "@dvnt/app/lib/hooks/use-activities-query";
+import { resolveRenderableMedia } from "@dvnt/app/lib/media/resolve-renderable";
 import { useActivityStore } from "@dvnt/app/lib/stores/activity-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
 import { useBootstrapNotifications } from "@dvnt/app/lib/hooks/use-bootstrap-notifications";
+import { PendingCohostInvites } from "@dvnt/app/features/sneaky-lynk/ui/web/CohostInvites";
 import { notificationsApiClient } from "@dvnt/app/lib/api/notifications";
 import { notificationKeys } from "@dvnt/app/lib/hooks/use-notifications-query";
 import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
@@ -106,9 +109,64 @@ const CDN_URL =
   "https://dvnt.b-cdn.net";
 
 function avatarUrl(avatar?: string): string {
-  if (!avatar) return "https://i.pravatar.cc/150?img=0";
+  if (!avatar) return "/dvnt-email-glyph.png";
   if (avatar.startsWith("http")) return avatar;
   return `${CDN_URL}/${avatar}`;
+}
+
+// A post thumbnail that never shows the browser's broken-image glyph. Routed
+// through resolveRenderableMedia (the single render-side resolver) so the same
+// MIME→ext→type detection, the "poster is never a video URL" guarantee, and the
+// HEIC/QuickTime browser-unsupported handling apply here instead of a local
+// regex. The activity feed only carries a bare URL string (activity.post
+// .thumbnail), so the resolver decides purely from the URL — which still
+// rescues the ~97 HEIC/.mov Live-Photo rows that the old regex rendered into a
+// dead <img>/<video>. Decodable mp4/webm still frame-grab their first frame via
+// <video>; HLS and browser-unsupported formats fall back to the placeholder.
+function PostThumb({ src, className }: { src: string; className: string }) {
+  const [errored, setErrored] = useState(false);
+  const media = resolveRenderableMedia({ url: src });
+
+  const placeholder = (
+    <span className={`flex items-center justify-center bg-white/8 ${className}`}>
+      <ImageOff size={18} color="#ffffff55" />
+    </span>
+  );
+
+  if (!src || errored || media.reason === "no_source") return placeholder;
+
+  if (media.kind === "video") {
+    // Browser-undecodable (QuickTime/.mov) or HLS-only → honest placeholder,
+    // never a spinner on a source Chrome/Firefox/Edge can't paint.
+    const canFrameGrab =
+      !media.browserUnsupported &&
+      !!media.videoUrl &&
+      !/\.m3u8(\?|$)/i.test(media.videoUrl);
+    if (!canFrameGrab) return placeholder;
+    return (
+      <video
+        src={`${media.videoUrl}#t=0.1`}
+        muted
+        playsInline
+        preload="metadata"
+        tabIndex={-1}
+        className={className}
+        onError={() => setErrored(true)}
+      />
+    );
+  }
+
+  // Image. posterUrl is guaranteed safe for <img> and is null for HEIC/HEIF.
+  if (media.browserUnsupported || !media.posterUrl) return placeholder;
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      src={media.posterUrl}
+      alt=""
+      className={className}
+      onError={() => setErrored(true)}
+    />
+  );
 }
 
 // ── Web route helpers (clean web routes, NOT native (protected) groups) ──────
@@ -454,10 +512,8 @@ function ActivityRow({
           }}
           className="shrink-0"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <PostThumb
             src={activity.post.thumbnail}
-            alt=""
             className="ml-3 h-12 w-12 rounded-lg object-cover bg-white/10"
           />
         </button>
@@ -569,10 +625,8 @@ function LikedRow({
           className="flex h-[104px] w-[82px] shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/8"
         >
           {item.previewImage ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <PostThumb
               src={item.previewImage}
-              alt=""
               className="h-full w-full object-cover"
             />
           ) : isEvent ? (
@@ -812,6 +866,11 @@ export function ActivityScreen() {
             </span>
           ) : null}
         </div>
+
+      {/* Pending co-host invitations sit ABOVE the feed: they are the only rows
+          here that expire, and an invite you scroll past is an invite you
+          missed. Renders nothing when there are none. */}
+      <PendingCohostInvites />
         {!showLiked && unreadCount > 0 ? (
           <button
             type="button"

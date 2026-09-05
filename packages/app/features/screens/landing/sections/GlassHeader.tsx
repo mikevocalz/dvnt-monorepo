@@ -12,7 +12,7 @@
  * from @expo/html-elements.
  */
 import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import { A, Header, Nav } from "@expo/html-elements";
+import { A, Header, Nav } from "@dvnt/app/components/ui/html";
 import { useContext, useRef, useState, useEffect, useCallback } from "react";
 // Universal routing via Solito's app-router API: usePathname() wraps
 // next/navigation on web and expo-router/react-navigation on native. Replaces
@@ -33,7 +33,8 @@ import { GlassSurface } from "../components/GlassSurface";
 import { HeaderLoginButton } from "./HeaderLoginButton";
 import { HeaderDrawer } from "./HeaderDrawer";
 import { clientNav } from "./client-nav";
-import { EASE_SETTLE, HEADER, LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
+import { HEADER, LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
+import { EASE_SETTLE } from "../theme-motion";
 
 const NAV = [
   { label: "Home", href: "/" },

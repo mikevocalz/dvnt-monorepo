@@ -10,12 +10,13 @@ import {
   type LegendListRef,
   type LegendListRenderItemProps,
 } from "@dvnt/app/components/list";
+import { KeyboardController } from "react-native-keyboard-controller";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { SheetHeader } from "@dvnt/app/components/ui/sheet-header";
-import { ThreadedComment, type CommentData } from "@dvnt/app/components/comments/threaded-comment";
-import { CommentComposerFooter } from "@dvnt/app/components/comments/comment-composer-footer";
+import { ThreadedComment, type CommentData } from "@dvnt/app/features/comments";
+import { CommentComposerFooter } from "@dvnt/app/features/comments";
 import { useComments, useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -233,6 +234,14 @@ function CommentsScreenContent() {
     const originalReplyTarget = replyTarget;
     setCommentText("");
     setReplyTarget(null);
+    // Sending is the end of the interaction, so the keyboard goes with it. The
+    // composer's TextInput sets `blurOnSubmit={false}` — correct, because the
+    // return key inserts a newline in a multiline field rather than submitting
+    // — which also meant nothing dismissed it when Send was tapped.
+    // KeyboardController, not Keyboard.dismiss: this screen sits inside the
+    // keyboard-controller provider, and mixing the two leaves its animated
+    // padding out of sync with the real keyboard.
+    KeyboardController.dismiss();
 
     createComment.mutate(
       {

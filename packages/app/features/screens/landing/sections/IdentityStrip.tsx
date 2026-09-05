@@ -2,8 +2,8 @@
  * Identity strip — NATIVE / base. Static, accessible rendering of the same copy
  * the web split animates. (Web uses IdentityStrip.web.tsx with GSAP.)
  */
-import { StyleSheet, View } from "react-native";
-import { Section, H2, P } from "@expo/html-elements";
+import { Image, StyleSheet, View } from "react-native";
+import { Section, H2, P } from "@dvnt/app/components/ui/html";
 import Animated from "react-native-reanimated";
 import { LANDING_COLORS } from "../theme";
 
@@ -35,6 +35,14 @@ export function IdentityStrip() {
           </Animated.Text>
         ))}
       </View>
+      {/* Verification explainer leads the promo imagery — it's the most
+          complicated signup requirement, so it comes before the pillars. */}
+      <Image
+        source={{ uri: "/landing/p3.jpg" }}
+        accessibilityLabel="ID & selfie verification — no bots, no fake profiles. Just real people, real community, real connections."
+        resizeMode="cover"
+        style={styles.verifyShot}
+      />
     </Section>
   );
 }
@@ -79,6 +87,16 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 30,
     maxWidth: 560,
+  },
+  verifyShot: {
+    width: 380,
+    maxWidth: "88%",
+    aspectRatio: 727 / 900,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(138,64,207,0.33)",
+    marginTop: 44,
+    backgroundColor: "rgba(255,255,255,0.03)",
   },
   badge: {
     color: LANDING_COLORS.textSecondary,

@@ -1,5 +1,6 @@
 package com.dvnt.app
 
+import io.sentry.react.RNSentrySDK
 import android.app.Application
 import android.content.res.Configuration
 
@@ -21,6 +22,9 @@ class MainApplication : Application(), ReactApplication {
       context = applicationContext,
       packageList =
         PackageList(this).packages.apply {
+          // Data Layer bridge for the Wear OS app (plugins/with-wear-os.js).
+          add(WearBridgePackage())
+          add(DVNTLiveNotificationPackage())
           // Packages that cannot be autolinked yet can be added manually here, for example:
           // add(MyReactNativePackage())
         }
@@ -29,6 +33,8 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+
+    RNSentrySDK.init(this)
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {

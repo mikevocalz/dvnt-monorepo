@@ -1,3 +1,4 @@
+import { watchNotificationFields } from "../_shared/watch-notification.ts";
 /**
  * Send Push Notification Edge Function
  *
@@ -10,6 +11,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import webpush from "npm:web-push@3.6.7";
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const APNS_PRODUCTION_URL = "https://api.push.apple.com";
@@ -146,7 +148,7 @@ async function sendApnsVoipPush(
 
     if (response.ok) {
       console.log(
-        `[send_notification] APNs VoIP push sent to ${deviceToken.substring(0, 10)}...`,
+        "[send_notification] APNs VoIP push accepted",
       );
       return { ok: true };
     } else {
@@ -158,7 +160,7 @@ async function sendApnsVoipPush(
     }
   } catch (error) {
     console.error("[send_notification] APNs fetch error:", error);
-    return { ok: false, error: error.message };
+    return { ok: false, error: error instanceof Error ? error.message : "Notification failed" };
   }
 }
 
@@ -195,7 +197,9 @@ interface ExpoPushMessage {
   badge?: number;
   channelId?: string;
   priority?: "default" | "normal" | "high"; // For Android
-  categoryId?: string; // For iOS categories
+  categoryId?: string;
+  threadId?: string;
+  interruptionLevel?: "active" | "time-sensitive";
 }
 
 Deno.serve(async (req) => {
@@ -214,10 +218,54 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+    // ── Auth gate: internal callers ONLY ────────────────────────────────
+    // This function takes an arbitrary recipient userId + arbitrary content,
+    // so a session-user path can never be safe — anyone could push arbitrary
+    // notifications to anyone. Every legitimate caller is server-side:
+    //   1. DB trigger (call_signals → pg_net, scripts/apply-call-push-trigger.sh)
+    //      sends `Authorization: Bearer <service_role key>`.
+    //   2. Edge fns (_shared/notify-event-organizers.ts,
+    //      _shared/notify-waitlisters.ts, video_create_room) send the same.
+    // Accept the service-role bearer, or an x-internal-secret header matching
+    // INTERNAL_FN_SECRET (fail CLOSED if that env var is unset).
+    const authHeader = req.headers.get("Authorization") || "";
+    const bearer = authHeader.replace("Bearer ", "").trim();
+    const isServiceRole =
+      bearer.length > 0 &&
+      supabaseServiceKey.length > 0 &&
+      bearer === supabaseServiceKey;
+
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
+
+    if (!isServiceRole) {
+      const provided = req.headers.get("x-internal-secret") || "";
+      let authorized = false;
+
+      const internalSecret = Deno.env.get("INTERNAL_FN_SECRET") || "";
+      if (internalSecret && provided === internalSecret) authorized = true;
+
+      // DB triggers (e.g. call_signals_push_trigger) can't set Deno secrets,
+      // so they authenticate with a value stored in internal_fn_secrets
+      // instead (RLS deny-all; only this service-role client can read it).
+      if (!authorized && provided) {
+        const { data: row } = await supabase
+          .from("internal_fn_secrets")
+          .select("value")
+          .eq("name", "call_push_trigger")
+          .maybeSingle();
+        if (row?.value && provided === row.value) authorized = true;
+      }
+
+      if (!authorized) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
 
     const payload: PushNotificationPayload = await req.json();
     const { userId, title, body, data, type } = payload;
@@ -297,11 +345,58 @@ Deno.serve(async (req) => {
 
     // Split tokens: VoIP tokens go to APNs, regular tokens go to Expo Push
     const voipTokens = tokens.filter((t) => t.platform === "ios_voip");
-    const expoTokens = tokens.filter((t) => t.platform !== "ios_voip");
+    const webTokens = tokens.filter((t) => t.platform === "web");
+    const expoTokens = tokens.filter(
+      (t) => t.platform !== "ios_voip" && t.platform !== "web",
+    );
 
     let totalSent = 0;
     let totalFailed = 0;
     const allErrors: string[] = [];
+
+    // ── 3z. Web Push (PWA/browser) — VAPID keys live in web_push_keys
+    // (RLS deny-all; only this service-role client can read them). Dead
+    // subscriptions (404/410 from the push service) are pruned.
+    if (webTokens.length > 0) {
+      try {
+        const { data: vapid } = await supabase
+          .from("web_push_keys")
+          .select("public_key, private_key, subject")
+          .eq("id", 1)
+          .single();
+        if (vapid) {
+          webpush.setVapidDetails(vapid.subject, vapid.public_key, vapid.private_key);
+          const webPayload = JSON.stringify({
+            title,
+            body,
+            data: { ...data, url: data?.url || "/feed/activity" },
+          });
+          for (const t of webTokens) {
+            try {
+              const sub = JSON.parse(t.token);
+              await webpush.sendNotification(sub, webPayload, { TTL: 86400 });
+              totalSent++;
+            } catch (err: any) {
+              totalFailed++;
+              const code = err?.statusCode;
+              if (code === 404 || code === 410) {
+                await supabase
+                  .from("push_tokens")
+                  .delete()
+                  .eq("user_id", recipientId)
+                  .eq("token", t.token);
+              } else {
+                allErrors.push(`web: ${code ?? err?.message ?? "send failed"}`);
+              }
+            }
+          }
+        } else {
+          console.error("[send_notification] web_push_keys row missing");
+        }
+      } catch (err) {
+        console.error("[send_notification] web push error:", err);
+      }
+    }
 
     // ── 3a. Send VoIP push via APNs for iOS call notifications ──────────
     if (isCallNotification && voipTokens.length > 0) {
@@ -343,11 +438,11 @@ Deno.serve(async (req) => {
         to: t.token,
         title,
         body,
-        data: { ...data, type },
+        data: { ...data, type, recipientId: String(recipientId), issuedAt: Date.now() / 1000 },
         sound: "default",
         channelId: isCallNotification ? "calls" : "default",
         priority: isCallNotification ? "high" : "default",
-        categoryId: isCallNotification ? "CALL" : undefined,
+        ...watchNotificationFields(type, data),
       }));
 
       const expoResponse = await fetch(EXPO_PUSH_URL, {
@@ -390,7 +485,7 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error("[send_notification] Error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Notification failed" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

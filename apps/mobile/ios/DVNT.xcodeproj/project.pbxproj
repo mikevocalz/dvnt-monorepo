@@ -7,70 +7,77 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		093E9FEF97AE4797A97D65AF /* Pods_DVNT.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 44F237197EB3267820D3BB19 /* Pods_DVNT.framework */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		26542CBBBA3B40AEB81B2132 /* ShareExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 65CE5351E74C48E596DC4AD1 /* ShareExtension.appex */; };
-		2E513A13A961454B87CFBBB2 /* dvnt-ring.wav in Resources */ = {isa = PBXBuildFile; fileRef = C5964BAB79A84082BEE945FC /* dvnt-ring.wav */; };
+		189E713AD28C490294C8A998 /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4BB1584677D42A5A2F85AB7 /* noop-file.swift */; };
+		2E789536EAA84288949A5A9A /* Intents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B6F005136B434972889666E5 /* Intents.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
+		3C46E9E1266844E993FB3195 /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BAB65BE312624FFE965CB1E5 /* CallKit.framework */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		53EF89867CF745A4AD19E499 /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D23F4D127153455F96430943 /* CallKit.framework */; };
-		5A3622D0EC784E0FB52E03D6 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2AA1B81EDE6478C809D5D94 /* ShareViewController.swift */; };
-		6F143A938FF64F4189AC2480 /* ShareExtensionPreprocessor.js in Resources */ = {isa = PBXBuildFile; fileRef = 12007673792E4B23BE33D5EA /* ShareExtensionPreprocessor.js */; };
-		84142F3919DA4A8B897D7519 /* PushKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BD588B01B2E24D5E8129EF01 /* PushKit.framework */; };
-		A6C7CED80D1B40FD854E8F5C /* Intents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C68DF39866374B8EA374E10D /* Intents.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
-		ADA58E2BAF9F493E8D7B1854 /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = D38E4B65F74B43AB8B4ED3EE /* noop-file.swift */; };
-		B094CB5F1E0AFB2ADDFAA907 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 36102EA4C9B44DEDAA565C5A /* PrivacyInfo.xcprivacy */; };
+		40509C6C5399402D930C4C72 /* PushKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 399741E333D8456DBE18B5D1 /* PushKit.framework */; };
+		5BFF5C10BAFD414BB4C1E8C5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = BFD6DCF7B15546858F1525FD /* PrivacyInfo.xcprivacy */; };
+		75434076BAD36079DFF7624B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 861F799DA3EB4D18ADD61252 /* PrivacyInfo.xcprivacy */; };
+		A2CA9627F53F4B4AA5B87193 /* AppDelegate+VoIPPush.m in Sources */ = {isa = PBXBuildFile; fileRef = CBEBB01013714B3E814D9A59 /* AppDelegate+VoIPPush.m */; };
+		B1F3CEC1414D9063E685BDCF /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE39D12B6981D17F454CE9F1 /* ExpoModulesProvider.swift */; };
+		B65FF004EC0F4EE0A91FF97F /* ShareExtensionPreprocessor.js in Resources */ = {isa = PBXBuildFile; fileRef = 3235881A0EFA45F9AA9AE5B7 /* ShareExtensionPreprocessor.js */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		C1763346F46B437E99577C48 /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3203BAB325A54180B4D66D5C /* MainInterface.storyboard */; };
-		D3D65DC9B557419C8FF3B488 /* AppDelegate+VoIPPush.m in Sources */ = {isa = PBXBuildFile; fileRef = 75C8BB9288544EDEB8D830FE /* AppDelegate+VoIPPush.m */; };
-		D61526A9C71D4E0A946FB893 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E3209EA38F234047B745620E /* PrivacyInfo.xcprivacy */; };
-		D72F6E07AC1251522904B864 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0BE09CCAE0BF0A848E9B398 /* ExpoModulesProvider.swift */; };
+		BC98C68B6AD94E3FB054DD89 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 861F799DA3EB4D18ADD61252 /* PrivacyInfo.xcprivacy */; };
+		C806ECF5502A430488040C93 /* ShareExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = F732DB0FF55D41C096372415 /* ShareExtension.appex */; };
+		D4F77031046F44899F03510F /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = D8E265E2FEE2427EB3E30F6F /* MainInterface.storyboard */; };
+		F06EECB903FE484B85B49BFD /* dvnt-ring.wav in Resources */ = {isa = PBXBuildFile; fileRef = 5C586F258BA84FCC908D7E6E /* dvnt-ring.wav */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
-		F74C878E6C04C9C8C1C46315 /* libPods-DVNT.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 8F6FD6237C1848B7FA35BB9B /* libPods-DVNT.a */; };
-		FFBEF9FFECA7488D95D59ED5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 36102EA4C9B44DEDAA565C5A /* PrivacyInfo.xcprivacy */; };
+		F4EC54419E8C4650A4078E50 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 069517EC8C804D4E89A853A1 /* ShareViewController.swift */; };
 		XX12B55A1EDABF083C3B51XX /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX470101BAEB8E0BBC8B0DXX /* WidgetKit.framework */; };
-		XX1A6800511A685AB346D2XX /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XXA12889081EB894481655XX /* AppIntents.framework */; };
 		XX1ECDC44A36499A2C9883XX /* WatchKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX378A422B4194AC6966BAXX /* WatchKit.framework */; };
+		XX31527E466FDD88F35F3BXX /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX99DB34EAB420F9CA31AFXX /* UserNotifications.framework */; };
 		XX378C5AFCA51B0EA4F6B5XX /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */; };
-		XX3C562DEF346B45594832XX /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XXCAF23C3FC41F82140FA1XX /* ActivityKit.framework */; };
+		XX511D59BA7099E82B7645XX /* DVNTWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = XX76D1DA9C9A13DAFA7C18XX /* DVNTWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		XX6A44985675A04437B8C4XX /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */; };
 		XX701AE525521F5C0BCBCBXX /* DVNTWatchComplication.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		XX8E4863C19534EC7D4226XX /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX8ACBDF17A27E5D829A2CXX /* WatchConnectivity.framework */; };
-		XX9DE1DCAA7FEF616A33B4XX /* DVNT.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		XXA23CC5AE17F562D6A3C8XX /* DVNTNotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XX9344D6E34C81514754B7XX /* DVNTNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		XXCD225AAAC48CF03570CBXX /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX7AA78EF20B6134AF145DXX /* ImageIO.framework */; };
 		XXD492FB1555A651E8C029XX /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX99DB34EAB420F9CA31AFXX /* UserNotifications.framework */; };
-		XXFF0758375E66BEE6B904XX /* CoreImage.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX7E674302DD5EEB942175XX /* CoreImage.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		D826A9812A3343C89B7E5822 /* PBXContainerItemProxy */ = {
+		C677F948E0D64A1BBBBE6D21 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 7ACDA37B4FAE42038CEED150;
+			remoteGlobalIDString = 1D2F5795A47A47F89F5E8437;
 			remoteInfo = ShareExtension;
 		};
-		XXB32BF84AD63A8E0D9F0EXX /* PBXContainerItemProxy */ = {
+		XXD91A4D79971C9BE467D2XX /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = XXEB4F218FD5F06DBADE29XX;
+			remoteGlobalIDString = XX9454F4BD8F1E7DBFF69FXX;
+			remoteInfo = DVNTNotificationService;
+		};
+		XXDC670A7CB09DFD8FAE87XX /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = XX57D2251FE5C8ED23FE09XX;
 			remoteInfo = DVNTWatchComplication;
 		};
-		XXCC2F6CC4483EF823FD14XX /* PBXContainerItemProxy */ = {
+		XXF24FC26F267E0662B0E5XX /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = XX6A43DD0F552874E793D0XX;
-			remoteInfo = DVNT;
+			remoteGlobalIDString = XXAB3F603B232A2BDC4FCBXX;
+			remoteInfo = DVNTWatch;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		80906F8A9CC1498496742226 /* Copy Files */ = {
+		2C219B3AF93E467789978FB0 /* Copy Files */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				26542CBBBA3B40AEB81B2132 /* ShareExtension.appex in Copy Files */,
+				C806ECF5502A430488040C93 /* ShareExtension.appex in Copy Files */,
 			);
 			name = "Copy Files";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -81,7 +88,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				XX701AE525521F5C0BCBCBXX /* DVNTWatchComplication.appex in Embed Foundation Extensions */,
+				XXA23CC5AE17F562D6A3C8XX /* DVNTNotificationService.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -92,94 +99,124 @@
 			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
 			dstSubfolderSpec = 16;
 			files = (
-				XX9DE1DCAA7FEF616A33B4XX /* DVNT.app in Embed Watch Content */,
+				XX511D59BA7099E82B7645XX /* DVNTWatch.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		XXDC26E7C3BF4FEBD9ABDDXX /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				XX701AE525521F5C0BCBCBXX /* DVNTWatchComplication.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		12007673792E4B23BE33D5EA /* ShareExtensionPreprocessor.js */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtensionPreprocessor.js; path = ShareExtensionPreprocessor.js; sourceTree = "<group>"; };
+		019CC740EB490C5CEF7AF580 /* Pods-DVNT.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-DVNT.release.xcconfig"; path = "Target Support Files/Pods-DVNT/Pods-DVNT.release.xcconfig"; sourceTree = "<group>"; };
+		069517EC8C804D4E89A853A1 /* ShareViewController.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = ShareViewController.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		10A9F7D4B1F3473CBD9E4D78 /* ShareExtension.entitlements */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtension.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* DVNT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; fileEncoding = 4; includeInIndex = 0; path = DVNT.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = DVNT/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = Info.plist; path = DVNT/Info.plist; sourceTree = "<group>"; };
-		2E6DA45A48F39AAFF996ABF9 /* Pods-DVNT.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-DVNT.release.xcconfig"; path = "Target Support Files/Pods-DVNT/Pods-DVNT.release.xcconfig"; sourceTree = "<group>"; };
-		3203BAB325A54180B4D66D5C /* MainInterface.storyboard */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = MainInterface.storyboard; path = MainInterface.storyboard; sourceTree = "<group>"; };
-		36102EA4C9B44DEDAA565C5A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = DVNT/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		65CE5351E74C48E596DC4AD1 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = undefined; name = ShareExtension.appex; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		6993BE99912F4AB1B11F11A7 /* ShareExtension-Info.plist */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = "ShareExtension-Info.plist"; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; };
-		75C8BB9288544EDEB8D830FE /* AppDelegate+VoIPPush.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = sourcecode.c.objc; name = "AppDelegate+VoIPPush.m"; path = "DVNT/AppDelegate+VoIPPush.m"; sourceTree = "<group>"; };
-		8E1C2F37C0E6DB83842E1657 /* Pods-DVNT.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-DVNT.debug.xcconfig"; path = "Target Support Files/Pods-DVNT/Pods-DVNT.debug.xcconfig"; sourceTree = "<group>"; };
-		8F6FD6237C1848B7FA35BB9B /* libPods-DVNT.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-DVNT.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		A0BE09CCAE0BF0A848E9B398 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-DVNT/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		3235881A0EFA45F9AA9AE5B7 /* ShareExtensionPreprocessor.js */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtensionPreprocessor.js; path = ShareExtensionPreprocessor.js; sourceTree = "<group>"; };
+		399741E333D8456DBE18B5D1 /* PushKit.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = PushKit.framework; path = System/Library/Frameworks/PushKit.framework; sourceTree = SDKROOT; };
+		44F237197EB3267820D3BB19 /* Pods_DVNT.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_DVNT.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		5C586F258BA84FCC908D7E6E /* dvnt-ring.wav */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = audio.wav; name = "dvnt-ring.wav"; path = "DVNT/dvnt-ring.wav"; sourceTree = "<group>"; };
+		7CDA9E34AFE62DEA7D2063F4 /* Pods-DVNT.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-DVNT.debug.xcconfig"; path = "Target Support Files/Pods-DVNT/Pods-DVNT.debug.xcconfig"; sourceTree = "<group>"; };
+		861F799DA3EB4D18ADD61252 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = DVNT/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = DVNT/SplashScreen.storyboard; sourceTree = "<group>"; };
+		B6F005136B434972889666E5 /* Intents.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = Intents.framework; path = System/Library/Frameworks/Intents.framework; sourceTree = SDKROOT; };
+		BAB65BE312624FFE965CB1E5 /* CallKit.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = CallKit.framework; path = System/Library/Frameworks/CallKit.framework; sourceTree = SDKROOT; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		BD588B01B2E24D5E8129EF01 /* PushKit.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = PushKit.framework; path = System/Library/Frameworks/PushKit.framework; sourceTree = SDKROOT; };
-		C5964BAB79A84082BEE945FC /* dvnt-ring.wav */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = audio.wav; name = "dvnt-ring.wav"; path = "DVNT/dvnt-ring.wav"; sourceTree = "<group>"; };
-		C68DF39866374B8EA374E10D /* Intents.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = Intents.framework; path = System/Library/Frameworks/Intents.framework; sourceTree = SDKROOT; };
-		D23F4D127153455F96430943 /* CallKit.framework */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = CallKit.framework; path = System/Library/Frameworks/CallKit.framework; sourceTree = SDKROOT; };
-		D38E4B65F74B43AB8B4ED3EE /* noop-file.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = "noop-file.swift"; path = "DVNT/noop-file.swift"; sourceTree = "<group>"; };
-		E3209EA38F234047B745620E /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		BE39D12B6981D17F454CE9F1 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-DVNT/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		BFD6DCF7B15546858F1525FD /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		C5476DFDB9D043029BEFA354 /* ShareExtension-Info.plist */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = "ShareExtension-Info.plist"; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; };
+		CBEBB01013714B3E814D9A59 /* AppDelegate+VoIPPush.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = sourcecode.c.objc; name = "AppDelegate+VoIPPush.m"; path = "DVNT/AppDelegate+VoIPPush.m"; sourceTree = "<group>"; };
+		D8E265E2FEE2427EB3E30F6F /* MainInterface.storyboard */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = MainInterface.storyboard; path = MainInterface.storyboard; sourceTree = "<group>"; };
+		E4BB1584677D42A5A2F85AB7 /* noop-file.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = "noop-file.swift"; path = "DVNT/noop-file.swift"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = DVNT/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* DVNT-Bridging-Header.h */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.h; name = "DVNT-Bridging-Header.h"; path = "DVNT/DVNT-Bridging-Header.h"; sourceTree = "<group>"; };
-		F2AA1B81EDE6478C809D5D94 /* ShareViewController.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = ShareViewController.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
-		FC8A42AF66854BF3A6A51705 /* ShareExtension.entitlements */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtension.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		F732DB0FF55D41C096372415 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = undefined; name = ShareExtension.appex; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		XX378A422B4194AC6966BAXX /* WatchKit.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = WatchKit.framework; path = System/Library/Frameworks/WatchKit.framework; sourceTree = SDKROOT; };
 		XX470101BAEB8E0BBC8B0DXX /* WidgetKit.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
-		XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; fileEncoding = 4; includeInIndex = 0; path = DVNT.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		XX7E674302DD5EEB942175XX /* CoreImage.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = CoreImage.framework; path = System/Library/Frameworks/CoreImage.framework; sourceTree = SDKROOT; };
+		XX76D1DA9C9A13DAFA7C18XX /* DVNTWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; fileEncoding = 4; includeInIndex = 0; path = DVNTWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		XX7AA78EF20B6134AF145DXX /* ImageIO.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = ImageIO.framework; path = System/Library/Frameworks/ImageIO.framework; sourceTree = SDKROOT; };
 		XX8ACBDF17A27E5D829A2CXX /* WatchConnectivity.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = System/Library/Frameworks/WatchConnectivity.framework; sourceTree = SDKROOT; };
+		XX9344D6E34C81514754B7XX /* DVNTNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = 4; includeInIndex = 0; path = DVNTNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		XX99DB34EAB420F9CA31AFXX /* UserNotifications.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = UserNotifications.framework; path = System/Library/Frameworks/UserNotifications.framework; sourceTree = SDKROOT; };
-		XXA12889081EB894481655XX /* AppIntents.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = 4; includeInIndex = 0; path = DVNTWatchComplication.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		XXCAF23C3FC41F82140FA1XX /* ActivityKit.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		XX62501F23E6A939F451D2XX /* Exceptions for "watch-complication" folder in "DVNTWatchComplication" target */ = {
+		XX11BF5A2AA47E5BC8352CXX /* Exceptions for "watch" folder in "DVNTWatch" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 				"expo-target.config.js",
 			);
-			target = XXEB4F218FD5F06DBADE29XX /* DVNTWatchComplication */;
+			target = XXAB3F603B232A2BDC4FCBXX /* DVNTWatch */;
 		};
-		XX656DECF5F5D2DB365E55XX /* Exceptions for "watch" folder in "DVNT" target */ = {
+		XX12CB2F060BDCC06402A9XX /* Exceptions for "watch-complication" folder in "DVNTWatchComplication" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 				"expo-target.config.js",
 			);
-			target = XX6A43DD0F552874E793D0XX /* DVNT */;
+			target = XX57D2251FE5C8ED23FE09XX /* DVNTWatchComplication */;
+		};
+		XX75C88861955DA1F262D1XX /* Exceptions for "notification-service" folder in "DVNTNotificationService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				"expo-target.config.js",
+			);
+			target = XX9454F4BD8F1E7DBFF69FXX /* DVNTNotificationService */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		XX0DBF78894CEA43EF97D3XX /* watch */ = {
+		XX1EFE827C7D960DEC5F83XX /* notification-service */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				XX656DECF5F5D2DB365E55XX /* Exceptions for "watch" folder in "DVNT" target */,
+				XX75C88861955DA1F262D1XX /* Exceptions for "notification-service" folder in "DVNTNotificationService" target */,
 			);
 			explicitFileTypes = {
 			};
 			explicitFolders = (
 			);
-			path = watch;
+			path = "notification-service";
 			sourceTree = "<group>";
 		};
-		XXC4AE1142AB83CBDC6EA3XX /* watch-complication */ = {
+		XX58D0AC5F5FFD92E805BBXX /* watch-complication */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				XX62501F23E6A939F451D2XX /* Exceptions for "watch-complication" folder in "DVNTWatchComplication" target */,
+				XX12CB2F060BDCC06402A9XX /* Exceptions for "watch-complication" folder in "DVNTWatchComplication" target */,
 			);
 			explicitFileTypes = {
 			};
 			explicitFolders = (
 			);
 			path = "watch-complication";
+			sourceTree = "<group>";
+		};
+		XX9CE412A01777341E8191XX /* watch */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				XX11BF5A2AA47E5BC8352CXX /* Exceptions for "watch" folder in "DVNTWatch" target */,
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = watch;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -189,14 +226,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				84142F3919DA4A8B897D7519 /* PushKit.framework in Frameworks */,
-				53EF89867CF745A4AD19E499 /* CallKit.framework in Frameworks */,
-				A6C7CED80D1B40FD854E8F5C /* Intents.framework in Frameworks */,
-				F74C878E6C04C9C8C1C46315 /* libPods-DVNT.a in Frameworks */,
+				40509C6C5399402D930C4C72 /* PushKit.framework in Frameworks */,
+				3C46E9E1266844E993FB3195 /* CallKit.framework in Frameworks */,
+				2E789536EAA84288949A5A9A /* Intents.framework in Frameworks */,
+				093E9FEF97AE4797A97D65AF /* Pods_DVNT.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		2C66C86025B84F30B23DFF33 /* Frameworks */ = {
+		4ADFDDFC2867455FB84E5EAA /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -207,11 +244,17 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				XX6A44985675A04437B8C4XX /* SwiftUI.framework in Frameworks */,
-				XX8E4863C19534EC7D4226XX /* WatchConnectivity.framework in Frameworks */,
-				XXFF0758375E66BEE6B904XX /* CoreImage.framework in Frameworks */,
-				XX1ECDC44A36499A2C9883XX /* WatchKit.framework in Frameworks */,
 				XXD492FB1555A651E8C029XX /* UserNotifications.framework in Frameworks */,
+				XXCD225AAAC48CF03570CBXX /* ImageIO.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		XXA94A5604E6B418CE81CFXX /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				XX12B55A1EDABF083C3B51XX /* WidgetKit.framework in Frameworks */,
+				XX378C5AFCA51B0EA4F6B5XX /* SwiftUI.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -219,30 +262,16 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				XX12B55A1EDABF083C3B51XX /* WidgetKit.framework in Frameworks */,
-				XX378C5AFCA51B0EA4F6B5XX /* SwiftUI.framework in Frameworks */,
-				XX3C562DEF346B45594832XX /* ActivityKit.framework in Frameworks */,
-				XX1A6800511A685AB346D2XX /* AppIntents.framework in Frameworks */,
+				XX6A44985675A04437B8C4XX /* SwiftUI.framework in Frameworks */,
+				XX8E4863C19534EC7D4226XX /* WatchConnectivity.framework in Frameworks */,
+				XX1ECDC44A36499A2C9883XX /* WatchKit.framework in Frameworks */,
+				XX31527E466FDD88F35F3BXX /* UserNotifications.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		052982FE8A38422E9A4C7EEE /* ShareExtension */ = {
-			isa = PBXGroup;
-			children = (
-				F2AA1B81EDE6478C809D5D94 /* ShareViewController.swift */,
-				3203BAB325A54180B4D66D5C /* MainInterface.storyboard */,
-				12007673792E4B23BE33D5EA /* ShareExtensionPreprocessor.js */,
-				E3209EA38F234047B745620E /* PrivacyInfo.xcprivacy */,
-				6993BE99912F4AB1B11F11A7 /* ShareExtension-Info.plist */,
-				FC8A42AF66854BF3A6A51705 /* ShareExtension.entitlements */,
-			);
-			name = ShareExtension;
-			path = ShareExtension;
-			sourceTree = "<group>";
-		};
 		13B07FAE1A68108700A75B9A /* DVNT */ = {
 			isa = PBXGroup;
 			children = (
@@ -252,10 +281,10 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				36102EA4C9B44DEDAA565C5A /* PrivacyInfo.xcprivacy */,
-				C5964BAB79A84082BEE945FC /* dvnt-ring.wav */,
-				75C8BB9288544EDEB8D830FE /* AppDelegate+VoIPPush.m */,
-				D38E4B65F74B43AB8B4ED3EE /* noop-file.swift */,
+				861F799DA3EB4D18ADD61252 /* PrivacyInfo.xcprivacy */,
+				5C586F258BA84FCC908D7E6E /* dvnt-ring.wav */,
+				CBEBB01013714B3E814D9A59 /* AppDelegate+VoIPPush.m */,
+				E4BB1584677D42A5A2F85AB7 /* noop-file.swift */,
 			);
 			name = DVNT;
 			sourceTree = "<group>";
@@ -264,38 +293,32 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				BD588B01B2E24D5E8129EF01 /* PushKit.framework */,
-				D23F4D127153455F96430943 /* CallKit.framework */,
-				C68DF39866374B8EA374E10D /* Intents.framework */,
+				399741E333D8456DBE18B5D1 /* PushKit.framework */,
+				BAB65BE312624FFE965CB1E5 /* CallKit.framework */,
+				B6F005136B434972889666E5 /* Intents.framework */,
+				XX99DB34EAB420F9CA31AFXX /* UserNotifications.framework */,
+				XX7AA78EF20B6134AF145DXX /* ImageIO.framework */,
 				XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */,
 				XX8ACBDF17A27E5D829A2CXX /* WatchConnectivity.framework */,
-				XX7E674302DD5EEB942175XX /* CoreImage.framework */,
 				XX378A422B4194AC6966BAXX /* WatchKit.framework */,
-				XX99DB34EAB420F9CA31AFXX /* UserNotifications.framework */,
 				XX470101BAEB8E0BBC8B0DXX /* WidgetKit.framework */,
-				XXCAF23C3FC41F82140FA1XX /* ActivityKit.framework */,
-				XXA12889081EB894481655XX /* AppIntents.framework */,
-				8F6FD6237C1848B7FA35BB9B /* libPods-DVNT.a */,
+				44F237197EB3267820D3BB19 /* Pods_DVNT.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		4D25861B2C6E64B2E14DC011 /* ExpoModulesProviders */ = {
+		5C3AFCE9A6EF40B8BA8EFFE1 /* ShareExtension */ = {
 			isa = PBXGroup;
 			children = (
-				C3D38E5D14B1C97D3793AA98 /* DVNT */,
+				069517EC8C804D4E89A853A1 /* ShareViewController.swift */,
+				D8E265E2FEE2427EB3E30F6F /* MainInterface.storyboard */,
+				3235881A0EFA45F9AA9AE5B7 /* ShareExtensionPreprocessor.js */,
+				BFD6DCF7B15546858F1525FD /* PrivacyInfo.xcprivacy */,
+				C5476DFDB9D043029BEFA354 /* ShareExtension-Info.plist */,
+				10A9F7D4B1F3473CBD9E4D78 /* ShareExtension.entitlements */,
 			);
-			name = ExpoModulesProviders;
-			sourceTree = "<group>";
-		};
-		7D46B09DDBF4BF5B292CC32E /* Pods */ = {
-			isa = PBXGroup;
-			children = (
-				8E1C2F37C0E6DB83842E1657 /* Pods-DVNT.debug.xcconfig */,
-				2E6DA45A48F39AAFF996ABF9 /* Pods-DVNT.release.xcconfig */,
-			);
-			name = Pods;
-			path = Pods;
+			name = ShareExtension;
+			path = ShareExtension;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -313,9 +336,9 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				052982FE8A38422E9A4C7EEE /* ShareExtension */,
-				7D46B09DDBF4BF5B292CC32E /* Pods */,
-				4D25861B2C6E64B2E14DC011 /* ExpoModulesProviders */,
+				5C3AFCE9A6EF40B8BA8EFFE1 /* ShareExtension */,
+				EB301E2B71470ABF6F41DBE8 /* Pods */,
+				847FFE317BFADCC66481C899 /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -326,11 +349,20 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* DVNT.app */,
-				65CE5351E74C48E596DC4AD1 /* ShareExtension.appex */,
-				XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */,
+				F732DB0FF55D41C096372415 /* ShareExtension.appex */,
+				XX9344D6E34C81514754B7XX /* DVNTNotificationService.appex */,
+				XX76D1DA9C9A13DAFA7C18XX /* DVNTWatch.app */,
 				XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		847FFE317BFADCC66481C899 /* ExpoModulesProviders */ = {
+			isa = PBXGroup;
+			children = (
+				C242D6192A6441B4E5C455FE /* DVNT */,
+			);
+			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
@@ -342,19 +374,30 @@
 			path = DVNT/Supporting;
 			sourceTree = "<group>";
 		};
-		C3D38E5D14B1C97D3793AA98 /* DVNT */ = {
+		C242D6192A6441B4E5C455FE /* DVNT */ = {
 			isa = PBXGroup;
 			children = (
-				A0BE09CCAE0BF0A848E9B398 /* ExpoModulesProvider.swift */,
+				BE39D12B6981D17F454CE9F1 /* ExpoModulesProvider.swift */,
 			);
 			name = DVNT;
+			sourceTree = "<group>";
+		};
+		EB301E2B71470ABF6F41DBE8 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				7CDA9E34AFE62DEA7D2063F4 /* Pods-DVNT.debug.xcconfig */,
+				019CC740EB490C5CEF7AF580 /* Pods-DVNT.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
 			sourceTree = "<group>";
 		};
 		XX3E41C1850246162C0061XX /* expo:targets */ = {
 			isa = PBXGroup;
 			children = (
-				XX0DBF78894CEA43EF97D3XX /* watch */,
-				XXC4AE1142AB83CBDC6EA3XX /* watch-complication */,
+				XX1EFE827C7D960DEC5F83XX /* notification-service */,
+				XX9CE412A01777341E8191XX /* watch */,
+				XX58D0AC5F5FFD92E805BBXX /* watch-complication */,
 			);
 			name = "expo:targets";
 			path = ../targets;
@@ -368,37 +411,38 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "DVNT" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				F404664B52D8B94309D955C7 /* [Expo] Configure project */,
+				DC58CCF4A6F63E4DD7C908A9 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				E7F65FC596E24D3B836AE5BB /* [Expo Dev Launcher] Strip Local Network Keys for Release */,
-				80906F8A9CC1498496742226 /* Copy Files */,
-				XX81D5C67C94C2E1F9007EXX /* Embed Watch Content */,
+				83C4E8CBC3C549459D7E6E21 /* [Expo Dev Launcher] Strip Local Network Keys for Release */,
+				86B0A2638E174280AEA25D29 /* Dedupe XCFramework Signatures */,
+				2C219B3AF93E467789978FB0 /* Copy Files */,
 				XX72A8CFBF0FBA13A79902XX /* Embed Foundation Extensions */,
-				4104C4CCC73D480FDED43C17 /* [CP] Embed Pods Frameworks */,
+				XX81D5C67C94C2E1F9007EXX /* Embed Watch Content */,
+				92214825038843790048931F /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				1906E310AD104585A5006BC9 /* PBXTargetDependency */,
-				XXDE0A65E7D3B48A78312AXX /* PBXTargetDependency */,
-				XX75F5F1EB59D6C7091039XX /* PBXTargetDependency */,
+				5D1609C9EF8B408CAEFD2DD9 /* PBXTargetDependency */,
+				XX5FAE648D396FA93CACC6XX /* PBXTargetDependency */,
+				XX59C5220957AF6113E904XX /* PBXTargetDependency */,
 			);
 			name = DVNT;
 			productName = DVNT;
 			productReference = 13B07F961A680F5B00A75B9A /* DVNT.app */;
 			productType = "com.apple.product-type.application";
 		};
-		7ACDA37B4FAE42038CEED150 /* ShareExtension */ = {
+		1D2F5795A47A47F89F5E8437 /* ShareExtension */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 1E854DB68D0848599B174E35 /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+			buildConfigurationList = 1AA3F84E3DC2498EA1B83B4F /* Build configuration list for PBXNativeTarget "ShareExtension" */;
 			buildPhases = (
-				6BF35E3C7ABE46E28CBBA5DA /* Sources */,
-				A210A6F34CD04C1E9E9050BF /* Resources */,
-				2C66C86025B84F30B23DFF33 /* Frameworks */,
+				4BCD626D697C4C7CA8D0615D /* Sources */,
+				C8A12B047FB1468483706CC1 /* Resources */,
+				4ADFDDFC2867455FB84E5EAA /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -406,12 +450,32 @@
 			);
 			name = ShareExtension;
 			productName = ShareExtension;
-			productReference = 65CE5351E74C48E596DC4AD1 /* ShareExtension.appex */;
+			productReference = F732DB0FF55D41C096372415 /* ShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		XX6A43DD0F552874E793D0XX /* DVNT */ = {
+		XX57D2251FE5C8ED23FE09XX /* DVNTWatchComplication */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = XX5D98D9F202CA073387BEXX /* Build configuration list for PBXNativeTarget "DVNT" */;
+			buildConfigurationList = XXE4A1C09E965A38B2C820XX /* Build configuration list for PBXNativeTarget "DVNTWatchComplication" */;
+			buildPhases = (
+				XXA94A5604E6B418CE81CFXX /* Frameworks */,
+				XXE5EC32CD2D09C6C886C7XX /* Sources */,
+				XX00779A11A1B70B580100XX /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				XX58D0AC5F5FFD92E805BBXX /* watch-complication */,
+			);
+			name = DVNTWatchComplication;
+			productName = DVNTWatchComplication;
+			productReference = XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		XX9454F4BD8F1E7DBFF69FXX /* DVNTNotificationService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = XX5716F394C97C9F1A998DXX /* Build configuration list for PBXNativeTarget "DVNTNotificationService" */;
 			buildPhases = (
 				XX074B8811C1CF8E8A3D74XX /* Frameworks */,
 				XXE45443DC38DCFE1DB622XX /* Sources */,
@@ -422,32 +486,34 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				XX0DBF78894CEA43EF97D3XX /* watch */,
+				XX1EFE827C7D960DEC5F83XX /* notification-service */,
 			);
-			name = DVNT;
-			productName = DVNT;
-			productReference = XX7AB5E3BF4E83C9B2E1CCXX /* DVNT.app */;
-			productType = "com.apple.product-type.application";
+			name = DVNTNotificationService;
+			productName = DVNTNotificationService;
+			productReference = XX9344D6E34C81514754B7XX /* DVNTNotificationService.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
-		XXEB4F218FD5F06DBADE29XX /* DVNTWatchComplication */ = {
+		XXAB3F603B232A2BDC4FCBXX /* DVNTWatch */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = XX3F6D23B063207BA20538XX /* Build configuration list for PBXNativeTarget "DVNTWatchComplication" */;
+			buildConfigurationList = XX5D98D9F202CA073387BEXX /* Build configuration list for PBXNativeTarget "DVNTWatch" */;
 			buildPhases = (
 				XXBA6CDF0021ABEEEDFCFBXX /* Frameworks */,
 				XXDC105B0E28F884B8E02DXX /* Sources */,
 				XXC55EF014B50CBDECCD15XX /* Resources */,
+				XXDC26E7C3BF4FEBD9ABDDXX /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				XX3D5A8A7A9E44B6CD9D9CXX /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				XXC4AE1142AB83CBDC6EA3XX /* watch-complication */,
+				XX9CE412A01777341E8191XX /* watch */,
 			);
-			name = DVNTWatchComplication;
-			productName = DVNTWatchComplication;
-			productReference = XXBEB2AABA54834E7D4BB8XX /* DVNTWatchComplication.appex */;
-			productType = "com.apple.product-type.app-extension";
+			name = DVNTWatch;
+			productName = DVNTWatch;
+			productReference = XX76D1DA9C9A13DAFA7C18XX /* DVNTWatch.app */;
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
@@ -461,17 +527,22 @@
 						DevelopmentTeam = 436WA3W63V;
 						LastSwiftMigration = 1250;
 					};
-					7ACDA37B4FAE42038CEED150 = {
+					1D2F5795A47A47F89F5E8437 = {
 						CreatedOnToolsVersion = 14.3;
 						DevelopmentTeam = 436WA3W63V;
 						ProvisioningStyle = Automatic;
 					};
-					XX6A43DD0F552874E793D0XX = {
+					XX57D2251FE5C8ED23FE09XX = {
 						CreatedOnToolsVersion = 14.3;
 						DevelopmentTeam = 436WA3W63V;
 						ProvisioningStyle = Automatic;
 					};
-					XXEB4F218FD5F06DBADE29XX = {
+					XX9454F4BD8F1E7DBFF69FXX = {
+						CreatedOnToolsVersion = 14.3;
+						DevelopmentTeam = 436WA3W63V;
+						ProvisioningStyle = Automatic;
+					};
+					XXAB3F603B232A2BDC4FCBXX = {
 						CreatedOnToolsVersion = 14.3;
 						DevelopmentTeam = 436WA3W63V;
 						ProvisioningStyle = Automatic;
@@ -492,9 +563,10 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* DVNT */,
-				7ACDA37B4FAE42038CEED150 /* ShareExtension */,
-				XX6A43DD0F552874E793D0XX /* DVNT */,
-				XXEB4F218FD5F06DBADE29XX /* DVNTWatchComplication */,
+				1D2F5795A47A47F89F5E8437 /* ShareExtension */,
+				XX9454F4BD8F1E7DBFF69FXX /* DVNTNotificationService */,
+				XXAB3F603B232A2BDC4FCBXX /* DVNTWatch */,
+				XX57D2251FE5C8ED23FE09XX /* DVNTWatchComplication */,
 			);
 		};
 /* End PBXProject section */
@@ -507,18 +579,25 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				FFBEF9FFECA7488D95D59ED5 /* PrivacyInfo.xcprivacy in Resources */,
-				2E513A13A961454B87CFBBB2 /* dvnt-ring.wav in Resources */,
+				BC98C68B6AD94E3FB054DD89 /* PrivacyInfo.xcprivacy in Resources */,
+				F06EECB903FE484B85B49BFD /* dvnt-ring.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		A210A6F34CD04C1E9E9050BF /* Resources */ = {
+		C8A12B047FB1468483706CC1 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C1763346F46B437E99577C48 /* MainInterface.storyboard in Resources */,
-				6F143A938FF64F4189AC2480 /* ShareExtensionPreprocessor.js in Resources */,
-				D61526A9C71D4E0A946FB893 /* PrivacyInfo.xcprivacy in Resources */,
+				D4F77031046F44899F03510F /* MainInterface.storyboard in Resources */,
+				B65FF004EC0F4EE0A91FF97F /* ShareExtensionPreprocessor.js in Resources */,
+				5BFF5C10BAFD414BB4C1E8C5 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		XX00779A11A1B70B580100XX /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -526,6 +605,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				75434076BAD36079DFF7624B /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -533,7 +613,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B094CB5F1E0AFB2ADDFAA907 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -583,32 +662,6 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		4104C4CCC73D480FDED43C17 /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-DVNT/Pods-DVNT-frameworks.sh",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/ExpoModulesJSI/ExpoModulesJSI.framework/ExpoModulesJSI",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/FaceSDK/FaceSDK.framework/FaceSDK",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/JitsiWebRTC/WebRTC.framework/WebRTC",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/RegulaCommon/RegulaCommon.framework/RegulaCommon",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermesvm.framework/hermesvm",
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputPaths = (
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ExpoModulesJSI.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/FaceSDK.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/WebRTC.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RegulaCommon.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermesvm.framework",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-DVNT/Pods-DVNT-frameworks.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
 		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -626,32 +679,12 @@
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoMediaLibrary/ExpoMediaLibrary_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoNotifications/ExpoNotifications_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoSystemUI/ExpoSystemUI_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/GTMSessionFetcher/GTMSessionFetcher_Core_Privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/GoogleDataTransport/GoogleDataTransport_Privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/GoogleToolboxForMac/GoogleToolboxForMac_Privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/GoogleToolboxForMac/GoogleToolboxForMac_Logger_Privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/GoogleUtilities/GoogleUtilities_Privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/PromisesObjC/FBLPromises_Privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/RCT-Folly/RCT-Folly_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/RNSVG/RNSVGFilters.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/ReachabilitySwift/ReachabilitySwift.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/React-Core/React-Core_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/React-cxxreact/React-cxxreact_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/SDWebImage/SDWebImage.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/Stripe/StripeBundle.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/StripeCore/StripeCoreBundle.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/StripeFinancialConnections/StripeFinancialConnectionsBundle.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/StripePaymentSheet/StripePaymentSheetBundle.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/StripePayments/StripePaymentsBundle.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/StripePayments/Stripe3DS2.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/StripePaymentsUI/StripePaymentsUIBundle.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/StripeUICore/StripeUICoreBundle.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/TrustKit/TrustKit.bundle",
+				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoTaskManager/ExpoTaskManager_privacy.bundle",
+				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoWidgets/ExpoWidgets.bundle",
+				"${PODS_CONFIGURATION_BUILD_DIR}/React-timing/React-timing_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/boost/boost_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/expo-dev-launcher/EXDevLauncher.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/expo-dev-menu/EXDevMenu.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/glog/glog_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/nanopb/nanopb_Privacy.bundle",
 			);
 			name = "[CP] Copy Pods Resources";
 			outputPaths = (
@@ -665,39 +698,19 @@
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoMediaLibrary_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoNotifications_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoSystemUI_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GTMSessionFetcher_Core_Privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleDataTransport_Privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleToolboxForMac_Privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleToolboxForMac_Logger_Privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleUtilities_Privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/FBLPromises_Privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/RCT-Folly_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/RNSVGFilters.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ReachabilitySwift.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-Core_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-cxxreact_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/SDWebImage.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/StripeBundle.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/StripeCoreBundle.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/StripeFinancialConnectionsBundle.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/StripePaymentSheetBundle.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/StripePaymentsBundle.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Stripe3DS2.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/StripePaymentsUIBundle.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/StripeUICoreBundle.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/TrustKit.bundle",
+				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoTaskManager_privacy.bundle",
+				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ExpoWidgets.bundle",
+				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-timing_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/boost_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXDevLauncher.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EXDevMenu.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/glog_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/nanopb_Privacy.bundle",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-DVNT/Pods-DVNT-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		E7F65FC596E24D3B836AE5BB /* [Expo Dev Launcher] Strip Local Network Keys for Release */ = {
+		83C4E8CBC3C549459D7E6E21 /* [Expo Dev Launcher] Strip Local Network Keys for Release */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -715,7 +728,329 @@
 			shellPath = /bin/sh;
 			shellScript = "# Strip dev-launcher-specific local network permission keys from non-Debug builds\n# This only removes _expo._tcp Bonjour services and the dev-launcher usage description.\n# Other Bonjour services and custom descriptions are preserved for production use.\n\nif [ \"$CONFIGURATION\" != \"Debug\" ]; then\n  PLIST_PATH=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\n  if [ -f \"$PLIST_PATH\" ]; then\n    # Check if NSBonjourServices exists\n    if /usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" >/dev/null 2>&1; then\n      # Get the count of services\n      COUNT=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n\n      # Remove _expo._tcp\n      for ((i=COUNT-1; i>=0; i--)); do\n        SERVICE=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n        if echo \"$SERVICE\" | grep -q \"_expo._tcp\"; then\n          /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices:$i\" \"$PLIST_PATH\" 2>/dev/null || true\n        fi\n      done\n\n      # If the array is now empty, remove it entirely\n      REMAINING=$(/usr/libexec/PlistBuddy -c \"Print :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null | grep \"^    \" | wc -l | tr -d ' ')\n      if [ \"$REMAINING\" -eq \"0\" ]; then\n        /usr/libexec/PlistBuddy -c \"Delete :NSBonjourServices\" \"$PLIST_PATH\" 2>/dev/null || true\n      fi\n    fi\n\n    # Only delete the description if it matches the dev-launcher default text\n    DESC=$(/usr/libexec/PlistBuddy -c \"Print :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || echo \"\")\n    if echo \"$DESC\" | grep -q \"Expo Dev Launcher\"; then\n      /usr/libexec/PlistBuddy -c \"Delete :NSLocalNetworkUsageDescription\" \"$PLIST_PATH\" 2>/dev/null || true\n    fi\n  fi\nfi\n";
 		};
-		F404664B52D8B94309D955C7 /* [Expo] Configure project */ = {
+		86B0A2638E174280AEA25D29 /* Dedupe XCFramework Signatures */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Dedupe XCFramework Signatures";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# ponytail: keep the root signature, drop per-pod duplicates — archive\n# assembly flattens them all into Signatures/ and dies on basename collision.\nif [ -d \"$BUILT_PRODUCTS_DIR\" ]; then\n  find \"$BUILT_PRODUCTS_DIR\" -mindepth 2 -name '*.xcframework-*.signature' -print -delete\nfi\n";
+		};
+		92214825038843790048931F /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-DVNT/Pods-DVNT-frameworks.sh",
+				"${BUILT_PRODUCTS_DIR}/DoubleConversion/DoubleConversion.framework",
+				"${BUILT_PRODUCTS_DIR}/Ease/Ease.framework",
+				"${BUILT_PRODUCTS_DIR}/GTMSessionFetcher/GTMSessionFetcher.framework",
+				"${BUILT_PRODUCTS_DIR}/GoogleDataTransport/GoogleDataTransport.framework",
+				"${BUILT_PRODUCTS_DIR}/GoogleToolboxForMac/GoogleToolboxForMac.framework",
+				"${BUILT_PRODUCTS_DIR}/GoogleUtilities/GoogleUtilities.framework",
+				"${BUILT_PRODUCTS_DIR}/LiquidGlass/LiquidGlass.framework",
+				"${BUILT_PRODUCTS_DIR}/MMKVCore/MMKVCore.framework",
+				"${BUILT_PRODUCTS_DIR}/MoQ/MoQ.framework",
+				"${BUILT_PRODUCTS_DIR}/NitroImage/NitroImage.framework",
+				"${BUILT_PRODUCTS_DIR}/NitroMmkv/NitroMmkv.framework",
+				"${BUILT_PRODUCTS_DIR}/NitroModules/NitroModules.framework",
+				"${BUILT_PRODUCTS_DIR}/PromisesObjC/FBLPromises.framework",
+				"${BUILT_PRODUCTS_DIR}/PurchasesHybridCommon/PurchasesHybridCommon.framework",
+				"${BUILT_PRODUCTS_DIR}/RCT-Folly/folly.framework",
+				"${BUILT_PRODUCTS_DIR}/RCTDeprecation/RCTDeprecation.framework",
+				"${BUILT_PRODUCTS_DIR}/RCTSwiftUI/RCTSwiftUI.framework",
+				"${BUILT_PRODUCTS_DIR}/RCTSwiftUIWrapper/RCTSwiftUIWrapper.framework",
+				"${BUILT_PRODUCTS_DIR}/RCTTypeSafety/RCTTypeSafety.framework",
+				"${BUILT_PRODUCTS_DIR}/RNCMaskedView/RNCMaskedView.framework",
+				"${BUILT_PRODUCTS_DIR}/RNCallKeep/RNCallKeep.framework",
+				"${BUILT_PRODUCTS_DIR}/RNDateTimePicker/RNDateTimePicker.framework",
+				"${BUILT_PRODUCTS_DIR}/RNFaceApi/RNFaceApi.framework",
+				"${BUILT_PRODUCTS_DIR}/RNGestureHandler/RNGestureHandler.framework",
+				"${BUILT_PRODUCTS_DIR}/RNPurchases/RNPurchases.framework",
+				"${BUILT_PRODUCTS_DIR}/RNReanimated/reanimated.framework",
+				"${BUILT_PRODUCTS_DIR}/RNSVG/RNSVG.framework",
+				"${BUILT_PRODUCTS_DIR}/RNScreens/RNScreens.framework",
+				"${BUILT_PRODUCTS_DIR}/RNTrueSheet/RNTrueSheet.framework",
+				"${BUILT_PRODUCTS_DIR}/RNVoipPushNotification/RNVoipPushNotification.framework",
+				"${BUILT_PRODUCTS_DIR}/RNWatch/RNWatch.framework",
+				"${BUILT_PRODUCTS_DIR}/RNWorklets/worklets.framework",
+				"${BUILT_PRODUCTS_DIR}/ReachabilitySwift/Reachability.framework",
+				"${BUILT_PRODUCTS_DIR}/React-Core/React.framework",
+				"${BUILT_PRODUCTS_DIR}/React-CoreModules/CoreModules.framework",
+				"${BUILT_PRODUCTS_DIR}/React-Fabric/React_Fabric.framework",
+				"${BUILT_PRODUCTS_DIR}/React-FabricComponents/React_FabricComponents.framework",
+				"${BUILT_PRODUCTS_DIR}/React-FabricImage/React_FabricImage.framework",
+				"${BUILT_PRODUCTS_DIR}/React-ImageManager/React_ImageManager.framework",
+				"${BUILT_PRODUCTS_DIR}/React-Mapbuffer/React_Mapbuffer.framework",
+				"${BUILT_PRODUCTS_DIR}/React-NativeModulesApple/React_NativeModulesApple.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTAnimation/RCTAnimation.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTAppDelegate/React_RCTAppDelegate.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTBlob/RCTBlob.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTFBReactNativeSpec/React_RCTFBReactNativeSpec.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTFabric/RCTFabric.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTImage/RCTImage.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTLinking/RCTLinking.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTNetwork/RCTNetwork.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTRuntime/RCTRuntime.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTSettings/RCTSettings.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTText/RCTText.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RCTVibration/RCTVibration.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RuntimeApple/React_RuntimeApple.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RuntimeCore/React_RuntimeCore.framework",
+				"${BUILT_PRODUCTS_DIR}/React-RuntimeHermes/React_RuntimeHermes.framework",
+				"${BUILT_PRODUCTS_DIR}/React-cxxreact/cxxreact.framework",
+				"${BUILT_PRODUCTS_DIR}/React-debug/React_debug.framework",
+				"${BUILT_PRODUCTS_DIR}/React-defaultsnativemodule/React_defaultsnativemodule.framework",
+				"${BUILT_PRODUCTS_DIR}/React-domnativemodule/React_domnativemodule.framework",
+				"${BUILT_PRODUCTS_DIR}/React-featureflags/React_featureflags.framework",
+				"${BUILT_PRODUCTS_DIR}/React-featureflagsnativemodule/React_featureflagsnativemodule.framework",
+				"${BUILT_PRODUCTS_DIR}/React-graphics/React_graphics.framework",
+				"${BUILT_PRODUCTS_DIR}/React-hermes/reacthermes.framework",
+				"${BUILT_PRODUCTS_DIR}/React-idlecallbacksnativemodule/idlecallbacksnativemodule.framework",
+				"${BUILT_PRODUCTS_DIR}/React-intersectionobservernativemodule/intersectionobservernativemodule.framework",
+				"${BUILT_PRODUCTS_DIR}/React-jserrorhandler/React_jserrorhandler.framework",
+				"${BUILT_PRODUCTS_DIR}/React-jsi/jsi.framework",
+				"${BUILT_PRODUCTS_DIR}/React-jsiexecutor/jsireact.framework",
+				"${BUILT_PRODUCTS_DIR}/React-jsinspector/jsinspector_modern.framework",
+				"${BUILT_PRODUCTS_DIR}/React-jsinspectorcdp/jsinspector_moderncdp.framework",
+				"${BUILT_PRODUCTS_DIR}/React-jsinspectornetwork/jsinspector_modernnetwork.framework",
+				"${BUILT_PRODUCTS_DIR}/React-jsinspectortracing/jsinspector_moderntracing.framework",
+				"${BUILT_PRODUCTS_DIR}/React-jsitooling/JSITooling.framework",
+				"${BUILT_PRODUCTS_DIR}/React-logger/logger.framework",
+				"${BUILT_PRODUCTS_DIR}/React-microtasksnativemodule/React_microtasksnativemodule.framework",
+				"${BUILT_PRODUCTS_DIR}/React-mutationobservernativemodule/mutationobservernativemodule.framework",
+				"${BUILT_PRODUCTS_DIR}/React-networking/React_networking.framework",
+				"${BUILT_PRODUCTS_DIR}/React-oscompat/oscompat.framework",
+				"${BUILT_PRODUCTS_DIR}/React-perflogger/reactperflogger.framework",
+				"${BUILT_PRODUCTS_DIR}/React-performancecdpmetrics/React_performancecdpmetrics.framework",
+				"${BUILT_PRODUCTS_DIR}/React-performancetimeline/React_performancetimeline.framework",
+				"${BUILT_PRODUCTS_DIR}/React-rendererconsistency/React_rendererconsistency.framework",
+				"${BUILT_PRODUCTS_DIR}/React-renderercss/React_renderercss.framework",
+				"${BUILT_PRODUCTS_DIR}/React-rendererdebug/React_rendererdebug.framework",
+				"${BUILT_PRODUCTS_DIR}/React-runtimeexecutor/React_runtimeexecutor.framework",
+				"${BUILT_PRODUCTS_DIR}/React-runtimescheduler/React_runtimescheduler.framework",
+				"${BUILT_PRODUCTS_DIR}/React-utils/React_utils.framework",
+				"${BUILT_PRODUCTS_DIR}/React-viewtransitionnativemodule/React_viewtransitionnativemodule.framework",
+				"${BUILT_PRODUCTS_DIR}/React-webperformancenativemodule/webperformancenativemodule.framework",
+				"${BUILT_PRODUCTS_DIR}/ReactAppDependencyProvider/ReactAppDependencyProvider.framework",
+				"${BUILT_PRODUCTS_DIR}/ReactCodegen/ReactCodegen.framework",
+				"${BUILT_PRODUCTS_DIR}/ReactCommon/ReactCommon.framework",
+				"${BUILT_PRODUCTS_DIR}/ReactNativeIncallManager/ReactNativeIncallManager.framework",
+				"${BUILT_PRODUCTS_DIR}/ReactNativeVideo/ReactNativeVideo.framework",
+				"${BUILT_PRODUCTS_DIR}/RevenueCat/RevenueCat.framework",
+				"${BUILT_PRODUCTS_DIR}/SDWebImage/SDWebImage.framework",
+				"${BUILT_PRODUCTS_DIR}/SDWebImageAVIFCoder/SDWebImageAVIFCoder.framework",
+				"${BUILT_PRODUCTS_DIR}/SDWebImageSVGCoder/SDWebImageSVGCoder.framework",
+				"${BUILT_PRODUCTS_DIR}/SDWebImageWebPCoder/SDWebImageWebPCoder.framework",
+				"${BUILT_PRODUCTS_DIR}/SocketRocket/SocketRocket.framework",
+				"${BUILT_PRODUCTS_DIR}/Stripe/Stripe.framework",
+				"${BUILT_PRODUCTS_DIR}/StripeApplePay/StripeApplePay.framework",
+				"${BUILT_PRODUCTS_DIR}/StripeCore/StripeCore.framework",
+				"${BUILT_PRODUCTS_DIR}/StripeFinancialConnections/StripeFinancialConnections.framework",
+				"${BUILT_PRODUCTS_DIR}/StripeIssuing/StripeIssuing.framework",
+				"${BUILT_PRODUCTS_DIR}/StripePaymentSheet/StripePaymentSheet.framework",
+				"${BUILT_PRODUCTS_DIR}/StripePayments/StripePayments.framework",
+				"${BUILT_PRODUCTS_DIR}/StripePaymentsUI/StripePaymentsUI.framework",
+				"${BUILT_PRODUCTS_DIR}/StripeUICore/StripeUICore.framework",
+				"${BUILT_PRODUCTS_DIR}/SwiftDraw/SwiftDraw.framework",
+				"${BUILT_PRODUCTS_DIR}/SwiftDrawDOM/SwiftDrawDOM.framework",
+				"${BUILT_PRODUCTS_DIR}/SwiftUIIntrospect/SwiftUIIntrospect.framework",
+				"${BUILT_PRODUCTS_DIR}/TrustKit/TrustKit.framework",
+				"${BUILT_PRODUCTS_DIR}/VisionCamera/VisionCamera.framework",
+				"${BUILT_PRODUCTS_DIR}/Yoga/yoga.framework",
+				"${BUILT_PRODUCTS_DIR}/ZXingObjC/ZXingObjC.framework",
+				"${BUILT_PRODUCTS_DIR}/fmt/fmt.framework",
+				"${BUILT_PRODUCTS_DIR}/glog/glog.framework",
+				"${BUILT_PRODUCTS_DIR}/libavif/libavif.framework",
+				"${BUILT_PRODUCTS_DIR}/libdav1d/libdav1d.framework",
+				"${BUILT_PRODUCTS_DIR}/libwebp/libwebp.framework",
+				"${BUILT_PRODUCTS_DIR}/nanopb/nanopb.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-compressor/react_native_compressor.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-get-random-values/react_native_get_random_values.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-hole-view/react_native_hole_view.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-insta-story/react_native_insta_story.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-keyboard-controller/react_native_keyboard_controller.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-pager-view/react_native_pager_view.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-safe-area-context/react_native_safe_area_context.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-skia/react_native_skia.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-slider/react_native_slider.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-webgpu/react_native_webgpu.framework",
+				"${BUILT_PRODUCTS_DIR}/react-native-webview/react_native_webview.framework",
+				"${BUILT_PRODUCTS_DIR}/stripe-react-native/stripe_react_native.framework",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/ExpoModulesJSI/ExpoModulesJSI.framework/ExpoModulesJSI",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/FaceSDK/FaceSDK.framework/FaceSDK",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/FishjamWebRTC/WebRTC.framework/WebRTC",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/RNAudioAPI/libavcodec.framework/libavcodec",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/RNAudioAPI/libavformat.framework/libavformat",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/RNAudioAPI/libavutil.framework/libavutil",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/RNAudioAPI/libswresample.framework/libswresample",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/RegulaCommon/RegulaCommon.framework/RegulaCommon",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermesvm.framework/hermesvm",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputPaths = (
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/DoubleConversion.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Ease.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/GTMSessionFetcher.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/GoogleDataTransport.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/GoogleToolboxForMac.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/GoogleUtilities.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/LiquidGlass.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/MMKVCore.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/MoQ.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/NitroImage.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/NitroMmkv.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/NitroModules.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/FBLPromises.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/PurchasesHybridCommon.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/folly.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTDeprecation.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTSwiftUI.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTSwiftUIWrapper.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTTypeSafety.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNCMaskedView.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNCallKeep.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNDateTimePicker.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNFaceApi.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNGestureHandler.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNPurchases.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/reanimated.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNSVG.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNScreens.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNTrueSheet.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNVoipPushNotification.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RNWatch.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/worklets.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Reachability.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/CoreModules.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_Fabric.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_FabricComponents.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_FabricImage.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_ImageManager.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_Mapbuffer.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_NativeModulesApple.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTAnimation.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_RCTAppDelegate.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTBlob.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_RCTFBReactNativeSpec.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTFabric.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTImage.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTLinking.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTNetwork.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTRuntime.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTSettings.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTText.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RCTVibration.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_RuntimeApple.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_RuntimeCore.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_RuntimeHermes.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/cxxreact.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_debug.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_defaultsnativemodule.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_domnativemodule.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_featureflags.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_featureflagsnativemodule.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_graphics.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/reacthermes.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/idlecallbacksnativemodule.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/intersectionobservernativemodule.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_jserrorhandler.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/jsi.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/jsireact.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/jsinspector_modern.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/jsinspector_moderncdp.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/jsinspector_modernnetwork.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/jsinspector_moderntracing.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/JSITooling.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/logger.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_microtasksnativemodule.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/mutationobservernativemodule.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_networking.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/oscompat.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/reactperflogger.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_performancecdpmetrics.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_performancetimeline.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_rendererconsistency.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_renderercss.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_rendererdebug.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_runtimeexecutor.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_runtimescheduler.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_utils.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React_viewtransitionnativemodule.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/webperformancenativemodule.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ReactAppDependencyProvider.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ReactCodegen.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ReactCommon.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ReactNativeIncallManager.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ReactNativeVideo.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RevenueCat.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/SDWebImage.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/SDWebImageAVIFCoder.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/SDWebImageSVGCoder.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/SDWebImageWebPCoder.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/SocketRocket.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Stripe.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/StripeApplePay.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/StripeCore.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/StripeFinancialConnections.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/StripeIssuing.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/StripePaymentSheet.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/StripePayments.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/StripePaymentsUI.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/StripeUICore.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/SwiftDraw.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/SwiftDrawDOM.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/SwiftUIIntrospect.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/TrustKit.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/VisionCamera.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/yoga.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ZXingObjC.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/fmt.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/glog.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/libavif.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/libdav1d.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/libwebp.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/nanopb.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_compressor.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_get_random_values.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_hole_view.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_insta_story.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_keyboard_controller.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_pager_view.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_safe_area_context.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_skia.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_slider.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_webgpu.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/react_native_webview.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/stripe_react_native.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ExpoModulesJSI.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/FaceSDK.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/WebRTC.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/libavcodec.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/libavformat.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/libavutil.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/libswresample.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/RegulaCommon.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermesvm.framework",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-DVNT/Pods-DVNT-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		DC58CCF4A6F63E4DD7C908A9 /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -747,17 +1082,17 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				D3D65DC9B557419C8FF3B488 /* AppDelegate+VoIPPush.m in Sources */,
-				ADA58E2BAF9F493E8D7B1854 /* noop-file.swift in Sources */,
-				D72F6E07AC1251522904B864 /* ExpoModulesProvider.swift in Sources */,
+				A2CA9627F53F4B4AA5B87193 /* AppDelegate+VoIPPush.m in Sources */,
+				189E713AD28C490294C8A998 /* noop-file.swift in Sources */,
+				B1F3CEC1414D9063E685BDCF /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		6BF35E3C7ABE46E28CBBA5DA /* Sources */ = {
+		4BCD626D697C4C7CA8D0615D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5A3622D0EC784E0FB52E03D6 /* ShareViewController.swift in Sources */,
+				F4EC54419E8C4650A4078E50 /* ShareViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -775,30 +1110,42 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		XXE5EC32CD2D09C6C886C7XX /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		1906E310AD104585A5006BC9 /* PBXTargetDependency */ = {
+		5D1609C9EF8B408CAEFD2DD9 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 7ACDA37B4FAE42038CEED150 /* ShareExtension */;
-			targetProxy = D826A9812A3343C89B7E5822 /* PBXContainerItemProxy */;
+			target = 1D2F5795A47A47F89F5E8437 /* ShareExtension */;
+			targetProxy = C677F948E0D64A1BBBBE6D21 /* PBXContainerItemProxy */;
 		};
-		XX75F5F1EB59D6C7091039XX /* PBXTargetDependency */ = {
+		XX3D5A8A7A9E44B6CD9D9CXX /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = XXEB4F218FD5F06DBADE29XX /* DVNTWatchComplication */;
-			targetProxy = XXB32BF84AD63A8E0D9F0EXX /* PBXContainerItemProxy */;
+			target = XX57D2251FE5C8ED23FE09XX /* DVNTWatchComplication */;
+			targetProxy = XXDC670A7CB09DFD8FAE87XX /* PBXContainerItemProxy */;
 		};
-		XXDE0A65E7D3B48A78312AXX /* PBXTargetDependency */ = {
+		XX59C5220957AF6113E904XX /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = XX6A43DD0F552874E793D0XX /* DVNT */;
-			targetProxy = XXCC2F6CC4483EF823FD14XX /* PBXContainerItemProxy */;
+			target = XXAB3F603B232A2BDC4FCBXX /* DVNTWatch */;
+			targetProxy = XXF24FC26F267E0662B0E5XX /* PBXContainerItemProxy */;
+		};
+		XX5FAE648D396FA93CACC6XX /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = XX9454F4BD8F1E7DBFF69FXX /* DVNTNotificationService */;
+			targetProxy = XXD91A4D79971C9BE467D2XX /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 8E1C2F37C0E6DB83842E1657 /* Pods-DVNT.debug.xcconfig */;
+			baseConfigurationReference = 7CDA9E34AFE62DEA7D2063F4 /* Pods-DVNT.debug.xcconfig */;
 			buildSettings = {
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -842,7 +1189,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 2E6DA45A48F39AAFF996ABF9 /* Pods-DVNT.release.xcconfig */;
+			baseConfigurationReference = 019CC740EB490C5CEF7AF580 /* Pods-DVNT.release.xcconfig */;
 			buildSettings = {
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -879,7 +1226,7 @@
 			};
 			name = Release;
 		};
-		327126B8135F452282618A04 /* Release */ = {
+		1609F51917C749629661F273 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
@@ -887,6 +1234,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 436WA3W63V;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -895,7 +1246,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.dvnt.app.share-extension";
 				PRODUCT_NAME = ShareExtension;
 				SKIP_INSTALL = YES;
@@ -903,7 +1254,7 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
-			name = Release;
+			name = Debug;
 		};
 		83CBBA201A601CBA00E9B192 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -958,6 +1309,18 @@
 					"$(inherited)",
 					"$(SRCROOT)/../node_modules/react-native-voip-push-notification/ios/RNVoipPushNotification",
 					"$(SRCROOT)/../node_modules/react-native-callkeep/ios/RNCallKeep",
+					"${PODS_CONFIGURATION_BUILD_DIR}/ReactCommon/ReactCommon.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/ReactCommon/ReactCommon.framework/Headers/react/nativemodule/core",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-runtimeexecutor/React_runtimeexecutor.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-runtimeexecutor/React_runtimeexecutor.framework/Headers/platform/ios",
+					"${PODS_CONFIGURATION_BUILD_DIR}/ReactCommon-Samples/ReactCommon_Samples.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/ReactCommon-Samples/ReactCommon_Samples.framework/Headers/platform/ios",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-Fabric/React_Fabric.framework/Headers/react/renderer/components/view/platform/cxx",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-NativeModulesApple/React_NativeModulesApple.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-graphics/React_graphics.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-graphics/React_graphics.framework/Headers/react/renderer/graphics/platform/ios",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-featureflags/React_featureflags.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-renderercss/React_renderercss.framework/Headers",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -975,6 +1338,7 @@
 					"$(inherited)",
 					"-DRCT_REMOVE_LEGACY_ARCH=1",
 				);
+				PODFILE_DIR = "$(SRCROOT)";
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../node_modules/react-native";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
@@ -1028,6 +1392,18 @@
 					"$(inherited)",
 					"$(SRCROOT)/../node_modules/react-native-voip-push-notification/ios/RNVoipPushNotification",
 					"$(SRCROOT)/../node_modules/react-native-callkeep/ios/RNCallKeep",
+					"${PODS_CONFIGURATION_BUILD_DIR}/ReactCommon/ReactCommon.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/ReactCommon/ReactCommon.framework/Headers/react/nativemodule/core",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-runtimeexecutor/React_runtimeexecutor.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-runtimeexecutor/React_runtimeexecutor.framework/Headers/platform/ios",
+					"${PODS_CONFIGURATION_BUILD_DIR}/ReactCommon-Samples/ReactCommon_Samples.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/ReactCommon-Samples/ReactCommon_Samples.framework/Headers/platform/ios",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-Fabric/React_Fabric.framework/Headers/react/renderer/components/view/platform/cxx",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-NativeModulesApple/React_NativeModulesApple.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-graphics/React_graphics.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-graphics/React_graphics.framework/Headers/react/renderer/graphics/platform/ios",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-featureflags/React_featureflags.framework/Headers",
+					"${PODS_CONFIGURATION_BUILD_DIR}/React-renderercss/React_renderercss.framework/Headers",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1044,6 +1420,7 @@
 					"$(inherited)",
 					"-DRCT_REMOVE_LEGACY_ARCH=1",
 				);
+				PODFILE_DIR = "$(SRCROOT)";
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../node_modules/react-native";
 				SDKROOT = iphoneos;
 				USE_HERMES = true;
@@ -1051,7 +1428,7 @@
 			};
 			name = Release;
 		};
-		8554CAAA397A41C2AFBFCC11 /* Debug */ = {
+		AF727A33B61A412598C21801 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
@@ -1059,10 +1436,6 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 436WA3W63V;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1071,7 +1444,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.dvnt.app.share-extension";
 				PRODUCT_NAME = ShareExtension;
 				SKIP_INSTALL = YES;
@@ -1079,9 +1452,51 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
+			name = Release;
+		};
+		XX0B810AD4E80D39F23FE2XX /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = "../targets/watch-complication/generated.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 436WA3W63V;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "../targets/watch-complication/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = DVNT;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp.complications;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
 			name = Debug;
 		};
-		XX9DC68CD511CD4E7F8ED6XX /* Release */ = {
+		XX1E36B2334802ED2A413DXX /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_ANALYZER_NONNULL = YES;
@@ -1100,30 +1515,30 @@
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "../targets/watch-complication/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = DVNTWatchComplication;
+				INFOPLIST_KEY_CFBundleDisplayName = DVNT;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
 				MTL_FAST_MATH = YES;
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp.complication;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp.complications;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Release;
 		};
-		XXA5B1A9E26E07C9435DEFXX /* Debug */ = {
+		XX3A779CF095B540C850C0XX /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_ANALYZER_NONNULL = YES;
@@ -1133,37 +1548,35 @@
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CODE_SIGN_ENTITLEMENTS = "../targets/watch-complication/generated.entitlements";
 				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 436WA3W63V;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "../targets/watch-complication/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = DVNTWatchComplication;
+				INFOPLIST_FILE = "../targets/notification-service/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = DVNT;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
-				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
-				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.watchkitapp.complication;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.notifications;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
 				SKIP_INSTALL = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
-			name = Debug;
+			name = Release;
 		};
 		XXAF910CE60410C350784AXX /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -1255,6 +1668,48 @@
 			};
 			name = Release;
 		};
+		XXEEC810287DAD121AE41DXX /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 436WA3W63V;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "../targets/notification-service/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = DVNT;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = com.dvnt.app.notifications;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1267,11 +1722,11 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1E854DB68D0848599B174E35 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
+		1AA3F84E3DC2498EA1B83B4F /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				8554CAAA397A41C2AFBFCC11 /* Debug */,
-				327126B8135F452282618A04 /* Release */,
+				1609F51917C749629661F273 /* Debug */,
+				AF727A33B61A412598C21801 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1285,20 +1740,29 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		XX3F6D23B063207BA20538XX /* Build configuration list for PBXNativeTarget "DVNTWatchComplication" */ = {
+		XX5716F394C97C9F1A998DXX /* Build configuration list for PBXNativeTarget "DVNTNotificationService" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				XXA5B1A9E26E07C9435DEFXX /* Debug */,
-				XX9DC68CD511CD4E7F8ED6XX /* Release */,
+				XXEEC810287DAD121AE41DXX /* Debug */,
+				XX3A779CF095B540C850C0XX /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		XX5D98D9F202CA073387BEXX /* Build configuration list for PBXNativeTarget "DVNT" */ = {
+		XX5D98D9F202CA073387BEXX /* Build configuration list for PBXNativeTarget "DVNTWatch" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				XXAF910CE60410C350784AXX /* Debug */,
 				XXD5786D9162175CB0EE1EXX /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		XXE4A1C09E965A38B2C820XX /* Build configuration list for PBXNativeTarget "DVNTWatchComplication" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XX0B810AD4E80D39F23FE2XX /* Debug */,
+				XX1E36B2334802ED2A413DXX /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

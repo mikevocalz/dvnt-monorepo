@@ -1,0 +1,28 @@
+name: verify edge functions
+
+# Guards the two silent-production-outage modes documented in
+# scripts/verify-edge-functions.mjs: verify_jwt drift on unpinned functions,
+# and the beta signup gate coming back. Static only — no secrets, no network.
+# Run the --live variant manually after a deploy (see package.json).
+
+on:
+  pull_request:
+    paths:
+      - "apps/mobile/supabase/**"
+      - "scripts/verify-edge-functions.mjs"
+      - ".github/workflows/verify-edge-functions.yml"
+  push:
+    branches: [master]
+    paths:
+      - "apps/mobile/supabase/**"
+      - "scripts/verify-edge-functions.mjs"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/verify-edge-functions.mjs

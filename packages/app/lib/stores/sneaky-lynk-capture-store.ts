@@ -41,6 +41,16 @@ export interface CaptureEvent {
 interface SneakyLynkCaptureState {
   currentCapture: CaptureEvent | null;
   pulseUserIds: Record<string, number>;
+  /**
+   * Is at least one participant in this room joined from a browser?
+   *
+   * Driven by presence on the `sneaky-capture-<roomId>` channel (see
+   * `useSneakyLynkCaptureBroadcast`). Web capture protection is deterrence
+   * only — no browser offers an equivalent to Android FLAG_SECURE or the iOS
+   * capture blackout — so every participant is entitled to know a web client
+   * is present. Drives the persistent header chip on both rails.
+   */
+  webPeerPresent: boolean;
 
   /** Record an incoming capture event (from any participant, self or remote). */
   recordCapture: (event: CaptureEvent) => void;
@@ -48,6 +58,8 @@ interface SneakyLynkCaptureState {
   clearCapture: () => void;
   /** Remove a userId from the pulse set (used by tile pulse timers). */
   clearPulse: (userId: string) => void;
+  /** Set from the capture channel's presence sync. */
+  setWebPeerPresent: (present: boolean) => void;
   /** Reset all state (called on room leave). */
   reset: () => void;
 
@@ -58,6 +70,7 @@ export const useSneakyLynkCaptureStore = create<SneakyLynkCaptureState>(
   (set, get) => ({
     currentCapture: null,
     pulseUserIds: {},
+    webPeerPresent: false,
 
     recordCapture: (event) => {
       set((s) => ({
@@ -78,7 +91,13 @@ export const useSneakyLynkCaptureStore = create<SneakyLynkCaptureState>(
         return { pulseUserIds: rest };
       }),
 
-    reset: () => set({ currentCapture: null, pulseUserIds: {} }),
+    setWebPeerPresent: (webPeerPresent) =>
+      set((s) =>
+        s.webPeerPresent === webPeerPresent ? s : { webPeerPresent },
+      ),
+
+    reset: () =>
+      set({ currentCapture: null, pulseUserIds: {}, webPeerPresent: false }),
 
     isPulsing: (userId) => userId in get().pulseUserIds,
   }),

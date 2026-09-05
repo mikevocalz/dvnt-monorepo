@@ -28,6 +28,10 @@ export { addSentryBreadcrumb, addNavigationBreadcrumb, addHttpBreadcrumb, addUse
 export { startSentrySpan, measureAsync, createTimer } from './spans';
 export { captureHandledError, captureApiError, captureFlowFailure, captureMediaFailure, captureSneakyLinkFailure, captureMessageFlowFailure, captureModerationDebugEvent } from './capture';
 export { setReleaseInfo, getReleaseInfo, updateOTAInfo, buildReleaseString } from './release';
+export { emitLog, logWebhookOutcome, logFunnelStep } from './logs';
+export type { LogLevel } from './logs';
+export { dvntTracesSampler, sampleRateForName, normalizeTransactionName, SAMPLE_RULES, HIGH_VALUE_RATE, CHATTY_RATE, DEFAULT_RATE } from './sampling';
+export type { DvntSamplingContext } from './sampling';
 export * from './bridge';
 
 // Re-export flows as namespace
@@ -41,6 +45,7 @@ import { setSentryInstance as setBreadcrumbsSentry } from './breadcrumbs';
 import { setSentryInstance as setSpansSentry } from './spans';
 import { setSentryInstance as setCaptureSentry } from './capture';
 import { setSentryInstance as setReleaseSentry } from './release';
+import { setSentryInstance as setLogsSentry } from './logs';
 
 /**
  * Initialize the observability layer with a Sentry SDK instance.
@@ -55,4 +60,5 @@ export function initObservability(sentry: SentrySDK): void {
   setSpansSentry(sentry);
   setCaptureSentry(sentry);
   setReleaseSentry(sentry);
+  setLogsSentry(sentry);
 }

@@ -6,6 +6,7 @@
  */
 
 import { supabase } from "../supabase/client";
+import { freshChannel } from "../supabase/realtime";
 
 export interface CallSignal {
   id: number;
@@ -21,6 +22,18 @@ export interface CallSignal {
 }
 
 export const callSignalsApi = {
+  /** Notifications are hints; only a current recipient-bound signal may ring. */
+  async getFreshIncomingSignal(roomId: string, calleeId: string): Promise<CallSignal | null> {
+    const { data, error } = await supabase.from("call_signals").select("*")
+      .eq("room_id", roomId).eq("callee_id", calleeId).eq("status", "ringing")
+      .gte("created_at", new Date(Date.now() - 30_000).toISOString())
+      .lte("created_at", new Date(Date.now() + 5_000).toISOString())
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) throw error;
+    if (!data || Date.now() - Date.parse(data.created_at) >= 30_000) return null;
+    return data as CallSignal;
+  },
+
   /**
    * Send a call signal to one or more users
    */
@@ -75,6 +88,29 @@ export const callSignalsApi = {
       console.error("[CallSignals] Failed to update signal:", error.message);
       throw error;
     }
+  },
+
+  async answerRingingSignal(signalId: number, calleeId?: string, roomId?: string): Promise<boolean> {
+    let query = supabase.from("call_signals")
+      .update({ status: "accepted", updated_at: new Date().toISOString() })
+      .eq("id", signalId).eq("status", "ringing")
+      .gte("created_at", new Date(Date.now() - 30_000).toISOString())
+      .lte("created_at", new Date(Date.now() + 5_000).toISOString());
+    if (calleeId) query = query.eq("callee_id", calleeId);
+    if (roomId) query = query.eq("room_id", roomId);
+    const { data, error } = await query.select("id").maybeSingle();
+    if (error) throw error;
+    return !!data;
+  },
+
+  async declineRingingSignal(signalId: number, calleeId: string, roomId: string): Promise<boolean> {
+    const { data, error } = await supabase.from("call_signals")
+      .update({ status: "declined", updated_at: new Date().toISOString() })
+      .eq("id", signalId).eq("callee_id", calleeId).eq("room_id", roomId).eq("status", "ringing")
+      .gte("created_at", new Date(Date.now() - 30_000).toISOString())
+      .lte("created_at", new Date(Date.now() + 5_000).toISOString()).select("id").maybeSingle();
+    if (error) throw error;
+    return !!data;
   },
 
   /**
@@ -165,8 +201,10 @@ export const callSignalsApi = {
     // to prevent multiple signals for the same call from canceling each other
     const _seenRoomIds = new Set<string>();
 
-    const channel = supabase
-      .channel(`call_signals:${userAuthId}`)
+    // freshChannel, not supabase.channel — a stable topic hands back the
+    // already-joined channel on remount and .on() throws. Full explanation of
+    // the realtime-js behaviour lives in lib/supabase/realtime.ts.
+    const channel = freshChannel(`call_signals:${userAuthId}`)
       .on(
         "postgres_changes",
         {
@@ -177,7 +215,8 @@ export const callSignalsApi = {
         },
         (payload) => {
           const signal = payload.new as CallSignal;
-          if (signal.status === "ringing") {
+          const stamp = Date.parse(signal.created_at);
+          if (signal.status === "ringing" && String(signal.callee_id) === userAuthId && Number.isFinite(stamp) && stamp <= Date.now() + 5_000 && Date.now() - stamp < 30_000 && ["audio", "video"].includes(signal.call_type)) {
             // Dedupe: skip if we already showed incoming UI for this room
             if (_seenRoomIds.has(signal.room_id)) {
               console.log(

@@ -11,6 +11,7 @@
 
 import { addSentryBreadcrumb } from './breadcrumbs';
 import { captureFlowFailure } from './capture';
+import { logFunnelStep } from './logs';
 import type { FeatureArea } from './types';
 
 export interface AnalyticsBridgeEvent {
@@ -39,6 +40,9 @@ export function bridgeFlowSuccess(event: AnalyticsBridgeEvent): void {
     event.metadata as Record<string, unknown> | undefined,
     'info',
   );
+  // Sampled structured log (success is chatty) — trace-correlated home for the
+  // funnel breadcrumb. See logs.ts / budget §1.
+  logFunnelStep(event.featureArea, event.analyticsEvent, 'success', event.metadata ?? undefined);
 }
 
 /**
@@ -66,6 +70,12 @@ export function bridgeFlowFailure(event: AnalyticsBridgeEvent & {
     'error',
   );
 
+  // Failures always log (sampleRate 1 by default in logFunnelStep).
+  logFunnelStep(event.featureArea, event.step, 'failure', {
+    analyticsEvent: event.analyticsEvent,
+    ...(event.metadata ?? {}),
+  });
+
   captureFlowFailure(
     event.sentryCategory,
     event.step,
@@ -88,4 +98,6 @@ export function bridgeFlowStart(event: AnalyticsBridgeEvent): void {
     event.metadata as Record<string, unknown> | undefined,
     'info',
   );
+  // Sampled structured log (starts are chatty). See logs.ts.
+  logFunnelStep(event.featureArea, event.analyticsEvent, 'started', event.metadata ?? undefined);
 }

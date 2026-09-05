@@ -28,15 +28,53 @@ function toFiniteNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function resolveBias(body: Record<string, unknown>) {
+// Approximate the caller's location from their IP (free, no key). Fallback only
+// when the client sent no device/city bias — so an NYC user searching "AMC"
+// gets NYC theaters instead of a hardcoded default city.
+async function ipGeoBias(ip: string | null): Promise<LatLng | null> {
+  if (!ip || ip === "127.0.0.1" || ip === "::1") return null;
+  try {
+    // ip-api.com: free, no key, ~45 req/min per querying IP. (ipapi.co rate-
+    // limited too aggressively.) ponytail: fine at beta scale; swap to a keyed
+    // geo provider if this edge fn's IP starts hitting the 45/min cap.
+    const res = await fetch(
+      `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,lat,lon`,
+      { signal: AbortSignal.timeout(2000) },
+    );
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (j?.status !== "success") return null;
+    const latitude = toFiniteNumber(j?.lat);
+    const longitude = toFiniteNumber(j?.lon);
+    if (latitude == null || longitude == null) return null;
+    return { latitude, longitude };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveBias(body: Record<string, unknown>, ip: string | null) {
   const candidate = body.locationBias as Record<string, unknown> | undefined;
-  const latitude = toFiniteNumber(candidate?.latitude);
-  const longitude = toFiniteNumber(candidate?.longitude);
+  let latitude = toFiniteNumber(candidate?.latitude);
+  let longitude = toFiniteNumber(candidate?.longitude);
   const radius = toFiniteNumber(candidate?.radiusMeters) ?? DEFAULT_RADIUS_METERS;
 
+  // No client-supplied location → geolocate by the caller's IP.
+  if (latitude == null || longitude == null) {
+    const ipBias = await ipGeoBias(ip);
+    if (ipBias) {
+      latitude = ipBias.latitude;
+      longitude = ipBias.longitude;
+    }
+  }
+
+  // Still nothing → null so we omit locationBias (global ranking) rather than
+  // pin results to an arbitrary city.
+  if (latitude == null || longitude == null) return null;
+
   return {
-    latitude: latitude ?? DEFAULT_BIAS_CENTER.latitude,
-    longitude: longitude ?? DEFAULT_BIAS_CENTER.longitude,
+    latitude,
+    longitude,
     radiusMeters: Math.max(1_000, Math.min(radius, DEFAULT_RADIUS_METERS)),
   };
 }
@@ -106,7 +144,7 @@ Deno.serve(async (req) => {
     return jsonResponse(req, { ok: false, error: "Missing sessionToken." }, 400);
   }
 
-  const bias = resolveBias(body);
+  const bias = await resolveBias(body, identifier);
 
   // Do not send includedPrimaryTypes here. Google's Autocomplete (New) caps it
   // at five primary types, and this field must serve both venues/POIs and street
@@ -117,15 +155,21 @@ Deno.serve(async (req) => {
     sessionToken,
     languageCode: "en",
     includedRegionCodes: ["us"],
-    locationBias: {
-      circle: {
-        center: {
-          latitude: bias.latitude,
-          longitude: bias.longitude,
-        },
-        radius: bias.radiusMeters,
-      },
-    },
+    // Omit locationBias entirely when we have no location (rather than pin to a
+    // default city) — Google then ranks by relevance without a wrong-city skew.
+    ...(bias
+      ? {
+          locationBias: {
+            circle: {
+              center: {
+                latitude: bias.latitude,
+                longitude: bias.longitude,
+              },
+              radius: bias.radiusMeters,
+            },
+          },
+        }
+      : {}),
   };
 
   const response = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
@@ -155,10 +199,12 @@ Deno.serve(async (req) => {
   return jsonResponse(req, {
     ok: true,
     predictions,
-    bias: {
-      latitude: bias.latitude,
-      longitude: bias.longitude,
-      radiusMeters: bias.radiusMeters,
-    },
+    bias: bias
+      ? {
+          latitude: bias.latitude,
+          longitude: bias.longitude,
+          radiusMeters: bias.radiusMeters,
+        }
+      : null,
   });
 });

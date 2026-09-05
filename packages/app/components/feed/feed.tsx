@@ -47,7 +47,7 @@ import {
 import {
   useLikesSheet,
   fireLikesTap,
-} from "@dvnt/app/src/features/likes/LikesSheetController";
+} from "@dvnt/app/features/likes/LikesSheetController";
 import { PostActionSheet } from "@dvnt/app/components/post-action-sheet";
 import { useReportSheetStore } from "@dvnt/app/lib/stores/report-sheet-store";
 import { ShareToInboxSheet } from "@dvnt/app/components/share-to-inbox-sheet";
@@ -60,6 +60,8 @@ import { useCreateStory } from "@dvnt/app/lib/hooks/use-stories";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useFocusEffect } from "expo-router";
 import type { PublicGateReason } from "@dvnt/app/lib/access/public-gates";
+import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
+import { feedScrollY, resetFeedScroll } from "@dvnt/app/lib/stores/feed-scroll-shared";
 
 type FeedPostItem = { _type: "post"; data: Post };
 type FeedEventItem = { _type: "event"; data: Event };
@@ -301,11 +303,16 @@ export function Feed({
   const { setActivePostId } = useFeedPostUIStore();
   const prevNsfwEnabled = useRef(nsfwEnabled);
   const listRef = useRef<LegendListRef>(null);
+  const tabBarInset = useTabBarInset();
+  const handleFeedScroll = useCallback((e: any) => {
+    feedScrollY.value = Math.max(0, e?.nativeEvent?.contentOffset?.y ?? 0);
+  }, []);
   const scrollToTopTrigger = useFeedScrollStore((s) => s.scrollToTopTrigger);
 
   useEffect(() => {
     if (scrollToTopTrigger > 0 && listRef.current) {
       listRef.current.scrollToOffset?.({ offset: 0, animated: true });
+      resetFeedScroll();
     }
   }, [scrollToTopTrigger]);
 
@@ -700,10 +707,13 @@ export function Feed({
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         contentInsetAdjustmentBehavior="automatic"
+        // Drives the stories-row collapse (UI thread, no re-render).
+        onScroll={handleFeedScroll}
+        scrollEventThrottle={16}
         contentContainerStyle={
           feedItems.length === 0
-            ? { flex: 1, paddingBottom: 80 }
-            : { paddingBottom: 80 }
+            ? { flex: 1, paddingBottom: tabBarInset }
+            : { paddingBottom: tabBarInset }
         }
         showsVerticalScrollIndicator={false}
         recycleItems

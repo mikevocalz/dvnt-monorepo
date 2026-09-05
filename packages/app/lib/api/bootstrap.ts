@@ -8,6 +8,7 @@
  */
 
 import { supabase } from "../supabase/client";
+import { getBetterAuthToken } from "../auth/identity";
 import type { TextPostSlide, TextPostThemeKey } from "@dvnt/app/lib/types";
 
 export interface BootstrapFeedResponse {
@@ -173,15 +174,18 @@ export const bootstrapApi = {
   }): Promise<BootstrapFeedResponse | null> {
     try {
       const t0 = Date.now();
+      // bootstrap-feed derives identity from the verified session only;
+      // anonymous callers (no token) get the public feed.
+      const token = await getBetterAuthToken();
       const { data, error } = await supabase.functions.invoke(
         "bootstrap-feed",
         {
           body: {
-            user_id: params.userId,
             cursor: params.cursor || 0,
             limit: params.limit || 20,
             include_nsfw: params.includeNSFW === true,
           },
+          ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
         },
       );
 
@@ -201,21 +205,25 @@ export const bootstrapApi = {
 
   /**
    * Profile bootstrap — profile header + first page of posts.
+   *
+   * `userId` is the PROFILE being viewed (public data). Viewer identity is
+   * derived server-side from the verified session token — never sent in the
+   * body.
    */
   async profile(params: {
     userId: string;
-    viewerId?: string;
     includeNSFW?: boolean;
   }): Promise<BootstrapProfileResponse | null> {
     try {
+      const token = await getBetterAuthToken();
       const { data, error } = await supabase.functions.invoke(
         "bootstrap-profile",
         {
           body: {
             user_id: params.userId,
-            viewer_id: params.viewerId,
             include_nsfw: params.includeNSFW === true,
           },
+          ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
         },
       );
 
@@ -232,19 +240,23 @@ export const bootstrapApi = {
 
   /**
    * Notifications bootstrap — activities + follow state + unread count.
+   *
+   * Identity is derived server-side from the verified session token — never
+   * sent in the body. No valid session = 401 (falls back to null).
    */
   async notifications(params: {
     userId: string;
     limit?: number;
   }): Promise<BootstrapNotificationsResponse | null> {
     try {
+      const token = await getBetterAuthToken();
       const { data, error } = await supabase.functions.invoke(
         "bootstrap-notifications",
         {
           body: {
-            user_id: params.userId,
             limit: params.limit || 50,
           },
+          ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
         },
       );
 
@@ -266,14 +278,17 @@ export const bootstrapApi = {
   }): Promise<BootstrapMessagesResponse | null> {
     try {
       const t0 = Date.now();
+      // Identity is derived server-side from the verified session token —
+      // never sent in the body. No valid session = 401 (falls back to null).
+      const token = await getBetterAuthToken();
       const { data, error } = await supabase.functions.invoke(
         "bootstrap-messages",
         {
           body: {
-            user_id: params.userId,
             filter: params.filter || "primary",
             limit: params.limit || 30,
           },
+          ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
         },
       );
 
@@ -300,13 +315,17 @@ export const bootstrapApi = {
   }): Promise<BootstrapEventsResponse | null> {
     try {
       const t0 = Date.now();
+      // Identity is derived server-side from the verified session token —
+      // never sent in the body. Anonymous callers still get the public
+      // event list, just with no viewer RSVP state.
+      const token = await getBetterAuthToken();
       const { data, error } = await supabase.functions.invoke(
         "bootstrap-events",
         {
           body: {
-            user_id: params.userId,
             limit: params.limit || 20,
           },
+          ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
         },
       );
 

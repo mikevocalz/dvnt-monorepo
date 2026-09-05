@@ -14,14 +14,11 @@ import {
 } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { likesApi, type PostLiker } from "@dvnt/app/lib/api/likes";
-import { likeStateKeys } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { assertLikesConsistent } from "@dvnt/app/lib/invariants/likesConsistency";
+import { postLikersKeys, likeStateKeys } from "@dvnt/app/lib/query-keys";
+export { postLikersKeys };
 
-export const postLikersKeys = {
-  all: ["postLikers"] as const,
-  forPost: (postId: string) => ["postLikers", postId] as const,
-};
 
 export function usePostLikers(postId: string | undefined, enabled: boolean) {
   const queryClient = useQueryClient();

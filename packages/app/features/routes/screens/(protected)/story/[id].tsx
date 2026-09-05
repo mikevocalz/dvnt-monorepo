@@ -4,6 +4,7 @@ import {
   TextInput,
   Pressable,
   Dimensions,
+  useWindowDimensions,
   Alert,
   ActivityIndicator,
   Platform,
@@ -57,7 +58,7 @@ import {
   storyViewKeys,
 } from "@dvnt/app/lib/hooks/use-stories";
 import { storyViewsApi } from "@dvnt/app/lib/api/stories";
-import { StoryViewersSheet } from "@dvnt/app/components/stories/story-viewers-sheet";
+import { StoryViewersSheet } from "@dvnt/app/features/stories";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { messagesApiClient } from "@dvnt/app/lib/api/messages";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -70,11 +71,11 @@ import {
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { storyTagsApi, type StoryTag } from "@dvnt/app/lib/api/stories";
 import type { Story, StoryAnimatedGifOverlay, StoryOverlay } from "@dvnt/app/lib/types";
-import { getImageStickerSourceById } from "@dvnt/app/src/stories-editor/constants";
+import { getImageStickerSourceById } from "@dvnt/app/features/stories-editor/constants";
 import {
   getSystemFontWeight,
   shouldUseSystemFontFallback,
-} from "@dvnt/app/src/stories-editor/utils/text-support";
+} from "@dvnt/app/features/stories-editor/utils/text-support";
 
 const { width, height } = Dimensions.get("window");
 const LONG_PRESS_DELAY = 300;
@@ -174,6 +175,9 @@ function TextOnlyStoryViewer({
   };
   insets: { top: number; bottom: number };
 }) {
+  // Live window size — the module constants above freeze at launch width, so
+  // these window-fraction offsets drifted out of register after a rotation.
+  const { width, height } = useWindowDimensions();
   const palette = useMemo(
     () => buildTextStoryPalette(item.backgroundColor),
     [item.backgroundColor],
@@ -304,6 +308,9 @@ function StoryViewerLoadingState({
   insets: { top: number; bottom: number };
   label: string;
 }) {
+  // Live window size — the module constants above freeze at launch width, so
+  // these window-fraction offsets drifted out of register after a rotation.
+  const { width, height } = useWindowDimensions();
   return (
     <LinearGradient
       colors={["#050507", "#101119", "#07070a"]}
@@ -578,7 +585,10 @@ function StoryOverlayLayer({ overlays }: { overlays: StoryOverlay[] }) {
         }
 
         if (overlay.type === "text") {
-          const maxWidth = width * overlay.maxWidthRatio;
+          // Editors scale the WHOLE text box (transform.scale), so the wrap
+          // width must scale with the font — otherwise scaled-up text wraps
+          // early and breaks words mid-glyph ("ultr / a").
+          const maxWidth = width * overlay.maxWidthRatio * overlay.scale;
           const fontSize = Math.max(
             width * overlay.fontSizeRatio * overlay.scale,
             18,

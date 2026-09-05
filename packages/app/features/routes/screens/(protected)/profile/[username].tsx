@@ -1,3 +1,5 @@
+import * as Haptics from "expo-haptics";
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
   Text,
@@ -7,13 +9,14 @@ import {
   useWindowDimensions,
   Modal,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import {
   ArrowLeft,
   Grid,
   MoreHorizontal,
   Share2,
   X,
+  CalendarDays,
 } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
@@ -24,11 +27,13 @@ import { Motion } from "@legendapp/motion";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ProfileActionSheet } from "@dvnt/app/components/profile-action-sheet";
 import { useReportSheetStore } from "@dvnt/app/lib/stores/report-sheet-store";
+import { useProfileStore } from "@dvnt/app/lib/stores/profile-store";
 import { Skeleton } from "@dvnt/app/components/ui/skeleton";
 
 import { useCallback, memo, useState, useMemo, useEffect, useRef } from "react";
 import { useUser, useFollow } from "@dvnt/app/lib/hooks";
 import { useProfilePosts } from "@dvnt/app/lib/hooks/use-posts";
+import { useUserEvents } from "@dvnt/app/lib/hooks/use-events";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
 import { usersApi } from "@dvnt/app/lib/api/users";
@@ -39,12 +44,13 @@ import { Avatar, AvatarSizes } from "@dvnt/app/components/ui/avatar";
 import { resolveAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { Image } from "expo-image";
 import { Debouncer } from "@tanstack/react-pacer";
-import { ProfileMasonryGrid } from "@dvnt/app/components/profile/ProfileMasonryGrid";
-import { ProfilePronounsPill } from "@dvnt/app/components/profile/ProfilePronounsPill";
+import { ProfileMasonryGrid } from "@dvnt/app/features/profile";
+import { ProfilePronounsPill } from "@dvnt/app/features/profile";
 import {
   safeGridTiles,
   type SafeGridTile,
 } from "@dvnt/app/lib/utils/safe-profile-mappers";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
 const GRID_GAP = 2;
 
@@ -66,7 +72,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "emma_wilson",
     fullName: "Emma Wilson",
     name: "Emma Wilson",
-    avatar: "https://i.pravatar.cc/150?img=5",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Travel enthusiast 🌍\nPhotography lover 📸",
     postsCount: 234,
     followersCount: 12500,
@@ -77,7 +83,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "john_fitness",
     fullName: "John Fitness",
     name: "John Fitness",
-    avatar: "https://i.pravatar.cc/150?img=17",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Fitness coach 💪\nHelping you reach your goals",
     postsCount: 189,
     followersCount: 45000,
@@ -88,7 +94,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "sarah_artist",
     fullName: "Sarah Artist",
     name: "Sarah Artist",
-    avatar: "https://i.pravatar.cc/150?img=14",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Digital artist 🎨\nCommissions open",
     postsCount: 567,
     followersCount: 8900,
@@ -99,7 +105,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "naturephoto",
     fullName: "Nature Photography",
     name: "Nature Photography",
-    avatar: "https://i.pravatar.cc/150?img=13",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Capturing the beauty of our planet 🌿\nSony Ambassador | DM for prints",
     postsCount: 892,
     followersCount: 156000,
@@ -110,7 +116,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "urban_explorer",
     fullName: "Urban Explorer",
     name: "Urban Explorer",
-    avatar: "https://i.pravatar.cc/150?img=8",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Street photography | City vibes 🏙️\nBased in Tokyo & NYC",
     postsCount: 445,
     followersCount: 67800,
@@ -121,7 +127,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "foodie_adventures",
     fullName: "Foodie Adventures",
     name: "Foodie Adventures",
-    avatar: "https://i.pravatar.cc/150?img=9",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Eating my way around the world 🍜\nMichelin hunter | Food blogger",
     postsCount: 678,
     followersCount: 89400,
@@ -132,7 +138,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "travel_with_me",
     fullName: "Sarah Anderson",
     name: "Sarah Anderson",
-    avatar: "https://i.pravatar.cc/150?img=10",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Full-time traveler ✈️\n50+ countries | Content creator",
     postsCount: 1234,
     followersCount: 234000,
@@ -143,7 +149,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "coffee_culture",
     fullName: "Marcus Chen",
     name: "Marcus Chen",
-    avatar: "https://i.pravatar.cc/150?img=31",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Coffee enthusiast ☕\nBarista | Roaster | Educator",
     postsCount: 312,
     followersCount: 28900,
@@ -154,7 +160,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "street_style",
     fullName: "Olivia Park",
     name: "Olivia Park",
-    avatar: "https://i.pravatar.cc/150?img=33",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Fashion designer 👗\nSeoul | Paris | NYC\nShop link below ⬇️",
     postsCount: 567,
     followersCount: 445000,
@@ -165,7 +171,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "astro_captures",
     fullName: "David Starr",
     name: "David Starr",
-    avatar: "https://i.pravatar.cc/150?img=35",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Astrophotographer 🌌\nChasing the cosmos one photo at a time",
     postsCount: 234,
     followersCount: 178000,
@@ -176,7 +182,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "pet_paradise",
     fullName: "Luna & Max",
     name: "Luna & Max",
-    avatar: "https://i.pravatar.cc/150?img=37",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Two rescue pups living their best life 🐕\nAdopt don't shop!",
     postsCount: 445,
     followersCount: 123000,
@@ -187,7 +193,7 @@ const mockUsers: Record<string, MockUser> = {
     username: "minimalist_home",
     fullName: "Interior Studio",
     name: "Interior Studio",
-    avatar: "https://i.pravatar.cc/150?img=40",
+    avatar: "/dvnt-email-glyph.png",
     bio: "Interior design studio 🏠\nScandinavian inspired | Less is more",
     postsCount: 289,
     followersCount: 67800,
@@ -325,6 +331,7 @@ function UserProfileScreenComponent() {
     postsCount: postsCountParam,
     followersCount: followersCountParam,
     followingCount: followingCountParam,
+    tab: tabParam,
   } = useLocalSearchParams<{
     username: string;
     userId?: string;
@@ -335,8 +342,14 @@ function UserProfileScreenComponent() {
     postsCount?: string;
     followersCount?: string;
     followingCount?: string;
+    /** `events` lands on the hosted-events tab — how "More events" on an event
+     *  page arrives here. Anything else falls back to posts. */
+    tab?: string;
   }>();
   const router = useRouter();
+  // The own-profile screen owns its tab in this store; the redirect below
+  // hands the requested tab over to it.
+  const setOwnProfileTab = useProfileStore((s) => s.setActiveTab);
   const { colors } = useColorScheme();
   const nsfwEnabled = useAppStore((state) => state.nsfwEnabled);
   const currentUser = useAuthStore((state) => state.user);
@@ -421,6 +434,13 @@ function UserProfileScreenComponent() {
   const { data: userPostsRaw = [], isLoading: isLoadingPosts } =
     useProfilePosts(safeUsername || "");
 
+  // Events HOSTED by this user — the "More events" surface (host_id = auth_id).
+  const hostAuthId =
+    (resolvedUserData as any)?.authId ??
+    (resolvedUserData as any)?.auth_id ??
+    null;
+  const { data: hostEvents = [] } = useUserEvents(hostAuthId);
+
   // Transform to masonry grid tiles
   const visibleUserPosts = useMemo(
     () =>
@@ -475,9 +495,12 @@ function UserProfileScreenComponent() {
   // This ensures consistent UI/UX and correct avatar display
   useEffect(() => {
     if (isOwnProfile) {
+      // Carry `?tab=events` across the hop. Without it, tapping "More events"
+      // on your own event drops you on your posts and looks like a dead link.
+      if (tabParam === "events") setOwnProfileTab("events");
       router.replace("/(protected)/(tabs)/profile");
     }
-  }, [isOwnProfile, router]);
+  }, [isOwnProfile, router, tabParam, setOwnProfileTab]);
 
   // Use API data or fallback to route params — renders INSTANTLY without waiting for query.
   // Route params (username, avatarParam, nameParam) are available synchronously on mount.
@@ -576,6 +599,15 @@ function UserProfileScreenComponent() {
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [isAvatarViewerOpen, setIsAvatarViewerOpen] = useState(false);
+  // Seeded from `?tab=` so an event page can land straight on this host's
+  // events. Re-seeds when the param or the profile changes, because this screen
+  // is reused across pushes and would otherwise keep the previous tab.
+  const [activeTab, setActiveTab] = useState<"posts" | "events">(
+    tabParam === "events" ? "events" : "posts",
+  );
+  useEffect(() => {
+    setActiveTab(tabParam === "events" ? "events" : "posts");
+  }, [tabParam, username]);
   const showToast = useUIStore((s) => s.showToast);
   const creatingConvRef = useRef(false);
 
@@ -753,7 +785,7 @@ function UserProfileScreenComponent() {
   return (
     <SafeAreaView
       edges={["top"]}
-      className="flex-1 bg-background max-w-3xl w-full self-center"
+      className={SCREEN_SHELL}
     >
       {/* Header */}
       <View
@@ -1065,15 +1097,94 @@ function UserProfileScreenComponent() {
           </View>
         </View>
 
-        {/* Tab Bar */}
+        {/* Tab Bar. Was a single Grid pressable with no onPress — it looked
+            interactive and did nothing, and there was no way to link to this
+            user's events. Two real tabs now, matching the web sibling's
+            posts/events split. Events is offered only when there are some, so
+            the tab never leads to an empty screen. */}
         <View className="flex-row border-b border-border">
-          <Pressable className="flex-1 items-center border-b-2 border-foreground py-3">
-            <Grid size={24} color={colors.foreground} />
-          </Pressable>
+          {(hostEvents.length > 0
+            ? (["posts", "events"] as const)
+            : (["posts"] as const)
+          ).map((tab) => {
+            const selected = activeTab === tab;
+            const Icon = tab === "posts" ? Grid : CalendarDays;
+            return (
+              <Pressable
+                key={tab}
+                onPress={() => {
+                  if (selected) return;
+                  Haptics.selectionAsync().catch(() => {});
+                  setActiveTab(tab);
+                }}
+                className="flex-1 items-center py-3"
+                style={{
+                  borderBottomWidth: 2,
+                  borderBottomColor: selected ? colors.foreground : "transparent",
+                }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected }}
+                accessibilityLabel={tab === "posts" ? "Posts" : "Events"}
+                hitSlop={8}
+              >
+                <Icon
+                  size={24}
+                  color={selected ? colors.foreground : "rgba(255,255,255,0.4)"}
+                />
+              </Pressable>
+            );
+          })}
         </View>
 
+        {/* Events hosted by this user — the "More events" surface. */}
+        {activeTab === "events" && hostEvents.length > 0 ? (
+          <View className="px-4 mt-4 mb-2">
+            <View className="flex-row items-center mb-3" style={{ gap: 8 }}>
+              <CalendarDays size={18} color="#fff" />
+              <Text className="text-white text-base font-bold">
+                Events{" "}
+                <Text className="text-white/40 font-medium">
+                  ({hostEvents.length})
+                </Text>
+              </Text>
+            </View>
+            <View className="flex-row flex-wrap" style={{ marginHorizontal: -4 }}>
+              {(hostEvents as any[]).map((ev) => (
+                <Pressable
+                  key={ev.id}
+                  onPress={() => router.push(`/events/${ev.id}`)}
+                  style={{ width: "33.33%", padding: 4 }}
+                >
+                  <View className="rounded-xl overflow-hidden border border-white/10 bg-white/5">
+                    <Image
+                      source={{ uri: ev.image }}
+                      style={{ width: "100%", aspectRatio: 0.8 }}
+                      contentFit="cover"
+                    />
+                    <View className="p-2">
+                      <Text
+                        numberOfLines={1}
+                        className="text-white text-xs font-semibold"
+                      >
+                        {ev.title}
+                      </Text>
+                      <Text
+                        numberOfLines={1}
+                        className="text-white/45"
+                        style={{ fontSize: 11 }}
+                      >
+                        {[ev.month, ev.date].filter(Boolean).join(" ")}
+                      </Text>
+                    </View>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         {/* Posts Grid — Masonry */}
-        {isLoading || isLoadingPosts ? (
+        {activeTab === "posts" && (isLoading || isLoadingPosts) ? (
           <View className="flex-row flex-wrap">
             {Array.from({ length: 6 }).map((_, i) => (
               <View
@@ -1086,7 +1197,7 @@ function UserProfileScreenComponent() {
               </View>
             ))}
           </View>
-        ) : (
+        ) : activeTab === "posts" ? (
           <ProfileMasonryGrid
             data={userPosts}
             userId={userId}
@@ -1097,7 +1208,7 @@ function UserProfileScreenComponent() {
               </View>
             }
           />
-        )}
+        ) : null}
       </ScrollView>
 
       <Modal

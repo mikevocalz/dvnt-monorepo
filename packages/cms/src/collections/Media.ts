@@ -4,6 +4,10 @@ import { isAdminPlus } from '../access/roles'
 
 export const Media: CollectionConfig = {
   slug: 'media',
+  admin: {
+    group: 'Content',
+    description: 'Uploaded images for blog posts and CMS content.',
+  },
   dbName: 'media',
   upload: {
     // Configure your storage adapter (S3 / Supabase Storage) in payload.config.

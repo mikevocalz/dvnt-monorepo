@@ -11,13 +11,18 @@ interface ProfileScreenUIState {
   avatarViewerOpen: boolean;
   /** Other-user "more" action sheet open. */
   menuOpen: boolean;
+  /** Other-user profile active tab (posts grid vs hosted events). */
+  userProfileTab: "posts" | "events";
   setAvatarViewerOpen: (v: boolean) => void;
   setMenuOpen: (v: boolean) => void;
+  setUserProfileTab: (v: "posts" | "events") => void;
 }
 
 export const useProfileScreenUIStore = create<ProfileScreenUIState>((set) => ({
   avatarViewerOpen: false,
   menuOpen: false,
+  userProfileTab: "posts",
   setAvatarViewerOpen: (avatarViewerOpen) => set({ avatarViewerOpen }),
   setMenuOpen: (menuOpen) => set({ menuOpen }),
+  setUserProfileTab: (userProfileTab) => set({ userProfileTab }),
 }));

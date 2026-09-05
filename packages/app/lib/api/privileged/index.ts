@@ -150,15 +150,21 @@ async function invokeEdgeFunction<T>(
     },
   });
 
+  // Throw, don't log. Callers own the decision about whether a failure is
+  // worth reporting: `syncAuthUser` retries immediately and usually succeeds on
+  // attempt 2, so shouting here put a red LogBox on every cold start for
+  // something that had already recovered by the time anyone read it.
   if (error) {
-    console.error(`[Privileged] ${functionName} error:`, error);
-    throw new Error(error.message || `Failed to call ${functionName}`);
+    const status = (error as { context?: Response })?.context?.status;
+    throw new Error(
+      `${error.message || `Failed to call ${functionName}`}${
+        status ? ` (HTTP ${status})` : ""
+      }`,
+    );
   }
 
   if (!data?.ok) {
-    const errorMessage = data?.error?.message || `${functionName} failed`;
-    console.error(`[Privileged] ${functionName} failed:`, errorMessage);
-    throw new Error(errorMessage);
+    throw new Error(data?.error?.message || `${functionName} failed`);
   }
 
   return data.data as T;
@@ -310,45 +316,12 @@ export async function updateEvent(
 }
 
 /**
- * Delete an event.
+ * NOTE: legacy `deleteEvent` / `cancelEvent` privileged wrappers (→ the
+ * retired `delete-event` / `cancel-event` edge fns) were removed. Use the
+ * canonical WS-9 surfaces instead: `eventsApi.deleteEvent` (guarded delete,
+ * routes to cancel when paid tickets exist) and
+ * `eventsApi.cancelEventWithRefunds` (resumable `event-cancel` fn).
  */
-export async function deleteEvent(
-  eventId: number,
-): Promise<{ success: boolean }> {
-  console.log("[Privileged] deleteEvent:", eventId);
-  return invokeEdgeFunction<{ success: boolean }>("delete-event", { eventId });
-}
-
-/**
- * Cancel a published event. Use this instead of deleteEvent when the
- * event has active ticket buyers — the server cascades Stripe refunds
- * (one idempotent call per unique payment_intent), voids free tickets,
- * pushes notifications to every affected user, and marks the event
- * `status='cancelled'`. The event row is preserved for the audit trail.
- *
- * delete-event will REJECT with `tickets_exist` if you try to hard-
- * delete an event that has any non-terminal tickets. Use this fn first;
- * fall back to deleteEvent only when this returns affectedTickets=0.
- */
-export interface CancelEventResult {
-  ok: boolean;
-  eventId: number;
-  refundsIssued: number;
-  refundsFailed: number;
-  freeTicketsVoided: number;
-  affectedTickets: number;
-  alreadyCancelled?: boolean;
-}
-export async function cancelEvent(
-  eventId: number,
-  reason?: string,
-): Promise<CancelEventResult> {
-  console.log("[Privileged] cancelEvent:", eventId, "reason:", reason ?? "—");
-  return invokeEdgeFunction<CancelEventResult>("cancel-event", {
-    eventId,
-    reason: reason || undefined,
-  });
-}
 
 /**
  * Co-organizer (staff) management. Each event has one owner

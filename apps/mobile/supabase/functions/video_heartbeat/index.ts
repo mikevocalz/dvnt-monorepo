@@ -10,12 +10,13 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -41,8 +42,6 @@ Deno.serve(async (req) => {
     if (!authHeader?.startsWith("Bearer ")) {
       return err("unauthorized", "Missing or invalid Authorization header");
     }
-    const jwt = authHeader.replace("Bearer ", "");
-
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -56,15 +55,11 @@ Deno.serve(async (req) => {
       },
     );
 
-    const { data: session } = await supabase
-      .from("session")
-      .select("userId, expiresAt")
-      .eq("token", jwt)
-      .single();
-    if (!session || new Date(session.expiresAt) < new Date()) {
+    // Verify Better Auth session via shared helper
+    const userId = await verifySession(supabase, req);
+    if (!userId) {
       return err("unauthorized", "Invalid or expired session");
     }
-    const userId = session.userId;
 
     let body: unknown;
     try {

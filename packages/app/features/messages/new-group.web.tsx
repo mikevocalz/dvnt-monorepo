@@ -37,7 +37,6 @@ import {
 } from "@dvnt/app/lib/stores/new-group-store";
 
 const CYAN = "#3FDCFF";
-const MAX_GROUP_MEMBERS = 4;
 const USER_ROW_HEIGHT = 70;
 
 const CDN_URL =
@@ -46,7 +45,7 @@ const CDN_URL =
   "https://dvnt.b-cdn.net";
 
 function getAvatarUrl(avatar: string | null | undefined): string {
-  if (!avatar) return "https://i.pravatar.cc/150?img=0";
+  if (!avatar) return "/dvnt-email-glyph.png";
   if (avatar.startsWith("http")) return avatar;
   return `${CDN_URL}/${avatar}`;
 }
@@ -179,16 +178,7 @@ export function NewGroupScreen() {
     [allUsersData, currentUser?.id],
   );
 
-  const handleToggle = (user: NewGroupSelectedUser) => {
-    const ok = toggleUser(user, MAX_GROUP_MEMBERS);
-    if (!ok) {
-      showToast(
-        "warning",
-        "Limit Reached",
-        `Group chats can have max ${MAX_GROUP_MEMBERS} members`,
-      );
-    }
-  };
+  const handleToggle = (user: NewGroupSelectedUser) => { toggleUser(user); };
 
   // SACRED — identical create-group call the native screen uses.
   const createGroup = useMutation({
@@ -269,7 +259,7 @@ export function NewGroupScreen() {
             </div>
           </FormField>
           <p className="mt-2 text-xs text-white/40">
-            Group chats support up to {MAX_GROUP_MEMBERS} members
+            Select at least 2 people
           </p>
         </div>
 
@@ -298,8 +288,7 @@ export function NewGroupScreen() {
               ))}
             </div>
             <p className="mt-2 text-xs text-white/40">
-              {selectedUsers.length}/{MAX_GROUP_MEMBERS - 1} selected (min 2, max{" "}
-              {MAX_GROUP_MEMBERS - 1})
+              {selectedUsers.length} selected · 2 minimum
             </p>
           </div>
         ) : null}

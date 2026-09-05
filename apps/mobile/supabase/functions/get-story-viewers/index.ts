@@ -1,14 +1,20 @@
 /**
  * Edge Function: get-story-viewers
  * Fetch all users who viewed a story. Uses service role to bypass RLS.
+ *
+ * Identity is derived from the verified Better Auth session (x-auth-token /
+ * Authorization header) — never from the request body. Viewer lists are
+ * inherently private: no session = 401, and only the story OWNER may read
+ * who viewed their story (403 otherwise).
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-auth-token, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -59,6 +65,40 @@ Deno.serve(async (req) => {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
+
+    // ── Identity from the verified Better Auth session ONLY ──────────
+    // This function reads with the service role; without this gate anyone
+    // could enumerate who viewed any story.
+    const sessionUserId = await verifySession(supabaseAdmin, req);
+    if (!sessionUserId) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Only the story owner may see their viewer list.
+    // Ownership idiom mirrors delete-story: stories.author_id stores the
+    // Better Auth UUID (the same value verifySession returns).
+    const { data: storyRow, error: storyErr } = await supabaseAdmin
+      .from("stories")
+      .select("author_id")
+      .eq("id", storyIdInt)
+      .single();
+
+    if (storyErr || !storyRow) {
+      return new Response(JSON.stringify({ error: "Story not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (String(storyRow.author_id) !== String(sessionUserId)) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const { data, error } = await supabaseAdmin
       .from("story_views")

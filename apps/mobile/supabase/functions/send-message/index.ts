@@ -1,16 +1,19 @@
+import { watchNotificationFields, watchNotificationImage } from "../_shared/watch-notification.ts";
 /**
  * Edge Function: send-message
  * Send a message in a conversation with Better Auth verification
  */
 
+import { canonicalJSON } from "./idempotency.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { checkRateLimit, MESSAGE_LIMIT } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -27,7 +30,7 @@ function jsonResponse<T>(data: ApiResponse<T>, status = 200): Response {
   });
 }
 
-function errorResponse(code: string, message: string): Response {
+function errorResponse(code: string, message: string, _status?: number): Response {
   console.error(`[Edge:send-message] Error: ${code} - ${message}`);
   return jsonResponse({ ok: false, error: { code, message } }, 200);
 }
@@ -51,8 +54,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    const token = authHeader.replace("Bearer ", "");
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!supabaseUrl || !supabaseServiceKey) {
@@ -63,21 +64,16 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
 
-    // Verify Better Auth session via direct DB lookup
-    const { data: sessionData, error: sessionError } = await supabaseAdmin
-      .from("session")
-      .select("id, token, userId, expiresAt")
-      .eq("token", token)
-      .single();
-
-    if (sessionError || !sessionData) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabaseAdmin, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    if (new Date(sessionData.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
 
-    const authUserId = sessionData.userId;
+    const authUserId = sessionResult.userId;
 
     // Rate limit check
     const rl = checkRateLimit(authUserId, "send-message", MESSAGE_LIMIT);
@@ -91,6 +87,7 @@ Deno.serve(async (req) => {
       mediaUrl?: string;
       mediaItems?: Array<{ uri: string; type: string }>;
       metadata?: Record<string, unknown>;
+      operationId?: string;
     };
     try {
       body = await req.json();
@@ -98,8 +95,12 @@ Deno.serve(async (req) => {
       return errorResponse("validation_error", "Invalid JSON body");
     }
 
-    const { conversationId, content, mediaUrl, mediaItems, metadata } = body;
-    if (!conversationId || typeof conversationId !== "number") {
+    const { conversationId, content, mediaUrl, mediaItems, metadata, operationId } = body;
+    if (operationId !== undefined && (typeof operationId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operationId))) {
+      return errorResponse("validation_error", "operationId must be a UUID");
+    }
+    if (!Number.isSafeInteger(conversationId) || conversationId <= 0) {
       return errorResponse(
         "validation_error",
         "conversationId is required",
@@ -110,7 +111,7 @@ Deno.serve(async (req) => {
       (!content ||
         typeof content !== "string" ||
         content.trim().length === 0) &&
-      !mediaUrl
+      !mediaUrl && !(Array.isArray(mediaItems) && mediaItems.length > 0)
     ) {
       return errorResponse(
         "validation_error",
@@ -161,25 +162,6 @@ Deno.serve(async (req) => {
       .eq("id", conversationId)
       .single();
 
-    const { error: readCursorError } = await supabaseAdmin
-      .from("conversation_reads")
-      .upsert(
-        {
-          conversation_id: conversationId,
-          user_id: userId,
-          last_read_at: sentAt,
-          updated_at: sentAt,
-        },
-        { onConflict: "conversation_id,user_id" },
-      );
-
-    if (readCursorError) {
-      console.error(
-        "[Edge:send-message] Failed to update conversation read cursor:",
-        readCursorError,
-      );
-    }
-
     // Insert message with optional metadata (e.g. story reply context, media)
     const mergedMetadata: Record<string, unknown> = {
       ...(metadata && typeof metadata === "object" ? metadata : {}),
@@ -205,6 +187,57 @@ Deno.serve(async (req) => {
         : "📷 Photo"
       : "";
 
+    const insertPayload: Record<string, unknown> = {
+      conversation_id: conversationId,
+      sender_id: userId,
+      content: (content || "").trim() || mediaLabel,
+    };
+    if (operationId) insertPayload.operation_id = operationId;
+    if (Object.keys(mergedMetadata).length > 0) {
+      insertPayload.metadata = mergedMetadata;
+    }
+
+    const { data: message, error: insertError } = await supabaseAdmin
+      .from("messages")
+      .insert(insertPayload)
+      .select()
+      .single();
+
+    if (insertError?.code === "23505" && operationId) {
+      const { data: existing, error: replayError } = await supabaseAdmin
+        .from("messages").select()
+        .eq("sender_id", userId).eq("operation_id", operationId).single();
+      if (replayError || !existing) return errorResponse("internal_error", "Could not recover sent message");
+      if (existing.conversation_id !== conversationId || existing.content !== insertPayload.content ||
+          canonicalJSON(existing.metadata || {}) !== canonicalJSON(mergedMetadata)) {
+        return errorResponse("idempotency_conflict", "This operation was already used for a different message");
+      }
+      return jsonResponse({ ok: true, data: { message: messageResponse(existing) } });
+    }
+    if (insertError) {
+      console.error("[Edge:send-message] Insert error:", insertError);
+      return errorResponse("internal_error", "Failed to send message");
+    }
+
+    const { error: readCursorError } = await supabaseAdmin
+      .from("conversation_reads")
+      .upsert(
+        {
+          conversation_id: conversationId,
+          user_id: userId,
+          last_read_at: sentAt,
+          updated_at: sentAt,
+        },
+        { onConflict: "conversation_id,user_id" },
+      );
+
+    if (readCursorError) {
+      console.error(
+        "[Edge:send-message] Failed to update conversation read cursor:",
+        readCursorError,
+      );
+    }
+
     // Replying implies the sender has seen any older inbound messages in this
     // conversation. Clear those unread rows here so unread truth stays correct
     // even if the client missed a separate mark-read call.
@@ -222,26 +255,6 @@ Deno.serve(async (req) => {
           markReadOnReplyError,
         );
       }
-    }
-
-    const insertPayload: Record<string, unknown> = {
-      conversation_id: conversationId,
-      sender_id: userId,
-      content: (content || "").trim() || mediaLabel,
-    };
-    if (Object.keys(mergedMetadata).length > 0) {
-      insertPayload.metadata = mergedMetadata;
-    }
-
-    const { data: message, error: insertError } = await supabaseAdmin
-      .from("messages")
-      .insert(insertPayload)
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error("[Edge:send-message] Insert error:", insertError);
-      return errorResponse("internal_error", "Failed to send message");
     }
 
     // Update conversation's last_message_at
@@ -268,7 +281,7 @@ Deno.serve(async (req) => {
         // Resolve auth_ids → integer user IDs for push_tokens lookup
         const { data: recipientRows } = await supabaseAdmin
           .from("users")
-          .select("id")
+          .select("id,auth_id")
           .in("auth_id", recipientAuthIds);
 
         const recipientIntIds = (recipientRows || []).map((r: any) => r.id);
@@ -284,7 +297,7 @@ Deno.serve(async (req) => {
           safeRecipientIntIds.length > 0
             ? await supabaseAdmin
                 .from("push_tokens")
-                .select("token")
+                .select("token,user_id")
                 .in("user_id", safeRecipientIntIds)
             : { data: null };
 
@@ -296,11 +309,17 @@ Deno.serve(async (req) => {
           const pushMessages = tokens.map((t: any) => ({
             to: t.token,
             sound: "default",
+            ...watchNotificationFields("message", { conversationId: String(conversationId) }),
+            ...watchNotificationImage(message.metadata),
             title: senderUsername,
             body: messagePreview,
             data: {
               type: "message",
+              recipientId: String(t.user_id),
+              recipientAuthId: recipientRows?.find((row: any) => Number(row.id) === Number(t.user_id))?.auth_id,
+              issuedAt: Date.now() / 1000,
               conversationId: String(conversationId),
+              messageId: String(message.id),
               senderId: String(userId),
               // Canonical URL — notification router resolves this first
               url: `https://dvntapp.live/chat/${conversationId}`,
@@ -332,15 +351,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       ok: true,
       data: {
-        message: {
-          id: String(message.id),
-          conversationId: String(message.conversation_id),
-          senderId: String(message.sender_id),
-          content: message.content,
-          metadata: message.metadata || null,
-          createdAt: message.created_at,
-          read: message.read || false,
-        },
+        message: messageResponse(message),
       },
     });
   } catch (err) {
@@ -348,3 +359,12 @@ Deno.serve(async (req) => {
     return errorResponse("internal_error", "An unexpected error occurred");
   }
 });
+
+function messageResponse(message: Record<string, any>) {
+  return {
+    id: String(message.id), conversationId: String(message.conversation_id),
+    senderId: String(message.sender_id), content: message.content,
+    metadata: message.metadata || null, createdAt: message.created_at,
+    read: message.read || false,
+  };
+}

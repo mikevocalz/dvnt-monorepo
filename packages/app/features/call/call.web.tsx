@@ -11,8 +11,10 @@
  * and peer→store sync logic is REPLICATED here against the web SDK.
  *
  * PORTABLE SHARED WIRING (identical to native):
- *   - Token/room fetch: `videoApi.joinRoom(roomId)` (Supabase edge fn
- *     `video_join_room`) → { token, user, room } — the SAME peer-token path.
+ *   - Room/token: `callRoomsApi` (`call_create` / `call_join`) — the PERSONAL
+ *     CALLS stack, which WS-1 split from Sneaky Lynk. Calls do NOT go through
+ *     `video_join_room` / `video_rooms`; that is the Lynk room model and it
+ *     requires a uuid-keyed row a personal call never has.
  *   - `resolveFishjamAppId()` for the FishjamProvider `fishjamId`.
  *   - `useVideoRoomStore` (Zustand) is the single source of call state.
  *
@@ -20,12 +22,12 @@
  *   - NativeWind interop OFF. Raw semantic HTML + Tailwind className only. No
  *     <View>/<Text>. State = Zustand only (no useState).
  *   - Tiles fill the screen (object-cover); local PiP rounded-2xl. Controls bar
- *     = circular icon buttons. bg #06070d/black, accent cyan #3FDCFF, end-call rose.
+ *     = circular icon buttons. bg color.ink/black, accent color.cyan, end-call color.signal.
  *   - Navigation via solito useRouter; leave → router.back().
  */
 
 import { useEffect, useRef, useCallback } from "react";
-import { useParams, useRouter } from "solito/navigation";
+import { useParams, useRouter, useSearchParams } from "solito/navigation";
 import {
   FishjamProvider,
   useConnection,
@@ -41,14 +43,15 @@ import {
   PhoneOff,
   SwitchCamera,
 } from "lucide-react";
-import { videoApi } from "@dvnt/app/src/video/api";
+import { callRoomsApi } from "@dvnt/app/lib/api/call-rooms";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { useVideoRoomStore } from "@dvnt/app/src/video/stores/video-room-store";
-import type { Participant } from "@dvnt/app/src/video/types";
+import { useVideoRoomStore } from "@dvnt/app/features/video";
+import type { Participant } from "@dvnt/app/features/video/types";
+import { color } from "@dvnt/app/lib/theme";
 import { useCallUIStore } from "./call-ui-store";
 
-const ACCENT = "#3FDCFF";
+const ACCENT = color.cyan;
 
 // ── <video> tile: binds a MediaStream to a DOM video element via ref ──────────
 // No useState — the stream is attached imperatively in a ref callback (the
@@ -97,7 +100,10 @@ function AvatarFallback({ name, avatar }: { name: string; avatar?: string }) {
     );
   }
   return (
-    <div className="flex h-24 w-24 items-center justify-center rounded-2xl bg-white/10 text-3xl font-semibold text-white">
+    <div
+      className="flex h-24 w-24 items-center justify-center rounded-2xl bg-white/10 text-3xl"
+      style={{ fontFamily: "SpaceGrotesk-Bold", color: color.text }}
+    >
       {(name?.[0] ?? "?").toUpperCase()}
     </div>
   );
@@ -118,7 +124,7 @@ function ControlButton({
   children: React.ReactNode;
 }) {
   const bg = danger
-    ? "bg-rose-500 hover:bg-rose-600"
+    ? "hover:opacity-90"
     : active
       ? "bg-white/15 hover:bg-white/25"
       : "bg-white/30 hover:bg-white/40";
@@ -127,6 +133,7 @@ function ControlButton({
       type="button"
       onClick={onClick}
       aria-label={label}
+      style={danger ? { backgroundColor: color.signal } : undefined}
       className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition-colors ${bg}`}
     >
       {children}
@@ -135,7 +142,19 @@ function ControlButton({
 }
 
 // ── Inner screen — rendered INSIDE FishjamProvider so SDK hooks are valid ─────
-function CallRoom({ roomId }: { roomId: string }) {
+function CallRoom({
+  roomId,
+  isOutgoing,
+  participantIds,
+  callType,
+  recipientUsername,
+}: {
+  roomId: string;
+  isOutgoing: boolean;
+  participantIds: string[];
+  callType: "audio" | "video";
+  recipientUsername: string;
+}) {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
 
@@ -176,13 +195,47 @@ function CallRoom({ roomId }: { roomId: string }) {
     (async () => {
       const s = getStore();
       s.clearError();
-      s.setCallType("video");
+      // Was hardcoded to "video", so an audio call from chat still opened the
+      // camera UI. The chat screen has always passed `callType` in the query.
+      s.setCallType(callType);
       s.setRoomId(roomId);
 
-      // 1) Resolve Fishjam peer token via the SHARED video API (Supabase edge
-      //    fn `video_join_room`). Identical token path to the native hook.
+      // 1) Resolve the Fishjam peer token through the PERSONAL CALLS stack
+      //    (`call_create` / `call_join`), the same one the native hook uses.
+      //
+      //    This used to call videoApi.joinRoom → `video_join_room`, which is
+      //    the Sneaky Lynk room path: it looks a room up by `uuid` in
+      //    video_rooms and 404s when there isn't one. A personal call never has
+      //    such a row — chat mints `call-${Date.now()}` and navigates straight
+      //    here — so every outgoing web call died at "connecting". WS-1 split
+      //    Calls from Lynk precisely so this could not happen; native migrated,
+      //    web did not.
+      //
+      //    Outgoing: create the room first (the caller owns it), then join the
+      //    id the server gives back. Incoming: the id in the URL is already a
+      //    real call room, so just join it.
       s.setCallPhase("joining_room");
-      const joinResult = await videoApi.joinRoom(roomId);
+
+      let joinTargetId = roomId;
+      if (isOutgoing && participantIds.length > 0) {
+        const created = await callRoomsApi.createCall({
+          title: recipientUsername || "Call",
+          participantIds,
+          hasVideo: callType === "video",
+        });
+        if (cancelled) return;
+        if (!created.ok || !created.data?.room?.id) {
+          s.setError(
+            created.error?.message || "Couldn't start the call",
+            created.error?.code || "call_create_failed",
+          );
+          return;
+        }
+        joinTargetId = created.data.room.id;
+        s.setRoomId(joinTargetId);
+      }
+
+      const joinResult = await callRoomsApi.joinCall(joinTargetId);
       if (cancelled) return;
 
       if (!joinResult.ok || !joinResult.data) {
@@ -244,7 +297,11 @@ function CallRoom({ roomId }: { roomId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [roomId, initStarted, setInitStarted, getStore]);
+  // participantIds is a fresh array each render, so it is keyed by its joined
+  // string; the initStarted guard means this effect runs once regardless.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, initStarted, setInitStarted, getStore, isOutgoing, callType,
+      recipientUsername, participantIds.join(",")]);
 
   // ── Sync Fishjam peerStatus → store connectionState ───────────────────────
   useEffect(() => {
@@ -385,7 +442,14 @@ function CallRoom({ roomId }: { roomId: string }) {
         ) : (
           <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-black">
             <AvatarFallback name={remoteName} avatar={remote?.avatar} />
-            <p className="text-lg font-medium text-white">{statusLabel}</p>
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-lg text-white"
+              style={{ fontFamily: "SpaceGrotesk-SemiBold" }}
+            >
+              {statusLabel}
+            </p>
           </div>
         )}
 
@@ -415,11 +479,16 @@ function CallRoom({ roomId }: { roomId: string }) {
                 connectionStatus === "connected"
                   ? ACCENT
                   : callPhase === "error"
-                    ? "#f43f5e"
-                    : "#facc15",
+                    ? color.signal
+                    : color.gold,
             }}
           />
-          <span className="text-sm font-medium text-white">{statusLabel}</span>
+          <span
+            className="text-sm text-white"
+            style={{ fontFamily: "Inter-SemiBold" }}
+          >
+            {statusLabel}
+          </span>
         </div>
       </header>
 
@@ -471,9 +540,28 @@ export function CallScreen() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const roomId = String((params as any)?.roomId ?? "");
 
+  // The chat screen puts the call's intent in the query string
+  // (`?isOutgoing=true&callType=video&participantIds=…`). This screen used to
+  // read only the path param and always join, which is why an outgoing call
+  // never created a room.
+  const search = useSearchParams();
+  const isOutgoing = search?.get("isOutgoing") === "true";
+  const participantIds = (search?.get("participantIds") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const callType = search?.get("callType") === "audio" ? "audio" : "video";
+  const recipientUsername = search?.get("recipientUsername") ?? "";
+
   return (
     <FishjamProvider fishjamId={resolveFishjamAppId()}>
-      <CallRoom roomId={roomId} />
+      <CallRoom
+        roomId={roomId}
+        isOutgoing={isOutgoing}
+        participantIds={participantIds}
+        callType={callType}
+        recipientUsername={recipientUsername}
+      />
     </FishjamProvider>
   );
 }

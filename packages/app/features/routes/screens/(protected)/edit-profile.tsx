@@ -1,15 +1,17 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
   Text,
   TextInput,
   Pressable,
   ActivityIndicator,
+  type LayoutChangeEvent,
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "expo-router";
 import {
   Camera,
   ChevronRight,
@@ -23,10 +25,14 @@ import { useProfileStore } from "@dvnt/app/lib/stores/profile-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { appendCacheBuster } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { useUpdateProfile } from "@dvnt/app/lib/hooks/use-profile";
+import {
+  IDENTITY_OPTIONS,
+  AUDIENCE_OPTIONS,
+} from "@dvnt/app/lib/constants/identity";
 
 const PRONOUNS_OPTIONS = [
   "He/Him",
@@ -112,6 +118,38 @@ function EditProfileScreenContent() {
   const [newLink, setNewLink] = useState("");
   const [showPronouns, setShowPronouns] = useState(false);
   const [showGender, setShowGender] = useState(false);
+  // Identity + event audience. These are 30% of the profile-completion score
+  // (weights 20 + 10) and, until now, existed ONLY on edit-profile.web and the
+  // native welcome flow — so on mobile the two checklist rows that ask for them
+  // pointed at this screen, where the fields did not exist. They could never be
+  // completed, the ring could never reach 100%, and the card never hid.
+  const [sexuality, setSexuality] = useState<string[]>([]);
+  const [eventAudience, setEventAudience] = useState("");
+
+  // ?focus=<completion item key> — sent by the profile-completion card so a row
+  // lands on the field it asked for instead of dumping you at the top of a long
+  // form. Sections report their y via onLayout; we scroll once, after mount.
+  const { focus } = useLocalSearchParams<{ focus?: string }>();
+  const scrollRef = useRef<any>(null);
+  const sectionY = useRef<Record<string, number>>({});
+  const didFocus = useRef(false);
+
+  const rememberSection = (key: string) => (e: LayoutChangeEvent) => {
+    sectionY.current[key] = e.nativeEvent.layout.y;
+  };
+
+  useEffect(() => {
+    if (!focus || didFocus.current) return;
+    const y = sectionY.current[focus];
+    if (y === undefined) return;
+    didFocus.current = true;
+    // Small delay so the layout pass has settled before we scroll.
+    const t = setTimeout(
+      () => scrollRef.current?.scrollTo?.({ y: Math.max(y - 12, 0), animated: true }),
+      120,
+    );
+    return () => clearTimeout(t);
+  }, [focus, sexuality, eventAudience, links, editLocation]);
 
   const validateUsername = (value: string): string => {
     if (!value.trim()) return "Username is required";
@@ -233,6 +271,8 @@ function EditProfileScreenContent() {
         username?: string;
         pronouns?: string;
         gender?: string;
+        sexuality?: string[];
+        eventAudience?: string;
       } = {
         name: editName.trim(),
         bio: editBio.trim(),
@@ -241,6 +281,8 @@ function EditProfileScreenContent() {
         location: editLocation.trim(),
         pronouns: nextPronouns,
         gender: nextGender,
+        sexuality,
+        eventAudience,
         ...(avatarUrl ? { avatar: avatarUrl } : {}),
         ...(trimmedUsername !== (user.username || "").toLowerCase()
           ? { username: trimmedUsername }
@@ -280,6 +322,14 @@ function EditProfileScreenContent() {
       setPronouns(typeof user.pronouns === "string" ? user.pronouns : "");
       setGender(typeof user.gender === "string" ? user.gender : "");
       setLinks(normalizeLinks((user as any)?.links));
+      setSexuality(
+        Array.isArray((user as any)?.sexuality) ? (user as any).sexuality : [],
+      );
+      setEventAudience(
+        typeof (user as any)?.eventAudience === "string"
+          ? (user as any).eventAudience
+          : "",
+      );
       return;
     }
 
@@ -287,6 +337,8 @@ function EditProfileScreenContent() {
     setPronouns("");
     setGender("");
     setLinks([]);
+    setSexuality([]);
+    setEventAudience("");
   }, [user, setEditName, setEditBio, setEditWebsite, setEditLocation]);
 
   const rowStyle = {
@@ -302,6 +354,16 @@ function EditProfileScreenContent() {
     fontSize: 15,
     color: colors.foreground,
     width: 100,
+  };
+
+  // Matches the inline eyebrow used by the Links / Location sections above.
+  const sectionLabelStyle = {
+    fontSize: 12,
+    fontWeight: "600" as const,
+    color: colors.mutedForeground,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.8,
+    marginBottom: 4,
   };
 
   const inputStyle = {
@@ -351,6 +413,7 @@ function EditProfileScreenContent() {
       </View>
 
       <KeyboardAwareScrollView
+        ref={scrollRef}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 60 }}
         keyboardShouldPersistTaps="handled"
@@ -770,6 +833,111 @@ function EditProfileScreenContent() {
                 maxLength={100}
               />
             </View>
+          </View>
+        </View>
+
+        {/* Identity + audience. Private filter data (users.sexuality text[] /
+            users.event_audience) — never shown publicly, same as web. */}
+        <View
+          style={{ paddingHorizontal: 16, marginTop: 24 }}
+          onLayout={rememberSection("identity")}
+        >
+          <Text style={sectionLabelStyle}>Who you are</Text>
+          <Text
+            style={{
+              fontSize: 12,
+              color: colors.mutedForeground,
+              marginBottom: 8,
+            }}
+          >
+            Private — used to tailor events and suggestions. Never shown on your
+            profile. Pick any that apply.
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {IDENTITY_OPTIONS.map((option) => {
+              const selected = sexuality.includes(option);
+              return (
+                <Pressable
+                  key={option}
+                  onPress={() =>
+                    setSexuality((prev) =>
+                      prev.includes(option)
+                        ? prev.filter((v) => v !== option)
+                        : [...prev, option],
+                    )
+                  }
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: selected }}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: selected ? "rgb(62,164,229)" : colors.border,
+                    backgroundColor: selected
+                      ? "rgba(62,164,229,0.15)"
+                      : colors.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      color: selected ? "rgb(62,164,229)" : colors.foreground,
+                    }}
+                  >
+                    {option}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View
+          style={{ paddingHorizontal: 16, marginTop: 24 }}
+          onLayout={rememberSection("audience")}
+        >
+          <Text style={sectionLabelStyle}>Who you want events with</Text>
+          <Text
+            style={{
+              fontSize: 12,
+              color: colors.mutedForeground,
+              marginBottom: 8,
+            }}
+          >
+            Private — helps us pick which events to surface. Choose one.
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {AUDIENCE_OPTIONS.map((option) => {
+              const selected = eventAudience === option;
+              return (
+                <Pressable
+                  key={option}
+                  onPress={() => setEventAudience(selected ? "" : option)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: selected ? "rgb(62,164,229)" : colors.border,
+                    backgroundColor: selected
+                      ? "rgba(62,164,229,0.15)"
+                      : colors.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      color: selected ? "rgb(62,164,229)" : colors.foreground,
+                    }}
+                  >
+                    {option}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 

@@ -33,6 +33,7 @@ import {
   CloudUpload,
   Tag,
   BarChart3,
+  Megaphone,
   Undo2,
 } from "lucide-react-native";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
@@ -502,6 +503,37 @@ function EventOrganizerScreenContent() {
             </Text>
           </Pressable>
         </View>
+
+        {/* Promoters (WS-4) — tracked links + rev-share ledger. Native
+            staff entry lives in the (fenced) event action sheet, so the
+            organizer surface hosts this entry point instead. */}
+        <Pressable
+          onPress={() =>
+            router.push(`/(protected)/events/${eventId}/promoters` as any)
+          }
+          style={{
+            backgroundColor: "rgba(255,255,255,0.06)",
+            borderWidth: 1,
+            borderColor: colors.border,
+            paddingVertical: 12,
+            borderRadius: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+          }}
+        >
+          <Megaphone size={16} color="#C084FC" />
+          <Text
+            style={{
+              color: colors.foreground,
+              fontSize: 13,
+              fontWeight: "600",
+            }}
+          >
+            Promoters
+          </Text>
+        </Pressable>
       </View>
 
       {/* Tickets List */}

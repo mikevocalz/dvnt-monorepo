@@ -1,0 +1,47 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:name="android.hardware.type.watch" />
+    <!-- RemoteActivityHelper opens the phone app; without this the intent is
+         silently dropped on some OEM builds. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="DVNT"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.DeviceDefault">
+
+        <!-- false, and this is a correctness claim, not a formality: the phone
+             owns the session, the watch holds no credentials, and with the
+             phone app absent this app has nothing to show and no way to get
+             it. Claiming standalone=true here fails Play review. -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="false" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="DVNT"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.DeviceDefault">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Receives replicated /tickets state while the app is backgrounded.
+             Not exported to arbitrary apps; the Data Layer binds it by its
+             own signature-checked intent filter. -->
+        <service
+            android:name=".WearDataLayerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/tickets" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

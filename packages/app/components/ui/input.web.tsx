@@ -24,9 +24,22 @@ export const Input = React.forwardRef<TextInput, InputProps>(
   ) => {
     const [hidden, setHidden] = React.useState(!!secureTextEntry)
 
+    // The label was rendered as loose <Text> next to the field with nothing
+    // tying them together, so the input's only accessible name was its
+    // placeholder — which vanishes the moment the user types. Binding by id
+    // gives the field a real name (WCAG 2.1 AA 4.1.2 / 3.3.2) and is also what
+    // makes it findable by label in tests and by voice control.
+    const id = React.useId()
+    const labelId = label ? `${id}-label` : undefined
+    const errorId = error ? `${id}-error` : undefined
+
     return (
       <View style={styles.wrap}>
-        {label ? <Text style={styles.label}>{label}</Text> : null}
+        {label ? (
+          <Text nativeID={labelId} style={styles.label}>
+            {label}
+          </Text>
+        ) : null}
 
         <View style={[styles.field, error ? styles.fieldError : null]}>
           {leftIcon ? <View style={styles.left}>{leftIcon}</View> : null}
@@ -36,11 +49,22 @@ export const Input = React.forwardRef<TextInput, InputProps>(
             style={[styles.input, style]}
             placeholderTextColor="rgba(255,255,255,0.45)"
             secureTextEntry={hidden}
+            aria-labelledby={labelId}
+            aria-describedby={errorId}
+            aria-invalid={error ? true : undefined}
             {...props}
           />
 
           {secureTextEntry ? (
-            <Pressable onPress={() => setHidden((v) => !v)} style={styles.toggle} hitSlop={8}>
+            <Pressable
+              onPress={() => setHidden((v) => !v)}
+              style={styles.toggle}
+              hitSlop={8}
+              // Icon-only control: without a name a screen reader announces
+              // nothing at all here.
+              accessibilityRole="button"
+              aria-label={hidden ? 'Show password' : 'Hide password'}
+            >
               {hidden ? (
                 <Eye size={18} color="rgba(255,255,255,0.65)" />
               ) : (
@@ -52,7 +76,11 @@ export const Input = React.forwardRef<TextInput, InputProps>(
           ) : null}
         </View>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? (
+          <Text nativeID={errorId} style={styles.error}>
+            {error}
+          </Text>
+        ) : null}
       </View>
     )
   },

@@ -158,9 +158,9 @@ Either way the transport hides behind the **same VideoTile + `useLynkBroadcast`/
    participants/listeners get a **subscriber token**. This maps *more naturally*
    onto MoQ than a 2-publisher cap, because of prefix-scoped namespace discovery:
    - Each publisher publishes to its own sub-path: `lynk/${roomId}/${peerId}`
-     (host/cohost/speaker alike). Token: `createMoqToken({ publishPath: "lynk/${roomId}/${peerId}" })`
+     (host/cohost/speaker alike). Token: `createMoqAccess({ publishPath: "lynk/${roomId}/${peerId}" })`
      — *specific* path, so a speaker can only publish as itself.
-   - Viewers subscribe to the room namespace: `createMoqToken({ subscribePath: "lynk/${roomId}" })`
+   - Viewers subscribe to the room namespace: `createMoqAccess({ subscribePath: "lynk/${roomId}" })`
      — *broad*, so `connection.announced` surfaces **every** live publisher and
      the viewer mounts one tile per announced path (1, 2, … N speakers) with no
      reload. "Promote listener → speaker" = server issues that user a publish
@@ -178,7 +178,7 @@ Either way the transport hides behind the **same VideoTile + `useLynkBroadcast`/
 
 | Piece | Path |
 |---|---|
-| Edge Function (createMoqToken, role-scoped, reuses video_join_room gate) | `apps/mobile/supabase/functions/lynk-moq-token/index.ts` |
+| Edge Function (createMoqAccess, role-scoped, reuses video_join_room gate) | `apps/mobile/supabase/functions/lynk-moq-token/index.ts` |
 | State machine | `packages/app/lib/lynk/lynkState.ts` |
 | Token hook (intent-scoped, 1h refresh) | `packages/app/lib/lynk/useMoqToken.ts` |
 | Shared hook contracts | `packages/app/lib/lynk/types.ts` |
@@ -225,7 +225,7 @@ the prompt matches Fishjam's MoQ product essentially verbatim:
   `@moq/lite` + `@moq/watch` (subscriber); `@moq/watch/ui` + `@moq/watch/element`
   web components for pure-viewer embeds.
 - **Server token:** `@fishjam-cloud/js-server-sdk` →
-  `createMoqToken({ publishPath })` / `createMoqToken({ subscribePath })`
+  `createMoqAccess({ publishPath })` / `createMoqAccess({ subscribePath })`
   (Deno edge import: `npm:@fishjam-cloud/js-server-sdk`).
 - **Relay:** `https://relay.fishjam.io/${FISHJAM_ID}?jwt=${token}`. The
   `FISHJAM_ID` is the automatic root namespace — never included in paths.
@@ -237,7 +237,7 @@ the prompt matches Fishjam's MoQ product essentially verbatim:
   publishers in the namespace. We use **specific** publish paths per peer
   (`lynk/${roomId}/${peerId}`) + **broad** subscribe (`lynk/${roomId}`) — see §5.2.
 - **Forbidden:** the sandbox flow `fetch(${SANDBOX_API_URL}/moq/${PATH}/publisher)`
-  / `…/subscriber`. Production = `createMoqToken()` behind our authorization.
+  / `…/subscriber`. Production = `createMoqAccess()` behind our authorization.
 
 **Decision: build the prompt as written** — MoQ via Fishjam relay. Web is
 fully supported now (WebCodecs → `<canvas>` via `Watch.MultiBackend`; publish via
@@ -276,3 +276,25 @@ branch) is retained as the pure-MoQ-on-native fallback but is no longer the
 default path. Native publish-from-phone is now **supported** (was web-first in the
 prior draft). Token-response shapes differ by transport (MoQ: single scoped token;
 livestream: per-publisher list) — both behind the hook seam, screens unaffected.
+
+### 6.1-R (2026-08-12) — SUPERSEDED: native goes true-native MoQ via `react-native-moq`
+
+The §6.1 decision (native = WHIP/WHEP livestream) was made when the only
+native MoQ options were a WebView-hosted `@moq` player or nothing. That
+constraint no longer holds: **`react-native-moq`** (Software Mansion Labs,
+npm 0.2.0, 2026-07-10) provides true-native MoQ bindings targeting the New
+Architecture, iOS 16+ / Android API 30+.
+
+Gates re-verified 2026-08-12 (full table in `docs/realtime-media-baseline.md`
+§Decision 3): all pass — deploymentTarget 17.0, minSdk 30 (`562f820`),
+newArchEnabled, plain-autolinking CNG install, docs pinned at our 0.29.0 SDK
+line, and explicit native↔web interop ("a stream published from the browser
+with `@moq/publish` can be watched with `react-native-moq`, and vice versa").
+`lynk-moq-token` already mints the correct path-scoped tokens for both intents.
+
+New decision: **both platforms converge on MoQ behind the unchanged
+`useLynkBroadcast`/`useLynkViewer` seam.** The WHIP/WHEP path, per-publisher
+livestream rooms, `video_room_members.livestream_id`, poll discovery, and the
+WebView `moqPlayerHtml.ts` fallback are retained through burn-in only, then
+deleted (delete list in the baseline doc). Maturity caution: 0.2.0 is young —
+the seam keeps a revert hook-internal.

@@ -11,7 +11,7 @@ import type {
   SpotlightCampaign,
   PromotionDuration,
   CampaignPlacement,
-} from "@dvnt/app/src/events/promotion-types";
+} from "@dvnt/app/features/events/promotion-types";
 
 async function getFunctionErrorMessage(
   error: any,
@@ -31,19 +31,13 @@ async function getFunctionErrorMessage(
   return fallback;
 }
 
-// Best-effort spotlight housekeeping: flip past-ends_at campaigns
-// to 'expired'. Throttled to once per 60s per process so a burst of
-// spotlight feed reads doesn't hammer the RPC.
-let lastExpirySweepMs = 0;
-async function sweepExpiredCampaigns(): Promise<void> {
-  const now = Date.now();
-  if (now - lastExpirySweepMs < 60_000) return;
-  lastExpirySweepMs = now;
-  const { error } = await supabase.rpc("expire_spotlight_campaigns");
-  if (error) {
-    console.warn("[Promotions] sweep error (non-fatal):", error.message);
-  }
-}
+// Spotlight expiry is a pg_cron job ('expire-spotlight-campaigns', */5), NOT a
+// client concern. It used to be swept from getSpotlightFeed() below, which
+// logged "permission denied for function expire_spotlight_campaigns" on every
+// logged-out read: `anon` has no EXECUTE on it, correctly, because it mutates
+// campaign status. The throttle that used to live here (once per 60s per
+// process) existed only to stop feed reads hammering the RPC — which is the
+// tell that it never belonged on a read path.
 
 export const promotionsApi = {
   /**
@@ -51,10 +45,9 @@ export const promotionsApi = {
    * Returns up to 8 promoted events with image + event summary.
    */
   async getSpotlightFeed(cityId?: number | null): Promise<SpotlightItem[]> {
-    // Kick off the expiry sweep before reading. The feed RPC already
-    // filters by now() BETWEEN starts_at AND ends_at, so users never
-    // see expired campaigns — this keeps the status column honest.
-    void sweepExpiredCampaigns();
+    // No expiry sweep here — see the note above. The feed RPC filters by
+    // now() BETWEEN starts_at AND ends_at, so users never see an expired
+    // campaign regardless of when the status column is reconciled.
     try {
       const { data, error } = await supabase.rpc("get_spotlight_feed", {
         p_city_id: cityId ?? null,

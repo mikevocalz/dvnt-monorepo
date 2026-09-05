@@ -40,7 +40,7 @@ import { postTagsApi } from "@dvnt/app/lib/api/post-tags";
 import {
   TagPeopleSheet,
   type TagCandidate,
-} from "@dvnt/app/components/tags/TagPeopleSheet";
+} from "@dvnt/app/features/tags";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
@@ -48,21 +48,35 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { UserMentionAutocomplete } from "@dvnt/app/components/ui/user-mention-autocomplete";
 import { Switch } from "react-native";
 import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
-import { setPendingCrop } from "@dvnt/app/src/crop/crop-utils";
-import { TextPostSlidesComposer } from "@dvnt/app/components/post/TextPostSlidesComposer";
+import { setPendingCrop } from "@dvnt/app/features/crop/crop-utils";
+import { TextPostSlidesComposer } from "@dvnt/app/features/post";
 import {
   TEXT_POST_MAX_LENGTH,
   serializeTextSlidesForMutation,
 } from "@dvnt/app/lib/posts/text-post";
 import { AppTrace, getErrorMessage } from "@dvnt/app/lib/diagnostics/app-trace";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const MEDIA_PREVIEW_SIZE = (SCREEN_WIDTH - 48) / 2;
+/**
+ * Was `(SCREEN_WIDTH - 48) / 2` off a module-scope Dimensions read, so the
+ * previews kept the width the app launched at and a rotation left them the
+ * wrong size. Read per-render below.
+ */
+const MIN_MEDIA_PREVIEW = 150;
 const ASPECT_RATIO = 4 / 5;
 
 const MAX_PHOTOS = 10;
 
 function CreateScreenContent() {
+  // Media previews scale with the window instead of the launch width.
+  const { cellWidth: MEDIA_PREVIEW_SIZE } = useResponsiveGrid({
+    minCellWidth: MIN_MEDIA_PREVIEW,
+    gap: 16,
+    horizontalPadding: 48,
+    maxColumns: 4,
+  });
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const {
@@ -617,7 +631,7 @@ function CreateScreenContent() {
   };
 
   return (
-    <View className="flex-1 bg-background max-w-3xl w-full self-center">
+    <View className={SCREEN_SHELL}>
       {/* Header — Close / Title / Post */}
       <View
         style={{

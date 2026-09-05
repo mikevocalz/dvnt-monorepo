@@ -27,6 +27,12 @@ export type OrganizerStatus = {
   past_due?: string[];
   /** Stripe's short code (requirements.disabled_reason) for why charges/payouts are off */
   disabled_reason?: string | null;
+  /**
+   * Deadline (requirements.current_deadline) by which currently_due must be
+   * satisfied before charges/payouts are disabled. Stripe sends a unix epoch
+   * (seconds); a persisted column may hand back an ISO string — accept both.
+   */
+  current_deadline?: string | number | null;
   /** Per-capability status from Stripe (e.g. { card_payments: "active" }) */
   capabilities?: Record<string, string>;
 };

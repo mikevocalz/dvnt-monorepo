@@ -62,13 +62,13 @@ export type SupportedTimezones =
   | 'Pacific/Fiji';
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "LexicalNodes_E13979C0".
+ * via the `definition` "LexicalNodes_2E087C4B".
  */
-export type LexicalNodes_E13979C0 =
+export type LexicalNodes_2E087C4B =
   | SerializedTextNode
   | SerializedTabNode
   | SerializedLineBreakNode
-  | SerializedParagraphNode<LexicalNodes_E13979C0>
+  | SerializedParagraphNode<LexicalNodes_2E087C4B>
   | SerializedBlockNode<
       | PullQuote
       | ImageGallery
@@ -86,10 +86,10 @@ export type LexicalNodes_E13979C0 =
     >
   | SerializedHorizontalRuleNode
   | SerializedUploadNode<'media', LexicalUploadFields_7C90EEAC>
-  | SerializedAutoLinkNode<LexicalNodes_E13979C0, LexicalLinkFields>
-  | SerializedLinkNode<LexicalNodes_E13979C0, LexicalLinkFields>
-  | SerializedHeadingNode<LexicalNodes_E13979C0, 'h1' | 'h2' | 'h3' | 'h4'>
-  | SerializedQuoteNode<LexicalNodes_E13979C0>
+  | SerializedAutoLinkNode<LexicalNodes_2E087C4B, LexicalLinkFields>
+  | SerializedLinkNode<LexicalNodes_2E087C4B, LexicalLinkFields>
+  | SerializedHeadingNode<LexicalNodes_2E087C4B, 'h1' | 'h2' | 'h3' | 'h4'>
+  | SerializedQuoteNode<LexicalNodes_2E087C4B>
   | SerializedRelationshipNode<
       | 'admin-users'
       | 'members'
@@ -102,13 +102,14 @@ export type LexicalNodes_E13979C0 =
       | 'categories'
       | 'authors'
       | 'comments'
+      | 'sentry-alerts'
       | 'payload-kv'
       | 'payload-locked-documents'
       | 'payload-preferences'
       | 'payload-migrations'
     >
-  | SerializedListNode<LexicalNodes_E13979C0>
-  | SerializedListItemNode<LexicalNodes_E13979C0>;
+  | SerializedListNode<LexicalNodes_2E087C4B>
+  | SerializedListItemNode<LexicalNodes_2E087C4B>;
 
 export interface Config {
   auth: {
@@ -128,6 +129,7 @@ export interface Config {
     authors: Author;
     media: Media;
     comments: Comment;
+    'sentry-alerts': SentryAlert;
     'payload-kv': PayloadKv;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
@@ -147,6 +149,7 @@ export interface Config {
     authors: AuthorsSelect<false> | AuthorsSelect<true>;
     media: MediaSelect<false> | MediaSelect<true>;
     comments: CommentsSelect<false> | CommentsSelect<true>;
+    'sentry-alerts': SentryAlertsSelect<false> | SentryAlertsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
@@ -161,6 +164,8 @@ export interface Config {
   locale: null;
   widgets: {
     collections: CollectionsWidget;
+    'collection-query': CollectionQueryWidget;
+    activity: ActivityWidget;
   };
   user: AdminUser;
   jobs: {
@@ -187,6 +192,8 @@ export interface AdminUserAuthOperations {
   };
 }
 /**
+ * Console/CMS staff accounts and roles.
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "admin-users".
  */
@@ -218,6 +225,8 @@ export interface AdminUser {
   collection: 'admin-users';
 }
 /**
+ * Live app users, synced every 10 minutes. Edits here update the app.
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "members".
  */
@@ -262,6 +271,8 @@ export interface Member {
   createdAt: string;
 }
 /**
+ * Uploaded images for blog posts and CMS content.
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "media".
  */
@@ -308,6 +319,8 @@ export interface Media {
   };
 }
 /**
+ * User reports raw records — the Console Reports tab is the working queue.
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "reports".
  */
@@ -329,6 +342,8 @@ export interface Report {
   createdAt: string;
 }
 /**
+ * Blog comments and moderation status.
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "comments".
  */
@@ -350,6 +365,8 @@ export interface Comment {
   createdAt: string;
 }
 /**
+ * Blog articles shown on dvntapp.live/posts.
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "posts".
  */
@@ -374,7 +391,7 @@ export interface Post {
    */
   heroVideoUrl?: string | null;
   heroCaption?: string | null;
-  content: LexicalRichText<LexicalNodes_E13979C0>;
+  content: LexicalRichText<LexicalNodes_2E087C4B>;
   contentHtml?: string | null;
   categories?: (number | Category)[] | null;
   tags?:
@@ -464,6 +481,8 @@ export interface Post {
   _status?: ('draft' | 'published') | null;
 }
 /**
+ * Blog categories and their accent colors.
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "categories".
  */
@@ -485,6 +504,8 @@ export interface Category {
   createdAt: string;
 }
 /**
+ * Blog bylines (linked to staff users).
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "authors".
  */
@@ -513,10 +534,29 @@ export interface Author {
    * Synced from the linked user’s avatar.
    */
   avatarUrl?: string | null;
+  /**
+   * Shown as links on the author byline. Handles can include or omit the leading @.
+   */
   socials?: {
+    /**
+     * Handle, e.g. dvnt or @dvnt
+     */
     instagram?: string | null;
+    /**
+     * Handle, e.g. dvnt
+     */
     twitter?: string | null;
+    /**
+     * Handle, e.g. dvnt
+     */
     tiktok?: string | null;
+    /**
+     * Handle, e.g. dvnt
+     */
+    onlyfans?: string | null;
+    /**
+     * Full URL incl. https://
+     */
     website?: string | null;
   };
   /**
@@ -527,6 +567,8 @@ export interface Author {
   createdAt: string;
 }
 /**
+ * Live app events, synced every 10 minutes. Edits here update the app.
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "events".
  */
@@ -542,6 +584,10 @@ export interface Event {
    * Event description. Saving updates the app.
    */
   description?: string | null;
+  /**
+   * Drag/drop a new flyer image to set as this event’s cover.
+   */
+  coverUpload?: (number | null) | Media;
   startsAt?: string | null;
   endsAt?: string | null;
   capacity?: number | null;
@@ -569,6 +615,8 @@ export interface Event {
   createdAt: string;
 }
 /**
+ * Live app tickets, synced every 10 minutes.
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "tickets".
  */
@@ -622,6 +670,8 @@ export interface BanList {
   createdAt: string;
 }
 /**
+ * Audit log of moderation decisions.
+ *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "moderation-actions".
  */
@@ -633,6 +683,25 @@ export interface ModerationAction {
   reason?: string | null;
   actor?: (number | null) | AdminUser;
   suspendedUntil?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Sentry issue alerts (created/regressed/resolved). Read-only log.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "sentry-alerts".
+ */
+export interface SentryAlert {
+  id: number;
+  action: 'created' | 'regressed' | 'resolved' | 'unresolved' | 'other';
+  title: string;
+  shortId?: string | null;
+  issueId?: string | null;
+  project?: string | null;
+  level?: string | null;
+  permalink?: string | null;
+  read?: boolean | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -707,6 +776,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'comments';
         value: number | Comment;
+      } | null)
+    | ({
+        relationTo: 'sentry-alerts';
+        value: number | SentryAlert;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -829,6 +902,7 @@ export interface EventsSelect<T extends boolean = true> {
   appEventId?: T;
   status?: T;
   description?: T;
+  coverUpload?: T;
   startsAt?: T;
   endsAt?: T;
   capacity?: T;
@@ -985,6 +1059,7 @@ export interface AuthorsSelect<T extends boolean = true> {
         instagram?: T;
         twitter?: T;
         tiktok?: T;
+        onlyfans?: T;
         website?: T;
       };
   profileUrl?: T;
@@ -1063,6 +1138,22 @@ export interface CommentsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "sentry-alerts_select".
+ */
+export interface SentryAlertsSelect<T extends boolean = true> {
+  action?: T;
+  title?: T;
+  shortId?: T;
+  issueId?: T;
+  project?: T;
+  level?: T;
+  permalink?: T;
+  read?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv_select".
  */
 export interface PayloadKvSelect<T extends boolean = true> {
@@ -1110,6 +1201,68 @@ export interface CollectionsWidget {
     [k: string]: unknown;
   };
   width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "collection-query_widget".
+ */
+export interface CollectionQueryWidget {
+  data?: {
+    title?: string | null;
+    relatedCollection:
+      | 'admin-users'
+      | 'members'
+      | 'reports'
+      | 'events'
+      | 'tickets'
+      | 'ban-list'
+      | 'moderation-actions'
+      | 'posts'
+      | 'categories'
+      | 'authors'
+      | 'media'
+      | 'comments'
+      | 'sentry-alerts';
+    where?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    sortField?: string | null;
+    sortDirection?: ('asc' | 'desc') | null;
+    limit?: number | null;
+  };
+  width: 'x-small' | 'small' | 'medium' | 'large' | 'x-large' | 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "activity_widget".
+ */
+export interface ActivityWidget {
+  data?: {
+    excludedCollections?:
+      | (
+          | 'admin-users'
+          | 'members'
+          | 'reports'
+          | 'events'
+          | 'tickets'
+          | 'ban-list'
+          | 'moderation-actions'
+          | 'posts'
+          | 'categories'
+          | 'authors'
+          | 'media'
+          | 'comments'
+          | 'sentry-alerts'
+        )[]
+      | null;
+  };
+  width: 'x-small' | 'small' | 'medium' | 'large' | 'x-large' | 'full';
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -1375,7 +1528,7 @@ export type SerializedUploadNode<TSlugs extends keyof Config['collections'], TFi
 } & {
   [TSlug in TSlugs]: {
     relationTo: TSlug;
-    value: number | string | Config['collections'][TSlug];
+    value: Config['collections'][TSlug]['id'] | Config['collections'][TSlug];
   };
 }[TSlugs];
 
@@ -1418,7 +1571,7 @@ export type SerializedRelationshipNode<TSlugs extends keyof Config['collections'
 } & {
   [TSlug in TSlugs]: {
     relationTo: TSlug;
-    value: number | string | Config['collections'][TSlug];
+    value: Config['collections'][TSlug]['id'] | Config['collections'][TSlug];
   };
 }[TSlugs];
 

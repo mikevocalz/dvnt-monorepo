@@ -24,16 +24,16 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#0a0408",
     theme_color: "#0a0408",
     icons: [
-      // ponytail: reusing the email glyph until purpose-built PWA icons
-      // ship. Replace with maskable 192/512 PNGs at /icons/pwa-*.png.
+      // Same artwork as the mobile app icon (apps/mobile/assets/images/icon.png),
+      // resized to the PWA sizes so home-screen installs match the native app.
       {
-        src: "/dvnt-email-glyph.png",
+        src: "/pwa-icon-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dvnt-email-glyph.png",
+        src: "/pwa-icon-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "any",

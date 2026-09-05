@@ -1,12 +1,12 @@
 import { View, Text, ScrollView, Pressable } from "react-native";
-import { Main } from "@expo/html-elements";
+import { Main } from "@dvnt/app/components/ui/html";
 import { useRouter, useNavigation } from "expo-router";
 import { SettingsCloseButton } from "@dvnt/app/components/settings-back-button";
 import { CloudRain, Snowflake, Sun } from "lucide-react-native";
 import { useLayoutEffect } from "react";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { Switch } from "@dvnt/app/components/ui/switch";
-import { useWeatherFXStore } from "@dvnt/app/src/features/weatherfx/WeatherFXStore";
+import { useWeatherFXStore } from "@dvnt/app/features/weatherfx/WeatherFXStore";
 export default function WeatherAmbianceScreen() {
   const router = useRouter();
   const navigation = useNavigation();

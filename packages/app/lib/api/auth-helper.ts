@@ -20,11 +20,9 @@ export function getCurrentUserId(): string | null {
 
   // If it's a UUID (Better Auth ID), we can't use it directly
   // The auth store should have the users table integer ID
-  if (
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
-  ) {
+  if (!/^\d+$/.test(id)) {
     console.warn(
-      "[auth-helper] getCurrentUserId received UUID instead of integer ID:",
+      "[auth-helper] getCurrentUserId received auth ID instead of integer ID:",
       id,
     );
     return null;

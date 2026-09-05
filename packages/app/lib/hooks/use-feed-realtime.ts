@@ -14,6 +14,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { postKeys } from "@dvnt/app/lib/hooks/use-posts";
 
 export function useFeedRealtime(enabled = true): void {
@@ -33,8 +34,7 @@ export function useFeedRealtime(enabled = true): void {
       }, 1500);
     };
 
-    const channel = supabase
-      .channel(`feed-rt:${Date.now()}`)
+    const channel = freshChannel(`feed-rt:${Date.now()}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "posts" },

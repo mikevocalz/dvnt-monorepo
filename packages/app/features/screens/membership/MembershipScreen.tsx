@@ -1,12 +1,11 @@
 /**
- * Membership / paywall screen (universal).
+ * Membership / paywall screen (web fork — Metro resolves the .native.tsx
+ * sibling on iOS/Android, which sells via IAP).
  *
  * Reads the user's resolved entitlements (useEntitlements) and shows their
  * current plan plus the full tier ladder from the shared subscription model
- * (VIP flagged "Most Popular"). Selling is web-only (reader-app pattern): the
- * upgrade CTA opens the web /pricing page in the browser rather than charging
- * in-app, which keeps the iOS build App-Store compliant. The native app only
- * reads entitlements — it never sells.
+ * (VIP flagged "Most Popular"). On the web, selling stays on the Stripe rail:
+ * the upgrade CTA opens the web /pricing page to complete checkout.
  */
 import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useCallback } from "react";
@@ -18,11 +17,19 @@ import {
   MEMBERSHIP_PLAN_KEYS,
   type PlanKey,
 } from "@dvnt/app/lib/subscription";
+import type { MembershipBilling } from "./billing";
+
+/** Shared signature with the native fork. `billing` is the native IAP seam —
+ *  meaningless on the web (Stripe checkout lives on /pricing), so it is
+ *  accepted and ignored here to keep one contract for importers. */
+export interface MembershipScreenProps {
+  billing?: MembershipBilling | null;
+}
 
 const WEB_BASE =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ((globalThis as any)?.process?.env?.EXPO_PUBLIC_WEB_URL as string) ||
-  "https://dvnt.app";
+  "https://dvntapp.live";
 
 const C = {
   bg: "#02030A",
@@ -41,11 +48,17 @@ function price(cents: number) {
 }
 
 async function openPricing(planKey?: PlanKey) {
-  const url = `${WEB_BASE}/pricing${planKey ? `?plan=${planKey}` : ""}`;
+  const path = `/pricing${planKey ? `?plan=${planKey}` : ""}`;
   if (Platform.OS === "web") {
-    (globalThis as typeof globalThis & { open?: (u: string) => void }).open?.(url);
+    // Same origin, same tab — never depend on WEB_BASE resolving on web
+    // (EXPO_PUBLIC_WEB_URL isn't in the Next build; the old absolute URL
+    // pointed at the dvnt.app fallback, a dead domain).
+    (globalThis as typeof globalThis & { location?: Location }).location?.assign(
+      path,
+    );
     return;
   }
+  const url = `${WEB_BASE}${path}`;
   try {
     const WebBrowser = await import("expo-web-browser");
     await WebBrowser.openBrowserAsync(url);
@@ -55,11 +68,52 @@ async function openPricing(planKey?: PlanKey) {
   }
 }
 
-export function MembershipScreen() {
+export function MembershipScreen(_props: MembershipScreenProps = {}) {
   const { entitlements, isLoading } = useEntitlements();
   const currentKey = entitlements.planKey;
 
-  const onUpgrade = useCallback((k: PlanKey) => openPricing(k), []);
+  // Web sells DIRECTLY via Stripe (two-rail law: Stripe on web, RC on
+  // mobile — the native fork is MembershipScreen.native.tsx). Same call the
+  // /pricing page makes; on failure fall back to /pricing so the user is
+  // never stranded.
+  const onUpgrade = useCallback(async (k: PlanKey) => {
+    if (Platform.OS !== "web") {
+      openPricing(k);
+      return;
+    }
+    try {
+      // Use supabase.functions.invoke — NOT a raw fetch. A raw cross-origin
+      // fetch to the functions host fails the preflight in browsers ("Failed
+      // to fetch"); invoke sends apikey + handles CORS the way the gateway
+      // expects. This is the exact mechanism the working sneaky-billing web
+      // checkout uses. (The /pricing page's raw-fetch has the same latent
+      // bug — it should move to invoke too.)
+      const { requireBetterAuthToken } = await import(
+        "@dvnt/app/lib/auth/identity"
+      );
+      const { supabase } = await import("@dvnt/app/lib/supabase/client");
+      const token = await requireBetterAuthToken();
+      const { data, error } = await supabase.functions.invoke(
+        "membership-checkout",
+        {
+          body: { plan_key: k },
+          headers: { Authorization: `Bearer ${token}`, "x-auth-token": token },
+        },
+      );
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      if (data?.url) {
+        (globalThis as typeof globalThis & { location?: Location }).location?.assign(
+          data.url,
+        );
+        return;
+      }
+      throw new Error("No checkout URL returned");
+    } catch (e) {
+      console.error("[membership] checkout failed", e);
+      openPricing(k);
+    }
+  }, []);
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
@@ -140,8 +194,9 @@ export function MembershipScreen() {
       })}
 
       <Animated.Text style={styles.fineprint}>
-        Plans are managed on the web. Choosing a plan opens dvnt.app to complete
-        checkout securely.
+        {Platform.OS === "web"
+          ? "Secure checkout via Stripe. Cancel anytime."
+          : "Plans are managed on the web. Choosing a plan opens dvntapp.live to complete checkout securely."}
       </Animated.Text>
     </ScrollView>
   );

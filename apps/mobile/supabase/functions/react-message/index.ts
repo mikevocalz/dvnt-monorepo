@@ -5,12 +5,13 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -37,13 +38,13 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  if (req.method !== "POST") return errorResponse("bad_request", "Method not allowed");
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return errorResponse("unauthorized", "Missing authorization token");
     }
-    const token = authHeader.replace("Bearer ", "");
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -52,24 +53,20 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${serviceKey}` } },
     });
 
-    // Verify Better Auth session via direct DB lookup
-    const { data: sessionData, error: sessionError } = await supabaseAdmin
-      .from("session")
-      .select("id, token, userId, expiresAt")
-      .eq("token", token)
-      .single();
-
-    if (sessionError || !sessionData) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabaseAdmin, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    if (new Date(sessionData.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
 
-    const authUserId = sessionData.userId;
+    const authUserId = sessionResult.userId;
 
-    const { messageId, emoji } = await req.json();
-    if (!messageId || !emoji) {
+    const { messageId, emoji, desiredPresent } = await req.json();
+    if (!Number.isSafeInteger(messageId) || messageId <= 0 || typeof emoji !== "string" ||
+        (desiredPresent !== undefined && typeof desiredPresent !== "boolean")) {
       return errorResponse("bad_request", "messageId and emoji are required");
     }
 
@@ -81,59 +78,19 @@ Deno.serve(async (req) => {
     );
     if (!userRow) return errorResponse("not_found", "User not found");
 
-    const userId = String(userRow.id); // Use integer user ID (matches client-side user.id)
-    const username = userRow.username || "user";
-
-    // Fetch current metadata
-    const { data: msg, error: fetchError } = await supabaseAdmin
-      .from("messages")
-      .select("metadata")
-      .eq("id", messageId)
-      .single();
-
-    if (fetchError || !msg) {
-      return errorResponse("not_found", "Message not found");
-    }
-
-    const meta = msg.metadata || {};
-    const reactions: Array<{
-      emoji: string;
-      userId: string;
-      username: string;
-    }> = Array.isArray(meta.reactions) ? [...meta.reactions] : [];
-
-    // Toggle: remove if already reacted with same emoji, otherwise add
-    const existingIdx = reactions.findIndex(
-      (r) => r.emoji === emoji && r.userId === userId,
-    );
-
-    if (existingIdx >= 0) {
-      reactions.splice(existingIdx, 1);
-    } else {
-      reactions.push({ emoji, userId, username });
-    }
-
-    // Update metadata with new reactions
-    const { error: updateError } = await supabaseAdmin
-      .from("messages")
-      .update({ metadata: { ...meta, reactions } })
-      .eq("id", messageId);
-
-    if (updateError) {
-      console.error("[Edge:react-message] Update error:", updateError);
-      return errorResponse("update_failed", updateError.message);
-    }
-
-    console.log(
-      `[Edge:react-message] ${existingIdx >= 0 ? "Removed" : "Added"} ${emoji} on message ${messageId} by ${username}`,
-    );
-
-    return jsonResponse({
-      ok: true,
-      data: { reactions, toggled: existingIdx >= 0 ? "removed" : "added" },
+    const { data: result, error } = await supabaseAdmin.rpc("set_message_reaction", {
+      p_message_id: messageId,
+      p_auth_id: authUserId,
+      p_emoji: emoji,
+      p_desired_present: desiredPresent ?? null,
     });
+    if (error) return errorResponse("update_failed", "Could not update reaction");
+    if (!result?.ok) return errorResponse(result?.code || "forbidden", "This message is unavailable");
+    return jsonResponse({ ok: true, data: {
+      reactions: result.reactions, toggled: result.toggled, present: result.present,
+    } });
   } catch (err: any) {
     console.error("[Edge:react-message] Unexpected error:", err);
-    return errorResponse("internal_error", err.message || "Internal error");
+    return errorResponse("internal_error", "Could not update reaction");
   }
 });

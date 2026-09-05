@@ -41,6 +41,10 @@ import {
 } from "@dvnt/app/lib/hooks/use-promotions";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import { slugify } from "@dvnt/app/lib/slug";
+import {
+  resolvePosterUrl,
+  resolveRenderableMedia,
+} from "@dvnt/app/lib/media/resolve-renderable";
 
 const TABS = ["Upcoming", "For You", "All", "Past"] as const;
 
@@ -396,12 +400,34 @@ export function EventsListScreen() {
 
 export default EventsListScreen;
 
-function videoFor(e: Event): string | undefined {
-  if (e.flyerVideoUrl) return e.flyerVideoUrl;
-  const v = (e.images ?? []).find(
-    (m) => m.type === "video" || /\.(mp4|mov|webm)(\?|$)/i.test(m.url),
-  );
-  return v?.url;
+// Resolve an event's flyer into a browser-safe { videoUrl, posterUrl } pair via
+// the single render-side resolver. The resolver's guarantees carry here: a
+// videoUrl is only handed back when Chrome/Firefox/Edge can actually paint it
+// (QuickTime/.mov is dropped), and a posterUrl is NEVER a video URL and is null
+// for HEIC — so those fall through to the themed gradient instead of a broken
+// <img>. Replaces the old ad-hoc `videoFor` regex + raw `e.image` usage.
+function flyerFor(e: Event): { videoUrl: string | null; posterUrl: string | null } {
+  const rawVideo =
+    e.flyerVideoUrl ||
+    (e.images ?? []).find(
+      (m) => resolveRenderableMedia({ url: m.url, type: m.type }).kind === "video",
+    )?.url ||
+    null;
+
+  const video = rawVideo
+    ? resolveRenderableMedia({ url: rawVideo, type: "video" })
+    : null;
+  const videoUrl = video && !video.browserUnsupported ? video.videoUrl : null;
+
+  const posterUrl =
+    (video ? video.posterUrl : null) ||
+    resolvePosterUrl({ url: e.image }) ||
+    (e.images ?? [])
+      .map((m) => resolvePosterUrl({ url: m.url, type: m.type }))
+      .find((u): u is string => !!u) ||
+    null;
+
+  return { videoUrl, posterUrl };
 }
 
 function formatLikes(likes: number): string {
@@ -423,8 +449,10 @@ function VirtualEventList({
   const listRef = useRef<HTMLDivElement>(null);
   const virtualizer = useWindowVirtualizer({
     count: events.length,
-    // aspect-video card (~16:9) on a max-w-3xl column + 16px gap.
-    estimateSize: () => 360,
+    // 4:5 portrait card capped at max-w-md (448px) + 16px gap. This estimate
+    // has to track the card's real geometry — the virtualizer positions rows
+    // from it, so a stale 16:9 number leaves gaps and jumpy scrolling.
+    estimateSize: () => 576,
     overscan: 6,
     scrollMargin: listRef.current?.offsetTop ?? 0,
   });
@@ -478,7 +506,7 @@ function LargeEventCard({
   onOpen: (title?: string | null) => void;
   onToggleLike: (e: Event) => void;
 }) {
-  const video = videoFor(e);
+  const { videoUrl, posterUrl } = flyerFor(e);
   return (
     <div
       role="button"
@@ -487,21 +515,32 @@ function LargeEventCard({
       onKeyDown={(ev) => {
         if (ev.key === "Enter" || ev.key === " ") onOpen(e.title);
       }}
-      className="relative w-full rounded-2xl overflow-hidden aspect-video text-left bg-white/[0.04] cursor-pointer"
+      // A DVNT flyer is authored 3:5 PORTRAIT (see BuiltEventMedia.flyerImageUrl).
+      // This card was `aspect-video`, so `object-cover` threw away roughly
+      // two thirds of every flyer and kept a letterbox strip out of the middle
+      // — the "squished" look. No event app crops a flyer to landscape: DICE,
+      // corner, Posh and Spotify Live Events all present them portrait.
+      //
+      // 4:5 rather than the full 3:5: it honours the artwork while still
+      // letting more than one card exist on a screen, and it is the ratio the
+      // references settle on for a feed. The width cap is the other half —
+      // a portrait card at the full max-w-3xl column would be a billboard.
+      className="relative mx-auto w-full max-w-md rounded-2xl overflow-hidden aspect-4/5 text-left bg-white/[0.04] cursor-pointer"
     >
-      {video ? (
+      {videoUrl ? (
         <video
-          src={video}
+          src={videoUrl}
+          poster={posterUrl ?? undefined}
           autoPlay
           muted
           loop
           playsInline
           className="absolute inset-0 w-full h-full object-cover"
         />
-      ) : e.image ? (
+      ) : posterUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={e.image}
+          src={posterUrl}
           alt={e.title}
           className="absolute inset-0 w-full h-full object-cover"
         />
@@ -577,13 +616,16 @@ function EventCard({
   event: Event;
   onOpen: (title?: string | null) => void;
 }) {
-  const img =
-    e.image && !/post-video|\.(mp4|mov|webm)(\?|$)/i.test(e.image)
-      ? e.image
-      : "";
+  // resolvePosterUrl never yields a video URL and returns null for HEIC, so the
+  // old `post-video|.mp4|.mov` regex guard is subsumed by the resolver.
+  const img = flyerFor(e).posterUrl;
   return (
     <button onClick={() => onOpen(e.title)} className="text-left w-full">
-      <div className="relative rounded-xl overflow-hidden aspect-square bg-white/[0.06]">
+      {/* Portrait, for the same reason as the card above: a square crop of a
+          3:5 flyer loses its top and bottom, which is usually the lineup and
+          the date. Posh and Spotify Live Events both use a portrait thumb in
+          exactly this row position. */}
+      <div className="relative rounded-xl overflow-hidden aspect-3/4 bg-white/[0.06]">
         {img ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={img} alt={e.title} className="w-full h-full object-cover" />
@@ -620,18 +662,28 @@ function Spotlight({
   return (
     <section className="-mx-4 mb-6" aria-label="Featured">
       <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory no-scrollbar px-4">
-        {items.map((it, i) => (
+        {items.map((it, i) => {
+          // Route the spotlight cover through the resolver so a mistyped/video
+          // or HEIC source degrades to the themed gradient, never a broken img.
+          const poster = resolvePosterUrl({
+            url: it.spotlight_image || it.cover_image || it.image,
+          });
+          return (
           <button
             key={it.id ?? it.event_id ?? i}
             onClick={() => onOpen(it.title)}
             className="snap-center shrink-0 w-[85%] sm:w-[460px] relative rounded-2xl overflow-hidden aspect-video text-left"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={it.spotlight_image || it.cover_image || it.image}
-              alt={it.title}
-              className="absolute inset-0 w-full h-full object-cover"
-            />
+            {poster ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={poster}
+                alt={it.title}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            ) : (
+              <div className="absolute inset-0 bg-linear-to-br from-[#1A0A2E] via-[#874E9F]/50 to-[#02030A]" />
+            )}
             <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/20 to-transparent" />
             <div className="absolute inset-x-0 bottom-0 p-4">
               <div className="flex items-center gap-1.5 text-[#379ED8] text-xs font-semibold">
@@ -652,7 +704,8 @@ function Spotlight({
               Spotlight
             </span>
           </button>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

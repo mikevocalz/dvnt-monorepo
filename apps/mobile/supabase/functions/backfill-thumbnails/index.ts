@@ -1,12 +1,15 @@
 /**
  * Edge Function: backfill-thumbnails
- * Finds video posts missing thumbnail rows in posts_media and generates
- * placeholder thumbnail entries. Run idempotently — safe to call repeatedly.
+ * Reports which video posts in posts_media have no thumbnail row. Writes
+ * nothing. Safe to call repeatedly.
  *
- * For posts on Bunny CDN, appends ?thumb=true query param to derive a
- * thumbnail URL (Bunny Stream supported). For other CDNs, stores the video
- * URL with a "needs_thumbnail" marker so a client-side job can generate real
- * thumbnails later.
+ * REPORT ONLY as of 2026-08-05. It previously stored the VIDEO's own URL in a
+ * row typed "thumbnail" (and documented a ?thumb=true trick that does not work
+ * here — the dvnt.b-cdn.net pull zone has no Bunny Optimizer, so ?thumb=true
+ * and ?width= both return the byte-identical original). Surfaces that trusted
+ * those rows rendered an .mp4/.mov inside an <img>, i.e. the broken-image
+ * glyph. The write has been removed; this now reports how many videos lack a
+ * real poster and writes nothing.
  *
  * Deploy: npx supabase functions deploy backfill-thumbnails --no-verify-jwt --project-ref npfjanxturvmjyevoyfo
  */
@@ -16,13 +19,46 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
+  }
+
+  // ── Auth gate: internal admin job — x-internal-secret required ──────
+  // Report-only today, but keep the gate so re-enabling writes can never
+  // be publicly invocable. Mirrors the payouts-release CRON_SECRET
+  // pattern: fail CLOSED when the env is unset.
+  const internalSecret = Deno.env.get("INTERNAL_FN_SECRET") || "";
+  if (!internalSecret) {
+    console.error(
+      "[backfill-thumbnails] INTERNAL_FN_SECRET not set — rejecting request",
+    );
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: { code: "misconfigured", message: "Misconfigured" },
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+  if ((req.headers.get("x-internal-secret") || "") !== internalSecret) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: { code: "unauthorized", message: "Unauthorized" },
+      }),
+      {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   }
 
   try {
@@ -108,37 +144,43 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Step 4: Insert thumbnail rows
-    // For Bunny CDN videos, we can't extract frames server-side in Deno,
-    // so we store the video URL as the thumbnail source. The client already
-    // handles missing thumbnails with a Play icon placeholder.
-    // When a real thumbnail generation service is available, this can be
-    // updated to call it and store proper image URLs.
-    const inserts = batch.map((m: any) => ({
-      _parent_id: m._parent_id,
-      type: "thumbnail",
-      url: m.url, // video URL as placeholder — client shows Play icon for non-image URLs
-      _order: 0,
-      id: `${m._parent_id}_thumb_backfill`,
+    // Step 4: REPORT ONLY — this function no longer writes thumbnail rows.
+    //
+    // It used to insert `url: m.url`, i.e. the VIDEO's own URL, into a row
+    // typed "thumbnail". Any surface that trusted that row put an .mp4/.mov
+    // into an <img> and rendered the broken-image glyph — the exact defect
+    // fixed downstream in "posts: animated_video no longer leaks its mp4 url
+    // into thumbnail (root fix)". Re-running this would have reintroduced it
+    // for every video post, so the write is removed rather than guarded.
+    //
+    // A thumbnail is a still frame. Deno Deploy has no ffmpeg and the Bunny
+    // pull zone has no Optimizer enabled (verified: `?width=400` returns the
+    // byte-identical original, and `?thumb=true` returns the full video), so
+    // there is nothing correct for this function to write. Real posters have
+    // to be produced where the frames are: at upload time on the client, or by
+    // a transcoding pipeline. Until then the honest state is "no poster", and
+    // `resolveRenderableMedia()` in packages/app/lib/media renders a
+    // placeholder for it instead of a dead <img>.
+    const needsPoster = batch.map((m: any) => ({
+      parentId: m._parent_id,
+      videoUrl: m.url,
     }));
 
-    const { error: insertErr, count } = await supabase
-      .from("posts_media")
-      .upsert(inserts, { onConflict: "id", ignoreDuplicates: true });
-
-    if (insertErr) {
-      console.error("[backfill-thumbnails] Insert error:", insertErr);
-      throw insertErr;
-    }
-
-    console.log(`[backfill-thumbnails] Inserted ${batch.length} thumbnail rows`);
+    console.log(
+      `[backfill-thumbnails] ${needsPoster.length} video posts have no real poster. Not fabricating one.`,
+    );
 
     return new Response(
       JSON.stringify({
         ok: true,
         data: {
-          processed: batch.length,
+          wrote: 0,
+          reportOnly: true,
+          videosWithoutPoster: needsPoster.length,
           remaining: needsThumb.length - batch.length,
+          message:
+            "Report only. Posters must be real still frames; this function no longer writes video URLs into the thumbnail slot.",
+          sample: dryRun ? needsPoster.slice(0, 5) : undefined,
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },

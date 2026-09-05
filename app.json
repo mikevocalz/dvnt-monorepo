@@ -1,0 +1,5 @@
+{
+  "ios": {
+    "bundleIdentifier": "com.dvntproject-2.universal-react-monorepo"
+  }
+}

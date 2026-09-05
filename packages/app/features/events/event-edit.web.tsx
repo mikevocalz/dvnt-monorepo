@@ -15,6 +15,7 @@
 
 import { useEffect, useRef } from "react";
 import { useParams, useRouter } from "solito/navigation";
+import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import {
   Calendar,
   DollarSign,
@@ -32,12 +33,24 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
   ticketTypesApi,
   TICKET_TYPE_CATEGORIES,
+  TIER_TYPE_OPTIONS,
+  TIER_VISIBILITY_OPTIONS,
 } from "@dvnt/app/lib/api/ticket-types";
+import {
+  scheduleRowsToEntries,
+  bandRowsToSubAllocations,
+} from "@dvnt/app/lib/tickets/pricing";
 import {
   useEventEditStore,
   TIER_LEVELS,
   type LocalTicketTier,
 } from "@dvnt/app/lib/stores/event-edit-store";
+import { addonsApi } from "@dvnt/app/lib/api/addons";
+import {
+  addonRecordToDraft,
+  draftAddonToCreateParams,
+} from "@dvnt/app/features/events/create/addon-form";
+import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web";
 
 const inputCls =
   "w-full bg-white/[0.05] border border-white/12 rounded-xl px-3 h-11 text-[15px] text-white placeholder:text-white/40 outline-none focus:border-[#3FDCFF]/60";
@@ -48,6 +61,15 @@ const tierLevelColor: Record<string, string> = {
   vip: "#8A40CF",
   table: "#FF5BFC",
 };
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_resolve, reject) =>
+      setTimeout(() => reject(new Error(`stalled at: ${label} (${ms / 1000}s)`)), ms),
+    ),
+  ]);
+}
 
 function Section({
   title,
@@ -101,7 +123,16 @@ export function EventEditScreen() {
     }
 
     const isoDate = ev.fullDate || ev.startDate || ev.date;
-    const existingFlyerUrl = ev.flyerImageUrl || null;
+    // Video FIRST. This read `ev.flyerImageUrl` only, so opening Edit on an
+    // event with a video flyer showed the still (or an empty box) and the
+    // editor had no idea a video existed — which is how saving could leave the
+    // two columns describing different flyers. Video takes precedence wherever
+    // a flyer renders (EventFlyer resolves video -> poster -> generated), so
+    // the editor has to load it that way too, with the still kept as the
+    // poster/fallback rather than discarded.
+    const existingVideoUrl = (ev as any).flyerVideoUrl || (ev as any).videoFlyerUrl || null;
+    const existingStillUrl = ev.flyerImageUrl || null;
+    const existingFlyerUrl = existingVideoUrl || existingStillUrl;
 
     s.hydrate({
       hydratedId: id,
@@ -123,9 +154,9 @@ export function EventEditScreen() {
       youtubeVideoUrl: ev.youtubeVideoUrl || "",
       ticketingEnabled: !!ev.ticketingEnabled,
       flyerImage: existingFlyerUrl,
-      flyerMediaType: /\.(mp4|mov|webm|m4v)(\?|$)/i.test(existingFlyerUrl || "")
-        ? "video"
-        : "image",
+      flyerMediaType: existingVideoUrl ? "video" : "image",
+      // The still is the poster when a video owns the primary slot.
+      flyerFallbackImage: existingVideoUrl ? existingStillUrl : null,
       eventImages: images,
     });
 
@@ -145,10 +176,34 @@ export function EventEditScreen() {
         description: t.description || "",
         isActive: true,
         saleStart: t.sale_start || "",
+        // v2 tier model — hydrate the jsonb shapes into editor rows.
+        tierType: t.tier_type || "ga",
+        visibility: t.tier_visibility || "public",
+        unlockCode: t.unlock_code || "",
+        priceSchedule: (Array.isArray(t.price_schedule) ? t.price_schedule : []).map(
+          (p: any) => ({
+            effectiveAt: p?.effective_at || "",
+            priceDollars: p?.price_cents != null ? String(p.price_cents / 100) : "",
+          }),
+        ),
+        subAllocations: (Array.isArray(t.sub_allocations) ? t.sub_allocations : []).map(
+          (b: any) => ({
+            quantity: b?.quantity != null ? String(b.quantity) : "",
+            priceDollars: b?.price_cents != null ? String(b.price_cents / 100) : "",
+          }),
+        ),
       }));
       useEventEditStore.setState({
         ticketTiers: tiers,
         originalTierIds: activeTiers.map((t: any) => t.id),
+      });
+    });
+
+    // Load the add-on catalog (WS-3) — working copy + diff baseline.
+    addonsApi.getByEvent(id).then((dbAddons) => {
+      useEventEditStore.setState({
+        addons: dbAddons.map((a) => addonRecordToDraft(a)),
+        originalAddonIds: dbAddons.map((a) => a.id),
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -170,11 +225,41 @@ export function EventEditScreen() {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ev = event as any;
+
+      // The flyer, resolved the same way the create screen resolves it.
+      //
+      // This used to write `s.flyerImage` straight into `flyerImageUrl`, which
+      // was wrong three ways: the picker hands back a `blob:` URL that dies
+      // with the tab (the create screen already fixed that once and this one
+      // never got it), a VIDEO picked in the editor landed in the STILL
+      // column, and `videoFlyerUrl` was never written at all — so an event's
+      // video flyer could not be changed or removed, and the two columns
+      // could end up describing different flyers.
+      const uploadIfLocal = async (url: string | null | undefined) => {
+        if (!url) return undefined;
+        if (!/^(blob:|data:|file:)/.test(url)) return url;
+        const up = await withTimeout(uploadToServer(url, "events"), 30000, "upload-flyer");
+        if (!up.success || !up.url) {
+          throw new Error(up.error || "Couldn't upload the flyer. Re-select it and try again.");
+        }
+        return up.url;
+      };
+
+      const primaryUrl = await uploadIfLocal(s.flyerImage);
+      const posterUrl = await uploadIfLocal(s.flyerFallbackImage);
+
+      // Video ALWAYS takes the hero; the still is its poster and the fallback
+      // for static contexts (wallet pass, OG, .ics) that can't play video.
+      const isVideoPrimary = s.flyerMediaType === "video" && !!primaryUrl;
+      const nextVideoUrl = isVideoPrimary ? primaryUrl ?? null : null;
+      const nextStillUrl = isVideoPrimary ? posterUrl ?? null : primaryUrl ?? null;
+
+      const originalVideoUrl = ev?.flyerVideoUrl || ev?.videoFlyerUrl || null;
       const originalFlyerUrl = ev?.flyerImageUrl || null;
-      let flyerImageUrl: string | null | undefined = undefined;
-      if (s.flyerImage !== originalFlyerUrl) {
-        flyerImageUrl = s.flyerImage || null;
-      }
+      const videoFlyerUrl =
+        nextVideoUrl !== originalVideoUrl ? nextVideoUrl : undefined;
+      const flyerImageUrl =
+        nextStillUrl !== originalFlyerUrl ? nextStillUrl : undefined;
 
       const updateData: Record<string, unknown> = {
         title: s.title.trim(),
@@ -193,6 +278,7 @@ export function EventEditScreen() {
         youtubeVideoUrl: s.youtubeVideoUrl.trim() || null,
         ticketingEnabled: s.ticketingEnabled,
         ...(flyerImageUrl !== undefined ? { flyerImageUrl } : {}),
+        ...(videoFlyerUrl !== undefined ? { videoFlyerUrl } : {}),
       };
       if (allImages.length > 0) {
         updateData.coverImage = allImages[0];
@@ -201,7 +287,11 @@ export function EventEditScreen() {
 
       // 1. Event row update — must finish before navigation
       try {
-        await updateEventMutation.mutateAsync({ eventId: id, updates: updateData });
+        await withTimeout(
+          updateEventMutation.mutateAsync({ eventId: id, updates: updateData }),
+          20000,
+          "event-update",
+        );
       } catch (err: any) {
         showToast(
           "error",
@@ -217,27 +307,53 @@ export function EventEditScreen() {
         const qty = parseInt(tier.quantity || "100");
         const maxPerUser = parseInt(tier.maxPerOrder || "4");
 
+        // v2 tier model — serialized once, shared by create + update.
+        const priceSchedule = scheduleRowsToEntries(tier.priceSchedule);
+        const subAllocations = bandRowsToSubAllocations(tier.subAllocations);
+
         if (!tier.id) {
-          await ticketTypesApi.create({
-            eventId: id,
-            name: tier.name || "General Admission",
-            category: tier.category || "admission",
-            description: tier.description || undefined,
-            priceCents,
-            quantityTotal: qty,
-            maxPerUser,
-            saleStart: tier.saleStart || undefined,
-          });
+          await withTimeout(
+            ticketTypesApi.create({
+              eventId: id,
+              name: tier.name || "General Admission",
+              category: tier.category || "admission",
+              description: tier.description || undefined,
+              priceCents,
+              quantityTotal: qty,
+              maxPerUser,
+              saleStart: tier.saleStart || undefined,
+              tierType: tier.tierType,
+              tierVisibility: tier.visibility,
+              unlockCode:
+                tier.visibility === "locked" ? tier.unlockCode : undefined,
+              priceSchedule,
+              subAllocations,
+            }),
+            15000,
+            "ticket-type-create",
+          );
         } else {
-          await ticketTypesApi.update(tier.id, {
-            name: tier.name,
-            category: tier.category || "admission",
-            description: tier.description || null,
-            price_cents: priceCents,
-            quantity_total: qty,
-            max_per_user: maxPerUser,
-            sale_start: tier.saleStart || null,
-          });
+          await withTimeout(
+            ticketTypesApi.update(tier.id, {
+              name: tier.name,
+              category: tier.category || "admission",
+              description: tier.description || null,
+              price_cents: priceCents,
+              quantity_total: qty,
+              max_per_user: maxPerUser,
+              sale_start: tier.saleStart || null,
+              tier_type: tier.tierType,
+              tier_visibility: tier.visibility,
+              unlock_code:
+                tier.visibility === "locked"
+                  ? tier.unlockCode.trim() || null
+                  : null,
+              price_schedule: priceSchedule,
+              sub_allocations: subAllocations,
+            }),
+            15000,
+            "ticket-type-update",
+          );
         }
       });
 
@@ -246,22 +362,100 @@ export function EventEditScreen() {
       );
       const removedIds = s.originalTierIds.filter((tid) => !currentIds.has(tid));
       const deactivatePromises = removedIds.map((tid) =>
-        ticketTypesApi.deactivate(tid),
+        withTimeout(ticketTypesApi.deactivate(tid), 15000, "ticket-type-deactivate"),
+      );
+
+      // 3. Add-on catalog creates / updates / removes (WS-3). requiresTierId
+      // already holds ticket_types uuids in the edit flow (identity resolve).
+      const addonPromises = s.addons.map(async (draft, i) => {
+        const params = draftAddonToCreateParams(draft, id, (tid) => tid, i);
+        if (!params) return; // unnamed row — nothing to persist
+        if (!draft.dbId) {
+          await withTimeout(addonsApi.create(params), 15000, "addon-create");
+          return;
+        }
+        await withTimeout(
+          addonsApi.update(draft.dbId, {
+            name: params.name,
+            description: params.description ?? null,
+            addon_type: params.addonType,
+            binding_mode: params.bindingMode,
+            price_cents: params.priceCents,
+            min_price_cents: params.minPriceCents ?? null,
+            // Inventory lives on variants once the matrix exists.
+            quantity_total:
+              (params.variants?.length ?? 0) > 0
+                ? null
+                : (params.quantityTotal ?? null),
+            requires_tier_id: params.requiresTierId ?? null,
+            is_redeemable: params.isRedeemable ?? false,
+            sort_order: i,
+            status: params.status ?? "on_sale",
+          }),
+          15000,
+          "addon-update",
+        );
+        await withTimeout(
+          addonsApi.syncVariants(
+            draft.dbId,
+            draft.variants
+              .filter((row) => row.size.trim() || row.color.trim())
+              .map((row, vi) => ({
+                id: row.dbId,
+                name: [row.size.trim(), row.color.trim()]
+                  .filter(Boolean)
+                  .join(" / "),
+                optionValues: {
+                  ...(row.size.trim() ? { size: row.size.trim() } : {}),
+                  ...(row.color.trim() ? { color: row.color.trim() } : {}),
+                },
+                priceCents:
+                  row.priceDollars.trim() === ""
+                    ? null
+                    : Math.round(parseFloat(row.priceDollars) * 100) || null,
+                quantityTotal:
+                  parseInt(row.quantity, 10) > 0
+                    ? parseInt(row.quantity, 10)
+                    : null,
+                sortOrder: vi,
+              })),
+          ),
+          15000,
+          "addon-variants",
+        );
+      });
+      const currentAddonIds = new Set(
+        s.addons.filter((a) => a.dbId).map((a) => a.dbId!),
+      );
+      const removedAddonIds = s.originalAddonIds.filter(
+        (aid) => !currentAddonIds.has(aid),
+      );
+      const addonRemovePromises = removedAddonIds.map((aid) =>
+        withTimeout(addonsApi.remove(aid), 15000, "addon-remove"),
       );
 
       try {
-        await Promise.all([...tierPromises, ...deactivatePromises]);
+        await Promise.all([
+          ...tierPromises,
+          ...deactivatePromises,
+          ...addonPromises,
+          ...addonRemovePromises,
+        ]);
       } catch (err: any) {
-        console.error("[EditEvent] Tier sync error:", err);
+        console.error("[EditEvent] Tier/add-on sync error:", err);
         showToast(
           "warning",
           "Partial save",
-          "Event saved, but some ticket tier changes did not apply. Open Edit and re-save.",
+          "Event saved, but some ticket or add-on changes did not apply. Open Edit and re-save.",
         );
       }
 
       showToast("success", "Saved", "Event updated successfully");
-      router.back();
+      // Go to the event, not `router.back()`. Back is wherever you came from,
+      // and this screen is reachable by direct URL and from the host menu — so
+      // saving could land you on about:blank, having just been told the save
+      // worked. The event you edited is the only correct destination.
+      router.push(`/feed/events/${id}`);
     } catch (error: any) {
       console.error("[EditEvent] Save error:", error);
       showToast("error", "Error", error?.message || "Failed to save changes");
@@ -275,11 +469,34 @@ export function EventEditScreen() {
     s.setEventImages((prev) => [...prev, ...urls]);
   };
 
+  /**
+   * One picker, two slots — video always wins the hero.
+   *
+   * Picking a video promotes it and keeps whatever still was there as the
+   * poster. Picking an image while a video is the hero replaces the POSTER,
+   * not the video: a still can never silently demote a video flyer, because
+   * every surface that renders a flyer resolves video first. Removing the
+   * video is the explicit way to go back to a still, and that promotes the
+   * poster rather than leaving the event with no flyer at all.
+   */
   const onFlyerPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    s.setFlyerImage(URL.createObjectURL(file));
-    s.setFlyerMediaType(file.type.startsWith("video/") ? "video" : "image");
+    const url = URL.createObjectURL(file);
+    const isVideo = file.type.startsWith("video/");
+    if (isVideo) {
+      if (s.flyerImage && s.flyerMediaType === "image" && !s.flyerFallbackImage) {
+        s.setFlyerFallbackImage(s.flyerImage);
+      }
+      s.setFlyerImage(url);
+      s.setFlyerMediaType("video");
+    } else if (s.flyerMediaType === "video" && s.flyerImage) {
+      s.setFlyerFallbackImage(url);
+    } else {
+      s.setFlyerImage(url);
+      s.setFlyerMediaType("image");
+    }
+    e.currentTarget.value = "";
   };
 
   if (isLoading || s.hydratedId !== id) {
@@ -409,7 +626,14 @@ export function EventEditScreen() {
               )}
               <button
                 onClick={() => {
-                  s.setFlyerImage(null);
+                  // Removing a video promotes its poster, so the event keeps a
+                  // flyer instead of dropping to the generated fallback.
+                  if (s.flyerMediaType === "video" && s.flyerFallbackImage) {
+                    s.setFlyerImage(s.flyerFallbackImage);
+                    s.setFlyerFallbackImage(null);
+                  } else {
+                    s.setFlyerImage(null);
+                  }
                   s.setFlyerMediaType("image");
                 }}
                 className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-black/60 flex items-center justify-center"
@@ -632,6 +856,23 @@ export function EventEditScreen() {
           ) : null}
         </Section>
 
+        {/* Add-on catalog (WS-3) — coat check, merch (size × color), drinks,
+            skip-line… Sold with or without a ticket; per-tier gating uses the
+            event's own tiers. */}
+        <Section title="Add-ons">
+          <p className="text-xs text-white/45 -mt-1">
+            Upsells sold alongside tickets. Already-sold add-ons can&apos;t be
+            deleted — retire them by setting status to Ended.
+          </p>
+          <AddonsEditor
+            addons={s.addons}
+            onChange={s.setAddons}
+            tierOptions={s.ticketTiers
+              .filter((tier) => tier.id)
+              .map((tier) => ({ id: tier.id!, name: tier.name }))}
+          />
+        </Section>
+
         {/* More details */}
         <Section title="More Details">
           <FormField label="YouTube Video URL">
@@ -832,6 +1073,196 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
           </button>
         ) : null}
       </div>
+
+      {/* Tier type — v2 enum (GA / VIP / Early Bird / Table / Group). */}
+      <span className="block text-[11px] text-white/50 mb-1">Tier type</span>
+      <div className="flex gap-1.5 mb-2.5">
+        {TIER_TYPE_OPTIONS.map((o) => {
+          const selected = (tier.tierType || "ga") === o.value;
+          return (
+            <button
+              key={o.value}
+              onClick={() => updateTier(idx, { tierType: o.value })}
+              className={`flex-1 py-1.5 rounded-lg text-[11px] font-semibold uppercase border ${
+                selected
+                  ? "bg-white text-black border-transparent"
+                  : "text-white/50 border-white/12"
+              }`}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Visibility — public / hidden / locked (+ unlock code). */}
+      <span className="block text-[11px] text-white/50 mb-1">Visibility</span>
+      <div className="flex gap-1.5 mb-1">
+        {TIER_VISIBILITY_OPTIONS.map((o) => {
+          const selected = (tier.visibility || "public") === o.value;
+          return (
+            <button
+              key={o.value}
+              onClick={() => updateTier(idx, { visibility: o.value })}
+              className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold border ${
+                selected
+                  ? "bg-[#3FDCFF] text-black border-transparent"
+                  : "text-white/50 border-white/12"
+              }`}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[11px] leading-[15px] text-white/50 mb-2">
+        {
+          TIER_VISIBILITY_OPTIONS.find(
+            (o) => o.value === (tier.visibility || "public"),
+          )?.hint
+        }
+      </p>
+      {tier.visibility === "locked" ? (
+        <input
+          className="w-full bg-white/[0.05] rounded-lg px-2.5 py-2 font-mono text-[13px] uppercase tracking-widest text-white outline-none mb-2.5 placeholder:normal-case placeholder:tracking-normal placeholder:font-sans placeholder:text-white/40"
+          placeholder="Unlock code (e.g. FRIENDS25)"
+          value={tier.unlockCode}
+          onChange={(e) =>
+            updateTier(idx, { unlockCode: e.target.value.toUpperCase() })
+          }
+        />
+      ) : null}
+
+      {/* Early-bird pricing — writes ticket_types.price_schedule +
+          sub_allocations exactly as the SQL resolver reads them. */}
+      <span className="block text-[10px] font-bold tracking-[1.2px] text-[#F5C518] mb-1.5">
+        EARLY-BIRD PRICING
+      </span>
+      {tier.priceSchedule.map((row, ri) => (
+        <div key={`sched-${ri}`} className="flex items-center gap-2 mb-1.5">
+          <span className="text-[11px] text-white/50 shrink-0">From</span>
+          <input
+            type="datetime-local"
+            className="flex-1 min-w-0 bg-white/[0.05] rounded-lg px-2 py-1.5 text-[12px] text-white outline-none"
+            value={row.effectiveAt ? toLocalInput(row.effectiveAt) : ""}
+            onChange={(e) =>
+              updateTier(idx, {
+                priceSchedule: tier.priceSchedule.map((r, i) =>
+                  i === ri
+                    ? {
+                        ...r,
+                        effectiveAt: e.target.value
+                          ? fromLocalInput(e.target.value)
+                          : "",
+                      }
+                    : r,
+                ),
+              })
+            }
+          />
+          <span className="text-[11px] text-white/50 shrink-0">price $</span>
+          <input
+            className="w-20 bg-white/[0.05] rounded-lg px-2 py-1.5 font-mono text-[12px] text-white outline-none"
+            inputMode="decimal"
+            placeholder="0.00"
+            value={row.priceDollars}
+            onChange={(e) =>
+              updateTier(idx, {
+                priceSchedule: tier.priceSchedule.map((r, i) =>
+                  i === ri ? { ...r, priceDollars: e.target.value } : r,
+                ),
+              })
+            }
+          />
+          <button
+            aria-label="Remove price change"
+            onClick={() =>
+              updateTier(idx, {
+                priceSchedule: tier.priceSchedule.filter((_, i) => i !== ri),
+              })
+            }
+            className="text-white/40 hover:text-white/80"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      ))}
+      {tier.subAllocations.map((row, ri) => (
+        <div key={`band-${ri}`} className="flex items-center gap-2 mb-1.5">
+          <span className="text-[11px] text-white/50 shrink-0">First</span>
+          <input
+            className="w-16 bg-white/[0.05] rounded-lg px-2 py-1.5 font-mono text-[12px] text-white outline-none"
+            inputMode="numeric"
+            placeholder="N"
+            value={row.quantity}
+            onChange={(e) =>
+              updateTier(idx, {
+                subAllocations: tier.subAllocations.map((r, i) =>
+                  i === ri ? { ...r, quantity: e.target.value } : r,
+                ),
+              })
+            }
+          />
+          <span className="text-[11px] text-white/50 shrink-0">tickets at $</span>
+          <input
+            className="w-20 bg-white/[0.05] rounded-lg px-2 py-1.5 font-mono text-[12px] text-white outline-none"
+            inputMode="decimal"
+            placeholder="0.00"
+            value={row.priceDollars}
+            onChange={(e) =>
+              updateTier(idx, {
+                subAllocations: tier.subAllocations.map((r, i) =>
+                  i === ri ? { ...r, priceDollars: e.target.value } : r,
+                ),
+              })
+            }
+          />
+          <button
+            aria-label="Remove quantity band"
+            onClick={() =>
+              updateTier(idx, {
+                subAllocations: tier.subAllocations.filter((_, i) => i !== ri),
+              })
+            }
+            className="text-white/40 hover:text-white/80"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      ))}
+      <div className="flex gap-3 mb-2.5">
+        <button
+          onClick={() =>
+            updateTier(idx, {
+              priceSchedule: [
+                ...tier.priceSchedule,
+                { effectiveAt: "", priceDollars: "" },
+              ],
+            })
+          }
+          className="text-[11px] font-semibold text-white/60 hover:text-white"
+        >
+          + Price goes up at a date
+        </button>
+        <button
+          onClick={() =>
+            updateTier(idx, {
+              subAllocations: [
+                ...tier.subAllocations,
+                { quantity: "", priceDollars: "" },
+              ],
+            })
+          }
+          className="text-[11px] font-semibold text-white/60 hover:text-white"
+        >
+          + First N tickets cheaper
+        </button>
+      </div>
+      {tier.priceSchedule.length > 0 && tier.subAllocations.length > 0 ? (
+        <p className="text-[11px] text-white/40 mb-2.5">
+          Date-based changes win over quantity bands when both apply.
+        </p>
+      ) : null}
 
       {/* Remove */}
       <button

@@ -19,6 +19,8 @@ import type {
   Dispute,
   PayoutSummary,
   PayoutRecord,
+  FailedPayout,
+  PayoutActionResult,
   BalanceTransaction,
   ConnectAccount,
   OrganizerBranding,
@@ -270,10 +272,60 @@ export const hostPayoutsApi = {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (error) throw error;
-      return data?.payout || null;
+      // The detail action returns the payout fields at the top level,
+      // not under a `payout` key.
+      return data || null;
     } catch (err: any) {
       console.error("[Payments] getPayoutDetail error:", err);
       return null;
+    }
+  },
+
+  /** Failed bank payouts on the connected account (recovery surface). */
+  async listFailedPayouts(): Promise<FailedPayout[]> {
+    try {
+      const token = await requireBetterAuthToken();
+      const { data, error } = await supabase.functions.invoke("host-payouts", {
+        body: { action: "failed_payouts" },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (error) throw error;
+      return data?.data || [];
+    } catch (err: any) {
+      console.error("[Payments] listFailedPayouts error:", err);
+      return [];
+    }
+  },
+
+  /** Create an instant payout (gated server-side on eligibility). */
+  async requestInstantPayout(amountCents?: number): Promise<PayoutActionResult> {
+    try {
+      const token = await requireBetterAuthToken();
+      const { data, error } = await supabase.functions.invoke("host-payouts", {
+        body: { action: "instant_payout", amount_cents: amountCents },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (error) throw error;
+      return data || { ok: false };
+    } catch (err: any) {
+      console.error("[Payments] requestInstantPayout error:", err);
+      return { ok: false, message: err.message };
+    }
+  },
+
+  /** Retry a bank payout after fixing bank details (fresh standard payout). */
+  async retryPayout(): Promise<PayoutActionResult> {
+    try {
+      const token = await requireBetterAuthToken();
+      const { data, error } = await supabase.functions.invoke("host-payouts", {
+        body: { action: "retry_payout" },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (error) throw error;
+      return data || { ok: false };
+    } catch (err: any) {
+      console.error("[Payments] retryPayout error:", err);
+      return { ok: false, message: err.message };
     }
   },
 };

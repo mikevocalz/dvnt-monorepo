@@ -19,10 +19,11 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { likesApi } from "@dvnt/app/lib/api/likes";
 import { postKeys } from "@dvnt/app/lib/hooks/use-posts";
-import { postLikersKeys } from "@dvnt/app/lib/hooks/use-post-likers";
 import { activityKeys } from "@dvnt/app/lib/hooks/use-activities-query";
 import { updatePostLikeEverywhere } from "@dvnt/app/lib/query/patch";
 import type { Post } from "@dvnt/app/lib/types";
+import { postLikersKeys, likeStateKeys } from "@dvnt/app/lib/query-keys";
+export { likeStateKeys };
 
 interface LikeState {
   hasLiked: boolean;
@@ -92,11 +93,6 @@ function logCacheMutation(
 }
 
 // Query keys for like state
-export const likeStateKeys = {
-  all: ["likeState"] as const,
-  forPost: (viewerId: string, postId: string) =>
-    ["likeState", viewerId, postId] as const,
-};
 
 /**
  * Central hook for post like state
@@ -371,9 +367,16 @@ export function seedLikeState(
 
   const key = likeStateKeys.forPost(viewerId, normalizedPostId);
 
-  // CRITICAL: Only seed if no existing cache — never overwrite optimistic updates
-  const existing = queryClient.getQueryData<LikeState>(key);
-  if (existing) {
+  // Never clobber an optimistic update that is still settling — but only skip
+  // while a like mutation for THIS post is genuinely in flight. The old check
+  // ("does a cache entry exist?") meant any stale entry won forever: this query
+  // is staleTime: Infinity with a queryFn that never hits the network, so once
+  // seeded there was no path back to server truth. On web, where the cache was
+  // also restored from localStorage, that froze hearts and counts across
+  // sessions.
+  const isMutating =
+    queryClient.isMutating({ mutationKey: ["likePost", normalizedPostId] }) > 0;
+  if (isMutating) {
     return;
   }
 

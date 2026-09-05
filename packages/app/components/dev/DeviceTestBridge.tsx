@@ -14,11 +14,11 @@ import { useStoryFlowStore } from "@dvnt/app/lib/stores/story-flow-store";
 import { useVerificationStore } from "@dvnt/app/lib/stores/useVerificationStore";
 import { storyKeys } from "@dvnt/app/lib/hooks/use-stories";
 import type { Story, StoryOverlay } from "@dvnt/app/lib/types";
-import { useEditorStore } from "@dvnt/app/src/stories-editor/stores/editor-store";
+import { useEditorStore } from "@dvnt/app/features/stories-editor";
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
-} from "@dvnt/app/src/stories-editor/constants";
+} from "@dvnt/app/features/stories-editor/constants";
 
 type DeviceTestAction =
   | "guest_home"

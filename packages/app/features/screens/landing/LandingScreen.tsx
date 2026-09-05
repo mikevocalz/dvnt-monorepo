@@ -7,13 +7,15 @@
  * scroll content is wrapped in a <Main> landmark. See
  * docs/landing-page-notes.md for the full architecture.
  *
- * Authored as one file: the per-platform pieces (Hero video, AmbientField,
- * GlassSurface) are resolved by bundler extension splits, so the composition
- * itself is identical on web and native.
+ * NATIVE — web resolves LandingScreen.web.tsx, which mounts the same section
+ * composition with the scroll timeline on GSAP instead of Reanimated (the
+ * Reanimated web mappers crashed against detached view descriptors after
+ * unmount — DVNT-WEB-6). The isWeb branch below is legacy for non-fork
+ * bundlers; per-platform pieces still resolve by extension splits.
  */
 import { useEffect } from "react";
 import { Platform, StyleSheet, View, useWindowDimensions } from "react-native";
-import { Main } from "@expo/html-elements";
+import { Main } from "@dvnt/app/components/ui/html";
 import Animated, {
   useAnimatedRef,
   useScrollViewOffset,

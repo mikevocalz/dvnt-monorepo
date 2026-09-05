@@ -1,31 +1,29 @@
 /**
- * Shared hero copy + kinetic entrance, used by both Hero.web and Hero.native.
+ * Hero copy + kinetic entrance — NATIVE (web resolves HeroContent.web.tsx).
  * Words fade/rise in on mount via a worklet timeline (mount-driven shared
- * values rather than layout-animation `entering`, which is flaky on RN-web).
+ * values rather than layout-animation `entering`).
  */
 import { useEffect } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
-import { H1, P } from "@expo/html-elements";
+import { useRouter } from "solito/navigation";
+import { H1, P } from "@dvnt/app/components/ui/html";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDelay,
   withTiming,
 } from "react-native-reanimated";
-import { EASE_SETTLE, LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
+import { LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
+import { EASE_SETTLE } from "../theme-motion";
 
 const WORDS = ["connect.", "gather.", "move."];
 
-function scrollToSection(id: string) {
-  if (Platform.OS !== "web") return;
-  const target = (globalThis as typeof globalThis & {
-    document?: Document;
-  }).document?.getElementById(id);
-  target?.scrollIntoView({ behavior: "smooth", block: "start" });
-}
+// NATIVE-ONLY: web resolves HeroContent.web.tsx (static, no Reanimated —
+// DVNT-WEB-6). Native keeps the worklet entrance from opacity 0.
+const REST_VISIBLE = 0;
 
 function Word({ text, index }: { text: string; index: number }) {
-  const t = useSharedValue(0);
+  const t = useSharedValue(REST_VISIBLE);
   useEffect(() => {
     t.value = withDelay(
       200 + index * 140,
@@ -50,7 +48,8 @@ function Word({ text, index }: { text: string; index: number }) {
 }
 
 export function HeroContent() {
-  const fade = useSharedValue(0);
+  const router = useRouter();
+  const fade = useSharedValue(REST_VISIBLE);
   useEffect(() => {
     fade.value = withDelay(
       560,
@@ -83,20 +82,11 @@ export function HeroContent() {
         <View style={styles.cta}>
           <Pressable
             accessibilityRole="link"
-            onPress={() => scrollToSection("download")}
+            onPress={() => router.push("/auth/login")}
             style={styles.primary}
           >
             <Animated.Text style={styles.primaryText}>
-              Get the app
-            </Animated.Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="link"
-            onPress={() => scrollToSection("explore")}
-            style={styles.ghost}
-          >
-            <Animated.Text style={styles.ghostText}>
-              Explore the room
+              Sign-Up / Sign-In
             </Animated.Text>
           </Pressable>
         </View>
@@ -155,12 +145,4 @@ const styles = StyleSheet.create({
     ...GRADIENT_STYLE,
   },
   primaryText: { color: "#0A0118", fontWeight: "800", fontSize: 16 },
-  ghost: {
-    paddingHorizontal: 26,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: LANDING_COLORS.glassBorderStrong,
-  },
-  ghostText: { color: LANDING_COLORS.text, fontWeight: "700", fontSize: 16 },
 });

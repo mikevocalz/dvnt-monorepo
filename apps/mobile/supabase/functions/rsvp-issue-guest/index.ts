@@ -21,11 +21,12 @@ import {
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-const GRANT_SECRET =
-  Deno.env.get("TICKET_HMAC_SECRET") || "dvnt-ticket-hmac-default-key";
+// I6: fail CLOSED — no hardcoded fallback secret. A public default would let
+// anyone forge grants and mint tickets. Unset env = reject every request.
+const GRANT_SECRET = Deno.env.get("TICKET_HMAC_SECRET") || "";
 const SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live").replace(/\/$/, "");
 
 function json(data: unknown, status = 200): Response {
@@ -85,6 +86,12 @@ async function verifyGrant(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (!GRANT_SECRET) {
+    console.error(
+      "[rsvp-issue-guest] TICKET_HMAC_SECRET not set — rejecting request",
+    );
+    return err("misconfigured", "Server misconfigured.", 500);
+  }
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,

@@ -102,6 +102,7 @@ export async function notifyNextWaitlister(
           body,
           type: "event_waitlist_promoted",
           data: {
+            eventId: String(eventId),
             entityType: "event",
             entityId: eventId,
             ticketTypeId,

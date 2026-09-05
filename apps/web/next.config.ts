@@ -3,6 +3,7 @@ import path from 'path';
 import type { NextConfig } from 'next';
 import type { Compiler, Compilation } from 'webpack';
 import { withPayload } from '@payloadcms/next/withPayload';
+import { withSentryConfig } from '@sentry/nextjs';
 
 class CopySkiaPlugin {
   apply(compiler: Compiler) {
@@ -29,6 +30,22 @@ class CopySkiaPlugin {
 }
 
 const nextConfig: NextConfig = {
+  // reactStrictMode left at the Next default (true). The reanimated 4.4.1
+  // _updatePropsJS double-mount crash that forced it off is gone since the
+  // 4.5.3 bump; verified `/` renders clean under StrictMode.
+  // ponytail: the TS gate moved OUT of `next build` and into the `build` script
+  // (`tsc --noEmit && next build`). Next runs its checker while the whole
+  // webpack compilation is still resident; on Vercel's 2-core/8GB builder that
+  // combined peak got SIGKILLed by the container OOM killer (the check ran 9.6
+  // min, then .next/routes-manifest.json was missing). Sequential processes
+  // never stack their peaks. `npx tsc --noEmit` is still the floor — it just
+  // runs first, and a type error still fails the deploy.
+  typescript: { ignoreBuildErrors: true },
+  // ponytail: opt-in only. Client source maps are the one way to attribute bytes
+  // in a shared chunk to the packages that put them there — Sentry deletes its
+  // uploads, and the production chunks carry no module paths. Off by default so
+  // normal builds don't pay for it: ANALYZE_SOURCEMAPS=1 pnpm build.
+  productionBrowserSourceMaps: process.env.ANALYZE_SOURCEMAPS === '1',
   // Keep only the genuinely server-only AWS SDK external. Do NOT externalize
   // @payloadcms/storage-s3 / plugin-cloud-storage — they ship the admin's
   // client component (S3ClientUploadHandler, referenced from the import map),
@@ -132,6 +149,19 @@ const nextConfig: NextConfig = {
       'https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/auth';
     return [
       { source: '/api/auth/:path*', destination: `${authUrl}/api/auth/:path*` },
+      // Same-origin EDGE-FUNCTION proxy. Browser calls to
+      // supabase.co/functions/v1 are a cross-origin fetch that privacy
+      // extensions / flaky networks can kill outright ("Failed to send a
+      // request to the Edge Function" — seen live on the onboarding save).
+      // The web supabase client rewrites functions URLs to /api/fn/* (see
+      // packages/supabase/src/client.web.ts), making every edge call
+      // first-party — same rationale as the /api/auth proxy above and the
+      // Sentry /monitoring tunnel.
+      {
+        source: '/api/fn/:path*',
+        destination:
+          'https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/:path*',
+      },
     ];
   },
   // The authenticated web app lives under /feed (the AppShell). Native routes
@@ -140,6 +170,21 @@ const nextConfig: NextConfig = {
   // would 404. Redirect them to the canonical /feed/sneaky-lynk/* route.
   async redirects() {
     return [
+      // Canonical host. Browsing/installing the PWA from the Vercel default
+      // domain names the installed app "dvnt-blog" (Chrome falls back to the
+      // hostname for app identity there). Force everyone onto dvntapp.live.
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'dvnt-blog.vercel.app' }],
+        destination: 'https://dvntapp.live/:path*',
+        permanent: true,
+      },
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'dvnt-blog-mikefacesnys-projects.vercel.app' }],
+        destination: 'https://dvntapp.live/:path*',
+        permanent: true,
+      },
       {
         source: '/sneaky-lynk/:path*',
         destination: '/feed/sneaky-lynk/:path*',
@@ -180,6 +225,12 @@ const nextConfig: NextConfig = {
       'react-native-qrcode-svg$': path.resolve(
         __dirname,
         'src/platform/qrcode-svg.web.tsx',
+      ),
+      // Native TurboModule package — the Lynk room's native transport. Shared
+      // barrels drag it web-side; the shim cuts the edge. See the file header.
+      'react-native-moq$': path.resolve(
+        __dirname,
+        'src/platform/react-native-moq.web.ts',
       ),
       '@fishjam-cloud/react-native-client$': path.resolve(
         __dirname,
@@ -273,4 +324,26 @@ const nextConfig: NextConfig = {
 // DefinePlugin) and adds Payload's serverExternalPackages + admin handling.
 // devBundleServerPackages:false keeps Payload's server deps external in dev so
 // the heavy RNW/Skia webpack pipeline doesn't try to bundle pg/sharp/payload.
-export default withPayload(nextConfig, { devBundleServerPackages: false });
+// withSentryConfig wraps LAST so it sees the final config: /monitoring tunnel
+// (ad blockers eat direct beacons → wrong Web Vitals), source-map upload when
+// SENTRY_AUTH_TOKEN is present (silently skipped otherwise), release naming
+// dvnt@<version>+<sha> shared with mobile/edge.
+const gitSha = (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7);
+process.env.SENTRY_RELEASE = `dvnt@${process.env.npm_package_version || '0.1.0'}${gitSha ? `+${gitSha}` : ''}`;
+
+export default withSentryConfig(
+  withPayload(nextConfig, { devBundleServerPackages: false }),
+  {
+    org: '5th-galaxy-studios',
+    project: 'dvnt-web',
+    silent: !process.env.CI,
+    tunnelRoute: '/monitoring',
+    disableLogger: true,
+    widenClientFileUpload: true,
+    // Sentry deletes client maps after upload, which is right for a normal
+    // build and defeats ANALYZE_SOURCEMAPS=1. Option name verified against
+    // node_modules/@sentry/nextjs/build/types/config/types.d.ts:239.
+    sourcemaps: { deleteSourcemapsAfterUpload: process.env.ANALYZE_SOURCEMAPS !== '1' },
+    release: { name: process.env.SENTRY_RELEASE },
+  },
+);

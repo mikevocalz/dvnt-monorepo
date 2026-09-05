@@ -1,27 +1,54 @@
 import SwiftUI
-import CoreImage
-import CoreImage.CIFilterBuiltins
-import WatchKit
 
-/// Renders a `qrToken` as a QR code BYTE-IDENTICAL to the phone: same string,
-/// QR symbology, error-correction level "H" (the phone uses H so a wordmark can
-/// overlay; we keep H for arm's-length scan robustness on a ~40 mm OLED).
+/// Draws the QR module grid the phone shipped inside the payload.
 ///
-/// Nearest-neighbour upscale (no interpolation) keeps module edges crisp so a
-/// phone camera locks on the first try.
+/// watchOS has no Core Image — `CIFilter.qrCodeGenerator()` is iOS-only — so the
+/// watch stays a pure presenter here too: the phone encodes `qrToken` at
+/// error-correction level "H" (the level it renders itself, so a wordmark can
+/// overlay) and hands over the finished module matrix. Painting rects instead of
+/// upscaling a bitmap keeps module edges exact at any size, so a phone camera
+/// locks on the first try.
 struct QRCodeView: View {
-    let token: String
+    let matrix: WatchQRMatrix?
     var size: CGFloat = 132
 
-    private static let context = CIContext()
+    /// Wrist-down (Always On). The code is a credential: watchOS HIG W-AO-02
+    /// requires sensitive content to be redacted in the dimmed state, and a
+    /// static high-contrast QR left lit is also the worst case for OLED
+    /// burn-in. Wrist down shows the mark instead — raise to present.
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Group {
-            if let img = Self.generate(token, side: size) {
-                Image(uiImage: img)
-                    .interpolation(.none)
-                    .resizable()
-                    .scaledToFit()
+            if isLuminanceReduced {
+                dormant
+            } else if let side = matrix?.size, side > 0, let modules = matrix?.modules {
+                Canvas { ctx, canvas in
+                    // Four modules of pure white on every edge, independent of
+                    // the outer card's decorative padding. Align module edges to
+                    // physical pixels so small-watch scaling stays crisp.
+                    let quietModules = 4
+                    let scale = max(displayScale, 1)
+                    let cell = floor(min(canvas.width, canvas.height) * scale / CGFloat(side + quietModules * 2)) / scale
+                    guard cell > 0 else { return }
+                    let originX = floor((canvas.width - CGFloat(side) * cell) * scale / 2) / scale
+                    let originY = floor((canvas.height - CGFloat(side) * cell) * scale / 2) / scale
+                    var path = Path()
+                    for y in 0..<side {
+                        for x in 0..<side where modules[y * side + x] {
+                            path.addRect(
+                                CGRect(
+                                    x: originX + CGFloat(x) * cell,
+                                    y: originY + CGFloat(y) * cell,
+                                    width: cell,
+                                    height: cell
+                                )
+                            )
+                        }
+                    }
+                    ctx.fill(path, with: .color(.black), style: FillStyle(antialiased: false))
+                }
             } else {
                 // Degenerate fallback — never blank, so the door staff knows to retry.
                 ZStack {
@@ -33,27 +60,28 @@ struct QRCodeView: View {
             }
         }
         .frame(width: size, height: size)
-        .background(Color.white)            // máx contrast quiet zone
+        // The quiet zone is the scan surface, so it stays pure white while the
+        // code is presented — but true black when dormant, so a lowered wrist
+        // is not a lit white rectangle in a dark room.
+        .background(isLuminanceReduced ? Color.black : Color.white)
+        .accessibilityElement()
+        .accessibilityLabel(isLuminanceReduced
+            ? "Ticket code hidden. Raise your wrist to present it."
+            : "Ticket QR code. Show this to door staff.")
     }
 
-    static func generate(_ string: String, side: CGFloat, scale: CGFloat = 3) -> UIImage? {
-        guard !string.isEmpty else { return nil }
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(string.utf8)
-        filter.correctionLevel = "H"        // matches the phone's ecl="H"
-        guard let output = filter.outputImage else { return nil }
-
-        // Upscale to a crisp pixel grid before rasterising.
-        let target = side * (WKScreenScale())
-        let scaleX = target / output.extent.width
-        let scaleY = target / output.extent.height
-        let transformed = output.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-
-        guard let cg = context.createCGImage(transformed, from: transformed.extent) else { return nil }
-        return UIImage(cgImage: cg)
+    /// Wrist-down state: the mark, and one instruction. No code, no animation,
+    /// nothing that updates — HIG W-AO-01 asks for reduced complexity, and
+    /// there is nothing here worth a redraw.
+    private var dormant: some View {
+        VStack(spacing: DVNT.Space.snug) {
+            Image(systemName: "qrcode")
+                .font(.system(size: DVNT.TypeScale.Icon.hero, weight: .light))
+                .foregroundColor(DVNT.accent)
+            Text("RAISE TO PRESENT")
+                .font(DVNT.TypeScale.stamp())
+                .tracking(DVNT.TypeScale.stampTracking)
+                .foregroundColor(DVNT.textMuted)
+        }
     }
-}
-
-private func WKScreenScale() -> CGFloat {
-    WKInterfaceDevice.current().screenScale
 }

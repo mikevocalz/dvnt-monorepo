@@ -4,7 +4,7 @@
  * pulsing glow treatment lives in HeaderLoginButton.web.tsx (CSS only).
  */
 import { Platform, StyleSheet, View } from "react-native";
-import { A } from "@expo/html-elements";
+import { A } from "@dvnt/app/components/ui/html";
 import Animated from "react-native-reanimated";
 import { LANDING_COLORS, LANDING_GRADIENTS } from "../theme";
 

@@ -39,6 +39,7 @@ import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { useOrganizerSetupUIStore } from "@dvnt/app/lib/stores/organizer-setup-ui-store";
 
 const REQ_LABELS: Record<string, string> = {
@@ -63,6 +64,50 @@ function humanizeRequirements(fields: string[]): string {
   if (unique.length === 1) return unique[0];
   if (unique.length === 2) return `${unique[0]} and ${unique[1]}`;
   return `${unique.slice(0, -1).join(", ")}, and ${unique[unique.length - 1]}`;
+}
+
+/** Turn a Stripe requirement code into a specific, actionable instruction. */
+function requirementAction(field: string): string {
+  const label = REQ_LABELS[field] || field.replace(/_/g, " ");
+  if (field.includes("verification.document")) return `Upload your ${label}`;
+  if (field.includes("id_number")) return `Add your ${label}`;
+  if (field === "external_account") return `Verify your ${label}`;
+  if (field.includes("tos_acceptance")) return "Accept the terms of service";
+  return `Add your ${label}`;
+}
+
+/** Format requirements.current_deadline (unix seconds or ISO) as a date. */
+function formatDeadline(
+  value: string | number | null | undefined,
+): string | null {
+  if (value == null) return null;
+  const d =
+    typeof value === "number"
+      ? new Date(value * 1000)
+      : /^\d+$/.test(value)
+        ? new Date(parseInt(value, 10) * 1000)
+        : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+/** Human copy for a restricted account's disabled_reason. */
+function disabledReasonCopy(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  if (reason.startsWith("requirements.past_due"))
+    return "Some required details are past due. Complete them now to keep selling.";
+  if (reason.startsWith("requirements.pending_verification")) return null; // handled as "reviewing"
+  if (reason.startsWith("rejected"))
+    return "Stripe could not verify this account. Contact support to resolve it.";
+  if (reason === "listed" || reason === "under_review")
+    return "Stripe is reviewing your account. No action is needed right now.";
+  if (reason === "platform_paused" || reason === "other")
+    return "Payouts are temporarily paused. Finish any outstanding steps below.";
+  return null;
 }
 
 function StatusRow({
@@ -143,8 +188,7 @@ export function OrganizerSetupScreen() {
   // re-fetch immediately so charges/payouts checkmarks flip without poll.
   useEffect(() => {
     if (!userAuthId) return;
-    const channel = supabase
-      .channel(`organizer-rt:${userAuthId}:${Date.now()}`)
+    const channel = freshChannel(`organizer-rt:${userAuthId}:${Date.now()}`)
       .on(
         "postgres_changes",
         {
@@ -193,6 +237,13 @@ export function OrganizerSetupScreen() {
 
   const blockingFields = status.currently_due ?? [];
   const reviewingFields = status.pending_verification ?? [];
+  const pastDueFields = status.past_due ?? [];
+  // Union of what the user must act on now, past-due first (urgent).
+  const actionFields = [...new Set([...pastDueFields, ...blockingFields])];
+  const deadlineLabel = formatDeadline(status.current_deadline);
+  const reasonCopy = isStripeReviewing
+    ? null
+    : disabledReasonCopy(status.disabled_reason);
 
   // Navigate to host (or create) the moment the account flips fully active —
   // mirrors native's "Create your first event" success CTA target.
@@ -349,6 +400,59 @@ export function OrganizerSetupScreen() {
                   }
                 />
               </div>
+
+              {/* Deadline banner — from stored requirements.current_deadline */}
+              {!isFullyConnected && deadlineLabel && actionFields.length > 0 ? (
+                <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-2.5">
+                  <Clock size={15} color="#F59E0B" className="shrink-0" />
+                  <span className="text-xs text-amber-300">
+                    Complete the steps below by{" "}
+                    <span className="font-semibold">{deadlineLabel}</span> to
+                    keep selling tickets.
+                  </span>
+                </div>
+              ) : null}
+
+              {/* Restricted / disabled reason — specific, not generic */}
+              {!isFullyConnected && reasonCopy ? (
+                <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/8 px-3.5 py-2.5">
+                  <AlertCircle
+                    size={15}
+                    color="#EF4444"
+                    className="mt-0.5 shrink-0"
+                  />
+                  <span className="text-xs text-red-300">{reasonCopy}</span>
+                </div>
+              ) : null}
+
+              {/* Actionable requirement checklist from stored currently/past due */}
+              {!isFullyConnected && actionFields.length > 0 ? (
+                <div className="mb-4 rounded-xl border border-white/8 bg-white/3 p-3.5">
+                  <p className="mb-2 text-xs font-semibold text-white/70">
+                    Stripe still needs
+                  </p>
+                  <div className="space-y-2">
+                    {actionFields.map((field) => {
+                      const isPastDue = pastDueFields.includes(field);
+                      return (
+                        <div key={field} className="flex items-center gap-2.5">
+                          <AlertCircle
+                            size={14}
+                            color={isPastDue ? "#EF4444" : "#F59E0B"}
+                            className="shrink-0"
+                          />
+                          <span
+                            className={`text-sm ${isPastDue ? "text-red-300" : "text-white"}`}
+                          >
+                            {requirementAction(field)}
+                            {isPastDue ? "  • past due" : ""}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
 
               {/* Optional organizer note carried into onboarding */}
               {!isFullyConnected ? (

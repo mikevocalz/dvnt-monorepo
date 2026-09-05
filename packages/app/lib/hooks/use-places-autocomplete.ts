@@ -8,12 +8,6 @@ import type {
   PlacesPrediction,
 } from "@dvnt/app/lib/places/types";
 
-const DEFAULT_BIAS: PlacesBias = {
-  latitude: 34.0522,
-  longitude: -118.2437,
-  radiusMeters: 50_000,
-};
-
 function createSessionToken() {
   const cryptoApi = globalThis.crypto as
     | { randomUUID?: () => string }
@@ -114,7 +108,7 @@ export function usePlacesAutocomplete({
     };
   }, [activeCity, deviceBias, deviceLat, deviceLng, setDeviceLocation]);
 
-  const locationBias = useMemo<PlacesBias>(() => {
+  const locationBias = useMemo<PlacesBias | null>(() => {
     if (activeCity) {
       return {
         latitude: activeCity.lat,
@@ -125,7 +119,11 @@ export function usePlacesAutocomplete({
     if (isFiniteCoord(deviceLat) && isFiniteCoord(deviceLng)) {
       return { latitude: deviceLat, longitude: deviceLng, radiusMeters: 50_000 };
     }
-    return deviceBias || DEFAULT_BIAS;
+    if (deviceBias) return deviceBias;
+    // No city, no device location — send null so the edge fn biases to the
+    // user's approximate location via their IP instead of a hardcoded default
+    // (which used to pin everyone to LA — an NYC user got LA venues).
+    return null;
   }, [activeCity, deviceBias, deviceLat, deviceLng]);
 
   const resetSession = useCallback(() => {

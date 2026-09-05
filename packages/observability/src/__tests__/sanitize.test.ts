@@ -4,12 +4,15 @@
  * Verifies that sensitive data is never sent to Sentry.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   sanitizeForSentry,
   sanitizeValue,
   sanitizeHeaders,
   createBeforeSend,
+  deriveFingerprintKey,
+  isEventClamped,
+  resetFingerprintClamp,
 } from '../sanitize';
 
 describe('sanitizeValue', () => {
@@ -115,7 +118,8 @@ describe('sanitizeForSentry', () => {
     const result = sanitizeForSentry(input);
     expect(result.userId).toBe('user_123');
     expect(result.password).toBe('[REDACTED]');
-    expect((result.profile as any).name).toBe('Test User');
+    // §2.4 identity denylist: `name` is redacted since PROMPT NN.
+    expect((result.profile as any).name).toBe('[REDACTED]');
     expect((result.profile as any).phoneNumber).toBe('[REDACTED]');
     expect((result.tokens as any).accessToken).toBe('[REDACTED]');
     expect((result.tokens as any).refreshToken).toBe('[REDACTED]');
@@ -190,5 +194,128 @@ describe('createBeforeSend', () => {
 
     const result = beforeSend(event);
     expect(result.user.email).toBe('admin@dvntapp.live');
+  });
+});
+
+// Budget clamp: after N events sharing a derived fingerprint in one session,
+// the rest are dropped client-side + one summary breadcrumb is emitted.
+describe('per-session fingerprint clamp', () => {
+  beforeEach(() => {
+    resetFingerprintClamp();
+  });
+
+  function errorEvent(
+    type: string,
+    value: string,
+    frames: Array<{ filename?: string; function?: string }> = [
+      { filename: 'app.js', function: 'outer' },
+      { filename: 'app.js', function: 'boom' },
+    ],
+  ) {
+    return {
+      exception: {
+        values: [{ type, value, stacktrace: { frames } }],
+      },
+    };
+  }
+
+  it('derives a deterministic key from type + message + top (last) frame', () => {
+    const key = deriveFingerprintKey(errorEvent('TypeError', 'x is not a function'));
+    expect(key).toBe('TypeError|x is not a function|app.js:boom');
+    expect(deriveFingerprintKey(errorEvent('TypeError', 'x is not a function'))).toBe(key);
+    expect(deriveFingerprintKey({ message: 'plain message' })).toBe('Error|plain message|noframe');
+  });
+
+  it('passes the first N events, drops every one after', () => {
+    const beforeSend = createBeforeSend();
+    for (let i = 0; i < 5; i++) {
+      expect(beforeSend(errorEvent('TypeError', 'x is not a function'))).not.toBeNull();
+    }
+    expect(beforeSend(errorEvent('TypeError', 'x is not a function'))).toBeNull();
+    expect(beforeSend(errorEvent('TypeError', 'x is not a function'))).toBeNull();
+  });
+
+  it('counts fingerprints independently', () => {
+    const beforeSend = createBeforeSend();
+    for (let i = 0; i < 6; i++) beforeSend(errorEvent('TypeError', 'x is not a function'));
+    // A different bug is unaffected by the clamped one.
+    expect(beforeSend(errorEvent('RangeError', 'out of bounds'))).not.toBeNull();
+  });
+
+  it('respects a configurable limit', () => {
+    const beforeSend = createBeforeSend({ clampLimit: 2 });
+    expect(beforeSend(errorEvent('TypeError', 'x is not a function'))).not.toBeNull();
+    expect(beforeSend(errorEvent('TypeError', 'x is not a function'))).not.toBeNull();
+    expect(beforeSend(errorEvent('TypeError', 'x is not a function'))).toBeNull();
+  });
+
+  it('emits ONE summary breadcrumb on the next event that goes out', () => {
+    const beforeSend = createBeforeSend({ clampLimit: 1 });
+    beforeSend(errorEvent('TypeError', 'x is not a function'));
+    beforeSend(errorEvent('TypeError', 'x is not a function')); // dropped → queues crumb
+    beforeSend(errorEvent('TypeError', 'x is not a function')); // dropped → no second crumb
+
+    const next = beforeSend(errorEvent('RangeError', 'out of bounds'));
+    const crumbs = next.breadcrumbs.filter((c: any) => c.category === 'observability.clamp');
+    expect(crumbs).toHaveLength(1);
+    expect(crumbs[0].message).toBe(
+      'clamped fingerprint TypeError|x is not a function|app.js:boom after 1 events',
+    );
+
+    // Delivered once — the following event carries no clamp breadcrumb.
+    const after = beforeSend(errorEvent('SyntaxError', 'unexpected token'));
+    expect(after.breadcrumbs ?? []).toHaveLength(0);
+  });
+
+  it('reports clamped fingerprints via isEventClamped (replay gating)', () => {
+    const beforeSend = createBeforeSend({ clampLimit: 1 });
+    const event = errorEvent('TypeError', 'x is not a function');
+    expect(isEventClamped(event)).toBe(false);
+    beforeSend(errorEvent('TypeError', 'x is not a function'));
+    expect(isEventClamped(event)).toBe(false);
+    beforeSend(errorEvent('TypeError', 'x is not a function')); // over budget
+    expect(isEventClamped(event)).toBe(true);
+  });
+
+  it('never clamps events without an exception or message', () => {
+    const beforeSend = createBeforeSend({ clampLimit: 1 });
+    for (let i = 0; i < 10; i++) {
+      expect(beforeSend({ request: { data: { screen: '/feed' } } })).not.toBeNull();
+    }
+  });
+
+  it('never clamps transactions', () => {
+    const beforeSend = createBeforeSend({ clampLimit: 1 });
+    for (let i = 0; i < 10; i++) {
+      expect(beforeSend({ type: 'transaction', message: 'same' })).not.toBeNull();
+    }
+  });
+});
+
+// §2.4 acceptance: a poisoned event with email + hiv_status arrives stripped.
+describe('§2.4 identity denylist', () => {
+  it('strips demographic/identity keys and patterns', () => {
+    const result = sanitizeForSentry({
+      email: 'person@example.com',
+      hiv_status: 'positive',
+      gender: 'x',
+      pronouns: 'they/them',
+      sexuality: ['Queer'],
+      eventAudience: 'Everyone',
+      date_of_birth: '1990-01-01',
+      surveyAnswers: { q1: 'yes' },
+      id_image_url: 'https://cdn/x.png',
+      safeCount: 3,
+    });
+    expect(result.hiv_status).toBe('[REDACTED]');
+    expect(result.gender).toBe('[REDACTED]');
+    expect(result.pronouns).toBe('[REDACTED]');
+    expect(result.sexuality).toBe('[REDACTED]');
+    expect(result.eventAudience).toBe('[REDACTED]');
+    expect(result.date_of_birth).toBe('[REDACTED]');
+    expect(result.surveyAnswers).toBe('[REDACTED]');
+    expect(result.id_image_url).toBe('[REDACTED]');
+    expect(String(result.email)).not.toContain('person@example.com');
+    expect(result.safeCount).toBe(3);
   });
 });

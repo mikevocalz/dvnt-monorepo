@@ -1,3 +1,4 @@
+import { watchNotificationFields } from "../_shared/watch-notification.ts";
 /**
  * notify-event-change Edge Function
  *
@@ -199,11 +200,15 @@ Deno.serve(async (req: Request) => {
     let pushed = 0;
     if (tokens && tokens.length > 0) {
       const messages = tokens.map((t: any) => ({
+        ...watchNotificationFields("event_changed", { eventId: String(eventId), eventStartAt: event.start_date }),
         to: t.token,
         title: "Event details changed",
         body: summary,
         data: {
           type: "event_changed",
+          eventId: String(eventId),
+          recipientId: String(t.user_id),
+          issuedAt: Date.now() / 1000,
           entityType: "event",
           entityId: String(eventId),
           changes,

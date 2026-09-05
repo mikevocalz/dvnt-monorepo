@@ -23,6 +23,7 @@ import Animated, {
   FadeOut,
   useSharedValue,
   useAnimatedStyle,
+  useReducedMotion,
   withSequence,
   withTiming,
 } from "react-native-reanimated";
@@ -35,6 +36,7 @@ import {
   Zap,
   ZapOff,
 } from "lucide-react-native";
+import type { ScanAddonSummary } from "@dvnt/app/lib/api/tickets";
 import { useScanTicket } from "@dvnt/app/lib/hooks/use-tickets";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -70,9 +72,18 @@ const hasVisionCamera =
 
 type ScanResult = {
   type: "success" | "error" | "already_scanned" | "not_found";
+  /** "addon" when the scanned QR was an order_addons redemption. */
+  kind?: "ticket" | "addon";
   name?: string;
   tierName?: string;
   message?: string;
+  /** Order add-ons shown on the result card ("VIP table ×1 — unredeemed"). */
+  addons?: ScanAddonSummary[];
+  /** already_scanned: the ORIGINAL check-in facts from the server CAS. */
+  checkedInAt?: string | null;
+  checkedInByName?: string | null;
+  /** Duplicate verdict painted from LOCAL knowledge (<300ms) pending server. */
+  optimistic?: boolean;
 };
 
 type ScanHistoryEntry = {
@@ -82,6 +93,242 @@ type ScanHistoryEntry = {
   tierName?: string;
   timestamp: number;
 };
+
+// ── AddonRows ─────────────────────────────────────────────────────────────────
+// Order add-ons on the scan result card: "VIP table ×1 — unredeemed".
+function AddonRows({ addons }: { addons: ScanAddonSummary[] }) {
+  if (!addons.length) return null;
+  return (
+    <View
+      style={{
+        width: "100%",
+        backgroundColor: "rgba(0,0,0,0.25)",
+        borderRadius: 12,
+        padding: 8,
+        marginTop: 4,
+      }}
+    >
+      <Text
+        style={{
+          color: "rgba(255,255,255,0.5)",
+          fontSize: 10,
+          fontWeight: "600",
+          textTransform: "uppercase",
+          letterSpacing: 1,
+          paddingHorizontal: 4,
+          paddingBottom: 4,
+        }}
+      >
+        Add-ons
+      </Text>
+      {addons.map((a, i) => {
+        const redeemed = a.status === "redeemed";
+        const refunded = a.status === "refunded";
+        const state = refunded
+          ? "refunded"
+          : redeemed
+            ? "redeemed"
+            : "unredeemed";
+        return (
+          <View
+            key={a.id}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              paddingHorizontal: 4,
+              paddingVertical: 6,
+              borderTopWidth: i === 0 ? 0 : 1,
+              borderTopColor: "rgba(255,255,255,0.1)",
+            }}
+          >
+            <Text
+              numberOfLines={1}
+              style={{
+                flex: 1,
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: "500",
+              }}
+            >
+              {a.name}
+              {a.variant_name ? (
+                <Text style={{ color: "rgba(255,255,255,0.6)" }}>
+                  {" "}
+                  · {a.variant_name}
+                </Text>
+              ) : null}
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.8)",
+                  fontVariant: ["tabular-nums"],
+                }}
+              >
+                {" "}
+                ×{a.quantity}
+              </Text>
+            </Text>
+            <View
+              style={{
+                borderRadius: 4,
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                backgroundColor:
+                  redeemed || refunded ? "rgba(0,0,0,0.4)" : "#fff",
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 10,
+                  fontWeight: "600",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.6,
+                  color:
+                    redeemed || refunded ? "rgba(255,255,255,0.6)" : "#000",
+                  textDecorationLine: refunded ? "line-through" : "none",
+                }}
+              >
+                {state}
+              </Text>
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// ── DuplicateFlash ────────────────────────────────────────────────────────────
+// LOUD full-screen duplicate flag: solid signal-red flash + the ORIGINAL scan
+// time/scanner rendered large. Paints optimistically (<300ms) when the offline
+// store already knew the token; server confirmation replaces it. Honors
+// reduced-motion (no strobe, static red).
+function DuplicateFlash({
+  result,
+  onDismiss,
+}: {
+  result: ScanResult;
+  onDismiss: () => void;
+}) {
+  const reducedMotion = useReducedMotion();
+  const flash = useSharedValue(1);
+  const flashStyle = useAnimatedStyle(() => ({ opacity: flash.value }));
+
+  useEffect(() => {
+    if (reducedMotion) return;
+    // Double-strobe inside the 280ms motion budget, then settle solid.
+    flash.value = 0.35;
+    flash.value = withSequence(
+      withTiming(1, { duration: 70 }),
+      withTiming(0.55, { duration: 60 }),
+      withTiming(1, { duration: 150 }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reducedMotion]);
+
+  const scannedAt = result.checkedInAt ? new Date(result.checkedInAt) : null;
+  const timeLabel = scannedAt
+    ? scannedAt.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null;
+  const dateLabel = scannedAt
+    ? scannedAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : null;
+
+  return (
+    <Animated.View
+      entering={FadeIn.duration(80)}
+      exiting={FadeOut.duration(150)}
+      style={[
+        {
+          position: "absolute",
+          inset: 0,
+          backgroundColor: "#FC253A",
+          zIndex: 110,
+        },
+        flashStyle,
+      ]}
+    >
+      <Pressable
+        onPress={onDismiss}
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          gap: 12,
+          paddingHorizontal: 32,
+        }}
+      >
+        <AlertTriangle size={64} color="#fff" strokeWidth={2.5} />
+        <Text
+          style={{
+            color: "#fff",
+            fontSize: 28,
+            fontWeight: "700",
+            textTransform: "uppercase",
+            letterSpacing: 2,
+            textAlign: "center",
+          }}
+        >
+          Already scanned
+        </Text>
+        {result.kind === "addon" && result.name ? (
+          <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: 16, fontWeight: "600" }}>
+            {result.name}
+          </Text>
+        ) : null}
+        {timeLabel ? (
+          <Text
+            selectable
+            style={{
+              color: "#fff",
+              fontSize: 40,
+              fontWeight: "800",
+              fontVariant: ["tabular-nums"],
+            }}
+          >
+            {timeLabel}
+          </Text>
+        ) : null}
+        {dateLabel || result.checkedInByName ? (
+          <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 15, fontWeight: "500" }}>
+            {dateLabel}
+            {result.checkedInByName ? ` · by ${result.checkedInByName}` : ""}
+          </Text>
+        ) : null}
+        {!timeLabel && result.message ? (
+          <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 15, textAlign: "center" }}>
+            {result.message}
+          </Text>
+        ) : null}
+        {result.optimistic ? (
+          <Text
+            style={{
+              color: "rgba(255,255,255,0.7)",
+              fontSize: 12,
+              fontWeight: "600",
+              textTransform: "uppercase",
+              letterSpacing: 1,
+            }}
+          >
+            Confirming with server…
+          </Text>
+        ) : null}
+        {result.addons?.length ? (
+          <View style={{ width: "100%", maxWidth: 360 }}>
+            <AddonRows addons={result.addons} />
+          </View>
+        ) : null}
+        <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 12, marginTop: 8 }}>
+          Tap anywhere to scan next
+        </Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
 
 function ScanResultOverlay({
   result,
@@ -102,15 +349,16 @@ function ScanResultOverlay({
     );
   }, []);
 
+  // Duplicates get the loud full-screen treatment.
+  if (result.type === "already_scanned") {
+    return <DuplicateFlash result={result} onDismiss={onDismiss} />;
+  }
+
   const isSuccess = result.type === "success";
   const bgColor = isSuccess
     ? "rgba(34, 197, 94, 0.95)"
     : "rgba(239, 68, 68, 0.95)";
-  const Icon = isSuccess
-    ? CheckCircle2
-    : result.type === "already_scanned"
-      ? AlertTriangle
-      : XCircle;
+  const Icon = isSuccess ? CheckCircle2 : XCircle;
 
   return (
     <Animated.View
@@ -152,12 +400,12 @@ function ScanResultOverlay({
             }}
           >
             {isSuccess
-              ? "Checked In!"
-              : result.type === "already_scanned"
-                ? "Already Scanned"
-                : result.type === "not_found"
-                  ? "Invalid Ticket"
-                  : "Scan Error"}
+              ? result.kind === "addon"
+                ? "Add-on Redeemed!"
+                : "Checked In!"
+              : result.type === "not_found"
+                ? "Invalid Ticket"
+                : "Scan Error"}
           </Text>
           {result.name && (
             <Text
@@ -186,6 +434,7 @@ function ScanResultOverlay({
               {result.message}
             </Text>
           )}
+          {result.addons?.length ? <AddonRows addons={result.addons} /> : null}
           <Text
             style={{
               color: "rgba(255,255,255,0.5)",
@@ -296,26 +545,64 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
 
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
+      // ── <300ms duplicate first paint ──────────────────────────────
+      // If this device already knows the token was scanned (offline set
+      // or a prior online success), flip the loud duplicate UI + warning
+      // haptic NOW from local knowledge; the server confirmation (with
+      // the ORIGINAL checked_in_at/by) follows. Server always wins.
+      const knownDuplicate = offlineStore.isAlreadyScanned(eventId, qrToken);
+      if (knownDuplicate) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        setScanResult({
+          type: "already_scanned",
+          optimistic: true,
+          message: "This ticket was already scanned on this device",
+        });
+        setScanHistory((h) =>
+          [
+            {
+              id: `${Date.now()}`,
+              type: "already_scanned" as const,
+              timestamp: Date.now(),
+            },
+            ...h,
+          ].slice(0, 50),
+        );
+      }
+
       scanMutation.mutate(
         { qrToken, scannedBy: authUser?.id, eventId },
         {
           onSuccess: (data) => {
             if (data.valid) {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+              const isAddon = data.kind === "addon";
+              const name = isAddon
+                ? [data.addon?.name, data.addon?.variant_name]
+                    .filter(Boolean)
+                    .join(" · ")
+                : data.ticket?.name;
+              const tierName = isAddon
+                ? `Add-on ×${data.addon?.quantity ?? 1}`
+                : data.ticket?.tier_name;
               const entry: ScanHistoryEntry = {
                 id: `${Date.now()}`,
                 type: "success",
-                name: data.ticket?.name,
-                tierName: data.ticket?.tier_name,
+                name,
+                tierName,
                 timestamp: Date.now(),
               };
               setScanResult({
                 type: "success",
-                name: data.ticket?.name,
-                tierName: data.ticket?.tier_name,
+                kind: data.kind ?? "ticket",
+                name,
+                tierName,
+                addons: data.addons,
               });
               setScanCount((c) => c + 1);
               setScanHistory((h) => [entry, ...h].slice(0, 50));
+              // Seed local knowledge so a re-scan flips instantly.
+              offlineStore.markScannedLocal(eventId, qrToken);
             } else {
               const isDuplicate = data.reason === "already_scanned";
               Haptics.notificationAsync(
@@ -328,25 +615,45 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                 : ("not_found" as const);
               setScanResult({
                 type: resultType,
+                kind: data.kind ?? "ticket",
+                name:
+                  data.kind === "addon" && data.addon
+                    ? [data.addon.name, data.addon.variant_name]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : undefined,
+                // Server truth: the ORIGINAL check-in facts.
+                checkedInAt: data.checked_in_at ?? null,
+                checkedInByName: data.checked_in_by_name ?? null,
+                addons: data.addons,
+                optimistic: false,
                 message: isDuplicate
                   ? "This ticket was already scanned"
                   : data.reason === "refunded"
                     ? "This ticket has been refunded"
                     : "This QR code is not a valid ticket",
               });
-              setScanHistory((h) =>
-                [
-                  {
-                    id: `${Date.now()}`,
-                    type: resultType,
-                    timestamp: Date.now(),
-                  },
-                  ...h,
-                ].slice(0, 50),
-              );
+              if (isDuplicate) {
+                offlineStore.markScannedLocal(eventId, qrToken);
+              }
+              // Optimistic paint already logged this duplicate.
+              if (!(isDuplicate && knownDuplicate)) {
+                setScanHistory((h) =>
+                  [
+                    {
+                      id: `${Date.now()}`,
+                      type: resultType,
+                      timestamp: Date.now(),
+                    },
+                    ...h,
+                  ].slice(0, 50),
+                );
+              }
             }
           },
           onError: () => {
+            // Network down — the optimistic duplicate verdict stands.
+            if (knownDuplicate) return;
             if (hasOfflineData) {
               if (offlineStore.isAlreadyScanned(eventId, qrToken)) {
                 Haptics.notificationAsync(
@@ -354,6 +661,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                 );
                 setScanResult({
                   type: "already_scanned",
+                  optimistic: true,
                   message: "This ticket was already scanned (offline)",
                 });
                 setScanHistory((h) =>
@@ -381,6 +689,32 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                       id: `${Date.now()}`,
                       type: "success" as const,
                       name: "Verified Offline",
+                      timestamp: Date.now(),
+                    },
+                    ...h,
+                  ].slice(0, 50),
+                );
+              } else if (offlineStore.isAddonTokenValid(eventId, qrToken)) {
+                // Add-on rail — queue with the kind discriminator.
+                offlineStore.markScannedOffline(
+                  eventId,
+                  qrToken,
+                  authUser?.id,
+                  "addon",
+                );
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                setScanResult({
+                  type: "success",
+                  kind: "addon",
+                  name: "Add-on Verified Offline",
+                });
+                setScanCount((c) => c + 1);
+                setScanHistory((h) =>
+                  [
+                    {
+                      id: `${Date.now()}`,
+                      type: "success" as const,
+                      name: "Add-on Verified Offline",
                       timestamp: Date.now(),
                     },
                     ...h,

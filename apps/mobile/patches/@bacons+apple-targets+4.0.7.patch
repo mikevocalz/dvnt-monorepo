@@ -1,0 +1,13 @@
+diff --git a/node_modules/@bacons/apple-targets/build/with-xcode-changes.js b/node_modules/@bacons/apple-targets/build/with-xcode-changes.js
+index 343bcb9..3838a13 100644
+--- a/node_modules/@bacons/apple-targets/build/with-xcode-changes.js
++++ b/node_modules/@bacons/apple-targets/build/with-xcode-changes.js
+@@ -61,7 +61,7 @@ async function applyXcodeChanges(config, project, props) {
+     }
+     const targets = getExtensionTargets();
+     const productName = props.productName;
+-    let targetToUpdate = (_a = targets.find((target) => target.props.productName === productName)) !== null && _a !== void 0 ? _a : targets[0];
++    let targetToUpdate = targets.find((target) => target.props.productName === productName);
+     if (targetToUpdate) {
+         (0, util_1.warnOnce)(`Target "${targetToUpdate.props.productName}" already exists, updating instead of creating a new one`);
+     }

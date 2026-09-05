@@ -17,8 +17,11 @@ import {
   welcome as welcomeEmail,
   resetPassword as resetPasswordEmail,
   verifyEmailLink,
+  accountLinked as accountLinkedEmail,
+  magicLinkEmail,
 } from "../_shared/email/templates.ts";
 import { brandEmailWrapper } from "../_shared/email/wrapper.ts";
+import { checkRateLimit } from "../_shared/rate-limit.ts";
 
 // ─── Env ────────────────────────────────────────────────────────────────────
 const DATABASE_URL = Deno.env.get("DATABASE_URL") || "";
@@ -40,6 +43,8 @@ const AUTH_BASE_URL = SUPABASE_URL; // Origin only — basePath stripping below 
 const OAUTH_CALLBACK_BASE = `${SUPABASE_URL}/functions/v1/auth/api/auth/callback`;
 const APPLE_CLIENT_ID = Deno.env.get("APPLE_CLIENT_ID") || "";
 const APPLE_CLIENT_SECRET = Deno.env.get("APPLE_CLIENT_SECRET") || "";
+const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID") || "";
+const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
 
 // Append the Supabase anon key as a query param so browser-initiated
 // GETs (reset-password, verify-email links from email) pass the gateway
@@ -104,7 +109,7 @@ console.log("[Auth] AUTH_BASE_URL:", AUTH_BASE_URL);
 // harmless for them. (This was the cause of web "Failed to fetch" on login.)
 const CORS_BASE: Record<string, string> = {
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, cookie, set-cookie",
+    "authorization, x-client-info, apikey, content-type, cookie, set-cookie, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Credentials": "true",
   "Access-Control-Expose-Headers": "set-auth-token, set-cookie",
@@ -175,9 +180,9 @@ async function getAuth() {
     console.log("[Auth] Initializing Better Auth...");
 
     // Import Better Auth + plugins
-    const { betterAuth } = await import("npm:better-auth@1.5.5");
-    const { expo } = await import("npm:@better-auth/expo@1.5.5");
-    const { username } = await import("npm:better-auth@1.5.5/plugins");
+    const { betterAuth } = await import("npm:better-auth@1.6.26");
+    const { expo } = await import("npm:@better-auth/expo@1.6.26");
+    const { username, magicLink } = await import("npm:better-auth@1.6.26/plugins");
     // Import npm:pg — Deno supports Node built-ins (node:net, node:tls) needed by pg
     const pgModule = await import("npm:pg@8.13.1");
     const Pool = pgModule.Pool || pgModule.default?.Pool || pgModule.default;
@@ -238,9 +243,58 @@ async function getAuth() {
           .filter(Boolean),
         AUTH_BASE_URL,
       ],
-      plugins: [expo(), username()],
-      socialProviders:
-        APPLE_CLIENT_ID && APPLE_CLIENT_SECRET
+      plugins: [
+        expo(),
+        username(),
+        // B4: BetterAuth mints/expires/verifies the link token; Resend only
+        // delivers. sendMagicLink signature verified against
+        // better-auth@1.6.26/dist/plugins/magic-link/index.d.mts:35.
+        magicLink({
+          expiresIn: 60 * 15,
+          // Login-only. Without this, verifying a link for an unknown email
+          // mints a fresh user (emailVerified:true, no name, no account row,
+          // no Payload profile) — the "@"/"U" ghost cards in Explore.
+          // Signup owns user creation; it provisions the profile + username.
+          // Option verified: better-auth@1.6.26 magic-link/index.d.mts:44.
+          disableSignUp: true,
+          sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
+            // Better Auth emits {SUPABASE_ORIGIN}/api/auth/magic-link/verify.
+            // For web sign-ins the verify hop must run through the dvntapp.live
+            // /api/auth proxy so the session cookie lands FIRST-party (same
+            // constraint as the Google callback). App-scheme callbacks keep the
+            // original host — the Expo plugin handles the deep link.
+            let sendUrl = url;
+            try {
+              const u = new URL(url);
+              const cb = u.searchParams.get("callbackURL") || "";
+              if (/^https?:\/\/(www\.)?dvntapp\.live/i.test(cb)) {
+                sendUrl = `https://dvntapp.live${u.pathname.replace(/^.*(\/api\/auth\/)/, "/api/auth/")}${u.search}`;
+              }
+            } catch { /* send the original URL */ }
+            const { subject, html } = magicLinkEmail(sendUrl);
+            await sendEmail(email, subject, html);
+          },
+        }),
+      ],
+      socialProviders: {
+        ...(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET
+          ? {
+              google: {
+                clientId: GOOGLE_CLIENT_ID,
+                clientSecret: GOOGLE_CLIENT_SECRET,
+                // Web-first: the callback must land on the WEB origin (proxied
+                // to this fn by Next's /api/auth rewrite) so the session cookie
+                // is first-party on dvntapp.live. A supabase.co callback (like
+                // Apple's native flow) would set cookies the browser never
+                // sends back to the app. Must match the URI registered in the
+                // Google Cloud OAuth client.
+                redirectURI:
+                  Deno.env.get("GOOGLE_REDIRECT_URI") ||
+                  "https://dvntapp.live/api/auth/callback/google",
+              },
+            }
+          : {}),
+        ...(APPLE_CLIENT_ID && APPLE_CLIENT_SECRET
           ? {
               apple: {
                 clientId: APPLE_CLIENT_ID,
@@ -258,7 +312,8 @@ async function getAuth() {
                 redirectURI: `${OAUTH_CALLBACK_BASE}/apple`,
               },
             }
-          : undefined,
+          : {}),
+      },
       emailAndPassword: {
         enabled: true,
         minPasswordLength: 8,
@@ -297,6 +352,19 @@ async function getAuth() {
       databaseHooks: {
         user: {
           create: {
+            // BETA GATE REMOVED 2026-08-09 at Mike's request — signup is now
+            // OPEN to any email. The gate lived here as a `before` hook that
+            // rejected addresses missing from public.allowlisted_emails with
+            // 403 BETA_ONLY, for every signup method (email/password AND OAuth).
+            //
+            // Nothing else was deleted: the allowlisted_emails table and the
+            // is_allowlisted() / hook_restrict_signup_beta() functions are all
+            // still in the database, so re-gating means restoring this block
+            // (git history: the commit that removed it) and redeploying — no
+            // migration needed.
+            //
+            // Client-side BETA_ONLY handling is also still in place
+            // (SignupScreen.web.tsx, SignUpStep2.tsx); it simply never fires now.
             // CANONICAL welcome trigger. Fires server-side for EVERY signup
             // method (email/password AND Apple/Google OAuth), so it's the one
             // place welcome is sent. The legacy POST /auth/send-welcome endpoint
@@ -309,6 +377,102 @@ async function getAuth() {
               const name = user.name || user.email.split("@")[0];
               const { subject, html } = welcomeEmail(name);
               await sendEmail(user.email, subject, html);
+            },
+          },
+        },
+        session: {
+          create: {
+            // GUEST → ACCOUNT CLAIM (WS-7/13). Fires on EVERY session
+            // establishment (email/password, OAuth, magic-link verify), so a
+            // guest who signs in by any method inherits their guest orders.
+            // Hook name + payload verified against the installed
+            // @better-auth/core@1.5.5 source:
+            //   dist/types/init-options.d.mts:1097-1112 —
+            //   session.create.after?: (session: Session & Record<string,
+            //   unknown>, context: GenericEndpointContext | null) => Promise<void>
+            // The Session payload carries userId (not the user), so we read
+            // email + emailVerified from the "user" row ourselves.
+            //
+            // VERIFIED-EMAIL CONTRACT (claim_guest_orders): only claim when
+            // "emailVerified" is true. Magic-link verification sets it
+            // (better-auth@1.6.26 dist/plugins/magic-link/index.mjs:140-150:
+            // new users are created with emailVerified: true, existing users
+            // are updated to true, then createSession fires this hook).
+            // Unverified email/password sign-ins are skipped — fail closed.
+            //
+            // claim_guest_orders is idempotent (matches user_id IS NULL only),
+            // so firing on every sign-in is safe. Best-effort: a claim
+            // failure must NEVER block auth.
+            after: async (session: any) => {
+              try {
+                const userId = String(session?.userId ?? "");
+                if (!userId) return;
+                const { rows } = await pool.query(
+                  'select "email", "emailVerified" from "user" where "id" = $1',
+                  [userId],
+                );
+                const u = rows?.[0];
+                if (!u?.email || !u.emailVerified) return;
+                const { rows: claimed } = await pool.query(
+                  "select public.claim_guest_orders($1, $2) as result",
+                  [userId, u.email],
+                );
+                const result = claimed?.[0]?.result;
+                if (
+                  result?.ok &&
+                  (Number(result.ordersClaimed) > 0 ||
+                    Number(result.ticketsClaimed) > 0)
+                ) {
+                  console.log(
+                    `[Auth] Guest claim: re-parented ${result.ordersClaimed} order(s) + ${result.ticketsClaimed} ticket(s) onto user ${userId}`,
+                  );
+                }
+              } catch (err) {
+                console.error(
+                  "[Auth] guest claim failed (non-blocking):",
+                  err,
+                );
+              }
+            },
+          },
+        },
+        account: {
+          create: {
+            // MERGE NOTICE. Fires whenever a provider account row is created.
+            // If a SOCIAL account (google/apple) lands on a user who already
+            // has another sign-in method, account linking just merged them —
+            // tell the person by email. Fresh social signups (no prior
+            // account rows) get the welcome email above instead, not this.
+            // Best-effort: an email failure must never block the sign-in.
+            after: async (account: any) => {
+              try {
+                const provider = String(account?.providerId ?? "");
+                if (provider === "credential") return;
+                const { rows: others } = await pool.query(
+                  'select "providerId" from "account" where "userId" = $1 and "id" <> $2 limit 1',
+                  [account.userId, account.id],
+                );
+                if (!others?.length) return; // brand-new social signup
+                const { rows: users } = await pool.query(
+                  'select "name", "email" from "user" where "id" = $1',
+                  [account.userId],
+                );
+                const u = users?.[0];
+                if (!u?.email) return;
+                const providerLabel =
+                  provider.charAt(0).toUpperCase() + provider.slice(1);
+                const name = u.name || String(u.email).split("@")[0];
+                console.log(
+                  `[Auth] ${providerLabel} account merged into existing user ${u.email} — sending notice`,
+                );
+                const { subject, html } = accountLinkedEmail(name, {
+                  provider: providerLabel,
+                  email: u.email,
+                });
+                await sendEmail(u.email, subject, html);
+              } catch (err) {
+                console.error("[Auth] account-linked email failed:", err);
+              }
             },
           },
         },
@@ -388,6 +552,83 @@ Deno.serve(async (req: Request) => {
         status: 200,
         headers: { ...corsFor(req), "Content-Type": "application/json" },
       },
+    );
+  }
+
+  // Guest → account claim entry point (WS-7/13). The "Add to my account" CTA
+  // in guest ticket emails points here (via the dvntapp.live /api/auth proxy,
+  // so the eventual session cookie lands first-party). Magic-link tokens live
+  // 15 minutes, so the ticket email can't carry a pre-minted link — this
+  // route mints a FRESH one per click through the Better Auth magic-link
+  // plugin's server API (auth.api.signInMagicLink — verified against
+  // better-auth@1.6.26 dist/plugins/magic-link/index.d.mts:66-120; BetterAuth
+  // mints, Resend delivers via the plugin's sendMagicLink above). After the
+  // user taps the link, verification marks the email verified, a session is
+  // created, and the session.create.after hook claims the guest orders.
+  //
+  // Enumeration-safe: the response is identical whether or not the email has
+  // tickets or an account. Rate-limited per email and per IP.
+  if (
+    (path === "/auth/api/auth/guest-claim" || path === "/auth/guest-claim") &&
+    req.method === "GET"
+  ) {
+    const claimPage = (title: string, bodyText: string) =>
+      new Response(
+        brandEmailWrapper(
+          `<h1 style="margin:0 0 12px;font-size:24px;color:#ffffff">${title}</h1><p style="margin:0;font-size:15px;line-height:1.6;color:#b8b8c2">${bodyText}</p>`,
+          { preheader: title },
+        ),
+        {
+          status: 200,
+          headers: { ...corsFor(req), "Content-Type": "text/html; charset=utf-8" },
+        },
+      );
+
+    const email = (url.searchParams.get("email") || "").trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+      return claimPage(
+        "That link looks incomplete",
+        "We couldn't read the email address on this link. Open the ticket email again and tap the button once more.",
+      );
+    }
+
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const emailRl = checkRateLimit(email, "guest-claim", {
+      maxRequests: 3,
+      windowMs: 10 * 60_000,
+    });
+    const ipRl = checkRateLimit(ip, "guest-claim-ip", {
+      maxRequests: 20,
+      windowMs: 10 * 60_000,
+    });
+    if (!emailRl.allowed || !ipRl.allowed) {
+      return claimPage(
+        "Hold on a moment",
+        "We recently sent a sign-in link to this address. Check your inbox (and spam), or try again in a few minutes.",
+      );
+    }
+
+    try {
+      const auth = await getAuth();
+      // Fixed callback — never taken from the query string (open-redirect
+      // hygiene). Lands on the web my-tickets surface with a first-party
+      // session; the claim already ran server-side in the session hook.
+      await auth.api.signInMagicLink({
+        body: {
+          email,
+          callbackURL: "https://dvntapp.live/feed/events/my-tickets",
+        },
+        headers: req.headers,
+      });
+    } catch (err) {
+      // Same response on failure — no enumeration signal. Log for ops.
+      console.error("[Auth] guest-claim magic-link mint failed:", err);
+    }
+
+    return claimPage(
+      "Check your email",
+      `If tickets or an account exist for <strong style="color:#ffffff">${email.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</strong>, a secure one-time sign-in link is on its way. It expires in 15 minutes. You can close this tab.`,
     );
   }
 

@@ -21,6 +21,7 @@ import {
   Flag,
   Languages,
 } from "lucide-react";
+import { UserAvatar } from "@dvnt/app/components/ui/avatar";
 import { usePost, useDeletePost } from "@dvnt/app/lib/hooks/use-posts";
 import { useComments, useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
@@ -36,18 +37,20 @@ import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
 import { useCarouselStore } from "@dvnt/app/lib/stores/carousel-store";
 import { usePostTagsUIStore } from "@dvnt/app/lib/stores/post-tags-store";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
+import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
 import { useReportSheetStore } from "@dvnt/app/lib/stores/report-sheet-store";
 import {
   usePostDetailUIStore,
   useLikesSheet,
 } from "@dvnt/app/lib/stores/post-detail-ui-store";
-import { ThreadedComment } from "@dvnt/app/components/comments/threaded-comment";
+import { ThreadedComment } from "@dvnt/app/features/comments";
 import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
 import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog, Drawer } from "@dvnt/ui";
 import { postsApi } from "@dvnt/app/lib/api/posts";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
-import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
+import { TextPostSurface } from "./ui/TextPostSurface";
+import { CAROUSEL_DOT_COLORS } from "@dvnt/app/components/feed/feed-media-mode";
 
 const VIDEO_URL_RE = /post-video|\.mp4(\?|$)|\.mov(\?|$)|\.m3u8(\?|$)|\.webm(\?|$)/i;
 
@@ -196,21 +199,27 @@ export function PostDetailScreen() {
           <button onClick={() => router.back()} aria-label="Back">
             <ArrowLeft size={22} color="#fff" />
           </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={post.author.avatar}
-            alt=""
-            className="w-10 h-10 rounded-xl object-cover bg-white/10"
-          />
-          <div className="flex flex-col leading-tight">
-            <span className="font-bold text-[15px]">
-              @{post.author.username}
-              {post.author.verified ? " ✓" : ""}
-            </span>
-            {metaLine ? (
-              <span className="text-white/45 text-xs">{metaLine}</span>
-            ) : null}
-          </div>
+          <button
+            onClick={() => router.push(`/feed/${post.author.username}`)}
+            className="flex items-center gap-3 text-left"
+            aria-label={`View @${post.author.username}'s profile`}
+          >
+            {/* Shared Avatar: same roundedSquare shape the comment rows use. */}
+            <UserAvatar
+              uri={post.author.avatar}
+              username={post.author.username}
+              size={40}
+            />
+            <div className="flex flex-col leading-tight">
+              <span className="font-bold text-[15px]">
+                @{post.author.username}
+                {post.author.verified ? " ✓" : ""}
+              </span>
+              {metaLine ? (
+                <span className="text-white/45 text-xs">{metaLine}</span>
+              ) : null}
+            </div>
+          </button>
           {/* ⋯ overflow menu — opens the action Drawer. */}
           <button
             onClick={() => setShowMenu(true)}
@@ -280,11 +289,18 @@ export function PostDetailScreen() {
         {post.caption ? (
           <div className="px-4 pb-3">
             <p className="text-[15px] leading-relaxed">
-              <span className="font-bold">@{post.author.username}</span>{" "}
+              <button
+                onClick={() => router.push(`/feed/${post.author.username}`)}
+                className="font-bold"
+              >
+                @{post.author.username}
+              </button>{" "}
               {translatedCaption || post.caption}
             </p>
-            {/* Caption translate toggle — same hook/store native uses. */}
-            {captionText ? (
+            {/* Caption translate toggle — same hook/store native uses. Only
+                shown when the caption is detectably non-English, like the
+                native feed (shouldShowTranslateButton gate). */}
+            {captionText && shouldShowTranslateButton(captionText, "en") ? (
               <button
                 onClick={handleTranslateCaption}
                 className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-[#3FDCFF]"
@@ -380,7 +396,8 @@ export function PostDetailScreen() {
             <button
               onClick={() => {
                 setShowMenu(false);
-                router.push(`/edit-post/${id}`);
+                // Web routes are mounted under /feed — /edit-post/:id 404s.
+                router.push(`/feed/edit-post/${id}`);
               }}
               className="flex items-center gap-3 py-3 text-left text-[15px] text-white"
             >
@@ -446,6 +463,12 @@ export function PostDetailScreen() {
         <p className="text-sm leading-5 text-white/60">
           Are you sure you want to delete this post? This can&apos;t be undone.
         </p>
+        {deletePost.isError ? (
+          <p className="mt-2 text-sm leading-5 text-rose-400">
+            {(deletePost.error as Error)?.message || "Failed to delete post"} —
+            try again.
+          </p>
+        ) : null}
       </Dialog>
 
       {/* Who-liked sheet — opened by tapping the like count. */}
@@ -626,8 +649,16 @@ function MediaCarousel({
               <span
                 key={i}
                 className={`h-1.5 rounded-full transition-all ${
-                  i === index ? "w-4 bg-white" : "w-1.5 bg-white/45"
+                  i === index ? "w-4" : "w-1.5 bg-white/45"
                 }`}
+                style={
+                  i === index
+                    ? {
+                        backgroundColor:
+                          CAROUSEL_DOT_COLORS[i % CAROUSEL_DOT_COLORS.length],
+                      }
+                    : undefined
+                }
               />
             ))}
           </div>

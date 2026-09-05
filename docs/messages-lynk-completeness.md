@@ -25,12 +25,27 @@ There are **two** distinct "Lynk" subsystems. They are NOT the same feature:
 | **Sneaky Lynk** (this prompt) | `src/sneaky-lynk/`, `features/sneaky-lynk/`, route `(protected)/sneaky-lynk/` | Fishjam WebRTC (`@fishjam-cloud/react-client` on web, `…react-native-client` on native) | Multi-party rooms: speakers/listeners/hand-raise |
 | **Lynk Live** (Prompt 6) | `lib/lynk/`, `features/screens/(protected)/lynk/[roomId]` | **MoQ** (`useMoqToken`, `relay.fishjam.io`, `lynk-moq-token` edge fn) | Broadcast livestream: host/cohost → many viewers |
 
-**Decision (owner, 2026-06-18): deep-port the existing Fishjam Sneaky Lynk room UI to
-web now.** No MoQ migration is in progress for the multi-party room concept (zero
-`MoQ/WHIP/WHEP` references in `src/sneaky-lynk/`); the MoQ build is a separate
-broadcast feature with its own `web.tsx`, tracked under Prompt 6 (web route wiring
-still owed there — out of scope here). So porting the Fishjam room UI is **not**
-throwaway work.
+> **SUPERSEDED (2026-08-24) — read `docs/lynk-moq-fit.md` §6.1-R first.**
+> The transport decision below was correct on 2026-06-18 and is no longer the
+> live one. `lynk-moq-fit.md` §6.1-R (2026-08-12) resolved that **both platforms
+> converge on MoQ**, and the owner re-confirmed it on 2026-08-24 for the
+> multi-party room specifically. The Fishjam WebRTC row in the table above is
+> therefore a record of what the room runs on *today*, not of what it targets.
+>
+> The rest of this document — the shared `sneakyLynkApi` / `videoApi` / store /
+> Supabase-channel inventory, and the per-surface completeness matrix — is
+> unaffected and still accurate. **Only the transport claim is retired.**
+>
+> `react-native-moq` was blocked on an iOS build failure while §6.1-R was
+> written (moq-kit's unconstrained `moq-swift` range). That is fixed upstream in
+> `react-native-moq@0.3.0`; the pin lives on `ws3a-dynamic-linkage-probe`.
+
+**Decision (owner, 2026-06-18) — SUPERSEDED, see above: deep-port the existing
+Fishjam Sneaky Lynk room UI to web now.** No MoQ migration was in progress for
+the multi-party room concept at that date (zero `MoQ/WHIP/WHEP` references in
+`src/sneaky-lynk/`); the MoQ build was a separate broadcast feature with its own
+`web.tsx`, tracked under Prompt 6. Porting the Fishjam room UI was **not**
+throwaway work — it is what the room runs on until the MoQ cutover lands.
 
 ### Nav decision (owner): keep Sneaky Lynk as a Messages tab
 

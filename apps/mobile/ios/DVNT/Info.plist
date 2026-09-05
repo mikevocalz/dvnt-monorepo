@@ -4,6 +4,10 @@
 <dict>
 	<key>AppGroupIdentifier</key>
 	<string>group.com.dvnt.app</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.expo.modules.backgroundtask.processing</string>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleAllowMixedLocalizations</key>
@@ -69,6 +73,8 @@
 	<string>DVNT adds event reminders to your calendar when you choose to save events.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>DVNT uses your camera to capture photos and videos for posts, stories, and live video rooms.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Allow $(PRODUCT_NAME) to access your contacts</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>DVNT uses Face ID or Touch ID to confirm your identity before sensitive actions like deleting your account or confirming a payment.</string>
 	<key>NSLocalNetworkUsageDescription</key>
@@ -97,12 +103,16 @@
 	</array>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>RCTRootViewBackgroundColor</key>
+	<integer>4278585101</integer>
 	<key>RNAS_PREVENT_RECENT_SCREENSHOTS</key>
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>voip</string>
+		<string>fetch</string>
 		<string>remote-notification</string>
+		<string>processing</string>
 		<string>audio</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
@@ -128,7 +138,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UIUserInterfaceStyle</key>
-	<string>Automatic</string>
+	<string>Dark</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
 </dict>

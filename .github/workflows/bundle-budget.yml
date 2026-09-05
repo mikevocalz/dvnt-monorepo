@@ -1,0 +1,50 @@
+name: bundle budget
+
+# Enforces the First Load JS budgets in scripts/check-bundle-budget.mjs against
+# a real build. Baselines and reasoning: docs/perf/bundle-size-baseline.md.
+#
+# Path-scoped on purpose. This job needs a full `next build` (~4 min on the
+# hosted runner), so it must not fire on native-only work — that was the whole
+# point of the Vercel ignore step, which cannot work (see the same doc). Here
+# the filter is reliable, because GitHub gives us real git history.
+
+on:
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - "scripts/check-bundle-budget.mjs"
+      - ".github/workflows/bundle-budget.yml"
+  push:
+    branches: [master]
+    paths:
+      - "apps/web/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - "scripts/check-bundle-budget.mjs"
+
+jobs:
+  budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The build only needs to produce .next/server/app/*.html and
+      # .next/static/chunks — no database. generateStaticParams falls back to
+      # empty sets without one, which shrinks prerendered routes but not the
+      # chunk graph the budgets measure.
+      - name: Build web
+        run: pnpm --filter web build
+
+      - name: Check First Load JS budgets
+        run: node scripts/check-bundle-budget.mjs --report

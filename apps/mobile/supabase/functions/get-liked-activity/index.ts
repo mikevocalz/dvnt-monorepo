@@ -6,12 +6,13 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -58,6 +59,15 @@ function resolveEventImage(event: Record<string, unknown>): string {
   const coverImageUrl =
     typeof event.cover_image_url === "string" ? event.cover_image_url : "";
   if (coverImageUrl) return coverImageUrl;
+
+  // flyer_image_url is the primary artwork for most events and was not being
+  // consulted here, so liked-activity thumbnails came back empty for them.
+  // Skipped when it points at a video — this value feeds an <img>.
+  const flyerImageUrl =
+    typeof event.flyer_image_url === "string" ? event.flyer_image_url : "";
+  if (flyerImageUrl && !/\.(mp4|mov|m4v|webm|avi)(\?|#|$)/i.test(flyerImageUrl)) {
+    return flyerImageUrl;
+  }
 
   const images = parseJsonbArray(event.images);
   for (const image of images) {
@@ -173,7 +183,6 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Authorization required" }, 401);
     }
 
-    const token = authHeader.replace("Bearer ", "");
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
@@ -186,23 +195,18 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
 
-    const { data: sessionData, error: sessionError } = await supabaseAdmin
-      .from("session")
-      .select("userId, expiresAt")
-      .eq("token", token)
-      .single();
-
-    if (sessionError || !sessionData) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabaseAdmin, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return jsonResponse({ error: "Session expired" }, 401);
+      }
       return jsonResponse({ error: "Invalid session" }, 401);
-    }
-
-    if (new Date(sessionData.expiresAt) < new Date()) {
-      return jsonResponse({ error: "Session expired" }, 401);
     }
 
     const userData = await resolveOrProvisionUser(
       supabaseAdmin,
-      sessionData.userId,
+      sessionResult.userId,
       "id",
     );
 
@@ -259,7 +263,7 @@ Deno.serve(async (req) => {
       eventIds.length > 0
         ? supabaseAdmin
             .from("events")
-            .select("id, title, host_id, cover_image_url, images")
+            .select("id, title, host_id, cover_image_url, flyer_image_url, images")
             .in("id", eventIds)
         : Promise.resolve({ data: [], error: null }),
     ]);

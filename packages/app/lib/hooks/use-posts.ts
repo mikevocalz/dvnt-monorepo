@@ -15,14 +15,14 @@ import { useRef, useCallback, useMemo, useEffect } from "react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { STALE_TIMES, GC_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
-import { profileKeys } from "@dvnt/app/lib/hooks/use-profile";
-import { activityKeys } from "@dvnt/app/lib/hooks/use-activities-query";
 import { isValidPostId } from "@dvnt/app/lib/validation/post-params";
 import {
   decrementPostCountEverywhere,
   removePostEverywhere,
   type PostOwnerIdentity,
 } from "@dvnt/app/lib/query/patch";
+import { postKeys, profileKeys, activityKeys } from "@dvnt/app/lib/query-keys";
+export { postKeys };
 
 // Track in-flight like mutations per post to prevent race conditions
 const pendingLikeMutations = new Set<string>();
@@ -87,14 +87,6 @@ function restoreCachedQuery(
  * queryKey: ["posts", "detail", postId]
  * queryKey: ["profilePosts", userId]
  */
-export const postKeys = {
-  all: ["posts"] as const,
-  feed: () => [...postKeys.all, "feed"] as const,
-  feedInfinite: () => [...postKeys.all, "feed", "infinite"] as const,
-  profilePosts: (userId: string) => ["profilePosts", userId] as const,
-  profile: (userId: string) => postKeys.profilePosts(userId),
-  detail: (id: string) => [...postKeys.all, "detail", id] as const,
-};
 
 // Fetch feed posts (legacy - for backwards compatibility)
 export function useFeedPosts() {
@@ -134,11 +126,14 @@ export function useInfiniteFeedPosts({
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage?.nextCursor ?? undefined,
     staleTime: STALE_TIMES.feed,
-    refetchOnMount: false,
-    // Web has no pull-to-refresh, so the feed would otherwise never pick up new
-    // posts within a session. Refetch when the browser tab regains focus (only
-    // when data is already stale, so it's not chatty). Native keeps pull-to-
-    // refresh and its instant back-nav (no focus refetch).
+    // Web MUST revalidate on mount. refetchOnWindowFocus only fires on a
+    // blur→focus round trip, which never happens on the visit that matters —
+    // a cold page load — so the web feed painted a localStorage snapshot that
+    // could be hours old and never refreshed it. Cached pages still render
+    // instantly; the refetch lands in the background (stale-while-revalidate).
+    // Native keeps false: it has pull-to-refresh and instant back-nav.
+    refetchOnMount: Platform.OS === "web" ? "always" : false,
+    // Still useful within a session for tab switching.
     refetchOnWindowFocus: Platform.OS === "web",
   });
 }

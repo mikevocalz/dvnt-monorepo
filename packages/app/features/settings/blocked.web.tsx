@@ -30,7 +30,7 @@ const CDN_URL =
   "https://dvnt.b-cdn.net";
 
 function getAvatarUrl(avatar: string | null): string {
-  if (!avatar) return "https://i.pravatar.cc/150?img=0";
+  if (!avatar) return "/dvnt-email-glyph.png";
   if (avatar.startsWith("http")) return avatar;
   return `${CDN_URL}/${avatar}`;
 }

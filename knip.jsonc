@@ -1,0 +1,211 @@
+{
+  // Phase 0 dead-code baseline config for the dvnt pnpm + Turbo monorepo.
+  // Tuned for React Native platform extensions, Expo Router file-convention
+  // routes, Solito route indirection, Supabase edge functions, and Payload CMS.
+  // NOTHING here deletes anything — this only shapes what Knip *reports*.
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+
+  // --- Global excludes: never analyze / never flag these trees. ---
+  // doc/, docs/, legal/ and DB migrations are human-owned or generated content
+  // and must NEVER be surfaced as "unused files" for deletion.
+  "ignore": [
+    "doc/**",
+    "docs/**",
+    "legal/**",
+    "**/legal/**",
+    "**/migrations/**",
+    "**/__generated__/**",
+    "**/*.gen.ts",
+    "**/payload-types.ts",
+    // native + build output trees (not JS module graph)
+    "**/android/**",
+    "**/ios/**",
+    "**/.expo/**",
+    "**/.next/**",
+    "**/dist/**",
+    "**/build/**",
+    "apps/mobile/apps/**"
+  ],
+
+
+  // --- WS-1 re-baseline (2026-08-10) keep-annotations -------------------------
+  // The 2026-08-07 baseline listed 553 unused files, headlined by ~533 orphans
+  // in apps/mobile/{lib,src,components}. Re-derived on master 69 commits later:
+  // 46 unused files, and the mobile orphan trees hold 85 files total. The purge
+  // the baseline promised was already banked. Everything below is a FALSE
+  // POSITIVE or a deliberate keep — verified individually, not swept:
+  //
+  //  * scripts/codemods/ws6-*.ts — spent one-shot ts-morph codemods, retained ON
+  //    PURPOSE: docs/structure-target.md:114 ships them "so the reviewer can
+  //    re-run it".
+  //  * scripts/watch-settings-check/mmkv-stub.js, scripts/presence-check/stubs.js
+  //    — consumed via esbuild --alias inside scripts/verify-*.mjs. Knip's module
+  //    graph cannot see bundler alias maps; deleting these breaks verify-watch
+  //    and verify-presence.
+  //  * apps/mobile/supabase/__tests__/*.test.ts — tests are entry points.
+  //  * features/presence/*, features/events/door-dashboard.ts,
+  //    features/ticket/ui/TicketPerkChip.tsx — Host & Guest WS-5/7/8, landed
+  //    ahead of their screen wiring. Work-in-progress, not orphans.
+  //  * features/scanner/ui/**, features/stories-editor/canvas-kit/**,
+  //    features/stories/ui/story-* — leaves behind feature barrels + platform
+  //    forks; review individually before any removal.
+  //  * apps/web/src/platform/* — resolved by the Next webpack alias map, not by
+  //    an import.
+  //
+  // The ONE genuine dead file this pass found — features/call/ui/
+  // incoming-call-overlay.tsx — was not deleted: it was a BUG. It is the global
+  // incoming-call listener and the sole driver of the watch call path, and it
+  // had never been mounted. Fixed on master (90621ff), not purged.
+  // Binaries referenced only from shell scripts / CI that Knip can't trace.
+  "ignoreBinaries": [
+    "patch-package",
+    "cross-env",
+    "eas",
+    "expo",
+    "payload",
+    "tsx",
+    "ts-node",
+    "vitest",
+    "supabase"
+  ],
+
+  "workspaces": {
+    // ---------------------------------------------------------------
+    // Root workspace
+    // ---------------------------------------------------------------
+    ".": {
+      "entry": ["scripts/*.{mjs,js,ts}"],
+      "project": ["scripts/**/*.{mjs,js,ts}"]
+    },
+
+    // ---------------------------------------------------------------
+    // apps/mobile — Expo Router + Supabase edge functions
+    // ---------------------------------------------------------------
+    "apps/mobile": {
+      "entry": [
+        "index.js",
+        "app.config.js",
+        "metro.config.js",
+        "babel.config.js",
+        "postcss.config.mjs",
+        "eslint.config.js",
+        // Expo Router: every file under app/ is a route entry
+        "app/**/*.{ts,tsx,js,jsx}",
+        // Expo config plugins, targets (apple watch), and dev/ci scripts
+        "plugins/**/*.{js,ts}",
+        "targets/**/*.{ts,tsx,js,jsx}",
+        "scripts/**/*.{ts,tsx,js,jsx}",
+        // Supabase edge functions: each function has its own index.ts entry
+        "supabase/functions/*/index.ts",
+        // Platform-forked files: BOTH forks are reachable via Metro resolution
+        "**/*.{native,web,ios,android}.{ts,tsx,js,jsx}"
+      ],
+      "project": ["**/*.{ts,tsx,js,jsx}"],
+      "ignore": [
+        "supabase/functions/**/_shared/**",
+        "expo-env.d.ts",
+        "nativewind-env.d.ts"
+      ]
+    },
+
+    // ---------------------------------------------------------------
+    // apps/web — Next.js 16 + Payload CMS admin (Next plugin auto-detects app/)
+    // ---------------------------------------------------------------
+    "apps/web": {
+      "entry": [
+        "next.config.ts",
+        "middleware.ts",
+        "instrumentation.ts",
+        "instrumentation-client.ts",
+        "sentry.*.config.ts",
+        "postcss.config.js",
+        "eslint.config.mjs",
+        // Next app-router tree (src/app) — file-convention routes + payload routes
+        "src/app/**/{page,layout,template,default,error,loading,not-found,route,global-error}.{ts,tsx}",
+        "src/app/**/{opengraph-image,twitter-image,icon,apple-icon,sitemap,robots,manifest}.{ts,tsx}",
+        "**/*.{native,web,ios,android}.{ts,tsx,js,jsx}"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "*.{ts,tsx,mjs,js}"]
+    },
+
+    // ---------------------------------------------------------------
+    // apps/web-vite — Payload v4 ESM CLI / migration + seed runner
+    // ---------------------------------------------------------------
+    "apps/web-vite": {
+      "entry": [
+        "src/payload.config.ts",
+        "scripts/**/*.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "scripts/**/*.ts"]
+    },
+
+    // ---------------------------------------------------------------
+    // Shared packages — main + package.json "exports" (incl. platform forks)
+    // are auto-treated as entry by Knip. We additionally mark every fork file
+    // as entry so Metro/Solito resolution of .native/.web is never "unused".
+    // ---------------------------------------------------------------
+    "packages/app": {
+      "entry": [
+        "index.ts",
+        "**/*.{native,web,ios,android}.{ts,tsx}",
+        // expo-widgets Live Activity layout: consumed by the native WidgetKit
+        // runtime via the "widget" directive (lazy platform-gated require), not
+        // a normal JS import, so it is an entry point rather than "unused".
+        "features/live-surface/native/live-activity-layout.tsx"
+      ],
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": ["nativewind-env.d.ts"]
+    },
+    "packages/ui": {
+      "entry": ["src/**/*.{native,web,ios,android}.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/api": {
+      "entry": ["src/**/*.{native,web,ios,android}.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/auth": {
+      "entry": ["src/**/*.{native,web,ios,android}.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/core": {
+      "entry": ["src/**/*.{native,web,ios,android}.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/network": {
+      "entry": ["src/**/*.{native,web,ios,android}.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/supabase": {
+      "entry": ["src/**/*.{native,web,ios,android}.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/functions": {
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/types": {
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/utils": {
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/cms": {
+      // Payload config is main; admin components/endpoints resolved dynamically
+      "entry": [
+        "src/payload.config.ts",
+        "src/components/**/*.{ts,tsx}",
+        "src/collections/**/*.{ts,tsx}",
+        "src/endpoints/**/*.{ts,tsx}"
+      ],
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignore": ["src/payload-types.ts"]
+    },
+    "packages/observability": {
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/dvnt-translation": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.{ts,tsx}"]
+    }
+  }
+}

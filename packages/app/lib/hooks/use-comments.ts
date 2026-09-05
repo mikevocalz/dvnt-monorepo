@@ -20,18 +20,14 @@ import {
   findCommentThread,
   insertCommentIntoThreads,
 } from "@dvnt/app/lib/comments/threading";
+import { commentKeys } from "@dvnt/app/lib/query-keys";
+export { commentKeys };
 
 export type CommentThread = {
   parentComment: Comment;
   replies: Comment[];
 };
 
-export const commentKeys = {
-  all: ["comments"] as const,
-  byPost: (postId: string) => [...commentKeys.all, "post", postId] as const,
-  thread: (postId: string, rootCommentId: string) =>
-    [...commentKeys.all, "thread", postId, rootCommentId] as const,
-};
 
 function findCachedThread(
   queryClient: QueryClient,
@@ -116,7 +112,20 @@ export function useComments(postId: string, limit?: number) {
           .filter((url): url is string => !!url && url.startsWith("http"));
 
         if (avatarUrls.length > 0) {
-          Image.prefetch(avatarUrls).catch(() => {});
+          // Warm the avatar cache BEFORE the list paints, not after.
+          //
+          // This was fire-and-forget, so rows rendered immediately and every
+          // avatar then popped in as its own request landed — the "trickling
+          // in" when a comment sheet opens. Awaiting it outright would hold the
+          // comments hostage to the slowest image, so it races a short budget:
+          // enough for a warm or nearby fetch, invisible when it is not,
+          // because this query is already prefetched on `onPressIn` of the
+          // comment button (feed-post.tsx) and the race overlaps the sheet's
+          // open animation.
+          await Promise.race([
+            Image.prefetch(avatarUrls),
+            new Promise((resolve) => setTimeout(resolve, AVATAR_WARM_BUDGET_MS)),
+          ]).catch(() => {});
         }
 
         return comments;
@@ -128,6 +137,12 @@ export function useComments(postId: string, limit?: number) {
     enabled: !!postId,
   });
 }
+
+/**
+ * How long the comments query waits for avatars before painting anyway.
+ * Bounded on purpose: a slow CDN must never stop comments from rendering.
+ */
+const AVATAR_WARM_BUDGET_MS = 400;
 
 export function prefetchComments(
   queryClient: QueryClient,

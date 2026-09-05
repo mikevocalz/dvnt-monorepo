@@ -1,9 +1,12 @@
-import "../global.css";
 // Install the global JS error handler FIRST — must be armed before
 // any other side-effect import can throw. Captures uncaught JS
 // errors + unhandled Promise rejections, persists to MMKV for the
 // next session to surface. OTA-safe — pure JS.
 import "@dvnt/app/lib/global-error-handler";
+// Sentry boots immediately after the raw JS handler so native crash capture,
+// tracing, and replay are armed before any other side-effect import can run.
+// No-op on web (Next has its own instrumentation files).
+import { bootSentry, wrapRoot } from "@dvnt/app/lib/sentry-boot";
 import "@dvnt/app/lib/query-focus-manager";
 import "@dvnt/app/lib/i18n";
 import "@dvnt/app/lib/ota-bootstrap-log";
@@ -21,6 +24,15 @@ import {
   initConnectivity,
   useConnectivityStore,
 } from "@dvnt/app/lib/stores/connectivity-store";
+import { initOutboxDrain } from "@dvnt/app/lib/outbox";
+import { initOfflineScanAutoDrain } from "@dvnt/app/lib/stores/offline-checkin-store";
+// Importing this module runs its module-scope TaskManager.defineTask() calls
+// (required — defineTask must run in the global scope so a headless background
+// launch can find the task). Registration itself is gated on auth below.
+import {
+  registerBackgroundTasks,
+  unregisterBackgroundTasks,
+} from "@dvnt/app/lib/background-tasks";
 import { OfflineBanner } from "@dvnt/app/components/offline-banner";
 import {
   persistOptions,
@@ -28,7 +40,9 @@ import {
 } from "@dvnt/app/lib/query-persistence";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
-import { useEffect } from "react";
+import { useEffect,
+  useState,
+} from "react";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import AnimatedSplashScreen from "@dvnt/app/components/animated-splash-screen";
@@ -36,11 +50,13 @@ import { Motion } from "@legendapp/motion";
 import { PortalHost } from "@rn-primitives/portal";
 import { ThemeProvider } from "@react-navigation/native";
 import { Toaster } from "sonner-native";
-import { ReportSheet } from "@dvnt/app/components/reports/report-sheet";
+import { ReportSheet } from "@dvnt/app/features/reports";
 import { NAV_THEME } from "@dvnt/app/theme";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useScreenViewTracking } from "@dvnt/app/lib/analytics/useScreenViewTracking";
+import { usePathname } from "expo-router";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { useDeepLinkStore } from "@dvnt/app/lib/stores/deep-link-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -50,6 +66,7 @@ import {
   Pressable,
   Text,
   ActivityIndicator,
+  InteractionManager,
 } from "react-native";
 import { useUpdates } from "@dvnt/app/lib/hooks/use-updates";
 import { useNotifications } from "@dvnt/app/lib/hooks/use-notifications";
@@ -59,13 +76,13 @@ import { setQueryClient } from "@dvnt/app/lib/auth-client";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { FeedSkeleton } from "@dvnt/app/components/skeletons";
 import { enforceListPolicy } from "@dvnt/app/lib/guards/list-guard";
-import { LikesSheetProvider } from "@dvnt/app/src/features/likes/LikesSheetController";
+import { LikesSheetProvider } from "@dvnt/app/features/likes/LikesSheetController";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { Dimensions } from "react-native";
 import { BiometricLock } from "@dvnt/app/components/BiometricLock";
 import { LayoutAnimationConfig } from "react-native-reanimated";
 import { ShareIntentHandler } from "@dvnt/app/components/share-intent-handler";
-import { SpotifyShareSheet } from "@dvnt/app/components/share/spotify-share-sheet";
+import { SpotifyShareSheet } from "@dvnt/app/features/share";
 import { SafeStripeProvider as StripeProvider } from "@dvnt/app/lib/safe-native-modules";
 import {
   isSafeMode,
@@ -143,6 +160,17 @@ try {
   console.warn("[Boot] initConnectivity failed (non-fatal):", e);
 }
 
+// Durable outbox drain (WS-12): flush queued mutations + pending offline
+// scans on connectivity→online and app foreground. Both inits are
+// idempotent and internally defensive — same boot-hardening contract as
+// initConnectivity above.
+try {
+  initOutboxDrain();
+  initOfflineScanAutoDrain();
+} catch (e) {
+  console.warn("[Boot] outbox drain init failed (non-fatal):", e);
+}
+
 // Bridge the Zustand connectivity phase to React Query's onlineManager.
 // Same defensive envelope as above — a failure here must not crash boot.
 try {
@@ -159,13 +187,48 @@ try {
   console.warn("[Boot] onlineManager wiring failed (non-fatal):", e);
 }
 
-export default function RootLayout() {
+bootSentry();
+
+function RootLayout() {
+  /**
+   * Stripe must NOT initialise while the app is starting. Constructing its
+   * TurboModule runs `StripeSdkImpl.init` -> `STPAPIClient` ->
+   * `StripeAPI.deviceSupportsApplePay` -> `PKCanMakePayments` ->
+   * `MCProfileConnection`, which is a BLOCKING mach IPC. Mounted at the root
+   * with a live key, that ran on the JS thread during bundle evaluation and
+   * parked it — expo-updates' ErrorRecovery then exhausted its pipeline and
+   * aborted the process (SIGABRT at `ErrorRecovery.crash`, Sentry
+   * DVNT-MOBILE-2, seen on iPad 9 seconds after launch).
+   *
+   * `StripeProvider` early-returns when `publishableKey` is falsy and renders
+   * a bare Fragment, so withholding the key defers `initStripe` without
+   * changing the tree — the provider stays mounted and nothing below it
+   * remounts when the real key arrives.
+   *
+   * Payments are a sub-flow here (checkout, ticket upgrade, promote, payment
+   * methods); none of them can be reached before interactions settle.
+   */
+  const [deferredStripeKey, setDeferredStripeKey] = useState("");
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setDeferredStripeKey(
+        process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || "",
+      );
+    });
+    return () => task.cancel();
+  }, []);
+
   const { colorScheme } = useColorScheme();
   const loadAuthState = useAuthStore((s) => s.loadAuthState);
   const authStatus = useAuthStore((s) => s.authStatus);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasSeenOnboarding = useAuthStore((s) => s.hasSeenOnboarding);
   const userId = useAuthStore((s) => s.user?.id);
+
+  // Product analytics — what Sentry was being asked for and could not answer.
+  // Mounted here so every route is covered without per-screen instrumentation
+  // and no screen can be forgotten. Refs only; never causes a render.
+  useScreenViewTracking(usePathname(), userId);
   // Root-layout wraps the whole app. Destructuring the store here
   // re-rendered every descendant whenever ANY app-store field updated
   // (pendingShareIntentRoute, nsfwEnabled, feedMode…). Narrow selectors
@@ -256,15 +319,36 @@ export default function RootLayout() {
   useEffect(() => {
     if (authStatus === "loading") return;
     if (!isAuthenticated) return;
+    let stop: (() => void) | null = null;
     (async () => {
       try {
-        const { ensureSupabaseJwt } = await import("@dvnt/app/lib/auth/supabase-jwt");
-        await ensureSupabaseJwt();
+        const { startSupabaseJwtAutoRefresh } = await import(
+          "@dvnt/app/lib/auth/supabase-jwt"
+        );
+        // Renews on a clock instead of once per auth change — a token that
+        // expires mid-session used to turn every authenticated read into a 401.
+        stop = startSupabaseJwtAutoRefresh();
       } catch {
         // bridge is additive — failures are silent
       }
     })();
+    return () => stop?.();
   }, [authStatus, isAuthenticated, userId]);
+
+  // ── Background tasks (WS-11) — register when authenticated ────────────
+  // Opportunistic acceleration only (scan flush, ticket prefetch, upload
+  // watchdog, outbox drain). Gated on a live session: the jobs hit authed
+  // edge fns, so a logged-out device should not wake for them. registration
+  // is idempotent + internally defensive; unregister on sign-out. See the
+  // honest execution-constraints header in lib/background-tasks/index.ts.
+  useEffect(() => {
+    if (authStatus === "loading") return;
+    if (isAuthenticated) {
+      void registerBackgroundTasks();
+    } else {
+      void unregisterBackgroundTasks();
+    }
+  }, [authStatus, isAuthenticated]);
 
   // ── Share Intent — receive content from other apps ──────────────────
   // Initialize push notifications
@@ -306,6 +390,12 @@ export default function RootLayout() {
 
     Notifications.getLastNotificationResponseAsync().then((response) => {
       if (!response) return;
+      // Action buttons are authenticated and routed by useNotifications.
+      // A generic cold-start route would bypass that check and push twice.
+      if (response.actionIdentifier !== Notifications?.DEFAULT_ACTION_IDENTIFIER) {
+        useAppStore.getState().setSplashAnimationFinished(true);
+        return;
+      }
       const data = response.notification.request.content.data as Record<string, unknown>;
       if (!data?.type) return;
 
@@ -329,17 +419,17 @@ export default function RootLayout() {
   }, [splashAnimationFinished]);
 
   const [fontsLoaded, fontError] = useFonts({
-    "Inter-Regular": require("../assets/fonts/Inter-Regular.ttf"),
-    "Inter-SemiBold": require("../assets/fonts/Inter-SemiBold.ttf"),
-    "Inter-Bold": require("../assets/fonts/Inter-Bold.ttf"),
-    "SpaceGrotesk-Regular": require("../assets/fonts/SpaceGrotesk-Regular.ttf"),
-    "SpaceGrotesk-SemiBold": require("../assets/fonts/SpaceGrotesk-SemiBold.ttf"),
-    "SpaceGrotesk-Bold": require("../assets/fonts/SpaceGrotesk-Bold.ttf"),
-    "Republica-Minor": require("../assets/fonts/Republica-Minor.ttf"),
-    BraveGates: require("../assets/fonts/BraveGates.ttf"),
-    LightBrighter: require("../assets/fonts/LightBrighter.ttf"),
-    Oasis: require("../assets/fonts/oasis.ttf"),
-    RedHat: require("../assets/fonts/redhat.ttf"),
+    "Inter-Regular": require("@dvnt/app/assets/fonts/Inter-Regular.ttf"),
+    "Inter-SemiBold": require("@dvnt/app/assets/fonts/Inter-SemiBold.ttf"),
+    "Inter-Bold": require("@dvnt/app/assets/fonts/Inter-Bold.ttf"),
+    "SpaceGrotesk-Regular": require("@dvnt/app/assets/fonts/SpaceGrotesk-Regular.ttf"),
+    "SpaceGrotesk-SemiBold": require("@dvnt/app/assets/fonts/SpaceGrotesk-SemiBold.ttf"),
+    "SpaceGrotesk-Bold": require("@dvnt/app/assets/fonts/SpaceGrotesk-Bold.ttf"),
+    "Republica-Minor": require("@dvnt/app/assets/fonts/Republica-Minor.ttf"),
+    BraveGates: require("@dvnt/app/assets/fonts/BraveGates.ttf"),
+    LightBrighter: require("@dvnt/app/assets/fonts/LightBrighter.ttf"),
+    Oasis: require("@dvnt/app/assets/fonts/oasis.ttf"),
+    RedHat: require("@dvnt/app/assets/fonts/redhat.ttf"),
   });
 
   // ── Auth initialization — runs ONCE on mount ──────────────────────────
@@ -518,19 +608,20 @@ export default function RootLayout() {
         <LayoutAnimationConfig skipEntering={false} skipExiting={false}>
           <BottomSheetModalProvider>
             <KeyboardProvider statusBarTranslucent navigationBarTranslucent>
+              {/* Key is withheld until after startup — see `deferredStripeKey`. */}
               <StripeProvider
-                publishableKey={
-                  process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""
-                }
+                publishableKey={deferredStripeKey}
                 merchantIdentifier="merchant.com.dvnt.app"
               >
                 <PersistQueryClientProvider
                   client={queryClient}
                   persistOptions={persistOptions}
                 >
-                  <ThemeProvider
-                    value={NAV_THEME[colorScheme === "light" ? "light" : "dark"]}
-                  >
+                  {/* Dark-only: never select NAV_THEME.light. A light nav
+                      theme sets dark:false, which turns off every dark:
+                      variant and flips native surfaces that read
+                      useTheme().dark. */}
+                  <ThemeProvider value={NAV_THEME.dark}>
                     <LikesSheetProvider>
                       <View
                         style={{
@@ -685,3 +776,6 @@ export default function RootLayout() {
     </OtaRecoveryBoundary>
   );
 }
+
+// Sentry.wrap on native (touch + profiler instrumentation); identity on web.
+export default wrapRoot(RootLayout);

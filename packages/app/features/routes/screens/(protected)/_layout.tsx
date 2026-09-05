@@ -6,32 +6,37 @@ import { Settings } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { TabHeaderLogo, TabHeaderRight } from "@dvnt/app/components/tab-header";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { useCallKeepCoordinator } from "@dvnt/app/src/services/callkeep";
-import { NotificationListener } from "@dvnt/app/src/services/callkeep/NotificationListener";
+import { useCallKeepCoordinator } from "@dvnt/app/features/services/callkeep";
+import { NotificationListener } from "@dvnt/app/features/services/callkeep/NotificationListener";
 import { usePresenceManager } from "@dvnt/app/lib/hooks/use-presence";
 import {
   registerForPushNotificationsAsync,
   savePushTokenToBackend,
+  saveLiveActivityPushToStartToken,
 } from "@dvnt/app/lib/notifications";
+import { addLiveActivityPushToStartListener } from "@dvnt/app/features/live-surface";
 import {
   registerVoipPushToken,
   saveVoipTokenToBackend,
-} from "@dvnt/app/src/services/callkeep/voipPushService";
+} from "@dvnt/app/features/services/callkeep/voipPushService";
 import { useBootPrefetch } from "@dvnt/app/lib/hooks/use-boot-prefetch";
 import { useEventsFeedRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useAppResume } from "@dvnt/app/lib/hooks/use-app-resume";
 import { useCartPaymentRecovery } from "@dvnt/app/lib/hooks/use-cart-payment-recovery";
 import { useBootLocation } from "@dvnt/app/lib/hooks/use-boot-location";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
-import { refreshWeather } from "@dvnt/app/src/features/weatherfx/WeatherDecisionEngine";
-import { useWeatherFXStore } from "@dvnt/app/src/features/weatherfx/WeatherFXStore";
-// import { WeatherGPUEngine } from "@dvnt/app/src/features/weatherfx/WeatherGPUEngine";
-import { WeatherReanimatedOverlay } from "@dvnt/app/src/features/weatherfx/WeatherReanimatedOverlay";
-import { useEventsTabVisibility } from "@dvnt/app/src/features/weatherfx/hooks/useEventsTabVisibility";
-// import { isWebGPUAvailable } from "@dvnt/app/src/gpu/GpuRuntime";
-import { useLiveSurface } from "@dvnt/app/src/live-surface";
-import { useWatchTicketSync } from "@dvnt/app/src/watch/use-watch-ticket-sync";
-import { useWatchBroadcastSync } from "@dvnt/app/src/watch/use-watch-broadcast-sync";
+import { refreshWeather } from "@dvnt/app/features/weatherfx/WeatherDecisionEngine";
+import { useWeatherFXStore } from "@dvnt/app/features/weatherfx/WeatherFXStore";
+// import { WeatherGPUEngine } from "@dvnt/app/features/weatherfx/WeatherGPUEngine";
+import { WeatherReanimatedOverlay } from "@dvnt/app/features/weatherfx/WeatherReanimatedOverlay";
+import { IncomingCallOverlay } from "@dvnt/app/features/call/ui/incoming-call-overlay";
+import { useEventsTabVisibility } from "@dvnt/app/features/weatherfx";
+// import { isWebGPUAvailable } from "@dvnt/app/features/gpu/GpuRuntime";
+import { useLiveSurface } from "@dvnt/app/features/live-surface";
+import { useWatchTicketSync } from "@dvnt/app/features/watch/use-watch-ticket-sync";
+import { useWatchBroadcastSync } from "@dvnt/app/features/watch/use-watch-broadcast-sync";
+import { useWatchEvents, useWatchCalls } from "@dvnt/app/features/watch/use-watch-events";
+import { useWatchDMSync } from "@dvnt/app/features/watch/use-watch-dm-sync";
 import { TransitionStack as Stack } from "@dvnt/app/lib/navigation/transition-stack";
 import {
   dvntEventTransition,
@@ -158,6 +163,11 @@ export default function ProtectedLayout() {
   // Mirror host broadcasts onto the watch too (no-op off iOS). Reuses the existing
   // activity feed — no new pipeline. See docs/watch-broadcast-fit.md.
   useWatchBroadcastSync();
+  // Conversation previews on the wrist + relay a reply typed there back through
+  // the phone's own send path. Opt-in — off until the member turns it on.
+  useWatchDMSync();
+  useWatchEvents();
+  useWatchCalls();
 
   const user = useAuthStore((s) => s.user);
 
@@ -210,8 +220,22 @@ export default function ProtectedLayout() {
       }
     });
 
+    // Register the iOS Live Activity push-to-start token (expo-widgets) so the
+    // server can start a Live Activity remotely while backgrounded.
+    const unsubPushToStart = addLiveActivityPushToStartListener(
+      (pushToStartToken) => {
+        saveLiveActivityPushToStartToken(pushToStartToken).catch((error) => {
+          console.error(
+            "[ProtectedLayout] Live Activity push-to-start save failed:",
+            error,
+          );
+        });
+      },
+    );
+
     return () => {
       unsubVoip();
+      unsubPushToStart();
     };
   }, [user?.id, user?.username]);
 
@@ -282,8 +306,12 @@ export default function ProtectedLayout() {
             )
           }
         />
+        {/* `ticket/` has its own _layout, so this stack's child is the GROUP
+            `ticket`, not `ticket/[id]`. Naming the leaf meant expo-router
+            matched nothing ("No route named ticket/[id] exists in nested
+            children") and the shared-element transition never applied. */}
         <Stack.Screen
-          name="ticket/[id]"
+          name="ticket"
           options={({ route }) =>
             dvntTicketTransition(
               String((route.params as any)?.id ?? ""),
@@ -323,6 +351,12 @@ export default function ProtectedLayout() {
       {/* PERSISTENT: Weather overlay — renders ON TOP of screens.
           pointerEvents="none" — touches pass through to content below. */}
       <WeatherReanimatedOverlay />
+      {/* PERSISTENT: incoming-call listener. Subscribes to call_signals and
+          presents the accept/decline sheet over whatever is on screen.
+          It also owns the WATCH call path — pushCallToWatch /
+          registerWatchCallHandler are fired from inside it — so while this was
+          unmounted, incoming calls rang on neither the phone nor the wrist. */}
+      <IncomingCallOverlay />
       {/* WeatherGPUEngine disabled - requires react-native-wgpu native module */}
       {/* {isWebGPUAvailable() && <WeatherGPUEngine />} */}
     </>

@@ -3,14 +3,14 @@
  *
  * Calls the `lynk-moq-token` Edge Function, which mirrors the calling feature's
  * `video_join_room` auth + private-room gate and mints a Fishjam
- * `createMoqToken({ publishPath | subscribePath })`. A `publish` token can only
+ * `createMoqAccess({ publishPath | subscribePath })`. A `publish` token can only
  * publish as the caller's own peer path; a `subscribe` token discovers the whole
  * room namespace and can never publish.
  *
  * NOTE on the transport: PROMPT 6 specifies `@dvnt/network apiFetch`, but every
  * Edge Function in this app is invoked through `supabase.functions.invoke` +
  * `requireBetterAuthToken()` (the calling feature included — see
- * `src/video/api.ts`). We reuse THAT seam verbatim to share a shape with the
+ * `features/video/api.ts`). We reuse THAT seam verbatim to share a shape with the
  * calling feature rather than introduce a second, drifting auth path. Better-Auth
  * token refresh is owned by `requireBetterAuthToken`; MoQ-token refresh (on the
  * 1h expiry) is owned here.

@@ -1,3 +1,4 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
   Text,
@@ -15,16 +16,13 @@ import {
 } from "@dvnt/app/components/ui/location-autocomplete-instagram";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
-import { DvntMap } from "@dvnt/app/src/components/map";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { DvntMap } from "@dvnt/app/components/map";
+
 import { ArrowLeft, Loader2, Calendar, Clock } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useState, useEffect } from "react";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import {
-  deleteEvent as deleteEventPrivileged,
-  cancelEvent as cancelEventPrivileged,
-} from "@dvnt/app/lib/api/privileged";
+import { eventsApi } from "@dvnt/app/lib/api/events";
 
 function EditEventScreenContent() {
   const router = useRouter();
@@ -119,31 +117,22 @@ function EditEventScreenContent() {
     }
   };
 
-  const handleDelete = () => {
-    // V2-EVT-01: route through cancel-event when tickets exist;
-    // cascades refunds + notifies attendees. delete-event is only
-    // safe for never-sold events (server enforces with tickets_exist 409).
+  // WS-9 safe destructive flow. Delete is the primary action: the guarded
+  // delete path (eventsApi.deleteEvent) refuses when paid tickets exist —
+  // client + server both return a tickets-exist error — and routes the host
+  // to Cancel & Refund, which runs the resumable event-cancel fn.
+  const promptCancelWithRefunds = () => {
     Alert.alert(
-      "Cancel Event",
-      "All ticket holders will be refunded and notified. The event will be marked Cancelled. This can't be undone.",
+      "Can't Delete — Tickets Sold",
+      "This event has active tickets. Cancel the event instead — every paid order is refunded and attendees are notified. This can't be undone.",
       [
         { text: "Keep Event", style: "cancel" },
         {
-          text: "Cancel Event",
+          text: "Cancel & Refund",
           style: "destructive",
           onPress: async () => {
             try {
-              const result = await cancelEventPrivileged(parseInt(eventId));
-              if (result.affectedTickets === 0) {
-                try {
-                  await deleteEventPrivileged(parseInt(eventId));
-                } catch (delErr) {
-                  console.warn(
-                    "[EditEvent] follow-up delete refused (race):",
-                    delErr,
-                  );
-                }
-              }
+              const result = await eventsApi.cancelEventWithRefunds(eventId);
               showToast(
                 result.refundsFailed > 0 ? "warning" : "success",
                 "Event cancelled",
@@ -160,6 +149,42 @@ function EditEventScreenContent() {
                 error instanceof Error
                   ? error.message
                   : "Try again in a moment.",
+              );
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleDelete = () => {
+    Alert.alert(
+      "Delete Event",
+      "This permanently removes the event. Events with paid tickets can't be deleted — cancel instead, which refunds every attendee.",
+      [
+        { text: "Keep Event", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await eventsApi.deleteEvent(eventId);
+              showToast("success", "Event deleted", "");
+              router.replace("/(protected)/(tabs)/events");
+            } catch (error) {
+              // Guard: paid/active tickets exist. Route the host to the
+              // safe cancel-with-refunds path instead of a dead end.
+              const msg =
+                error instanceof Error ? error.message : String(error || "");
+              if (/ticket/i.test(msg)) {
+                promptCancelWithRefunds();
+                return;
+              }
+              console.error("[EditEvent] Delete error:", error);
+              showToast(
+                "error",
+                "Couldn't delete",
+                msg || "Try again in a moment.",
               );
             }
           },

@@ -15,7 +15,6 @@ import {
   Text,
   Pressable,
   StyleSheet,
-  ScrollView,
   RefreshControl,
   useWindowDimensions,
 } from "react-native";
@@ -43,9 +42,16 @@ import { ImageOff, WifiOff } from "lucide-react-native";
 import { useConnectivityStore } from "@dvnt/app/lib/stores/connectivity-store";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { seedLikeState, usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
-import { navigateToPost } from "@dvnt/app/lib/routes/post-routes";
+import { navigateToPost, getPostDetailRoute } from "@dvnt/app/lib/routes/post-routes";
 import { getVideoThumbnail } from "@dvnt/app/lib/media/getVideoThumbnail";
 import { useQuery } from "@tanstack/react-query";
+import {
+  COLUMN_GAP,
+  columnsForWidth,
+  columnWidthFor,
+  packByHeight,
+} from "./masonry-layout";
+
 import { DVNTMediaBadge } from "@dvnt/app/components/media/DVNTMediaBadge";
 import { DVNTGifView } from "@dvnt/app/components/media/DVNTGifView";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
@@ -57,19 +63,22 @@ import type { Event } from "@dvnt/app/lib/hooks/use-events";
 import type { Post } from "@dvnt/app/lib/types";
 import { useFeedScrollStore } from "@dvnt/app/lib/stores/feed-scroll-store";
 import * as Haptics from "expo-haptics";
-import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
+import { TextPostSurface } from "@dvnt/app/features/post";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import {
   extractFeedImageUrls,
   prefetchImages,
   prefetchImagesBlocking,
 } from "@dvnt/app/lib/perf/image-prefetch";
+import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
+import { LegendList } from "@dvnt/app/components/list";
+import type { LegendListRef } from "@dvnt/app/components/list";
+import { feedScrollY, resetFeedScroll } from "@dvnt/app/lib/stores/feed-scroll-shared";
+import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const COLUMN_GAP = 3;
 const CELL_RADIUS = 12;
-const NUM_COLUMNS = 2;
 const VARIATION = 0.3;
 const EVENT_INTERVAL = 7;
 
@@ -190,7 +199,13 @@ function OfflineFeedEmpty({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function MasonryGridSkeleton({ columnWidth }: { columnWidth: number }) {
+function MasonryGridSkeleton({
+  columnWidth,
+  numColumns,
+}: {
+  columnWidth: number;
+  numColumns: number;
+}) {
   const heights = [
     columnWidth * 1.4,
     columnWidth * 1.05,
@@ -209,7 +224,7 @@ function MasonryGridSkeleton({ columnWidth }: { columnWidth: number }) {
       }}
       pointerEvents="none"
     >
-      {[0, 1].map((col) => (
+      {Array.from({ length: numColumns }, (_, col) => col).map((col) => (
         <View
           key={col}
           style={{ flex: 1, paddingHorizontal: COLUMN_GAP / 2 }}
@@ -323,6 +338,10 @@ const MasonryCell = memo(function MasonryCell({
     toggleLike();
   }, [toggleLike]);
 
+  // Phone cells (~185pt) wear 14pt glyphs fine; tablet cells (~275pt+)
+  // made them read as specks. Scale with the cell, capped.
+  const iconSize = width >= 240 ? 20 : 14;
+
   const media = post.media?.[0];
   const isTextPost = post.kind === "text";
   const textPostPreview = resolveTextPostPresentation(
@@ -339,12 +358,17 @@ const MasonryCell = memo(function MasonryCell({
     : media?.thumbnail || media?.url || null;
 
   return (
-    <Pressable
-      onPress={handlePress}
-      onPressIn={handlePressIn}
-      style={{ marginBottom: COLUMN_GAP }}
+    <ZoomCard
+      href={getPostDetailRoute(post.id) as never}
+      onPress={handlePressIn}
     >
-      <View style={[styles.cell, { width, height, borderRadius: CELL_RADIUS }]}>
+      {/* Flattened: expo-router's <Slot> (Link asChild) rejects style arrays. */}
+      <View
+        style={StyleSheet.flatten([
+          styles.cell,
+          { width, height, borderRadius: CELL_RADIUS, marginBottom: COLUMN_GAP },
+        ])}
+      >
         {isTextPost ? (
           <TextPostSurface
             text={textPostPreview.previewText}
@@ -431,7 +455,7 @@ const MasonryCell = memo(function MasonryCell({
               style={styles.overlayAction}
             >
               <Heart
-                size={14}
+                size={iconSize}
                 color={hasLiked ? "#ef4444" : "#fff"}
                 fill={hasLiked ? "#ef4444" : "transparent"}
               />
@@ -448,7 +472,7 @@ const MasonryCell = memo(function MasonryCell({
               style={styles.overlayAction}
             >
               <Bookmark
-                size={14}
+                size={iconSize}
                 color={isBookmarked ? "#3FDCFF" : "#fff"}
                 fill={isBookmarked ? "#3FDCFF" : "transparent"}
               />
@@ -458,11 +482,11 @@ const MasonryCell = memo(function MasonryCell({
           </View>
         </LinearGradient>
       </View>
-    </Pressable>
+    </ZoomCard>
   );
 });
 
-// ─── Pack posts into 2 columns (shortest-first) ────────────────────────────
+// ─── Pack posts into N columns (shortest-first) ────────────────────────────
 
 interface PackedPost {
   post: Post;
@@ -472,24 +496,13 @@ interface PackedPost {
 function packIntoColumns(
   posts: Post[],
   columnWidth: number,
-): [PackedPost[], PackedPost[]] {
-  const col0: PackedPost[] = [];
-  const col1: PackedPost[] = [];
-  let h0 = 0;
-  let h1 = 0;
-
-  for (const post of posts) {
-    const height = Math.round(columnWidth * estimateRatio(post));
-    if (h0 <= h1) {
-      col0.push({ post, height });
-      h0 += height + COLUMN_GAP;
-    } else {
-      col1.push({ post, height });
-      h1 += height + COLUMN_GAP;
-    }
-  }
-
-  return [col0, col1];
+  numColumns: number,
+): PackedPost[][] {
+  return packByHeight(
+    posts,
+    (post) => Math.round(columnWidth * estimateRatio(post)),
+    numColumns,
+  ).map((col) => col.map(({ item, height }) => ({ post: item, height })));
 }
 
 // ─── Build sections: masonry chunks interleaved with event cards ────────────
@@ -541,41 +554,34 @@ function buildSections(posts: Post[], events: Event[]): MasonrySection[] {
 const MasonrySection_ = memo(function MasonrySection_({
   posts,
   columnWidth,
+  numColumns,
   onPress,
 }: {
   posts: Post[];
   columnWidth: number;
+  numColumns: number;
   onPress: (id: string) => void;
 }) {
-  const [col0, col1] = useMemo(
-    () => packIntoColumns(posts, columnWidth),
-    [posts, columnWidth],
+  const columns = useMemo(
+    () => packIntoColumns(posts, columnWidth, numColumns),
+    [posts, columnWidth, numColumns],
   );
 
   return (
     <View style={styles.gridContainer}>
-      <View style={{ width: columnWidth }}>
-        {col0.map(({ post, height }) => (
-          <MasonryCell
-            key={post.id}
-            post={post}
-            width={columnWidth}
-            height={height}
-            onPress={onPress}
-          />
-        ))}
-      </View>
-      <View style={{ width: columnWidth }}>
-        {col1.map(({ post, height }) => (
-          <MasonryCell
-            key={post.id}
-            post={post}
-            width={columnWidth}
-            height={height}
-            onPress={onPress}
-          />
-        ))}
-      </View>
+      {columns.map((cells, colIndex) => (
+        <View key={colIndex} style={{ width: columnWidth }}>
+          {cells.map(({ post, height }) => (
+            <MasonryCell
+              key={post.id}
+              post={post}
+              width={columnWidth}
+              height={height}
+              onPress={onPress}
+            />
+          ))}
+        </View>
+      ))}
     </View>
   );
 });
@@ -587,12 +593,14 @@ export function MasonryFeed() {
   const queryClient = useQueryClient();
   const { width: screenWidth } = useWindowDimensions();
   const viewerId = useAuthStore((s) => s.user?.id) || "";
-  const scrollRef = useRef<ScrollView>(null);
+  const listRef = useRef<LegendListRef>(null);
+  const tabBarInset = useTabBarInset();
   const scrollToTopTrigger = useFeedScrollStore((s) => s.scrollToTopTrigger);
 
   useEffect(() => {
-    if (scrollToTopTrigger > 0 && scrollRef.current) {
-      scrollRef.current.scrollTo?.({ y: 0, animated: true });
+    if (scrollToTopTrigger > 0 && listRef.current) {
+      listRef.current.scrollToOffset?.({ offset: 0, animated: true });
+      resetFeedScroll();
     }
   }, [scrollToTopTrigger]);
 
@@ -715,9 +723,20 @@ export function MasonryFeed() {
     [filteredPosts, forYouEvents],
   );
 
-  // Layout
-  const columnWidth = Math.floor(
-    (screenWidth - COLUMN_GAP * (NUM_COLUMNS + 1)) / NUM_COLUMNS,
+  // Layout. Window width is only the ESTIMATE: on iPadOS the native tab
+  // layout insets the content region (~180pt on the 11"), so sizing columns
+  // from the window overflowed the container and cut the last column off at
+  // the screen edge. onLayout measures the region the feed actually owns.
+  const [containerWidth, setContainerWidth] = useState<number | null>(null);
+  const feedWidth = containerWidth ?? screenWidth;
+  const numColumns = columnsForWidth(feedWidth);
+  const columnWidth = columnWidthFor(feedWidth, numColumns);
+  const handleContainerLayout = useCallback(
+    (e: { nativeEvent: { layout: { width: number } } }) => {
+      const w = Math.round(e.nativeEvent.layout.width);
+      if (w > 0) setContainerWidth((prev) => (prev === w ? prev : w));
+    },
+    [],
   );
 
   const handlePress = useCallback(
@@ -736,6 +755,8 @@ export function MasonryFeed() {
   const handleScroll = useCallback(
     (e: any) => {
       const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+      // Drives the stories-row collapse (UI thread, no re-render).
+      feedScrollY.value = Math.max(0, contentOffset.y);
       const distanceFromBottom =
         contentSize.height - layoutMeasurement.height - contentOffset.y;
       if (distanceFromBottom < 800 && hasNextPage && !isFetchingNextPage) {
@@ -750,7 +771,11 @@ export function MasonryFeed() {
   // wrong shape here). Stories + events live in their own lanes and
   // must never gate the grid body.
   if (isLoading || !nsfwLoaded) {
-    return <MasonryGridSkeleton columnWidth={columnWidth} />;
+    return (
+      <View style={{ flex: 1 }} onLayout={handleContainerLayout}>
+        <MasonryGridSkeleton columnWidth={columnWidth} numColumns={numColumns} />
+      </View>
+    );
   }
 
   // Offline + no cached feed → show a deliberate offline surface
@@ -770,12 +795,38 @@ export function MasonryFeed() {
   }
 
   return (
-    <ScrollView
-      ref={scrollRef}
+    <View style={{ flex: 1 }} onLayout={handleContainerLayout}>
+    <LegendList
+      ref={listRef}
+      // Virtualized at SECTION granularity. Each section already carries its own
+      // shortest-first column packing, so the masonry layout is byte-identical to
+      // the old ScrollView — the only change is that offscreen sections stop
+      // rendering. Under a plain ScrollView every post in an infinite feed stayed
+      // mounted with its images decoded and its videos alive.
+      data={sections}
+      keyExtractor={(section: MasonrySection) => section.key}
+      renderItem={({ item }: { item: MasonrySection }) =>
+        item.type === "event" ? (
+          <FeedEventCard event={item.event} />
+        ) : (
+          <MasonrySection_
+            posts={item.posts}
+            columnWidth={columnWidth}
+            numColumns={numColumns}
+            onPress={handlePress}
+          />
+        )
+      }
+      recycleItems
+      estimatedItemSize={columnWidth * 2.4}
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: 80 }}
+      contentContainerStyle={{ paddingBottom: tabBarInset }}
       onScroll={handleScroll}
-      scrollEventThrottle={200}
+      scrollEventThrottle={16}
+      onEndReached={() => {
+        if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+      }}
+      onEndReachedThreshold={0.5}
       refreshControl={
         <RefreshControl
           refreshing={isRefetching}
@@ -783,48 +834,33 @@ export function MasonryFeed() {
           tintColor="#fff"
         />
       }
-    >
-      {/* StoriesBar lifted to HomeScreen (app/(protected)/(tabs)/index.tsx)
-          so it stays mounted across feed-mode toggles and the spicy toggle.
-          Thin divider restores the separator that used to sit above the grid. */}
-      <View
-        style={{
-          height: 8,
-          borderTopWidth: 1,
-          borderTopColor: "rgba(255,255,255,0.06)",
-        }}
-      />
-
-      {filteredPosts.length === 0 ? (
+      ListHeaderComponent={
+        /* StoriesBar lives in HomeScreen so it survives feed-mode toggles; this
+           thin rule restores the separator that used to sit above the grid. */
+        <View
+          style={{
+            height: 8,
+            borderTopWidth: 1,
+            borderTopColor: "rgba(255,255,255,0.06)",
+          }}
+        />
+      }
+      ListEmptyComponent={
         <EmptyState
           icon={ImageOff}
           title="No Posts Yet"
           description="When you or people you follow share posts, they'll appear here"
         />
-      ) : (
-        <>
-          {sections.map((section) => {
-            if (section.type === "event") {
-              return <FeedEventCard key={section.key} event={section.event} />;
-            }
-            return (
-              <MasonrySection_
-                key={section.key}
-                posts={section.posts}
-                columnWidth={columnWidth}
-                onPress={handlePress}
-              />
-            );
-          })}
-        </>
-      )}
-
-      {isFetchingNextPage && (
-        <View style={styles.loadMore}>
-          <Text style={styles.loadMoreText}>Loading...</Text>
-        </View>
-      )}
-    </ScrollView>
+      }
+      ListFooterComponent={
+        isFetchingNextPage ? (
+          <View style={styles.loadMore}>
+            <Text style={styles.loadMoreText}>Loading...</Text>
+          </View>
+        ) : null
+      }
+    />
+    </View>
   );
 }
 

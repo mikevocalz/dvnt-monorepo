@@ -30,7 +30,7 @@ import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
 import {
   CommentRow,
   type CommentData,
-} from "@dvnt/app/components/comments/threaded-comment";
+} from "./ui/threaded-comment";
 import type { Comment } from "@dvnt/app/lib/types";
 
 const ESTIMATED_ROW = 120;
@@ -204,6 +204,7 @@ function ReplyComposer({
           placeholder={
             replyTo ? `Reply to @${replyTo.username}…` : "Add a reply…"
           }
+          aria-label={replyTo ? `Reply to ${replyTo.username}` : "Add a reply"}
           className="flex-1 bg-transparent text-[15px] text-white outline-none placeholder:text-white/40"
         />
         <button

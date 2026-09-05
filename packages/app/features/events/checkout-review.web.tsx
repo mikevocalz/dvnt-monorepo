@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "solito/navigation";
 import { create } from "zustand";
+import { useQuery } from "@tanstack/react-query";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   ArrowLeft,
@@ -33,6 +34,7 @@ import {
   Plus,
   Shirt,
   ShoppingBag,
+  Sparkles,
   Tag,
   Ticket,
   Trash2,
@@ -54,6 +56,11 @@ import {
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
+import {
+  effectiveAddonUnitPriceCents,
+  filterEligibleAddons,
+} from "@dvnt/app/lib/tickets/pricing";
 
 // ── Promo input: tiny local Zustand store (no useState, Law 2) ──────────
 type AppliedPromo = {
@@ -102,6 +109,148 @@ function metadataText(
   return fallback;
 }
 
+/**
+ * Review-screen add-on upsell (WS-3): eligible add-ons not yet in the cart get
+ * a one-tap "Add" that writes a cart line item directly (quantity is edited on
+ * the normal line rows). Eligibility mirrors cart_create_hold: on-sale, in
+ * stock, requires_tier satisfied by a tier already in this cart. Prices shown
+ * are preview — the hold RPC reprices server-side.
+ */
+function AddonUpsellSection({
+  eventId,
+  eventTitle,
+}: {
+  eventId: string;
+  eventTitle: string;
+}) {
+  const cart = useCartStore((state) => state.cart);
+  const addLineItem = useCartStore((state) => state.addLineItem);
+  const { data: addons = [] } = useQuery<AddonRecord[]>({
+    queryKey: ["event-addons", eventId],
+    enabled: !!eventId,
+    staleTime: 60 * 1000,
+    queryFn: () => addonsApi.getByEvent(eventId),
+  });
+
+  const lineItems = cart?.lineItems ?? [];
+  const selectedTierIds = new Set(
+    lineItems
+      .filter((li) => li.category !== "addon")
+      .map((li) => String(li.tierId)),
+  );
+  const inCart = new Set(
+    lineItems
+      .filter((li) => li.category === "addon")
+      .map((li) => (li.variantId ? `${li.addonId}:${li.variantId}` : String(li.addonId))),
+  );
+
+  const eligible = filterEligibleAddons(addons, selectedTierIds).filter(
+    (addon) =>
+      addon.has_variants
+        ? (addon.ticket_addon_variants ?? []).some(
+            (v) => !inCart.has(`${addon.id}:${v.id}`),
+          )
+        : !inCart.has(addon.id),
+  );
+  if (eligible.length === 0) return null;
+
+  const add = (addon: AddonRecord, variantId: string | null) => {
+    const variant = variantId
+      ? addon.ticket_addon_variants?.find((v) => v.id === variantId)
+      : null;
+    addLineItem(eventId, {
+      category: "addon",
+      // DTO back-compat: addon id rides tierId on addon lines.
+      tierId: addon.id,
+      addonId: addon.id,
+      variantId: variantId ?? undefined,
+      quantity: 1,
+      unitPriceCents: effectiveAddonUnitPriceCents(
+        addon.price_cents,
+        variant?.price_cents,
+      ),
+      metadata: {
+        name: variant ? `${addon.name} — ${variant.name}` : addon.name,
+        eventTitle,
+      },
+    });
+  };
+
+  return (
+    <section className="mb-5 flex flex-col gap-2">
+      <div className="flex items-center gap-1.5">
+        <Sparkles size={13} color="#FF5BFC" />
+        <h2 className="text-xs font-bold uppercase tracking-wider text-white/55">
+          Before you pay
+        </h2>
+      </div>
+      <div className="flex flex-col gap-2">
+        {eligible.map((addon) =>
+          addon.has_variants ? (
+            (addon.ticket_addon_variants ?? [])
+              .filter((v) => !inCart.has(`${addon.id}:${v.id}`))
+              .map((variant) => (
+                <div
+                  key={`${addon.id}:${variant.id}`}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5"
+                >
+                  <span className="min-w-0 flex-1 truncate text-sm font-bold text-white">
+                    {addon.name}
+                    <span className="font-semibold text-white/55">
+                      {" "}
+                      · {variant.name}
+                    </span>
+                  </span>
+                  <span className="shrink-0 font-mono text-sm text-white/70">
+                    {formatCents(
+                      effectiveAddonUnitPriceCents(
+                        addon.price_cents,
+                        variant.price_cents,
+                      ),
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => add(addon, variant.id)}
+                    className="h-8 shrink-0 rounded-lg border border-[#3FDCFF]/40 bg-[#3FDCFF]/10 px-3 text-xs font-bold text-[#3FDCFF] active:scale-95"
+                  >
+                    Add
+                  </button>
+                </div>
+              ))
+          ) : (
+            <div
+              key={addon.id}
+              className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-bold text-white">
+                  {addon.name}
+                </span>
+                {addon.description ? (
+                  <span className="block truncate text-xs text-white/50">
+                    {addon.description}
+                  </span>
+                ) : null}
+              </span>
+              <span className="shrink-0 font-mono text-sm text-white/70">
+                {formatCents(addon.price_cents)}
+              </span>
+              <button
+                type="button"
+                onClick={() => add(addon, null)}
+                className="h-8 shrink-0 rounded-lg border border-[#3FDCFF]/40 bg-[#3FDCFF]/10 px-3 text-xs font-bold text-[#3FDCFF] active:scale-95"
+              >
+                Add
+              </button>
+            </div>
+          ),
+        )}
+      </div>
+    </section>
+  );
+}
+
 function CategoryIcon({
   category,
   className,
@@ -110,6 +259,8 @@ function CategoryIcon({
   className?: string;
 }) {
   if (category === "coat_check") return <Shirt size={18} className={className} />;
+  if (category === "addon" || category === "product" || category === "service")
+    return <Sparkles size={18} className={className} />;
   return <Ticket size={18} className={className} />;
 }
 
@@ -222,7 +373,15 @@ export function CheckoutReviewScreen() {
   const lineItems = cart?.lineItems ?? [];
 
   const groups = useMemo(() => {
-    const categories: LineItemCategory[] = ["admission", "coat_check"];
+    // Add-on lines (WS-3) render in their own group after tickets; legacy
+    // product/service coarse add-ons keep rendering too.
+    const categories: LineItemCategory[] = [
+      "admission",
+      "coat_check",
+      "product",
+      "service",
+      "addon",
+    ];
     return categories
       .map((category) => ({
         category,
@@ -472,7 +631,7 @@ export function CheckoutReviewScreen() {
             </div>
             <p className="text-xl font-bold text-white">Your cart is empty</p>
             <p className="mt-2 text-sm leading-5 text-white/55">
-              Add admission tickets or coat-check passes from an event.
+              Add tickets, coat check, or add-ons from an event.
             </p>
           </div>
         ) : (
@@ -502,6 +661,18 @@ export function CheckoutReviewScreen() {
                 </div>
               </section>
             ))}
+
+            {/* Add-on upsell (WS-3) */}
+            {cart?.eventId ? (
+              <AddonUpsellSection
+                eventId={cart.eventId}
+                eventTitle={metadataText(
+                  lineItems[0]?.metadata,
+                  ["eventTitle"],
+                  "",
+                )}
+              />
+            ) : null}
 
             {/* Promo code */}
             <section className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">

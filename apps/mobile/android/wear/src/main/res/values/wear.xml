@@ -1,0 +1,9 @@
+<resources>
+    <!-- Declared so the PHONE can ask CapabilityClient "is the watch app
+         installed?" and get an honest answer instead of guessing. The phone
+         declares dvnt_phone_app on its side; the two names are contracted in
+         TicketRepository.kt -> WearPaths. -->
+    <string-array name="android_wear_capabilities">
+        <item>dvnt_wear_app</item>
+    </string-array>
+</resources>

@@ -47,6 +47,10 @@ import {
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
 import {
+  planAccent,
+  planLabel as planLabelFor,
+} from "@dvnt/app/lib/theme/plan-colors";
+import {
   useAttendeesStore,
   type AttendeesStatusFilter,
 } from "@dvnt/app/lib/stores/attendees-store";
@@ -98,6 +102,10 @@ function AttendeeRow({ item }: { item: TicketRecord }) {
     ? `@${username}`
     : `Ticket ${String(item.id).slice(0, 8)}`;
   const initial = (username || item.qr_token || "?").slice(0, 1).toUpperCase();
+  const planKey = item.membership_tier?.planKey ?? null;
+  // `free` carries no badge — only a paid tier is worth a chip.
+  const planLabel = planKey && planKey !== "free" ? planLabelFor(planKey) : null;
+  const planColor = planAccent(planKey);
 
   return (
     <div
@@ -121,6 +129,18 @@ function AttendeeRow({ item }: { item: TicketRecord }) {
           >
             {tier}
           </span>
+          {/* SUBSCRIPTION tier — a different axis from the ticket tier beside
+              it, so it gets its own palette (plan-colors, never tier-colors).
+              Absent for guests and free members: rendered as nothing at all,
+              not a "Free" chip, so no one reads as lesser on a host's roster. */}
+          {planLabel ? (
+            <span
+              className="rounded-lg px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
+              style={{ backgroundColor: `${planColor}22`, color: planColor }}
+            >
+              {planLabel}
+            </span>
+          ) : null}
           {item.purchase_amount_cents != null ? (
             <span className="text-[13px] text-white/40">
               ${(item.purchase_amount_cents / 100).toFixed(2)}

@@ -1,6 +1,8 @@
 node_modules
 **/node_modules
-.git
+# .git is intentionally NOT ignored: the Ignored Build Step runs after
+# .vercelignore is applied, and a git-based skip check needs history.
+# 34MB. See docs/perf/bundle-size-baseline.md.
 .next
 **/.next
 dist

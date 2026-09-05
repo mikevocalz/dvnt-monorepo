@@ -13,7 +13,7 @@
  */
 import { useEffect } from "react";
 import { View, StyleSheet, useWindowDimensions } from "react-native";
-import { Main } from "@expo/html-elements";
+import { Main } from "@dvnt/app/components/ui/html";
 import { useRouter, usePathname } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { routeOwnsHeader } from "@dvnt/app/lib/web-chrome";

@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 
 const SneakyLynkCreateScreen = dynamic(
   () =>
-    import('@dvnt/app/features/sneaky-lynk/create.web').then(
+    import('@dvnt/app/features/sneaky-lynk/screens/create.web').then(
       (m) => m.SneakyLynkCreateScreen,
     ),
   { ssr: false },

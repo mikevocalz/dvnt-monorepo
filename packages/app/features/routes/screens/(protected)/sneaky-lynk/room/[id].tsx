@@ -29,6 +29,8 @@ import {
   Radio,
   Mic,
   MicOff,
+  Video,
+  VideoOff,
   Hand,
 } from "lucide-react-native";
 import React, { useState, useEffect, useCallback, useRef } from "react";
@@ -37,14 +39,12 @@ import {
   useCameraPermission,
   useMicrophonePermission,
 } from "react-native-vision-camera";
-import {
-  useCamera,
-  useMicrophone,
-  useInitializeDevices,
-} from "@fishjam-cloud/react-native-client";
-import { useVideoRoom } from "@dvnt/app/src/video/hooks/useVideoRoom";
+import { useCamera, useMicrophone } from "react-native-moq";
+import { RoomVideo } from "@dvnt/app/features/sneaky-lynk/ui/RoomVideo";
+import { useVideoRoom } from "@dvnt/app/features/video";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import {
   VideoStage,
   VideoGrid,
@@ -53,44 +53,57 @@ import {
   SpeakerGrid,
   ListenerGrid,
   ControlsBar,
-  ConnectionBanner,
+  REACTION_EMOJIS,
   EjectModal,
   ChatSheet,
-  RoomTimer,
   RoomParticipantsSheet,
   HandQueueSheet,
   RemoteAudioLayer,
-} from "@dvnt/app/src/sneaky-lynk/ui";
-import type { VideoParticipant } from "@dvnt/app/src/sneaky-lynk/ui";
-import type { SneakyRoom, SneakyUser } from "@dvnt/app/src/sneaky-lynk/types";
-import { RoomJoinErrorSheet } from "@dvnt/app/src/sneaky-lynk/ui/RoomJoinErrorSheet";
-import { RoomFullSheet } from "@dvnt/app/src/sneaky-lynk/ui/RoomFullSheet";
-import { CaptureNotificationBanner } from "@dvnt/app/src/sneaky-lynk/ui/CaptureNotificationBanner";
-import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureBroadcast";
+} from "@dvnt/app/features/sneaky-lynk/ui";
+import type { VideoParticipant } from "@dvnt/app/features/sneaky-lynk/ui";
+import type {
+  SneakyRoom,
+  SneakyUser,
+} from "@dvnt/app/features/sneaky-lynk/types";
+import { RoomJoinErrorSheet } from "@dvnt/app/features/sneaky-lynk";
+import { RoomFullSheet } from "@dvnt/app/features/sneaky-lynk";
+import { CaptureNotificationBanner } from "@dvnt/app/features/sneaky-lynk";
+import { CaptureDisclosureChip } from "@dvnt/app/features/sneaky-lynk/ui";
+import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/features/sneaky-lynk";
 import {
   classifySneakyLynkError,
   type ClassifiedError,
-} from "@dvnt/app/src/sneaky-lynk/errors";
+} from "@dvnt/app/features/sneaky-lynk/errors";
 import {
   getSneakyUserLabel,
   normalizeSneakyAnonLabel,
-} from "@dvnt/app/src/sneaky-lynk/ui/user-labels";
-import { videoApi } from "@dvnt/app/src/video/api";
+} from "@dvnt/app/features/sneaky-lynk";
+import { videoApi } from "@dvnt/app/features/video/api";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
-import { useRoomStore } from "@dvnt/app/src/sneaky-lynk/stores/room-store";
-import { useLynkHistoryStore } from "@dvnt/app/src/sneaky-lynk/stores/lynk-history-store";
-import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
+import { useRoomStore } from "@dvnt/app/features/sneaky-lynk";
+import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
-import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
+import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import { shareUrl } from "@dvnt/app/lib/deep-linking/share-link";
 import {
   DVNTLiquidGlass,
   DVNTLiquidGlassIconButton,
 } from "@dvnt/app/components/media/DVNTLiquidGlass";
-import { useRoomReactions } from "@dvnt/app/src/sneaky-lynk/hooks/useRoomReactions";
-import { useSneakyLynkCaptureProtection } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureProtection";
-import { SneakySubscriptionModal } from "@dvnt/app/src/sneaky-lynk/components/SneakySubscriptionModal";
-import { SneakyPaywallModal } from "@dvnt/app/src/sneaky-lynk/components/SneakyPaywallModal";
+import {
+  useRoomReactions,
+  GPU_REACTION_CAP,
+} from "@dvnt/app/features/sneaky-lynk";
+import { ConnectionBanner, RoomTimer, type ConnectionPhase } from "@dvnt/ui";
+import { HOST_MUTE_COPY } from "@dvnt/app/lib/video/host-mute";
+import { bannerPhaseFor, useRoomSession } from "@dvnt/app/features/sneaky-lynk/session/useRoomSession";
+import { isActive } from "@dvnt/app/features/sneaky-lynk/session/machine";
+import { useRoomHeartbeat } from "@dvnt/app/features/sneaky-lynk/hooks/useRoomHeartbeat";
+import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
+import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
+import { SneakyPaywallModal } from "@dvnt/app/features/sneaky-lynk";
+import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
+import type { SneakyBilling } from "@dvnt/app/features/screens/membership/billing";
 import { isFeatureEnabled } from "@dvnt/app/lib/feature-flags";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 
@@ -293,6 +306,16 @@ function ClosedRoomScreen({
   );
 }
 
+/**
+ * Where leaving a Lynk goes: the Lynks list, never `router.back()`.
+ *
+ * Back is wherever you happened to come from, and for a deep link, a push
+ * notification, an accepted invite or a cold start that is outside the app
+ * entirely — so hanging up did nothing and you stayed in the room you had just
+ * tried to leave. Same constant and same reason as the web room.
+ */
+const LYNKS_LIST_ROUTE = "/messages";
+
 // ── Pre-Join Screen ──────────────────────────────────────────────────
 
 function PreJoinScreen({
@@ -301,11 +324,22 @@ function PreJoinScreen({
   onBack,
 }: {
   roomTitle: string;
-  onJoin: (anonymous: boolean) => void;
+  onJoin: (anonymous: boolean, cameraOn: boolean, micOn: boolean) => void;
   onBack: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [anonymous, setAnonymous] = React.useState(false);
+  const [cameraOn, setCameraOn] = React.useState(true);
+  const [micOn, setMicOn] = React.useState(true);
+
+  /**
+   * Self-preview, same as the web pre-join.
+   *
+   * This screen asked "how do you want to appear" and showed you nothing — you
+   * found out what the room could see AFTER it could see it. Its own camera,
+   * released when this screen unmounts, so the room's capture starts clean.
+   */
+  const previewCamera = useCamera({ enabled: cameraOn });
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -325,8 +359,29 @@ function PreJoinScreen({
         <View className="w-6" />
       </View>
 
-      {/* Content */}
-      <View className="flex-1 items-center justify-center px-6">
+      {/* Content.
+          `max-w-md self-center` is the whole iPad fix: every card here was
+          `w-full` inside a full-bleed padding box, so on a 1024pt iPad the
+          safety copy and the toggles stretched the entire width and the screen
+          read as a settings page rather than a door. Phones are unchanged —
+          the cap is wider than they are. Same column width as the web
+          pre-join, so the two rails describe the same screen. */}
+      <ScrollView
+        // contentContainerSTYLE, not className: NativeWind does not map
+        // `contentContainerClassName` in this setup, so the class version
+        // silently applies nothing — the same trap already documented at
+        // (tabs)/profile.tsx:619. The centring and padding here are the whole
+        // layout, so losing them would undo the fix this screen exists for.
+        contentContainerStyle={{
+          flexGrow: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingHorizontal: 24,
+          paddingVertical: 24,
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+       <View className="w-full max-w-md self-center items-center">
         <View className="w-20 h-20 rounded-full bg-primary/20 items-center justify-center mb-6">
           <Radio size={40} color="#FC253A" />
         </View>
@@ -334,9 +389,60 @@ function PreJoinScreen({
         <Text className="text-2xl font-bold text-foreground text-center mb-2">
           {roomTitle || getLynkDisplayName()}
         </Text>
-        <Text className="text-muted-foreground text-center mb-10">
+        <Text className="text-muted-foreground text-center mb-6">
           Choose how you want to appear in this room
         </Text>
+
+        {/* Self-preview + the two decisions that matter at a door. Mirrored,
+            because an unmirrored preview reads as someone else. */}
+        <View className="w-full rounded-2xl overflow-hidden bg-black border border-border mb-4">
+          <View className="w-full aspect-video">
+            {cameraOn && previewCamera ? (
+              <RoomVideo camera={previewCamera} mirror />
+            ) : (
+              <View className="flex-1 items-center justify-center gap-2">
+                <VideoOff size={26} color="#ffffff73" />
+                <Text className="text-xs text-muted-foreground">
+                  Camera off — you&apos;ll join as your avatar
+                </Text>
+              </View>
+            )}
+          </View>
+          <View className="flex-row items-center justify-center gap-3 px-4 py-3 border-t border-border">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: cameraOn }}
+              accessibilityLabel={cameraOn ? "Turn camera off" : "Turn camera on"}
+              onPress={() => setCameraOn((v) => !v)}
+              hitSlop={8}
+              className={`w-11 h-11 rounded-full items-center justify-center ${
+                cameraOn ? "bg-secondary" : "bg-primary"
+              }`}
+            >
+              {cameraOn ? (
+                <Video size={18} color="#fff" />
+              ) : (
+                <VideoOff size={18} color="#fff" />
+              )}
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: micOn }}
+              accessibilityLabel={micOn ? "Mute microphone" : "Unmute microphone"}
+              onPress={() => setMicOn((v) => !v)}
+              hitSlop={8}
+              className={`w-11 h-11 rounded-full items-center justify-center ${
+                micOn ? "bg-secondary" : "bg-primary"
+              }`}
+            >
+              {micOn ? (
+                <Mic size={18} color="#fff" />
+              ) : (
+                <MicOff size={18} color="#fff" />
+              )}
+            </Pressable>
+          </View>
+        </View>
 
         <View className="w-full rounded-2xl bg-secondary px-5 py-4 mb-4">
           <Text className="text-foreground font-semibold mb-2">
@@ -385,21 +491,26 @@ function PreJoinScreen({
 
         {/* Join Button */}
         <Pressable
-          onPress={() => onJoin(anonymous)}
+          onPress={() => onJoin(anonymous, cameraOn, micOn)}
           className="w-full py-4 rounded-full bg-primary items-center active:bg-primary/80"
         >
           <Text className="text-white font-bold text-base">
             {anonymous ? "Join Anonymously" : "Join Lynk"}
           </Text>
         </Pressable>
-      </View>
+       </View>
+      </ScrollView>
     </View>
   );
 }
 
 // ── Router entry point ──────────────────────────────────────────────
 
-function SneakyLynkRoomScreenContent() {
+function SneakyLynkRoomScreenContent({
+  billing = null,
+}: {
+  billing?: SneakyBilling | null;
+}) {
   // Capture protection is mounted INSIDE ServerRoom + LocalRoom, not
   // here, so the local screenshot listener has access to roomId +
   // localUser for room-wide broadcast. Ref counter inside the hook
@@ -430,6 +541,10 @@ function SneakyLynkRoomScreenContent() {
   // Pre-join state for server rooms (joiners, not creators)
   const [hasJoined, setHasJoined] = useState(!isServerRoom || isCreator);
   const [joinAnonymous, setJoinAnonymous] = useState(false);
+  // How you said you wanted to arrive at the door. The room used to start
+  // camera and mic regardless, which made the pre-join choice decoration.
+  const [joinCameraOn, setJoinCameraOn] = useState(true);
+  const [joinMicOn, setJoinMicOn] = useState(true);
   const [roomLookup, setRoomLookup] = useState<{
     loading: boolean;
     room: SneakyRoom | null;
@@ -456,10 +571,15 @@ function SneakyLynkRoomScreenContent() {
     };
   }, [id, shouldGateJoin]);
 
-  const handleJoin = useCallback((anonymous: boolean) => {
-    setJoinAnonymous(anonymous);
-    setHasJoined(true);
-  }, []);
+  const handleJoin = useCallback(
+    (anonymous: boolean, cameraOn: boolean, micOn: boolean) => {
+      setJoinAnonymous(anonymous);
+      setJoinCameraOn(cameraOn);
+      setJoinMicOn(micOn);
+      setHasJoined(true);
+    },
+    [],
+  );
 
   if (shouldGateJoin && roomLookup.loading) {
     return (
@@ -507,33 +627,40 @@ function SneakyLynkRoomScreenContent() {
         paramTitle={paramTitle}
         roomHasVideo={roomHasVideo}
         anonymous={joinAnonymous}
+        initialCameraOn={joinCameraOn}
+        initialMicOn={joinMicOn}
         initialRoom={roomLookup.room}
+        billing={billing}
       />
     );
   }
   return (
-    <LocalRoom id={id} paramTitle={paramTitle} roomHasVideo={roomHasVideo} />
+    <LocalRoom
+      id={id}
+      paramTitle={paramTitle}
+      roomHasVideo={roomHasVideo}
+      billing={billing}
+    />
   );
 }
 
-// ── LocalRoom: direct Fishjam camera/mic, NO useVideoRoom ──────────
+// ── LocalRoom: direct MoQ capture, NO useVideoRoom ─────────────────
 
 function LocalRoom({
   id,
   paramTitle,
   roomHasVideo = true,
+  billing = null,
 }: {
   id: string;
   paramTitle?: string;
   roomHasVideo?: boolean;
+  billing?: SneakyBilling | null;
 }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const authUser = useAuthStore((s) => s.user);
   const showToast = useUIStore((s) => s.showToast);
-  const fishjamCamera = useCamera();
-  const fishjamMic = useMicrophone();
-  const { initializeDevices } = useInitializeDevices();
   const endRoom = useLynkHistoryStore((s) => s.endRoom);
 
   // VisionCamera permissions for native camera preview
@@ -545,16 +672,6 @@ function LocalRoom({
     hasPermission: hasMicPermission,
     requestPermission: requestMicPermission,
   } = useMicrophonePermission();
-
-  // Keep refs to the latest camera/mic so effects never use stale closures.
-  const cameraRef = useRef(fishjamCamera);
-  const micRef = useRef(fishjamMic);
-  useEffect(() => {
-    cameraRef.current = fishjamCamera;
-  }, [fishjamCamera]);
-  useEffect(() => {
-    micRef.current = fishjamMic;
-  }, [fishjamMic]);
 
   const {
     isHandRaised,
@@ -610,14 +727,14 @@ function LocalRoom({
       ]);
 
       if (cancelled) return;
-
-      try {
-        await initializeDevices({
-          enableVideo: roomHasVideo && cameraGranted,
-          enableAudio: microphoneGranted,
-        });
-      } catch (error) {
-        console.warn("[SneakyLynk:Local] Failed to initialize devices:", error);
+      // No device init step on this transport: capture starts and stops from
+      // the `enabled` flags below. Permissions are still ours to request —
+      // a missing one shows as a black preview, not an error.
+      if (roomHasVideo && !cameraGranted) {
+        console.warn("[SneakyLynk:Local] Camera permission denied");
+      }
+      if (!microphoneGranted) {
+        console.warn("[SneakyLynk:Local] Microphone permission denied");
       }
     })();
 
@@ -625,41 +742,24 @@ function LocalRoom({
       cancelled = true;
       reset();
     };
-  }, [
-    initializeDevices,
-    requestCamPermission,
-    requestMicPermission,
-    reset,
-    roomHasVideo,
-  ]);
+  }, [requestCamPermission, requestMicPermission, reset, roomHasVideo]);
 
-  // Start audio session + mic on mount
+  // Local capture. Nothing is published here — this is the solo practice space
+  // — so these exist for the preview and to make mute mean something: with
+  // `enabled: false` the hardware actually stops, which also releases the iOS
+  // audio session rather than holding it in playAndRecord.
+  const camera = useCamera({
+    enabled: effectiveVideoOn,
+    videoCodec: "h264",
+  });
+  const mic = useMicrophone({ enabled: localMicEnabled });
+
+  // Audio session for the room (no CallKit for Lynk rooms — they are social
+  // rooms, not private calls, so audio always routes to the speaker).
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // Configure audio session BEFORE starting mic (no CallKit for Lynk rooms)
-        // Lynks are social rooms, not private calls. Always route audio to speaker.
-        audioSession.startForLynk(true);
-        console.log("[SneakyLynk:Local] Starting mic");
-        const toggleError = await micRef.current.toggleMicrophone();
-        if (toggleError) {
-          throw toggleError;
-        }
-        if (!cancelled) {
-          setLocalMicEnabled(true);
-          console.log("[SneakyLynk:Local] Mic started");
-        }
-      } catch (e) {
-        console.warn("[SneakyLynk:Local] Failed to start mic:", e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      micRef.current.stopMicrophone();
-      audioSession.stop();
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    audioSession.startForLynk(true);
+    return () => audioSession.stop();
+  }, []);
 
   // Speaking indicator
   useEffect(() => {
@@ -703,20 +803,17 @@ function LocalRoom({
   }, [router, id, endRoom, reset, storeListeners.length, showToast]);
 
   // Subscription check — determines if the host has a paid plan (timer hidden
-  // for paid hosts; free hosts see the time-up paywall instead of being kicked)
+  // for paid hosts; free hosts see the time-up paywall instead of being kicked).
+  // Sourced from the canonical resolver (useEntitlements) so BOTH rails
+  // (web Stripe + mobile RevenueCat IAP) and BOTH families (standalone Sneaky
+  // tiers + DVNT membership) grant host powers — the legacy direct
+  // sneaky_subscriptions read missed every RC-written row.
   const [showTimesUpPaywall, setShowTimesUpPaywall] = useState(false);
-  const [isPaidHost, setIsPaidHost] = useState(false);
-  useEffect(() => {
-    if (!authUser?.id) return;
-    supabase
-      .from("sneaky_subscriptions")
-      .select("status, plan_id")
-      .eq("host_id", authUser.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setIsPaidHost(data?.status === "active" && data?.plan_id !== "free");
-      });
-  }, [authUser?.id]);
+  const { entitlements, isLoading: entitlementsLoading } = useEntitlements();
+  // Same boolean the legacy check derived (active && plan_id !== "free"):
+  // every paid plan grants unlimited session duration.
+  const isPaidHost =
+    !entitlementsLoading && entitlements.sessionMinutes === null;
 
   const handleTimeUp = useCallback(() => {
     if (isPaidHost) {
@@ -748,71 +845,23 @@ function LocalRoom({
 
     showToast("info", "Share Cancelled", "Invite sharing was dismissed.");
   }, [id, roomTitle, showToast]);
-  const handleToggleMic = useCallback(async () => {
+  const handleToggleMic = useCallback(() => {
+    // Capture follows the flag (see `useMicrophone` above) — there is no async
+    // toggle that can fail, so there is nothing to catch or roll back.
     const wantEnabled = !localMicEnabled;
-    try {
-      if (wantEnabled && !micRef.current.isMicrophoneOn) {
-        const toggleError = await micRef.current.toggleMicrophone();
-        if (toggleError) {
-          throw toggleError;
-        }
-      } else if (!wantEnabled && micRef.current.isMicrophoneOn) {
-        const toggleError = await micRef.current.toggleMicrophone();
-        if (toggleError) {
-          throw toggleError;
-        }
-      }
-
-      audioSession.setMicMuted(!wantEnabled);
-      setLocalMicEnabled(wantEnabled);
-    } catch (error) {
-      console.warn("[SneakyLynk:Local] Failed to toggle mic:", error);
-      showToast(
-        "error",
-        "Microphone unavailable",
-        "We couldn't change the microphone state. Please try again.",
-      );
-    }
-  }, [localMicEnabled, showToast]);
+    audioSession.setMicMuted(!wantEnabled);
+    setLocalMicEnabled(wantEnabled);
+  }, [localMicEnabled]);
   const handleToggleVideo = useCallback(() => {
     setLocalVideoOn((prev) => !prev);
   }, []);
   const handleSwitchCamera = useCallback(async () => {
-    const devices = cameraRef.current.cameraDevices || [];
-    const nextFacing = isFrontCamera ? "back" : "front";
+    // `flip()` swaps capture position natively — no device enumeration, and no
+    // deprecated _switchCamera() facingMode trap. See useVideoRoom.switchCamera.
+    camera.flip();
+    setIsFrontCamera((prev) => !prev);
+  }, [camera]);
 
-    // See the matching comment in src/video/hooks/useVideoRoom.ts —
-    // the track's `_switchCamera()` is deprecated AND buggy for us
-    // because Fishjam starts cameras by deviceId (facingMode left
-    // undefined). Always use `selectCamera(deviceId)` directly.
-    const nextCamera = devices.find((device: any) => {
-      const label = String(device?.label || "").toLowerCase();
-      const deviceId = String(device?.deviceId || "").toLowerCase();
-      const position = String(device?.position || "").toLowerCase();
-      const facingMode = String(device?.facingMode || "").toLowerCase();
-      return (
-        label.includes(nextFacing) ||
-        deviceId.includes(nextFacing) ||
-        position.includes(nextFacing) ||
-        facingMode.includes(nextFacing)
-      );
-    });
-
-    if (nextCamera?.deviceId) {
-      const error = await cameraRef.current.selectCamera(nextCamera.deviceId);
-      if (!error) {
-        setIsFrontCamera((prev) => !prev);
-        return;
-      }
-      console.warn("[SneakyLynk:Local] selectCamera failed:", error);
-    }
-
-    showToast(
-      "error",
-      "Camera unavailable",
-      "We couldn't reverse the camera in this Lynk.",
-    );
-  }, [isFrontCamera, showToast]);
   const handleToggleHand = useCallback(async () => {
     if (handToggleInFlightRef.current) return;
 
@@ -869,7 +918,9 @@ function LocalRoom({
     isLocal: true,
     isCameraOn: effectiveVideoOn,
     isMicOn: !effectiveMuted,
-    videoTrack: undefined, // local room uses native camera preview
+    // The practice space had no preview at all: its tile rendered from a
+    // Fishjam stream that was never wired to one. The capture track is.
+    localCamera: camera,
     isHandRaised,
     isFrontCamera,
   });
@@ -939,10 +990,10 @@ function LocalRoom({
         onClose={() => setShowTimesUpPaywall(false)}
         reason="duration_limit"
         dismissible={false}
-        onSubscribed={() => {
-          setIsPaidHost(true);
-          setShowTimesUpPaywall(false);
-        }}
+        billing={billing}
+        // isPaidHost is derived from useEntitlements — the modal's activation
+        // loop already invalidated the query, so the flag flips on its own.
+        onSubscribed={() => setShowTimesUpPaywall(false)}
       />
     </>
   );
@@ -955,20 +1006,26 @@ function ServerRoom({
   paramTitle,
   roomHasVideo = true,
   anonymous = false,
+  initialCameraOn = true,
+  initialMicOn = true,
   initialRoom = null,
+  billing = null,
 }: {
   id: string;
   paramTitle?: string;
   roomHasVideo?: boolean;
   anonymous?: boolean;
+  /** The pre-join answer. Applied once publishing becomes possible. */
+  initialCameraOn?: boolean;
+  initialMicOn?: boolean;
   initialRoom?: SneakyRoom | null;
+  billing?: SneakyBilling | null;
 }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const showToast = useUIStore((s) => s.showToast);
   const authUser = useAuthStore((s) => s.user);
   const endRoomHistory = useLynkHistoryStore((s) => s.endRoom);
-  const { initializeDevices } = useInitializeDevices();
 
   // VisionCamera permissions for native camera fallback
   const { requestPermission: requestCamPermission } = useCameraPermission();
@@ -1019,8 +1076,12 @@ function ServerRoom({
     null,
   );
   const presenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const desiredMicEnabledRef = useRef(true);
-  const desiredVideoEnabledRef = useRef(roomHasVideo);
+  // Seeded from the pre-join answer, not from `true`. `reconcileDesiredMedia`
+  // already applies these on join / reconnect / foreground, so seeding them is
+  // the whole carry-through: you arrive the way you said you would, and a
+  // reconnect does not quietly turn your camera back on.
+  const desiredMicEnabledRef = useRef(initialMicOn);
+  const desiredVideoEnabledRef = useRef(roomHasVideo && initialCameraOn);
   const handToggleInFlightRef = useRef(false);
   const shareInFlightRef = useRef(false);
   const reportInFlightRef = useRef(false);
@@ -1136,6 +1197,22 @@ function ServerRoom({
           | "connected"
           | "reconnecting"
           | "disconnected");
+  // The session machine owns "is this room live", and the observability seam
+  // hangs off it — app-hang tracking and profiling are suppressed for exactly
+  // as long as the session is up, rather than for as long as this component
+  // happens to be mounted. The banner still reads from connectionState above;
+  // moving it onto the machine changes what a user sees during a drop and
+  // wants a device to confirm (WS-3).
+  // videoRoom.join already re-mints the peer token and re-attaches, and it
+  // returns false rather than throwing, which is exactly the contract the
+  // machine's budget expects. Held in a ref inside the hook, so its identity
+  // changing between renders does not restart the retry loop.
+  const session = useRoomSession(videoRoom.connectionState.status, {
+    onReconnect: videoRoom.join,
+  });
+  // See the web leg: without this every member reports no last_seen_at and
+  // video_list_rooms keeps the room "Live" for twelve hours.
+  useRoomHeartbeat(id, isActive(session));
   const previousConnectionStateRef = useRef(connectionState);
   const appStateRef = useRef(AppState.currentState);
   const isHostRef = useRef(isHost);
@@ -1148,41 +1225,17 @@ function ServerRoom({
   );
   const [showTimesUpPaywall, setShowTimesUpPaywall] = useState(false);
   const [showViewerPaywall, setShowViewerPaywall] = useState(false);
-  const [isPaidHost, setIsPaidHost] = useState(false);
-  const [hostPlanChecked, setHostPlanChecked] = useState(false);
-  useEffect(() => {
-    if (!isHost || !authUser?.id) {
-      setHostPlanChecked(false);
-      setIsPaidHost(false);
-      return;
-    }
-
-    let cancelled = false;
-    setHostPlanChecked(false);
-
-    (async () => {
-      try {
-        const { data } = await supabase
-          .from("sneaky_subscriptions")
-          .select("status, plan_id")
-          .eq("host_id", authUser.id)
-          .maybeSingle();
-
-        if (cancelled) return;
-        setIsPaidHost(data?.status === "active" && data?.plan_id !== "free");
-        setHostPlanChecked(true);
-      } catch (error) {
-        if (cancelled) return;
-        console.warn("[SneakyLynk:Host] Subscription check failed:", error);
-        setIsPaidHost(false);
-        setHostPlanChecked(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isHost, authUser?.id]);
+  // Host plan check — sourced from the canonical resolver (useEntitlements)
+  // so BOTH rails (web Stripe + mobile RevenueCat IAP) and BOTH families
+  // (standalone Sneaky tiers + DVNT membership) grant host powers — the
+  // legacy direct sneaky_subscriptions read missed every RC-written row.
+  // Same booleans as before: isPaidHost (active paid plan → unlimited
+  // duration) and hostPlanChecked (lookup settled — the guards below treat
+  // "unknown" as paid so a slow read can't auto-end a paid host's room).
+  const { entitlements, isLoading: entitlementsLoading } = useEntitlements();
+  const isPaidHost =
+    isHost && !entitlementsLoading && entitlements.sessionMinutes === null;
+  const hostPlanChecked = isHost && !entitlementsLoading;
 
   const reconcileDesiredMedia = useCallback(
     async (reason: "join" | "reconnect" | "foreground") => {
@@ -1238,16 +1291,13 @@ function ServerRoom({
 
       if (cancelled) return;
 
-      try {
-        await initializeDevices({
-          enableVideo: roomHasVideo && cameraGranted,
-          enableAudio: microphoneGranted,
-        });
-      } catch (error) {
-        console.warn(
-          "[SneakyLynk:Server] Failed to initialize devices:",
-          error,
-        );
+      // Capture starts from `useLynkBroadcast`'s enabled flags once the role
+      // is known; there is no device-init step to await. Permissions stay ours.
+      if (roomHasVideo && !cameraGranted) {
+        console.warn("[SneakyLynk:Server] Camera permission denied");
+      }
+      if (!microphoneGranted) {
+        console.warn("[SneakyLynk:Server] Microphone permission denied");
       }
     })();
 
@@ -1256,7 +1306,6 @@ function ServerRoom({
       reset();
     };
   }, [
-    initializeDevices,
     requestCamPermission,
     requestMicPermission,
     reset,
@@ -1298,8 +1347,7 @@ function ServerRoom({
   useEffect(() => {
     if (!id) return;
 
-    const channel = supabase
-      .channel(`video_room_meta:${id}`)
+    const channel = freshChannel(`video_room_meta:${id}`)
       .on(
         "postgres_changes",
         {
@@ -1475,14 +1523,13 @@ function ServerRoom({
     if (connectionState !== "connected") return;
     if (videoRoom.participants.length === 0) return;
     if (!desiredMicEnabledRef.current) return;
-    if (videoRoom.isMicOn || videoRoom.microphone.isMicrophoneOn) return;
+    // Was `microphone.isMicrophoneOn` (Fishjam's hardware truth). On MoQ the
+    // equivalent "desired but not actually going out" signal is: the store says
+    // mic-on AND we are publishing.
+    if (videoRoom.isMicOn && videoRoom.isLive) return;
 
     const timer = setTimeout(async () => {
-      if (
-        videoRoomRef.current.isMicOn ||
-        videoRoomRef.current.microphone.isMicrophoneOn
-      )
-        return;
+      if (videoRoomRef.current.isMicOn && videoRoomRef.current.isLive) return;
       console.warn(
         "[SneakyLynk:Server] MIC_SAFETY: remote peers present but mic is still off, force-starting",
       );
@@ -1498,7 +1545,7 @@ function ServerRoom({
     connectionState,
     videoRoom.participants.length,
     videoRoom.isMicOn,
-    videoRoom.microphone.isMicrophoneOn,
+    videoRoom.isLive,
   ]);
 
   // Speaking indicator - only clear when muted, don't auto-set when unmuted
@@ -1619,8 +1666,7 @@ function ServerRoom({
       );
     if (!isUuid) return;
 
-    const channel = supabase
-      .channel(`room-closed:${id}`)
+    const channel = freshChannel(`room-closed:${id}`)
       .on(
         "postgres_changes" as any,
         {
@@ -1689,14 +1735,14 @@ function ServerRoom({
 
       reset();
       endRoomHistory(id, storeListeners.length);
-      router.back();
+      router.push(LYNKS_LIST_ROUTE);
       return;
     }
 
     // Non-host: navigate first, then reconcile with the server.
     reset();
     endRoomHistory(id, storeListeners.length);
-    router.back();
+    router.push(LYNKS_LIST_ROUTE);
 
     // Fire-and-forget — the user is already gone. Surface a background
     // log for ops; do NOT toast on failure because the user's already
@@ -1742,9 +1788,15 @@ function ServerRoom({
   const handleToggleMic = useCallback(async () => {
     const actuallyOn = videoRoomRef.current.isMicOn;
     const nextEnabled = !actuallyOn;
+    const allowed = await videoRoomRef.current.setMicEnabled(nextEnabled);
+    if (!allowed) {
+      // Host is holding the mute. Say so — a control that silently does
+      // nothing reads as the app being broken.
+      showToast("info", "Muted by host", HOST_MUTE_COPY.blocked);
+      return;
+    }
     desiredMicEnabledRef.current = nextEnabled;
-    await videoRoomRef.current.setMicEnabled(nextEnabled);
-  }, []);
+  }, [showToast]);
   const handleToggleVideo = useCallback(async () => {
     const actuallyOn = videoRoomRef.current.isCameraOn;
     const nextEnabled = !actuallyOn;
@@ -2120,7 +2172,9 @@ function ServerRoom({
 
   // ── Build flat VideoParticipant[] for VideoGrid ──────────────────
   const remotePeers = videoRoom.participants || [];
-  const localCameraStream = videoRoom.camera?.cameraStream || null;
+  // MoQ has no local MediaStream — the preview is the capture track itself,
+  // rendered by `<PublisherView>` inside RoomVideo.
+  const localCamera = videoRoom.cameraTrack;
 
   const allParticipants: VideoParticipant[] = [];
 
@@ -2132,7 +2186,7 @@ function ServerRoom({
     isLocal: true,
     isCameraOn: effectiveVideoOn,
     isMicOn: !effectiveMuted,
-    videoTrack: localCameraStream ? { stream: localCameraStream } : undefined,
+    localCamera,
     isHandRaised,
     isFrontCamera: videoRoom.isFrontCamera,
   });
@@ -2150,8 +2204,7 @@ function ServerRoom({
       isLocal: false,
       isCameraOn: p.isCameraOn || false,
       isMicOn: p.isMicOn || false,
-      videoTrack: p.videoTrack,
-      audioTrack: p.audioTrack,
+      broadcast: p.broadcast,
       isHandRaised: !!raisedHands[peerId],
     });
   });
@@ -2172,6 +2225,8 @@ function ServerRoom({
       <RoomLayout
         insets={insets}
         connectionState={connectionState}
+        hostMuteLocked={videoRoom.hostMuteLocked}
+        bannerPhase={bannerPhaseFor(session)}
         isHost={!!isHost}
         roomTitle={roomTitle}
         participantCount={totalParticipants}
@@ -2219,7 +2274,19 @@ function ServerRoom({
         raisedHandCount={raisedHandOrder.length}
         onOpenHandQueue={isHost ? openHandQueue : undefined}
         onTimeUp={handleTimeUp}
-        hideTimer={isHost && isPaidHost}
+        // The server decides whether this session is limited (video_rooms
+        // .ends_at); the entitlement read is only the fallback for a backend
+        // that predates the gate and returns no field at all.
+        hideTimer={
+          videoRoom.serverEndsAt !== undefined
+            ? videoRoom.serverEndsAt === null
+            : isHost && isPaidHost
+        }
+        timerDurationMs={
+          videoRoom.serverEndsAt != null && timerStartedAt != null
+            ? new Date(videoRoom.serverEndsAt).getTime() - timerStartedAt
+            : undefined
+        }
         timerStartedAt={timerStartedAt}
       />
 
@@ -2228,10 +2295,10 @@ function ServerRoom({
         onClose={() => setShowTimesUpPaywall(false)}
         reason="duration_limit"
         dismissible={false}
-        onSubscribed={() => {
-          setIsPaidHost(true);
-          setShowTimesUpPaywall(false);
-        }}
+        billing={billing}
+        // isPaidHost is derived from useEntitlements — the modal's activation
+        // loop already invalidated the query, so the flag flips on its own.
+        onSubscribed={() => setShowTimesUpPaywall(false)}
       />
 
       <SneakyPaywallModal
@@ -2381,6 +2448,8 @@ function ServerRoom({
 function RoomLayout({
   insets,
   connectionState,
+  hostMuteLocked,
+  bannerPhase,
   isHost,
   roomTitle,
   participantCount,
@@ -2417,10 +2486,18 @@ function RoomLayout({
   onOpenHandQueue,
   onTimeUp,
   hideTimer,
+  timerDurationMs,
   timerStartedAt,
 }: {
   insets: any;
   connectionState: "connecting" | "connected" | "reconnecting" | "disconnected";
+  /** Host is holding the local participant muted — the mic control says so
+   *  rather than silently refusing (lib/video/host-mute). */
+  hostMuteLocked?: boolean;
+  /** Banner phase from the session machine. `connectionState` above still
+   *  drives this screen's media/teardown effects; only the banner moves, since
+   *  the machine is what can tell a first join from a reconnect. */
+  bannerPhase?: ConnectionPhase;
   isHost: boolean;
   localRole:
     | "host"
@@ -2463,8 +2540,15 @@ function RoomLayout({
   onOpenHandQueue?: () => void;
   onTimeUp?: () => void;
   hideTimer?: boolean;
+  /** Derived from the server deadline; undefined keeps the free-tier default. */
+  timerDurationMs?: number;
   timerStartedAt?: number;
 }) {
+  // Capped at the RN default (6 concurrent) because each reaction here is an
+  // animated view. The higher GPU cap went with the GPU overlay: it only
+  // applied once that overlay reported a device, an atlas AND a pipeline, and
+  // the same flag suppressed the RN renderer — so any failure in that chain
+  // showed nothing at all rather than falling back.
   const { reactions, sendReaction } = useRoomReactions({
     roomId,
     currentUser: localUser,
@@ -2513,7 +2597,7 @@ function RoomLayout({
         }}
       />
 
-      <ConnectionBanner state={connectionState} />
+      <ConnectionBanner phase={bannerPhase ?? connectionState} />
       {presenceEvent ? <PresenceToast event={presenceEvent} /> : null}
 
       <View className="flex-1" style={{ paddingTop: insets.top }}>
@@ -2743,6 +2827,11 @@ function RoomLayout({
               <View style={{ width: 42 }} />
             )}
           </View>
+
+          {/* Standing disclosure — renders only while a web viewer is in the
+              room. Web protection is deterrence + attribution; native runs
+              under FLAG_SECURE / the iOS blackout. Everyone gets told. */}
+          <CaptureDisclosureChip />
         </View>
 
         <View
@@ -2766,11 +2855,15 @@ function RoomLayout({
             onParticipantPress={onParticipantPress}
             stageHeight={stageContentHeight}
             hostOverlay={
-              !hideTimer ? (
+              // No startedAt means no server fact to count down from. Falling
+              // back to mount time would invent one, and two clients in the
+              // same room would then disagree about when it ends.
+              !hideTimer && timerStartedAt != null ? (
                 <RoomTimer
-                  key={timerStartedAt ?? "mount"}
+                  key={timerStartedAt}
                   onTimeUp={onTimeUp ?? onLeave}
                   startedAt={timerStartedAt}
+                  durationMs={timerDurationMs}
                 />
               ) : null
             }
@@ -2779,13 +2872,18 @@ function RoomLayout({
 
         <RemoteAudioLayer participants={allParticipants} />
 
+
         <ControlsBar
           isMuted={effectiveMuted}
+          hostMuteLocked={hostMuteLocked}
           isVideoEnabled={effectiveVideoOn}
           handRaised={isHandRaised}
           hasVideo={hasVideo ?? true}
           localRole={localRole}
           overlayOpen={isChatOpen}
+          // One renderer, matching web. The GPU overlay suppressed this whenever
+          // it reported available, so a canvas that failed to draw made
+          // reactions silently invisible — the same defect on both legs.
           floatingReactions={reactions}
           onLeave={onLeave}
           onToggleMute={onToggleMic}
@@ -2803,7 +2901,8 @@ function RoomLayout({
             drives visibility from the `visible` prop via index. */}
         <EjectModal
           visible={showEjectModal}
-          payload={ejectPayload}
+          kind={ejectPayload?.action ?? null}
+          reason={ejectPayload?.reason}
           onDismiss={onEjectDismiss}
         />
 
@@ -2828,14 +2927,21 @@ function RoomLayout({
   );
 }
 
-export default function SneakyLynkRoomScreen() {
+export default function SneakyLynkRoomScreen({
+  billing = null,
+}: {
+  /** Native RC billing seam, injected by the apps/mobile route file
+   *  (packages/app never imports the RevenueCat wrapper across the app
+   *  boundary — see features/screens/membership/billing.ts). */
+  billing?: SneakyBilling | null;
+}) {
   const router = useRouter();
   return (
     <GlobalErrorBoundary
       screenName="SneakyLynkRoom"
       onGoBack={() => router.back()}
     >
-      <SneakyLynkRoomScreenContent />
+      <SneakyLynkRoomScreenContent billing={billing} />
     </GlobalErrorBoundary>
   );
 }

@@ -1,30 +1,131 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
-  ],
-  "enabledManagers": [
-    "npm"
-  ],
+  "extends": ["config:recommended", ":dependencyDashboard", "group:monorepos"],
+  "enabledManagers": ["npm"],
+  "rangeStrategy": "bump",
+  "minimumReleaseAge": "3 days",
+  "prConcurrentLimit": 10,
+  "labels": ["dependencies"],
+  "schedule": ["after 9am and before 6pm every weekday"],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"],
+    "minimumReleaseAge": null,
+    "schedule": ["at any time"]
+  },
   "packageRules": [
     {
-      "enabled": false,
-      "matchPackageNames": [
-        "*"
-      ]
+      "description": "Ecosystem grouping — Expo SDK 57 minor/patch (never majors — those are a manual SDK upgrade via the expo-upgrade skill)",
+      "matchPackageNames": ["expo", "expo-*", "@expo/*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "expo sdk 57"
     },
     {
+      "description": "Ecosystem grouping — web/Next stack",
+      "matchFileNames": ["apps/web/**", "apps/web-vite/**"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "web ecosystem"
+    },
+    {
+      "description": "Ecosystem grouping — Supabase / backend",
+      "matchPackageNames": ["@supabase/*", "stripe", "resend", "pg", "@stripe/*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "backend"
+    },
+    {
+      "description": "Ecosystem grouping — TanStack",
+      "matchPackageNames": ["@tanstack/*"],
+      "groupName": "tanstack"
+    },
+    {
+      "description": "Ecosystem grouping — native-critical modules (minor/patch)",
       "matchPackageNames": [
-        "turbo",
-        "pnpm"
+        "react-native-vision-camera*",
+        "@fishjam-cloud/*",
+        "react-native-purchases",
+        "better-auth",
+        "@better-auth/*",
+        "expo-screen-capture"
       ],
-      "enabled": true,
-      "groupName": "build tooling"
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "native-critical (minor/patch)"
     },
     {
-      "matchPackageNames": ["expo"],
-      "enabled": true,
-      "groupName": "expo",
+      "description": "Tooling + types automerge on soaked patch/minor",
+      "matchPackageNames": ["@types/*", "turbo", "pnpm", "prettier", "prettier-*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "tooling",
+      "automerge": true
+    },
+    {
+      "description": "Green patch bumps automerge after the soak window",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true
+    },
+    {
+      "description": "Every major update requires explicit human approval on the dashboard",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "automerge": false
+    },
+
+    {
+      "description": "HOLD/PIN (rules below are last so they override the groups above) — Reactivity core is pinned in pnpm.overrides; bump by hand as a coordinated set, never via Renovate",
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "react-native",
+        "react-native-web",
+        "react-native-reanimated",
+        "react-native-worklets",
+        "react-native-nitro-modules",
+        "lightningcss",
+        "hermes-compiler",
+        "@expo/dom-webview"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Expo SDK majors are a manual SDK upgrade (expo-upgrade skill + expo install --fix), never an auto-bump mid-SDK",
+      "matchPackageNames": ["expo", "expo-*", "@expo/*", "babel-preset-expo", "eslint-config-expo"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "Payload is pinned to a 4.0 prerelease tag — bump by hand (canary is a moving target and each bump needs an importMap/types regen + admin build check)",
+      "matchPackageNames": ["payload", "@payloadcms/*"],
+      "enabled": false
+    },
+    {
+      "description": "graphql / qs-esm held to the lines Payload pins — no ahead-of-Payload majors",
+      "matchPackageNames": ["graphql", "graphql-http", "qs-esm"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "Native-module majors need an on-device (prebuild + boot smoke) validation pass — surface for approval, never automerge",
+      "matchPackageNames": [
+        "react-native-vision-camera*",
+        "@fishjam-cloud/*",
+        "@stripe/stripe-react-native",
+        "react-native-purchases",
+        "react-native-gesture-handler",
+        "react-native-webview",
+        "react-native-get-random-values",
+        "react-native-compressor",
+        "react-native-watch-connectivity",
+        "@bam.tech/react-native-app-security",
+        "@bacons/apple-targets"
+      ],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "automerge": false
+    },
+    {
+      "description": "TypeScript / ESLint majors need a toolchain-validation pass (TS 7 native port, eslint 10 vs expo/next config peers) — approval-gated",
+      "matchPackageNames": ["typescript", "eslint", "@typescript-eslint/*", "eslint-config-next", "eslint-config-expo"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
       "automerge": false
     }
   ]

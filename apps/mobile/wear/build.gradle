@@ -1,0 +1,72 @@
+// DVNT Wear OS app — a SEPARATE APK, not a build variant of the phone app.
+// The two ship in one Play listing and share an applicationId and signing
+// identity; they share nothing else.
+//
+// This whole module is copied into android/wear/ by
+// apps/mobile/plugins/with-wear-os.js on every `expo prebuild`, because CNG
+// deletes android/ wholesale. Edit it HERE, never in android/wear/.
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+// Mandatory from Kotlin 2.0: `composeOptions.kotlinCompilerExtensionVersion` is
+// gone and AGP fails configuration outright without this plugin when
+// buildFeatures.compose is on. Version comes from the root buildscript
+// classpath, which expo-root-project pins in lockstep with kotlin-gradle-plugin.
+apply plugin: 'org.jetbrains.kotlin.plugin.compose'
+
+android {
+    namespace 'com.dvnt.app.wear'
+    compileSdk rootProject.ext.compileSdkVersion
+
+    defaultConfig {
+        applicationId 'com.dvnt.app'
+        // Wear OS 3.0. Below this there is no Compose-for-Wear story worth
+        // shipping, and the installed base is rounding-error small.
+        minSdkVersion 30
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildFeatures { compose true }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+    // No compose-bom, and no explicit androidx.compose.* lines. Wear Compose
+    // already brings the Compose runtime/foundation/ui it is built against, and
+    // every version this module pinned on top of that turned into a fight: the
+    // current BOM generation and lifecycle-runtime-compose 2.11.0 both require
+    // compileSdk 37 / AGP 9.1, while this project is on 36 / 8.12. Fewer pins,
+    // fewer conflicts — add one back only when something is genuinely missing.
+
+    // Stable Wear Material 3, verified against the 1.6.2 published sources.
+    implementation 'androidx.wear.compose:compose-material3:1.6.2'
+    implementation 'androidx.wear.compose:compose-foundation:1.6.2'
+    implementation 'androidx.wear:wear-input:1.2.0'
+    implementation 'androidx.wear.tiles:tiles:1.6.2'
+    implementation 'androidx.wear.protolayout:protolayout-material3:1.4.2'
+    implementation 'androidx.wear.watchface:watchface-complications-data-source:1.2.1'
+    implementation 'androidx.wear:wear-ongoing:1.1.0'
+
+    implementation 'androidx.activity:activity-compose:1.10.1'
+
+    implementation 'androidx.wear:wear:1.4.0'
+    // Opening the phone app from the wrist — the escape hatch for anything the
+    // watch should not do (checkout, full profile, settings).
+    implementation 'androidx.wear:wear-remote-interactions:1.2.0'
+    // The Data Layer: DataClient / MessageClient / CapabilityClient.
+    implementation 'com.google.android.gms:play-services-wearable:20.0.1'
+}

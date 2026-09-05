@@ -5,9 +5,11 @@
  * (ScrollView / KeyboardStickyView / expo-router / useSafeHeader), so this is a
  * focused web view over the SHARED data: the EXACT event-comment hooks native
  * uses (useEventComments / useCreateEventComment → react-query) plus the same
- * @mention search (usersApi.searchUsers). Event comments are a FLAT list (the
- * data layer exposes only fetch + create — no like/reply/delete), so there is no
- * threading here, mirroring native.
+ * @mention search (usersApi.searchUsers). Event comments are a FLAT list, so
+ * there is no threading here, mirroring native. Authors can edit and delete
+ * their OWN comments (useUpdateEventComment / useDeleteEventComment → the
+ * `event-comment-mutate` Edge Function, which is where ownership is enforced);
+ * there is still no like or reply.
  *
  * Conventions: NativeWind interop is OFF, so Tailwind className lives only on raw
  * DOM tags (no <View>/<Text>). The comment list is a TanStack Virtual list
@@ -26,12 +28,16 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useEventComments,
   useCreateEventComment,
+  useUpdateEventComment,
+  useDeleteEventComment,
 } from "@dvnt/app/lib/hooks/use-event-comments";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
+import { useEventCommentEditStore } from "@dvnt/app/lib/stores/event-comment-edit-store";
+import { getCurrentUserIdSync } from "@dvnt/app/lib/auth/identity";
 import { useEventCommentMentionStore } from "@dvnt/app/lib/stores/event-comment-mention-store";
-import { MENTION_COLOR } from "@dvnt/app/src/constants/mentions";
+import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 
 const ESTIMATED_ROW = 88;
 
@@ -69,11 +75,51 @@ function formatDate(dateString: string) {
  */
 function CommentRow({
   comment,
+  eventId,
   onProfilePress,
 }: {
   comment: EventComment;
+  eventId: string;
   onProfilePress: (username: string) => void;
 }) {
+  // "Mine" is the users-table integer id, not the auth id — `author.id` comes
+  // from `author:author_id(...)`. `getCurrentUserIdSync` resolves the same
+  // value the insert used, falling back to the boot cache when the auth store
+  // holds an auth_id.
+  const myId = getCurrentUserIdSync();
+  const isMine =
+    myId != null && String(comment.author?.id ?? "") === String(myId);
+
+  const updateComment = useUpdateEventComment();
+  const deleteComment = useDeleteEventComment();
+  // Zustand, not useState — this file's rule (see the header).
+  const editingId = useEventCommentEditStore((st) => st.editingId);
+  const draft = useEventCommentEditStore((st) => st.draft);
+  const confirmingDeleteId = useEventCommentEditStore(
+    (st) => st.confirmingDeleteId,
+  );
+  const startEdit = useEventCommentEditStore((st) => st.startEdit);
+  const setDraft = useEventCommentEditStore((st) => st.setDraft);
+  const cancelEdit = useEventCommentEditStore((st) => st.cancelEdit);
+  const askDelete = useEventCommentEditStore((st) => st.askDelete);
+  const cancelDelete = useEventCommentEditStore((st) => st.cancelDelete);
+
+  const rowId = String(comment.id);
+  const editing = editingId === rowId;
+  const confirmingDelete = confirmingDeleteId === rowId;
+
+  const save = () => {
+    const next = draft.trim();
+    // An empty edit is a delete the user did not ask for; refuse it rather
+    // than silently blanking the comment. The server refuses it too.
+    if (!next || next === comment.content) {
+      cancelEdit();
+      return;
+    }
+    updateComment.mutate({ eventId, commentId: rowId, text: next });
+    cancelEdit();
+  };
+
   return (
     <div className="flex gap-3">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -91,6 +137,34 @@ function CommentRow({
             {formatDate(comment.createdAt)}
           </span>
         </div>
+        {editing ? (
+          <div className="flex flex-col gap-2">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value.slice(0, 2000))}
+              rows={3}
+              autoFocus
+              aria-label="Edit your comment"
+              className="w-full resize-y rounded-xl border border-white/12 bg-white/[0.06] px-3 py-2 text-sm text-white outline-none focus:border-cyan-400/60"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={save}
+                className="rounded-lg bg-cyan-400 px-3 py-1.5 text-xs font-bold text-black active:scale-95"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="rounded-lg bg-white/8 px-3 py-1.5 text-xs font-semibold text-white/80 active:scale-95"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
         <p className="text-sm leading-5 text-white/90">
           {(comment.content || "").split(/(@\w+)/g).map((part, i) =>
             part.startsWith("@") ? (
@@ -107,6 +181,52 @@ function CommentRow({
             ),
           )}
         </p>
+        )}
+
+        {/* Only on your own comments, and only when not already editing. The
+            server enforces this too — the button's absence is courtesy, not
+            security. */}
+        {isMine && !editing ? (
+          <div className="mt-1.5 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => startEdit(rowId, comment.content || "")}
+              className="text-xs font-semibold text-white/55 hover:text-white/90"
+            >
+              Edit
+            </button>
+            {confirmingDelete ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    deleteComment.mutate({ eventId, commentId: rowId });
+                    cancelDelete();
+                  }}
+                  className="text-xs font-bold text-[#FC253A]"
+                >
+                  Delete for good
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelDelete}
+                  className="text-xs font-semibold text-white/55 hover:text-white/90"
+                >
+                  Keep
+                </button>
+              </>
+            ) : (
+              // Two taps, because a deleted comment is not recoverable.
+              <button
+                type="button"
+                onClick={() => askDelete(rowId)}
+                className="text-xs font-semibold text-white/55 hover:text-white/90"
+              >
+                Delete
+              </button>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -118,9 +238,11 @@ function CommentRow({
  */
 function CommentList({
   comments,
+  eventId,
   onProfilePress,
 }: {
   comments: EventComment[];
+  eventId: string;
   onProfilePress: (username: string) => void;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -158,7 +280,11 @@ function CommentList({
                 paddingBottom: 16,
               }}
             >
-              <CommentRow comment={comment} onProfilePress={onProfilePress} />
+              <CommentRow
+                comment={comment}
+                eventId={eventId}
+                onProfilePress={onProfilePress}
+              />
             </div>
           );
         })}
@@ -337,6 +463,7 @@ function EventCommentComposer({
             }
           }}
           placeholder="Add a comment… (@ to mention)"
+          aria-label="Add a comment"
           className="flex-1 bg-transparent text-[15px] text-white outline-none placeholder:text-white/40"
         />
         <button
@@ -397,6 +524,7 @@ export function EventCommentsScreen() {
         ) : (
           <CommentList
             comments={comments}
+            eventId={eventId}
             onProfilePress={(username) => router.push(`/feed/${username}`)}
           />
         )}

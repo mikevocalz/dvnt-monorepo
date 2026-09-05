@@ -1,6 +1,6 @@
 import { useMemo, useLayoutEffect } from "react";
 import { View, Text, ScrollView, Pressable } from "react-native";
-import { Main } from "@expo/html-elements";
+import { Main } from "@dvnt/app/components/ui/html";
 import { useRouter, useNavigation } from "expo-router";
 import { SettingsCloseButton } from "@dvnt/app/components/settings-back-button";
 import { ChevronDown } from "lucide-react-native";

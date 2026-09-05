@@ -44,10 +44,13 @@ import {
   usePeers,
 } from "@fishjam-cloud/react-native-client";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { videoApi } from "@dvnt/app/src/video/api";
+import { useWatchSessionStore } from "@dvnt/app/features/watch/watch-session-store";
+import { useWatchActiveCall } from "@dvnt/app/features/watch/use-watch-active-call";
+import { callRoomsApi } from "@dvnt/app/lib/api/call-rooms";
 import { callSignalsApi } from "@dvnt/app/lib/api/call-signals";
 import { supabase } from "@dvnt/app/lib/supabase/client";
-import { audioSession } from "@dvnt/app/src/services/calls/audioSession";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
+import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import {
   startOutgoingCall,
   reportOutgoingCallConnected,
@@ -56,8 +59,8 @@ import {
   persistCallMapping,
   clearCallMapping,
   setMuted as callKeepSetMuted,
-} from "@dvnt/app/src/services/callkeep";
-import { lockMuteEcho } from "@dvnt/app/src/services/callkeep/useCallKeepCoordinator";
+} from "@dvnt/app/features/services/callkeep";
+import { lockMuteEcho } from "@dvnt/app/features/services/callkeep/useCallKeepCoordinator";
 import { useChatStore } from "@dvnt/app/lib/stores/chat-store";
 import {
   useVideoRoomStore,
@@ -66,9 +69,9 @@ import {
   type CallRole,
   type CallDirection,
   type RecipientInfo,
-} from "@dvnt/app/src/video/stores/video-room-store";
-import type { Participant } from "@dvnt/app/src/video/types";
-import { CT } from "@dvnt/app/src/services/calls/callTrace";
+} from "@dvnt/app/features/video";
+import type { Participant } from "@dvnt/app/features/video/types";
+import { CT } from "@dvnt/app/features/services/calls/callTrace";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
 
 // Re-export for consumers
@@ -89,6 +92,8 @@ function logWarn(...args: unknown[]) {
 
 export function useVideoCall() {
   const user = useAuthStore((s) => s.user);
+  const watchOwnedRoom = useRef<string | null>(null);
+  const watchOwnedGeneration = useRef<string | null>(null);
   const { joinRoom, leaveRoom, peerStatus } = useConnection();
   const cameraHook = useCamera();
   const microphoneHook = useMicrophone();
@@ -546,6 +551,7 @@ export function useVideoCall() {
       callType: CallType = "video",
       chatId?: string,
     ) => {
+      const watchCallGeneration = useWatchSessionStore.getState().accountGen;
       const s = getStore();
       s.clearError();
       s.setCallType(callType);
@@ -613,10 +619,11 @@ export function useVideoCall() {
           ? "Audio Call"
           : "Video Call";
 
-      const createResult = await videoApi.createRoom({
+      const createResult = await callRoomsApi.createCall({
         title,
-        isPublic: false, // CRITICAL: Personal calls must be private (not shown in Sneaky Lynk)
-        maxParticipants: Math.max(participantIds.length + 1, 10),
+        participantIds,
+        maxParticipants: 4,
+        hasVideo: callType === "video",
       });
 
       if (!createResult.ok || !createResult.data) {
@@ -634,8 +641,8 @@ export function useVideoCall() {
       s.setCallPhase("joining_room");
       log("Joining room...");
 
-      const joinResult = await videoApi.joinRoom(newRoomId);
-      log("Join result:", JSON.stringify(joinResult));
+      const joinResult = await callRoomsApi.joinCall(newRoomId);
+      log("Join result:", joinResult.ok ? "authorized" : "rejected");
       if (!joinResult.ok || !joinResult.data) {
         const msg = joinResult.error?.message || "Failed to join room";
         logError("Room join failed:", msg);
@@ -645,6 +652,8 @@ export function useVideoCall() {
       }
 
       const { token, user: joinedUser, room: joinedRoom } = joinResult.data;
+      watchOwnedRoom.current = joinedRoom.id;
+      watchOwnedGeneration.current = watchCallGeneration;
       log("Got Fishjam token for user:", joinedUser.id);
       // [SESSION] Assertion: verify roomId + fishjamRoomId for debugging
       log(
@@ -865,6 +874,7 @@ export function useVideoCall() {
   // ── Join an existing call (incoming) ───────────────────────────────
   const joinCall = useCallback(
     async (roomId: string, callType: CallType = "video") => {
+      const watchCallGeneration = useWatchSessionStore.getState().accountGen;
       const s = getStore();
       s.clearError();
       s.setCallType(callType);
@@ -883,7 +893,7 @@ export function useVideoCall() {
       s.setCallPhase("joining_room");
       log("Joining existing room:", roomId);
 
-      const joinResult = await videoApi.joinRoom(roomId);
+      const joinResult = await callRoomsApi.joinCall(roomId);
       if (!joinResult.ok || !joinResult.data) {
         const msg = joinResult.error?.message || "Failed to join room";
         logError("Room join failed:", msg);
@@ -893,6 +903,8 @@ export function useVideoCall() {
       }
 
       const { token, user: joinedUser, room: joinedRoom } = joinResult.data;
+      watchOwnedRoom.current = joinedRoom.id;
+      watchOwnedGeneration.current = watchCallGeneration;
       log("Got Fishjam token for user:", joinedUser.id);
       log(
         `[SESSION] roomId=${roomId}, fishjamRoomId=${joinedRoom?.fishjamRoomId}, userId=${joinedUser.id}`,
@@ -1211,6 +1223,8 @@ export function useVideoCall() {
     );
   }, [getStore]);
 
+  useWatchActiveCall({ ownedRoom: watchOwnedRoom, ownedGeneration: watchOwnedGeneration, peerStatus, tracks: () => micRef.current.microphoneStream?.getAudioTracks() ?? [], toggleMute, leaveCall });
+
   // ── Escalate audio → video (explicit, permission-gated) ────────────
   // This is the ONLY way to enable camera during an audio call.
   // It requests camera permission, starts camera, then transitions mode.
@@ -1480,8 +1494,7 @@ export function useVideoCall() {
     log(
       `[SIGNAL_SUB] Subscribing to call_signals updates for room: ${currentRoomId}`,
     );
-    const channel = supabase
-      .channel(`call_end:${currentRoomId}`)
+    const channel = freshChannel(`call_end:${currentRoomId}`)
       .on(
         "postgres_changes",
         {

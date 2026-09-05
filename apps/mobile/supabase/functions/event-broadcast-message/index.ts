@@ -1,3 +1,4 @@
+import { watchNotificationFields } from "../_shared/watch-notification.ts";
 /**
  * event-broadcast-message Edge Function
  *
@@ -98,7 +99,7 @@ Deno.serve(async (req: Request) => {
     // Permission: owner or accepted admin only.
     const { data: event } = await supabase
       .from("events")
-      .select("id, host_id, title, status")
+      .select("id, host_id, title, status, start_date")
       .eq("id", eventId)
       .maybeSingle();
     if (!event)
@@ -202,7 +203,7 @@ Deno.serve(async (req: Request) => {
 
     // Persist for the in-app activity feed. message body goes in
     // entity_payload so the activity row can render it inline.
-    await supabase.from("notifications").insert(
+    const { error: notificationError } = await supabase.from("notifications").insert(
       intIds.map((uid: number) => ({
         recipient_id: uid,
         actor_id: null,
@@ -216,6 +217,10 @@ Deno.serve(async (req: Request) => {
       })),
     );
 
+    if (notificationError) {
+      return json({ ok: false, error: { message: "Could not save the notice" } }, 500, req);
+    }
+
     // Push
     const { data: tokens } = await supabase
       .from("push_tokens")
@@ -225,6 +230,7 @@ Deno.serve(async (req: Request) => {
     let pushed = 0;
     if (tokens && tokens.length > 0) {
       const messages = tokens.map((t: any) => ({
+        ...watchNotificationFields("event_broadcast", { eventId: String(eventId), eventStartAt: event.start_date }),
         to: t.token,
         title: body.title || event.title || "Event update",
         body: message,
@@ -233,6 +239,9 @@ Deno.serve(async (req: Request) => {
         categoryId: "dvnt_broadcast",
         data: {
           type: "event_broadcast",
+          eventId: String(eventId),
+          recipientId: String(t.user_id),
+          issuedAt: Date.now() / 1000,
           entityType: "event",
           entityId: String(eventId),
           // Lets the watch long-look show the event name without a lookup.

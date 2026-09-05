@@ -1,6 +1,6 @@
 import { View, Text } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { SignUpStep1, SignUpStep2, SignUpStep3 } from "@dvnt/app/components/signup";
+import { SignUpStep1, SignUpStep2, SignUpStep3 } from "@dvnt/app/features/signup/ui";
 import { useSignupStore } from "@dvnt/app/lib/stores/signup-store";
 import { Check } from "lucide-react-native";
 

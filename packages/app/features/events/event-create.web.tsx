@@ -16,7 +16,16 @@
  * Known web follow-ups (present on mobile, queued next): multi-tier ticket
  * editor and co-organizer search. Single-tier ticketing is fully wired here.
  */
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useId,
+  Children,
+  cloneElement,
+  isValidElement,
+  type ReactElement,
+} from "react";
 import { useRouter } from "solito/navigation";
 import {
   Calendar,
@@ -34,8 +43,22 @@ import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import { useCreateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { usePlacesAutocomplete } from "@dvnt/app/lib/hooks/use-places-autocomplete";
 import type { PlacesLocationData } from "@dvnt/app/lib/places/types";
-import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
+import {
+  ticketTypesApi,
+  TIER_TYPE_OPTIONS,
+  TIER_VISIBILITY_OPTIONS,
+} from "@dvnt/app/lib/api/ticket-types";
+import {
+  scheduleRowsToEntries,
+  bandRowsToSubAllocations,
+  type TierType,
+  type TierVisibility,
+} from "@dvnt/app/lib/tickets/pricing";
+import { addonsApi } from "@dvnt/app/lib/api/addons";
+import { draftAddonToCreateParams } from "@dvnt/app/features/events/create/addon-form";
+import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
@@ -89,14 +112,34 @@ function Field({
   error?: string;
   children: React.ReactNode;
 }) {
+  // Bind the label to the control. Previously the <label> stood next to the
+  // input with no `htmlFor`, so the field's only accessible name was its
+  // placeholder — which vanishes once typed into (WCAG 2.1 AA 3.3.2 / 1.3.1).
+  // The single control child is cloned to receive the id + error wiring.
+  const id = useId();
+  const errorId = error ? `${id}-error` : undefined;
+  const only = Children.count(children) === 1 ? children : null;
+  const bound =
+    only && isValidElement(only)
+      ? cloneElement(only as ReactElement<any>, {
+          id: (only as ReactElement<any>).props.id ?? id,
+          "aria-describedby": errorId,
+          "aria-invalid": error ? true : undefined,
+          "aria-required": required || undefined,
+        })
+      : children;
   return (
     <div className="flex flex-col gap-1">
-      <label className={labelCls}>
+      <label className={labelCls} htmlFor={id}>
         {label}
         {required ? <span className="text-[#3FDCFF]"> *</span> : null}
       </label>
-      {children}
-      {error ? <span className={errCls}>{error}</span> : null}
+      {bound}
+      {error ? (
+        <span className={errCls} id={errorId} role="alert">
+          {error}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -128,6 +171,23 @@ export function CreateEventScreen() {
   const errors: EventFormErrors = attempted ? validation.errors : {};
 
   const publish = async () => {
+    // DIAGNOSTIC: label every awaited step so an infinite "Publishing…" becomes
+    // a 20s error naming the exact stalling call (upload / create-event / ticket).
+    // Also a hard backstop against any single hung network call.
+    const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> => {
+      // eslint-disable-next-line no-console
+      console.log(`[publish] → ${label}`);
+      return Promise.race([
+        p.then((v) => {
+          // eslint-disable-next-line no-console
+          console.log(`[publish] ✓ ${label}`);
+          return v;
+        }),
+        new Promise<T>((_r, rej) =>
+          setTimeout(() => rej(new Error(`stalled at: ${label} (${ms / 1000}s)`)), ms),
+        ),
+      ]);
+    };
     setAttempted(true);
     const { ok, errors: errs } = validateEventDraft(s);
     if (!ok) {
@@ -141,7 +201,7 @@ export function CreateEventScreen() {
     // Paid events need a connected Stripe payout account (same gate as mobile).
     if (hasPaidTier(s)) {
       try {
-        const status = await organizerApi.getStatus();
+        const status = await withTimeout(organizerApi.getStatus(), 15000, "payout-status");
         const ready =
           status.connected &&
           status.charges_enabled === true &&
@@ -177,7 +237,7 @@ export function CreateEventScreen() {
       const uploadIfLocal = async (url: string | null | undefined) => {
         if (!url) return undefined;
         if (!/^(blob:|data:|file:)/i.test(url)) return url;
-        const up = await uploadToServer(url, "events");
+        const up = await withTimeout(uploadToServer(url, "events"), 30000, "upload-flyer");
         if (!up.success || !up.url) {
           throw new Error(
             up.error || "Couldn't upload an image. Re-select it and try again.",
@@ -207,7 +267,7 @@ export function CreateEventScreen() {
       const galleryUrls: string[] = [];
       for (const url of s.eventImages) {
         if (/^(blob:|data:|file:)/i.test(url)) {
-          const up = await uploadToServer(url, "events");
+          const up = await withTimeout(uploadToServer(url, "events"), 30000, "upload-gallery");
           if (!up.success || !up.url) {
             throw new Error(
               up.error || "Couldn't upload an additional image. Re-select it and try again.",
@@ -219,46 +279,141 @@ export function CreateEventScreen() {
         }
       }
 
+      // Companion Sneaky Lynk room. Created BEFORE the event so its uuid can
+      // go in with the insert — one row, one truth, no second write that can
+      // half-fail. If the room cannot be created the event still publishes:
+      // an event without its room is a real event, an event that failed to
+      // publish because a room failed is not.
+      let lynkRoomId: string | undefined;
+      if (s.attachLynkRoom) {
+        try {
+          const room = await withTimeout(
+            sneakyLynkApi.createRoom({
+              title: s.title.trim() || "Event Lynk",
+              topic: s.eventType || "",
+              description: s.description.trim(),
+              hasVideo: true,
+              // Private: the guest list is the event's, enforced at the door
+              // by the event, not by a public room anyone can walk into.
+              isPublic: false,
+            }),
+            20000,
+            "create-lynk-room",
+          );
+          if (room.ok && room.data?.room?.id) {
+            lynkRoomId = String(room.data.room.id);
+          } else {
+            showToast(
+              "warning",
+              "Lynk room not created",
+              "The event will publish without it. You can add one from Edit.",
+            );
+          }
+        } catch {
+          showToast(
+            "warning",
+            "Lynk room not created",
+            "The event will publish without it. You can add one from Edit.",
+          );
+        }
+      }
+
       const payload = buildEventInsert(s, {
         image,
         flyerImageUrl,
         videoFlyerUrl,
+        lynkRoomId,
         images: galleryUrls.map((url) => ({ type: "image", url })),
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const created = await createEvent.mutateAsync(payload as any);
+      const created = await withTimeout(
+        createEvent.mutateAsync(payload as any),
+        20000,
+        "create-event-insert",
+      );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const id = (created as any)?.id;
 
-      // Create ticket types so the event is actually purchasable/RSVP-able.
-      // Multi-tier branch wins when the user added explicit tiers;
-      // otherwise we keep the single-price-into-one-tier fallback so a
-      // user who never opened the tier editor still publishes correctly.
-      if (s.ticketingEnabled && id) {
-        if (s.ticketTiers.length > 0) {
-          // Best-effort sequential creation — failing one tier shouldn't
-          // silently swallow the rest, so any error propagates to the
-          // catch below and the user is told to retry.
-          for (const tier of s.ticketTiers) {
-            await ticketTypesApi.create({
-              eventId: String(id),
-              name: tier.name || "General Admission",
-              priceCents: tier.priceCents,
-              quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
-              maxPerUser:
-                tier.maxPerUser > 0 ? tier.maxPerUser : s.simpleMaxPerUser,
-            });
+      // Every event gets at least one ticket type so it's attendable and the
+      // host sees a ticket. Explicit tiers win; otherwise a single default —
+      // a free "RSVP" when no price is set, else "General Admission". Ticket
+      // creation is post-publish setup; if it fails, the event row is already
+      // live and must not be reported as an event publish failure.
+      let ticketSetupFailed = false;
+      // Local editor tier id → created ticket_types uuid, so add-on per-tier
+      // eligibility (requires_tier_id) can point at the real row.
+      const createdTierIdByLocalId = new Map<string, string>();
+      if (id) {
+        try {
+          if (s.ticketTiers.length > 0) {
+            // Sequential creation keeps tier order deterministic.
+            for (const tier of s.ticketTiers) {
+              const createdTier = await withTimeout(
+                ticketTypesApi.create({
+                  eventId: String(id),
+                  name: tier.name || "General Admission",
+                  priceCents: tier.priceCents,
+                  quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
+                  maxPerUser:
+                    tier.maxPerUser > 0 ? tier.maxPerUser : s.simpleMaxPerUser,
+                  // v2 tier model — visibility, type, early-bird pricing.
+                  tierType: tier.tierType,
+                  tierVisibility: tier.visibility,
+                  unlockCode:
+                    tier.visibility === "locked" ? tier.unlockCode : undefined,
+                  priceSchedule: scheduleRowsToEntries(tier.priceSchedule),
+                  subAllocations: bandRowsToSubAllocations(tier.subAllocations),
+                }),
+                15000,
+                "ticket-type",
+              );
+              if (createdTier?.id) {
+                createdTierIdByLocalId.set(tier.id, String(createdTier.id));
+              }
+            }
+          } else {
+            const priceCents = Math.round((parseFloat(s.ticketPrice) || 0) * 100);
+            const qty = s.maxAttendees ? parseInt(s.maxAttendees, 10) : 200;
+            await withTimeout(
+              ticketTypesApi.create({
+                eventId: String(id),
+                name: priceCents === 0 ? "RSVP" : "General Admission",
+                priceCents,
+                quantityTotal: qty,
+                maxPerUser: s.simpleMaxPerUser > 0 ? s.simpleMaxPerUser : 4,
+              }),
+              15000,
+              "ticket-type",
+            );
           }
-        } else {
-          const priceCents = Math.round((parseFloat(s.ticketPrice) || 0) * 100);
-          const qty = s.maxAttendees ? parseInt(s.maxAttendees, 10) : 200;
-          await ticketTypesApi.create({
-            eventId: String(id),
-            name: priceCents === 0 ? "Free" : "General Admission",
-            priceCents,
-            quantityTotal: qty,
-            maxPerUser: s.simpleMaxPerUser > 0 ? s.simpleMaxPerUser : 4,
-          });
+        } catch (ticketErr) {
+          ticketSetupFailed = true;
+          console.warn("[create-event] ticket setup failed after publish", ticketErr);
+        }
+
+        // Add-on catalog (WS-3). Post-publish setup like tiers: a failure
+        // never rolls back the live event — the host retries from edit.
+        // Prices serialize to integer cents in addon-form.ts; the checkout
+        // server reprices every line under lock regardless.
+        if (s.addons.length > 0) {
+          try {
+            for (const [i, draft] of s.addons.entries()) {
+              const params = draftAddonToCreateParams(
+                draft,
+                String(id),
+                (localTierId) => createdTierIdByLocalId.get(localTierId) ?? null,
+                i,
+              );
+              if (!params) continue; // unnamed row — nothing to persist
+              await withTimeout(addonsApi.create(params), 15000, "ticket-addon");
+            }
+          } catch (addonErr) {
+            ticketSetupFailed = true;
+            console.warn(
+              "[create-event] add-on setup failed after publish",
+              addonErr,
+            );
+          }
         }
       }
 
@@ -285,7 +440,15 @@ export function CreateEventScreen() {
       }
 
       s.resetDraft();
-      showToast("success", "Published", "Your event is live.");
+      if (ticketSetupFailed) {
+        showToast(
+          "warning",
+          "Published",
+          "Your event is live, but ticket setup needs a retry from the event dashboard.",
+        );
+      } else {
+        showToast("success", "Published", "Your event is live.");
+      }
       router.push(id ? `/events/${slug || id}` : "/events");
     } catch (e) {
       showToast(
@@ -481,6 +644,7 @@ export function CreateEventScreen() {
                     <input
                       type="file"
                       accept="video/*"
+                      aria-label="Upload video flyer"
                       className="hidden"
                       onChange={onVideoFlyerPick}
                     />
@@ -531,6 +695,7 @@ export function CreateEventScreen() {
                     <input
                       type="file"
                       accept="image/*"
+                      aria-label="Upload flyer image"
                       className="hidden"
                       onChange={onImageFlyerPick}
                     />
@@ -587,6 +752,7 @@ export function CreateEventScreen() {
                       type="file"
                       accept="image/*"
                       multiple
+                      aria-label="Upload gallery images"
                       className="hidden"
                       onChange={(e) => {
                         const files = e.target.files;
@@ -600,6 +766,29 @@ export function CreateEventScreen() {
                     />
                   </label>
                 </div>
+              </Field>
+
+              <Field label="Sneaky Lynk room">
+                <label className="flex items-start gap-3 rounded-xl bg-white/[0.04] px-4 py-3">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-[#8A40CF]"
+                    checked={s.attachLynkRoom}
+                    onChange={(e) => s.setAttachLynkRoom(e.target.checked)}
+                  />
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium text-white">
+                      Host this event in a Sneaky Lynk
+                    </span>
+                    {/* Says what it DOES, not what it is. A checkbox whose
+                        consequence is a second object being created has to
+                        name that consequence before the tap, not after. */}
+                    <span className="mt-0.5 block text-xs text-white/55">
+                      Creates a private video room for this event. Guests join it
+                      from the event page — you can start it any time.
+                    </span>
+                  </span>
+                </label>
               </Field>
 
               <Field label="YouTube video (optional)">
@@ -675,6 +864,11 @@ export function CreateEventScreen() {
                               description: "",
                               saleStart: "",
                               saleEnd: "",
+                              tierType: "ga",
+                              visibility: "public",
+                              unlockCode: "",
+                              priceSchedule: [],
+                              subAllocations: [],
                             },
                           ]);
                         }}
@@ -723,12 +917,29 @@ export function CreateEventScreen() {
               ) : null}
             </Section>
 
+            <Section
+              title="Add-ons"
+              subtitle="Upsells sold with (or without) a ticket — coat check, merch, drinks, skip-line."
+            >
+              <AddonsEditor
+                addons={s.addons}
+                onChange={s.setAddons}
+                tierOptions={s.ticketTiers.map((tier) => ({
+                  id: tier.id,
+                  name: tier.name,
+                }))}
+              />
+            </Section>
+
             <Section title="Visibility & audience">
               <Field label="Who can see this">
-                <div className="flex gap-2">
+                <div className="flex gap-2" role="radiogroup" aria-label="Who can see this">
                   {(["public", "private", "link_only"] as const).map((v) => (
                     <button
                       key={v}
+                      type="button"
+                      role="radio"
+                      aria-checked={s.visibility === v}
                       onClick={() => s.setVisibility(v)}
                       className={`flex-1 h-9 rounded-xl text-sm font-medium capitalize ${
                         s.visibility === v
@@ -742,10 +953,13 @@ export function CreateEventScreen() {
                 </div>
               </Field>
               <Field label="Age restriction">
-                <div className="flex gap-2">
+                <div className="flex gap-2" role="radiogroup" aria-label="Age restriction">
                   {(["none", "18+", "21+"] as const).map((a) => (
                     <button
                       key={a}
+                      type="button"
+                      role="radio"
+                      aria-checked={s.ageRestriction === a}
                       onClick={() => s.setAgeRestriction(a)}
                       className={`flex-1 h-9 rounded-xl text-sm font-medium ${
                         s.ageRestriction === a
@@ -1070,6 +1284,11 @@ function TicketTiersEditor() {
         description: "",
         saleStart: "",
         saleEnd: "",
+        tierType: "ga" as TierType,
+        visibility: "public" as TierVisibility,
+        unlockCode: "",
+        priceSchedule: [],
+        subAllocations: [],
       },
     ]);
 
@@ -1159,6 +1378,206 @@ function TicketTiersEditor() {
                 }
               />
             </label>
+          </div>
+
+          {/* Tier type — v2 enum (GA / VIP / Early Bird / Table / Group). */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-white/55">Tier type</span>
+            <div className="flex gap-1.5">
+              {TIER_TYPE_OPTIONS.map((o) => {
+                const selected = (tier.tierType ?? "ga") === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => update(idx, { tierType: o.value })}
+                    className={`flex-1 h-8 rounded-lg text-[11px] font-semibold uppercase tracking-wide border ${
+                      selected
+                        ? "bg-white text-black border-transparent"
+                        : "bg-transparent text-white/50 border-white/12 hover:text-white/80"
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Visibility — public / hidden / locked (+ unlock code). */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-white/55">Visibility</span>
+            <div className="flex gap-1.5">
+              {TIER_VISIBILITY_OPTIONS.map((o) => {
+                const selected = (tier.visibility ?? "public") === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => update(idx, { visibility: o.value })}
+                    className={`flex-1 h-8 rounded-lg text-[11px] font-semibold border ${
+                      selected
+                        ? "bg-[#3FDCFF] text-black border-transparent"
+                        : "bg-transparent text-white/50 border-white/12 hover:text-white/80"
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-white/40">
+              {
+                TIER_VISIBILITY_OPTIONS.find(
+                  (o) => o.value === (tier.visibility ?? "public"),
+                )?.hint
+              }
+            </p>
+            {tier.visibility === "locked" ? (
+              <input
+                className="h-9 rounded-lg bg-white/8 px-2 font-mono text-xs uppercase tracking-widest text-white outline-none placeholder:normal-case placeholder:tracking-normal placeholder:font-sans"
+                placeholder="Unlock code (e.g. FRIENDS25)"
+                value={tier.unlockCode ?? ""}
+                onChange={(e) =>
+                  update(idx, { unlockCode: e.target.value.toUpperCase() })
+                }
+              />
+            ) : null}
+          </div>
+
+          {/* Early-bird pricing — writes ticket_types.price_schedule +
+              sub_allocations exactly as the SQL resolver reads them. */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#F5C518]">
+              Early-bird pricing (optional)
+            </span>
+            {(tier.priceSchedule ?? []).map((row, ri) => (
+              <div key={`sched-${ri}`} className="flex items-center gap-2">
+                <span className="text-[11px] text-white/55 shrink-0">From</span>
+                <input
+                  type="datetime-local"
+                  className="h-9 flex-1 min-w-0 rounded-lg bg-white/8 px-2 text-xs text-white outline-none"
+                  value={row.effectiveAt ? toLocalInput(row.effectiveAt) : ""}
+                  onChange={(e) =>
+                    update(idx, {
+                      priceSchedule: (tier.priceSchedule ?? []).map((r, i) =>
+                        i === ri
+                          ? { ...r, effectiveAt: e.target.value ? fromLocalInput(e.target.value) : "" }
+                          : r,
+                      ),
+                    })
+                  }
+                />
+                <span className="text-[11px] text-white/55 shrink-0">price $</span>
+                <input
+                  className="h-9 w-20 rounded-lg bg-white/8 px-2 font-mono text-xs text-white outline-none"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={row.priceDollars}
+                  onChange={(e) =>
+                    update(idx, {
+                      priceSchedule: (tier.priceSchedule ?? []).map((r, i) =>
+                        i === ri ? { ...r, priceDollars: e.target.value } : r,
+                      ),
+                    })
+                  }
+                />
+                <button
+                  type="button"
+                  aria-label="Remove price change"
+                  onClick={() =>
+                    update(idx, {
+                      priceSchedule: (tier.priceSchedule ?? []).filter((_, i) => i !== ri),
+                    })
+                  }
+                  className="text-white/40 hover:text-white/80"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            {(tier.subAllocations ?? []).map((row, ri) => (
+              <div key={`band-${ri}`} className="flex items-center gap-2">
+                <span className="text-[11px] text-white/55 shrink-0">First</span>
+                <input
+                  className="h-9 w-16 rounded-lg bg-white/8 px-2 font-mono text-xs text-white outline-none"
+                  inputMode="numeric"
+                  placeholder="N"
+                  value={row.quantity}
+                  onChange={(e) =>
+                    update(idx, {
+                      subAllocations: (tier.subAllocations ?? []).map((r, i) =>
+                        i === ri ? { ...r, quantity: e.target.value } : r,
+                      ),
+                    })
+                  }
+                />
+                <span className="text-[11px] text-white/55 shrink-0">
+                  tickets at $
+                </span>
+                <input
+                  className="h-9 w-20 rounded-lg bg-white/8 px-2 font-mono text-xs text-white outline-none"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={row.priceDollars}
+                  onChange={(e) =>
+                    update(idx, {
+                      subAllocations: (tier.subAllocations ?? []).map((r, i) =>
+                        i === ri ? { ...r, priceDollars: e.target.value } : r,
+                      ),
+                    })
+                  }
+                />
+                <button
+                  type="button"
+                  aria-label="Remove quantity band"
+                  onClick={() =>
+                    update(idx, {
+                      subAllocations: (tier.subAllocations ?? []).filter((_, i) => i !== ri),
+                    })
+                  }
+                  className="text-white/40 hover:text-white/80"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  update(idx, {
+                    priceSchedule: [
+                      ...(tier.priceSchedule ?? []),
+                      { effectiveAt: "", priceDollars: "" },
+                    ],
+                  })
+                }
+                className="text-[11px] font-semibold text-white/60 hover:text-white"
+              >
+                + Price goes up at a date
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  update(idx, {
+                    subAllocations: [
+                      ...(tier.subAllocations ?? []),
+                      { quantity: "", priceDollars: "" },
+                    ],
+                  })
+                }
+                className="text-[11px] font-semibold text-white/60 hover:text-white"
+              >
+                + First N tickets cheaper
+              </button>
+            </div>
+            {(tier.priceSchedule ?? []).length > 0 &&
+            (tier.subAllocations ?? []).length > 0 ? (
+              <p className="text-[11px] text-white/40">
+                Date-based changes win over quantity bands when both apply.
+              </p>
+            ) : null}
           </div>
         </div>
       ))}

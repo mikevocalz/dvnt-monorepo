@@ -81,6 +81,10 @@ function parseStoryOverlayRow(
             data.textAlign === "center"
               ? data.textAlign
               : "center",
+          textStyle:
+            typeof data.textStyle === "string"
+              ? String(data.textStyle)
+              : undefined,
         },
       };
     }

@@ -13,18 +13,38 @@
  */
 module.exports = {
   type: "watch",
-  name: "DVNT",
+  // Target name MUST be unique across the Xcode project. It was "DVNT", the
+  // same as the main app target, and EAS/fastlane maps provisioning profiles
+  // BY TARGET NAME — so the watch's profile (com.dvnt.app.watchkitapp) was
+  // applied to the phone app, failing the build with "has app ID
+  // com.dvnt.app.watchkitapp, which does not match bundle ID com.dvnt.app"
+  // plus a cascade of missing-capability errors (App Groups, Apple Pay,
+  // Associated Domains, Push, Sign In with Apple — all the phone app's, none
+  // of which the watch profile carries).
+  // displayName keeps the user-visible name on the watch as "DVNT"
+  // (INFOPLIST_KEY_CFBundleDisplayName falls back to `name` when unset).
+  name: "DVNTWatch",
+  displayName: "DVNT",
   // Watch app needs its own bundle id; keep it under the phone app's namespace.
   bundleIdentifier: "com.dvnt.app.watchkitapp",
   deploymentTarget: "10.0",
-  // App icon for the watch home screen (square glyph — re-used from the phone assets).
-  icon: "../../assets/images/dvnt-glyph.png",
+  // App icon for the watch home screen. MUST be square: watchOS masks the icon
+  // into a circle, so a non-square source is squashed to fit. This pointed at
+  // dvnt-glyph.png, which is 2816x1536 (1.83:1) despite the old comment calling
+  // it square — the watch icon came out distorted and did not match the phone.
+  // ios-icon.png is the phone's own 1024x1024 icon, so the two now match.
+  icon: "../../assets/images/ios-icon.png",
   // App Group shared between the watch app and the watch complication (per-device
   // container — the watch CANNOT read the iPhone's group, hence WCSession transport).
   entitlements: {
     "com.apple.security.application-groups": ["group.com.dvnt.app.watch"],
   },
-  frameworks: ["SwiftUI", "WatchConnectivity", "CoreImage", "WatchKit", "UserNotifications"],
+  // NEVER add CoreImage here. It does not exist in the watchOS SDK, and listing
+  // it puts CoreImage.framework in the target's Frameworks build phase — which
+  // fails at LINK time, after every compile has succeeded. Dropping the Swift
+  // `import CoreImage` is not enough on its own; this list is the second half.
+  // The ticket QR is encoded on the phone and shipped as `qrMatrix` instead.
+  frameworks: ["SwiftUI", "WatchConnectivity", "WatchKit", "UserNotifications"],
   // The real brand wordmark. apple-targets >=3 rasterizes target `images` through
   // @expo/image-utils, which rejects SVG ("Invalid mimeType") — so reference a PNG
   // rasterized from DVNT-logo-grad-white.svg (the full 2360x908 wordmark, transparent

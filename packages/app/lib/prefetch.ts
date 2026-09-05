@@ -15,9 +15,7 @@ import { postsApi } from "@dvnt/app/lib/api/posts";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { commentsApi as commentsApiClient } from "@dvnt/app/lib/api/comments";
 import { eventsApi as eventsApiClient } from "@dvnt/app/lib/api/events";
-import { postKeys } from "@dvnt/app/lib/hooks/use-posts";
-import { commentKeys } from "@dvnt/app/lib/hooks/use-comments";
-import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
+import { postKeys, commentKeys, eventKeys } from "@dvnt/app/lib/query-keys";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 
 export const screenPrefetch = {

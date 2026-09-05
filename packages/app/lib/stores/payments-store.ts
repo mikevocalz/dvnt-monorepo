@@ -13,6 +13,7 @@ import type {
   Dispute,
   PayoutSummary,
   PayoutRecord,
+  FailedPayout,
   BalanceTransaction,
   ConnectAccount,
   OrganizerBranding,
@@ -97,12 +98,16 @@ interface HostDisputesSlice {
 interface HostPayoutsSlice {
   payoutSummary: PayoutSummary | null;
   payouts: PayoutRecord[];
+  failedPayouts: FailedPayout[];
   payoutsLoading: boolean;
   payoutSummaryLoading: boolean;
+  payoutActionLoading: boolean;
   setPayoutSummary: (summary: PayoutSummary | null) => void;
   setPayouts: (payouts: PayoutRecord[]) => void;
+  setFailedPayouts: (payouts: FailedPayout[]) => void;
   setPayoutsLoading: (loading: boolean) => void;
   setPayoutSummaryLoading: (loading: boolean) => void;
+  setPayoutActionLoading: (loading: boolean) => void;
 }
 
 // ─── Host: Transactions ───────────────────────────────────────
@@ -226,13 +231,18 @@ export const usePaymentsStore = create<PaymentsState>((set) => ({
   // Host Payouts
   payoutSummary: null,
   payouts: [],
+  failedPayouts: [],
   payoutsLoading: false,
   payoutSummaryLoading: false,
+  payoutActionLoading: false,
   setPayoutSummary: (payoutSummary) => set({ payoutSummary }),
   setPayouts: (payouts) => set({ payouts }),
+  setFailedPayouts: (failedPayouts) => set({ failedPayouts }),
   setPayoutsLoading: (payoutsLoading) => set({ payoutsLoading }),
   setPayoutSummaryLoading: (payoutSummaryLoading) =>
     set({ payoutSummaryLoading }),
+  setPayoutActionLoading: (payoutActionLoading) =>
+    set({ payoutActionLoading }),
 
   // Host Transactions
   transactions: [],
@@ -286,8 +296,10 @@ export const usePaymentsStore = create<PaymentsState>((set) => ({
       hostDisputesLoading: false,
       payoutSummary: null,
       payouts: [],
+      failedPayouts: [],
       payoutsLoading: false,
       payoutSummaryLoading: false,
+      payoutActionLoading: false,
       transactions: [],
       transactionsLoading: false,
       transactionsFilter: undefined,

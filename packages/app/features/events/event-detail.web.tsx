@@ -6,10 +6,11 @@
  * tiers, Attendees, Location (+ Maps), Tags, Disclaimers — plus a header menu
  * popover (Share / Edit / Report / Delete). Raw semantic tags + Tailwind; Solito.
  */
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter, usePathname } from "solito/navigation";
 import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
+import { formatEventTime } from "@dvnt/app/lib/events/event-time";
 import {
   ArrowLeft,
   MoreHorizontal,
@@ -38,15 +39,27 @@ import {
   Minus,
   Plus,
   Lock,
+  Copy,
+  CalendarX2,
+  RotateCcw,
+  Ban,
+  Trash2,
+  Radio,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
+import { eventsApi } from "@dvnt/app/lib/api/events";
+import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
+import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
+import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
 import { useEvents, useEvent, useToggleEventLike, useRsvpEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useEventRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useEventDominantColor } from "@dvnt/app/lib/color/useEventDominantColor";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { computePromoDiscountCents, promoLabel } from "@dvnt/app/lib/payments/promo-discount";
 import { WhoAllOverThere } from "@dvnt/app/components/event/WhoAllOverThere.web";
-import { WeatherStrip } from "@dvnt/app/components/events/weather-strip.web";
-import { OrganizerCard } from "@dvnt/app/src/events/ui/OrganizerCard.web";
+import { WeatherStrip } from "./ui/weather-strip.web";
+import { OrganizerCard } from "./ui/OrganizerCard.web";
 import {
   useTicketTypes,
   useMyTicketForEvent,
@@ -63,11 +76,18 @@ import {
 } from "@dvnt/app/lib/hooks/use-event-waitlist";
 import { useCreateEventReview } from "@dvnt/app/lib/hooks/use-event-reviews";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
+import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
 import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
 import { usePromotionStore } from "@dvnt/app/lib/stores/promotion-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useEventDetailUiStore } from "@dvnt/app/lib/stores/event-detail-ui-store";
+import {
+  useAgeVerificationStatus,
+  needsAgeVerification,
+} from "@dvnt/app/lib/hooks/use-age-verification";
+import { VerificationInterstitial } from "@dvnt/app/components/verification-interstitial.web";
+import { onboardingCheckpoint } from "@dvnt/observability/flows";
 import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
 import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog } from "@dvnt/ui";
@@ -76,10 +96,65 @@ import { GuestRsvpSheet } from "./guest-rsvp-sheet.web";
 import { useGuestRsvpStore } from "@dvnt/app/lib/stores/guest-rsvp-store";
 import { GuestCheckoutSheet } from "./guest-checkout-sheet.web";
 import { useGuestCheckoutStore } from "@dvnt/app/lib/stores/guest-checkout-store";
-import type { TicketTypeRecord } from "@dvnt/app/lib/api/ticket-types";
+import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
+import {
+  ticketTypesApi,
+  type TicketTypeRecord,
+} from "@dvnt/app/lib/api/ticket-types";
+import {
+  filterBuyerVisibleTiers,
+  tierIsHiddenFromBuyers,
+  tierIsLockedForBuyer,
+  effectiveAddonUnitPriceCents,
+} from "@dvnt/app/lib/tickets/pricing";
+import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
+import {
+  AddonUpsellStrip,
+  addonSelectionsTotalCents,
+} from "./addon-upsell.web";
+import { useAddonUpsellStore } from "@dvnt/app/lib/stores/addon-upsell-store";
+import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
 import "react-lite-youtube-embed/dist/LiteYouTubeEmbed.css";
 import { matchBySlug } from "@dvnt/app/lib/slug";
+import {
+  resolvePosterUrl,
+  resolveRenderableMedia,
+} from "@dvnt/app/lib/media/resolve-renderable";
+
+// Route the event cover flyer through the single render-side resolver — same
+// contract as events-list.web.tsx `flyerFor`: a videoUrl is only handed back
+// when Chrome/Firefox/Edge can actually paint it (QuickTime/.mov dropped), and a
+// posterUrl is NEVER a video URL and is null for HEIC, so those fall through to
+// the empty cover box instead of a broken <img>/<video>. Falls back across
+// flyerVideoUrl → image → coverImageUrl → gallery.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function coverFor(e: any): { videoUrl: string | null; posterUrl: string | null } {
+  const images: any[] = Array.isArray(e?.images) ? e.images : [];
+  const rawVideo =
+    e?.flyerVideoUrl ||
+    (e?.image && VIDEO_RE.test(e.image) ? e.image : null) ||
+    images.find(
+      (m) => resolveRenderableMedia({ url: m?.url, type: m?.type }).kind === "video",
+    )?.url ||
+    null;
+
+  const video = rawVideo
+    ? resolveRenderableMedia({ url: rawVideo, type: "video" })
+    : null;
+  const videoUrl = video && !video.browserUnsupported ? video.videoUrl : null;
+
+  const posterUrl =
+    (video ? video.posterUrl : null) ||
+    resolvePosterUrl({ url: e?.image }) ||
+    resolvePosterUrl({ url: e?.coverImageUrl }) ||
+    images
+      .map((m) => resolvePosterUrl({ url: m?.url, type: m?.type }))
+      .find((u: string | null): u is string => !!u) ||
+    null;
+
+  return { videoUrl, posterUrl };
+}
 
 function Stars({ rating, size = 14 }: { rating: number; size?: number }) {
   return (
@@ -109,20 +184,20 @@ function timeAgo(iso?: string): string {
 
 const VIDEO_RE = /post-video|flyer-video|\.(mp4|mov|webm)(\?|$)/i;
 
-function fmt(iso?: string): string {
+// Timezone-correct: physical events with a known venue zone render event-local
+// (same door time for everyone); otherwise viewer-local. Always shows a zone
+// abbreviation so "9:00 PM PDT" is never ambiguous. Falls back gracefully when
+// event_tz isn't present yet (older events) → viewer-local.
+function fmt(
+  iso?: string,
+  eventTz?: string | null,
+  isOnline?: boolean | null,
+): string {
   if (!iso) return "Date TBA";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Date TBA";
-  return (
-    d.toLocaleDateString(undefined, {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    }) +
-    " · " +
-    d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-  );
+  const mode = !isOnline && eventTz ? "event-local" : "viewer-local";
+  return formatEventTime(d, eventTz ?? null, mode);
 }
 
 function ytId(url?: string | null): string | null {
@@ -165,8 +240,15 @@ export function EventDetailScreen() {
   const params = useParams();
   const router = useRouter();
   const pathname = usePathname() ?? "";
+  // This screen mounts at BOTH /events/[slug] and /feed/events/[id]. The [id]
+  // route hands us a numeric id directly — read it, or the slug-only path below
+  // leaves resolvedId undefined, useEvent("") never fetches, and the detail
+  // silently never loads (no get_event_detail call, no hero, no flyer).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const slug = String((params as any)?.slug ?? "");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const idParam = String((params as any)?.id ?? "");
+  const directId = /^\d+$/.test(idParam) ? Number(idParam) : undefined;
   const { data: events, isLoading } = useEvents();
   const listEvent = matchBySlug(events, slug);
   // The cached list is filtered (upcoming only), so it can't resolve past events.
@@ -184,7 +266,8 @@ export function EventDetailScreen() {
       return res.ok ? res.json() : [];
     },
   });
-  const resolvedId = listEvent?.id ?? matchBySlug(slugIndex, slug)?.id;
+  const resolvedId =
+    directId ?? listEvent?.id ?? matchBySlug(slugIndex, slug)?.id;
   const { data: full } = useEvent(resolvedId ? String(resolvedId) : "");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const e = (full ?? listEvent) as any;
@@ -228,6 +311,10 @@ export function EventDetailScreen() {
   // ── event-detail UI flags (Zustand, no useState) ─────────────────────
   const checkoutOpen = useEventDetailUiStore((s) => s.checkoutOpen);
   const setCheckoutOpen = useEventDetailUiStore((s) => s.setCheckoutOpen);
+  // B3: deferred ID verification — gate age-restricted RSVP/tickets, never registration.
+  const verifyOpen = useEventDetailUiStore((s) => s.verifyOpen);
+  const setVerifyOpen = useEventDetailUiStore((s) => s.setVerifyOpen);
+  const { data: verificationStatus } = useAgeVerificationStatus();
   const selectedTierId = useEventDetailUiStore((s) => s.selectedTierId);
   const setSelectedTierId = useEventDetailUiStore((s) => s.setSelectedTierId);
   const ticketQty = useEventDetailUiStore((s) => s.ticketQty);
@@ -244,12 +331,48 @@ export function EventDetailScreen() {
   const setReviewText = useEventDetailUiStore((s) => s.setReviewText);
   const translated = useEventDetailUiStore((s) => s.translated);
   const setTranslated = useEventDetailUiStore((s) => s.setTranslated);
+  // Locked-tier unlock ("Have a code?") — validation is server-side only.
+  const unlockOpen = useEventDetailUiStore((s) => s.unlockOpen);
+  const setUnlockOpen = useEventDetailUiStore((s) => s.setUnlockOpen);
+  const unlockCodeInput = useEventDetailUiStore((s) => s.unlockCodeInput);
+  const setUnlockCodeInput = useEventDetailUiStore((s) => s.setUnlockCodeInput);
+  const unlockError = useEventDetailUiStore((s) => s.unlockError);
+  const setUnlockError = useEventDetailUiStore((s) => s.setUnlockError);
+  const unlockBusy = useEventDetailUiStore((s) => s.unlockBusy);
+  const setUnlockBusy = useEventDetailUiStore((s) => s.setUnlockBusy);
+  const unlockedTierIds = useEventDetailUiStore((s) => s.unlockedTierIds);
+  const addUnlockedTierIds = useEventDetailUiStore((s) => s.addUnlockedTierIds);
   const resetUi = useEventDetailUiStore((s) => s.reset);
+  // WS-9 host lifecycle/destructive action dialogs (Zustand, no useState).
+  const hostAction = useEventDetailUiStore((s) => s.hostAction);
+  const setHostAction = useEventDetailUiStore((s) => s.setHostAction);
+  const hostActionBusy = useEventDetailUiStore((s) => s.hostActionBusy);
+  const setHostActionBusy = useEventDetailUiStore((s) => s.setHostActionBusy);
+  const queryClient = useQueryClient();
 
   // Reset transient flags when leaving the screen.
   useEffect(() => () => resetUi(), [resetUi]);
 
   const eventId = resolvedId ? String(resolvedId) : "";
+
+
+
+  // Promoter attribution (WS-4): capture ?ref=CODE from tracked share
+  // links (?promo= is taken by promo codes) into the MMKV/localStorage-
+  // persisted store so the Stripe redirect can't lose it. The checkout
+  // API layer forwards it as promoter_code; pricing is never affected.
+  // Covers /feed/events/[id] AND /public/events/[id] (both render this
+  // screen).
+  const setPromoterRef = usePromoterRefStore((s) => s.setRef);
+  useEffect(() => {
+    if (!eventId || typeof window === "undefined") return;
+    try {
+      const ref = new URLSearchParams(window.location.search).get("ref");
+      if (ref) setPromoterRef(eventId, ref);
+    } catch {
+      /* malformed URL — ignore */
+    }
+  }, [eventId, setPromoterRef]);
 
   // Phase 2 — live propagation: subscribe to this event's row + tier/ticket
   // changes so a host edit (time/venue/price/cancel) reflects here without a
@@ -299,6 +422,17 @@ export function EventDetailScreen() {
   );
   const { mutate: initiateUpgrade, isPending: isUpgradePending } =
     useInitiateUpgrade(eventId);
+
+  // ── 1b. ADD-ONS — catalog for the upsell strip (WS-3). Public read; the
+  //    hold RPC reprices + tier-gates every line server-side, so this list is
+  //    display + preview only.
+  const { data: eventAddons = [] } = useQuery<AddonRecord[]>({
+    queryKey: ["event-addons", eventId],
+    enabled: !!eventId,
+    staleTime: 60 * 1000,
+    queryFn: () => addonsApi.getByEvent(eventId),
+  });
+  const resetAddonSelections = useAddonUpsellStore((s) => s.reset);
 
   // ── 2. WAITLIST — status + join/leave for the selected tier ──────────
   const { data: waitlistStatus } = useEventWaitlistStatus(
@@ -384,6 +518,9 @@ export function EventDetailScreen() {
     translate: translateDescription,
     showOriginal: showOriginalDescription,
   } = useContentTranslation(`event-${eventId}-description`, descText, "en");
+  // Only offer translation when the description is detectably non-English —
+  // same gate as the native feed/event cards.
+  const showTranslate = shouldShowTranslateButton(descText, "en");
   const handleToggleTranslate = () => {
     if (isDescriptionTranslated) {
       showOriginalDescription();
@@ -397,20 +534,121 @@ export function EventDetailScreen() {
   // ── 6. PROMOTION — open the promote-event sheet (host only) ──────────
   const openPromotionSheet = usePromotionStore((s) => s.openSheet);
 
+  // ── 7. LOCKED TIERS — "Have a code?" unlock. The code is validated
+  //    SERVER-side (ticketTypesApi.unlockTier → `unlock-ticket-tier` edge fn,
+  //    a payments-wave seam); we never compare against a fetched unlock_code.
+  const unlockedSet = new Set(unlockedTierIds);
+  const handleUnlockSubmit = async () => {
+    const code = unlockCodeInput.trim();
+    if (!code || unlockBusy || !eventId) return;
+    setUnlockBusy(true);
+    setUnlockError(null);
+    const { tierIds, error } = await ticketTypesApi.unlockTier(eventId, code);
+    setUnlockBusy(false);
+    if (error || tierIds.length === 0) {
+      setUnlockError(error || "That code didn't unlock a tier.");
+      return;
+    }
+    addUnlockedTierIds(tierIds);
+    setUnlockOpen(false);
+    setUnlockCodeInput("");
+    showToast("success", "Unlocked", "A hidden tier is now available.");
+  };
+
   const resolving =
     (isLoading && !listEvent) || !slugIndex || (!!resolvedId && !full);
   if (!e && resolving) return <Centered>Loading…</Centered>;
   if (!e) return <Centered>Event not found</Centered>;
 
   const isHost = !!me && me === e.host?.username;
-  const cover = e.flyerVideoUrl || e.image || e.coverImageUrl;
-  const isVideo = !!e.flyerVideoUrl || (cover && VIDEO_RE.test(cover));
+
+  /**
+   * Open the event's Lynk — and make sure there is a live one to open.
+   *
+   * The companion room is created when the EVENT is published, which for an
+   * event two weeks out means the room's session expires long before anyone
+   * arrives: `video_join_room` answers `session_expired` and the card is a
+   * dead link on the day it matters most. (A free host's session is capped;
+   * this is not an edge case for them, it is every time.)
+   *
+   * So the host's tap is "start it": if the linked room is gone or ended, mint
+   * a fresh one and re-point the event at it before routing. Guests just go —
+   * if the host has not started it they get the room's own "this Lynk has
+   * ended" screen, which is the honest answer.
+   */
+  const openEventLynk = useCallback(async () => {
+    const linked = e?.lynkRoomId as string | undefined;
+    if (!linked) return;
+    const go = (roomId: string) =>
+      router.push(`/feed/sneaky-lynk/room/${roomId}${isHost ? "?isHost=1" : ""}`);
+    if (!isHost) {
+      go(linked);
+      return;
+    }
+    let roomId = linked;
+    try {
+      const existing = await sneakyLynkApi.getRoomById(linked);
+      // "Open" is not the same as "joinable": the session deadline
+      // (`ends_at`) expires while the row stays open, and every join then
+      // answers `session_expired`. Both have to be checked or the recovery
+      // never fires on the exact rooms that need it.
+      const sessionOver =
+        !!existing?.endsAt && new Date(existing.endsAt).getTime() <= Date.now();
+      if (!existing || existing.status === "ended" || sessionOver) {
+        const fresh = await sneakyLynkApi.createRoom({
+          title: e?.title || "Event Lynk",
+          topic: "",
+          description: e?.description || "",
+          hasVideo: true,
+          isPublic: false,
+        });
+        if (fresh.ok && fresh.data?.room?.id) {
+          roomId = String(fresh.data.room.id);
+          await eventsApi.updateEvent(eventId, { lynkRoomId: roomId } as any);
+        }
+      }
+    } catch {
+      // Fall through to the linked room — the room screen states the problem
+      // better than a toast here can.
+    }
+    go(roomId);
+  }, [e?.lynkRoomId, e?.title, e?.description, eventId, isHost, router]);
+  const { videoUrl: coverVideoUrl, posterUrl: coverPosterUrl } = coverFor(e);
   const yt = ytId(e.youtubeVideoUrl || e.youtubeUrl);
   const lineup: string[] = Array.isArray(e.lineup) ? e.lineup : [];
   const perks: string[] = Array.isArray(e.perks) ? e.perks : [];
   const tags: string[] = Array.isArray(e.tags) ? e.tags : [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tiers: any[] = Array.isArray(e.ticketTiers) ? e.ticketTiers : [];
+  // Buyer-facing tier visibility (v2 tier model): hidden tiers NEVER render;
+  // locked tiers collapse into the "Have a code?" affordance until the server
+  // unlocks them. Live ticket_types rows are authoritative for the flags; the
+  // event payload's copy is the fallback for older aggregates.
+  const liveList = liveTicketTypes as TicketTypeRecord[];
+  const liveById = (tid: unknown) =>
+    liveList.find((lt) => String(lt.id) === String(tid));
+  const buyerVisibleTiers = tiers.filter((t) => {
+    const live = liveById(t.id);
+    const vis = {
+      id: live?.id ?? t.id,
+      tier_visibility:
+        live?.tier_visibility ?? t.tier_visibility ?? t.tierVisibility ?? null,
+    };
+    return (
+      !tierIsHiddenFromBuyers(vis) && !tierIsLockedForBuyer(vis, unlockedSet)
+    );
+  });
+  const hasLockedTiers =
+    liveList.some((t) => t.is_active && tierIsLockedForBuyer(t, unlockedSet)) ||
+    tiers.some((t) =>
+      tierIsLockedForBuyer(
+        {
+          id: t.id,
+          tier_visibility: t.tier_visibility ?? t.tierVisibility ?? null,
+        },
+        unlockedSet,
+      ),
+    );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const attendeeAvatars: any[] = Array.isArray(e.attendeeAvatars)
     ? e.attendeeAvatars
@@ -424,13 +662,21 @@ export function EventDetailScreen() {
   const reviewCount = Number(e.reviewCount) || reviews.length;
   const maxAttendees = Number(e.maxAttendees) || 0;
   const remaining = maxAttendees > 0 ? Math.max(0, maxAttendees - going) : 0;
+  // Gallery photos routed through the resolver: resolvePosterUrl never yields a
+  // video URL and returns null for HEIC/unsupported, so videos + dead Live-Photo
+  // rows drop out honestly (subsumes the old `type !== "video"` + VIDEO_RE guard)
+  // and a browser-safe <img> URL is guaranteed for the rest.
   const gallery: string[] = (Array.isArray(e.images) ? e.images : [])
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .filter((m: any) => m?.url && m?.type !== "video" && !VIDEO_RE.test(m.url))
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((m: any) => m.url);
+    .map((m: any) => resolvePosterUrl({ url: m?.url, type: m?.type }))
+    .filter((u: string | null): u is string => !!u);
   const countdown = (() => {
-    const start = new Date(e.date || e.fullDate || "");
+    // `fullDate` FIRST. `e.date` is the day-of-month chip the event CARD
+    // draws ("18"), not a date — `new Date("18")` is either invalid or the
+    // year 2018, and since it is truthy the real ISO value was never reached.
+    // Every other screen already orders these correctly; this one rendered
+    // "Date TBA" on an event that has a date.
+    const start = new Date(e.fullDate || e.date || "");
     if (Number.isNaN(start.getTime())) return "";
     const ms = start.getTime() - Date.now();
     if (ms <= 0) return "";
@@ -469,24 +715,196 @@ export function EventDetailScreen() {
         ? `https://maps.google.com/?q=${encodeURIComponent(e.location)}`
         : null;
 
+  // ── WS-9 host lifecycle/destructive actions (web parity with the native
+  //    action sheet). Owner-gated (isHost) + status-aware. Cancel loops the
+  //    resumable event-cancel fn via eventsApi.cancelEventWithRefunds;
+  //    Postpone/Resume are reversible; Delete is blocked server-side once
+  //    tickets exist and routes the host to Cancel. ──────────────────────
+  const status: string | undefined = e.status;
+  const isCancelledEvent = status === "cancelled";
+  const isPostponedEvent = status === "postponed";
+
+  // Duplicate → clone scalars + tiers + add-ons into the create-event draft
+  // as fresh unsaved rows, then open the create flow (WS-9, item 2).
+  const handleDuplicate = async () => {
+    setMenuOpen(false);
+    try {
+      const draft = await eventsApi.buildDuplicateDraft(eventId);
+      const store = useCreateEventStore.getState();
+      store.resetDraft();
+      store.setTitle(e.title || "");
+      store.setDescription(e.description || "");
+      store.setLocation(e.location || "");
+      if (e.locationName || e.location) {
+        store.setLocationData({
+          name: e.locationName || e.location || "",
+          latitude: e.locationLat,
+          longitude: e.locationLng,
+          address: e.locationAddress,
+        });
+      }
+      store.setIsOnline(e.locationType === "virtual" || !!e.isOnline);
+      const galleryUrls: string[] = (Array.isArray(e.images) ? e.images : [])
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((m: any) => m?.url)
+        .filter((u: unknown): u is string => typeof u === "string" && u.length > 0);
+      store.setEventImages(galleryUrls);
+      if (e.flyerVideoUrl) {
+        store.setFlyerImage(e.flyerVideoUrl);
+        store.setFlyerMediaType("video");
+        store.setFlyerFallbackImage(e.flyerImageUrl || e.image || null);
+      } else if (e.flyerImageUrl || e.image) {
+        store.setFlyerImage(e.flyerImageUrl || e.image);
+        store.setFlyerMediaType("image");
+      }
+      // Only carry a future date — a duplicated past event must not default
+      // to an unbookable date.
+      const srcDate = e.fullDate || e.date ? new Date(e.fullDate || e.date) : null;
+      if (srcDate && !Number.isNaN(srcDate.getTime()) && srcDate.getTime() > Date.now()) {
+        store.setEventDate(srcDate.toISOString());
+        if (e.endDate) store.setEndDate(e.endDate);
+      }
+      if (e.maxAttendees) store.setMaxAttendees(String(e.maxAttendees));
+      if (e.visibility) store.setVisibility(e.visibility);
+      if (e.ageRestriction) store.setAgeRestriction(e.ageRestriction);
+      store.setIsNsfw(!!e.nsfw);
+      store.setTicketingEnabled(
+        !!e.ticketingEnabled || draft.ticketTiers.length > 0,
+      );
+      store.setDressCode(e.dressCode || "");
+      store.setDoorPolicy(e.doorPolicy || "");
+      store.setLineup(Array.isArray(e.lineup) ? e.lineup : []);
+      store.setPerks(Array.isArray(e.perks) ? e.perks : []);
+      // NEW (WS-9): tiers + add-ons cloned as fresh unsaved draft rows.
+      store.setTicketTiers(draft.ticketTiers);
+      store.setAddons(draft.addons);
+      store.setCurrentStep(0);
+      router.push("/feed/events/create");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err || "");
+      showToast("error", "Couldn't duplicate", msg || "Try again in a moment.");
+    }
+  };
+
+  const handleCancel = async () => {
+    if (hostActionBusy) return;
+    setHostActionBusy(true);
+    try {
+      const result = await eventsApi.cancelEventWithRefunds(eventId);
+      propagateEntity(queryClient, "event", eventId, {
+        status: "cancelled",
+        cancelled_at: new Date().toISOString(),
+      });
+      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      const refundLine =
+        result.refundsIssued > 0
+          ? `${result.refundsIssued} refund${result.refundsIssued === 1 ? "" : "s"} issued.`
+          : "";
+      const failedLine =
+        result.refundsFailed > 0
+          ? ` ${result.refundsFailed} refund${result.refundsFailed === 1 ? "" : "s"} couldn't be processed — re-run Cancel or check the host dashboard.`
+          : "";
+      setHostAction(null);
+      showToast(
+        result.refundsFailed > 0 ? "warning" : "success",
+        "Event cancelled",
+        `${refundLine}${failedLine}`.trim() || "Done.",
+      );
+      router.back();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err || "");
+      showToast("error", "Couldn't cancel", msg || "Try again in a moment.");
+    } finally {
+      setHostActionBusy(false);
+    }
+  };
+
+  const handlePostpone = async () => {
+    if (hostActionBusy) return;
+    setHostActionBusy(true);
+    try {
+      await eventsApi.postponeEvent(eventId);
+      propagateEntity(queryClient, "event", eventId, { status: "postponed" });
+      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      setHostAction(null);
+      showToast(
+        "success",
+        "Event postponed",
+        "Attendees have been notified. Tickets remain valid.",
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err || "");
+      showToast("error", "Couldn't postpone", msg || "Try again in a moment.");
+    } finally {
+      setHostActionBusy(false);
+    }
+  };
+
+  const handleResume = async () => {
+    if (hostActionBusy) return;
+    setHostActionBusy(true);
+    try {
+      await eventsApi.resumeEvent(eventId);
+      propagateEntity(queryClient, "event", eventId, { status: "active" });
+      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      setHostAction(null);
+      showToast("success", "Event resumed", "You're back on.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err || "");
+      showToast("error", "Couldn't resume", msg || "Try again in a moment.");
+    } finally {
+      setHostActionBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (hostActionBusy) return;
+    setHostActionBusy(true);
+    try {
+      await eventsApi.deleteEvent(eventId);
+      queryClient.setQueriesData<unknown>(
+        { queryKey: eventKeys.all },
+        (old: unknown) =>
+          Array.isArray(old)
+            ? old.filter((ev: any) => String(ev?.id) !== String(eventId))
+            : old,
+      );
+      queryClient.removeQueries({ queryKey: eventKeys.detail(eventId) });
+      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      setHostAction(null);
+      showToast("success", "Event deleted", "");
+      router.back();
+    } catch (err: unknown) {
+      // Server/client guard: paid tickets exist → route to the safe path.
+      const msg = err instanceof Error ? err.message : String(err || "");
+      if (/ticket/i.test(msg)) {
+        setHostAction("delete_blocked");
+        return;
+      }
+      showToast("error", "Couldn't delete", msg || "Try again in a moment.");
+    } finally {
+      setHostActionBusy(false);
+    }
+  };
+
   return (
     <div className="min-h-[100dvh] bg-[#02030A] text-white">
       <div className="mx-auto max-w-[680px] pb-28">
         {/* Cover + back + menu */}
         <div className="relative" style={{ backgroundColor: coverColor }}>
-          {cover && isVideo ? (
+          {coverVideoUrl ? (
             <video
-              src={cover}
-              poster={e.image}
+              src={coverVideoUrl}
+              poster={coverPosterUrl ?? undefined}
               autoPlay
               muted
               loop
               playsInline
               className="w-full aspect-video object-cover"
             />
-          ) : cover ? (
+          ) : coverPosterUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={cover} alt={e.title} className="w-full aspect-video object-cover" />
+            <img src={coverPosterUrl} alt={e.title} className="w-full aspect-video object-cover" />
           ) : (
             <div className="w-full aspect-video bg-white/[0.06]" />
           )}
@@ -514,7 +932,7 @@ export function EventDetailScreen() {
               <div className="absolute right-3 top-14 z-50 w-48 rounded-xl border border-white/12 bg-[#0b0d16] py-1 shadow-2xl">
                 <MenuItem Icon={Share2} label="Share event" onClick={share} />
                 {/* 5. TRANSLATION — toggle the About copy via useContentTranslation. */}
-                {descText ? (
+                {showTranslate ? (
                   <MenuItem
                     Icon={Languages}
                     label={
@@ -532,7 +950,7 @@ export function EventDetailScreen() {
                   <MenuItem
                     Icon={Pencil}
                     label="Edit event"
-                    onClick={() => router.push(`/events/${slug}/edit`)}
+                    onClick={() => router.push(`/feed/events/${eventId}/edit`)}
                   />
                 ) : null}
                 {/* 6. PROMOTION — host-only; opens the promotion sheet store. */}
@@ -551,6 +969,59 @@ export function EventDetailScreen() {
                     }}
                   />
                 ) : null}
+                {/* WS-9 host lifecycle/destructive actions — owner-gated,
+                    status-aware. Confirms route through Zustand dialog state. */}
+                {isHost ? (
+                  <>
+                    <div className="my-1 h-px bg-white/10" />
+                    <MenuItem
+                      Icon={Copy}
+                      label="Duplicate event"
+                      onClick={handleDuplicate}
+                    />
+                    {isPostponedEvent ? (
+                      <MenuItem
+                        Icon={RotateCcw}
+                        label="Resume event"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setHostAction("resume");
+                        }}
+                      />
+                    ) : !isCancelledEvent ? (
+                      <MenuItem
+                        Icon={CalendarX2}
+                        label="Postpone event…"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setHostAction("postpone");
+                        }}
+                      />
+                    ) : null}
+                    {!isCancelledEvent ? (
+                      <MenuItem
+                        Icon={Ban}
+                        label="Cancel event…"
+                        destructive
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setHostAction("cancel");
+                        }}
+                      />
+                    ) : null}
+                    {!isCancelledEvent ? (
+                      <MenuItem
+                        Icon={Trash2}
+                        label="Delete event…"
+                        destructive
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setHostAction("delete");
+                        }}
+                      />
+                    ) : null}
+                  </>
+                ) : null}
                 <MenuItem Icon={Flag} label="Report" onClick={() => setMenuOpen(false)} />
               </div>
             </>
@@ -560,7 +1031,11 @@ export function EventDetailScreen() {
         <div className="px-4 pt-4">
           <div className="flex items-center gap-1.5 text-[#379ED8] text-sm font-semibold">
             <Calendar size={15} />
-            {fmt(e.date || e.fullDate)}
+            {fmt(
+              e.fullDate || e.date,
+              (e as any).event_tz ?? (e as any).eventTz,
+              (e as any).is_online ?? (e as any).isOnline,
+            )}
           </div>
           <h1 className="text-2xl font-extrabold mt-1 leading-tight">{e.title}</h1>
           {e.location ? (
@@ -624,9 +1099,12 @@ export function EventDetailScreen() {
 
           {/* CTA — drives the real checkout / view-ticket / waitlist flow. */}
           {(() => {
-            const sellableTiers = (liveTicketTypes as TicketTypeRecord[]).filter(
-              (t) => t.is_active,
-            );
+            // Buyer-visible only: hidden tiers never sell here, locked tiers
+            // join once the server unlocks them (v2 tier model).
+            const sellableTiers = filterBuyerVisibleTiers(
+              liveList.filter((t) => t.is_active),
+              unlockedSet,
+            ).visible;
             const allSoldOut =
               sellableTiers.length > 0 &&
               sellableTiers.every(
@@ -719,6 +1197,19 @@ export function EventDetailScreen() {
                     router.push(loginPathWithReturn(pathname));
                     return;
                   }
+                  // B3: first age-gated action triggers the verify interstitial.
+                  if (
+                    needsAgeVerification(
+                      (e as any).ageRestriction,
+                      verificationStatus,
+                    )
+                  ) {
+                    onboardingCheckpoint("verification.triggered", {
+                      surface: "event_detail",
+                    });
+                    setVerifyOpen(true);
+                    return;
+                  }
                   // Authed: free tier-less event → RSVP; else open checkout.
                   if (isFreeRsvp) {
                     rsvpMutation.mutate({ eventId, status: "going" });
@@ -774,13 +1265,15 @@ export function EventDetailScreen() {
               <p className="text-white/85 text-[15px] leading-relaxed whitespace-pre-wrap">
                 {isDescriptionTranslated ? translatedDescription : e.description}
               </p>
-              <button
-                onClick={handleToggleTranslate}
-                className="mt-2 inline-flex items-center gap-1.5 text-[#379ED8] text-sm font-medium"
-              >
-                <Languages size={14} />
-                {isDescriptionTranslated ? "Show original" : "Translate"}
-              </button>
+              {showTranslate ? (
+                <button
+                  onClick={handleToggleTranslate}
+                  className="mt-2 inline-flex items-center gap-1.5 text-[#379ED8] text-sm font-medium"
+                >
+                  <Languages size={14} />
+                  {isDescriptionTranslated ? "Show original" : "Translate"}
+                </button>
+              ) : null}
             </Section>
           ) : null}
 
@@ -790,6 +1283,34 @@ export function EventDetailScreen() {
               <div className="rounded-xl overflow-hidden bg-black">
                 <LiteYouTubeEmbed id={yt} title="Event video" />
               </div>
+            </Section>
+          ) : null}
+
+          {/* Sneaky Lynk — the room this event is hosted in.
+              Above Lineup on purpose: when an event HAS a room, "where do I
+              go" outranks "who is playing". The card states the room is
+              private and that entry follows the event's guest list, because a
+              guest who taps into a refusal learns that too late. */}
+          {e.lynkRoomId ? (
+            <Section title="Sneaky Lynk" Icon={Radio}>
+              <button
+                type="button"
+                data-lynk-room={e.lynkRoomId}
+                onClick={() => void openEventLynk()}
+                className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 text-left transition-colors hover:bg-white/[0.1]"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#8A40CF]/20">
+                  <Radio size={18} className="text-[#8A40CF]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-white">
+                    {isHost ? "Open your event's Lynk" : "Join the event's Lynk"}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-white/55">
+                    Private video room · only people on this event&apos;s list get in
+                  </span>
+                </span>
+              </button>
             </Section>
           ) : null}
 
@@ -863,10 +1384,10 @@ export function EventDetailScreen() {
               ticket_types query (useTicketTypes) is the source of truth for
               sold-out + the real UUID id checkout needs; falls back to the
               event payload tiers for display only. */}
-          {tiers.length > 0 ? (
+          {buyerVisibleTiers.length > 0 || hasLockedTiers ? (
             <Section title="Tickets">
               <div className="flex flex-col gap-2">
-                {tiers.map((t, i) => {
+                {buyerVisibleTiers.map((t, i) => {
                   const price =
                     t.price != null
                       ? t.price
@@ -938,6 +1459,62 @@ export function EventDetailScreen() {
                     </button>
                   );
                 })}
+
+                {/* Locked tiers — "Have a code?" affordance. The code goes to
+                    the server for validation; on success the unlocked tier(s)
+                    appear in the list above. Never a client-side comparison. */}
+                {hasLockedTiers ? (
+                  <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-4">
+                    {!unlockOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUnlockError(null);
+                          setUnlockOpen(true);
+                        }}
+                        className="flex w-full items-center gap-2 text-left text-sm font-medium text-white/70 hover:text-white"
+                      >
+                        <Lock size={14} color="#F5C518" />
+                        Have a code? Unlock a hidden tier
+                      </button>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <span className="flex items-center gap-2 text-sm font-medium text-white/85">
+                          <Lock size={14} color="#F5C518" /> Enter your access
+                          code
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            value={unlockCodeInput}
+                            onChange={(ev) =>
+                              setUnlockCodeInput(ev.target.value.toUpperCase())
+                            }
+                            onKeyDown={(ev) => {
+                              if (ev.key === "Enter") {
+                                ev.preventDefault();
+                                void handleUnlockSubmit();
+                              }
+                            }}
+                            placeholder="ACCESS CODE"
+                            autoCapitalize="characters"
+                            className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 font-mono text-sm uppercase tracking-widest text-white placeholder:text-white/30 outline-none focus:border-[#F5C518]/60"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void handleUnlockSubmit()}
+                            disabled={unlockBusy || !unlockCodeInput.trim()}
+                            className="h-10 shrink-0 rounded-xl border border-[#F5C518]/40 bg-[#F5C518]/10 px-4 text-sm font-semibold text-[#F5C518] disabled:opacity-40"
+                          >
+                            {unlockBusy ? "…" : "Unlock"}
+                          </button>
+                        </div>
+                        {unlockError ? (
+                          <p className="text-sm text-[#FC253A]">{unlockError}</p>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             </Section>
           ) : null}
@@ -1173,6 +1750,7 @@ export function EventDetailScreen() {
         tier={(liveTicketTypes as TicketTypeRecord[]).find(
           (t) => String(t.id) === String(selectedTierId),
         )}
+        addons={eventAddons}
         qty={ticketQty}
         setQty={setTicketQty}
         promoCode={promoCode}
@@ -1190,6 +1768,62 @@ export function EventDetailScreen() {
             );
             return;
           }
+
+          // Add-ons selected → the MIXED-CART rail (cart store →
+          // cart-create-hold → cart_create_hold RPC holds tier + add-on
+          // inventory atomically; cart-checkout prices server-side). The
+          // single-tier fast path below stays untouched when no add-ons.
+          const upsell = useAddonUpsellStore.getState();
+          const selections =
+            upsell.eventId === eventId ? upsell.selectionList() : [];
+          if (selections.length > 0) {
+            const cartStore = useCartStore.getState();
+            cartStore.startCart(eventId);
+            cartStore.addLineItem(eventId, {
+              category: "admission",
+              tierId: String(tier.id),
+              quantity: ticketQty,
+              unitPriceCents: tier.price_cents,
+              metadata: {
+                tierName: tier.name,
+                eventTitle: e.title ?? "Event",
+              },
+            });
+            for (const sel of selections) {
+              const addon = eventAddons.find((a) => a.id === sel.addonId);
+              if (!addon) continue;
+              const variant = sel.variantId
+                ? addon.ticket_addon_variants?.find(
+                    (v) => v.id === sel.variantId,
+                  )
+                : null;
+              cartStore.addLineItem(eventId, {
+                category: "addon",
+                // DTO back-compat: addon id rides tierId on addon lines.
+                tierId: sel.addonId,
+                addonId: sel.addonId,
+                variantId: sel.variantId ?? undefined,
+                quantity: sel.quantity,
+                unitPriceCents: effectiveAddonUnitPriceCents(
+                  addon.price_cents,
+                  variant?.price_cents,
+                ),
+                metadata: {
+                  name: variant
+                    ? `${addon.name} — ${variant.name}`
+                    : addon.name,
+                  eventTitle: e.title ?? "Event",
+                },
+              });
+            }
+            resetAddonSelections();
+            setCheckoutOpen(false);
+            // Promo codes re-apply on the review screen (cart-checkout
+            // validates them server-side there).
+            router.push("/feed/checkout/review");
+            return;
+          }
+
           const result = await checkout({
             eventId,
             ticketTypeId: String(tier.id),
@@ -1340,9 +1974,177 @@ export function EventDetailScreen() {
         />
       </Dialog>
 
+      {/* WS-9 — Cancel (destructive, auto-refund) confirm. */}
+      <Dialog
+        open={hostAction === "cancel"}
+        onClose={() => {
+          if (!hostActionBusy) setHostAction(null);
+        }}
+        title="Cancel event?"
+        footer={
+          <>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction(null)}
+              className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Keep event
+            </button>
+            <button
+              disabled={hostActionBusy}
+              onClick={handleCancel}
+              className="flex-1 rounded-xl bg-[#FC253A] py-3 font-semibold text-white disabled:opacity-50"
+            >
+              {hostActionBusy ? "Refunding…" : "Cancel & Refund"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-5 text-white/60">
+          Every paid order is automatically refunded (the whole payment,
+          including fees) and every attendee is notified. Guest buyers get an
+          email. This can&apos;t be undone.
+        </p>
+      </Dialog>
+
+      {/* WS-9 — Postpone (reversible, no refunds) confirm. */}
+      <Dialog
+        open={hostAction === "postpone"}
+        onClose={() => {
+          if (!hostActionBusy) setHostAction(null);
+        }}
+        title="Postpone event?"
+        footer={
+          <>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction(null)}
+              className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Not now
+            </button>
+            <button
+              disabled={hostActionBusy}
+              onClick={handlePostpone}
+              className="flex-1 rounded-xl bg-[#F5C518] py-3 font-semibold text-black disabled:opacity-50"
+            >
+              {hostActionBusy ? "Working…" : "Postpone"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-5 text-white/60">
+          Attendees are notified that the event is postponed. Tickets remain
+          valid — no refunds are issued. You can resume any time.
+        </p>
+      </Dialog>
+
+      {/* WS-9 — Resume a postponed event. */}
+      <Dialog
+        open={hostAction === "resume"}
+        onClose={() => {
+          if (!hostActionBusy) setHostAction(null);
+        }}
+        title="Resume event?"
+        footer={
+          <>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction(null)}
+              className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Not now
+            </button>
+            <button
+              disabled={hostActionBusy}
+              onClick={handleResume}
+              className="flex-1 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] py-3 font-semibold text-white disabled:opacity-50"
+            >
+              {hostActionBusy ? "Working…" : "Resume"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-5 text-white/60">
+          The event goes back to active and attendees are notified their tickets
+          are valid as issued.
+        </p>
+      </Dialog>
+
+      {/* WS-9 — Delete (blocked server-side once tickets exist). */}
+      <Dialog
+        open={hostAction === "delete"}
+        onClose={() => {
+          if (!hostActionBusy) setHostAction(null);
+        }}
+        title="Delete event?"
+        footer={
+          <>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction(null)}
+              className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Keep event
+            </button>
+            <button
+              disabled={hostActionBusy}
+              onClick={handleDelete}
+              className="flex-1 rounded-xl bg-[#FC253A] py-3 font-semibold text-white disabled:opacity-50"
+            >
+              {hostActionBusy ? "Deleting…" : "Delete"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-5 text-white/60">
+          This permanently removes the event. Events with paid tickets can&apos;t
+          be deleted — cancel instead, which refunds every attendee.
+        </p>
+      </Dialog>
+
+      {/* WS-9 — Delete blocked (paid tickets) → route the host to Cancel. */}
+      <Dialog
+        open={hostAction === "delete_blocked"}
+        onClose={() => {
+          if (!hostActionBusy) setHostAction(null);
+        }}
+        title="Can't delete — tickets sold"
+        footer={
+          <>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction(null)}
+              className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Keep event
+            </button>
+            <button
+              disabled={hostActionBusy}
+              onClick={() => setHostAction("cancel")}
+              className="flex-1 rounded-xl bg-[#FC253A] py-3 font-semibold text-white disabled:opacity-50"
+            >
+              Cancel &amp; Refund…
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-5 text-white/60">
+          This event has active tickets. Cancel the event instead — every paid
+          order is refunded and attendees are notified.
+        </p>
+      </Dialog>
+
       <Lightbox />
       <GuestRsvpSheet />
       <GuestCheckoutSheet />
+      {/* B3: age-gate interstitial (Didit hosted capture). */}
+      <VerificationInterstitial
+        open={verifyOpen}
+        onClose={() => setVerifyOpen(false)}
+        status={verificationStatus}
+        ageLabel={(event as any)?.ageRestriction || "18+"}
+      />
     </div>
   );
 }
@@ -1360,6 +2162,7 @@ function CheckoutSheet({
   eventId,
   eventTitle,
   tier,
+  addons,
   qty,
   setQty,
   promoCode,
@@ -1372,6 +2175,7 @@ function CheckoutSheet({
   eventId: string;
   eventTitle: string;
   tier: TicketTypeRecord | undefined;
+  addons: AddonRecord[];
   qty: number;
   setQty: (q: number) => void;
   promoCode: string;
@@ -1381,6 +2185,14 @@ function CheckoutSheet({
 }) {
   const maxPer = tier?.max_per_user ?? 6;
   const subtotalCents = (tier?.price_cents ?? 0) * qty;
+
+  // Add-on upsell selections (WS-3) — preview math only; server reprices.
+  const upsellSelections = useAddonUpsellStore((s) =>
+    s.eventId === eventId ? s.selections : undefined,
+  );
+  const selectionList = upsellSelections ? Object.values(upsellSelections) : [];
+  const addonPreviewCents = addonSelectionsTotalCents(addons, selectionList);
+  const hasAddonSelections = selectionList.length > 0;
 
   const appliedPromo = useEventDetailUiStore((s) => s.appliedPromo);
   const setAppliedPromo = useEventDetailUiStore((s) => s.setAppliedPromo);
@@ -1405,7 +2217,7 @@ function CheckoutSheet({
   const discountCents = appliedPromo
     ? computePromoDiscountCents(appliedPromo.type, appliedPromo.value, subtotalCents, qty)
     : 0;
-  const totalCents = Math.max(0, subtotalCents - discountCents);
+  const totalCents = Math.max(0, subtotalCents - discountCents) + addonPreviewCents;
   const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 
   const applyPromo = async () => {
@@ -1502,8 +2314,26 @@ function CheckoutSheet({
           ) : null}
         </div>
 
+        {/* Add-on upsell (WS-3) — eligibility gated by the selected tier;
+            selections become cart line items on the mixed-cart rail. */}
+        {tier ? (
+          <AddonUpsellStrip
+            eventId={eventId}
+            addons={addons}
+            selectedTierIds={new Set([String(tier.id)])}
+          />
+        ) : null}
+
         {/* Price breakdown */}
         <div className="flex flex-col gap-1.5 border-t border-white/10 pt-3">
+          {addonPreviewCents > 0 ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-white/55">Add-ons</span>
+              <span className="font-mono text-sm text-white/80">
+                {money(addonPreviewCents)}
+              </span>
+            </div>
+          ) : null}
           {discountCents > 0 ? (
             <>
               <div className="flex items-center justify-between">
@@ -1531,9 +2361,11 @@ function CheckoutSheet({
         >
           {isCheckingOut
             ? "Processing…"
-            : totalCents
-              ? `Pay ${money(totalCents)}`
-              : "Confirm RSVP"}
+            : hasAddonSelections
+              ? `Review order · ${money(totalCents)}`
+              : totalCents
+                ? `Pay ${money(totalCents)}`
+                : "Confirm RSVP"}
         </button>
       </div>
     </BottomSheet>
@@ -1619,17 +2451,21 @@ function MenuItem({
   Icon,
   label,
   onClick,
+  destructive = false,
 }: {
   Icon: typeof Share2;
   label: string;
   onClick: () => void;
+  destructive?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-white/5"
+      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-white/5 ${
+        destructive ? "text-[#FC253A]" : "text-white"
+      }`}
     >
-      <Icon size={16} color="#fff" />
+      <Icon size={16} color={destructive ? "#FC253A" : "#fff"} />
       {label}
     </button>
   );

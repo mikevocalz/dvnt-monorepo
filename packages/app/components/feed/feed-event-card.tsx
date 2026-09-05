@@ -21,6 +21,7 @@ import type { PublicGateReason } from "@dvnt/app/lib/access/public-gates";
 import { TranslateButton } from "@dvnt/app/components/ui/translate-button";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
+import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 
 const CARD_HEIGHT = 200;
 
@@ -59,14 +60,11 @@ export const FeedEventCard = memo(function FeedEventCard({
     await translateTitleFn();
   }, [translateTitleFn]);
 
+  // Navigation itself is the Link's job now (ZoomCard) — this only warms the
+  // cache so the detail screen has data before the zoom finishes.
   const handlePress = useCallback(() => {
-    if (guestMode) {
-      onRequireAuth?.("events");
-      return;
-    }
     screenPrefetch.eventDetail(queryClient, event.id);
-    router.push(`/(protected)/events/${event.id}` as any);
-  }, [event.id, guestMode, onRequireAuth, queryClient, router]);
+  }, [event.id, queryClient]);
 
   const attendeeCount =
     typeof event.attendees === "number"
@@ -84,7 +82,12 @@ export const FeedEventCard = memo(function FeedEventCard({
 
   return (
     <View style={{ paddingHorizontal: 4, paddingVertical: 12 }}>
-      <Pressable onPress={handlePress}>
+      <ZoomCard
+        href={`/(protected)/events/${event.id}` as never}
+        onPress={handlePress}
+        disabled={guestMode}
+        onDisabledPress={() => onRequireAuth?.("events")}
+      >
         <View
           style={{
             height: CARD_HEIGHT,
@@ -395,7 +398,7 @@ export const FeedEventCard = memo(function FeedEventCard({
             </View>
           </View>
         </View>
-      </Pressable>
+      </ZoomCard>
     </View>
   );
 });

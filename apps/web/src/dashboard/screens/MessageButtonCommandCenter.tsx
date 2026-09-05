@@ -54,7 +54,7 @@ export function MessageButtonCommandCenter() {
           <h1 className="text-2xl font-bold text-white">
             📩 Message Button Command Center
           </h1>
-          <p className="text-zinc-400 text-sm mt-1">
+          <p className="text-white/60 text-sm mt-1">
             App Store rejection tracking — Message button health monitoring
           </p>
         </div>
@@ -65,8 +65,8 @@ export function MessageButtonCommandCenter() {
               onClick={() => setPeriod(p)}
               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                 period === p
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                  ? 'bg-[#8A40CF] text-white'
+                  : 'bg-white/10 text-white/60 hover:text-white'
               }`}
             >
               {p}
@@ -77,7 +77,7 @@ export function MessageButtonCommandCenter() {
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500" />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#8A40CF]" />
         </div>
       ) : metrics ? (
         <>
@@ -129,12 +129,12 @@ export function MessageButtonCommandCenter() {
             ) : (
               <div className="space-y-2">
                 {metrics.latestErrors.map((issue: IssueSummary) => (
-                  <div key={issue.id} className="rounded-lg border border-zinc-800 p-3">
+                  <div key={issue.id} className="rounded-lg border border-white/10 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <p className="text-white text-sm font-medium truncate">{issue.title}</p>
-                        <p className="text-zinc-500 text-xs mt-0.5">{issue.culprit}</p>
-                        <div className="flex gap-3 mt-1.5 text-xs text-zinc-400">
+                        <p className="text-white/50 text-xs mt-0.5">{issue.culprit}</p>
+                        <div className="flex gap-3 mt-1.5 text-xs text-white/60">
                           <span>Count: {issue.count}</span>
                           <span>Users: {issue.userCount}</span>
                           <span>Platform: {issue.platform}</span>
@@ -147,7 +147,7 @@ export function MessageButtonCommandCenter() {
                             href={issue.permalink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="px-2 py-1 rounded bg-zinc-800 text-purple-400 hover:text-purple-300 text-xs"
+                            className="px-2 py-1 rounded bg-white/10 text-[#c084fc] hover:text-[#FF5BFC] text-xs"
                           >
                             Sentry
                           </a>
@@ -161,9 +161,9 @@ export function MessageButtonCommandCenter() {
           </div>
 
           {/* Diagnostic Note */}
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-            <h3 className="text-zinc-300 text-sm font-medium">Diagnostic Context</h3>
-            <ul className="mt-2 text-xs text-zinc-400 space-y-1">
+          <div className="rounded-lg border border-white/10 bg-white/[0.04]/50 p-4">
+            <h3 className="text-white/75 text-sm font-medium">Diagnostic Context</h3>
+            <ul className="mt-2 text-xs text-white/60 space-y-1">
               <li>• Tap counts (success/total) sourced from Supabase analytics_events</li>
               <li>• Failure data sourced from Sentry via featureArea:messaging tag</li>
               <li>• Look for auth/session failures before message opens (common rejection cause)</li>
@@ -185,13 +185,13 @@ function StatCard({ label, value, danger, success }: {
   danger?: boolean;
   success?: boolean;
 }) {
-  const borderColor = success ? 'border-green-500/30' : danger ? 'border-red-500/30' : 'border-zinc-800';
+  const borderColor = success ? 'border-green-500/30' : danger ? 'border-red-500/30' : 'border-white/10';
   const bgColor = success ? 'bg-green-500/5' : danger ? 'bg-red-500/5' : '';
   const textColor = success ? 'text-green-400' : danger ? 'text-red-400' : 'text-white';
 
   return (
     <div className={`rounded-lg border p-4 ${borderColor} ${bgColor}`}>
-      <p className="text-zinc-400 text-xs uppercase tracking-wide">{label}</p>
+      <p className="text-white/60 text-xs uppercase tracking-wide">{label}</p>
       <p className={`text-2xl font-bold mt-1 ${textColor}`}>{value}</p>
     </div>
   );
@@ -199,9 +199,9 @@ function StatCard({ label, value, danger, success }: {
 
 function BreakdownCard({ title, count }: { title: string; count: number }) {
   return (
-    <div className={`rounded-lg border p-3 ${count > 0 ? 'border-red-500/20 bg-red-500/5' : 'border-zinc-800'}`}>
-      <p className="text-zinc-400 text-xs">{title}</p>
-      <p className={`text-xl font-bold mt-0.5 ${count > 0 ? 'text-red-400' : 'text-zinc-300'}`}>{count}</p>
+    <div className={`rounded-lg border p-3 ${count > 0 ? 'border-red-500/20 bg-red-500/5' : 'border-white/10'}`}>
+      <p className="text-white/60 text-xs">{title}</p>
+      <p className={`text-xl font-bold mt-0.5 ${count > 0 ? 'text-red-400' : 'text-white/75'}`}>{count}</p>
     </div>
   );
 }

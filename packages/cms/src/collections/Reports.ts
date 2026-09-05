@@ -15,6 +15,8 @@ export const Reports: CollectionConfig = {
     delete: canModerate,
   },
   admin: {
+    group: 'Moderation',
+    description: 'User reports raw records — the Console Reports tab is the working queue.',
     useAsTitle: 'reason',
     defaultColumns: ['reportedMember', 'reason', 'status', 'createdAt'],
   },

@@ -8,7 +8,7 @@ import { ImageCropper, getCroppedDataUrl } from "@dvnt/ui";
 import type { Area } from "react-easy-crop";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
-import type { AspectPreset } from "@dvnt/app/src/crop/edit-state";
+import type { AspectPreset } from "@dvnt/app/features/crop/edit-state";
 
 /**
  * Crop & Preview — web port of `(protected)/crop-preview.tsx`.

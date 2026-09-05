@@ -1,6 +1,7 @@
 // src/collections/Posts.ts — editorial blog posts with full magazine-grade
 // schema: cinematic hero, rich content blocks, editorial flags, SEO/OG, drafts.
 import type { CollectionConfig, Block } from 'payload'
+import type { AdminUser } from '../payload-types'
 import {
   lexicalEditor,
   lexicalHTMLField,
@@ -214,13 +215,13 @@ export const Posts: CollectionConfig = {
     // moderator is scoped to the posts they created (own-blog editing).
     create: canModerate,
     update: ({ req }) => {
-      const role = req.user?.role
+      const role = (req.user as AdminUser | null)?.role
       if (role === 'super_admin' || role === 'admin') return true
       if (role === 'moderator') return { createdBy: { equals: req.user?.id } }
       return false
     },
     delete: ({ req }) => {
-      const role = req.user?.role
+      const role = (req.user as AdminUser | null)?.role
       if (role === 'super_admin' || role === 'admin') return true
       if (role === 'moderator') return { createdBy: { equals: req.user?.id } }
       return false
@@ -228,6 +229,8 @@ export const Posts: CollectionConfig = {
     readVersions: canModerate,
   },
   admin: {
+    group: 'Content',
+    description: 'Blog articles shown on dvntapp.live/posts.',
     useAsTitle: 'title',
     defaultColumns: ['title', 'slug', 'featured', 'editorsPick', '_status', 'publishedAt'],
     livePreview: {

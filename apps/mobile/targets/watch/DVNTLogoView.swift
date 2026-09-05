@@ -4,27 +4,26 @@ import SwiftUI
 /// apple-targets from `DVNT-logo-grad-white.png` (a 2360x908 raster of the brand
 /// wordmark SVG; white glyphs on transparent, gradient intact). Never redrawn.
 struct DVNTLogoView: View {
+    /// Fixed height; width follows the wordmark's 2360x908 aspect.
     var height: CGFloat = 22
 
-    var body: some View {
-        Image("dvntLogo")
-            .resizable()
-            .scaledToFit()
-            .frame(height: height)
-            .accessibilityLabel("DVNT")
-    }
-}
+    /// Take the width offered and let height follow the aspect instead.
+    ///
+    /// A fixed height cannot serve both sizes: the same 30pt mark is 38% of a
+    /// 205pt Ultra screen and 48% of a 162pt SE. The Door wants the mark to
+    /// read at the same *proportion* on every watch, which is a width problem,
+    /// not a height one.
+    var fillWidth: Bool = false
 
-/// Launch / loading state: gradient wordmark on true-black.
-struct LaunchView: View {
     var body: some View {
-        ZStack {
-            DVNT.canvas.ignoresSafeArea()
-            VStack(spacing: 10) {
-                DVNTLogoView(height: 26)
-                ProgressView()
-                    .tint(DVNT.accent)
+        let mark = Image("dvntLogo").resizable().scaledToFit()
+        Group {
+            if fillWidth {
+                mark.frame(maxWidth: .infinity)
+            } else {
+                mark.frame(height: height)
             }
         }
+        .accessibilityLabel("DVNT")
     }
 }

@@ -11,6 +11,27 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // ── Auth gate: internal admin job — x-internal-secret required ──────
+  // Bulk-creates users rows from the Better Auth table with the service
+  // role. Mirrors the payouts-release CRON_SECRET pattern: fail CLOSED
+  // when the env is unset.
+  const internalSecret = Deno.env.get("INTERNAL_FN_SECRET") || "";
+  if (!internalSecret) {
+    console.error(
+      "[backfill-users] INTERNAL_FN_SECRET not set — rejecting request",
+    );
+    return new Response(JSON.stringify({ error: "Misconfigured" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  if ((req.headers.get("x-internal-secret") || "") !== internalSecret) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,

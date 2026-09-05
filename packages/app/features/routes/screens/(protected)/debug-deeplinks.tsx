@@ -1,10 +1,11 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 /**
  * Deep Link Tester (Dev Only)
  * Paste a URL, simulate parse + navigation, see resolved route + policy.
  */
 
 import { View, Text, Pressable, TextInput, ScrollView } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ChevronLeft, Play, Copy, Link2 } from "lucide-react-native";

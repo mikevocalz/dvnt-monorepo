@@ -29,12 +29,14 @@ import {
 } from "lucide-react-native";
 import * as WebBrowser from "expo-web-browser";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
-import { SneakySubscriptionModal } from "@dvnt/app/src/sneaky-lynk/components/SneakySubscriptionModal";
-import { useSneakyLynkCaptureProtection } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureProtection";
+import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
+import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
+import type { SneakyBilling } from "@dvnt/app/features/screens/membership/billing";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 
 interface Subscription {
@@ -55,7 +57,11 @@ const PLAN_LABELS: Record<
   host_50: { name: "Unlimited", price: "$25/mo", maxPax: null },
 };
 
-function BillingScreenContent() {
+function BillingScreenContent({
+  billing = null,
+}: {
+  billing?: SneakyBilling | null;
+}) {
   // Protect billing/subscription information from capture
   useSneakyLynkCaptureProtection();
 
@@ -114,8 +120,7 @@ function BillingScreenContent() {
   useEffect(() => {
     if (!authUser?.id) return;
 
-    const channel = supabase
-      .channel("sneaky-sub-changes")
+    const channel = freshChannel("sneaky-sub-changes")
       .on(
         "postgres_changes" as any,
         {
@@ -369,11 +374,17 @@ function BillingScreenContent() {
             </Pressable>
           )}
 
-          {/* Upgrade CTA — hidden on iOS for free users (App Store Guideline 3.1.1) */}
-          {Platform.OS === "ios" && isFree ? (
+          {/* Upgrade CTA — with the RC billing seam injected the modal sells
+              via IAP on iOS (3.1.1-compliant); without it (expo-go / missing
+              pod) free iOS users keep the visit-the-web notice. */}
+          {Platform.OS === "ios" && isFree && !billing ? (
             <View
               className="rounded-2xl p-4 items-center gap-1"
-              style={{ backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" }}
+              style={{
+                backgroundColor: "rgba(255,255,255,0.04)",
+                borderWidth: 1,
+                borderColor: "rgba(255,255,255,0.08)",
+              }}
             >
               <Text className="text-sm font-sans-semibold text-foreground text-center">
                 Manage Your Plan
@@ -424,17 +435,23 @@ function BillingScreenContent() {
           }}
           currentPlan={subscription?.plan_id ?? "free"}
           reason="upgrade"
+          billing={billing}
         />
       )}
     </View>
   );
 }
 
-export default function BillingScreen() {
+export default function BillingScreen({
+  billing = null,
+}: {
+  /** Native RC billing seam, injected by the apps/mobile route file. */
+  billing?: SneakyBilling | null;
+}) {
   const router = useRouter();
   return (
     <ErrorBoundary screenName="Billing" onGoBack={() => router.back()}>
-      <BillingScreenContent />
+      <BillingScreenContent billing={billing} />
     </ErrorBoundary>
   );
 }

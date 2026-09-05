@@ -11,9 +11,11 @@ interface NewGroupState {
   searchQuery: string;
   groupName: string;
   selectedUsers: NewGroupSelectedUser[];
+  isCreating: boolean;
+  setIsCreating: (value: boolean) => void;
   setSearchQuery: (query: string) => void;
   setGroupName: (name: string) => void;
-  toggleUser: (user: NewGroupSelectedUser, max: number) => boolean;
+  toggleUser: (user: NewGroupSelectedUser, max?: number) => boolean;
   removeUser: (id: string) => void;
   isSelected: (id: string) => boolean;
   reset: () => void;
@@ -22,13 +24,14 @@ interface NewGroupState {
 /**
  * Tiny Zustand store backing the New Group screen — search query, group name,
  * and the selected-members set (Law: state is Zustand, never useState).
- * `toggleUser` returns false when the max-members cap blocks the add so the
- * caller can surface a toast (matching the native screen's behavior).
+ * A caller can supply its own domain limit; group chats do not inherit the audio-call cap.
  */
 export const useNewGroupStore = create<NewGroupState>((set, get) => ({
   searchQuery: "",
   groupName: "",
   selectedUsers: [],
+  isCreating: false,
+  setIsCreating: (value) => set({ isCreating: value }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setGroupName: (name) => set({ groupName: name }),
   toggleUser: (user, max) => {
@@ -38,7 +41,7 @@ export const useNewGroupStore = create<NewGroupState>((set, get) => ({
       set({ selectedUsers: prev.filter((u) => u.id !== user.id) });
       return true;
     }
-    if (prev.length >= max - 1) {
+    if (max !== undefined && prev.length >= max - 1) {
       return false;
     }
     set({ selectedUsers: [...prev, user] });
@@ -49,5 +52,5 @@ export const useNewGroupStore = create<NewGroupState>((set, get) => ({
       selectedUsers: state.selectedUsers.filter((u) => u.id !== id),
     })),
   isSelected: (id) => get().selectedUsers.some((u) => u.id === id),
-  reset: () => set({ searchQuery: "", groupName: "", selectedUsers: [] }),
+  reset: () => set({ searchQuery: "", groupName: "", selectedUsers: [], isCreating: false }),
 }));

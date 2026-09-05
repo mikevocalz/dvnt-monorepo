@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "solito/navigation";
 import { X } from "lucide-react";
 import { StoryViewer } from "@dvnt/ui";
 import { useStoryViewerStore } from "@dvnt/app/lib/stores/story-viewer-store";
+import { StoryOverlaysLayer } from "@dvnt/app/components/story-overlays-layer.web";
 
 /**
  * Full-screen story viewer overlay (web) — pops over the ENTIRE app at the top
@@ -19,6 +21,7 @@ import { useStoryViewerStore } from "@dvnt/app/lib/stores/story-viewer-store";
  * screens and fills the width on phones.
  */
 export function StoryViewerOverlay() {
+  const router = useRouter();
   const open = useStoryViewerStore((s) => s.open);
   const groups = useStoryViewerStore((s) => s.groups);
   const groupIndex = useStoryViewerStore((s) => s.groupIndex);
@@ -28,6 +31,13 @@ export function StoryViewerOverlay() {
   // Portal target only exists on the client; gate the portal until mounted.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // Which segment inside the current group is playing — drives which item's
+  // overlays are shown. react-insta-stories fires onStoryChange (onStoryStart)
+  // on every segment start; reset to 0 whenever the group changes (the viewer
+  // remounts per group via key={group.id}).
+  const [storyIndex, setStoryIndex] = useState(0);
+  useEffect(() => setStoryIndex(0), [groupIndex]);
 
   // react-insta-stories positions its internal layers using the width/height
   // props as PIXEL values — passing "100%" breaks its layout math so segments
@@ -92,6 +102,8 @@ export function StoryViewerOverlay() {
   if (!mounted || !open || groups.length === 0 || size.w === 0) return null;
   const group = groups[Math.min(groupIndex, groups.length - 1)];
   if (!group || group.segments.length === 0) return null;
+  const segment =
+    group.segments[Math.min(storyIndex, group.segments.length - 1)];
 
   // Portal to <body> so the overlay escapes every ancestor stacking context
   // (the shell's backdrop-filter / transforms) and truly sits on top of the
@@ -130,9 +142,25 @@ export function StoryViewerOverlay() {
             header: { heading: group.username, profileImage: group.avatar },
           }))}
           onAllStoriesEnd={nextGroup}
+          onStoryChange={setStoryIndex}
           width={size.w}
           height={size.h}
         />
+
+        {/* Story overlays for the current segment — the SAME shared renderer the
+            create preview uses. WS-4 stickers are tappable here (deep-link per
+            their metadata); tapping closes the viewer and navigates. */}
+        {segment ? (
+          <StoryOverlaysLayer
+            storyOverlays={segment.storyOverlays}
+            animatedGifOverlays={segment.animatedGifOverlays}
+            interactive
+            onNavigate={(path) => {
+              close();
+              router.push(path);
+            }}
+          />
+        ) : null}
       </div>
     </div>,
     document.body,

@@ -19,7 +19,7 @@
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -84,6 +84,27 @@ Deno.serve(async (req) => {
 
   if (req.method !== "POST") {
     return errorResponse("validation_error", "Method not allowed");
+  }
+
+  // ── Auth gate: internal admin job — x-internal-secret required ──────
+  // DEAD CODE (no known caller) but publicly invocable until deleted: an
+  // open Resend relay for spoofed welcome/reset mail. Mirrors the
+  // payouts-release CRON_SECRET pattern: fail CLOSED when the env is unset.
+  const internalSecret = Deno.env.get("INTERNAL_FN_SECRET") || "";
+  if (!internalSecret) {
+    console.error(
+      "[send-email] INTERNAL_FN_SECRET not set — rejecting request",
+    );
+    return jsonResponse(
+      { ok: false, error: { code: "misconfigured", message: "Misconfigured" } },
+      500,
+    );
+  }
+  if ((req.headers.get("x-internal-secret") || "") !== internalSecret) {
+    return jsonResponse(
+      { ok: false, error: { code: "unauthorized", message: "Unauthorized" } },
+      401,
+    );
   }
 
   try {

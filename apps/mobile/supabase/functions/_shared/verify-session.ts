@@ -7,10 +7,20 @@
  *   const userId = await verifySession(supabase, req);
  */
 
-export async function verifySession(
+export type SessionVerification =
+  | { ok: true; userId: string }
+  | { ok: false; reason: "missing" | "invalid" | "expired" };
+
+/**
+ * Detailed variant of verifySession: same token extraction, same DB lookup,
+ * same expiry semantics — but reports WHY verification failed so callers
+ * migrating from inline lookups can preserve their exact per-case error
+ * responses (e.g. "Session expired" vs "Invalid or expired session").
+ */
+export async function verifySessionDetailed(
   supabase: any,
   req: Request,
-): Promise<string | null> {
+): Promise<SessionVerification> {
   // Prefer x-auth-token (avoids Supabase gateway rejecting non-JWT in Authorization)
   // Fall back to Authorization for backward compatibility
   const customToken = req.headers.get("x-auth-token") || "";
@@ -19,7 +29,7 @@ export async function verifySession(
 
   if (!token) {
     console.error("[verify-session] No token in Authorization header");
-    return null;
+    return { ok: false, reason: "missing" };
   }
 
   console.log(
@@ -39,21 +49,29 @@ export async function verifySession(
 
   if (error) {
     console.error("[verify-session] DB error:", error.message, error.code);
-    return null;
+    return { ok: false, reason: "invalid" };
   }
 
   if (!session) {
     console.error("[verify-session] No session row matches token");
-    return null;
+    return { ok: false, reason: "invalid" };
   }
 
   // Check expiry
   if (new Date(session.expiresAt) < new Date()) {
     console.error("[verify-session] Session expired");
-    return null;
+    return { ok: false, reason: "expired" };
   }
 
-  return session.userId;
+  return { ok: true, userId: session.userId };
+}
+
+export async function verifySession(
+  supabase: any,
+  req: Request,
+): Promise<string | null> {
+  const result = await verifySessionDetailed(supabase, req);
+  return result.ok ? result.userId : null;
 }
 
 /**
@@ -64,6 +82,8 @@ export async function verifySession(
 const ALLOWED_ORIGINS = [
   "http://localhost:8081", // Expo dev server
   "http://localhost:19006", // Expo web
+  "http://localhost:3000", // Next web dev server + the Playwright e2e lane
+  "http://127.0.0.1:3000",
   "https://dvnt.app", // Future web domain
   "https://dvntapp.live", // Production web (custom domain)
   "https://www.dvntapp.live",
@@ -103,7 +123,7 @@ export function corsHeaders(req?: Request): Record<string, string> {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers":
-      "Content-Type, Authorization, apikey, x-client-info, x-auth-token",
+      "Content-Type, Authorization, apikey, x-client-info, x-auth-token, sentry-trace, baggage",
     ...(origin ? { Vary: "Origin" } : {}),
   };
 }
@@ -116,7 +136,7 @@ export const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, apikey, x-client-info, x-auth-token",
+    "Content-Type, Authorization, apikey, x-client-info, x-auth-token, sentry-trace, baggage",
 };
 
 /**

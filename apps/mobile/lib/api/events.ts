@@ -31,8 +31,25 @@ function isVideoUrl(url: string): boolean {
 
 /** Resolve event image URL from multiple DB columns */
 function resolveEventImage(event: any): string {
-  // Priority: cover_image_url > image > cover_image_id (would need join)
-  return event[DB.events.coverImageUrl] || event["image"] || "";
+  // Priority: cover_image_url > flyer_image_url > image.
+  //
+  // flyer_image_url was missing and is the column that actually holds the art
+  // for most events: get_events_home returns `image: ""` and a null
+  // cover_image_url for them, so this returned "" and the card rendered
+  // nothing. A flyer can also be a VIDEO, which must never reach an <img> —
+  // resolveFlyerVideoUrl below handles that case, so video URLs are skipped
+  // here rather than returned.
+  const candidates = [
+    event[DB.events.coverImageUrl],
+    event[DB.events.flyerImageUrl],
+    event["image"],
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && /^https?:\/\//i.test(c) && !isVideoUrl(c)) {
+      return c;
+    }
+  }
+  return "";
 }
 
 /** Returns the flyer video URL if the flyer is a video, otherwise undefined */
@@ -941,6 +958,31 @@ export const eventsApi = {
         throw new Error("You are not the host of this event");
       }
 
+      // WS-9 guard — FIRST step of the cascade: never hard-delete an
+      // event that has taken money that wasn't returned. Any
+      // non-terminal ticket carrying a Stripe payment intent means the
+      // host must Cancel instead (event-cancel edge fn refunds every
+      // paid order + notifies attendees). Server-side delete-event has
+      // the same 409 guard; this stops the client-cascade path too.
+      // Fail CLOSED: if the count can't be read, refuse the delete.
+      const { count: paidCount, error: paidErr } = await supabase
+        .from("tickets")
+        .select("id", { count: "exact", head: true })
+        .eq("event_id", eventIdInt)
+        .in("status", ["active", "transfer_pending", "scanned"])
+        .not("stripe_payment_intent_id", "is", null);
+      if (paidErr) {
+        console.error("[Events] deleteEvent paid-ticket check failed:", paidErr);
+        throw new Error(
+          "Couldn't verify ticket sales for this event. Try again in a moment.",
+        );
+      }
+      if ((paidCount ?? 0) > 0) {
+        throw new Error(
+          "This event has paid tickets. Cancel the event instead — attendees are refunded and notified automatically.",
+        );
+      }
+
       // Collect all image URLs for CDN cleanup
       const imageUrls: string[] = [];
       const coverImage = event[DB.events.coverImageUrl] || event["image"];
@@ -1022,6 +1064,121 @@ export const eventsApi = {
       console.error("[Events] deleteEvent error:", error?.message || error);
       throw error;
     }
+  },
+
+  /**
+   * Cancel an event with automatic refunds (WS-9). Calls the
+   * event-cancel edge fn, which flips status→'cancelled', closes the
+   * waitlist, refunds every paid order (whole-PI, idempotent), voids
+   * free tickets, notifies attendees, and emails guest orders. Refunds
+   * run in server-side batches — this loops until the server reports
+   * done, so a large event resumes transparently. Safe to re-call.
+   */
+  async cancelEventWithRefunds(
+    eventId: string,
+    reason?: string,
+  ): Promise<{
+    refundsIssued: number;
+    refundsFailed: number;
+    freeTicketsVoided: number;
+    guestEmailsSent: number;
+    notified: number;
+    done: boolean;
+  }> {
+    const { invokeEdge } = await import("./invoke-edge");
+    const totals = {
+      refundsIssued: 0,
+      refundsFailed: 0,
+      freeTicketsVoided: 0,
+      guestEmailsSent: 0,
+      notified: 0,
+      done: false,
+    };
+    // 40 passes × 25 orders = 1,000 orders per user action; anything
+    // bigger keeps state server-side and finishes on the next call.
+    const MAX_PASSES = 40;
+    for (let pass = 0; pass < MAX_PASSES; pass++) {
+      const { data, error } = await invokeEdge<{
+        ok: boolean;
+        done: boolean;
+        refundsIssued: number;
+        refundsFailed: number;
+        freeTicketsVoided: number;
+        guestEmailsSent: number;
+        notified: number;
+        remainingOrders: number;
+        error?: { message: string };
+      }>("event-cancel", { eventId: parseInt(eventId), reason });
+      if (error || !data?.ok) {
+        throw new Error(
+          error?.message ||
+            (data as any)?.error?.message ||
+            "Cancel failed",
+        );
+      }
+      totals.refundsIssued += data.refundsIssued || 0;
+      totals.refundsFailed += data.refundsFailed || 0;
+      totals.freeTicketsVoided += data.freeTicketsVoided || 0;
+      totals.guestEmailsSent += data.guestEmailsSent || 0;
+      totals.notified += data.notified || 0;
+      if (data.done) {
+        totals.done = true;
+        break;
+      }
+      // Stripe refused some refunds this pass and nothing else is
+      // pending → retrying immediately would spin on the same orders.
+      if (data.refundsFailed > 0 && data.remainingOrders <= data.refundsFailed) {
+        break;
+      }
+    }
+    return totals;
+  },
+
+  /**
+   * Postpone an active event (WS-9). Reversible via resumeEvent. No
+   * refunds — tickets stay valid; the server notifies attendees +
+   * emails guest orders. (Host-policy refund windows are WS-5 work.)
+   */
+  async postponeEvent(
+    eventId: string,
+    note?: string,
+  ): Promise<{ status: string; notified: number }> {
+    const { invokeEdge } = await import("./invoke-edge");
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      status: string;
+      notified: number;
+      error?: { message: string };
+    }>("event-postpone", {
+      eventId: parseInt(eventId),
+      action: "postpone",
+      note,
+    });
+    if (error || !data?.ok) {
+      throw new Error(
+        error?.message || (data as any)?.error?.message || "Postpone failed",
+      );
+    }
+    return { status: data.status, notified: data.notified || 0 };
+  },
+
+  /** Flip a postponed event back to active (WS-9). */
+  async resumeEvent(
+    eventId: string,
+  ): Promise<{ status: string; notified: number }> {
+    const { invokeEdge } = await import("./invoke-edge");
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      status: string;
+      notified: number;
+      error?: { message: string };
+    }>("event-postpone", { eventId: parseInt(eventId), action: "resume" });
+    if (error || !data?.ok) {
+      throw new Error(
+        error?.message || (data as any)?.error?.message || "Resume failed",
+      );
+    }
+    return { status: data.status, notified: data.notified || 0 };
   },
 
   /**

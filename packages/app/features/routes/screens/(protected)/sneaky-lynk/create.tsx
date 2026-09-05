@@ -17,14 +17,15 @@ import {
   UserPlus,
   X,
   Plus,
+  Smartphone,
 } from "lucide-react-native";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import * as Haptics from "expo-haptics";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { useLynkHistoryStore } from "@dvnt/app/src/sneaky-lynk/stores/lynk-history-store";
-import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
-import { useSneakyLynkCaptureProtection } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureProtection";
+import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
+import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
@@ -50,6 +51,7 @@ function CreateLynkScreenContent() {
   const [description, setDescription] = useState("");
   const [hasVideo, setHasVideo] = useState(false);
   const [isPublic, setIsPublic] = useState(true);
+  const [appOnly, setAppOnly] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [inviteSearch, setInviteSearch] = useState("");
   const [inviteResults, setInviteResults] = useState<Invitee[]>([]);
@@ -143,6 +145,7 @@ function CreateLynkScreenContent() {
         description: description.trim(),
         hasVideo,
         isPublic,
+        appOnly,
         invitedUserIds: isPublic
           ? []
           : invitees.map((invitee) => invitee.authId),
@@ -155,6 +158,7 @@ function CreateLynkScreenContent() {
         description: description.trim(),
         hasVideo,
         isPublic,
+        appOnly,
       });
 
       if (!result.ok || !result.data) {
@@ -209,6 +213,7 @@ function CreateLynkScreenContent() {
     description,
     hasVideo,
     isPublic,
+    appOnly,
     invitees,
     router,
     showToast,
@@ -341,7 +346,7 @@ function CreateLynkScreenContent() {
         </View>
 
         {/* Public/Private Toggle */}
-        <View className="flex-row items-center justify-between bg-secondary rounded-xl px-4 py-4 mb-8">
+        <View className="flex-row items-center justify-between bg-secondary rounded-xl px-4 py-4 mb-4">
           <View className="flex-row items-center gap-3">
             <View className="w-10 h-10 rounded-full bg-primary/20 items-center justify-center">
               {isPublic ? (
@@ -367,6 +372,41 @@ function CreateLynkScreenContent() {
             trackColor={{ false: "#374151", true: "#FC253A" }}
             thumbColor="#fff"
           />
+        </View>
+
+        {/* App-only toggle — the only ENFORCED tier of capture protection.
+            The web room's blackout/watermark/shortcut handling is deterrence;
+            an app-only room simply never mints a peer token for a browser. */}
+        <View className="bg-secondary rounded-xl px-4 py-4 mb-8">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-row items-center gap-3 flex-1">
+              <View className="w-10 h-10 rounded-full bg-primary/20 items-center justify-center">
+                <Smartphone size={20} color="#FC253A" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-foreground font-semibold">
+                  App-only room
+                </Text>
+                <Text className="text-xs text-muted-foreground">
+                  Web viewers can&apos;t join · strongest capture protection
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={appOnly}
+              onValueChange={setAppOnly}
+              trackColor={{ false: "#374151", true: "#FC253A" }}
+              thumbColor="#fff"
+            />
+          </View>
+          {appOnly ? (
+            <Text className="text-xs text-muted-foreground leading-5 mt-3">
+              Everyone joins from the DVNT app, where the OS blacks out
+              screenshots and screen recordings at the system level. Browsers
+              have no equivalent, so they&apos;re turned away before they can
+              connect.
+            </Text>
+          ) : null}
         </View>
 
         {!isPublic && (

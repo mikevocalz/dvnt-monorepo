@@ -9,7 +9,8 @@ import {
 import { Image } from "expo-image";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Main } from "@expo/html-elements";
+import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
+import { Main, LinearGradient } from "@dvnt/app/components/ui/html";
 import {
   Heart,
   Plus,
@@ -30,7 +31,7 @@ import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useIsLargeScreen } from "@dvnt/app/lib/hooks/use-is-large-screen";
-import { LinearGradient } from "expo-linear-gradient";
+
 import { Motion } from "@legendapp/motion";
 import Animated from "react-native-reanimated";
 import { useRef, useCallback, useMemo } from "react";
@@ -53,15 +54,17 @@ import { useBootstrapEvents } from "@dvnt/app/lib/hooks/use-bootstrap-events";
 import { useDeviceLocation } from "@dvnt/app/lib/hooks/use-device-location";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
-import { EventCollectionRow } from "@dvnt/app/components/events/event-collection-row";
-import { EventsMapSheet } from "@dvnt/app/components/events/events-map-sheet";
-import { EventFilterSheet } from "@dvnt/app/components/events/event-filter-sheet";
-import { SpotlightSection } from "@dvnt/app/components/events/spotlight-carousel";
-import { PromoteEventSheet } from "@dvnt/app/components/events/promote-event-sheet";
+import { EventCollectionRow } from "@dvnt/app/features/events";
+import { EventsMapSheet } from "@dvnt/app/features/events";
+import { EventFilterSheet } from "@dvnt/app/features/events";
+import { SpotlightSection } from "@dvnt/app/features/events";
+import { PromoteEventSheet } from "@dvnt/app/features/events";
 import {
   useSpotlightFeed,
   usePromotedEventIds,
 } from "@dvnt/app/lib/hooks/use-promotions";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 
 function EventCard({
   event,
@@ -100,7 +103,7 @@ function EventCard({
         stiffness: 300,
         delay: index * 0.15,
       }}
-      className="max-w-2xl w-full self-center"
+      className="w-full self-center"
     >
       <Motion.View
         className="rounded-3xl overflow-hidden mb-5"
@@ -327,24 +330,44 @@ function EventCard({
   );
 }
 
+/** Smallest 4:5 flyer card that still shows its title and date. */
+const MIN_CARD_WIDTH = 240;
+
 function EventsScreenContent() {
   const router = useRouter();
   const { colors } = useColorScheme();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const queryClient = useQueryClient();
   const pagerRef = useRef<any>(null);
   const trace = useScreenTrace("Events");
   useBootstrapEvents();
 
-  // Responsive grid — 2-col on tablet
+  // Responsive grid — columns follow the available width
   const { width: screenWidth } = useWindowDimensions();
   const isLargeScreen = useIsLargeScreen();
-  const numColumns = isLargeScreen ? 2 : 1;
-  const gridGap = isLargeScreen ? 12 : 0;
-  const cardWidth = isLargeScreen
-    ? (Math.min(screenWidth, 768) - 32 - gridGap) / 2
-    : screenWidth - 12;
-  const cardHeight = Math.round(cardWidth * (isLargeScreen ? 0.85 : 1));
+  // Columns follow the REAL width, and the grid is no longer capped at 768.
+  //
+  // `Math.min(screenWidth, 768)` meant a bigger iPad got more empty space
+  // rather than more content — the definition of not responsive. A 1024pt iPad
+  // laid out exactly like a 768pt one and parked the difference in the
+  // gutters. Now the canvas grows and a third column appears when there is
+  // genuinely room for one at a sane card width.
+  const { columns: numColumns, cellWidth } = useResponsiveGrid({
+    minCellWidth: MIN_CARD_WIDTH,
+    gap: 12,
+    horizontalPadding: 32,
+  });
+  const gridGap = numColumns > 1 ? 12 : 0;
+  const cardWidth = numColumns > 1 ? cellWidth : screenWidth - 12;
+  // PORTRAIT, because a DVNT flyer is authored 3:5 portrait
+  // (`BuiltEventMedia.flyerImageUrl`) and these cards render it with
+  // `resizeMode="cover"`. At 0.85 (landscape) and 1.0 (square) the card threw
+  // away most of every flyer and kept a band out of the middle — the squished
+  // look, on the iPad worst of all because the 2-up grid makes each card wider
+  // and so crops even harder. 4:5 matches the web feed card, and matches how
+  // DICE, corner, Posh and Spotify Live Events all present flyers.
+  const cardHeight = Math.round(cardWidth * 1.25);
 
   // Zustand store — replaces all useState
   const activeTab = useEventsScreenStore((s) => s.activeTab);
@@ -575,7 +598,7 @@ function EventsScreenContent() {
   const showEventSkeletons = isLoading && events.length === 0;
 
   return (
-    <View className="flex-1 bg-background max-w-3xl w-full self-center">
+    <View className={SCREEN_SHELL}>
       <Main className="flex-1">
         {/* Header — date+title left, actions right */}
         <View className="px-4 pt-2 pb-1">
@@ -926,7 +949,7 @@ function EventsScreenContent() {
                         className="flex-1"
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={{
-                          paddingBottom: insets.bottom + 32,
+                          paddingBottom: tabBarInset,
                         }}
                       >
                         {tabIndex === 1 &&
@@ -950,7 +973,7 @@ function EventsScreenContent() {
                         className="flex-1"
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={{
-                          paddingBottom: insets.bottom + 32,
+                          paddingBottom: tabBarInset,
                         }}
                       >
                         {tabIndex === 1 &&
@@ -987,8 +1010,12 @@ function EventsScreenContent() {
                           <View
                             style={{
                               paddingHorizontal: 16,
-                              flexDirection: isLargeScreen ? "row" : "column",
-                              flexWrap: isLargeScreen ? "wrap" : "nowrap",
+                              // Driven by the computed column count, not by
+                              // `isLargeScreen`: those disagreed between 700 and
+                              // 768pt, where cards were sized for a grid the
+                              // container still stacked.
+                              flexDirection: numColumns > 1 ? "row" : "column",
+                              flexWrap: numColumns > 1 ? "wrap" : "nowrap",
                               gap: gridGap,
                             }}
                           >
@@ -996,7 +1023,7 @@ function EventsScreenContent() {
                               <View
                                 key={event.id}
                                 style={
-                                  isLargeScreen
+                                  numColumns > 1
                                     ? { width: cardWidth }
                                     : undefined
                                 }

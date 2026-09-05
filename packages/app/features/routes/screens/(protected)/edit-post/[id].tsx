@@ -1,3 +1,4 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 /**
  * Edit Post Screen
  *
@@ -20,6 +21,7 @@ import {
   Pressable,
   ActivityIndicator,
   Dimensions,
+  useWindowDimensions,
   Alert,
   ScrollView as RNScrollView,
   Switch,
@@ -27,10 +29,7 @@ import {
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
-import {
-  SafeAreaView,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Image } from "expo-image";
 import {
@@ -51,7 +50,7 @@ import {
   type LocationData,
 } from "@dvnt/app/components/ui/location-autocomplete-instagram";
 import { UserMentionAutocomplete } from "@dvnt/app/components/ui/user-mention-autocomplete";
-import { ImageTagger } from "@dvnt/app/components/post/image-tagger";
+import { ImageTagger } from "@dvnt/app/features/post";
 import { usePost, postKeys } from "@dvnt/app/lib/hooks/use-posts";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -62,11 +61,21 @@ import type { Post } from "@dvnt/app/lib/types";
 import * as ImageManipulator from "expo-image-manipulator";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 
+/**
+ * Fallback only — see the live read inside the screen. A module-scope
+ * `Dimensions.get` freezes at launch width, and this screen divides the
+ * carousel's scroll offset by that width to work out which slide you are on:
+ * after a rotation the division used the OLD width, so the dots and the index
+ * pointed at the wrong slide.
+ */
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const MEDIA_HEIGHT = SCREEN_WIDTH * 0.65;
 const MAX_CAPTION = 2200;
 
 function EditPostScreenContent() {
+  // Live, because the carousel's page index is derived from it.
+  const { width: screenWidth } = useWindowDimensions();
+  const mediaHeight = screenWidth * 0.65;
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
@@ -365,10 +374,10 @@ function EditPostScreenContent() {
   const handleMediaScroll = useCallback(
     (event: any) => {
       const offsetX = event.nativeEvent.contentOffset.x;
-      const index = Math.round(offsetX / SCREEN_WIDTH);
+      const index = Math.round(offsetX / screenWidth);
       if (index !== mediaIndex) setMediaIndex(index);
     },
-    [mediaIndex],
+    [mediaIndex, screenWidth],
   );
 
   // ═══════════════════════════════════════════
@@ -557,7 +566,7 @@ function EditPostScreenContent() {
               {mediaItems.map((media, index) => (
                 <View
                   key={`media-${index}`}
-                  style={{ width: SCREEN_WIDTH, height: MEDIA_HEIGHT }}
+                  style={{ width: screenWidth, height: mediaHeight }}
                   className="bg-black"
                 >
                   {media.type === "video" ? (
@@ -578,7 +587,7 @@ function EditPostScreenContent() {
                       postId={id!}
                       mediaUrl={media.url}
                       mediaIndex={index}
-                      height={MEDIA_HEIGHT}
+                      height={mediaHeight}
                       existingTags={postTags}
                       onTagsChanged={handleTagsChanged}
                       onRotate={() => handleRotate(index)}

@@ -1,0 +1,304 @@
+#!/usr/bin/env node
+/**
+ * Guards the two watch invariants that fail late and expensively.
+ *
+ * 1. Every framework a watch target declares must exist in the watchOS SDK.
+ *    CoreImage did not, and listing it cost a full production build: the Swift
+ *    compiled fine and the LINK failed, ~12 minutes into EAS. A framework list
+ *    is not type checked by anything, so check it here.
+ *
+ * 2. The phone → watch QR wire format.
+ *
+ * watchOS has no Core Image, so the phone encodes the ticket QR and ships the
+ * module grid (`WatchQRMatrix`) instead of a token the watch could not draw.
+ * The packing is the only non-obvious part — hex, row-major, 4 modules per
+ * character, MSB first, tail padded MSB-first — and getting a bit offset wrong
+ * yields a code that still *looks* like a QR but scans as nothing at the door.
+ *
+ * This round-trips the packer against an unpacker written to the same spec as
+ * `WatchQRMatrix.modules` in apps/mobile/targets/watch/Models.swift. Keep the
+ * two in lockstep: if you change one, this fails until you change the other.
+ *
+ *   node scripts/verify-watch.mjs
+ */
+import assert from "node:assert";
+import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(import.meta.url);
+
+// --- 1. Declared frameworks must exist in the watchOS SDK ---------------------
+const targets = ["watch", "watch-complication"];
+let sdk = null;
+try {
+  sdk = execFileSync("xcrun", ["--sdk", "watchos", "--show-sdk-path"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+} catch {
+  console.warn("! no watchOS SDK on this machine — skipping the framework audit");
+}
+
+for (const target of targets) {
+  const config = require(join(root, "apps/mobile/targets", target, "expo-target.config.js"));
+  for (const framework of config.frameworks ?? []) {
+    // Hard-fail regardless of SDK availability: this one has already cost a build.
+    assert.notStrictEqual(
+      framework,
+      "CoreImage",
+      `targets/${target} declares CoreImage, which does not exist on watchOS — ` +
+        `the QR is encoded on the phone (see watch-payload.ts)`,
+    );
+    if (!sdk) continue;
+    assert.ok(
+      existsSync(join(sdk, "System/Library/Frameworks", `${framework}.framework`)),
+      `targets/${target} declares ${framework}, absent from the watchOS SDK — it would fail at link`,
+    );
+  }
+}
+console.log(
+  sdk
+    ? `watch frameworks OK — every declared framework exists in ${sdk.split("/").pop()}`
+    : "watch frameworks OK — CoreImage absent (SDK audit skipped)",
+);
+
+// watch-payload.ts is TS with a runtime require; bundle it to CJS inside the
+// repo so its own `react-native-qrcode-svg` require still resolves.
+const tmp = mkdtempSync(join(tmpdir(), "watch-qr-"));
+const bundle = join(root, "node_modules", ".verify-watch-payload.cjs");
+try {
+  execFileSync(
+    join(root, "node_modules", ".bin", "esbuild"),
+    [
+      "packages/app/features/watch/watch-payload.ts",
+      "--bundle",
+      "--platform=node",
+      "--format=cjs",
+      "--packages=external",
+      `--outfile=${bundle}`,
+      "--log-level=warning",
+    ],
+    { cwd: root, stdio: "inherit" },
+  );
+
+  const { toQRMatrix } = require(bundle);
+
+  /** Mirrors WatchQRMatrix.modules in Models.swift — fails closed, never partial. */
+  function unpack({ size, bits }) {
+    if (!(size > 0)) return null;
+    const count = size * size;
+    const out = [];
+    for (const ch of bits) {
+      const nibble = parseInt(ch, 16);
+      if (Number.isNaN(nibble)) return null;
+      for (let shift = 3; shift >= 0 && out.length < count; shift--) {
+        out.push(((nibble >> shift) & 1) === 1);
+      }
+    }
+    return out.length === count ? out : null;
+  }
+
+  const gm = require("react-native-qrcode-svg/src/genMatrix");
+  const genMatrix = gm.default ?? gm;
+
+  // A real 64-char hex token, the shape the host scanner expects.
+  const token = "a3f9".repeat(16);
+  const matrix = toQRMatrix(token);
+  assert.ok(matrix, "toQRMatrix returned undefined for a valid token");
+
+  const expected = genMatrix(token, "H")
+    .flat()
+    .map((m) => !!m);
+  assert.strictEqual(matrix.size ** 2, expected.length, "size disagrees with the encoder");
+  assert.strictEqual(
+    matrix.bits.length,
+    Math.ceil(expected.length / 4),
+    "hex length is not ceil(modules / 4)",
+  );
+  assert.deepStrictEqual(unpack(matrix), expected, "unpacked grid differs from the encoder");
+
+  // Fail closed rather than draw half a code.
+  assert.strictEqual(toQRMatrix(""), undefined, "empty token should yield no matrix");
+  assert.strictEqual(unpack({ size: matrix.size, bits: "ab" }), null, "short bits should be null");
+  assert.strictEqual(unpack({ size: matrix.size, bits: "zz" }), null, "non-hex should be null");
+  assert.strictEqual(unpack({ size: 0, bits: matrix.bits }), null, "zero size should be null");
+
+  console.log(
+    `watch QR wire format OK — ${matrix.size}x${matrix.size}, ` +
+      `${matrix.bits.length} hex chars (~${Math.ceil(matrix.bits.length / 2)} bytes/ticket)`,
+  );
+  // 3. The watch feature gate. `watchFeatureEnabled` ANDs every switch with the
+  //    master one; getting that backwards means a member who switched the watch
+  //    off still gets their door QR pushed to a wrist they told us to stop using.
+  //    Executable because the store is plain zustand — only the MMKV adapter is
+  //    native, and it is aliased to an in-memory stand-in here.
+  const gateBundle = join(root, "node_modules", ".verify-watch-settings.cjs");
+  try {
+    execFileSync(
+      join(root, "node_modules", ".bin", "esbuild"),
+      [
+        "packages/app/features/watch/watch-settings-store.ts",
+        "--bundle",
+        "--platform=node",
+        "--format=cjs",
+        "--packages=external",
+        "--alias:@dvnt/app/lib/mmkv-zustand=./scripts/watch-settings-check/mmkv-stub.js",
+        `--outfile=${gateBundle}`,
+        "--log-level=warning",
+      ],
+      { cwd: root, stdio: "inherit" },
+    );
+    const { useWatchSettingsStore, watchFeatureEnabled } = require(gateBundle);
+    const set = (patch) => useWatchSettingsStore.setState(patch);
+    const features = ["tickets", "broadcasts", "calls", "messages", "door"];
+
+    set({ enabled: true, tickets: true, broadcasts: true, calls: true, messages: true, door: true });
+    for (const f of features) {
+      assert.ok(watchFeatureEnabled(f), `${f} should be on when everything is on`);
+    }
+
+    // Master off wins over every per-feature switch left on.
+    set({ enabled: false });
+    assert.strictEqual(watchFeatureEnabled("enabled"), false, "master should read off");
+    for (const f of features) {
+      assert.strictEqual(
+        watchFeatureEnabled(f),
+        false,
+        `${f} must be off while the master switch is off`,
+      );
+    }
+
+    // One feature off does not take the others down with it.
+    set({ enabled: true, calls: false });
+    assert.strictEqual(watchFeatureEnabled("calls"), false, "calls should be off");
+    assert.ok(watchFeatureEnabled("tickets"), "tickets should survive calls being off");
+    console.log("watch feature gate OK — master ANDs, per-feature isolated");
+  } finally {
+    rmSync(gateBundle, { force: true });
+  }
+
+  // 3b. The wrist-reply trust boundary. A reply arrives from another process as
+  //     free text plus a conversation id; `validateDMReply` is the only thing
+  //     standing between that and the member's outbox. An id the phone never
+  //     pushed must not be sendable to.
+  const dmBundle = join(root, "node_modules", ".verify-watch-dm.cjs");
+  try {
+    execFileSync(
+      join(root, "node_modules", ".bin", "esbuild"),
+      [
+        "packages/app/features/watch/watch-dm-payload.ts",
+        "--bundle",
+        "--platform=node",
+        "--format=cjs",
+        "--packages=external",
+        `--outfile=${dmBundle}`,
+        "--log-level=warning",
+      ],
+      { cwd: root, stdio: "inherit" },
+    );
+    const { buildDMEnvelope, dmSignature, validateDMReply } = require(dmBundle);
+
+    const env = buildDMEnvelope([
+      { id: 7, user: { id: "u1", name: "Ada", username: "ada", avatar: "" },
+        lastMessage: "you coming?", timestamp: "2026-08-10T01:00:00.000Z", unread: true },
+      { id: 9, isGroup: true, groupName: "Backroom", user: { id: "u2", name: "", username: "", avatar: "" },
+        lastMessage: "doors at 11", timestamp: "2026-08-10T02:00:00.000Z", unread: false },
+    ]);
+    assert.strictEqual(env.dms.length, 2, "both conversations should project");
+    assert.strictEqual(env.dms[0].id, "9", "newest conversation should sort first");
+    assert.strictEqual(env.dms[0].name, "Backroom", "group should use its group name");
+    assert.strictEqual(env.dms[0].handle, "", "a group has no handle");
+    assert.strictEqual(env.dms[1].handle, "@ada", "a 1:1 should carry the @handle");
+    assert.notStrictEqual(
+      dmSignature(env),
+      dmSignature(buildDMEnvelope([])),
+      "signature must change when the set does",
+    );
+
+    const known = env.dms.map((d) => d.id);
+    assert.deepStrictEqual(
+      validateDMReply({ conversationId: "7", text: "  omw  " }, known),
+      { conversationId: "7", text: "omw" },
+      "a known thread with real text should pass, trimmed",
+    );
+    assert.strictEqual(
+      validateDMReply({ conversationId: "404", text: "hi" }, known),
+      null,
+      "a conversation the phone never pushed must be rejected",
+    );
+    assert.strictEqual(
+      validateDMReply({ conversationId: "7", text: "   " }, known),
+      null,
+      "whitespace is not a message",
+    );
+    assert.strictEqual(
+      validateDMReply({ conversationId: "7", text: "x".repeat(501) }, known),
+      null,
+      "over-long bodies must be rejected",
+    );
+    assert.strictEqual(
+      validateDMReply({ conversationId: 7, text: "hi" }, known),
+      null,
+      "a non-string id must be rejected, not coerced",
+    );
+    assert.strictEqual(validateDMReply(null, known), null, "null must be rejected");
+    console.log("watch DM wire format OK — projection sorts, reply gate fails closed");
+  } finally {
+    rmSync(dmBundle, { force: true });
+  }
+
+  // 4. RingPhase boundaries. The watch binary is arm64_32 and cannot run here,
+  //    but RingPhase + Models + TicketStore import only Foundation/Combine, so
+  //    the same sources build and RUN for the host. A pass that flips to blocked
+  //    an hour early strands a paying member at a door — worth executing, not
+  //    just type-checking.
+  const watchDir = join(root, "apps/mobile/targets/watch");
+  const checkBin = join(tmp, "ringphase-check");
+  execFileSync(
+    "swiftc",
+    [
+      "-o", checkBin,
+      join(watchDir, "RingPhase.swift"),
+      join(watchDir, "Models.swift"),
+      join(watchDir, "TicketStore.swift"),
+      join(root, "scripts/watch-ringphase-check/main.swift"),
+    ],
+    { stdio: "inherit" },
+  );
+  execFileSync(checkBin, { stdio: "inherit" });
+
+  // 5. The watch-tests suites. Every one of these builds and runs on the host
+  //    for the same reason RingPhase does: Foundation-only sources. They existed
+  //    but no runner executed them, so a regression in ticket fail-closed rules,
+  //    door count validation, venue send locking or media-cache account
+  //    isolation could land green. Wire-format changes should break here.
+  const suites = [
+    ["DMStoreTests", ["WatchProtocol.swift", "DMModels.swift", "DMStore.swift"]],
+    ["DoorStoreTests", ["DoorModels.swift", "DoorStore.swift"]],
+    ["TicketSafetyTests", ["Models.swift"]],
+    ["VenueActionStoreTests", ["VenueActionStore.swift"]],
+    ["WatchMediaCacheTests", ["WatchMediaLoader.swift"]],
+  ];
+  for (const [suite, sources] of suites) {
+    const bin = join(tmp, suite.toLowerCase());
+    execFileSync(
+      "swiftc",
+      [
+        "-parse-as-library",
+        "-o", bin,
+        ...sources.map((file) => join(watchDir, file)),
+        join(root, "apps/mobile/targets/watch-tests", `${suite}.swift`),
+      ],
+      { stdio: "inherit" },
+    );
+    execFileSync(bin, { stdio: "inherit" });
+  }
+} finally {
+  rmSync(bundle, { force: true });
+  rmSync(tmp, { recursive: true, force: true });
+}

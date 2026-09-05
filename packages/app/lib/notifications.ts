@@ -234,6 +234,44 @@ export async function savePushTokenToBackend(
 }
 
 /**
+ * Persist an iOS Live Activity push-to-start token (from
+ * expo-widgets' addPushToStartTokenListener) into live_activity_push_tokens.
+ *
+ * Uses the register_live_activity_pts_token RPC (SECURITY DEFINER) so the
+ * caller's integer user_id is resolved server-side from the JWT and the token
+ * is array-appended distinct — no client-side read-modify-write race.
+ */
+export async function saveLiveActivityPushToStartToken(
+  token: string,
+): Promise<boolean> {
+  if (Platform.OS !== "ios" || !token) return false;
+  try {
+    const { supabase } = await import("@dvnt/app/lib/supabase/client");
+    const { error } = await supabase.rpc("register_live_activity_pts_token", {
+      p_token: token,
+    });
+    if (error) {
+      // Table/function not yet migrated — log but don't fail the boot path.
+      if (error.code === "42883" || error.code === "42P01") {
+        console.log(
+          "[Notifications] live_activity_push_tokens not yet migrated",
+        );
+        return false;
+      }
+      throw error;
+    }
+    console.log("[Notifications] Live Activity push-to-start token saved");
+    return true;
+  } catch (error) {
+    console.error(
+      "[Notifications] Error saving Live Activity push-to-start token:",
+      error,
+    );
+    return false;
+  }
+}
+
+/**
  * Schedule a local notification
  */
 export async function scheduleLocalNotification(

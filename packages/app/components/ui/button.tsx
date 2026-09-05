@@ -46,6 +46,13 @@ export function Button({
     <Pressable
       disabled={disabled || loading}
       onPress={onPress}
+      // Without an explicit role, react-native-web renders Pressable as a bare
+      // <div>: the a11y tree shows `generic`, so screen readers never announce
+      // it as a control and it is not reachable as one. Every button in the app
+      // goes through here, including the login CTA. Disabled/busy are exposed
+      // too — an unannounced disabled button reads as simply broken.
+      accessibilityRole="button"
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
       className={cn(
         base,
         bg,

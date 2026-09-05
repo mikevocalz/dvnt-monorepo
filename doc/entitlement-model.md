@@ -1,6 +1,6 @@
 # Entitlement Model
 
-> Two rails, one row, one read. See [`../AGENTS.md`](../AGENTS.md) for the invariants
+> Two rails, one row, one read. See [`../docs/engineering-contract.md`](../docs/engineering-contract.md) for the invariants
 > the model has to uphold (I1–I6) and [`./existing-payment-audit.md`](./existing-payment-audit.md)
 > for what was already in place before this work.
 

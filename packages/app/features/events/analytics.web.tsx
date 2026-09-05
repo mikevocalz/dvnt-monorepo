@@ -39,6 +39,10 @@ import {
   attendeesToCsv,
   type EventAnalyticsSummary,
 } from "@dvnt/app/lib/api/event-analytics";
+import {
+  promotersApi,
+  type PromoterLeaderboardRow,
+} from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useEventAnalyticsStore } from "@dvnt/app/lib/stores/event-analytics-store";
 
@@ -224,6 +228,17 @@ export function EventAnalyticsScreen() {
       enabled: !!eventId,
       staleTime: 30 * 1000,
     });
+
+  // Promoter leaderboard (WS-4) — ranked server-side by NET ledger
+  // earnings (single ledger query in manage-promoters). No client
+  // re-math beyond formatting, so this section always matches the
+  // ledger exactly.
+  const { data: promoterLeaderboard } = useQuery<PromoterLeaderboardRow[]>({
+    queryKey: ["event-promoter-leaderboard", eventId],
+    queryFn: () => promotersApi.leaderboard(parseInt(eventId, 10)),
+    enabled: !!eventId,
+    staleTime: 30 * 1000,
+  });
 
   const handleExportAttendees = useCallback(async () => {
     if (!eventId || isExporting) return;
@@ -515,6 +530,57 @@ export function EventAnalyticsScreen() {
                 </div>
               ))}
             </div>
+          </section>
+        ) : null}
+
+        {/* ── Promoter leaderboard (WS-4) — ledger-exact ranking ── */}
+        {promoterLeaderboard && promoterLeaderboard.length > 0 ? (
+          <section className="mt-4 rounded-2xl border border-white/10 bg-white/4 p-4">
+            <p className="mb-3 text-sm font-bold tracking-wide text-white">
+              Promoter leaderboard
+            </p>
+            <div className="flex flex-col">
+              {promoterLeaderboard.map((row, i) => (
+                <div
+                  key={row.promoterId}
+                  className="flex items-center justify-between border-b border-white/8 py-2 last:border-0"
+                >
+                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                    <span
+                      className="w-5 shrink-0 text-center font-mono text-[13px] font-bold"
+                      style={{
+                        color: i === 0 ? "#F5C518" : "rgba(255,255,255,0.4)",
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="truncate text-[13px] font-semibold text-white">
+                      {row.displayName}
+                    </span>
+                    <span className="shrink-0 font-mono text-[11px] tracking-wide text-[#C084FC]">
+                      {row.code}
+                    </span>
+                    {row.status === "paused" ? (
+                      <span className="shrink-0 text-[11px] uppercase tracking-wide text-white/35">
+                        paused
+                      </span>
+                    ) : null}
+                  </div>
+                  <span
+                    className="shrink-0 font-mono text-[13px] font-bold"
+                    style={{
+                      color: row.earnedCents >= 0 ? "#22c55e" : "#ef4444",
+                    }}
+                  >
+                    {formatCents(row.earnedCents)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-[11px] leading-4 text-white/35">
+              Net rev-share earned (earnings − reversals), straight off the
+              promoter ledger.
+            </p>
           </section>
         ) : null}
 

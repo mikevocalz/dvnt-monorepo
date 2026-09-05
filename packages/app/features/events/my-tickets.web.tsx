@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "solito/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
@@ -28,10 +28,12 @@ import {
   QrCode,
   Send,
   Shirt,
+  Sparkles,
   Ticket,
 } from "lucide-react";
 import { ticketKeys, useMyTickets } from "@dvnt/app/lib/hooks/use-tickets";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { addonsApi, type OrderAddonRecord } from "@dvnt/app/lib/api/addons";
 import {
   useMyTicketsTabStore,
   type TicketsTab,
@@ -90,9 +92,12 @@ function isUpcoming(ticket: TicketRecord): boolean {
 
 function TicketCard({
   ticket,
+  addonCount = 0,
   onPress,
 }: {
   ticket: TicketRecord;
+  /** Owned add-ons for this event (order_addons) — WS-3 wallet badge. */
+  addonCount?: number;
   onPress: () => void;
 }) {
   const status = STATUS_COLORS[ticket.status] || STATUS_COLORS.void;
@@ -140,6 +145,12 @@ function TicketCard({
               ? `Coat Check · ${ticket.ticket_type_name || "Pass"}`
               : ticket.ticket_type_name}
           </p>
+          {addonCount > 0 ? (
+            <span className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-bold text-[#FF5BFC]">
+              <Sparkles size={9} color="#FF5BFC" />
+              +{addonCount} add-on{addonCount === 1 ? "" : "s"}
+            </span>
+          ) : null}
         </div>
 
         <div className="mt-2 flex items-center gap-3">
@@ -266,6 +277,22 @@ export function MyTicketsScreen() {
 
   const activeTab = useMyTicketsTabStore((s) => s.activeTab);
   const setActiveTab = useMyTicketsTabStore((s) => s.setActiveTab);
+
+  // Owned add-ons (WS-3) → per-event count badge on the ticket card.
+  const { data: myAddons = [] } = useQuery<OrderAddonRecord[]>({
+    queryKey: ["my-order-addons", "all"],
+    staleTime: 60 * 1000,
+    queryFn: () => addonsApi.getMyAddons(),
+  });
+  const addonCountByEvent = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const addon of myAddons) {
+      if (addon.status === "refunded") continue;
+      const key = String(addon.event_id);
+      map.set(key, (map.get(key) ?? 0) + addon.quantity);
+    }
+    return map;
+  }, [myAddons]);
 
   const [pendingTransfers, setPendingTransfers] = useState<any[]>([]);
 
@@ -452,6 +479,10 @@ export function MyTicketsScreen() {
                     ) : (
                       <TicketCard
                         ticket={row.ticket}
+                        addonCount={
+                          addonCountByEvent.get(String(row.ticket.event_id)) ??
+                          0
+                        }
                         onPress={() => handleTicketPress(row.ticket)}
                       />
                     )}

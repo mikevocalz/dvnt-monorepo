@@ -49,7 +49,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSafeHeader } from "@dvnt/app/lib/hooks/use-safe-header";
-import { StoryTagPicker } from "@dvnt/app/components/stories/story-tag-picker";
+import { StoryTagPicker } from "@dvnt/app/features/stories";
 import { storyTagsApi } from "@dvnt/app/lib/api/stories";
 // generateVideoThumbnail disabled — expo-video-thumbnails hangs on iOS 26.3
 import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
@@ -58,7 +58,7 @@ import { useStoryEditorResultStore } from "@dvnt/app/lib/stores/story-editor-res
 import type { StoryAnimatedGifOverlay, StoryOverlay } from "@dvnt/app/lib/types";
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import { DVNTGifView } from "@dvnt/app/components/media/DVNTGifView";
-import { getImageStickerSourceById } from "@dvnt/app/src/stories-editor/constants";
+import { getImageStickerSourceById } from "@dvnt/app/features/stories-editor/constants";
 
 function StoryVideoPreview({ uri }: { uri: string }) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -180,7 +180,9 @@ function StoryOverlayPreview({
         }
 
         if (overlay.type === "text") {
-          const maxWidth = width * overlay.maxWidthRatio;
+          // Wrap width scales with the text box, matching the editors (see
+          // story/[id].tsx viewer).
+          const maxWidth = width * overlay.maxWidthRatio * overlay.scale;
           const fontSize = Math.max(width * overlay.fontSizeRatio * overlay.scale, 16);
           return (
             <View

@@ -9,7 +9,7 @@
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
-    "noEmit": true,
+    "noEmit": true, "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "esModuleInterop": true,
     "module": "esnext",
@@ -46,7 +46,8 @@
     },
     "jsxImportSource": "nativewind",
     "types": [
-      "nativewind/types"
+      "nativewind/types",
+      "@webgpu/types"
     ]
   },
   "include": [

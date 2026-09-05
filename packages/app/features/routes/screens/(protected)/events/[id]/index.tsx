@@ -4,12 +4,14 @@ import {
   Pressable,
   StyleSheet,
   Dimensions,
+  useWindowDimensions,
   StatusBar,
   Platform,
   Alert,
   TextInput,
 } from "react-native";
 // Galeria → MediaLightbox temporary swap (iOS 26 gesture issue, no native dep)
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { MediaLightbox as Galeria } from "@dvnt/app/components/media/MediaLightbox";
 import { LegendList } from "@dvnt/app/components/list";
 import React, { useEffect, useCallback, useMemo } from "react";
@@ -43,6 +45,7 @@ import {
   MoreHorizontal,
   Send,
   Ticket,
+  Radio,
 } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -55,9 +58,17 @@ import Animated, {
 } from "react-native-reanimated";
 import { useEventViewStore } from "@dvnt/app/lib/stores/event-store";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
 import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import {
+  useAgeVerificationStatus,
+  needsAgeVerification,
+} from "@dvnt/app/lib/hooks/use-age-verification";
+import { VerificationInterstitial } from "@dvnt/app/components/verification-interstitial.native";
+import { onboardingCheckpoint } from "@dvnt/observability/flows";
 import { eventsApi } from "@dvnt/app/lib/api/events";
+import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import { useEventDetailScreenStore } from "@dvnt/app/lib/stores/event-detail-screen-store";
 import { normalizeRouteParams } from "@dvnt/app/lib/navigation/route-params";
 import { routeToProfile } from "@dvnt/app/lib/utils/route-to-profile";
@@ -72,10 +83,6 @@ import {
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 import { ticketKeys } from "@dvnt/app/lib/hooks/use-tickets";
 import * as WebBrowser from "expo-web-browser";
-import {
-  deleteEvent as deleteEventPrivileged,
-  cancelEvent as cancelEventPrivileged,
-} from "@dvnt/app/lib/api/privileged";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
 import { useCreateEventReview } from "@dvnt/app/lib/hooks/use-event-reviews";
 import { EventRatingModal } from "@dvnt/app/components/event-rating-modal";
@@ -86,9 +93,9 @@ import { useSaleNotifyStore } from "@dvnt/app/lib/stores/sale-notify-store";
 import { SafeCalendar as Calendar } from "@dvnt/app/lib/safe-native-modules";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
-import { MENTION_COLOR } from "@dvnt/app/src/constants/mentions";
+import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 import { usePromotionStore } from "@dvnt/app/lib/stores/promotion-store";
-import { PromoteEventSheet } from "@dvnt/app/components/events/promote-event-sheet";
+import { PromoteEventSheet } from "@dvnt/app/features/events";
 import {
   CountdownTimer,
   GoingAccordion,
@@ -101,24 +108,24 @@ import {
   EventMapSection,
   TicketsOpeningSoonCard,
   OrganizerCard,
-} from "@dvnt/app/src/events/ui";
+} from "@dvnt/app/features/events/ui";
 import type {
   TicketTier,
   EventAttendee,
   EventDetail,
-} from "@dvnt/app/src/events/types";
+} from "@dvnt/app/features/events/types";
 import { YouTubeEmbed } from "@dvnt/app/components/youtube-embed";
-import { EventActionSheet } from "@dvnt/app/components/events/event-action-sheet";
-import { EventEditSheet } from "@dvnt/app/components/events/event-edit-sheet";
-import { ShareEventSheet } from "@dvnt/app/components/events/share-event-sheet";
+import { EventActionSheet } from "@dvnt/app/features/events";
+import { EventEditSheet } from "@dvnt/app/features/events";
+import { ShareEventSheet } from "@dvnt/app/features/events";
 import { DVNTLiquidGlassIconButton } from "@dvnt/app/components/media/DVNTLiquidGlass";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import { TranslateButton } from "@dvnt/app/components/ui/translate-button";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { useTranslation } from "react-i18next";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
-import { UpgradeTierCard } from "@dvnt/app/components/events/UpgradeTierCard";
-import { UpgradeConfirmationSheet } from "@dvnt/app/components/events/UpgradeConfirmationSheet";
+import { UpgradeTierCard } from "@dvnt/app/features/events";
+import { UpgradeConfirmationSheet } from "@dvnt/app/features/events";
 import {
   useTicketUpgradeOptions,
   useInitiateUpgrade,
@@ -132,7 +139,14 @@ import {
   useLeaveWaitlist,
 } from "@dvnt/app/lib/hooks/use-event-waitlist";
 import { ensureOnlineOrToast } from "@dvnt/app/lib/connectivity/guard";
+import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
 
+/**
+ * Fallback only. `StyleSheet.create` runs at module scope, so the image-grid
+ * cells below were sized from the launch width and could not follow a
+ * rotation — the one place in this screen where the frozen read is visible.
+ * The grid overrides them inline from the live width.
+ */
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const HERO_HEIGHT = 420;
 const DEFAULT_EVENT_DURATION_MS = 3 * 60 * 60 * 1000;
@@ -313,7 +327,7 @@ function EventDetailScreenContent() {
   // DEV-only loop detection
   useRenderLoopDetector("EventDetail");
 
-  const rawParams = useLocalSearchParams<{ id: string }>();
+  const rawParams = useLocalSearchParams<{ id: string; ref?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -323,6 +337,19 @@ function EventDetailScreenContent() {
     [rawParams.id],
   );
   const eventId = normalizedParams.id || "";
+
+  // Promoter attribution (WS-4): capture ?ref=CODE from a tracked share
+  // deep link into the MMKV-persisted store so the app-switch to Stripe
+  // can't lose it. Checkout kickoffs forward it as promoter_code;
+  // pricing is never affected.
+  const setPromoterRef = usePromoterRefStore((s) => s.setRef);
+  useEffect(() => {
+    const rawRef = Array.isArray(rawParams.ref)
+      ? rawParams.ref[0]
+      : rawParams.ref;
+    if (eventId && rawRef) setPromoterRef(eventId, String(rawRef));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, rawParams.ref, setPromoterRef]);
 
   // Live updates for this event: a host editing the title/date/price on
   // another device, or another buyer claiming the last tier, reflects
@@ -552,7 +579,7 @@ function EventDetailScreenContent() {
   // syncing via useEffect (the previous approach) creates a race when
   // the user likes from the feed card while the detail screen is
   // mounted — the mirror lags one render behind the cache. See
-  // CLAUDE.md PREVENTION.md (banned pattern: cache-mirror useState/store).
+  // docs/engineering-contract.md PREVENTION.md (banned pattern: cache-mirror useState/store).
   const isLiked = eventData?.isLiked ?? false;
 
   const toggleLikeMutation = useToggleEventLike();
@@ -758,6 +785,10 @@ function EventDetailScreenContent() {
   // whole event detail screen on every keystroke.
   const isCheckingOut = useEventDetailScreenStore((s) => s.isCheckingOut);
   const setIsCheckingOut = useEventDetailScreenStore((s) => s.setIsCheckingOut);
+  // B3: deferred ID verification — gate age-restricted RSVP/tickets.
+  const verifyOpen = useEventDetailScreenStore((s) => s.verifyOpen);
+  const setVerifyOpen = useEventDetailScreenStore((s) => s.setVerifyOpen);
+  const { data: verificationStatus } = useAgeVerificationStatus();
   const promoCode = useEventDetailScreenStore((s) => s.promoCode);
   const setPromoCode = useEventDetailScreenStore((s) => s.setPromoCode);
 
@@ -796,6 +827,16 @@ function EventDetailScreenContent() {
         showToast("warning", "Event Ended", "This event has already ended.");
         return;
       }
+    }
+
+    // B3: the FIRST age-gated action triggers the verify interstitial —
+    // verified users pass straight through, registration never asks.
+    if (
+      needsAgeVerification((eventData as any).ageRestriction, verificationStatus)
+    ) {
+      onboardingCheckpoint("verification.triggered", { surface: "event_detail" });
+      setVerifyOpen(true);
+      return;
     }
 
     // ── Stripe checkout path (only when real DB ticket tiers exist) ──
@@ -1090,64 +1131,32 @@ function EventDetailScreenContent() {
     return false;
   }, [user?.id, eventData?.host?.id]);
 
-  const handleDeleteEvent = useCallback(() => {
-    // V2-EVT-01: route through cancel-event when tickets exist; the
-    // server cascades Stripe refunds + notifies attendees + marks the
-    // event status='cancelled' (preserves the row). delete-event is
-    // only safe for never-sold events and the server enforces that
-    // with a `tickets_exist` 409 guard.
+  // ── WS-9 safe destructive flows ──────────────────────────────────
+  // Cancel (auto-refund) / Postpone (reversible, no refunds) / Delete
+  // (blocked while paid tickets exist) each get their own confirmed
+  // path. Server: event-cancel + event-postpone edge fns.
+
+  const handleCancelEvent = useCallback(() => {
     Alert.alert(
       "Cancel Event",
-      "All ticket holders will be refunded and notified. The event will be marked Cancelled. This can't be undone.",
+      "Every paid order is automatically refunded (whole payment, including fees) and every attendee is notified. Guest buyers get an email. This can't be undone.",
       [
         { text: "Keep Event", style: "cancel" },
         {
-          text: "Cancel Event",
+          text: "Cancel & Refund",
           style: "destructive",
           onPress: async () => {
             try {
-              const result = await cancelEventPrivileged(parseInt(eventId));
+              const result = await eventsApi.cancelEventWithRefunds(eventId);
 
-              if (result.affectedTickets === 0) {
-                // No buyers → safe to hard-delete the row + remove from
-                // every list cache. Nothing to communicate to attendees
-                // because there are none.
-                queryClient.setQueriesData<any[]>(
-                  { queryKey: eventKeys.all },
-                  (old) => {
-                    if (!old || !Array.isArray(old)) return old;
-                    return old.filter(
-                      (e: any) => String(e?.id) !== String(eventId),
-                    );
-                  },
-                );
-                try {
-                  await deleteEventPrivileged(parseInt(eventId));
-                } catch (delErr) {
-                  console.warn(
-                    "[EventDetail] follow-up delete refused (race):",
-                    delErr,
-                  );
-                }
-                queryClient.removeQueries({
-                  queryKey: eventKeys.detail(eventId),
-                });
-              } else {
-                // BUYERS EXIST — keep the row visible in every list with
-                // a status='cancelled' label so ticket holders see the
-                // cancellation in context (instead of the event quietly
-                // disappearing from their feed). The cancel-event edge
-                // function already issued refunds + push notifications
-                // to attendees server-side.
-                propagateEntity(queryClient, "event", eventId, {
-                  status: "cancelled",
-                  cancelled_at: new Date().toISOString(),
-                });
-              }
-
-              // Background invalidate so next list focus refetches
-              // authoritative server state (in case anything else changed
-              // server-side as part of the cancel cascade).
+              // Keep the row visible in every list with a
+              // status='cancelled' label so ticket holders see the
+              // cancellation in context (instead of the event quietly
+              // disappearing from their feed).
+              propagateEntity(queryClient, "event", eventId, {
+                status: "cancelled",
+                cancelled_at: new Date().toISOString(),
+              });
               queryClient.invalidateQueries({ queryKey: eventKeys.all });
 
               const refundLine =
@@ -1156,7 +1165,7 @@ function EventDetailScreenContent() {
                   : "";
               const failedLine =
                 result.refundsFailed > 0
-                  ? ` ${result.refundsFailed} refund${result.refundsFailed === 1 ? "" : "s"} still processing — check host dashboard.`
+                  ? ` ${result.refundsFailed} refund${result.refundsFailed === 1 ? "" : "s"} couldn't be processed — re-run Cancel or check the host dashboard.`
                   : "";
               showToast(
                 result.refundsFailed > 0 ? "warning" : "success",
@@ -1177,6 +1186,187 @@ function EventDetailScreenContent() {
       ],
     );
   }, [eventId, queryClient, showToast, router]);
+
+  const handlePostponeEvent = useCallback(() => {
+    Alert.alert(
+      "Postpone Event",
+      "Attendees are notified that the event is postponed. Tickets remain valid — no refunds are issued. You can resume the event any time.",
+      [
+        { text: "Not Now", style: "cancel" },
+        {
+          text: "Postpone",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await eventsApi.postponeEvent(eventId);
+              propagateEntity(queryClient, "event", eventId, {
+                status: "postponed",
+              });
+              queryClient.invalidateQueries({ queryKey: eventKeys.all });
+              showToast(
+                "success",
+                "Event postponed",
+                "Attendees have been notified. Tickets remain valid.",
+              );
+            } catch (err: any) {
+              console.error("[EventDetail] Postpone error:", err);
+              showToast(
+                "error",
+                "Couldn't postpone",
+                err?.message || "Try again in a moment.",
+              );
+            }
+          },
+        },
+      ],
+    );
+  }, [eventId, queryClient, showToast]);
+
+  const handleResumeEvent = useCallback(() => {
+    Alert.alert(
+      "Resume Event",
+      "The event goes back to active and attendees are notified their tickets are valid as issued.",
+      [
+        { text: "Not Now", style: "cancel" },
+        {
+          text: "Resume",
+          onPress: async () => {
+            try {
+              await eventsApi.resumeEvent(eventId);
+              propagateEntity(queryClient, "event", eventId, {
+                status: "active",
+              });
+              queryClient.invalidateQueries({ queryKey: eventKeys.all });
+              showToast("success", "Event resumed", "You're back on.");
+            } catch (err: any) {
+              console.error("[EventDetail] Resume error:", err);
+              showToast(
+                "error",
+                "Couldn't resume",
+                err?.message || "Try again in a moment.",
+              );
+            }
+          },
+        },
+      ],
+    );
+  }, [eventId, queryClient, showToast]);
+
+  const handleDeleteEvent = useCallback(() => {
+    Alert.alert(
+      "Delete Event",
+      "This permanently removes the event. Events with paid tickets can't be deleted — cancel instead, which refunds every attendee.",
+      [
+        { text: "Keep Event", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await eventsApi.deleteEvent(eventId);
+              queryClient.setQueriesData<any[]>(
+                { queryKey: eventKeys.all },
+                (old) => {
+                  if (!old || !Array.isArray(old)) return old;
+                  return old.filter(
+                    (e: any) => String(e?.id) !== String(eventId),
+                  );
+                },
+              );
+              queryClient.removeQueries({
+                queryKey: eventKeys.detail(eventId),
+              });
+              queryClient.invalidateQueries({ queryKey: eventKeys.all });
+              showToast("success", "Event deleted", "");
+              router.back();
+            } catch (err: any) {
+              // Server 409 guard: paid/active tickets exist. Route the
+              // host to the safe path instead of a dead end.
+              const msg = String(err?.message || "");
+              if (/ticket/i.test(msg)) {
+                Alert.alert(
+                  "Can't Delete — Tickets Sold",
+                  "This event has active tickets. Cancel the event instead — every paid order is refunded and attendees are notified.",
+                  [
+                    { text: "Keep Event", style: "cancel" },
+                    {
+                      text: "Cancel & Refund…",
+                      style: "destructive",
+                      onPress: () => handleCancelEvent(),
+                    },
+                  ],
+                );
+                return;
+              }
+              console.error("[EventDetail] Delete error:", err);
+              showToast(
+                "error",
+                "Couldn't delete",
+                msg || "Try again in a moment.",
+              );
+            }
+          },
+        },
+      ],
+    );
+  }, [eventId, queryClient, showToast, router, handleCancelEvent]);
+
+  const handleDuplicateEvent = useCallback(() => {
+    if (!eventData) return;
+    // Prefill the create-event flow through the store's public setters
+    // (never editing the store file). Tier/add-on duplication is left
+    // to the host in the create flow — tier rows carry server ids that
+    // must not be cloned.
+    const store = useCreateEventStore.getState();
+    store.resetDraft();
+    store.setTitle(eventData.title || "");
+    store.setDescription(eventData.description || "");
+    store.setLocation(eventData.location || "");
+    if (eventData.locationName || eventData.location) {
+      store.setLocationData({
+        name: eventData.locationName || eventData.location || "",
+        latitude: eventData.locationLat,
+        longitude: eventData.locationLng,
+        address: (eventData as any).locationAddress,
+      });
+    }
+    store.setIsOnline(eventData.locationType === "virtual");
+    const galleryUrls = (eventData.images || [])
+      .map((img) => img?.url)
+      .filter((u): u is string => typeof u === "string" && u.length > 0);
+    store.setEventImages(galleryUrls);
+    if (eventData.flyerVideoUrl) {
+      store.setFlyerImage(eventData.flyerVideoUrl);
+      store.setFlyerMediaType("video");
+      store.setFlyerFallbackImage(eventData.flyerImageUrl || eventData.image || null);
+    } else if (eventData.flyerImageUrl || eventData.image) {
+      store.setFlyerImage(eventData.flyerImageUrl || eventData.image);
+      store.setFlyerMediaType("image");
+    }
+    // Only carry a date that's still in the future — a duplicated past
+    // event must not default to a date that can't be booked.
+    const srcDate = eventData.date ? new Date(eventData.date) : null;
+    if (srcDate && srcDate.getTime() > Date.now()) {
+      store.setEventDate(srcDate.toISOString());
+      if (eventData.endDate) store.setEndDate(eventData.endDate);
+    }
+    if (eventData.maxAttendees) {
+      store.setMaxAttendees(String(eventData.maxAttendees));
+    }
+    if (eventData.visibility) store.setVisibility(eventData.visibility);
+    if (eventData.ageRestriction) {
+      store.setAgeRestriction(eventData.ageRestriction);
+    }
+    store.setIsNsfw(!!eventData.nsfw);
+    store.setTicketingEnabled(!!eventData.ticketingEnabled);
+    store.setDressCode(eventData.dressCode || "");
+    store.setDoorPolicy(eventData.doorPolicy || "");
+    store.setLineup(eventData.lineup || []);
+    store.setPerks(eventData.perks || []);
+    store.setCurrentStep(0);
+
+    router.push("/(protected)/events/create" as any);
+  }, [eventData, router]);
 
   const handleShare = useCallback(async () => {
     try {
@@ -1559,7 +1749,55 @@ function EventDetailScreenContent() {
   }
 
   const event = safeEvent;
+  // Gallery cells follow the window, not the width the app launched with.
+  const { width: liveScreenWidth } = useWindowDimensions();
+  const imageCellSize = (liveScreenWidth - 40 - 8) / 2;
   const host = event.host;
+
+  /**
+   * Open the event's Lynk — and make sure there is a live one to open.
+   *
+   * The companion room is created when the EVENT is published, so for an event
+   * weeks out its session expires long before anyone arrives and the card is a
+   * dead link on the day it matters most. A free host's session is capped, so
+   * this is not an edge case for them, it is every time. The host's tap is
+   * therefore "start it": if the linked room is gone, ended, or its session has
+   * run out, mint a fresh one and re-point the event first. An open `status` is
+   * not enough to decide that — the row stays open while `ends_at` passes.
+   */
+  const openEventLynk = async () => {
+    const linked = (event as any)?.lynkRoomId as string | undefined;
+    if (!linked) return;
+    const go = (roomId: string) =>
+      router.push(`/(protected)/sneaky-lynk/room/${roomId}` as any);
+    if (!isHost) {
+      go(linked);
+      return;
+    }
+    let roomId = linked;
+    try {
+      const existing = await sneakyLynkApi.getRoomById(linked);
+      const sessionOver =
+        !!existing?.endsAt && new Date(existing.endsAt).getTime() <= Date.now();
+      if (!existing || existing.status === "ended" || sessionOver) {
+        const fresh = await sneakyLynkApi.createRoom({
+          title: (event as any)?.title || "Event Lynk",
+          topic: "",
+          description: (event as any)?.description || "",
+          hasVideo: true,
+          isPublic: false,
+        });
+        if (fresh.ok && fresh.data?.room?.id) {
+          roomId = String(fresh.data.room.id);
+          await eventsApi.updateEvent(eventId, { lynkRoomId: roomId } as any);
+        }
+      }
+    } catch {
+      // Fall through to the linked room — the room screen states the problem
+      // better than a toast here can.
+    }
+    go(roomId);
+  };
   // CRITICAL: event.date is the day number ("22"), event.fullDate is the ISO string
   const isoDate = event.fullDate || event.date;
   const dateStr = formatEventDate(isoDate);
@@ -1583,6 +1821,10 @@ function EventDetailScreenContent() {
               event hasn't been given a cover image yet. Without this
               the hero is just black behind the existing overlay
               gradient, which makes the screen look unfinished. */}
+          {/* ZoomTarget marks the rect the feed card flies into. Without it
+              the card expands into the whole screen instead of the hero
+              landing in place. */}
+          <ZoomTarget>
           <View style={s.heroImageContainer}>
             <Animated.View style={[s.heroImageContainer, heroParallaxStyle]}>
               {/* Video flyer is the preferred hero medium when the organizer
@@ -1620,6 +1862,7 @@ function EventDetailScreenContent() {
               )}
             </Animated.View>
           </View>
+          </ZoomTarget>
 
           {/* Dark gradient overlay */}
           <LinearGradient
@@ -2099,6 +2342,40 @@ function EventDetailScreenContent() {
             </View>
           )}
 
+          {/* ── Sneaky Lynk — the room this event is hosted in.
+                 Above the details on purpose: when an event HAS a room,
+                 "where do I go" outranks "what's the dress code". The card
+                 says it is private and that entry follows the event's list,
+                 because a guest who taps into a refusal learns that too
+                 late. */}
+          {(event as any).lynkRoomId ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                isHost ? "Open your event's Lynk" : "Join the event's Lynk"
+              }
+              testID="event-lynk-room"
+              onPress={() => void openEventLynk()}
+              className="mx-4 mb-4 flex-row items-center gap-3 rounded-2xl bg-card px-4 py-3 active:opacity-80"
+            >
+              <View className="w-10 h-10 rounded-xl bg-primary/20 items-center justify-center">
+                <Radio size={18} color="#8A40CF" />
+              </View>
+              <View className="flex-1">
+                <Text
+                  className="text-foreground font-semibold"
+                  numberOfLines={1}
+                >
+                  {isHost ? "Open your event's Lynk" : "Join the event's Lynk"}
+                </Text>
+                <Text className="text-xs text-muted-foreground mt-0.5">
+                  Private video room · only people on this event&apos;s list get
+                  in
+                </Text>
+              </View>
+            </Pressable>
+          ) : null}
+
           {/* ── 4. COLLAPSIBLE EVENT DETAILS ─────────────────────── */}
           <View style={s.collapsibleSection}>
             {event.description ? (
@@ -2177,7 +2454,12 @@ function EventDetailScreenContent() {
                       <Galeria.Image index={idx} key={idx}>
                         <Image
                           source={{ uri: imageUrl }}
-                          style={s.imageGridImage}
+                          // Inline override of the StyleSheet size, which is
+                          // frozen at the launch width. Same 2-up maths, live.
+                          style={[
+                            s.imageGridImage,
+                            { width: imageCellSize, height: imageCellSize },
+                          ]}
                         />
                       </Galeria.Image>
                     );
@@ -2554,6 +2836,7 @@ function EventDetailScreenContent() {
         onClose={() => setShowActionSheet(false)}
         isHost={isHost}
         isLiked={isLiked}
+        eventStatus={(eventData as any)?.status}
         onShare={handleShare}
         onToggleLike={handleToggleLike}
         onAddToCalendar={handleAddToCalendar}
@@ -2561,6 +2844,10 @@ function EventDetailScreenContent() {
           router.push(`/(protected)/events/${eventId}/edit` as any)
         }
         onDelete={handleDeleteEvent}
+        onDuplicate={isHost ? handleDuplicateEvent : undefined}
+        onCancelEvent={isHost ? handleCancelEvent : undefined}
+        onPostponeEvent={isHost ? handlePostponeEvent : undefined}
+        onResumeEvent={isHost ? handleResumeEvent : undefined}
         onDashboard={
           isHost
             ? () =>
@@ -2601,6 +2888,14 @@ function EventDetailScreenContent() {
                 )
             : undefined
         }
+      />
+
+      {/* B3: age-gate interstitial (Didit hosted capture). */}
+      <VerificationInterstitial
+        visible={verifyOpen}
+        onClose={() => setVerifyOpen(false)}
+        status={verificationStatus}
+        ageLabel={(eventData as any)?.ageRestriction || "18+"}
       />
     </View>
   );

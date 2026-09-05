@@ -1,3 +1,4 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 /**
  * New Group Chat Screen
  *
@@ -15,12 +16,13 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ArrowLeft, Search, X, Check, Users } from "lucide-react-native";
 import { Image } from "expo-image";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect } from "react";
+import { useNewGroupStore } from "@dvnt/app/lib/stores/new-group-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -34,17 +36,22 @@ interface SelectedUser {
   avatar: string;
 }
 
-const MAX_GROUP_MEMBERS = 4;
 
 function NewGroupScreenContent() {
   const router = useRouter();
   const currentUser = useAuthStore((state) => state.user);
   const showToast = useUIStore((s) => s.showToast);
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedUsers, setSelectedUsers] = useState<SelectedUser[]>([]);
-  const [groupName, setGroupName] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
+  const searchQuery = useNewGroupStore((s) => s.searchQuery);
+  const setSearchQuery = useNewGroupStore((s) => s.setSearchQuery);
+  const selectedUsers = useNewGroupStore((s) => s.selectedUsers);
+  const groupName = useNewGroupStore((s) => s.groupName);
+  const setGroupName = useNewGroupStore((s) => s.setGroupName);
+  const isCreating = useNewGroupStore((s) => s.isCreating);
+  const setIsCreating = useNewGroupStore((s) => s.setIsCreating);
+  const toggleUser = useNewGroupStore((s) => s.toggleUser);
+  const reset = useNewGroupStore((s) => s.reset);
+  useEffect(() => () => reset(), [reset]);
 
   // Fetch all users
   const { data: allUsersData, isLoading } = useQuery({
@@ -70,25 +77,8 @@ function NewGroupScreenContent() {
     }));
 
   const toggleUserSelection = useCallback(
-    (user: SelectedUser) => {
-      setSelectedUsers((prev) => {
-        const isSelected = prev.some((u) => u.id === user.id);
-        if (isSelected) {
-          return prev.filter((u) => u.id !== user.id);
-        }
-        // Check max limit (excluding current user who will be added automatically)
-        if (prev.length >= MAX_GROUP_MEMBERS - 1) {
-          showToast(
-            "warning",
-            "Limit Reached",
-            `Group chats can have max ${MAX_GROUP_MEMBERS} members`,
-          );
-          return prev;
-        }
-        return [...prev, user];
-      });
-    },
-    [showToast],
+    (user: SelectedUser) => { toggleUser(user); },
+    [toggleUser],
   );
 
   const isUserSelected = useCallback(
@@ -123,7 +113,7 @@ function NewGroupScreenContent() {
     } finally {
       setIsCreating(false);
     }
-  }, [selectedUsers, groupName, router, showToast]);
+  }, [selectedUsers, groupName, router, showToast, setIsCreating]);
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
@@ -169,7 +159,7 @@ function NewGroupScreenContent() {
           />
         </View>
         <Text className="text-xs text-muted-foreground mt-2 ml-1">
-          Group chats support up to {MAX_GROUP_MEMBERS} members
+          Select at least 2 people
         </Text>
       </View>
 
@@ -204,8 +194,7 @@ function NewGroupScreenContent() {
             </View>
           </ScrollView>
           <Text className="text-xs text-muted-foreground mt-2">
-            {selectedUsers.length}/{MAX_GROUP_MEMBERS - 1} selected (min 2, max{" "}
-            {MAX_GROUP_MEMBERS - 1})
+            {selectedUsers.length} selected · 2 minimum
           </Text>
         </View>
       )}

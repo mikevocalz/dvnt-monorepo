@@ -10,13 +10,14 @@
  *  - authed app surfaces, logged in  → app WebAppHeader + WebTabBar (like the feed), no marketing footer
  *  - everything else                 → marketing GlassHeader + Footer (turn-to-glass on /)
  *
- * GlassHeader/Footer are browser-only (Reanimated) so they're loaded ssr:false,
+ * GlassHeader/Footer resolve their web forks (CSS transitions / plain views —
+ * no Reanimated on the marketing path, DVNT-WEB-6) and stay ssr:false,
  * matching how the marketing pages always loaded them. WebAppHeader/WebTabBar
  * SSR fine. The header/footer are position:fixed / in-flow respectively; content
  * top-padding still lives in each page/layout.
  */
 import dynamic from 'next/dynamic';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'solito/navigation';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
 import { AppShell } from '@dvnt/app/components/app-shell';
@@ -60,6 +61,13 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
 
+  // Hydration guard (DVNT-WEB-9): zustand-persist rehydrates from localStorage
+  // synchronously, so a signed-in visitor's FIRST client render could pick the
+  // AppShell branch while the server HTML was the marketing branch — a React
+  // hydration mismatch. First client render must match SSR; swap after mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   // Supabase JWT bridge for the WEB app. Mobile does this in its Expo Router
   // _layout; the web never did, so its supabase client stayed `anon` and EVERY
   // direct write (events, stories, messages, follows, tags…) failed with
@@ -83,7 +91,7 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   // App surfaces show the app chrome once we know the visitor is authed.
   // (WebAppShell still redirects logged-out users away from auth-only surfaces;
   // /events stays public and falls through to the marketing shell below.)
-  if (isAppSurface(pathname) && hasHydrated && isAuthenticated) {
+  if (isAppSurface(pathname) && mounted && hasHydrated && isAuthenticated) {
     // The persistent 3-column shell (PROMPT 13 §1): left rail + center + right
     // aside on desktop, the bottom tab bar on phones. AppShell switches by
     // breakpoint and owns the nav, replacing the old floating header + tab bar.
@@ -94,9 +102,10 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Marketing / landing / public + logged-out app surfaces. The Reanimated
-  // header/footer are each boundaried so a resize-time worklet crash remounts
-  // only that piece — the page content between them is never blanked.
+  // Marketing / landing / public + logged-out app surfaces. The header/footer
+  // are each boundaried so a render crash remounts only that piece — the page
+  // content between them is never blanked. (They no longer run Reanimated;
+  // the old resize-time worklet crash class is gone — DVNT-WEB-6.)
   return (
     <>
       <ChromeErrorBoundary label="header">

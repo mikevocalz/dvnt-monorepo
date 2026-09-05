@@ -32,6 +32,8 @@
 
 import { Platform } from "react-native";
 import { readAndClearLastJSError } from "@dvnt/app/lib/global-error-handler";
+import { mmkv } from "@dvnt/app/lib/mmkv-zustand";
+import { crashSignature } from "@dvnt/observability/capture";
 
 interface NativeExceptionPayload {
   timestamp: string;
@@ -44,6 +46,37 @@ interface NativeExceptionPayload {
 }
 
 let _hasReportedThisSession = false;
+
+/** Signatures already sent to Sentry, newest last. */
+const REPORTED_SIGNATURES_KEY = "DVNT_REPORTED_CRASH_SIGS";
+/** Bounded so a stream of distinct signatures cannot grow the record forever. */
+const MAX_TRACKED_SIGNATURES = 20;
+/** Frames kept on the event. The throwing class/selector is at the top of the
+ *  stack; the rest is dispatch plumbing that repeats on every crash. */
+const STACK_FRAMES_ON_EVENT = 12;
+
+/**
+ * 2.8: a crash loop relaunches, and the persisted record is re-read and
+ * re-reported on every launch — multiplying billed fatal events during exactly
+ * the incident that needs quota headroom. First launch after a given crash
+ * reports it; later launches log and do not send.
+ *
+ * Fails OPEN: if MMKV is unreadable we report, because losing the first record
+ * of a crash is worse than sending a duplicate.
+ */
+function claimCrashSignature(signature: string): boolean {
+  try {
+    const raw = mmkv.getString(REPORTED_SIGNATURES_KEY);
+    const seen: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+    if (!Array.isArray(seen)) throw new Error("corrupt");
+    if (seen.includes(signature)) return false;
+    const next = [...seen, signature].slice(-MAX_TRACKED_SIGNATURES);
+    mmkv.set(REPORTED_SIGNATURES_KEY, JSON.stringify(next));
+    return true;
+  } catch {
+    return true;
+  }
+}
 
 async function readAndClearAsync(): Promise<NativeExceptionPayload | null> {
   if (Platform.OS !== "ios") return null;
@@ -109,6 +142,52 @@ function logToConsole(report: NativeExceptionPayload): void {
 }
 
 /**
+ * Ship a prior-session crash record to Sentry as a real EVENT before the
+ * persisted copy is cleared. console.error alone is only a breadcrumb — it
+ * attaches to no event and vanishes with the deleted file, which is exactly
+ * how the 1.0.316 background-crash loop left an empty Sentry dashboard: the
+ * record was read, printed, deleted, and lost. Never throws.
+ */
+function reportToSentry(kind: string, payload: Record<string, unknown>): void {
+  try {
+    const signature = crashSignature(kind, payload);
+    if (!claimCrashSignature(signature)) {
+      // Console only — a relaunch loop is still visible in device logs, and
+      // costs nothing. ponytail: no local repeat counter; if loop *frequency*
+      // ever needs to reach Sentry, send one summary event on the Nth repeat.
+      console.error("[prior-session-crash] repeat, not re-sent:", signature);
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Sentry } = require("@dvnt/app/lib/sentry-boot");
+    if (!Sentry?.captureMessage) return; // web fork / not booted
+    // 2.8: the full callStackSymbols array rode along on every event. The
+    // throwing frame is at the top; the tail is dispatch plumbing identical
+    // across crashes. Keep the head, drop the payload weight.
+    const stack = payload.callStackSymbols;
+    const extra = Array.isArray(stack)
+      ? {
+          ...payload,
+          callStackSymbols: stack.slice(0, STACK_FRAMES_ON_EVENT),
+          callStackSymbolsTruncated: stack.length > STACK_FRAMES_ON_EVENT
+            ? stack.length - STACK_FRAMES_ON_EVENT
+            : 0,
+        }
+      : payload;
+    Sentry.captureMessage(
+      `[prior-session-crash] ${kind}: ${String(payload.name ?? "")}: ${String(payload.message ?? payload.reason ?? "")}`.slice(0, 500),
+      {
+        level: "fatal",
+        tags: { priorSessionCrash: kind },
+        extra,
+      },
+    );
+  } catch {
+    /* never throw from boot path */
+  }
+}
+
+/**
  * Fire-and-forget. Idempotent within a session.
  * Safe to call multiple times (e.g. from multiple side-effect imports
  * during dev hot-reload) — only the first call does work.
@@ -125,6 +204,7 @@ function readPriorNativeCrashReport(): void {
   try {
     const jsReport = readAndClearLastJSError();
     if (jsReport) {
+      reportToSentry("js", jsReport as unknown as Record<string, unknown>);
       console.error("╔══════════════════════════════════════════════════════════════╗");
       console.error("║  [PRIOR-JS-CRASH] Prior session ended with uncaught JS    ║");
       console.error("╚══════════════════════════════════════════════════════════════╝");
@@ -151,6 +231,7 @@ function readPriorNativeCrashReport(): void {
   readAndClearAsync()
     .then((report) => {
       if (!report) return;
+      reportToSentry("native", report as unknown as Record<string, unknown>);
       logToConsole(report);
     })
     .catch(() => {

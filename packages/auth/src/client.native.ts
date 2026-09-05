@@ -7,7 +7,7 @@
  */
 import { createAuthClient } from "better-auth/react";
 import { expoClient } from "@better-auth/expo/client";
-import { usernameClient } from "better-auth/client/plugins";
+import { usernameClient, magicLinkClient } from "better-auth/client/plugins";
 import { passkeyClient } from "@better-auth/passkey/client";
 import * as SecureStore from "expo-secure-store";
 
@@ -31,7 +31,11 @@ console.log("[AuthClient] AUTH_BASE_PATH:", AUTH_BASE_PATH);
 export const authClient = createAuthClient({
   baseURL: AUTH_ORIGIN,
   basePath: AUTH_BASE_PATH,
-  plugins: [
+  plugins: [magicLinkClient(),
+    // @ts-expect-error @better-auth/expo@1.6.x client plugin's getActions
+    // BetterFetch param type no longer unifies with better-auth@1.6.x's
+    // stricter plugin shape (upstream .d.ts variance regression). Runtime is
+    // unaffected; suppressing here preserves full authClient method inference.
     expoClient({
       scheme: "dvnt",
       storagePrefix: "dvnt",

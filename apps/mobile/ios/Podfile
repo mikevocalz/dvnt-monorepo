@@ -17,11 +17,39 @@ end
 ENV['EX_DEV_CLIENT_NETWORK_INSPECTOR'] ||= podfile_properties['EX_DEV_CLIENT_NETWORK_INSPECTOR']
 ENV['RCT_USE_RN_DEP'] ||= podfile_properties['ios.buildReactNativeFromSource'] == 'true' ? '0' : '1'
 ENV['RCT_USE_PREBUILT_RNCORE'] ||= podfile_properties['ios.buildReactNativeFromSource'] == 'true' ? '0' : '1'
-ENV['RCT_HERMES_V1_ENABLED'] ||= '1' if podfile_properties['expo.useHermesV1'] == 'true'
-ENV['EXPO_USE_PRECOMPILED_MODULES'] ||= '1' if podfile_properties['EXPO_USE_PRECOMPILED_MODULES'] != 'false'
+ENV['RCT_HERMES_V1_ENABLED'] ||= '0' if podfile_properties['expo.useHermesV1'] == 'false'
+# An explicit `ios.usePrecompiledModules: false` must win even when the env var is already set
+# (e.g. EXPO_USE_PRECOMPILED_MODULES exported by EAS Build), so force-disable here before the default.
+ENV['EXPO_USE_PRECOMPILED_MODULES'] = '0' if podfile_properties['EXPO_USE_PRECOMPILED_MODULES'] == 'false'
+ENV['EXPO_USE_PRECOMPILED_MODULES'] ||= '1'
 platform :ios, podfile_properties['ios.deploymentTarget'] || '16.4'
 
 prepare_react_native_project!
+
+# ── force-static pods (with-static-pods) ──
+# See apps/mobile/plugins/with-static-pods.js for why each pod is listed.
+STATIC_FRAMEWORK_PODS = [
+  'FishjamReactNativeWebrtc',
+  # Consumes Google MLKit, which ships prebuilt STATIC xcframeworks
+  # (GMLImage / MLKBarcode* undefined when this pod links as its own dynamic
+  # framework). Same class as upstream moq's RNAudioAPI force-static.
+  'VisionCameraBarcodeScanner',
+  # Consumes prebuilt ffmpeg xcframeworks (libavcodec/libavformat/libavutil/
+  # libswresample). CocoaPods puts their -framework flags only on the app
+  # target, so as its own dynamic framework every av_* symbol is undefined at
+  # its own Ld step. Verified: MACH_O_TYPE=staticlib in Debug and Release.
+  'RNAudioAPI',
+]
+pre_install do |installer|
+  installer.pod_targets.each do |pod|
+    if STATIC_FRAMEWORK_PODS.include?(pod.name)
+      Pod::UI.puts "[with-static-pods] Building #{pod.name} as a static framework"
+      def pod.build_type
+        Pod::BuildType.static_framework
+      end
+    end
+  end
+end
 
 # Disable VisionCamera Frame Processors (no worklets-core needed)
 $VCEnableFrameProcessors = false
@@ -59,6 +87,16 @@ target 'DVNT' do
   )
 
   post_install do |installer|
+    # dvnt: enforce minimum iOS deployment target
+    installer.pods_project.targets.each do |t|
+      t.build_configurations.each do |config|
+        current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+        if current.nil? || current.to_f < 17.0.to_f
+          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.0'
+        end
+      end
+    end
+
     react_native_post_install(
       installer,
       config[:reactNativePath],
@@ -107,13 +145,112 @@ target 'DVNT' do
     # [fix-wgpu-headers] Ensure wgpu's cpp/ tree is in HEADER_SEARCH_PATHS so
     # qualified includes like "jsi/NativeObject.h" resolve to wgpu's own headers
     # instead of Skia's identically-named copies.
+    #
+    # cpp/rnwgpu matters under dynamic-framework builds: apple/WebGPUModule.h
+    # does a bare #import "RNWebGPUManager.h" and the header lives at
+    # cpp/rnwgpu/. Static builds resolved it through CocoaPods' flattened
+    # Pods/Headers/Private dir, which framework builds don't generate — and
+    # the podspec sets USE_HEADERMAP=NO, so search paths are all that's left.
     installer.pods_project.targets.each do |t|
-      next unless t.name == 'react-native-wgpu'
+      # Pod renamed react-native-wgpu -> react-native-webgpu at 0.8.x; this
+      # plugin matched only the old name for a while and was a silent no-op.
+      next unless ['react-native-webgpu', 'react-native-wgpu'].include?(t.name)
       t.build_configurations.each do |config|
         paths = config.build_settings['HEADER_SEARCH_PATHS'] || ['$(inherited)']
         paths = [paths] if paths.is_a?(String)
-        paths << '"$(PODS_TARGET_SRCROOT)/cpp"' unless paths.any? { |p| p.include?('PODS_TARGET_SRCROOT)/cpp"') }
-        paths << '"$(PODS_TARGET_SRCROOT)/cpp/jsi"' unless paths.any? { |p| p.include?('cpp/jsi') }
+        # The package bare-includes ("GPU.h", "JSIConverter.h", ...) across its
+        # whole tree — written assuming the flattened Private-headers dir that
+        # only static builds get. This is the COMPLETE list of header dirs
+        # under cpp/ (enumerated with find, not discovered build-by-build).
+        %w[cpp cpp/jsi cpp/rnwgpu cpp/rnwgpu/api cpp/rnwgpu/api/descriptors cpp/rnwgpu/async cpp/webgpu].each do |d|
+          entry = '"$(PODS_TARGET_SRCROOT)/' + d + '"'
+          paths << entry unless paths.include?(entry)
+        end
+        config.build_settings['HEADER_SEARCH_PATHS'] = paths
+
+        # ApplePlatformContext.mm uses RCTBlobManager but the podspec never
+        # declares React-RCTBlob. Static builds resolved the class at app
+        # link; as a dynamic framework the pod must link it itself
+        # (undefined _OBJC_CLASS_$_RCTBlobManager otherwise). The pod builds
+        # regardless (React-Core dependents pull it in) — this only adds the
+        # missing link edge.
+        fsp = config.build_settings['FRAMEWORK_SEARCH_PATHS'] || ['$(inherited)']
+        fsp = [fsp] if fsp.is_a?(String)
+        blob_dir = '"$(PODS_CONFIGURATION_BUILD_DIR)/React-RCTBlob"'
+        fsp << blob_dir unless fsp.include?(blob_dir)
+        config.build_settings['FRAMEWORK_SEARCH_PATHS'] = fsp
+
+        ldflags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
+        ldflags = [ldflags] if ldflags.is_a?(String)
+        # Product MODULE name, not pod name: the React-RCTBlob pod builds
+        # RCTBlob.framework (React-CoreModules links -framework RCTBlob).
+        unless ldflags.join(' ').include?('RCTBlob')
+          ldflags += ['-framework', '"RCTBlob"']
+        end
+        config.build_settings['OTHER_LDFLAGS'] = ldflags
+      end
+    end
+
+    # [fix-wgpu-headers] Nitro pods, part 2: adding -I dirs is NOT enough when
+    # headermaps are on. The own-target hmap rewrites "ListenerSubscription.hpp"
+    # to "VisionCamera/ListenerSubscription.hpp", and clang then searches for
+    # the REWRITTEN name — which only exists in the flattened
+    # Pods/Headers/Public/<Module>/ layout that static builds generate and
+    # framework builds leave empty. Disabling headermaps would break the
+    # generated -Swift.h resolution instead, so satisfy the hmap: symlink every
+    # public nitrogen header into Headers/Public/<name>/ for both the target
+    # name and the product module name (hmap prefixes use the module).
+    require 'fileutils'
+    public_root = File.join(installer.sandbox.root.to_s, 'Headers', 'Public')
+    installer.pod_targets.each do |pt|
+      pod_dir = installer.sandbox.pod_dir(pt.pod_name).to_s
+      nitro = File.join(pod_dir, 'nitrogen')
+      next unless File.directory?(nitro)
+      names = [pt.name]
+      names << pt.product_module_name if pt.respond_to?(:product_module_name)
+      headers = Dir.glob(File.join(nitro, 'generated', '{shared,ios}', '**', '*.{h,hpp}'))
+      names.compact.uniq.each do |n|
+        dest = File.join(public_root, n)
+        FileUtils.mkdir_p(dest)
+        headers.each { |hdr| FileUtils.ln_sf(hdr, File.join(dest, File.basename(hdr))) }
+      end
+      Pod::UI.puts "[fix-wgpu-headers] Flattened #{headers.length} nitrogen headers for #{names.compact.uniq.join('/')}"
+    end
+
+    # [fix-wgpu-headers] Not wgpu-specific, same pass: under RN-from-source +
+    # dynamic frameworks, jsinspector_modern.framework's headers include
+    # "jsinspector-modern/cdp/CdpJson.h" etc., which live in the SIBLING
+    # frameworks (cdp / network / tracing). Any pod that builds the React
+    # module re-parses those headers and fails unless the siblings' Headers
+    # dirs are searchable (first seen: ReactNativeVideo, build 38b680cf).
+    # Namespaced header layouts, so adding them everywhere cannot collide.
+    jsinspector_headers = [
+      'React-jsinspector/jsinspector_modern.framework/Headers',
+      'React-jsinspectorcdp/jsinspector_moderncdp.framework/Headers',
+      'React-jsinspectornetwork/jsinspector_modernnetwork.framework/Headers',
+      'React-jsinspectortracing/jsinspector_moderntracing.framework/Headers',
+    ].map { |p| '"$(PODS_CONFIGURATION_BUILD_DIR)/' + p + '"' }
+    installer.pods_project.targets.each do |t|
+      t.build_configurations.each do |config|
+        paths = config.build_settings['HEADER_SEARCH_PATHS'] || ['$(inherited)']
+        paths = [paths] if paths.is_a?(String)
+        jsinspector_headers.each { |e| paths << e unless paths.include?(e) }
+        # Nitro modules: nitrogen generates bare cross-includes
+        # ("ResizeMode.hpp" from the ios/ umbrella, file in shared/c++/) that
+        # static builds resolved via the flattened headers dir. The layout is
+        # identical for every nitrogen package, and a search path to a dir
+        # that doesn't exist is a no-op — so add the trio unconditionally
+        # rather than maintaining a nitro-pod list (first seen:
+        # ReactNativeVideo, build fa65ad1c).
+        %w[nitrogen/generated/shared/c++ nitrogen/generated/ios nitrogen/generated/ios/c++].each do |d|
+          entry = '"$(PODS_TARGET_SRCROOT)/' + d + '"'
+          paths << entry unless paths.include?(entry)
+        end
+        # Resolves the hmap-rewritten "<Module>/Header.hpp" form against the
+        # flattened symlink farm built in the pass above. Static builds had
+        # this dir on the path implicitly; framework builds do not.
+        pub = '"$(PODS_ROOT)/Headers/Public"'
+        paths << pub unless paths.include?(pub)
         config.build_settings['HEADER_SEARCH_PATHS'] = paths
       end
     end

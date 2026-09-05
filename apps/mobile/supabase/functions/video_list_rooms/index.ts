@@ -4,11 +4,12 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -147,7 +148,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    const jwt = authHeader.replace("Bearer ", "");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -156,21 +156,16 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
 
-    const { data: session, error: sessionError } = await supabase
-      .from("session")
-      .select("id, token, userId, expiresAt")
-      .eq("token", jwt)
-      .single();
-
-    if (sessionError || !session) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabase, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
 
-    if (new Date(session.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
-
-    const userId = String(session.userId);
+    const userId = String(sessionResult.userId);
     const twentyFourHoursAgo = new Date(
       Date.now() - 24 * 60 * 60 * 1000,
     ).toISOString();
@@ -181,6 +176,7 @@ Deno.serve(async (req) => {
       .from("video_rooms")
       .select("*")
       .eq("is_public", true)
+      .eq("room_kind", "lynk")
       .or(roomStatusFilter)
       .order("status", { ascending: false })
       .order("created_at", { ascending: false })
@@ -211,6 +207,7 @@ Deno.serve(async (req) => {
         .from("video_rooms")
         .select("*")
         .in("id", invitedRoomIds)
+        .eq("room_kind", "lynk")
         .or(roomStatusFilter)
         .order("status", { ascending: false })
         .order("created_at", { ascending: false })
@@ -229,6 +226,7 @@ Deno.serve(async (req) => {
       .select("*")
       .eq("created_by", userId)
       .eq("is_public", false)
+      .eq("room_kind", "lynk")
       .or(roomStatusFilter)
       .order("status", { ascending: false })
       .order("created_at", { ascending: false })

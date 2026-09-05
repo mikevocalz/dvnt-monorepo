@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
 import { Heart, Bookmark, Play, Grid3x3, Plus } from "lucide-react";
-import { useInfiniteFeedPosts } from "@dvnt/app/lib/hooks/use-posts";
+import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
 import { useFeedRealtime } from "@dvnt/app/lib/hooks/use-feed-realtime";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { useToggleBookmark } from "@dvnt/app/lib/hooks/use-bookmarks";
@@ -28,7 +28,7 @@ import {
 } from "@dvnt/app/lib/stores/story-viewer-store";
 import { StoryViewerOverlay } from "@dvnt/app/components/story-viewer-overlay.web";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
-import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
+import { TextPostSurface } from "@dvnt/app/features/post";
 import type { Post } from "@dvnt/app/lib/types";
 
 const GAP = 10;
@@ -83,6 +83,10 @@ export function HomeScreen() {
     useInfiniteFeedPosts();
   // Live feed: refetch when other users post/delete (web has no pull-to-refresh).
   useFeedRealtime();
+  // Reconcile hearts against the server, the way the native feeds do
+  // (masonry-feed / feed both call this). Without it web had no path to
+  // correct a like made on another device.
+  useSyncLikedPosts();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const posts: Post[] = data?.pages?.flatMap((p: any) => p?.data ?? []) ?? [];
@@ -374,41 +378,121 @@ function toViewerGroup(s: any): StoryViewerGroup {
       type: (it.type === "video" ? "video" : "image") as "image" | "video",
       url: it.url as string,
       duration: it.duration as number | undefined,
+      storyOverlays: it.storyOverlays,
+      animatedGifOverlays: it.animatedGifOverlays,
     }));
   return { id: String(s.id ?? s.username), username: s.username, avatar: s.avatar, segments };
+}
+
+/* The tile shows the STORY'S media (first frame), not the avatar —
+   thumbnail if present, else the image URL, else a first-frame
+   <video> for videos; avatar only as a last-resort fallback. A
+   small avatar sits in the corner for identity. */
+function StoryTileMedia({ s }: { s: any }) {
+  const first = (s.items ?? [])[0] as any;
+  const img =
+    first?.thumbnail || (first && first.type !== "video" ? first.url : null);
+  return (
+    <span className="relative block w-full h-full rounded-lg overflow-hidden bg-white/10">
+      {img ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={img} alt={s.username} className="w-full h-full object-cover" />
+      ) : first?.type === "video" && first.url ? (
+        <video
+          src={`${first.url}#t=0.1`}
+          muted
+          playsInline
+          preload="metadata"
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={s.avatar}
+          alt={s.username}
+          className="w-full h-full object-cover"
+        />
+      )}
+      {s.avatar ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={s.avatar}
+          alt=""
+          className="absolute bottom-1 left-1 w-5 h-5 rounded-md object-cover border border-white/80"
+        />
+      ) : null}
+    </span>
+  );
 }
 
 function StoriesRow() {
   const router = useRouter();
   const { data: stories } = useStories();
   const openAt = useStoryViewerStore((st) => st.openAt);
-  // Your own story is the create tile; show everyone else's as story rings.
+  // Your own story renders as a ring too (parity with mobile stories-bar);
+  // the + badge on it (or the bare tile when you have none) opens create.
+  const mine = (stories ?? []).find((s) => s.isYou);
   const others = (stories ?? []).filter((s) => !s.isYou);
   // Pre-build the viewer groups (only those with playable segments).
-  const groups = others.map(toViewerGroup).filter((g) => g.segments.length > 0);
+  const groups = [...(mine ? [mine] : []), ...others]
+    .map(toViewerGroup)
+    .filter((g) => g.segments.length > 0);
   const openStory = (storyId: string) => {
     const idx = groups.findIndex((g) => g.id === String(storyId));
     if (idx >= 0) openAt(groups, idx);
   };
+  const myGroup = mine
+    ? groups.find((g) => g.id === String(mine.id))
+    : undefined;
 
   return (
     <nav
       className="flex gap-3 overflow-x-auto px-3 py-3 no-scrollbar"
       aria-label="Stories"
     >
-      <button
-        onClick={() => router.push("/feed/story/create")}
-        className="flex flex-col items-center gap-1.5 shrink-0 w-[74px]"
-      >
-        <span className="w-[74px] h-[104px] rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
-          <span className="w-10 h-10 rounded-full bg-[#3FDCFF] flex items-center justify-center">
-            <Plus size={22} color="#0c0a09" strokeWidth={3} />
-          </span>
-        </span>
+      <div className="relative flex flex-col items-center gap-1.5 shrink-0 w-[74px]">
+        {mine && myGroup ? (
+          <>
+            <button
+              onClick={() => openStory(String(mine.id))}
+              className="w-full"
+              aria-label="View your story"
+            >
+              <span
+                className={`block w-[74px] h-[104px] rounded-xl p-[2px] ${
+                  mine.isViewed
+                    ? "bg-white/15"
+                    : "bg-linear-to-tr from-[#3FDCFF] to-[#8A40CF]"
+                }`}
+              >
+                <StoryTileMedia s={mine} />
+              </span>
+            </button>
+            <button
+              onClick={() => router.push("/feed/story/create")}
+              aria-label="Add to your story"
+              className="absolute bottom-[26px] right-0 w-[26px] h-[26px] rounded-lg bg-[#3FDCFF] border-2 border-black flex items-center justify-center"
+            >
+              <Plus size={15} color="#0c0a09" strokeWidth={3} />
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => router.push("/feed/story/create")}
+            className="w-full"
+            aria-label="Create a story"
+          >
+            <span className="block w-[74px] h-[104px] rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
+              <span className="w-10 h-10 rounded-full bg-[#3FDCFF] flex items-center justify-center">
+                <Plus size={22} color="#0c0a09" strokeWidth={3} />
+              </span>
+            </span>
+          </button>
+        )}
         <span className="text-white/70 text-[11px] truncate w-[74px] text-center">
           Your Story
         </span>
-      </button>
+      </div>
 
       {others.map((s) => (
         <button
@@ -423,12 +507,7 @@ function StoriesRow() {
                 : "bg-linear-to-tr from-[#3FDCFF] to-[#8A40CF]"
             }`}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={s.avatar}
-              alt={s.username}
-              className="w-full h-full rounded-lg object-cover bg-white/10"
-            />
+            <StoryTileMedia s={s} />
           </span>
           <span className="text-white/70 text-[11px] truncate w-[74px] text-center">
             {s.username}

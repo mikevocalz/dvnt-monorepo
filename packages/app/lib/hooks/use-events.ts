@@ -23,6 +23,8 @@ import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { activityKeys } from "@dvnt/app/lib/hooks/use-activities-query";
+import { eventKeys } from "@dvnt/app/lib/query-keys";
+export { eventKeys };
 
 // Filter params for events home
 export type EventSort =
@@ -84,19 +86,6 @@ export interface Event {
 }
 
 // Query keys
-export const eventKeys = {
-  all: ["events"] as const,
-  list: (filters?: EventFilters) =>
-    [...eventKeys.all, "list", filters ?? {}] as const,
-  upcoming: () => [...eventKeys.all, "upcoming"] as const,
-  past: () => [...eventKeys.all, "past"] as const,
-  detail: (id: string) => [...eventKeys.all, "detail", id] as const,
-  byCategory: (category: string) =>
-    [...eventKeys.all, "category", category] as const,
-  liked: (userId: number) => [...eventKeys.all, "liked", userId] as const,
-  search: (q: string) => [...eventKeys.all, "search", q] as const,
-  forYou: () => [...eventKeys.all, "forYou"] as const,
-};
 
 function findEventInCache(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -250,6 +239,19 @@ export function useMyEvents() {
   return useQuery({
     queryKey: [...eventKeys.all, "mine"] as const,
     queryFn: () => eventsApiClient.getMyEvents(),
+    staleTime: STALE_TIMES.events,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: Platform.OS === "web",
+  });
+}
+
+// Fetch events HOSTED by a given user (auth_id) — powers the "More events"
+// section on another host's profile. Disabled until an id is available.
+export function useUserEvents(hostAuthId: string | null | undefined) {
+  return useQuery({
+    queryKey: [...eventKeys.all, "byHost", hostAuthId ?? ""] as const,
+    queryFn: () => eventsApiClient.getEventsByHost(String(hostAuthId)),
+    enabled: !!hostAuthId,
     staleTime: STALE_TIMES.events,
     refetchOnMount: "always",
     refetchOnWindowFocus: Platform.OS === "web",
@@ -732,7 +734,20 @@ export function useRsvpEvent() {
       }
       pendingRsvpMutations.add(eventId);
       try {
-        return await eventsApiClient.rsvpEvent(eventId, status);
+        const result = await eventsApiClient.rsvpEvent(eventId, status);
+        // Every "going" RSVP issues a free ticket via the idempotent
+        // issue_rsvp_ticket RPC. Web never did this (only native called it), so
+        // web RSVPs had no ticket. Best-effort: a ticket hiccup must NOT fail or
+        // hang the RSVP — the query invalidation + next RSVP cover stragglers.
+        if (status === "going") {
+          try {
+            const { ticketsApi } = await import("@dvnt/app/lib/api/tickets");
+            await ticketsApi.issueRsvpTicket({ eventId, userId: "" });
+          } catch (e) {
+            console.warn("[useRsvpEvent] ticket issue failed (non-fatal):", e);
+          }
+        }
+        return result;
       } finally {
         pendingRsvpMutations.delete(eventId);
       }
@@ -786,6 +801,9 @@ export function useRsvpEvent() {
       queryClient.invalidateQueries({
         queryKey: [...eventKeys.all, "mine"],
       });
+      // A "going" RSVP now issues a ticket — refresh My Tickets + this event's
+      // ticket so the new ticket shows without a manual reload.
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
     },
   });
 }

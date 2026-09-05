@@ -114,6 +114,15 @@ export type StoryOverlay =
       fontSizeRatio: number;
       maxWidthRatio: number;
       textAlign?: "left" | "center" | "right";
+      // Style preset key from the editor (neon/shadow/classic/outline/strong/
+      // gradient/…). Optional + additive — round-trips so the viewer renders the
+      // same preset CSS the editor showed. Absent ⇒ plain text.
+      textStyle?: string;
+      // WS-4: text overlays that stand in for a tappable DVNT sticker
+      // (mention / link / event / ticket) carry the sticker kind + metadata
+      // so create-story stores the tappable region. Additive + optional.
+      stickerKind?: string;
+      metadata?: Record<string, string>;
     }
   | {
       id: string;
@@ -127,6 +136,10 @@ export type StoryOverlay =
       source: "asset" | "url";
       assetId?: string;
       url?: string;
+      // Additive metadata for data-bearing image/custom stickers.
+      category?: string;
+      label?: string;
+      metadata?: Record<string, string>;
     };
 
 export type StoryItem = {

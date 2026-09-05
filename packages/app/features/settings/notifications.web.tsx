@@ -7,6 +7,8 @@ import {
   useUpdateNotificationPrefs,
   type NotificationPrefs,
 } from "@dvnt/app/lib/hooks/use-user-settings";
+import { enableWebPush, webPushPermission } from "@dvnt/app/lib/web-push";
+import { useState } from "react";
 
 /**
  * Push Notifications settings — web (Phase 1 port of native
@@ -118,6 +120,9 @@ export function NotificationsScreen() {
         </div>
       ) : (
         <main className="mx-auto w-full max-w-xl px-4 py-6">
+          {/* Web push: enable real notifications in THIS browser/PWA. */}
+          <WebPushCard />
+
           {/* Pause All */}
           <div className="rounded-2xl bg-white/4 border border-white/10 px-4">
             <Row
@@ -187,6 +192,53 @@ export function NotificationsScreen() {
             </p>
           </div>
         </main>
+      )}
+    </div>
+  );
+}
+
+
+/** Enable Web Push for this browser/PWA install (parity with mobile push). */
+function WebPushCard() {
+  const [state, setState] = useState<ReturnType<typeof webPushPermission> | "busy" | "error">(
+    () => webPushPermission(),
+  );
+  if (state === "unsupported") return null;
+
+  const enable = async () => {
+    setState("busy");
+    const result = await enableWebPush();
+    setState(result === "granted" ? "granted" : result === "denied" ? "denied" : "error");
+  };
+
+  return (
+    <div className="mb-4 rounded-2xl bg-white/4 border border-white/10 p-4">
+      <p className="font-semibold text-white text-[15px]">Notifications on this device</p>
+      {state === "granted" ? (
+        <p className="mt-1 text-sm text-emerald-400">
+          On — this browser gets DVNT notifications even when the tab is closed.
+        </p>
+      ) : state === "denied" ? (
+        <p className="mt-1 text-sm text-white/55">
+          Blocked in your browser. Allow notifications for dvntapp.live in the
+          browser's site settings, then come back here.
+        </p>
+      ) : (
+        <>
+          <p className="mt-1 text-sm text-white/55">
+            Get likes, messages, and event alerts here — even when the tab is closed.
+          </p>
+          <button
+            onClick={enable}
+            disabled={state === "busy"}
+            className="mt-3 rounded-xl bg-[rgb(62,164,229)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {state === "busy" ? "Enabling…" : "Turn on notifications"}
+          </button>
+          {state === "error" ? (
+            <p className="mt-2 text-sm text-rose-400">Couldn't enable — try again.</p>
+          ) : null}
+        </>
       )}
     </div>
   );

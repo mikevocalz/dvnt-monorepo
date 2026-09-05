@@ -34,10 +34,32 @@ export default {
     name: "DVNT",
     slug: "dvnt",
     version: "1.0.0",
-    runtimeVersion: "1.0.0",
+    // Fingerprint, NOT a hardcoded string. A fixed runtimeVersion makes every
+    // binary ever shipped claim the same native contract, so `eas update`
+    // happily serves a JS bundle built against today's native module set to a
+    // binary that predates it. When Fabric then mounts a view whose Expo module
+    // isn't in that older binary, ExpoFabricView's initializer hits
+    // `fatalError(AppContextLost)` — EXC_BREAKPOINT, no JS stack, invisible if
+    // it happens on a background launch. Confirmed twice on-device
+    // (DVNT-2026-08-10-141056/164451.ips, build 1.0.312, byte-identical stacks).
+    // Native surface has churned hard since: SDK 56->57, Sentry, widgets +
+    // push-to-start, background-task, watch targets. Fingerprint hashes the
+    // native project so mismatched pairs are never offered the update at all.
+    runtimeVersion: { policy: "fingerprint" },
     orientation: "portrait",
     icon: "./assets/images/icon.png",
-    userInterfaceStyle: "automatic",
+    // DVNT is dark-only. "automatic" let every SYSTEM-drawn surface follow the
+    // device: the UITabBar, TrueSheet backgrounds, liquid glass, Alert,
+    // ActionSheet, pickers and the keyboard all rendered light on a phone set
+    // to Light appearance. App-drawn Views were fine (the palette is black in
+    // both schemes), which is why this looked like "some screens are white".
+    userInterfaceStyle: "dark",
+    // The colour behind every React view — the RN root view. Unset, it is the
+    // platform default, which measured rgb(242,242,242) on iPad. Invisible on a
+    // phone where content covers the window edge to edge; on a tablet it showed
+    // as light panels either side of every capped screen column. Ink, so the
+    // gutters are the app background at the one level that is behind all of it.
+    backgroundColor: "#06070D",
     splash: {
       image: "./assets/images/splash-icon.png",
       resizeMode: "contain",
@@ -54,7 +76,10 @@ export default {
       // CRITICAL: Use appEnv (which reads APP_ENV from EAS profiles), NOT NODE_ENV
       // NODE_ENV defaults to "development" during Metro bundling even for production builds
       enabled: appEnv === "production" || appEnv === "preview", // Enable OTA for production and preview builds only
-      runtimeVersion: "1.0.0", // Fixed runtime version for OTA safety
+      // NOTE: runtimeVersion is a TOP-LEVEL expo config key. It used to be
+      // duplicated here as "1.0.0" with a comment claiming it was "for OTA
+      // safety" — it was never read by expo-updates, and the top-level value it
+      // shadowed in spirit was the actual cause of the AppContextLost crash.
       message: "A new version is available. Restart to apply updates.", // User-friendly message
     },
     buildCacheProvider: "eas",
@@ -66,7 +91,14 @@ export default {
       // targets (mirrors the with-development-team plugin's teamId).
       appleTeamId: "436WA3W63V",
       icon: "./assets/images/ios-icon.png",
-      associatedDomains: ["applinks:dvntapp.live", "applinks:www.dvntapp.live"],
+      associatedDomains: [
+        "applinks:dvntapp.live",
+        "applinks:www.dvntapp.live",
+        // App Clip invocation domains (Apple Surfaces WS-3). Harmless before
+        // the clip target exists; required before its first invocation.
+        "appclips:dvntapp.live",
+        "appclips:www.dvntapp.live",
+      ],
       deploymentTarget: "17.0",
       // App Group for the iPhone-side ExtensionStorage write (watch reads its own
       // group over WCSession — App Group containers are per-device).
@@ -266,14 +298,46 @@ export default {
       output: webOutput,
     },
     plugins: [
+      // react-native-audio-api: Web Audio API on iOS/Android (used for Lynk VAD
+      // via AnalyserNode). The config plugin wires the native module + iOS
+      // background-audio/microphone entitlements on prebuild.
+      "react-native-audio-api",
+      // Sentry's Expo plugin was REMOVED (2026-09-04). `useNativeInit: true`
+      // inserted RNSentrySDK.init into MainApplication.onCreate / the iOS
+      // AppDelegate ahead of the JS bundle; dvnt-mobile then recorded zero
+      // issues in 90 days while the app crashed in the field. See
+      // packages/app/lib/sentry-boot.native.ts for the full reasoning and how
+      // to restore it. android/ and ios/ are committed prebuild output, so
+      // this only reaches a build after `npx expo prebuild --clean`.
       // Links native targets (Apple Watch app + watch complication) outside /ios
       // via CNG. Auto-discovers apps/mobile/targets/*/expo-target.config.js.
-      // TEMPORARILY DISABLED for the SDK 56 production build: the watch
-      // complication App ID (com.dvnt.app.watchkitapp.complication) isn't
-      // registerable on the Individual Apple team, which blocked credential
-      // setup. The watch app was held-back anyway (PROMPT 7). Re-enable once the
-      // watch App IDs are registered on the Apple Developer portal.
-      // "@bacons/apple-targets",
+      // Re-enabled 2026-08-09 to attempt the watch targets via an INTERACTIVE
+      // build. The blocker was never the code: EAS could register
+      // com.dvnt.app.watchkitapp but not attach its App Group, because an App
+      // Store Connect API key cannot sync capability *identifiers* — EAS said
+      // so outright ("Skipping capability identifier syncing because the
+      // current Apple authentication session is not using Cookies"). A cookie
+      // session (interactive Apple ID login) can, and should create
+      // group.com.dvnt.app.watch on the fly.
+      //
+      // If the interactive run still fails on
+      // com.dvnt.app.watchkitapp.complication ("An App ID with Identifier ...
+      // is not available"), that identifier is taken and must be registered by
+      // hand in the Developer portal — or renamed here and in
+      // targets/watch-complication/expo-target.config.js.
+      //
+      // Links the watch app + complication under apps/mobile/targets/* via CNG.
+      // Re-enabled 2026-08-09 once the Core Image blocker was solved. Core Image
+      // does not exist on watchOS (Apple ships it for iOS/macOS/tvOS/visionOS
+      // only), so QRCodeView no longer encodes anything: the phone encodes the
+      // token with react-native-qrcode-svg's own matrix generator and ships the
+      // module grid in the WCSession payload (watch-payload.ts `qrMatrix`), and
+      // the watch paints it. Same encoder, same level "H", ~254 bytes a ticket.
+      //
+      // Everything else about the watch is registered: App IDs,
+      // group.com.dvnt.app.watch, unique target names, and the complication as
+      // a watch-widget.
+      "@bacons/apple-targets",
       "./plugins/disable-user-script-sandboxing",
       "./plugins/with-app-controller-init",
       // Install NSSetUncaughtExceptionHandler EARLY so it's the first
@@ -283,6 +347,7 @@ export default {
       // name / reason / call-stack-symbols persisted for next launch.
       "./plugins/with-uncaught-exception-handler",
       "./plugins/android-fixes",
+      "./plugins/with-wear-os",
       "./plugins/fix-wgpu-headers",
       "./plugins/with-cube-luts",
       "./plugins/disable-frame-processors",
@@ -294,7 +359,30 @@ export default {
       "expo-localization",
       "expo-share-intent",
       "expo-sharing",
-      "expo-splash-screen",
+      // WS-11 background tasks. Its config plugin adds the iOS
+      // UIBackgroundModes "processing" entry + the single BGTaskScheduler
+      // permitted identifier ("com.expo.modules.backgroundtask.processing")
+      // that all four DVNT background jobs multiplex under. Android needs no
+      // extra permissions (expo-task-manager ships its receiver + JobService).
+      "expo-background-task",
+      // Must carry its own config: once this plugin is listed it OWNS the iOS
+      // storyboard and the Android splash colors, and the top-level `splash`
+      // key above is ignored. With no props it generated
+      // systemBackgroundColor (white on a Light device) in
+      // SplashScreen.storyboard and a hardcoded #FFFFFF in Android's
+      // colors.xml — a guaranteed white launch flash on Android and a
+      // conditional one on iOS.
+      [
+        "expo-splash-screen",
+        {
+          image: "./assets/images/splash-icon.png",
+          resizeMode: "contain",
+          // No `dark:` variant: the app is userInterfaceStyle "dark", and
+          // declaring both makes expo-splash-screen warn that the interface
+          // style prevents the splash from applying. One black splash is right.
+          backgroundColor: "#000000",
+        },
+      ],
       "expo-status-bar",
       "expo-web-browser",
       "@config-plugins/react-native-webrtc",
@@ -315,14 +403,119 @@ export default {
       ],
       appSecurityPlugin,
       "./plugins/with-swift5-compat",
+      // pre_install hook forcing named pods static under dynamic linkage —
+      // expo-build-properties' forceStaticLinking is a no-op when RN builds
+      // from source (see the plugin header for the receipts).
+      "./plugins/with-static-pods",
+      // Binary SPM xcframeworks (MoqFFI) get their signature collected once
+      // per consuming context; archive assembly flattens them and collides.
+      // Late app-target phase prunes the per-pod duplicates.
+      "./plugins/with-dedupe-xcframework-signatures",
+      // Must run so its post_install pass lands in the generated Podfile.
+      ["./plugins/with-ios-deployment-target", { target: "17.0" }],
       [
         "expo-build-properties",
         {
           ios: {
             deploymentTarget: "17.0",
+            // PROBE (ws3a): does this app link dynamically at all?
+            //
+            // `react-native-moq` is only ever built by upstream under dynamic
+            // linkage — example/ios/Podfile line 2 is
+            // `ENV['USE_FRAMEWORKS'] = 'dynamic'`, set before anything else
+            // loads. The README documents plain `npm install` + `pod install`
+            // and never mentions linkage, which is why two nights of static
+            // builds produced bugs with no upstream issue to match:
+            //   - `MoQ/MoQ-Swift.h` not found — that umbrella header only
+            //     exists when the pod is a framework.
+            //   - duplicate `MoqFFI.xcframework-ios.signature` at archive —
+            //     with no dynamic framework owning the SPM binary xcframework,
+            //     more than one of our four targets embeds it.
+            // react-native/scripts/cocoapods/spm.rb says it outright: SPM +
+            // static linking "might cause linker errors. Consider using
+            // USE_FRAMEWORKS=dynamic".
+            //
+            // MoQ stays UNINSTALLED for this probe. The only question here is
+            // what the other ~494 Podfile.lock entries do under dynamic
+            // linkage across four targets. Pods shipping prebuilt static
+            // archives are the expected casualties (upstream's own example
+            // force-feeds RNAudioAPI and react-native-executorch back to
+            // static frameworks via pre_install).
+            useFrameworks: "dynamic",
+            // ONLY genuinely broken-under-dynamic pods belong in this list.
+            // The first two link failures (get-random-values, incall-manager)
+            // looked like candidates and were not — buildReactNativeFromSource
+            // below fixed all 53 React-Core dependents at once, so pinning
+            // them here would only have hidden the real fix.
+            //
+            // NOTE: forceStaticLinking is NOT usable here — installer.rb gates
+            // its build-type override on RCT_USE_PREBUILT_RNCORE=1, and
+            // buildReactNativeFromSource below sets it to 0, so the option
+            // logs and then no-ops (proven by build 5e13c670). The static pin
+            // for FishjamReactNativeWebrtc lives in
+            // ./plugins/with-static-pods.js as a raw pre_install hook instead.
+            // Expo modules ship as XCFrameworks too, and ExpoModulesCore is one
+            // of the 33 pods referencing React-Core from ObjC. Kept consistent
+            // with buildReactNativeFromSource — this is the pair the local pod
+            // install was verified against.
+            usePrecompiledModules: false,
           },
-          // Disable experimental RN/Hermes flags in production to reduce SIGTRAP crash risk
-          buildReactNativeFromSource: !isProd,
+          android: {
+            // Raised 24 -> 30 deliberately, to clear the floor `react-native-moq`
+            // requires (iOS 16+ / Android API 30+) so Sneaky Lynk's native
+            // broadcast can move off the WHIP/WHEP workaround onto MoQ.
+            //
+            // Nothing set this before: expo-build-properties had only an `ios`
+            // block, so Android fell through to Expo's default of 24 —
+            // node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle:68
+            //   minSdkVersion project.ext.safeExtGet("minSdkVersion", 24)
+            //
+            // THE COST, stated plainly because it is real: this drops Android
+            // 7.0, 8.x, 9 and 10. Anyone below API 30 can no longer install or
+            // update. Mike made this call explicitly to unblock MoQ.
+            //
+            // Note the watch module already required 30 (android/wear/build.gradle),
+            // so 30 is not new to this repo — it is new to the phone app.
+            minSdkVersion: 30,
+          },
+          // Off everywhere, not just production. Building React Native from
+          // source compiles RN's own pods at their default iOS 15.1 target
+          // while ExpoModulesCore requires 16.4, which fails the Xcode build:
+          //   "compiling for iOS 15.1, but module 'ExpoModulesCore' has a
+          //    minimum deployment target of iOS 16.4"
+          // Production already had it off and builds clean; development had it
+          // on and errored. Prebuilt RN artifacts honour deploymentTarget above.
+          //
+          // FLIPPED TO true FOR DYNAMIC LINKAGE (ws3a probe). The old reason
+          // above was a deployment-target clash, and it no longer applies:
+          // ios.deploymentTarget is 17.0 and ./plugins/with-ios-deployment-target
+          // raises every pod to 17.0 in post_install, so nothing compiles at
+          // 15.1 any more.
+          //
+          // The new reason is load-bearing. Under `useFrameworks: dynamic` with
+          // PRECOMPILED React Native, dependent pods get React-Core's
+          // FRAMEWORK_SEARCH_PATHS but no link flag at all — measured, not
+          // guessed: 0 of 222 generated pod xcconfigs contained a React
+          // -framework entry, and ReactNativeIncallManager's OTHER_LDFLAGS was
+          // literally just `$(inherited) -weak_framework "JavaScriptCore"`.
+          // Under static linkage that is invisible, because everything resolves
+          // later when it is all linked into the app.
+          //
+          // That is why builds 7c4c2cb0 and 07d76094 died at link on
+          // react-native-get-random-values and ReactNativeIncallManager — and
+          // it was never going to stop at two: 33 pods in this graph reference
+          // React-Core symbols from Objective-C, including ExpoModulesCore,
+          // RNReanimated, RNScreens, RNGestureHandler, RNSVG, react-native-skia,
+          // RNSentry and NitroModules. forceStaticLinking would have meant
+          // listing nearly the whole native graph.
+          //
+          // Building from source restores the edge: the React-Core pod becomes
+          // React.framework and 53 pod xcconfigs pick up `-framework "React"`.
+          // Verified locally with pod install alone, no EAS build burned.
+          //
+          // THE COST, stated plainly: RN compiles from source on every clean
+          // build, so EAS build times go up materially.
+          buildReactNativeFromSource: true,
           // useHermesV1: !isProd, // Disabled due to version conflicts
         },
       ],
@@ -389,7 +582,28 @@ export default {
       "./plugins/with-voip-push",
       "./plugins/with-custom-ringtone",
       "./plugins/with-live-activity",
+      // expo-widgets drives iOS Live Activities (WS-1 migration). It generates,
+      // via CNG, exactly what the hand-rolled ActivityKit module could not
+      // safely ship: the widget-extension target, App Group, aps-environment,
+      // and the NSSupportsLiveActivities Info.plist flag. groupIdentifier keeps
+      // the existing App Group; enablePushNotifications turns on push-to-start.
+      // DISABLED 2026-08-09 for the same reason as @bacons/apple-targets above:
+      // the generated App ID com.dvnt.app.ExpoWidgetsTarget is brand new, and
+      // EAS cannot turn its APP_GROUPS capability on with App-Store-Connect
+      // API-key auth (capability *identifier* syncing needs cookie auth), so
+      // Apple rejects the patch and the build dies at credentials. The main app
+      // com.dvnt.app is unaffected — its App Groups was enabled long ago.
+      // This whole slice is Apple Surfaces WS-1, still at its approval gate.
+      // Re-enable after enabling App Groups on the widget App ID in the portal.
+      // [
+      //   "expo-widgets",
+      //   {
+      //     groupIdentifier: "group.com.dvnt.app",
+      //     enablePushNotifications: true,
+      //   },
+      // ],
       ["./plugins/with-development-team", { teamId: "436WA3W63V" }],
+      "./plugins/with-storekit-config",
       "expo-secure-store",
       "react-native-compressor",
       [

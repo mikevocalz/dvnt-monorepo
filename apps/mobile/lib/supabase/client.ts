@@ -1,36 +1,12 @@
-import { createDvntSupabaseClient } from "@dvnt/functions/supabase";
-import * as SecureStore from "expo-secure-store";
-import { Platform } from "react-native";
-
-const ExpoSecureStoreAdapter = {
-  getItem: (key: string) => {
-    if (Platform.OS === "web") {
-      return typeof window !== "undefined" ? localStorage.getItem(key) : null;
-    }
-    return SecureStore.getItemAsync(key);
-  },
-  setItem: (key: string, value: string) => {
-    if (Platform.OS === "web") {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(key, value);
-      }
-      return;
-    }
-    SecureStore.setItemAsync(key, value);
-  },
-  removeItem: (key: string) => {
-    if (Platform.OS === "web") {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem(key);
-      }
-      return;
-    }
-    SecureStore.deleteItemAsync(key);
-  },
-};
-
-export const supabase = createDvntSupabaseClient({
-  storage: ExpoSecureStoreAdapter,
-  onMissingAnonKey: console.error,
-  onInitialized: console.log,
-});
+// Shim — the supabase client lives in @dvnt/supabase (PROMPT 0 §3), same as
+// packages/app/lib/supabase/client.ts. This path is preserved so the existing
+// importers keep resolving unchanged.
+//
+// This file previously built its own client via createDvntSupabaseClient. The
+// config was identical (ExpoSecureStoreAdapter, persistSession: false,
+// autoRefreshToken: false, detectSessionInUrl: false), so collapsing it changes
+// no behaviour and carries no logout risk — nothing was persisted to storage in
+// either version. What it does fix: the app was constructing TWO client
+// instances, and with persistSession:false each holds its auth in memory only,
+// so a setSession from the JWT bridge on one was invisible to the other.
+export * from "@dvnt/supabase";

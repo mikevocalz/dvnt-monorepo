@@ -1,3 +1,10 @@
+# mint-supabase-jwt runs BEFORE the client has a Supabase JWT (it bridges the
+# Better Auth session → a minted JWT). It authenticates itself via x-auth-token,
+# so the gateway must NOT require a JWT — else it 401s before the fn runs and the
+# web client stays anon (event/post inserts denied). Keep this false.
+[functions.mint-supabase-jwt]
+verify_jwt = false
+
 [functions.auth]
 verify_jwt = false
 
@@ -61,10 +68,22 @@ verify_jwt = false
 [functions.send_notification]
 verify_jwt = false
 
+# live-surface-push is called server-side only (service-role bearer or
+# x-internal-secret). It does its own internal-caller auth (I4), so the gateway
+# JWT check must stay off.
+[functions.live-surface-push]
+verify_jwt = false
+
 [functions.video_create_room]
 verify_jwt = false
 
 [functions.video_join_room]
+verify_jwt = false
+
+[functions.call_create]
+verify_jwt = false
+
+[functions.call_join]
 verify_jwt = false
 
 [functions.video_refresh_token]
@@ -115,6 +134,9 @@ verify_jwt = false
 [functions.cart-line-refund]
 verify_jwt = false
 
+[functions.membership-checkout]
+verify_jwt = false
+
 [functions.stripe-webhook]
 verify_jwt = false
 
@@ -128,6 +150,11 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.guest-checkout]
+verify_jwt = false
+
+# Guest ticket re-request (WS-7): email-only re-delivery, no session. Own
+# rate limits + uniform response inside the fn; never returns ticket data.
+[functions.guest-ticket-lookup]
 verify_jwt = false
 
 # OG/share page — crawlers + anon hit it; gates visibility internally.
@@ -146,4 +173,299 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.delete-conversation]
+verify_jwt = false
+
+# A10 probes — public endpoints (no secrets served); Sentry Uptime + pg_cron
+# hit them without a JWT. Pinned so a redeploy can't regress to verify_jwt=true.
+[functions.db-health]
+verify_jwt = false
+
+[functions.cdn-probe]
+verify_jwt = false
+
+# Better-Auth-token functions gate internally via _shared/verify-session (the
+# app sends its session token in Authorization, which is not a Supabase JWT).
+# 2026-08-08 incident: a bulk redeploy reset every unlisted function to
+# verify_jwt=true and the gateway 401'd all app reads (comments/tickets/
+# profile). Every app-called function MUST be listed here with false.
+[functions.backfill-users]
+verify_jwt = false
+
+[functions.bootstrap-events]
+verify_jwt = false
+
+[functions.bootstrap-feed]
+verify_jwt = false
+
+[functions.bootstrap-messages]
+verify_jwt = false
+
+[functions.bootstrap-notifications]
+verify_jwt = false
+
+[functions.bootstrap-profile]
+verify_jwt = false
+
+[functions.cleanup-expired-media]
+verify_jwt = false
+
+[functions.close-friends]
+verify_jwt = false
+
+[functions.create-payment-intent]
+verify_jwt = false
+
+[functions.event-cancel]
+verify_jwt = false
+
+[functions.event-postpone]
+verify_jwt = false
+
+[functions.fix-tickets]
+verify_jwt = false
+
+[functions.get-event-tickets]
+verify_jwt = false
+
+[functions.get-followers]
+verify_jwt = false
+
+[functions.get-following]
+verify_jwt = false
+
+[functions.get-guest-ticket]
+verify_jwt = false
+
+[functions.get-liked-activity]
+verify_jwt = false
+
+[functions.get-liked-posts]
+verify_jwt = false
+
+[functions.get-post-comments]
+verify_jwt = false
+
+[functions.get-post-likers]
+verify_jwt = false
+
+[functions.get-story-viewers]
+verify_jwt = false
+
+[functions.get-viewer-liked-post-ids]
+verify_jwt = false
+
+[functions.host-payouts]
+verify_jwt = false
+
+[functions.lynk-livestream-token]
+verify_jwt = false
+
+[functions.lynk-cohost-invite]
+verify_jwt = false
+
+[functions.event-comment-mutate]
+verify_jwt = false
+
+[functions.lynk-moq-token]
+verify_jwt = false
+
+[functions.manage-promoters]
+verify_jwt = false
+
+[functions.mark-read]
+verify_jwt = false
+
+[functions.payouts-release]
+verify_jwt = false
+
+[functions.post-like]
+verify_jwt = false
+
+[functions.post-unlike]
+verify_jwt = false
+
+[functions.react-message]
+verify_jwt = false
+
+[functions.reconcile-orders]
+verify_jwt = false
+
+[functions.send-email]
+verify_jwt = false
+
+[functions.ticket-checkout]
+verify_jwt = false
+
+[functions.ticket-scan]
+verify_jwt = false
+
+[functions.ticket-upgrade]
+verify_jwt = false
+
+[functions.toggle-comment-like]
+verify_jwt = false
+
+[functions.unlock-ticket-tier]
+verify_jwt = false
+
+[functions.user-settings]
+verify_jwt = false
+
+[functions.video_heartbeat]
+verify_jwt = false
+
+[functions.video_list_rooms]
+verify_jwt = false
+
+[functions.video_set_room_mode]
+verify_jwt = false
+
+[functions.video_toggle_hand]
+verify_jwt = false
+
+
+# RevenueCat posts Authorization: Bearer <webhook secret> (not a JWT); the fn
+# does its own constant-time secret auth (I4). Gateway JWT check must stay off.
+[functions.revenuecat-webhook]
+verify_jwt = false
+
+# Pinned 2026-08-09: an unlisted function is deployed with verify_jwt=TRUE,
+# which 401s every caller (this app authenticates with Better Auth tokens, not
+# Supabase JWTs). The 2026-08-08 bulk deploy flipped 5 unlisted functions that
+# way and broke didit-webhook, create-verification-session and create-event.
+# Every function the repo ships is pinned here so that cannot recur.
+
+[functions.backfill-thumbnails]
+verify_jwt = false
+
+[functions.branding]
+verify_jwt = false
+
+[functions.bulk-comp-tickets]
+verify_jwt = false
+
+[functions.bulk-refund-tickets]
+verify_jwt = false
+
+[functions.create-event]
+verify_jwt = false
+
+[functions.create-event-moment]
+verify_jwt = false
+
+[functions.create-verification-session]
+verify_jwt = false
+
+[functions.delete-account]
+verify_jwt = false
+
+[functions.didit-webhook]
+verify_jwt = false
+
+[functions.event-analytics]
+verify_jwt = false
+
+[functions.event-broadcast-message]
+verify_jwt = false
+
+[functions.event-waitlist]
+verify_jwt = false
+
+[functions.export-event-attendees]
+verify_jwt = false
+
+[functions.flyer-color]
+verify_jwt = false
+
+[functions.get-bookmarks]
+verify_jwt = false
+
+[functions.get-event-staff]
+verify_jwt = false
+
+[functions.get-following-ids]
+verify_jwt = false
+
+[functions.get-host-dashboard]
+verify_jwt = false
+
+[functions.get-my-tickets]
+verify_jwt = false
+
+[functions.host-disputes]
+verify_jwt = false
+
+[functions.host-transactions]
+verify_jwt = false
+
+[functions.invite-co-organizer]
+verify_jwt = false
+
+[functions.live-surface]
+verify_jwt = false
+
+[functions.notify-event-change]
+verify_jwt = false
+
+[functions.notify-sale-open]
+verify_jwt = false
+
+[functions.organizer-connect]
+verify_jwt = false
+
+[functions.organizer-refund]
+verify_jwt = false
+
+[functions.payment-methods]
+verify_jwt = false
+
+[functions.persona-webhook]
+verify_jwt = false
+
+[functions.places-autocomplete]
+verify_jwt = false
+
+[functions.places-details]
+verify_jwt = false
+
+[functions.promotion-cancel]
+verify_jwt = false
+
+[functions.promotion-checkout]
+verify_jwt = false
+
+[functions.promotion-webhook]
+verify_jwt = false
+
+[functions.purchases]
+verify_jwt = false
+
+[functions.report-content]
+verify_jwt = false
+
+[functions.rsvp-issue-ticket]
+verify_jwt = false
+
+[functions.sneaky-access-checkout]
+verify_jwt = false
+
+[functions.sneaky-billing-checkout]
+verify_jwt = false
+
+[functions.sneaky-billing-portal]
+verify_jwt = false
+
+[functions.submit-verification]
+verify_jwt = false
+
+[functions.toggle-sale-notify]
+verify_jwt = false
+
+[functions.transfer-ticket]
+verify_jwt = false
+
+[functions.validate-promo-code]
+verify_jwt = false
+
+[functions.event-presence]
 verify_jwt = false

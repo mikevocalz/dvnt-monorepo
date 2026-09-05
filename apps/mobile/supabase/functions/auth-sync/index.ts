@@ -17,7 +17,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -164,6 +164,8 @@ Deno.serve(async (req) => {
         links,
         pronouns,
         gender,
+        sexuality,
+        event_audience,
         verified,
         followers_count,
         following_count,
@@ -202,6 +204,8 @@ Deno.serve(async (req) => {
         links,
         pronouns,
         gender,
+        sexuality,
+        event_audience,
         verified,
         followers_count,
         following_count,
@@ -298,6 +302,8 @@ Deno.serve(async (req) => {
         links,
         pronouns,
         gender,
+        sexuality,
+        event_audience,
         verified,
         followers_count,
         following_count,
@@ -342,6 +348,8 @@ function formatUserResponse(data: any) {
     links: normalizeLinks(data.links),
     pronouns: data.pronouns,
     gender: data.gender,
+    sexuality: data.sexuality || [],
+    eventAudience: data.event_audience || null,
     avatar: data.avatar?.url || null,
     isVerified: data.verified || false,
     postsCount: data.posts_count || 0,

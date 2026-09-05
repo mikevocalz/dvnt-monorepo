@@ -9,6 +9,46 @@ import {
   getCurrentUserIdSync,
   getCurrentUserAuthId,
 } from "./auth-helper";
+import { invokeEdge } from "./invoke-edge";
+import type { TicketTypeCategory } from "./ticket-types";
+import type { TierType, TierVisibility } from "../tickets/pricing";
+import type { DraftAddon } from "../../features/events/create/addon-form";
+
+/**
+ * A duplicated event's ticket-tier row, shaped for create-event-store's
+ * `setTicketTiers` public setter. Server ids and sold state are stripped —
+ * every row is a NEW unsaved draft (`id` is a local editor key). Prices,
+ * capacity, tier_type, visibility, and the early-bird schedule/allocation
+ * bands are preserved.
+ */
+export interface DuplicateTierDraft {
+  id: string;
+  name: string;
+  category: TicketTypeCategory;
+  priceCents: number;
+  quantity: number;
+  maxPerUser: number;
+  description: string;
+  saleStart: string;
+  saleEnd: string;
+  tierType?: TierType;
+  visibility?: TierVisibility;
+  unlockCode?: string;
+  priceSchedule?: Array<{ effectiveAt: string; priceDollars: string }>;
+  subAllocations?: Array<{ quantity: string; priceDollars: string }>;
+}
+
+/** Tier + add-on clone for a duplicated event (WS-9). */
+export interface DuplicateDraft {
+  ticketTiers: DuplicateTierDraft[];
+  addons: DraftAddon[];
+}
+
+/** Integer cents → the dollar-string the create-event editors expect ("" when null). */
+function centsToDollarsInput(cents: number | null | undefined): string {
+  if (cents == null || !Number.isFinite(cents)) return "";
+  return (cents / 100).toString();
+}
 
 /** Safely parse a JSONB array column (handles string, array, or null) */
 function parseJsonbArray(value: unknown): any[] {
@@ -26,19 +66,69 @@ function parseJsonbArray(value: unknown): any[] {
 
 /** Returns true if the URL points to a video file */
 function isVideoUrl(url: string): boolean {
-  return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url);
+  // Bunny stores flyer/post videos under a kind-named path segment with NO file
+  // extension (e.g. dvnt.b-cdn.net/post-video/<id>, .../event-video/<id>), so an
+  // extension-only test missed every real flyer video. Match the path segment
+  // too — same set the detail screen's VIDEO_RE uses.
+  return (
+    /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url) ||
+    /\/(post|flyer|event|story)-video\//i.test(url)
+  );
+}
+
+/** True for URLs an <img> can render for OTHER viewers: hosted http(s), not a video file. */
+function isRenderableImageUrl(url: unknown): url is string {
+  return (
+    typeof url === "string" && /^https?:\/\//i.test(url) && !isVideoUrl(url)
+  );
 }
 
 /** Resolve event image URL from multiple DB columns */
 function resolveEventImage(event: any): string {
-  // Priority: cover_image_url > image > cover_image_id (would need join)
-  return event[DB.events.coverImageUrl] || event["image"] || "";
+  // Priority: cover_image_url > flyer_image_url > image. Skip anything an <img>
+  // can't render — legacy rows persisted blob: object URLs (dead outside the
+  // creator's tab) and video files in the image columns; falling through beats
+  // a broken img.
+  //
+  // flyer_image_url is the one that matters in practice and was missing here:
+  // get_events_home returns `image: ""` and a null cover_image_url for events
+  // whose art lives in flyer_image_url, so this fell through to "" and the card
+  // rendered NOTHING. That is the whole of "no images in events" — the flyer is
+  // the primary artwork for an event, and it was the only column not consulted.
+  // (Checked after cover_image_url so an explicitly-set cover still wins.)
+  //
+  // A flyer can legitimately be a VIDEO — some rows point at a post-video path.
+  // isRenderableImageUrl rejects those, and resolveFlyerVideoUrl below picks
+  // them up instead, so a video flyer never reaches an <img>.
+  const candidates = [
+    event[DB.events.coverImageUrl],
+    event[DB.events.flyerImageUrl],
+    event["image"],
+  ];
+  for (const c of candidates) {
+    if (isRenderableImageUrl(c)) return c;
+  }
+  return "";
 }
 
 /** Returns the flyer video URL if the flyer is a video, otherwise undefined */
 function resolveFlyerVideoUrl(event: any): string | undefined {
-  const flyerUrl = event[DB.events.flyerImageUrl];
-  return flyerUrl && isVideoUrl(flyerUrl) ? flyerUrl : undefined;
+  // The dedicated column comes first — a flyer stored there (the create path's
+  // videoFlyerUrl) was previously invisible, because this only scanned the
+  // legacy image columns below. Legacy rows kept the video in
+  // image/cover_image_url with flyer_image_url empty, so those still count.
+  const candidates = [
+    event[DB.events.videoFlyerUrl],
+    event[DB.events.flyerImageUrl],
+    event[DB.events.coverImageUrl],
+    event["image"],
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && /^https?:\/\//i.test(c) && isVideoUrl(c)) {
+      return c;
+    }
+  }
+  return undefined;
 }
 
 function normalizeVisibility(
@@ -211,13 +301,14 @@ export const eventsApi = {
           description: event.description,
           ...dateParts,
           location: event.location,
-          image: event.image || "",
+          image: resolveEventImage(event),
           // Video flyer routes through the resolver — null when the
           // flyer is a static image so the feed card can fall back to
           // event.image cleanly.
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           images: parseJsonbArray(event.images),
           youtubeVideoUrl: event.youtube_video_url || null,
+          lynkRoomId: event.lynk_room_id || null,
           price: Number(event.price) || 0,
           likes: Number(event.likes_count) || 0,
           isLiked: event.is_liked || false,
@@ -301,10 +392,11 @@ export const eventsApi = {
           description: event.description,
           ...dateParts,
           location: event.location,
-          image: event.image || "",
+          image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           images: parseJsonbArray(event.images),
           youtubeVideoUrl: event.youtube_video_url || null,
+          lynkRoomId: event.lynk_room_id || null,
           price: Number(event.price) || 0,
           likes: Number(event.likes_count) || 0,
           isLiked: event.is_liked || false,
@@ -394,6 +486,45 @@ export const eventsApi = {
       if (!/not authenticated/i.test(msg)) {
         console.error("[Events] getMyEvents error:", error);
       }
+      return [];
+    }
+  },
+
+  /**
+   * Get events HOSTED by a given user (their auth_id). Public — used by the
+   * "More events" → host profile Events section. Only that host's events
+   * (host_id match), newest first. Readable by anon via events RLS.
+   */
+  async getEventsByHost(hostAuthId: string, limit: number = 50) {
+    try {
+      if (!hostAuthId) return [];
+      const { data, error } = await supabase
+        .from(DB.events.table)
+        .select("*")
+        .eq(DB.events.hostId, hostAuthId)
+        .order(DB.events.startDate, { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+
+      const mapped = (data || []).map((event: any) => {
+        const dateParts = formatEventDate(event[DB.events.startDate]);
+        return {
+          id: String(event[DB.events.id]),
+          title: event[DB.events.title],
+          description: event[DB.events.description],
+          ...dateParts,
+          location: event[DB.events.location],
+          image: resolveEventImage(event),
+          flyerVideoUrl: resolveFlyerVideoUrl(event),
+          price: Number(event[DB.events.price]) || 0,
+          attendees: Number(event[DB.events.totalAttendees]) || 0,
+          status: event.status || undefined,
+          cancelledAt: event.cancelled_at || undefined,
+        };
+      });
+      return enrichEventsWithTierPrices(mapped);
+    } catch (error) {
+      console.error("[Events] getEventsByHost error:", error);
       return [];
     }
   },
@@ -508,11 +639,13 @@ export const eventsApi = {
         description: ev.description,
         ...dateParts,
         location: ev.location,
-        image: ev.image || "",
+        image: resolveEventImage(ev),
         images: parseJsonbArray(ev.images),
         flyerImageUrl: ev.flyer_image_url || null,
         flyerVideoUrl: resolveFlyerVideoUrl(ev) || null,
         youtubeVideoUrl: ev.youtube_video_url || null,
+        // Sneaky Lynk room this event is hosted in (video_rooms.uuid).
+        lynkRoomId: ev.lynk_room_id || null,
         price: Number(ev.price) || 0,
         likes: Number(data.likes_count) || 0,
         isLiked: data.is_liked || false,
@@ -527,6 +660,10 @@ export const eventsApi = {
           followersCount: host.followers_count || 0,
         },
         coOrganizer: null,
+        // Timezone display: venue zone + online flag drive event-local vs
+        // viewer-local formatting on the detail screen.
+        event_tz: ev.event_tz ?? null,
+        isOnline: ev.is_online ?? false,
         // V2 fields
         locationLat:
           ev.location_lat != null ? Number(ev.location_lat) : undefined,
@@ -640,6 +777,30 @@ export const eventsApi = {
   /**
    * Get user's RSVP status for event
    */
+  /**
+   * The event a Sneaky Lynk room belongs to, if any.
+   *
+   * The room is the inside of the event; without this the room is a video
+   * call with a familiar title and no way back to the thing it is for.
+   * Read-only and failure-tolerant: no event just means no chip.
+   */
+  async getEventByLynkRoom(roomUuid: string) {
+    if (!roomUuid) return null;
+    const { data, error } = await supabase
+      .from("events")
+      .select("id, title, share_slug")
+      .eq("lynk_room_id", roomUuid)
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error("[Events] getEventByLynkRoom:", error.message);
+      return null;
+    }
+    return data
+      ? { id: String(data.id), title: data.title as string, slug: (data as any).share_slug as string | null }
+      : null;
+  },
+
   async getUserRsvp(eventId: string) {
     try {
       const authId = await getCurrentUserAuthId();
@@ -668,92 +829,28 @@ export const eventsApi = {
     try {
       console.log("[Events] createEvent");
 
-      const authId = await getCurrentUserAuthId();
-      if (!authId) throw new Error("Not authenticated");
+      const eventTz =
+        typeof eventData.eventTz === "string" && eventData.eventTz.trim()
+          ? eventData.eventTz.trim()
+          : Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-      // The insert runs under RLS as `authenticated` (policy
-      // events_insert_authenticated). Bridge the Better Auth session into a
-      // Supabase JWT first via setSession — without it the client is `anon`,
-      // which lacks INSERT on events and fails with
-      // "permission denied for table events". (Mirrors updateEvent below.)
-      try {
-        const { ensureSupabaseJwt } = await import("../auth/supabase-jwt");
-        await ensureSupabaseJwt();
-      } catch {
-        // Non-fatal: fall through with the current session.
+      const result = await invokeEdge<{
+        ok: boolean;
+        data?: { event?: Record<string, any> };
+        error?: { code: string; message: string };
+      }>("create-event", { ...eventData, eventTz });
+
+      if (result.error) throw new Error(result.error.message);
+      if (!result.data?.ok || !result.data.data?.event) {
+        throw new Error(result.data?.error?.message || "Failed to create event");
       }
 
-      // Use authId for host_id (text column)
-      const insertPayload: Record<string, any> = {
-        [DB.events.hostId]: authId,
-        [DB.events.title]: eventData.title,
-        [DB.events.description]: eventData.description,
-        [DB.events.startDate]: eventData.date,
-        [DB.events.location]: eventData.location,
-        [DB.events.coverImageUrl]: eventData.image,
-        ["image"]: eventData.image,
-        ["images"]: eventData.images || [],
-        [DB.events.youtubeVideoUrl]: eventData.youtubeVideoUrl || null,
-        [DB.events.price]: eventData.price || 0,
-        [DB.events.isOnline]: eventData.isOnline || false,
-      };
-
-      // Guard: never insert max_attendees as `undefined`/NaN (it's the one
-      // formerly-unconditional field). Only set a real capacity.
-      if (eventData.maxAttendees != null && Number.isFinite(Number(eventData.maxAttendees)))
-        insertPayload[DB.events.maxAttendees] = Number(eventData.maxAttendees);
-
-      // V2 fields (additive — only set if provided)
-      if (eventData.locationLat != null)
-        insertPayload.location_lat = eventData.locationLat;
-      if (eventData.locationLng != null)
-        insertPayload.location_lng = eventData.locationLng;
-      if (eventData.locationName)
-        insertPayload.location_name = eventData.locationName;
-      if (eventData.locationAddress)
-        insertPayload.location_address = eventData.locationAddress;
-      if (eventData.locationType)
-        insertPayload.location_type = eventData.locationType;
-      insertPayload.visibility = normalizeVisibility(eventData.visibility);
-      // `events` has a `category` column but NO `event_type` column, so the
-      // structured Event Type persists here. Prefer event_type over the legacy
-      // tag-derived `category` and the older `eventCategory` alias. (Previously
-      // this read only `eventCategory`, which the form never set → category and
-      // the entire Event Type picker were silently dropped on every create.)
-      const resolvedCategory =
-        eventData.event_type || eventData.category || eventData.eventCategory;
-      if (resolvedCategory) insertPayload.category = resolvedCategory;
-      if (eventData.ageRestriction)
-        insertPayload.age_restriction = eventData.ageRestriction;
-      if (eventData.endDate) insertPayload.end_date = eventData.endDate;
-      if (eventData.ticketingEnabled != null)
-        insertPayload.ticketing_enabled = eventData.ticketingEnabled;
-      if (eventData.dressCode) insertPayload.dress_code = eventData.dressCode;
-      if (eventData.doorPolicy)
-        insertPayload.door_policy = eventData.doorPolicy;
-      if (eventData.lineup) insertPayload.lineup = eventData.lineup;
-      if (eventData.perks) insertPayload.perks = eventData.perks;
-      if (eventData.flyerImageUrl)
-        insertPayload.flyer_image_url = eventData.flyerImageUrl;
-      // Video flyer: when present, plays in feed; static contexts use the
-      // flyer image as poster (no separate poster column — flyer image
-      // IS the poster). Column shipped by the 20260613004000 migration.
-      if (eventData.videoFlyerUrl)
-        insertPayload.video_flyer_url = eventData.videoFlyerUrl;
-      if (eventData.nsfw != null) insertPayload.nsfw = eventData.nsfw;
-
-      const { data, error } = await supabase
-        .from(DB.events.table)
-        .insert(insertPayload)
-        .select()
-        .single();
-
-      if (error) throw error;
+      const data = result.data.data.event;
 
       console.log("[Events] Event created:", data?.id);
 
       // Extract the flyer's dominant color (skeleton bg) — fire-and-forget.
-      if (data?.id && (insertPayload.flyer_image_url || insertPayload.cover_image_url)) {
+      if (data?.id && (data.flyer_image_url || data.cover_image_url)) {
         void (async () => {
           try {
             const { invokeEdge } = await import("./invoke-edge");
@@ -850,6 +947,8 @@ export const eventsApi = {
       if (updates.perks !== undefined) updateData.perks = updates.perks || null;
       if (updates.youtubeVideoUrl !== undefined)
         updateData.youtube_video_url = updates.youtubeVideoUrl || null;
+      if (updates.lynkRoomId !== undefined)
+        updateData.lynk_room_id = updates.lynkRoomId || null;
       if (updates.locationLat !== undefined)
         updateData.location_lat = updates.locationLat;
       if (updates.locationLng !== undefined)
@@ -862,6 +961,15 @@ export const eventsApi = {
         updateData[DB.events.isOnline] = updates.isOnline;
       if (updates.flyerImageUrl !== undefined)
         updateData[DB.events.flyerImageUrl] = updates.flyerImageUrl || null;
+      // The VIDEO flyer was not writable here at all, so the editor could only
+      // ever change the still — and a video picked in the editor was written
+      // into the still column. Video takes precedence over the still
+      // everywhere it renders, so it has to be editable where the still is.
+      if (updates.videoFlyerUrl !== undefined)
+        updateData[DB.events.videoFlyerUrl] = updates.videoFlyerUrl || null;
+      // Gallery images — the editor sends `images` (jsonb array of {url}); it was
+      // previously dropped here, so edits to the gallery never saved.
+      if (updates.images !== undefined) updateData.images = updates.images;
 
       // Ensure the Supabase JWT bridge is attached so PostgREST sees
       // us as `authenticated` (not `anon`) — RLS on events_update_own
@@ -1036,6 +1144,31 @@ export const eventsApi = {
         throw new Error("You are not the host of this event");
       }
 
+      // WS-9 guard — FIRST step of the cascade: never hard-delete an
+      // event that has taken money that wasn't returned. Any
+      // non-terminal ticket carrying a Stripe payment intent means the
+      // host must Cancel instead (event-cancel edge fn refunds every
+      // paid order + notifies attendees). Server-side delete-event has
+      // the same 409 guard; this stops the client-cascade path too.
+      // Fail CLOSED: if the count can't be read, refuse the delete.
+      const { count: paidCount, error: paidErr } = await supabase
+        .from("tickets")
+        .select("id", { count: "exact", head: true })
+        .eq("event_id", eventIdInt)
+        .in("status", ["active", "transfer_pending", "scanned"])
+        .not("stripe_payment_intent_id", "is", null);
+      if (paidErr) {
+        console.error("[Events] deleteEvent paid-ticket check failed:", paidErr);
+        throw new Error(
+          "Couldn't verify ticket sales for this event. Try again in a moment.",
+        );
+      }
+      if ((paidCount ?? 0) > 0) {
+        throw new Error(
+          "This event has paid tickets. Cancel the event instead — attendees are refunded and notified automatically.",
+        );
+      }
+
       // Collect all image URLs for CDN cleanup
       const imageUrls: string[] = [];
       const coverImage = event[DB.events.coverImageUrl] || event["image"];
@@ -1117,6 +1250,206 @@ export const eventsApi = {
       console.error("[Events] deleteEvent error:", error?.message || error);
       throw error;
     }
+  },
+
+  /**
+   * Cancel an event with automatic refunds (WS-9). Calls the
+   * event-cancel edge fn, which flips status→'cancelled', closes the
+   * waitlist, refunds every paid order (whole-PI, idempotent), voids
+   * free tickets, notifies attendees, and emails guest orders. Refunds
+   * run in server-side batches — this loops until the server reports
+   * done, so a large event resumes transparently. Safe to re-call.
+   */
+  async cancelEventWithRefunds(
+    eventId: string,
+    reason?: string,
+  ): Promise<{
+    refundsIssued: number;
+    refundsFailed: number;
+    freeTicketsVoided: number;
+    guestEmailsSent: number;
+    notified: number;
+    done: boolean;
+  }> {
+    const totals = {
+      refundsIssued: 0,
+      refundsFailed: 0,
+      freeTicketsVoided: 0,
+      guestEmailsSent: 0,
+      notified: 0,
+      done: false,
+    };
+    // 40 passes × 25 orders = 1,000 orders per user action; anything
+    // bigger keeps state server-side and finishes on the next call.
+    const MAX_PASSES = 40;
+    for (let pass = 0; pass < MAX_PASSES; pass++) {
+      const { data, error } = await invokeEdge<{
+        ok: boolean;
+        done: boolean;
+        refundsIssued: number;
+        refundsFailed: number;
+        freeTicketsVoided: number;
+        guestEmailsSent: number;
+        notified: number;
+        remainingOrders: number;
+        error?: { message: string };
+      }>("event-cancel", { eventId: parseInt(eventId), reason });
+      if (error || !data?.ok) {
+        throw new Error(
+          error?.message ||
+            (data as any)?.error?.message ||
+            "Cancel failed",
+        );
+      }
+      totals.refundsIssued += data.refundsIssued || 0;
+      totals.refundsFailed += data.refundsFailed || 0;
+      totals.freeTicketsVoided += data.freeTicketsVoided || 0;
+      totals.guestEmailsSent += data.guestEmailsSent || 0;
+      totals.notified += data.notified || 0;
+      if (data.done) {
+        totals.done = true;
+        break;
+      }
+      // Stripe refused some refunds this pass and nothing else is
+      // pending → retrying immediately would spin on the same orders.
+      if (data.refundsFailed > 0 && data.remainingOrders <= data.refundsFailed) {
+        break;
+      }
+    }
+    return totals;
+  },
+
+  /**
+   * Postpone an active event (WS-9). Reversible via resumeEvent. No
+   * refunds — tickets stay valid; the server notifies attendees +
+   * emails guest orders. (Host-policy refund windows are WS-5 work.)
+   */
+  async postponeEvent(
+    eventId: string,
+    note?: string,
+  ): Promise<{ status: string; notified: number }> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      status: string;
+      notified: number;
+      error?: { message: string };
+    }>("event-postpone", {
+      eventId: parseInt(eventId),
+      action: "postpone",
+      note,
+    });
+    if (error || !data?.ok) {
+      throw new Error(
+        error?.message || (data as any)?.error?.message || "Postpone failed",
+      );
+    }
+    return { status: data.status, notified: data.notified || 0 };
+  },
+
+  /** Flip a postponed event back to active (WS-9). */
+  async resumeEvent(
+    eventId: string,
+  ): Promise<{ status: string; notified: number }> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      status: string;
+      notified: number;
+      error?: { message: string };
+    }>("event-postpone", { eventId: parseInt(eventId), action: "resume" });
+    if (error || !data?.ok) {
+      throw new Error(
+        error?.message || (data as any)?.error?.message || "Resume failed",
+      );
+    }
+    return { status: data.status, notified: data.notified || 0 };
+  },
+
+  /**
+   * Build a duplicate draft for an event (WS-9): fetch the source event's
+   * ticket tiers (ticket_types) and add-ons (ticket_addons) and clone them
+   * into create-event-store draft rows. Server ids, quantity_sold, and sold
+   * state are STRIPPED — every row is a fresh unsaved draft. Names, prices,
+   * capacity, max-per-user, sale windows, tier_type, visibility, unlock code,
+   * early-bird schedule/allocation bands, and the full add-on config
+   * (binding, redeemable, variant matrix) are preserved. Add-on per-tier
+   * eligibility (requires_tier_id) is re-pointed from the source ticket_type
+   * uuid to the NEW local tier id, so publish re-links it to the created row.
+   *
+   * The caller prefills the scalar fields via the store's public setters and
+   * applies `ticketTiers` / `addons` through `setTicketTiers` / `setAddons`.
+   * This helper never touches the store — pure data.
+   */
+  async buildDuplicateDraft(eventId: string): Promise<DuplicateDraft> {
+    const [{ ticketTypesApi }, { addonsApi }] = await Promise.all([
+      import("./ticket-types"),
+      import("./addons"),
+    ]);
+    const [sourceTiers, sourceAddons] = await Promise.all([
+      ticketTypesApi.getByEvent(eventId).catch(() => []),
+      addonsApi.getByEvent(eventId).catch(() => []),
+    ]);
+
+    const seed = Date.now();
+    // Source ticket_type uuid → new local tier id, so add-on per-tier
+    // eligibility re-points at the clone (never the original's row).
+    const tierIdMap = new Map<string, string>();
+
+    const ticketTiers: DuplicateTierDraft[] = sourceTiers
+      .filter((t) => t.is_active !== false)
+      .map((t, i) => {
+        const localId = `dup_tier_${seed}_${i}`;
+        tierIdMap.set(String(t.id), localId);
+        return {
+          id: localId, // NEW unsaved id — server id stripped
+          name: t.name || "General Admission",
+          category: t.category,
+          priceCents: t.price_cents ?? 0,
+          // capacity kept; quantity_sold intentionally dropped (fresh row)
+          quantity: t.quantity_total ?? 0,
+          maxPerUser: t.max_per_user ?? 4,
+          description: t.description ?? "",
+          saleStart: t.sale_start ?? "",
+          saleEnd: t.sale_end ?? "",
+          tierType: t.tier_type ?? undefined,
+          visibility: t.tier_visibility ?? undefined,
+          unlockCode: t.unlock_code ?? undefined,
+          priceSchedule: (t.price_schedule ?? []).map((e) => ({
+            effectiveAt: e.effective_at,
+            priceDollars: centsToDollarsInput(e.price_cents),
+          })),
+          subAllocations: (t.sub_allocations ?? []).map((a) => ({
+            quantity: String(a.quantity),
+            priceDollars: centsToDollarsInput(a.price_cents),
+          })),
+        };
+      });
+
+    const addons: DraftAddon[] = sourceAddons.map((a, i) => ({
+      id: `dup_addon_${seed}_${i}`, // NEW unsaved id — dbId stripped
+      name: a.name,
+      description: a.description ?? "",
+      addonType: a.addon_type,
+      bindingMode: a.binding_mode,
+      priceDollars: centsToDollarsInput(a.price_cents),
+      minPriceDollars: centsToDollarsInput(a.min_price_cents),
+      // capacity kept; quantity_sold / quantity_held dropped (fresh row)
+      quantity: a.quantity_total != null ? String(a.quantity_total) : "",
+      requiresTierId: a.requires_tier_id
+        ? (tierIdMap.get(String(a.requires_tier_id)) ?? null)
+        : null,
+      isRedeemable: a.is_redeemable,
+      // Terminal/sold states reset so the clone is buyable; other config kept.
+      status:
+        a.status === "sold_out" || a.status === "ended" ? "on_sale" : a.status,
+      variants: (a.ticket_addon_variants ?? []).map((v) => ({
+        size: v.option_values?.size ?? "",
+        color: v.option_values?.color ?? "",
+        priceDollars: centsToDollarsInput(v.price_cents),
+        quantity: v.quantity_total != null ? String(v.quantity_total) : "",
+      })),
+    }));
+
+    return { ticketTiers, addons };
   },
 
   /**
@@ -1428,6 +1761,58 @@ export const eventsApi = {
       console.error("[Events] getEventComments error:", error);
       return [];
     }
+  },
+
+  /**
+   * Edit one of YOUR OWN event comments.
+   *
+   * Goes through the `event-comment-mutate` Edge Function rather than writing
+   * the row directly, because ownership cannot be enforced in RLS here: this app
+   * authenticates with Better-Auth, so `auth.uid()` is null inside Postgres. The
+   * table's public UPDATE/DELETE policies were dropped alongside this — before
+   * that, anyone with the anon key could rewrite anyone's comment.
+   */
+  async updateEventComment(commentId: string, content: string) {
+    const { requireBetterAuthToken } = await import("../auth/identity");
+    const token = await requireBetterAuthToken();
+
+    const { data, error } = await supabase.functions.invoke(
+      "event-comment-mutate",
+      {
+        body: {
+          action: "update",
+          commentId: parseInt(commentId, 10),
+          content,
+        },
+        headers: { "x-auth-token": token },
+      },
+    );
+
+    if (error) throw error;
+    if (!data?.ok) {
+      throw new Error(data?.error?.message || "Couldn't update that comment");
+    }
+    return data.data as { id: string; content: string; createdAt: string };
+  },
+
+  /** Delete one of YOUR OWN event comments. Same authorization seam as above. */
+  async deleteEventComment(commentId: string) {
+    const { requireBetterAuthToken } = await import("../auth/identity");
+    const token = await requireBetterAuthToken();
+
+    const { data, error } = await supabase.functions.invoke(
+      "event-comment-mutate",
+      {
+        body: { action: "delete", commentId: parseInt(commentId, 10) },
+        headers: { "x-auth-token": token },
+      },
+    );
+
+    if (error) throw error;
+    if (!data?.ok) {
+      throw new Error(data?.error?.message || "Couldn't delete that comment");
+    }
+    return { id: commentId, deleted: true };
   },
 
   /**

@@ -23,6 +23,7 @@ import {
   type UploadProgress,
 } from "@dvnt/app/lib/server-upload";
 import { getVideoThumbnail } from "@dvnt/app/lib/media/getVideoThumbnail";
+import { generateBlurPlaceholder } from "@dvnt/app/lib/media/image-processor";
 
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import {
@@ -64,6 +65,8 @@ export interface MediaUploadResult {
   thumbnailPath?: string;
   mimeType?: string;
   livePhotoVideoUrl?: string;
+  /** Compact inline fade-in placeholder (base64 WebP data URI) for images. */
+  blurhash?: string;
   success: boolean;
   error?: string;
   compressionStats?: {
@@ -515,8 +518,15 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
             );
           }
 
+          // Compact fade-in placeholder from the downscaled image, sent
+          // alongside the upload so the media row's `blurhash` column populates.
+          // Never blocks the upload (returns undefined on failure).
+          const blurhash = await generateBlurPlaceholder(imageUri);
+
           setStatusMessage("Uploading image...");
-          const uploadResult = await serverUpload(imageUri, folder);
+          const uploadResult = await serverUpload(imageUri, folder, undefined, {
+            blurhash,
+          });
 
           if (!uploadResult.success) {
             results.push({
@@ -531,6 +541,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
               type: "image",
               kind: "image",
               url: uploadResult.url,
+              blurhash,
               success: true,
             });
           }

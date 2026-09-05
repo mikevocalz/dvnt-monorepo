@@ -25,7 +25,7 @@
 
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { supabase } from "../supabase/client";
+import { supabase, setBridgeAccessToken } from "../supabase/client";
 import { getBetterAuthToken } from "./identity";
 
 const STORAGE_KEY = "dvnt-supabase-jwt-v1";
@@ -114,21 +114,33 @@ async function mintRemote(): Promise<MintedJwt | null> {
       "https://npfjanxturvmjyevoyfo.supabase.co";
     const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || "";
 
-    const res = await fetch(
-      `${supabaseUrl}/functions/v1/mint-supabase-jwt`,
-      {
-        method: "POST",
-        headers: {
-          // x-auth-token avoids the Supabase gateway rejecting a
-          // non-JWT in Authorization (the verify-session helper
-          // accepts both).
-          "x-auth-token": token,
-          apikey: anonKey,
-          "Content-Type": "application/json",
+    // ponytail: hard timeout so a hung/cold-starting mint edge fn can't freeze
+    // callers. This runs on the publish path (createEvent awaits it) — a
+    // never-resolving fetch here shows as "stuck on publishing" on web+mobile.
+    // On abort we fall through to null → anon-only, exactly like any mint error.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let res: Response;
+    try {
+      res = await fetch(
+        `${supabaseUrl}/functions/v1/mint-supabase-jwt`,
+        {
+          method: "POST",
+          headers: {
+            // x-auth-token avoids the Supabase gateway rejecting a
+            // non-JWT in Authorization (the verify-session helper
+            // accepts both).
+            "x-auth-token": token,
+            apikey: anonKey,
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+          signal: controller.signal,
         },
-        body: "{}",
-      },
-    );
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!res.ok) {
       // 503 = bridge intentionally disabled (no JWT secret); silent fallback.
@@ -168,6 +180,15 @@ async function mintRemote(): Promise<MintedJwt | null> {
  */
 async function attachToSupabaseClient(jwt: MintedJwt | null): Promise<void> {
   try {
+    // Web: feed the token to the client's `accessToken` option. NO setSession —
+    // setSession triggers GoTrue /auth/v1/user validation, which 400s for a
+    // bridged token and drops the session → writes go out as anon → 401. (See
+    // client.web.ts.) Passing null reverts to the anon key.
+    if (Platform.OS === "web") {
+      setBridgeAccessToken(jwt ? jwt.accessToken : null);
+      return;
+    }
+    // Native keeps setSession (no accessToken option there).
     if (jwt) {
       await supabase.auth.setSession({
         access_token: jwt.accessToken,
@@ -226,6 +247,46 @@ export async function ensureSupabaseJwt(): Promise<boolean> {
     return false;
   } finally {
     inflight = null;
+  }
+}
+
+/**
+ * Keep the bridged JWT alive for as long as the member is signed in.
+ *
+ * Without this, `ensureSupabaseJwt` ran exactly once per auth-state change.
+ * The minted token is short-lived, so it would quietly expire mid-session and
+ * every PostgREST read after that went out with a dead bearer and came back
+ * 401 — which callers swallow into empty lists (a signed-in member seeing "No
+ * new profiles to discover right now" while a signed-out visitor saw the full
+ * list, because anon can read those tables and a rejected JWT cannot).
+ *
+ * The web client also guards per request (it drops an already-expired token
+ * rather than send it), but native attaches via `setSession` and has no such
+ * hook, so the renewal has to happen on a clock for both.
+ *
+ * Ticks at half the refresh window, so a token is always renewed with margin.
+ * Returns an unsubscribe fn. Safe to call repeatedly — the previous timer is
+ * cleared first.
+ */
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startSupabaseJwtAutoRefresh(): () => void {
+  stopSupabaseJwtAutoRefresh();
+  // Fire once immediately so a cold start does not wait a whole interval.
+  void ensureSupabaseJwt().catch(() => false);
+  refreshTimer = setInterval(
+    () => {
+      void ensureSupabaseJwt().catch(() => false);
+    },
+    (REFRESH_WINDOW_SECONDS / 2) * 1000,
+  );
+  return stopSupabaseJwtAutoRefresh;
+}
+
+export function stopSupabaseJwtAutoRefresh(): void {
+  if (refreshTimer != null) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
   }
 }
 

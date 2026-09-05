@@ -2,6 +2,7 @@
 // Roles: super_admin | admin | moderator. The two known super-admins are pinned
 // by email so an edit can't silently demote them.
 import type { CollectionConfig } from 'payload'
+import type { AdminUser } from '../payload-types'
 import { isSuperAdmin, isStaff, forceSuperAdminByEmail } from '../access/roles'
 import { betterAuthStrategy } from '../auth/betterAuthStrategy'
 
@@ -17,10 +18,12 @@ export const AdminUsers: CollectionConfig = {
   access: {
     read: isStaff,
     create: isSuperAdmin, // only super-admins mint new staff
-    update: ({ req, id }) => req.user?.role === 'super_admin' || req.user?.id === id, // self or super
+    update: ({ req, id }) => (req.user as AdminUser | null)?.role === 'super_admin' || req.user?.id === id, // self or super
     delete: isSuperAdmin,
   },
-  admin: { useAsTitle: 'email', defaultColumns: ['email', 'name', 'role'] },
+  admin: {
+    group: 'Access',
+    description: 'Console/CMS staff accounts and roles.', useAsTitle: 'email', defaultColumns: ['email', 'name', 'role'] },
   hooks: {
     beforeChange: [
       ({ data }) => {
@@ -47,7 +50,7 @@ export const AdminUsers: CollectionConfig = {
         { label: 'Moderator', value: 'moderator' },
       ],
       // Only super-admins can change roles; others see it read-only.
-      access: { update: ({ req }) => req.user?.role === 'super_admin' },
+      access: { update: ({ req }) => (req.user as AdminUser | null)?.role === 'super_admin' },
     },
   ],
 }

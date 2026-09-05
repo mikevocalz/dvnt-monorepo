@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef } from "react";
 import { StyleSheet, View, useWindowDimensions } from "react-native";
-import { Section } from "@expo/html-elements";
+import { Section } from "@dvnt/app/components/ui/html";
 import Hls from "hls.js";
 import { HeroContent } from "./HeroContent";
 import { HERO_VIDEO_PLAYLIST, LANDING_COLORS } from "../theme";

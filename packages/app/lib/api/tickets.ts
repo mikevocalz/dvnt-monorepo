@@ -2,11 +2,20 @@ import { supabase } from "../supabase/client";
 import { getCurrentUserAuthId } from "./auth-helper";
 import { requireBetterAuthToken } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
+import { getPendingPromoterRef } from "../stores/promoter-ref-store";
 import {
   CartLineRefundResponseDTO,
   parseDTO,
   type CartLineRefundResponse,
 } from "@dvnt/app/lib/contracts/dto";
+import type { PlanKey } from "@dvnt/app/lib/subscription/types";
+import type { PerkKey } from "@dvnt/app/lib/perks/perk-config";
+
+/** Keyset cursor for the roster — the previous page's last row. */
+export interface RosterCursor {
+  value: string | number | null;
+  id: string;
+}
 
 export interface TicketRecord {
   id: string;
@@ -28,9 +37,66 @@ export interface TicketRecord {
   ticket_type_name?: string;
   event_title?: string;
   event_image?: string;
+  /**
+   * `events.dominant_color` — the flyer's representative hex, joined by
+   * get-my-tickets. Null until the first viewer's extraction writes it back
+   * (see `lib/color/useEventDominantColor`). Consumed by the watch projection,
+   * which needs an always-offline colour for a card that has no image.
+   */
+  event_dominant_color?: string | null;
   event_date?: string;
   event_location?: string;
   username?: string;
+  /** Holder display name, resolved server-side. Guests carry `guest_name`. */
+  holder_name?: string | null;
+  /**
+   * SUBSCRIPTION tier — deliberately NOT the ticket tier (`ticket_type_name`).
+   * Server-resolved from `membership_subscriptions` at query time; the client
+   * never derives or caches it. `null` for guests and for anyone whose
+   * subscription doesn't currently confer a tier (lapsed past_due, ended
+   * cancellation) — a lapsed member gets no perk, by law.
+   *
+   * Only present for roles permitted to see it; absent entirely otherwise.
+   */
+  membership_tier?: { planKey: PlanKey; rank: number } | null;
+  /** WS-3 perks resolved for this holder at this event. */
+  perks?: PerkKey[];
+}
+
+/** Add-on summary rendered on door scan result cards ("VIP table ×1 — unredeemed"). */
+export interface ScanAddonSummary {
+  id: string;
+  name: string;
+  variant_name: string | null;
+  quantity: number;
+  status: "unfulfilled" | "fulfilled" | "redeemed" | "refunded";
+  redeemed_at: string | null;
+  redeemable?: boolean;
+}
+
+/**
+ * ticket-scan edge fn response. The server rides the redeem_ticket /
+ * redeem_addon CAS RPCs — on `already_scanned` it returns the ORIGINAL
+ * check-in facts (server always wins on double-scan).
+ */
+export interface ScanTicketResponse {
+  valid: boolean;
+  reason?: string;
+  /** "addon" when the scanned QR belonged to an order_addons row. */
+  kind?: "ticket" | "addon";
+  status?: string;
+  checked_in_at?: string | null;
+  checked_in_by?: string | null;
+  checked_in_by_name?: string | null;
+  ticket?: any;
+  /** The redeemed (or duplicate) add-on itself. */
+  addon?: ScanAddonSummary;
+  /** The scanned ticket's order add-ons (name, qty, redeemed state). */
+  addons?: ScanAddonSummary[];
+  /** WS-4: holder's subscription tier, resolved server-side after the redeem. */
+  membership_tier?: { planKey: PlanKey; rank: number } | null;
+  /** WS-4: perks this holder has at THIS event, already resolved by the server. */
+  perks?: PerkKey[];
 }
 
 export const ticketsApi = {
@@ -79,6 +145,14 @@ export const ticketsApi = {
         | "transfer_pending"
         | "void";
       search?: string;
+      /** WS-2 sort key; defaults server-side to `purchased_at`. */
+      sort?: "purchased_at" | "checked_in" | "ticket_tier" | "status";
+      /**
+       * Keyset cursor from the previous page's `nextCursor`. Prefer this over
+       * `page` on a live roster: offset paging duplicates and skips rows as
+       * tickets are sold mid-scroll.
+       */
+      cursor?: RosterCursor | null;
     } = {},
   ): Promise<{
     tickets: TicketRecord[];
@@ -87,6 +161,7 @@ export const ticketsApi = {
     total: number | null;
     hasMore: boolean;
     role: "owner" | "admin" | "editor" | "scanner" | null;
+    nextCursor: RosterCursor | null;
   }> {
     const { data, error } = await invokeEdge<{
       ok: boolean;
@@ -96,12 +171,15 @@ export const ticketsApi = {
       total?: number | null;
       hasMore?: boolean;
       role?: "owner" | "admin" | "editor" | "scanner";
+      nextCursor?: RosterCursor | null;
     }>("get-event-tickets", {
       event_id: parseInt(eventId),
       page: opts.page ?? 1,
       pageSize: opts.pageSize ?? 50,
       status: opts.status ?? "all",
       search: opts.search ?? "",
+      sort: opts.sort ?? "purchased_at",
+      cursor: opts.cursor ?? null,
     });
     if (error) {
       console.error(
@@ -115,6 +193,7 @@ export const ticketsApi = {
         total: null,
         hasMore: false,
         role: null,
+        nextCursor: null,
       };
     }
     const tickets = data?.ok ? (data.tickets ?? []) : [];
@@ -125,6 +204,7 @@ export const ticketsApi = {
       total: data?.total ?? null,
       hasMore: data?.hasMore ?? false,
       role: data?.role ?? null,
+      nextCursor: data?.nextCursor ?? null,
     };
   },
 
@@ -139,7 +219,14 @@ export const ticketsApi = {
       tickets: TicketRecord[];
     }>("get-my-tickets", {});
     if (error) {
-      if (!/not authenticated/i.test(error.message ?? "")) {
+      // A 401/403 here is the cold-start race: the ticket poll fires before the
+      // session token is in hand, and the very next poll (~5s) succeeds. It is
+      // not worth a red LogBox on every launch. Anything else still shouts.
+      const authRace =
+        error.status === 401 ||
+        error.status === 403 ||
+        /not authenticated/i.test(error.message ?? "");
+      if (!authRace) {
         console.error("[Tickets] getMyTickets error:", error.message);
       }
       return [];
@@ -164,6 +251,10 @@ export const ticketsApi = {
   }> {
     try {
       const token = await requireBetterAuthToken();
+      // Promoter attribution (WS-4): a pending ?ref= from a tracked
+      // share link, MMKV-persisted so the Stripe redirect can't lose
+      // it. Never affects pricing — attribution only.
+      const promoterCode = getPendingPromoterRef(params.eventId);
       const { data, error } = await supabase.functions.invoke(
         "ticket-checkout",
         {
@@ -172,6 +263,7 @@ export const ticketsApi = {
             ticket_type_id: params.ticketTypeId,
             quantity: params.quantity,
             ...(params.promoCode ? { promo_code: params.promoCode } : {}),
+            ...(promoterCode ? { promoter_code: promoterCode } : {}),
           },
           headers: { Authorization: `Bearer ${token}` },
         },
@@ -204,6 +296,9 @@ export const ticketsApi = {
     error?: string;
   }> {
     try {
+      // Promoter attribution (WS-4) — same pending-ref read as the
+      // authed path; guests arriving from tracked links attribute too.
+      const promoterCode = getPendingPromoterRef(params.eventId);
       const { data, error } = await supabase.functions.invoke(
         "ticket-checkout",
         {
@@ -214,6 +309,7 @@ export const ticketsApi = {
             guest_email: params.guestEmail,
             ...(params.guestName ? { guest_name: params.guestName } : {}),
             ...(params.promoCode ? { promo_code: params.promoCode } : {}),
+            ...(promoterCode ? { promoter_code: promoterCode } : {}),
           },
           // No Authorization header — the server only checks for it
           // when guest_email is missing, so this routes to the guest
@@ -230,17 +326,15 @@ export const ticketsApi = {
   },
 
   /**
-   * Scan/validate a ticket by QR token (organizer)
+   * Scan/validate a ticket OR add-on by QR token (organizer / door staff).
+   * The server resolves which rail the token belongs to and redeems it
+   * atomically (redeem_ticket / redeem_addon CAS).
    */
   async scanTicket(
     qrToken: string,
     scannedBy?: string,
     eventId?: string,
-  ): Promise<{
-    valid: boolean;
-    reason?: string;
-    ticket?: any;
-  }> {
+  ): Promise<ScanTicketResponse> {
     try {
       // ticket-scan now requires a Better Auth session (host-only). Without
       // this header it returns 401 and scans silently fail.
@@ -305,12 +399,16 @@ export const ticketsApi = {
 
   /**
    * Download the active QR tokens for an event so the host can
-   * validate scans offline.
+   * validate scans offline. Also seeds the offline store's add-on token
+   * allowlist (order_addons redeemable tokens) when the server sends it,
+   * so add-on scans queue with the right kind while offline — the return
+   * type stays ticket-tokens-only for existing callers.
    */
   async downloadOfflineTokens(eventId: string): Promise<string[]> {
     const { data, error } = await invokeEdge<{
       ok: boolean;
       qr_tokens: string[];
+      addon_qr_tokens?: string[];
     }>("get-event-tickets", {
       event_id: parseInt(eventId),
       offline: true,
@@ -319,15 +417,40 @@ export const ticketsApi = {
       console.error("[Tickets] downloadOfflineTokens error:", error.message);
       return [];
     }
-    return data?.ok ? (data.qr_tokens ?? []).filter(Boolean) : [];
+    if (!data?.ok) return [];
+    const addonTokens = (data.addon_qr_tokens ?? []).filter(Boolean);
+    try {
+      // Lazy import mirrors the store→api dynamic import and avoids a
+      // static cycle (the store lazy-imports this module for auto-drain).
+      const { useOfflineCheckinStore } = await import(
+        "@dvnt/app/lib/stores/offline-checkin-store"
+      );
+      useOfflineCheckinStore
+        .getState()
+        .setAddonTokensForEvent(eventId, addonTokens);
+    } catch (e) {
+      console.warn("[Tickets] offline addon-token seed failed:", e);
+    }
+    return (data.qr_tokens ?? []).filter(Boolean);
   },
 
   /**
    * Sync offline scans back to the server.
-   * Calls ticket-scan edge function for each pending scan.
+   * Calls ticket-scan edge function for each pending scan — the server
+   * routes each token through the same redeem_ticket / redeem_addon CAS
+   * used for live scans (p_offline := true via offline_scanned_at), so
+   * the server always wins on double-scan and audit rows carry offline
+   * provenance. `kind` is the store's discriminator; the server
+   * re-resolves the rail from the token itself.
    */
   async syncOfflineScans(
-    scans: { qrToken: string; scannedAt: string; scannedBy?: string }[],
+    scans: {
+      qrToken: string;
+      scannedAt: string;
+      scannedBy?: string;
+      eventId?: string;
+      kind?: "ticket" | "addon";
+    }[],
   ): Promise<{ synced: string[]; failed: string[] }> {
     const synced: string[] = [];
     const failed: string[] = [];
@@ -347,6 +470,7 @@ export const ticketsApi = {
             qr_token: scan.qrToken,
             scanned_by: scan.scannedBy,
             offline_scanned_at: scan.scannedAt,
+            ...(scan.eventId ? { event_id: scan.eventId } : {}),
           },
           headers: {
             Authorization: `Bearer ${token}`,

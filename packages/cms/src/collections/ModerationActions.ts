@@ -15,6 +15,8 @@ export const ModerationActions: CollectionConfig = {
     delete: () => false, // immutable
   },
   admin: {
+    group: 'Moderation',
+    description: 'Audit log of moderation decisions.',
     useAsTitle: 'action',
     defaultColumns: ['member', 'action', 'previousStatus', 'actor', 'createdAt'],
   },

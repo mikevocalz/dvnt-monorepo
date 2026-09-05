@@ -14,11 +14,11 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
 import { formatEventDate } from "@dvnt/app/lib/api/events";
 
-const TICKET_TYPES_KEY = (id: string) =>
-  ["tickets", "types", id] as const;
+const TICKET_TYPES_KEY = (id: string) => ["tickets", "types", id] as const;
 
 export function useEventRealtime(eventId: string | undefined): void {
   const queryClient = useQueryClient();
@@ -29,8 +29,7 @@ export function useEventRealtime(eventId: string | undefined): void {
     if (!Number.isFinite(evIdInt)) return;
 
     const channelId = `event-rt:${eventId}:${Date.now()}`;
-    const channel = supabase
-      .channel(channelId)
+    const channel = freshChannel(channelId)
       .on(
         "postgres_changes",
         {
@@ -154,8 +153,7 @@ export function useEventsFeedRealtime(enabled = true): void {
     if (!enabled) return;
 
     const channelId = `events-feed-rt:${Date.now()}`;
-    const channel = supabase
-      .channel(channelId)
+    const channel = freshChannel(channelId)
       .on(
         "postgres_changes",
         {
@@ -250,11 +248,10 @@ export function useEventsFeedRealtime(enabled = true): void {
                   doorPolicy: next.door_policy ?? e.doorPolicy,
                   lineup: next.lineup ?? e.lineup,
                   perks: next.perks ?? e.perks,
-                  youtubeVideoUrl:
-                    next.youtube_video_url ?? e.youtubeVideoUrl,
+                  youtubeVideoUrl: next.youtube_video_url ?? e.youtubeVideoUrl,
                   // Derived display fields (event.date is a day number,
                   // event.month is "JUN", event.time is "8:00 PM" —
-                  // see CLAUDE.md ⚠️ Events date warning). Without these
+                  // see docs/engineering-contract.md ⚠️ Events date warning). Without these
                   // the card badge keeps the old day after a date edit.
                   ...(dateParts
                     ? {

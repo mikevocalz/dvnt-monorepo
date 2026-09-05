@@ -7,5 +7,11 @@
   "include": [
     "src/**/*",
     "nativewind-env.d.ts"
+  ],
+  // Tests run on `node --test` with Node's own type stripping. Typechecking
+  // them here would need "types": ["node"], which retypes every ambient
+  // setTimeout in a DOM-targeting package and breaks unrelated .web files.
+  "exclude": [
+    "**/*.test.ts"
   ]
 }

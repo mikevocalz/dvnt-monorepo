@@ -14,6 +14,7 @@
  *
  * Plan → Stripe price id is resolved from env (STRIPE_PRICE_DVNT_VIP, …), with a
  * one-time create-on-demand fallback persisted into membership_plans.stripe_price_id.
+ * Return URLs use PUBLIC_SITE_URL (shared convention) -> dvntapp.live fallback.
  * Webhook is the source of truth for subscription state.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -22,7 +23,7 @@ import { verifySession } from "../_shared/verify-session.ts";
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-const SITE_URL = Deno.env.get("DVNT_WEB_URL") || "http://localhost:3000";
+const SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live").replace(/\/$/, "");
 
 // plan_key → env var holding its Stripe price id (mirrors lib/subscription/plans.ts).
 const PRICE_ENV: Record<string, string> = {
@@ -45,7 +46,11 @@ const FAMILY: Record<string, "sneaky_lynk" | "dvnt_membership"> = {
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  // The web client (pricing page + settings/membership) sends the Better Auth
+  // session in x-auth-token and the anon key in apikey/Authorization; all must
+  // be in the preflight allow-list or the browser blocks the POST.
+  "Access-Control-Allow-Headers":
+    "Content-Type, Authorization, x-auth-token, apikey, x-client-info",
 };
 
 function json(data: unknown, status = 200) {
@@ -213,8 +218,8 @@ Deno.serve(async (req: Request) => {
       customer: stripeCustomerId,
       "line_items[0][price]": priceId,
       "line_items[0][quantity]": "1",
-      success_url: `${SITE_URL}/pricing?checkout=success`,
-      cancel_url: `${SITE_URL}/pricing?checkout=cancelled`,
+      success_url: `${SITE_URL}/settings/membership?checkout=success`,
+      cancel_url: `${SITE_URL}/settings/membership?checkout=cancelled`,
       "subscription_data[metadata][plan_key]": plan_key,
       "subscription_data[metadata][product_family]": family,
       "subscription_data[metadata][dvnt_user_id]": user_id,

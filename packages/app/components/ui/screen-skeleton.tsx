@@ -1,5 +1,6 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import { View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import { Skeleton, SkeletonCircle, SkeletonText } from "./skeleton";
 
 type ScreenSkeletonVariant = "list" | "grid" | "detail" | "form";

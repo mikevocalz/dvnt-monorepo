@@ -1,5 +1,19 @@
 'use client';
 import { WebAppShell } from '@dvnt/app/components/web-app-shell';
+import { PwaInstallPrompt } from '@dvnt/app/components/pwa-install.web';
+import { IncomingCallOverlay } from '@dvnt/app/features/call/ui/incoming-call-overlay.web';
+import { useEffect } from 'react';
+import { registerWebPushIfGranted } from '@dvnt/app/lib/web-push';
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
-  return <WebAppShell>{children}</WebAppShell>;
+  // Web push: silently (re)subscribe when permission was already granted.
+  useEffect(() => {
+    void registerWebPushIfGranted();
+  }, []);
+  return (
+    <WebAppShell>
+      {children}
+      <PwaInstallPrompt />
+      <IncomingCallOverlay />
+    </WebAppShell>
+  );
 }

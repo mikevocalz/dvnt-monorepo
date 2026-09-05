@@ -117,6 +117,7 @@ covers `useBookmarks`+`usePostsByIds`). Next: **Phase 3 — events/commerce**.
 |---|---|---|
 | ~~`post/post-detail.web`~~ | ~~P2~~ | **PAID DOWN** — delete/tags/translation/likes-sheet/bookmarks/text-slides all wired; passes parity with no allowance |
 | `events/events-list.web` | P3 events | `useForYouEvents`, `useToggleEventLike`, `usePromotedEventIds` |
+| `events/event-detail.web` | WS-9 lifecycle | `create-event-store`/`useCreateEventStore` — native detail gained "Duplicate event" (prefills the create flow); web fork's action menu adopts cancel/postpone/duplicate when the events-premium web lane lands |
 | `events/event-detail.web` | P3 events | tickets (`use-tickets`/`useTicketTypes`/`useTicketCheckout`/`useTicketUpgradeOptions`/`useInitiateUpgrade`/`useMyTicketForEvent`/`ticket-store`), waitlist (`useEventWaitlistStatus`/`useJoinWaitlist`/`useLeaveWaitlist`), `useToggleEventLike`, `useCreateEventReview`, `promotion-store`, `translation-store`/`useContentTranslation` |
 
 ## Web translations still owed (108) — priority order (Law: highest-traffic edit/forms first)

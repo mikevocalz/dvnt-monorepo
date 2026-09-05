@@ -13,7 +13,12 @@ export default function PublicTabsLayout() {
 
   return (
     <View style={{ flex: 1 }}>
-      <NativeTabs minimizeBehavior="never">
+      <NativeTabs
+      minimizeBehavior="never"
+      backgroundColor="#000"
+      blurEffect="systemChromeMaterialDark"
+      tintColor="#FFFFFF"
+    >
         <NativeTabs.Trigger name="index">
           <NativeTabs.Trigger.Icon
             sf={{ default: "house", selected: "house.fill" }}

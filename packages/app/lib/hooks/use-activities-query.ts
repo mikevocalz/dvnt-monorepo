@@ -21,6 +21,8 @@ import {
 } from "@dvnt/app/lib/api/notifications";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
+import { postKeys, profileKeys, activityKeys } from "@dvnt/app/lib/query-keys";
+export { activityKeys };
 
 // Re-export Activity type so consumers don't need the store import
 export type ActivityType =
@@ -65,6 +67,10 @@ export interface Activity {
   event?: {
     id: string;
     title?: string;
+    /** Event artwork. Carried for surfaces that draw the event, e.g. the watch. */
+    imageURL?: string;
+    /** Raw `events.dominant_color`; normalize before handing to a renderer. */
+    dominantHex?: string;
   };
   comment?: string;
   commentId?: string;
@@ -98,11 +104,6 @@ export interface LikedActivity {
 }
 
 // Query keys
-export const activityKeys = {
-  all: ["activities"] as const,
-  list: (viewerId: string) => ["activities", viewerId] as const,
-  liked: (viewerId: string) => ["activities", viewerId, "liked"] as const,
-};
 
 /**
  * Transform a backend Notification into an Activity.
@@ -150,6 +151,8 @@ function notificationToActivity(notif: Notification): Activity | null {
         ? {
             id: String(notif.event.id || ""),
             title: notif.event.title,
+            imageURL: notif.event.imageURL,
+            dominantHex: notif.event.dominantHex,
           }
         : undefined,
       comment: notif.content,

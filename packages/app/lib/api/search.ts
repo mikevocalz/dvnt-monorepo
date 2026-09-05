@@ -1,6 +1,7 @@
 import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import { transformPost } from "@dvnt/app/lib/api/posts";
+import { withoutSuppressedAuthors } from "./feed-suppression";
 
 const SEARCH_POST_SELECT = `
   ${DB.posts.id},
@@ -68,18 +69,22 @@ export const searchApi = {
 
       const [{ data: contentMatches, error: contentError }, { data: slideRows, error: slideError }] =
         await Promise.all([
-          supabase
-            .from(DB.posts.table)
-            .select(SEARCH_POST_SELECT)
-            .ilike(DB.posts.content, searchPattern)
-            .eq(DB.posts.visibility, "public")
-            .eq(DB.posts.isNsfw, false)
+          withoutSuppressedAuthors(
+            supabase
+              .from(DB.posts.table)
+              .select(SEARCH_POST_SELECT)
+              .ilike(DB.posts.content, searchPattern)
+              .eq(DB.posts.visibility, "public")
+              .eq(DB.posts.isNsfw, false),
+            DB.posts.authorId,
+          )
             .order(DB.posts.createdAt, { ascending: false })
             .limit(limit * 2),
-          supabase
-            .from(DB.postTextSlides.table)
-            .select(
-              `
+          withoutSuppressedAuthors(
+            supabase
+              .from(DB.postTextSlides.table)
+              .select(
+                `
               ${DB.postTextSlides.postId},
               post:posts!inner(
                 ${DB.posts.id},
@@ -87,11 +92,12 @@ export const searchApi = {
                 ${DB.posts.isNsfw}
               )
             `,
-            )
-            .ilike(DB.postTextSlides.content, searchPattern)
-            .eq("post.visibility", "public")
-            .eq("post.is_nsfw", false)
-            .limit(limit * 4),
+              )
+              .ilike(DB.postTextSlides.content, searchPattern)
+              .eq("post.visibility", "public")
+              .eq("post.is_nsfw", false),
+            "post.author_id",
+          ).limit(limit * 4),
         ]);
 
       if (contentError) throw contentError;
@@ -193,12 +199,15 @@ export const searchApi = {
         return { docs: [], totalDocs: 0 };
       }
 
-      const { data, error, count } = await supabase
-        .from(DB.posts.table)
-        .select(SEARCH_POST_SELECT, { count: "exact" })
-        .ilike(DB.posts.location, `%${normalizedQuery}%`)
-        .eq(DB.posts.visibility, "public")
-        .eq(DB.posts.isNsfw, false)
+      const { data, error, count } = await withoutSuppressedAuthors(
+        supabase
+          .from(DB.posts.table)
+          .select(SEARCH_POST_SELECT, { count: "exact" })
+          .ilike(DB.posts.location, `%${normalizedQuery}%`)
+          .eq(DB.posts.visibility, "public")
+          .eq(DB.posts.isNsfw, false),
+        DB.posts.authorId,
+      )
         .order(DB.posts.createdAt, { ascending: false })
         .limit(limit);
 

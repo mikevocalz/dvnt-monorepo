@@ -341,4 +341,8 @@ export interface AppUser {
   followingCount: number;
   gender?: string;
   pronouns?: string;
+  /** "I am…" identity tags from onboarding (private filter data). */
+  sexuality?: string[];
+  /** "Looking for events w/…" audience preference from onboarding. */
+  eventAudience?: string;
 }

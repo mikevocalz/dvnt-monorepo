@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -6,7 +7,7 @@ const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -43,25 +44,15 @@ Deno.serve(async (req) => {
     });
 
     let viewerUserId: number | null = null;
-    const authHeader = req.headers.get("Authorization");
-    if (authHeader?.startsWith("Bearer ")) {
-      const token = authHeader.replace("Bearer ", "").trim();
-      if (token) {
-        const { data: sessionData } = await supabaseAdmin
-          .from("session")
-          .select("userId, expiresAt")
-          .eq("token", token)
-          .maybeSingle();
-
-        if (sessionData && new Date(sessionData.expiresAt) >= new Date()) {
-          const { data: userRow } = await supabaseAdmin
-            .from("users")
-            .select("id")
-            .eq("auth_id", sessionData.userId)
-            .maybeSingle();
-          viewerUserId = userRow?.id ?? null;
-        }
-      }
+    // Optional viewer auth via shared helper (failure = anonymous, not an error)
+    const viewerAuthId = await verifySession(supabaseAdmin, req);
+    if (viewerAuthId) {
+      const { data: userRow } = await supabaseAdmin
+        .from("users")
+        .select("id")
+        .eq("auth_id", viewerAuthId)
+        .maybeSingle();
+      viewerUserId = userRow?.id ?? null;
     }
 
     const body = await req.json().catch(() => null);

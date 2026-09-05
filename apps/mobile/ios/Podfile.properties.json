@@ -3,9 +3,11 @@
   "EX_DEV_CLIENT_NETWORK_INSPECTOR": "true",
   "ios.deploymentTarget": "17.0",
   "expo.inlineModules.watchedDirectories": "[]",
+  "expo.inlineModules.xcodeProjectTargets": "{\"mainTarget\":\"DVNT\",\"targets\":[]}",
+  "ios.useFrameworks": "dynamic",
   "ios.forceStaticLinking": "[]",
   "apple.privacyManifestAggregationEnabled": "true",
   "ios.buildReactNativeFromSource": "true",
-  "EXPO_USE_PRECOMPILED_MODULES": "true",
+  "EXPO_USE_PRECOMPILED_MODULES": "false",
   "expo-image.disable-libdav1d": "false"
 }

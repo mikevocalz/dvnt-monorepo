@@ -4,7 +4,6 @@ import { default as default_1a14ef5d8c2bad13ca2191e1bfe7dca9 } from '@dvnt/cms/c
 import { RscEntryLexicalCell as RscEntryLexicalCell_44fe37237e0ebf4470c9990d8cb7b07e } from '@payloadcms/richtext-lexical/rsc'
 import { RscEntryLexicalField as RscEntryLexicalField_44fe37237e0ebf4470c9990d8cb7b07e } from '@payloadcms/richtext-lexical/rsc'
 import { LexicalDiffComponent as LexicalDiffComponent_44fe37237e0ebf4470c9990d8cb7b07e } from '@payloadcms/richtext-lexical/rsc'
-import { ClientEntryLexicalField as ClientEntryLexicalField_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { BlocksFeatureClient as BlocksFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { HorizontalRuleFeatureClient as HorizontalRuleFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { InlineCodeFeatureClient as InlineCodeFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
@@ -28,12 +27,18 @@ import { BoldFeatureClient as BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864
 import { ItalicFeatureClient as ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { default as default_0ccfca3c4dc527a80f5674d21fdb9861 } from '@dvnt/cms/components/Icon'
 import { default as default_e6ec51973242ecc02deba9d3e1f63635 } from '@dvnt/cms/components/Logo'
-import { default as default_20f08b10c0dae90cd957cf30d87bff98 } from '@dvnt/cms/components/BackToConsole'
+import { default as default_ce66db0d635f062c1393c5ec9a235b74 } from '@dvnt/cms/components/ObservabilityNavLink'
 import { default as default_8927304619b103ad9825942558eb3b2b } from '@dvnt/cms/components/KeepNavInteractive'
 import { default as default_bd2eb919a0ef345761afe56bded2090b } from '@dvnt/cms/components/SyncFromApp'
 import { default as default_1ee0f43f5fc02685c2849a5e4ca0319c } from '@dvnt/cms/components/BeforeLogin'
-import { S3ClientUploadHandler as S3ClientUploadHandler_f97aa6c64367fa259c5bc0567239ef24 } from '@payloadcms/storage-s3/client'
+import { default as default_32df30e218d15c2d874f3dcd46aed307 } from '@/dashboard/ConsoleHome'
+import { default as default_d1ea9e0ca107cfedc21644451d39a01b } from '@dvnt/cms/components/ObservabilityView'
 import { CollectionCards as CollectionCards_ab83ff7e88da8d3530831f296ec4756a } from '@payloadcms/ui/rsc'
+import { CollectionQueryWidget as CollectionQueryWidget_ab83ff7e88da8d3530831f296ec4756a } from '@payloadcms/ui/rsc'
+import { QueryPresetsWhereField as QueryPresetsWhereField_3817bf644402e67bfe6577f60ef982de } from '@payloadcms/ui'
+import { CollectionQuerySortField as CollectionQuerySortField_3817bf644402e67bfe6577f60ef982de } from '@payloadcms/ui'
+import { RecentlyViewedWidget as RecentlyViewedWidget_ab83ff7e88da8d3530831f296ec4756a } from '@payloadcms/ui/rsc'
+import { RecentlyViewedCollectionsField as RecentlyViewedCollectionsField_3817bf644402e67bfe6577f60ef982de } from '@payloadcms/ui'
 
 /** @type import('payload').ImportMap */
 export const importMap = {
@@ -43,7 +48,6 @@ export const importMap = {
   "@payloadcms/richtext-lexical/rsc#RscEntryLexicalCell": RscEntryLexicalCell_44fe37237e0ebf4470c9990d8cb7b07e,
   "@payloadcms/richtext-lexical/rsc#RscEntryLexicalField": RscEntryLexicalField_44fe37237e0ebf4470c9990d8cb7b07e,
   "@payloadcms/richtext-lexical/rsc#LexicalDiffComponent": LexicalDiffComponent_44fe37237e0ebf4470c9990d8cb7b07e,
-  "@payloadcms/richtext-lexical/client#ClientEntryLexicalField": ClientEntryLexicalField_e70f5e05f09f93e00b997edb1ef0c864,
   "@payloadcms/richtext-lexical/client#BlocksFeatureClient": BlocksFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@payloadcms/richtext-lexical/client#HorizontalRuleFeatureClient": HorizontalRuleFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@payloadcms/richtext-lexical/client#InlineCodeFeatureClient": InlineCodeFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
@@ -67,10 +71,16 @@ export const importMap = {
   "@payloadcms/richtext-lexical/client#ItalicFeatureClient": ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@dvnt/cms/components/Icon#default": default_0ccfca3c4dc527a80f5674d21fdb9861,
   "@dvnt/cms/components/Logo#default": default_e6ec51973242ecc02deba9d3e1f63635,
-  "@dvnt/cms/components/BackToConsole#default": default_20f08b10c0dae90cd957cf30d87bff98,
+  "@dvnt/cms/components/ObservabilityNavLink#default": default_ce66db0d635f062c1393c5ec9a235b74,
   "@dvnt/cms/components/KeepNavInteractive#default": default_8927304619b103ad9825942558eb3b2b,
   "@dvnt/cms/components/SyncFromApp#default": default_bd2eb919a0ef345761afe56bded2090b,
   "@dvnt/cms/components/BeforeLogin#default": default_1ee0f43f5fc02685c2849a5e4ca0319c,
-  "@payloadcms/storage-s3/client#S3ClientUploadHandler": S3ClientUploadHandler_f97aa6c64367fa259c5bc0567239ef24,
-  "@payloadcms/ui/rsc#CollectionCards": CollectionCards_ab83ff7e88da8d3530831f296ec4756a
+  "@/dashboard/ConsoleHome#default": default_32df30e218d15c2d874f3dcd46aed307,
+  "@dvnt/cms/components/ObservabilityView#default": default_d1ea9e0ca107cfedc21644451d39a01b,
+  "@payloadcms/ui/rsc#CollectionCards": CollectionCards_ab83ff7e88da8d3530831f296ec4756a,
+  "@payloadcms/ui/rsc#CollectionQueryWidget": CollectionQueryWidget_ab83ff7e88da8d3530831f296ec4756a,
+  "@payloadcms/ui#QueryPresetsWhereField": QueryPresetsWhereField_3817bf644402e67bfe6577f60ef982de,
+  "@payloadcms/ui#CollectionQuerySortField": CollectionQuerySortField_3817bf644402e67bfe6577f60ef982de,
+  "@payloadcms/ui/rsc#RecentlyViewedWidget": RecentlyViewedWidget_ab83ff7e88da8d3530831f296ec4756a,
+  "@payloadcms/ui#RecentlyViewedCollectionsField": RecentlyViewedCollectionsField_3817bf644402e67bfe6577f60ef982de
 }

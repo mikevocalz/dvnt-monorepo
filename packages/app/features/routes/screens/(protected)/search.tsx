@@ -6,10 +6,11 @@ import {
   ScrollView,
   Dimensions,
 } from "react-native";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Link, useRouter, useLocalSearchParams } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "expo-router";
 import {
   ArrowLeft,
   Search,
@@ -40,15 +41,26 @@ import {
   LocationAutocompleteInstagram,
   type LocationData,
 } from "@dvnt/app/components/ui/location-autocomplete-instagram";
-import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
+import { TextPostSurface } from "@dvnt/app/features/post";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import { prefetchImagesBlocking } from "@dvnt/app/lib/perf/image-prefetch";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const columnWidth = (SCREEN_WIDTH - 8) / 3;
-const GRID_COLS = SCREEN_WIDTH >= 768 ? 5 : 4;
+/**
+ * Explore's grid used to be computed HERE, at module scope, from
+ * `Dimensions.get("window")` — evaluated once when the bundle loads and never
+ * again. Launch in portrait, rotate to landscape, and the cells were still
+ * sized for the old width while the list drew the old column count: the
+ * jumbled Explore grid. There is no correct module-scope version of this;
+ * it has to be read per-render, so it now lives in `useResponsiveGrid`.
+ */
 const GRID_GAP = 2;
-const GRID_CELL_SIZE = (SCREEN_WIDTH - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
+/** Explore + Discover breathing room, per side. */
+const EXPLORE_PADDING = 6;
+/** Smallest Explore tile still worth tapping. */
+const MIN_TILE = 110;
+/** Smallest avatar/preview cell in the Discover rails. */
+const MIN_DISCOVER_TILE = 120;
 
 function getSearchPreviewUrls(posts: Post[]) {
   return posts
@@ -267,18 +279,32 @@ function DiscoverGrid({
   posts: Post[];
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
+  // 6px each side, and the SAME number is subtracted from the available width
+  // below — when the container had padding the maths did not know about, each
+  // cell came out too wide and the tiles overlapped, which is why they sat on
+  // top of one another.
+  const { columns: gridCols, cellWidth: gridCellSize } = useResponsiveGrid({
+    minCellWidth: MIN_TILE,
+    gap: GRID_GAP,
+    horizontalPadding: EXPLORE_PADDING * 2,
+    // A designed maximum, not just whatever fits: past this the tiles get
+    // small enough that the wall stops reading as individual posts.
+    maxColumnsPortrait: 4,
+    maxColumnsLandscape: 5,
+    maxColumns: 5,
+  });
   const renderItem = useCallback(
     ({ item }: { item: Post }) => {
       return (
         <PostGridTile
           post={item}
-          size={GRID_CELL_SIZE}
+          size={gridCellSize}
           router={router}
           queryClient={queryClient}
         />
       );
     },
-    [queryClient, router],
+    [queryClient, router, gridCellSize],
   );
 
   if (posts.length === 0) return null;
@@ -290,7 +316,7 @@ function DiscoverGrid({
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
-          paddingHorizontal: 16,
+          paddingHorizontal: EXPLORE_PADDING,
           marginBottom: 12,
         }}
       >
@@ -309,8 +335,12 @@ function DiscoverGrid({
         data={posts}
         renderItem={renderItem}
         keyExtractor={(item: Post) => item.id}
-        numColumns={GRID_COLS}
-        estimatedItemSize={GRID_CELL_SIZE}
+        numColumns={gridCols}
+        estimatedItemSize={gridCellSize}
+        // Remount the list when the column count changes: LegendList caches
+        // cell geometry per column count, so rotating without this keeps the
+        // old lanes and overlaps the new ones.
+        key={`explore-${gridCols}`}
         recycleItems
         columnWrapperStyle={{ gap: GRID_GAP }}
         contentContainerStyle={{ gap: GRID_GAP }}
@@ -321,6 +351,13 @@ function DiscoverGrid({
 }
 
 function SearchScreenContent() {
+  // The Discover rails' cells, reactive for the same reason as Explore above.
+  const { cellWidth: columnWidth } = useResponsiveGrid({
+    minCellWidth: MIN_DISCOVER_TILE,
+    gap: 4,
+    horizontalPadding: 8,
+    maxColumns: 8,
+  });
   const router = useRouter();
   const queryClient = useQueryClient();
   const navigation = useNavigation();
@@ -531,12 +568,16 @@ function SearchScreenContent() {
 
   return (
     <View
-      className="flex-1 bg-background max-w-3xl w-full self-center"
+      // Full width, NOT SCREEN_SHELL. That shell is a reading column
+      // (max-w-4xl, centred) which is right for text screens and wrong here:
+      // Explore is a media wall, and capping it was what put the tablet's
+      // extra width into gutters instead of into tiles.
+      className="flex-1 bg-background w-full"
       style={{ paddingTop: insets.top }}
     >
       {/* Header */}
       <View
-        className="flex-row items-center gap-3 border-b border-border px-4 py-3"
+        className="flex-row items-center justify-center gap-3 border-b border-border px-4 py-3"
         style={{ zIndex: 20, elevation: 20 }}
       >
         <Pressable
@@ -547,7 +588,10 @@ function SearchScreenContent() {
         >
           <ArrowLeft size={24} color="#fff" />
         </Pressable>
-        <View className="flex-1">
+        {/* Capped, not `flex-1`: at full tablet width an unconstrained field
+            stretched the entire header and left the location button marooned
+            at the far edge. */}
+        <View className="flex-1 max-w-xl">
           {searchMode === "content" ? (
             <View className="flex-row items-center bg-secondary rounded-xl px-3">
               <Search size={20} color="#999" />

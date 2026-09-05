@@ -30,7 +30,6 @@ import {
   User,
   Plus,
 } from "lucide-react";
-import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import Logo from "@dvnt/app/components/logo";
 import { WebTabBar } from "./web-tab-bar.web";
 import { WebTopBar } from "./web-top-bar.web";
@@ -78,7 +77,6 @@ export function AppShell({
   const { width } = useWindowDimensions();
   const router = useRouter();
   const pathname = usePathname() ?? "/";
-  const username = useAuthStore((s) => s.user?.username);
 
   // Phones get a sticky DVNT header + bottom tab bar; desktop gets the rail.
   // CRITICAL: render ONE tree across the 768px breakpoint with {children} always
@@ -102,7 +100,11 @@ export function AppShell({
     { href: "/notifications", Icon: Heart, label: "Activity" },
     { href: "/feed/messages", Icon: MessageCircle, label: "Messages" },
     {
-      href: username ? `/profile/${username}` : "/profile",
+      // Own profile route directly — ProfileScreen. Going via
+      // /profile/{username} loaded the OTHER-user UserProfileScreen first,
+      // which then router.replace'd to /feed/profile: a two-URL, two-page
+      // flicker on every Profile tap.
+      href: "/feed/profile",
       Icon: User,
       label: "Profile",
     },

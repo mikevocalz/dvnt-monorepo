@@ -10,9 +10,15 @@
  *
  * This eliminates the N-query waterfall on the feed screen.
  * Client falls back to individual queries if this fails.
+ *
+ * Identity is derived from the verified Better Auth session (x-auth-token /
+ * Authorization header) — never from the request body. Callers without a
+ * valid session get the anonymous public feed with no viewer state.
  */
 
+import { withSentry } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -183,14 +189,14 @@ async function getAuthoritativeUnreadInboxCount(
   return { count: unreadInboxCount, authoritative: true };
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, x-auth-token",
       },
     });
   }
@@ -203,45 +209,33 @@ Deno.serve(async (req: Request) => {
 
   try {
     const {
-      user_id,
       cursor = 0,
       limit = PAGE_SIZE,
       include_nsfw = false,
     } = await req.json();
-
-    if (!user_id) {
-      return new Response(JSON.stringify({ error: "Missing user_id" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } },
     });
 
-    // ── Resolve integer users.id from auth_id UUID ────────────────
-    // user_id from client is AppUser.id = Better Auth UUID, NOT integer
+    // ── Identity comes ONLY from the verified Better Auth session ─
+    // Never from the body — this function reads with the service role, so a
+    // client-supplied id would let anyone read another user's viewer state.
+    // No valid session = anonymous viewer (public safe feed, no viewer data).
+    const sessionUserId = await verifySession(supabase, req);
+
+    // ── Resolve integer users.id from the verified auth_id UUID ──
     let intUserId: number | null = null;
     let authUserId: string | null = null;
-    const asInt = parseInt(user_id, 10);
-    if (!isNaN(asInt) && String(asInt) === String(user_id)) {
+    if (sessionUserId) {
       const { data: userRow } = await supabase
         .from("users")
         .select("id, auth_id")
-        .eq("id", asInt)
-        .single();
-      intUserId = userRow?.id ?? asInt;
-      authUserId = userRow?.auth_id ?? null;
-    } else {
-      const { data: userRow } = await supabase
-        .from("users")
-        .select("id, auth_id")
-        .eq("auth_id", user_id)
+        .eq("auth_id", sessionUserId)
         .single();
       intUserId = userRow?.id ?? null;
-      authUserId = userRow?.auth_id ?? user_id;
+      authUserId = userRow?.auth_id ?? sessionUserId;
     }
 
     const unreadMessagesResult = await getAuthoritativeUnreadInboxCount(
@@ -292,12 +286,24 @@ Deno.serve(async (req: Request) => {
             id, username, first_name, verified,
             avatar:avatar_id(url)
           ),
-          media:posts_media(type, url, "order", mime_type, live_photo_video_url),
+          media:posts_media(type, url, _order, mime_type, live_photo_video_url),
           post_text_slides(id, slide_index, content)
         `,
         { count: "exact" },
       )
       .eq("visibility", "public");
+
+    // Temporary moderation — mirrors packages/app/lib/api/feed-suppression.ts
+    // (Deno can't import it). Self-expires; delete after SUPPRESS_UNTIL.
+    const SUPPRESSED_FEED_AUTHOR_IDS = [30]; // @james_dunn, per Mike 2026-08-08
+    const SUPPRESS_UNTIL = Date.parse("2026-08-29T12:00:00Z");
+    if (Date.now() < SUPPRESS_UNTIL) {
+      postsQuery = postsQuery.not(
+        "author_id",
+        "in",
+        `(${SUPPRESSED_FEED_AUTHOR_IDS.join(",")})`,
+      );
+    }
 
     // Strict spicy contract:
     //   include_nsfw=false → ONLY safe posts (is_nsfw=false OR NULL)
@@ -439,7 +445,7 @@ Deno.serve(async (req: Request) => {
           verified: author?.verified || false,
         },
         media: (p.media || [])
-          .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+          .sort((a: any, b: any) => (a._order || 0) - (b._order || 0))
           .map((m: any) => {
             const rawType: string = m.type || "image";
             const mimeType: string | undefined = m.mime_type || undefined;
@@ -482,7 +488,7 @@ Deno.serve(async (req: Request) => {
     });
 
     // Viewer context
-    const viewerProfile = viewerProfileResult.data;
+    const viewerProfile = viewerProfileResult.data as any;
     const viewerAvatarUrl =
       typeof viewerProfile?.avatar === "object"
         ? viewerProfile?.avatar?.url
@@ -496,7 +502,7 @@ Deno.serve(async (req: Request) => {
       posts: transformedPosts,
       stories,
       viewer: {
-        id: user_id,
+        id: sessionUserId,
         username: viewerProfile?.username || "",
         avatarUrl: viewerAvatarUrl || "",
         unreadMessages: unreadMessagesResult.count || 0,
@@ -526,4 +532,4 @@ Deno.serve(async (req: Request) => {
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
-});
+}));

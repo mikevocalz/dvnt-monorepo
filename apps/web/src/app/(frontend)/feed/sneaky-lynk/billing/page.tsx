@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 
 const SneakyLynkBillingScreen = dynamic(
   () =>
-    import('@dvnt/app/features/sneaky-lynk/billing.web').then(
+    import('@dvnt/app/features/sneaky-lynk/screens/billing.web').then(
       (m) => m.SneakyLynkBillingScreen,
     ),
   { ssr: false },

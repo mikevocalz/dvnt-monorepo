@@ -11,9 +11,12 @@ final class TicketStore: ObservableObject {
 
     @Published private(set) var envelope: WatchTicketEnvelope = .empty
 
-    private var defaults: UserDefaults? { UserDefaults(suiteName: Self.appGroup) }
+    private let defaults: UserDefaults?
 
-    init() { load() }
+    init(defaults: UserDefaults? = UserDefaults(suiteName: "group.com.dvnt.app.watch")) {
+        self.defaults = defaults
+        load()
+    }
 
     /// Tickets grouped by event, sorted soonest-first; valid events float up.
     var groups: [EventGroup] {
@@ -25,6 +28,14 @@ final class TicketStore: ObservableObject {
                 title: first?.eventTitle ?? "Event",
                 date: first?.eventDate.flatMap(Self.parseDate),
                 location: first?.eventLocation,
+                // Artwork is per-event, so any ticket in the group carries it —
+                // but take the first ticket that actually HAS one rather than
+                // `first?`, because a group can mix a freshly-issued row (the
+                // phone's optimistic RSVP record, which has no event join yet)
+                // with a synced one that does. Reading position 0 blindly is
+                // how a card that has art renders blank.
+                dominantHex: tickets.compactMap(\.dominantHex).first,
+                imageURL: tickets.compactMap(\.imageURL).first,
                 // Stable order inside a group: valid first, then by tier label.
                 tickets: tickets.sorted { lhs, rhs in
                     if lhs.status.isPresentable != rhs.status.isPresentable {
@@ -52,6 +63,10 @@ final class TicketStore: ObservableObject {
 
     var isEmpty: Bool { envelope.tickets.isEmpty }
 
+    /// nil until the phone has resolved entitlements at least once. Read-only —
+    /// the watch never resolves, ranks, or expires a plan itself.
+    var membership: WatchMembership? { envelope.membership }
+
     /// Next upcoming valid event — drives the complication countdown.
     var nextEvent: EventGroup? {
         groups.first { $0.hasPresentable }
@@ -66,9 +81,17 @@ final class TicketStore: ObservableObject {
 
     /// Decode an incoming WCSession dictionary (`{"payload": "<json string>"}`)
     /// or raw JSON data.
-    func ingest(json data: Data) {
-        guard let env = try? JSONDecoder().decode(WatchTicketEnvelope.self, from: data) else { return }
+    /// `generation` is the session generation the watch is currently scoped to.
+    /// Tickets were the one domain applied without that check while every other
+    /// envelope compared it, so a protocol-2 snapshot for a previous account
+    /// could repopulate the wrist. Returns whether the envelope was applied.
+    @discardableResult
+    func ingest(json data: Data, generation: String? = nil) -> Bool {
+        guard let env = try? JSONDecoder().decode(WatchTicketEnvelope.self, from: data),
+              env.belongs(toGeneration: generation)
+        else { return false }
         apply(env)
+        return true
     }
 
     // MARK: - Persistence (App Group)
@@ -87,7 +110,10 @@ final class TicketStore: ObservableObject {
 
     // MARK: - Helpers
 
-    static func parseDate(_ iso: String) -> Date? {
+    /// `nonisolated` because it touches no store state and is called from view
+    /// bodies and `RingPhase.of` — inheriting the class's `@MainActor` would make
+    /// every one of those an actor hop, and an error outright under Swift 6.
+    nonisolated static func parseDate(_ iso: String) -> Date? {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let d = f.date(from: iso) { return d }

@@ -53,10 +53,10 @@ import PagerView from "react-native-pager-view";
 import {
   useLynkHistoryStore,
   type LynkRecord,
-} from "@dvnt/app/src/sneaky-lynk/stores/lynk-history-store";
-import { LiveRoomCard } from "@dvnt/app/src/sneaky-lynk/ui/LiveRoomCard";
-import { sneakyLynkApi } from "@dvnt/app/src/sneaky-lynk/api/supabase";
-import { useSneakyLynkCaptureProtection } from "@dvnt/app/src/sneaky-lynk/hooks/useSneakyLynkCaptureProtection";
+} from "@dvnt/app/features/sneaky-lynk";
+import { LiveRoomCard } from "@dvnt/app/features/sneaky-lynk";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
+import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { useFocusEffect } from "expo-router";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useScreenTrace } from "@dvnt/app/lib/perf/screen-trace";
@@ -64,6 +64,7 @@ import { useBootstrapMessages } from "@dvnt/app/lib/hooks/use-bootstrap-messages
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
 import { useChatStore } from "@dvnt/app/lib/stores/chat-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
@@ -464,10 +465,12 @@ function ConversationList({
           tintColor="#3EA4E5"
         />
       }
-      contentContainerStyle={[
-        conversationListStyles.listContent,
-        conversations.length === 0 && conversationListStyles.listContentEmpty,
-      ] as any}
+      contentContainerStyle={
+        [
+          conversationListStyles.listContent,
+          conversations.length === 0 && conversationListStyles.listContentEmpty,
+        ] as any
+      }
       ListEmptyComponent={
         <EmptyState
           icon={emptyIcon}
@@ -1006,8 +1009,7 @@ function MessagesScreenContent() {
     let cancelled = false;
 
     const channelId = `conv-list-${currentUser.id}-${Date.now()}`;
-    const channel = supabase
-      .channel(channelId)
+    const channel = freshChannel(channelId)
       .on(
         "postgres_changes",
         {
@@ -1322,6 +1324,19 @@ function MessagesScreenContent() {
     );
   }
 
+  // A conversation list is a READING column, not a canvas: full-bleed rows on a
+  // landscape tablet put the avatar and the timestamp ~1300pt apart, so the eye
+  // has to travel the whole width to pair a name with its preview. Every
+  // messaging app caps this (Telegram, Fiverr, Peerspace all keep a narrow
+  // list). 720pt is that column; phones are unaffected because they are
+  // narrower than the cap.
+  //
+  // The cap goes on an INNER view on purpose. The outer one keeps its explicit
+  // window dimensions — see the regression guard above, where a flex-only
+  // container collapsed to zero height under the Stack presentation.
+  const INBOX_MAX_WIDTH = 720;
+  const inboxWidth = Math.min(windowWidth, INBOX_MAX_WIDTH);
+
   return (
     <View
       style={{
@@ -1332,6 +1347,7 @@ function MessagesScreenContent() {
         alignSelf: "center",
       }}
     >
+     <View style={{ width: inboxWidth, alignSelf: "center", flex: 1 }}>
       {/* Header */}
       <View className="flex-row items-center justify-between border-b border-border px-4 py-3">
         <Pressable onPress={() => router.back()} hitSlop={12}>
@@ -1475,6 +1491,7 @@ function MessagesScreenContent() {
           <SneakyLynkContent router={router} isActive={activeTab === 2} />
         </View>
       </PagerView>
+     </View>
     </View>
   );
 }

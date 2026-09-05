@@ -17,6 +17,8 @@ function toViewerGroup(s: any): StoryViewerGroup {
       type: (it.type === "video" ? "video" : "image") as "image" | "video",
       url: it.url as string,
       duration: it.duration as number | undefined,
+      storyOverlays: it.storyOverlays,
+      animatedGifOverlays: it.animatedGifOverlays,
     }));
   return { id: String(s.id ?? s.username), username: s.username, avatar: s.avatar, segments };
 }
@@ -41,8 +43,8 @@ export function StoryRouteScreen() {
 
   useEffect(() => {
     if (!stories || !id) return;
+    // Own story included — /feed/story/[id] must open your own fresh post too.
     const groups = (stories as any[])
-      .filter((s) => !s.isYou)
       .map(toViewerGroup)
       .filter((g) => g.segments.length > 0);
     const idx = groups.findIndex((g) => g.id === id);

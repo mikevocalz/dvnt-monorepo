@@ -10,11 +10,11 @@ export const events = [
     image:
       "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&h=1000&fit=crop",
     attendees: [
-      { image: "https://i.pravatar.cc/150?img=5", name: "Sarah" },
-      { image: "https://i.pravatar.cc/150?img=9", name: "Maria" },
+      { image: "/dvnt-email-glyph.png", name: "Sarah" },
+      { image: "/dvnt-email-glyph.png", name: "Maria" },
       { name: "JD", initials: "JD" },
-      { image: "https://i.pravatar.cc/150?img=10", name: "Emma" },
-      { image: "https://i.pravatar.cc/150?img=12", name: "John" },
+      { image: "/dvnt-email-glyph.png", name: "Emma" },
+      { image: "/dvnt-email-glyph.png", name: "John" },
     ],
     totalAttendees: 127,
     likes: 1100,
@@ -31,11 +31,11 @@ export const events = [
     image:
       "https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=800&h=1000&fit=crop",
     attendees: [
-      { image: "https://i.pravatar.cc/150?img=10", name: "Emma" },
+      { image: "/dvnt-email-glyph.png", name: "Emma" },
       { name: "MK", initials: "MK" },
-      { image: "https://i.pravatar.cc/150?img=12", name: "John" },
-      { image: "https://i.pravatar.cc/150?img=16", name: "Alex" },
-      { image: "https://i.pravatar.cc/150?img=20", name: "Lisa" },
+      { image: "/dvnt-email-glyph.png", name: "John" },
+      { image: "/dvnt-email-glyph.png", name: "Alex" },
+      { image: "/dvnt-email-glyph.png", name: "Lisa" },
     ],
     totalAttendees: 89,
     likes: 850,
@@ -52,10 +52,10 @@ export const events = [
     image:
       "https://images.unsplash.com/photo-1551632436-cbf8dd35adfa?w=800&h=1000&fit=crop",
     attendees: [
-      { image: "https://i.pravatar.cc/150?img=16", name: "Alex" },
-      { image: "https://i.pravatar.cc/150?img=20", name: "Lisa" },
+      { image: "/dvnt-email-glyph.png", name: "Alex" },
+      { image: "/dvnt-email-glyph.png", name: "Lisa" },
       { name: "TC", initials: "TC" },
-      { image: "https://i.pravatar.cc/150?img=5", name: "Sarah" },
+      { image: "/dvnt-email-glyph.png", name: "Sarah" },
       { name: "RS", initials: "RS" },
     ],
     totalAttendees: 156,
@@ -74,10 +74,10 @@ export const events = [
       "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800&h=1000&fit=crop",
     attendees: [
       { name: "RS", initials: "RS" },
-      { image: "https://i.pravatar.cc/150?img=5", name: "Sarah" },
+      { image: "/dvnt-email-glyph.png", name: "Sarah" },
       { name: "PK", initials: "PK" },
-      { image: "https://i.pravatar.cc/150?img=9", name: "Maria" },
-      { image: "https://i.pravatar.cc/150?img=12", name: "John" },
+      { image: "/dvnt-email-glyph.png", name: "Maria" },
+      { image: "/dvnt-email-glyph.png", name: "John" },
     ],
     totalAttendees: 203,
     likes: 1600,
@@ -94,10 +94,10 @@ export const events = [
     image:
       "https://images.unsplash.com/photo-1585699324551-f6c309eedeca?w=800&h=1000&fit=crop",
     attendees: [
-      { image: "https://i.pravatar.cc/150?img=10", name: "Emma" },
-      { image: "https://i.pravatar.cc/150?img=12", name: "John" },
+      { image: "/dvnt-email-glyph.png", name: "Emma" },
+      { image: "/dvnt-email-glyph.png", name: "John" },
       { name: "AZ", initials: "AZ" },
-      { image: "https://i.pravatar.cc/150?img=16", name: "Alex" },
+      { image: "/dvnt-email-glyph.png", name: "Alex" },
       { name: "GH", initials: "GH" },
     ],
     totalAttendees: 178,
@@ -115,10 +115,10 @@ export const events = [
     image:
       "https://images.unsplash.com/photo-1531243269054-5ebf6f34081e?w=800&h=1000&fit=crop",
     attendees: [
-      { image: "https://i.pravatar.cc/150?img=9", name: "Maria" },
+      { image: "/dvnt-email-glyph.png", name: "Maria" },
       { name: "GH", initials: "GH" },
-      { image: "https://i.pravatar.cc/150?img=16", name: "Alex" },
-      { image: "https://i.pravatar.cc/150?img=20", name: "Lisa" },
+      { image: "/dvnt-email-glyph.png", name: "Alex" },
+      { image: "/dvnt-email-glyph.png", name: "Lisa" },
       { name: "TC", initials: "TC" },
     ],
     totalAttendees: 94,

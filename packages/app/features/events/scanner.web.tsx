@@ -41,6 +41,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { QrScanner } from "@dvnt/ui";
+import type { ScanAddonSummary } from "@dvnt/app/lib/api/tickets";
 import { useScanTicket } from "@dvnt/app/lib/hooks/use-tickets";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -51,8 +52,139 @@ import {
   type ScanResult,
   type ScanHistoryEntry,
 } from "@dvnt/app/lib/stores/scanner-store";
+import { planAccent, planLabel as planLabelFor } from "@dvnt/app/lib/theme/plan-colors";
+import { PERK_LABELS } from "@dvnt/app/lib/perks/perk-config";
 
 const ROW_HEIGHT = 44;
+
+// ── AddonRows ─────────────────────────────────────────────────────────────────
+// Order add-ons on the scan result card: "VIP table ×1 — unredeemed".
+// Qty in mono (the ticket-stub data voice); redeemed state as a quiet chip.
+function AddonRows({ addons }: { addons: ScanAddonSummary[] }) {
+  if (!addons.length) return null;
+  return (
+    <div className="mt-1 w-full rounded-xl bg-black/25 p-2 text-left">
+      <p className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-white/50">
+        Add-ons
+      </p>
+      {addons.map((a) => {
+        const redeemed = a.status === "redeemed";
+        const refunded = a.status === "refunded";
+        const state = refunded
+          ? "refunded"
+          : redeemed
+            ? "redeemed"
+            : "unredeemed";
+        return (
+          <div
+            key={a.id}
+            className="flex items-center justify-between gap-2 border-t border-white/10 px-1 py-1.5 first-of-type:border-t-0"
+          >
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white">
+              {a.name}
+              {a.variant_name ? (
+                <span className="text-white/60"> · {a.variant_name}</span>
+              ) : null}
+              <span className="font-mono text-white/80"> ×{a.quantity}</span>
+            </span>
+            <span
+              className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                refunded
+                  ? "bg-black/40 text-white/50 line-through"
+                  : redeemed
+                    ? "bg-black/40 text-white/60"
+                    : "bg-white text-black"
+              }`}
+            >
+              {state}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── DuplicateFlash ────────────────────────────────────────────────────────────
+// LOUD full-viewport duplicate flag. Paints instantly (optimistic when the
+// offline store already knows the token) — the red flash + huge ORIGINAL scan
+// time are the point. Honors prefers-reduced-motion (static red, no strobe).
+function DuplicateFlash({
+  result,
+  onDismiss,
+}: {
+  result: ScanResult;
+  onDismiss: () => void;
+}) {
+  const scannedAt = result.checkedInAt ? new Date(result.checkedInAt) : null;
+  const timeLabel = scannedAt
+    ? scannedAt.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null;
+  const dateLabel = scannedAt
+    ? scannedAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : null;
+
+  return (
+    <div
+      onClick={onDismiss}
+      role="button"
+      aria-live="assertive"
+      className="dvnt-dup-flash fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 px-8 text-center"
+      style={{ backgroundColor: "#FC253A" }}
+    >
+      <style>{`
+        @keyframes dvnt-dup-flash {
+          0% { opacity: 0.35; }
+          25% { opacity: 1; }
+          45% { opacity: 0.55; }
+          70% { opacity: 1; }
+          100% { opacity: 1; }
+        }
+        .dvnt-dup-flash {
+          animation: dvnt-dup-flash 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .dvnt-dup-flash { animation: none; }
+        }
+      `}</style>
+      <AlertTriangle size={64} color="#fff" strokeWidth={2.5} />
+      <p className="text-[28px] font-bold uppercase tracking-[0.08em] text-white">
+        Already scanned
+      </p>
+      {result.kind === "addon" && result.name ? (
+        <p className="text-base font-semibold text-white/95">{result.name}</p>
+      ) : null}
+      {timeLabel ? (
+        <p className="font-mono text-[40px] font-bold leading-none text-white">
+          {timeLabel}
+        </p>
+      ) : null}
+      {dateLabel || result.checkedInByName ? (
+        <p className="text-[15px] font-medium text-white/90">
+          {dateLabel}
+          {result.checkedInByName ? ` · by ${result.checkedInByName}` : ""}
+        </p>
+      ) : null}
+      {!timeLabel && result.message ? (
+        <p className="text-[15px] text-white/90">{result.message}</p>
+      ) : null}
+      {result.optimistic ? (
+        <p className="text-xs font-medium uppercase tracking-wide text-white/70">
+          Confirming with server…
+        </p>
+      ) : null}
+      {result.addons?.length ? (
+        <div className="w-full max-w-sm">
+          <AddonRows addons={result.addons} />
+        </div>
+      ) : null}
+      <p className="mt-2 text-xs text-white/70">Tap anywhere to scan next</p>
+    </div>
+  );
+}
 
 // ── ScanResultOverlay ─────────────────────────────────────────────────────────
 function ScanResultOverlay({
@@ -62,21 +194,21 @@ function ScanResultOverlay({
   result: ScanResult;
   onDismiss: () => void;
 }) {
+  // Duplicates get the loud full-viewport treatment.
+  if (result.type === "already_scanned") {
+    return <DuplicateFlash result={result} onDismiss={onDismiss} />;
+  }
+
   const isSuccess = result.type === "success";
-  const Icon =
-    isSuccess
-      ? CheckCircle2
-      : result.type === "already_scanned"
-        ? AlertTriangle
-        : XCircle;
+  const Icon = isSuccess ? CheckCircle2 : XCircle;
   const bg = isSuccess ? "rgba(34,197,94,0.95)" : "rgba(244,63,94,0.95)";
   const title = isSuccess
-    ? "Checked In!"
-    : result.type === "already_scanned"
-      ? "Already Scanned"
-      : result.type === "not_found"
-        ? "Invalid Ticket"
-        : "Scan Error";
+    ? result.kind === "addon"
+      ? "Add-on Redeemed!"
+      : "Checked In!"
+    : result.type === "not_found"
+      ? "Invalid Ticket"
+      : "Scan Error";
 
   return (
     <div
@@ -96,9 +228,29 @@ function ScanResultOverlay({
         {result.tierName ? (
           <p className="text-sm text-white/70">{result.tierName}</p>
         ) : null}
+        {/* WS-4 — subscription tier + perks, sized to be read at a door in the
+            dark at arm's length. Deliberately louder than the ticket tier above
+            it: this is what tells staff to move someone to the front. */}
+        {result.planLabel ? (
+          <span
+            className="rounded-xl px-4 py-1.5 text-[17px] font-extrabold uppercase tracking-wide"
+            style={{
+              backgroundColor: `${result.planColor ?? "#fff"}26`,
+              color: result.planColor ?? "#fff",
+            }}
+          >
+            {result.planLabel}
+          </span>
+        ) : null}
+        {result.perkLabels?.length ? (
+          <p className="text-[15px] font-semibold text-white">
+            {result.perkLabels.join(" · ")}
+          </p>
+        ) : null}
         {result.message ? (
           <p className="text-[13px] text-white/70">{result.message}</p>
         ) : null}
+        {result.addons?.length ? <AddonRows addons={result.addons} /> : null}
         <p className="mt-2 text-xs text-white/50">Tap anywhere to scan next</p>
       </div>
     </div>
@@ -221,20 +373,51 @@ function ScannerActive({ eventId }: { eventId: string }) {
         qrToken = deepLinkMatch[1];
       }
 
+      // ── <300ms duplicate first paint ──────────────────────────────
+      // If this device already knows the token was scanned (offline set
+      // or a prior online success), flip the loud duplicate UI NOW from
+      // local knowledge; the server confirmation (with the ORIGINAL
+      // checked_in_at/by) follows and replaces it. Server always wins.
+      const knownDuplicate = offlineStore.isAlreadyScanned(eventId, qrToken);
+      if (knownDuplicate) {
+        setScanResult({
+          type: "already_scanned",
+          optimistic: true,
+          message: "This ticket was already scanned on this device",
+        });
+        recordHistory("already_scanned");
+      }
+
       scanMutation.mutate(
         { qrToken, scannedBy: authUser?.id, eventId },
         {
           onSuccess: (data) => {
             if (data.valid) {
+              const isAddon = data.kind === "addon";
+              const name = isAddon
+                ? [data.addon?.name, data.addon?.variant_name]
+                    .filter(Boolean)
+                    .join(" · ")
+                : data.ticket?.name;
+              const tierName = isAddon
+                ? `Add-on ×${data.addon?.quantity ?? 1}`
+                : data.ticket?.tier_name;
+              const planKey = data.membership_tier?.planKey ?? null;
               setScanResult({
                 type: "success",
-                name: data.ticket?.name,
-                tierName: data.ticket?.tier_name,
+                kind: data.kind ?? "ticket",
+                name,
+                tierName,
+                addons: data.addons,
+                // `free` gets no badge — only a paid tier is worth door attention.
+                planLabel:
+                  planKey && planKey !== "free" ? planLabelFor(planKey) : null,
+                planColor: planAccent(planKey),
+                perkLabels: (data.perks ?? []).map((p) => PERK_LABELS[p]),
               });
-              recordSuccess({
-                name: data.ticket?.name,
-                tierName: data.ticket?.tier_name,
-              });
+              recordSuccess({ kind: data.kind ?? "ticket", name, tierName });
+              // Seed local knowledge so a re-scan flips instantly.
+              offlineStore.markScannedLocal(eventId, qrToken);
             } else {
               const isDuplicate = data.reason === "already_scanned";
               const resultType = isDuplicate
@@ -242,20 +425,41 @@ function ScannerActive({ eventId }: { eventId: string }) {
                 : ("not_found" as const);
               setScanResult({
                 type: resultType,
+                kind: data.kind ?? "ticket",
+                name:
+                  data.kind === "addon" && data.addon
+                    ? [data.addon.name, data.addon.variant_name]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : undefined,
+                // Server truth: the ORIGINAL check-in facts.
+                checkedInAt: data.checked_in_at ?? null,
+                checkedInByName: data.checked_in_by_name ?? null,
+                addons: data.addons,
+                optimistic: false,
                 message: isDuplicate
                   ? "This ticket was already scanned"
                   : data.reason === "refunded"
                     ? "This ticket has been refunded"
                     : "This QR code is not a valid ticket",
               });
-              recordHistory(resultType);
+              if (isDuplicate) {
+                offlineStore.markScannedLocal(eventId, qrToken);
+              }
+              // Optimistic paint already logged this duplicate.
+              if (!(isDuplicate && knownDuplicate)) {
+                recordHistory(resultType);
+              }
             }
           },
           onError: () => {
+            // Network down — the optimistic duplicate verdict stands.
+            if (knownDuplicate) return;
             if (hasOfflineData) {
               if (offlineStore.isAlreadyScanned(eventId, qrToken)) {
                 setScanResult({
                   type: "already_scanned",
+                  optimistic: true,
                   message: "This ticket was already scanned (offline)",
                 });
                 recordHistory("already_scanned");
@@ -267,6 +471,20 @@ function ScannerActive({ eventId }: { eventId: string }) {
                   tierName: undefined,
                 });
                 recordSuccess({ name: "Verified Offline" });
+              } else if (offlineStore.isAddonTokenValid(eventId, qrToken)) {
+                // Add-on rail — queue with the kind discriminator.
+                offlineStore.markScannedOffline(
+                  eventId,
+                  qrToken,
+                  authUser?.id,
+                  "addon",
+                );
+                setScanResult({
+                  type: "success",
+                  kind: "addon",
+                  name: "Add-on Verified Offline",
+                });
+                recordSuccess({ kind: "addon", name: "Add-on Verified Offline" });
               } else {
                 setScanResult({
                   type: "not_found",

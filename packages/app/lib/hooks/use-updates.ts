@@ -71,7 +71,7 @@ function safeGet<T>(fn: () => T, fallback: T): T {
  *  2. MMKV dismissed-ID check — prevents loops across cold restarts
  *
  * Uses sonner-native toast with action/cancel buttons. Falls back to Alert.
- * MUST show "Update Later" (cancel) + "Restart App Now" (action) per CLAUDE.md.
+ * MUST show "Update Later" (cancel) + "Restart App Now" (action) per docs/engineering-contract.md.
  */
 function showUpdateToast(updateId?: string | null) {
   const store = useOtaUpdateStore.getState();

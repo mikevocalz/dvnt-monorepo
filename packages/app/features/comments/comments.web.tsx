@@ -22,7 +22,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useComments, useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
-import { ThreadedComment } from "@dvnt/app/components/comments/threaded-comment";
+import { ThreadedComment } from "./ui/threaded-comment";
 
 const ESTIMATED_ROW = 140;
 
@@ -174,6 +174,7 @@ function CommentComposer({ postId }: { postId: string }) {
           placeholder={
             replyTo ? `Reply to @${replyTo.username}…` : "Add a comment…"
           }
+          aria-label={replyTo ? `Reply to ${replyTo.username}` : "Add a comment"}
           className="flex-1 bg-transparent text-[15px] text-white outline-none placeholder:text-white/40"
         />
         <button

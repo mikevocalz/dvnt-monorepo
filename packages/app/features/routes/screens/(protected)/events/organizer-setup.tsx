@@ -37,11 +37,15 @@ import {
 } from "lucide-react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Haptics from "expo-haptics";
-import { organizerApi, type OrganizerStatus } from "@dvnt/app/lib/api/organizer";
+import {
+  organizerApi,
+  type OrganizerStatus,
+} from "@dvnt/app/lib/api/organizer";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 const REQ_LABELS: Record<string, string> = {
   "individual.address.city": "city",
   "individual.address.line1": "street",
@@ -64,6 +68,50 @@ function humanizeRequirements(fields: string[]): string {
   if (unique.length === 1) return unique[0];
   if (unique.length === 2) return `${unique[0]} and ${unique[1]}`;
   return `${unique.slice(0, -1).join(", ")}, and ${unique[unique.length - 1]}`;
+}
+
+/** Turn a Stripe requirement code into a specific, actionable instruction. */
+function requirementAction(field: string): string {
+  const label = REQ_LABELS[field] || field.replace(/_/g, " ");
+  if (field.includes("verification.document")) return `Upload your ${label}`;
+  if (field.includes("id_number")) return `Add your ${label}`;
+  if (field === "external_account") return `Verify your ${label}`;
+  if (field.includes("tos_acceptance")) return "Accept the terms of service";
+  return `Add your ${label}`;
+}
+
+/** Format requirements.current_deadline (unix seconds or ISO) as a date. */
+function formatDeadline(
+  value: string | number | null | undefined,
+): string | null {
+  if (value == null) return null;
+  const d =
+    typeof value === "number"
+      ? new Date(value * 1000)
+      : /^\d+$/.test(value)
+        ? new Date(parseInt(value, 10) * 1000)
+        : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+/** Human copy for a restricted account's disabled_reason. */
+function disabledReasonCopy(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  if (reason.startsWith("requirements.past_due"))
+    return "Some required details are past due. Complete them now to keep selling.";
+  if (reason.startsWith("requirements.pending_verification")) return null;
+  if (reason.startsWith("rejected"))
+    return "Stripe could not verify this account. Contact support to resolve it.";
+  if (reason === "listed" || reason === "under_review")
+    return "Stripe is reviewing your account. No action is needed right now.";
+  if (reason === "platform_paused" || reason === "other")
+    return "Payouts are temporarily paused. Finish any outstanding steps below.";
+  return null;
 }
 
 function OrganizerSetupContent() {
@@ -91,8 +139,7 @@ function OrganizerSetupContent() {
   // re-fetch immediately so charges/payouts checkmarks flip without poll.
   useEffect(() => {
     if (!userAuthId) return;
-    const channel = supabase
-      .channel(`organizer-rt:${userAuthId}:${Date.now()}`)
+    const channel = freshChannel(`organizer-rt:${userAuthId}:${Date.now()}`)
       .on(
         "postgres_changes",
         {
@@ -142,6 +189,12 @@ function OrganizerSetupContent() {
 
   const blockingFields = status.currently_due ?? [];
   const reviewingFields = status.pending_verification ?? [];
+  const pastDueFields = status.past_due ?? [];
+  const actionFields = [...new Set([...pastDueFields, ...blockingFields])];
+  const deadlineLabel = formatDeadline(status.current_deadline);
+  const reasonCopy = isStripeReviewing
+    ? null
+    : disabledReasonCopy(status.disabled_reason);
 
   // Animated progress
   const progress = useSharedValue(0);
@@ -161,13 +214,9 @@ function OrganizerSetupContent() {
     if (isFullyConnected && !celebratedRef.current) {
       celebratedRef.current = true;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      successScale.value = withTiming(
-        1,
-        { duration: 0 },
-        () => {
-          "worklet";
-        },
-      );
+      successScale.value = withTiming(1, { duration: 0 }, () => {
+        "worklet";
+      });
       successScale.value = withSpring(
         1.08,
         { damping: 12, stiffness: 220 },
@@ -223,10 +272,7 @@ function OrganizerSetupContent() {
   else if (status.connected) ctaLabel = "Continue Setup";
 
   return (
-    <View
-      className="flex-1 bg-background"
-      style={{ paddingTop: insets.top }}
-    >
+    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <View className="flex-row items-center px-4 py-3 gap-3">
         <Pressable
           onPress={() => router.back()}
@@ -297,9 +343,7 @@ function OrganizerSetupContent() {
                         : "Required to sell paid tickets"}
                 </Text>
               </View>
-              {isFullyConnected && (
-                <Sparkles size={20} color="#22C55E" />
-              )}
+              {isFullyConnected && <Sparkles size={20} color="#22C55E" />}
             </View>
 
             {/* Progress bar */}
@@ -341,6 +385,62 @@ function OrganizerSetupContent() {
                 }
               />
             </View>
+
+            {/* Deadline banner — from stored requirements.current_deadline */}
+            {!isFullyConnected && deadlineLabel && actionFields.length > 0 && (
+              <View className="flex-row items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-2.5 mb-4">
+                <Clock size={15} color="#F59E0B" />
+                <Text className="text-xs text-amber-300 flex-1">
+                  Complete the steps below by {deadlineLabel} to keep selling
+                  tickets.
+                </Text>
+              </View>
+            )}
+
+            {/* Restricted / disabled reason — specific, not generic */}
+            {!isFullyConnected && reasonCopy && (
+              <View className="flex-row items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/8 px-3.5 py-2.5 mb-4">
+                <AlertCircle
+                  size={15}
+                  color="#EF4444"
+                  style={{ marginTop: 2 }}
+                />
+                <Text className="text-xs text-red-300 flex-1">
+                  {reasonCopy}
+                </Text>
+              </View>
+            )}
+
+            {/* Actionable requirement checklist from stored currently/past due */}
+            {!isFullyConnected && actionFields.length > 0 && (
+              <View className="rounded-xl border border-white/8 bg-white/3 p-3.5 mb-4">
+                <Text className="text-xs font-sans-semibold text-white/70 mb-2">
+                  Stripe still needs
+                </Text>
+                <View className="gap-2">
+                  {actionFields.map((field) => {
+                    const isPastDue = pastDueFields.includes(field);
+                    return (
+                      <View
+                        key={field}
+                        className="flex-row items-center gap-2.5"
+                      >
+                        <AlertCircle
+                          size={14}
+                          color={isPastDue ? "#EF4444" : "#F59E0B"}
+                        />
+                        <Text
+                          className={`text-sm ${isPastDue ? "text-red-300" : "text-foreground"}`}
+                        >
+                          {requirementAction(field)}
+                          {isPastDue ? "  • past due" : ""}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
 
             {!isFullyConnected && ctaLabel !== "" && (
               <Pressable

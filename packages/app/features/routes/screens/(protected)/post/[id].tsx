@@ -1,9 +1,11 @@
+import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
   Text,
   ScrollView,
   Pressable,
   Dimensions,
+  useWindowDimensions,
   Modal,
   StatusBar,
   ActivityIndicator,
@@ -18,7 +20,7 @@ import React, {
   memo,
 } from "react";
 import * as Haptics from "expo-haptics";
-import { SafeAreaView } from "react-native-safe-area-context";
+
 import {
   ArrowLeft,
   Heart,
@@ -36,7 +38,7 @@ import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { PostDetailSkeleton } from "@dvnt/app/components/skeletons";
 import { usePost, useDeletePost } from "@dvnt/app/lib/hooks/use-posts";
 import { useComments } from "@dvnt/app/lib/hooks/use-comments";
-import { CommentLikeButton } from "@dvnt/app/components/comments/threaded-comment";
+import { CommentLikeButton } from "@dvnt/app/features/comments";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { useVideoPlayerStore } from "@dvnt/app/lib/stores/video-player-store";
 // STABILIZED: Bookmark state comes from server via useBookmarks hook only
@@ -78,7 +80,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
 import { formatLikeCount } from "@dvnt/app/lib/utils/format-count";
 import { Alert } from "react-native";
-import { TagOverlayViewer } from "@dvnt/app/components/tags/TagOverlayViewer";
+import { TagOverlayViewer } from "@dvnt/app/features/tags";
 // Galeria's native gestureRecognizer doesn't fire on iOS 26 — the
 // MediaLightbox drop-in matches Galeria's API (urls + .Image namespace)
 // using @gorhom/bottom-sheet, no native dependency. Revert when upstream
@@ -86,7 +88,7 @@ import { TagOverlayViewer } from "@dvnt/app/components/tags/TagOverlayViewer";
 import { MediaLightbox as Galeria } from "@dvnt/app/components/media/MediaLightbox";
 import { usePostTags } from "@dvnt/app/lib/hooks/use-post-tags";
 import { usePostTagsUIStore } from "@dvnt/app/lib/stores/post-tags-store";
-import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
+import { TextPostSurface } from "@dvnt/app/features/post";
 import {
   useSharedValue,
   withSpring,
@@ -96,7 +98,7 @@ import {
 import {
   useLikesSheet,
   fireLikesTap,
-} from "@dvnt/app/src/features/likes/LikesSheetController";
+} from "@dvnt/app/features/likes/LikesSheetController";
 import { normalizePost } from "@dvnt/app/lib/normalization/safe-entity";
 import { validatePostParams } from "@dvnt/app/lib/validation/post-params";
 import { resolveRenderableTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
@@ -104,7 +106,15 @@ import { TranslateButton } from "@dvnt/app/components/ui/translate-button";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { useTranslation } from "react-i18next";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
+import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
+import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
+import { feedMediaMode } from "@dvnt/app/components/feed/feed-media-mode";
 
+/**
+ * Fallbacks only. Read at module scope, `Dimensions.get` freezes at the width
+ * the app launched with, so on a rotation the media kept its old width and the
+ * 4:5 box no longer matched the screen. The components below read live.
+ */
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 // CRITICAL: Match FeedItem's 4:5 aspect ratio for consistent display
 const PORTRAIT_HEIGHT = Math.round(SCREEN_WIDTH * (5 / 4));
@@ -383,6 +393,7 @@ function PostDetailActionBar({
  * creating (and tearing down) a native player for every image post.
  */
 function PostVideoPlayer({ postId, url }: { postId: string; url?: string }) {
+  const { width: screenWidth } = useWindowDimensions();
   const { isMountedRef, isSafeToOperate } = useVideoLifecycle(
     "PostDetail",
     postId,
@@ -601,7 +612,7 @@ function PostVideoPlayer({ postId, url }: { postId: string; url?: string }) {
           onSeekEnd={() => {
             if (isPlaying) safePlay(player, isMountedRef, "PostDetail");
           }}
-          barWidth={SCREEN_WIDTH - 32}
+          barWidth={screenWidth - 32}
         />
       </View>
 
@@ -931,6 +942,9 @@ const MediaCarousel = memo(function MediaCarousel({
 });
 
 function PostDetailScreenContent() {
+  // Live window width; the media below is sized from it.
+  const { width: screenWidth } = useWindowDimensions();
+  const portraitHeight = Math.round(screenWidth * (5 / 4));
   // DEV-only loop detection
   useRenderLoopDetector("PostDetail");
 
@@ -1217,7 +1231,11 @@ function PostDetailScreenContent() {
   // CRITICAL: Compute all derived values and useMemo BEFORE early returns
   // These must be called unconditionally to maintain stable hook count
   const isTextPost = safePost.kind === "text";
-  const isVideo = !isTextPost && safePost.media?.[0]?.type === "video";
+  // Same rule as the feed — see packages/app/components/feed/feed-media-mode.ts.
+  // Keying off media[0] alone sent [video, image, image] down the single-video
+  // path, so the images could not be reached and the dots never showed.
+  const mediaMode = feedMediaMode(safePost.media as any, { isTextPost });
+  const isVideo = mediaMode === "single-video";
 
   // Translation support for caption
   const { i18n } = useTranslation();
@@ -1256,7 +1274,7 @@ function PostDetailScreenContent() {
     safePost.media &&
     Array.isArray(safePost.media) &&
     safePost.media.length > 0;
-  const hasMultipleMedia = hasMedia && safePost.media.length > 1 && !isVideo;
+  const hasMultipleMedia = mediaMode === "carousel";
   const postIdString = safePost.id ? String(safePost.id) : postId;
   const handlePrimaryCommentsPress = useCallback(() => {
     if (!postIdString) return;
@@ -1515,7 +1533,7 @@ function PostDetailScreenContent() {
   return (
     <SafeAreaView
       edges={["top"]}
-      className="flex-1 bg-background max-w-3xl w-full self-center"
+      className={SCREEN_SHELL}
     >
       <View
         style={{
@@ -1583,8 +1601,8 @@ function PostDetailScreenContent() {
           <View
             style={{
               display: hasMedia ? "flex" : "none",
-              width: SCREEN_WIDTH,
-              height: PORTRAIT_HEIGHT,
+              width: screenWidth,
+              height: portraitHeight,
               borderRadius: isVideo ? 0 : 12,
               overflow: "hidden",
             }}
@@ -1599,7 +1617,7 @@ function PostDetailScreenContent() {
                 height: "100%",
               }}
             >
-              <SafeMediaWrapper width={SCREEN_WIDTH} height={PORTRAIT_HEIGHT}>
+              <SafeMediaWrapper width={screenWidth} height={portraitHeight}>
                 <PostVideoPlayer
                   postId={postId}
                   url={isVideo ? safePost.media?.[0]?.url : ""}
@@ -1614,12 +1632,16 @@ function PostDetailScreenContent() {
                 height: "100%",
               }}
             >
-              <SafeMediaWrapper width={SCREEN_WIDTH} height={PORTRAIT_HEIGHT}>
+              {/* ZoomTarget marks where a feed / profile-grid card lands.
+                  Wrapping the media (not the screen) is what makes the picture
+                  fly into place instead of the card ballooning to full screen. */}
+              <ZoomTarget>
+              <SafeMediaWrapper width={screenWidth} height={portraitHeight}>
                 {hasMultipleMedia ? (
                   <MediaCarousel
                     media={stableMedia as MediaItem[]}
                     imageUrls={imageUrls}
-                    width={SCREEN_WIDTH}
+                    width={screenWidth}
                     height={PORTRAIT_HEIGHT}
                     onSlideChange={setCurrentSlide}
                   />
@@ -1633,7 +1655,7 @@ function PostDetailScreenContent() {
                     <Galeria.Image index={0}>
                       <DVNTMediaRenderer
                         item={stableMedia[0] as any}
-                        width={SCREEN_WIDTH}
+                        width={screenWidth}
                         height={PORTRAIT_HEIGHT}
                         // Detail view: contain so the TOP of the photo is
                         // never cropped out. cover was center-cropping
@@ -1662,6 +1684,7 @@ function PostDetailScreenContent() {
                   </View>
                 )}
               </SafeMediaWrapper>
+              </ZoomTarget>
             </View>
 
             {/* Tag overlay — tap image to toggle, sits on top of all media */}
@@ -1692,7 +1715,7 @@ function PostDetailScreenContent() {
           {!isTextPost ? (
             <View
               style={{
-                width: SCREEN_WIDTH,
+                width: screenWidth,
                 paddingHorizontal: 12,
                 paddingTop: 10,
                 paddingBottom: 6,
@@ -1725,7 +1748,7 @@ function PostDetailScreenContent() {
           {isTextPost && (
             <View
               style={{
-                width: SCREEN_WIDTH,
+                width: screenWidth,
                 paddingHorizontal: 20,
                 paddingVertical: 18,
               }}
@@ -1737,7 +1760,7 @@ function PostDetailScreenContent() {
                     pagingEnabled
                     showsHorizontalScrollIndicator={false}
                     onScroll={(event) => {
-                      const slideW = SCREEN_WIDTH - 40;
+                      const slideW = screenWidth - 40;
                       const idx = Math.round(
                         event.nativeEvent.contentOffset.x / slideW,
                       );
@@ -1752,7 +1775,7 @@ function PostDetailScreenContent() {
                       ) => (
                         <View
                           key={slide.id || index}
-                          style={{ width: SCREEN_WIDTH - 40 }}
+                          style={{ width: screenWidth - 40 }}
                         >
                           <TextPostSurface
                             text={slide.content}

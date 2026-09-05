@@ -100,7 +100,7 @@ export async function deleteAccountPrivileged(): Promise<boolean> {
   // every code path (e.g. account created and deleted without ever
   // receiving a call).
   try {
-    const { endAllCalls } = await import("@dvnt/app/src/services/callkeep/callkeep");
+    const { endAllCalls } = await import("@dvnt/app/features/services/callkeep/callkeep");
     endAllCalls();
   } catch (callkeepErr) {
     console.warn(

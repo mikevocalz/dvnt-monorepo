@@ -63,8 +63,12 @@ import { useConversationResolution } from "@dvnt/app/lib/hooks/use-conversation-
 import { useRefreshMessageCounts } from "@dvnt/app/lib/hooks/use-messages";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { useTypingIndicator } from "@dvnt/app/lib/hooks/use-typing-indicator";
-import { useUserPresence, formatLastSeen } from "@dvnt/app/lib/hooks/use-presence";
+import {
+  useUserPresence,
+  formatLastSeen,
+} from "@dvnt/app/lib/hooks/use-presence";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { SharedPostBubble } from "@dvnt/app/components/chat/shared-post-bubble";
 import { StoryReplyBubble } from "@dvnt/app/components/chat/story-reply-bubble";
@@ -119,10 +123,7 @@ function PresenceText({ recipientId }: { recipientId?: string }) {
       ? formatLastSeen(lastSeen)
       : "";
   return (
-    <p
-      className="text-xs"
-      style={{ color: isOnline ? "#22C55E" : "#6B7280" }}
-    >
+    <p className="text-xs" style={{ color: isOnline ? "#22C55E" : "#6B7280" }}>
       {text}
     </p>
   );
@@ -169,11 +170,7 @@ function MediaGrid({
               </span>
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={m.uri}
-                alt=""
-                className="h-full w-full object-cover"
-              />
+              <img src={m.uri} alt="" className="h-full w-full object-cover" />
             )}
             {isLast && (
               <span className="absolute inset-0 flex items-center justify-center bg-black/55 text-xl font-bold text-white">
@@ -204,10 +201,18 @@ function MessageRow({
   item: Message;
   isGroupChat: boolean;
   senderColorMap: Map<string, string>;
-  groupMemberLookup: Map<string, { username: string; name?: string; avatar?: string }>;
+  groupMemberLookup: Map<
+    string,
+    { username: string; name?: string; avatar?: string }
+  >;
   recipientAvatar: string;
   recipientUsername: string;
-  currentUser: { id?: string; username?: string; name?: string; avatar?: string } | null;
+  currentUser: {
+    id?: string;
+    username?: string;
+    name?: string;
+    avatar?: string;
+  } | null;
   conversationActionId: string;
   chatMessages: Message[];
   onMention: (u: string) => void;
@@ -217,7 +222,9 @@ function MessageRow({
   const deleteMessage = useChatStore((s) => s.deleteMessage);
   const retryMessage = useChatStore((s) => s.retryMessage);
   const setSelectedMessage = useChatScreenStore((s) => s.setSelectedMessage);
-  const setShowMessageActions = useChatScreenStore((s) => s.setShowMessageActions);
+  const setShowMessageActions = useChatScreenStore(
+    (s) => s.setShowMessageActions,
+  );
 
   const lastTapRef = useRef<number>(0);
 
@@ -263,7 +270,8 @@ function MessageRow({
   const onDoubleTap = useCallback(() => {
     const now = Date.now();
     if (now - lastTapRef.current < 300) {
-      if (conversationActionId) reactToMessage(conversationActionId, item.id, "❤️");
+      if (conversationActionId)
+        reactToMessage(conversationActionId, item.id, "❤️");
       lastTapRef.current = 0;
     } else {
       lastTapRef.current = now;
@@ -287,7 +295,9 @@ function MessageRow({
   // Special bubbles (shared RN components, render via react-native-web).
   let inner: React.ReactNode;
   if (item.sharedPost) {
-    inner = <SharedPostBubble sharedPost={item.sharedPost} isOwnMessage={isMe} />;
+    inner = (
+      <SharedPostBubble sharedPost={item.sharedPost} isOwnMessage={isMe} />
+    );
   } else if (item.storyReply) {
     inner = (
       <StoryReplyBubble
@@ -297,7 +307,9 @@ function MessageRow({
       />
     );
   } else if (item.eventShare) {
-    inner = <EventShareBubble eventShare={item.eventShare} isOwnMessage={isMe} />;
+    inner = (
+      <EventShareBubble eventShare={item.eventShare} isOwnMessage={isMe} />
+    );
   } else {
     inner = (
       <div
@@ -314,7 +326,10 @@ function MessageRow({
             <MediaGrid mediaList={item.media!} onOpen={onOpenMedia} />
           </div>
         )}
-        <div className="px-3.5 pb-2.5" style={{ paddingTop: hasMedia ? 6 : 10 }}>
+        <div
+          className="px-3.5 pb-2.5"
+          style={{ paddingTop: hasMedia ? 6 : 10 }}
+        >
           {item.text ? (
             <p
               className="text-[15px] leading-snug"
@@ -338,9 +353,7 @@ function MessageRow({
 
   const reactionPills =
     reactions.length > 0 ? (
-      <div
-        className={`mt-0.5 flex gap-1 ${isMe ? "justify-end" : "ml-10"}`}
-      >
+      <div className={`mt-0.5 flex gap-1 ${isMe ? "justify-end" : "ml-10"}`}>
         {Object.entries(grouped).map(([emoji, count]) => {
           const mine = reactions.some(
             (r) => r.emoji === emoji && r.userId === currentUser?.id,
@@ -371,11 +384,15 @@ function MessageRow({
         className="mb-2 flex items-end justify-end gap-2"
         style={{ opacity: isMsgSending ? 0.6 : 1 }}
       >
-        <div className="flex max-w-[80%] flex-col items-end" style={{ flexShrink: 1 }}>
+        <div
+          className="flex max-w-[80%] flex-col items-end"
+          style={{ flexShrink: 1 }}
+        >
           {isFailed ? (
             <button
               onClick={() => {
-                if (conversationActionId) retryMessage(conversationActionId, item.id);
+                if (conversationActionId)
+                  retryMessage(conversationActionId, item.id);
               }}
             >
               {inner}
@@ -455,10 +472,18 @@ function MessageList({
   chatMessages: Message[];
   isGroupChat: boolean;
   senderColorMap: Map<string, string>;
-  groupMemberLookup: Map<string, { username: string; name?: string; avatar?: string }>;
+  groupMemberLookup: Map<
+    string,
+    { username: string; name?: string; avatar?: string }
+  >;
   recipientAvatar: string;
   recipientUsername: string;
-  currentUser: { id?: string; username?: string; name?: string; avatar?: string } | null;
+  currentUser: {
+    id?: string;
+    username?: string;
+    name?: string;
+    avatar?: string;
+  } | null;
   conversationActionId: string;
   onMention: (u: string) => void;
   onOpenMedia: (m: MediaAttachment) => void;
@@ -564,7 +589,9 @@ export function ChatScreen() {
   } = useConversationResolution(chatId || "");
 
   const isNumericId = !!chatId && /^\d+$/.test(chatId);
-  const activeConvId = isNumericId ? (chatId as string) : (resolvedConvId ?? "");
+  const activeConvId = isNumericId
+    ? (chatId as string)
+    : (resolvedConvId ?? "");
 
   // ── chat-store (selector-per-field, native parity) ──
   const messages = useChatStore((s) => s.messages);
@@ -597,10 +624,14 @@ export function ChatScreen() {
   const editingMessage = useChatScreenStore((s) => s.editingMessage);
   const editText = useChatScreenStore((s) => s.editText);
   const setRecipient = useChatScreenStore((s) => s.setRecipient);
-  const setIsLoadingRecipient = useChatScreenStore((s) => s.setIsLoadingRecipient);
+  const setIsLoadingRecipient = useChatScreenStore(
+    (s) => s.setIsLoadingRecipient,
+  );
   const setGroupInfo = useChatScreenStore((s) => s.setGroupInfo);
   const setSelectedMessage = useChatScreenStore((s) => s.setSelectedMessage);
-  const setShowMessageActions = useChatScreenStore((s) => s.setShowMessageActions);
+  const setShowMessageActions = useChatScreenStore(
+    (s) => s.setShowMessageActions,
+  );
   const setEditingMessage = useChatScreenStore((s) => s.setEditingMessage);
   const setEditText = useChatScreenStore((s) => s.setEditText);
   const resetChatScreen = useChatScreenStore((s) => s.resetChatScreen);
@@ -632,7 +663,10 @@ export function ChatScreen() {
     if (!isGroupChat) return map;
     for (const msg of chatMessages) {
       if (msg.sender === "them" && msg.senderId && !map.has(msg.senderId)) {
-        map.set(msg.senderId, GROUP_BUBBLE_COLORS[map.size % GROUP_BUBBLE_COLORS.length]);
+        map.set(
+          msg.senderId,
+          GROUP_BUBBLE_COLORS[map.size % GROUP_BUBBLE_COLORS.length],
+        );
       }
     }
     return map;
@@ -683,7 +717,11 @@ export function ChatScreen() {
           await messagesApiClient.getConversationById(activeConvId);
         if (cancelled || !conversation) return;
         if (conversation.isGroup && conversation.members) {
-          setGroupInfo(true, conversation.members, conversation.groupName || "");
+          setGroupInfo(
+            true,
+            conversation.members,
+            conversation.groupName || "",
+          );
         }
         const otherUser = conversation.user;
         if (otherUser) {
@@ -705,7 +743,13 @@ export function ChatScreen() {
     return () => {
       cancelled = true;
     };
-  }, [activeConvId, currentUserId, setGroupInfo, setRecipient, setIsLoadingRecipient]);
+  }, [
+    activeConvId,
+    currentUserId,
+    setGroupInfo,
+    setRecipient,
+    setIsLoadingRecipient,
+  ]);
 
   // ── Mark as read ──
   const hasMarkedReadRef = useRef<string | null>(null);
@@ -730,8 +774,7 @@ export function ChatScreen() {
     const userIntId = getCurrentUserIdSync();
     const channelId = `chat-${convId}-${Date.now()}`;
 
-    const channel = supabase
-      .channel(channelId)
+    const channel = freshChannel(channelId)
       .on(
         "postgres_changes",
         {
@@ -780,7 +823,10 @@ export function ChatScreen() {
             const d = new Date(newMsg.created_at);
             timeStr = isNaN(d.getTime())
               ? ""
-              : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              : d.toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
           } catch {
             timeStr = "";
           }
@@ -930,7 +976,13 @@ export function ChatScreen() {
       setShowMessageActions(false);
       setSelectedMessage(null);
     },
-    [selectedMessage, conversationActionId, reactToMessage, setShowMessageActions, setSelectedMessage],
+    [
+      selectedMessage,
+      conversationActionId,
+      reactToMessage,
+      setShowMessageActions,
+      setSelectedMessage,
+    ],
   );
 
   const handleUnsend = useCallback(() => {
@@ -940,7 +992,13 @@ export function ChatScreen() {
       deleteMessage(conversationActionId, selectedMessage.id);
     }
     setSelectedMessage(null);
-  }, [selectedMessage, conversationActionId, deleteMessage, setShowMessageActions, setSelectedMessage]);
+  }, [
+    selectedMessage,
+    conversationActionId,
+    deleteMessage,
+    setShowMessageActions,
+    setSelectedMessage,
+  ]);
 
   const handleStartEdit = useCallback(() => {
     if (!selectedMessage) return;
@@ -948,14 +1006,27 @@ export function ChatScreen() {
     setEditingMessage(selectedMessage);
     setEditText(selectedMessage.text);
     setSelectedMessage(null);
-  }, [selectedMessage, setShowMessageActions, setEditingMessage, setEditText, setSelectedMessage]);
+  }, [
+    selectedMessage,
+    setShowMessageActions,
+    setEditingMessage,
+    setEditText,
+    setSelectedMessage,
+  ]);
 
   const handleSaveEdit = useCallback(() => {
     if (!editingMessage || !editText.trim() || !conversationActionId) return;
     editMessage(conversationActionId, editingMessage.id, editText.trim());
     setEditingMessage(null);
     setEditText("");
-  }, [editingMessage, editText, conversationActionId, editMessage, setEditingMessage, setEditText]);
+  }, [
+    editingMessage,
+    editText,
+    conversationActionId,
+    editMessage,
+    setEditingMessage,
+    setEditText,
+  ]);
 
   const handleCopy = useCallback(() => {
     if (!selectedMessage?.text) return;
@@ -1146,7 +1217,9 @@ export function ChatScreen() {
         {/* Mention suggestions */}
         {showMentions && filteredUsers.length > 0 && (
           <div className="max-h-[200px] border-t border-white/8 bg-white/5">
-            <p className="px-4 pb-2 pt-3 text-xs text-white/55">Mention a user</p>
+            <p className="px-4 pb-2 pt-3 text-xs text-white/55">
+              Mention a user
+            </p>
             {filteredUsers.map((u) => (
               <button
                 key={u.id || u.username}
@@ -1273,7 +1346,9 @@ export function ChatScreen() {
               disabled={!canSend}
               aria-label="Send"
               className="flex h-10 w-10 items-center justify-center rounded-2xl"
-              style={{ backgroundColor: canSend ? ACCENT : "rgba(255,255,255,0.08)" }}
+              style={{
+                backgroundColor: canSend ? ACCENT : "rgba(255,255,255,0.08)",
+              }}
             >
               <Send size={20} color={canSend ? "#000" : "#666"} />
             </button>

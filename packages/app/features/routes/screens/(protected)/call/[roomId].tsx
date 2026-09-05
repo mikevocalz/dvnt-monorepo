@@ -7,17 +7,18 @@
  * 3. Delegates ALL rendering to CallScreen orchestrator
  *
  * All UI logic, stage rendering, and controls live in
- * src/features/calls/ui/ — this file is intentionally minimal.
+ * features/calls/ui/ — this file is intentionally minimal.
  */
 
 import { useEffect, useRef } from "react";
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoCall, type CallType } from "@dvnt/app/lib/hooks/use-video-call";
-import { useMediaPermissions } from "@dvnt/app/src/video/hooks/useMediaPermissions";
-import { useVideoRoomStore } from "@dvnt/app/src/video/stores/video-room-store";
-import { CT } from "@dvnt/app/src/services/calls/callTrace";
-import { CallScreen } from "@dvnt/app/src/features/calls/ui/CallScreen";
+import { useMediaPermissions } from "@dvnt/app/features/video";
+import { useVideoRoomStore } from "@dvnt/app/features/video";
+import { color } from "@dvnt/app/lib/theme";
+import { CT } from "@dvnt/app/features/services/calls/callTrace";
+import { CallScreen } from "@dvnt/app/features/calls";
 
 export default function VideoCallScreen() {
   const {
@@ -106,7 +107,7 @@ export default function VideoCallScreen() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#000" }}>
+    <View style={{ flex: 1, backgroundColor: color.ink }}>
       <CallScreen
         recipientName={recipientUsername || "Unknown"}
         recipientAvatar={recipientAvatar}

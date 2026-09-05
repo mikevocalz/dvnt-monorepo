@@ -6,6 +6,7 @@
  */
 
 import * as LegacyFileSystem from "expo-file-system/legacy";
+import * as ImageManipulator from "expo-image-manipulator";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import {
   compressAvatar,
@@ -250,7 +251,21 @@ export async function uploadMedia(
         "[uploadMedia] Compression failed, using original:",
         compressError,
       );
-      const fileInfo = await getFileInfo(uri);
+      // HEIC must NEVER upload raw — browsers can't render it, so the post
+      // is invisible on web (36 legacy files were backfilled for exactly
+      // this). Last-ditch plain JPEG conversion; if even that fails, reject
+      // instead of shipping an image half the platform can't see.
+      if (/hei[cf]/i.test(processedMime) || /\.hei[cf]$/i.test(uri)) {
+        const jpeg = await ImageManipulator.manipulateAsync(uri, [], {
+          compress: 0.9,
+          format: ImageManipulator.SaveFormat.JPEG,
+        });
+        processedUri = jpeg.uri;
+        processedWidth = jpeg.width || width;
+        processedHeight = jpeg.height || height;
+        processedMime = "image/jpeg";
+      }
+      const fileInfo = await getFileInfo(processedUri);
       processedSize = fileInfo.size;
     }
 

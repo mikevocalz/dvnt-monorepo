@@ -5,7 +5,7 @@
  *   Article (borderRadius: 12, overflow hidden)
  *     ├─ Media block (video | carousel | single image)
  *     │    ├─ OVERLAY top-left:    [Avatar + username] liquid glass
- *     │    ├─ OVERLAY top-center:  carousel dots (multi-image only)
+ *     │    ├─ OVERLAY top-right:   carousel dots (any post with 2+ items)
  *     │    ├─ OVERLAY top-right:   [⋮] liquid glass icon button
  *     │    ├─ OVERLAY bottom-left: [❤ n] [💬 n] [→] [🔖] liquid glass pill
  *     │    ├─ OVERLAY bottom-right:[⤢] liquid glass icon button (video only)
@@ -22,7 +22,7 @@ import {
   Modal,
   StatusBar,
 } from "react-native";
-import { Article } from "@expo/html-elements";
+import { Article } from "@dvnt/app/components/ui/html";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import {
   Heart,
@@ -37,6 +37,13 @@ import {
 import { useRouter } from "expo-router";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useFeedSlideStore } from "@dvnt/app/lib/stores/post-store";
+import {
+  feedMediaMode,
+  showsCarouselDots,
+  dotWindowStart,
+  DOT_WINDOW,
+  CAROUSEL_DOT_COLORS,
+} from "./feed-media-mode";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { usePrefetchComments } from "@dvnt/app/lib/hooks/use-comments";
 import { useToggleBookmark } from "@dvnt/app/lib/hooks/use-bookmarks";
@@ -71,16 +78,17 @@ import {
 import { DVNTMediaRenderer } from "@dvnt/app/components/media/DVNTMediaRenderer";
 import { useFeedPostUIStore } from "@dvnt/app/lib/stores/feed-post-store";
 import { HashtagText } from "@dvnt/app/components/ui/hashtag-text";
-import { TextPostBadgeLogo } from "@dvnt/app/components/post/TextPostBadgeLogo";
-import { TextPostSurface } from "@dvnt/app/components/post/TextPostSurface";
+import { TextPostBadgeLogo } from "@dvnt/app/features/post";
+import { TextPostSurface } from "@dvnt/app/features/post";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useBookmarkStore } from "@dvnt/app/lib/stores/bookmark-store";
 import { routeToProfile } from "@dvnt/app/lib/utils/route-to-profile";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { navigateToPost } from "@dvnt/app/lib/routes/post-routes";
+import { navigateToPost, getPostDetailRoute } from "@dvnt/app/lib/routes/post-routes";
+import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 import { formatLikeCount } from "@dvnt/app/lib/utils/format-count";
 import { useResponsiveMedia } from "@dvnt/app/lib/hooks/use-responsive-media";
-import { TagOverlayViewer } from "@dvnt/app/components/tags/TagOverlayViewer";
+import { TagOverlayViewer } from "@dvnt/app/features/tags";
 import { usePostTags } from "@dvnt/app/lib/hooks/use-post-tags";
 import { usePostTagsUIStore } from "@dvnt/app/lib/stores/post-tags-store";
 import { postsApi } from "@dvnt/app/lib/api/posts";
@@ -128,27 +136,48 @@ interface FeedPostProps {
 
 // ─────────────────────────────── helpers ────────────────────────────────────
 
-/** Carousel dot pill at top-center in brand gradient colors */
+/**
+ * Carousel dots, in brand gradient colors, overlaid top-right of the media.
+ *
+ * The row is capped: it sits between the NSFW pill and the more-menu button, so
+ * an uncapped run of dots grows left until it collides with them. Past the cap
+ * a sliding window follows the active slide and the edge dots shrink, which is
+ * the standard way to say "there is more this way" without widening the row.
+ */
 function CarouselDots({ count, current }: { count: number; current: number }) {
-  const COLORS = ["#3FDCFF", "#8A40CF", "#FF5BFC"];
+  const COLORS = CAROUSEL_DOT_COLORS;
+
+  const start = dotWindowStart(count, current);
+  const shown = Math.min(count, DOT_WINDOW);
+
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-      {Array.from({ length: count }).map((_, i) => (
-        <View
-          key={i}
-          style={{
-            width: i === current ? 18 : 7,
-            height: 7,
-            borderRadius: 4,
-            backgroundColor:
-              i === current
+    <View
+      style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
+      accessibilityLabel={`Item ${Math.min(current + 1, count)} of ${count}`}
+    >
+      {Array.from({ length: shown }).map((_, offset) => {
+        const i = start + offset;
+        const active = i === current;
+        // Edge dots shrink only when there is more beyond them.
+        const atEdge =
+          (offset === 0 && start > 0) ||
+          (offset === shown - 1 && start + shown < count);
+        return (
+          <View
+            key={i}
+            style={{
+              width: active ? 18 : atEdge ? 4 : 7,
+              height: atEdge && !active ? 4 : 7,
+              borderRadius: 4,
+              backgroundColor: active
                 ? COLORS[i % COLORS.length]
                 : "rgba(255,255,255,0.38)",
-            opacity: i === current ? 1 : 0.7,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.6)",
-          }}
-        />
-      ))}
+              opacity: active ? 1 : 0.7,
+              boxShadow: "0 1px 3px rgba(0,0,0,0.6)",
+            }}
+          />
+        );
+      })}
     </View>
   );
 }
@@ -302,9 +331,12 @@ function FeedPostComponent({
     shouldShowTranslateButton(captionForTranslation, targetLang);
 
   const hasMedia = media && media.length > 0;
-  const isVideo = !isTextPost && hasMedia && media[0]?.type === "video";
-  const hasMultipleMedia =
-    !isTextPost && hasMedia && media.length > 1 && !isVideo;
+  // See ./feed-media-mode.ts for the rule and its tests. A video among images
+  // is a carousel, not a lone video — that mistake made the other items
+  // unreachable and hid the dots.
+  const mediaMode = feedMediaMode(media, { isTextPost });
+  const hasMultipleMedia = mediaMode === "carousel";
+  const isVideo = mediaMode === "single-video";
   const currentSlide = currentSlides[id] || 0;
 
   const isFocused = useIsFocused();
@@ -931,7 +963,10 @@ function FeedPostComponent({
                               width={cardInnerWidthRef.current}
                               height={PORTRAIT_HEIGHT}
                               contentFit="cover"
-                              showBadge={index === 0}
+                              // The badge names THIS slide's kind (gif /
+                              // live photo), so it belongs on every slide
+                              // that has one — not just the first.
+                              showBadge
                               isPlaying={isActivePost && isFocused && index === currentSlide}
                             />
                           ) : (
@@ -959,13 +994,19 @@ function FeedPostComponent({
                 singleUrl &&
                 (singleUrl.startsWith("http://") ||
                   singleUrl.startsWith("https://"));
+              // Zoom into the detail screen. Falls back to a plain press when
+              // the tap means something else — a tagged post toggles its tags,
+              // a guest opens the auth gate — because a Link's navigation
+              // cannot be vetoed after the press. No press-scale on this path:
+              // it fights the zoom for the same frame.
               return (
-                <Pressable
-                  onPress={handlePostPress}
-                  onPressIn={handlePressIn}
-                  onPressOut={handlePressOut}
-                  style={{ width: "100%", height: PORTRAIT_HEIGHT }}
+                <ZoomCard
+                  href={getPostDetailRoute(id) as never}
+                  onPress={handlePressIn}
+                  disabled={postTags.length > 0 || guestMode}
+                  onDisabledPress={handlePostPress}
                 >
+                <View style={{ width: "100%", height: PORTRAIT_HEIGHT }}>
                   {isValidSingleUrl ? (
                     <DVNTMediaRenderer
                       item={media[0]}
@@ -985,7 +1026,8 @@ function FeedPostComponent({
                       </Text>
                     </View>
                   )}
-                </Pressable>
+                </View>
+                </ZoomCard>
               );
             })()}
 
@@ -1053,7 +1095,7 @@ function FeedPostComponent({
             </Pressable>
 
             {/* TOP-RIGHT: Carousel dots (multi-image) */}
-            {hasMultipleMedia && (
+            {showsCarouselDots(mediaMode) && (
               <View
                 style={{
                   position: "absolute",

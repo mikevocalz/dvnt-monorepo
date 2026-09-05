@@ -6,6 +6,7 @@
 const {
   withAndroidManifest,
   withDangerousMod,
+  withMainApplication,
 } = require("expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
@@ -80,7 +81,40 @@ function withAndroidNotificationFiles(config) {
   ]);
 }
 
+/**
+ * Register DVNTLiveNotificationPackage with MainApplication.
+ *
+ * Without this the module was dead: withAndroidNotificationFiles copied
+ * DVNTLiveNotificationPackage.kt into the app module, where it compiled and
+ * shipped and did nothing, because `PackageList(this).packages` only contains
+ * autolinked modules. `NativeModules.DVNTLiveNotification` was undefined at
+ * runtime, so every JS call against it silently no-opped — no error, on either
+ * side, which is why it survived this long.
+ */
+function withAndroidLiveNotificationPackage(config) {
+  return withMainApplication(config, (config) => {
+    const src = config.modResults.contents;
+    if (src.includes("DVNTLiveNotificationPackage()")) return config;
+
+    const anchor = /(PackageList\(this\)\.packages\.apply\s*\{)/;
+    if (!anchor.test(src)) {
+      console.warn(
+        "[with-live-activity] Could not find PackageList(...).packages.apply in " +
+          "MainApplication — DVNTLiveNotificationPackage NOT registered."
+      );
+      return config;
+    }
+
+    config.modResults.contents = src.replace(
+      anchor,
+      "$1\n          add(DVNTLiveNotificationPackage())"
+    );
+    return config;
+  });
+}
+
 module.exports = {
   withAndroidLiveNotification,
   withAndroidNotificationFiles,
+  withAndroidLiveNotificationPackage,
 };

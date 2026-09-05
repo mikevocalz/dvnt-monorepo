@@ -5,12 +5,13 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -68,7 +69,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    const jwt = authHeader.replace("Bearer ", "");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const fishjamAppId = Deno.env.get("FISHJAM_APP_ID")!;
@@ -77,21 +77,16 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false, autoRefreshToken: false }, global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } } });
 
-    // Verify Better Auth session via direct DB lookup
-    const { data: session, error: sessionError } = await supabase
-      .from("session")
-      .select("id, token, userId, expiresAt")
-      .eq("token", jwt)
-      .single();
-
-    if (sessionError || !session) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabase, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    if (new Date(session.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
 
-    const userId = session.userId;
+    const userId = sessionResult.userId;
 
     // Parse input
     let body: unknown;
@@ -247,15 +242,17 @@ Deno.serve(async (req) => {
           Authorization: `Bearer ${fishjamApiKey}`,
           "Content-Type": "application/json",
         },
+        // NO `metadata` KEY — Fishjam rejects it now with
+        // 400 "Invalid request structure". Same breaking change that broke
+        // video_join_room; probed directly against the live API:
+        //   {"type":"webrtc"}                  -> 201
+        //   {"type":"webrtc","options":{...}}  -> 201
+        //   {"type":"webrtc","metadata":{...}} -> 400
+        // Peer metadata is set client-side on joinRoom (use-video-call.ts).
         body: JSON.stringify({
           type: "webrtc",
           options: {
             enableSimulcast: true,
-          },
-          metadata: {
-            userId,
-            role: member.role,
-            jti,
           },
         }),
       },

@@ -22,7 +22,7 @@ import * as Watch from "@moq/watch";
 import { Signal } from "@moq/signals";
 import { useMoqToken } from "./useMoqToken";
 import { deriveLynkState } from "./lynkState";
-import { useSignalValue } from "./moq-signals-react";
+import { useSignalValue, useSignalSetKey } from "./moq-signals-react";
 import type { LynkPublisher, LynkViewerBase } from "./types";
 
 export interface UseLynkViewerResult extends LynkViewerBase {
@@ -63,7 +63,10 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
   const status = useSignalValue(
     reload?.status ?? new Signal<Moq.Connection.ReloadStatus>("connecting"),
   );
-  const announced = useSignalValue(
+  // A STRING of the announced paths, not the Set — the Set is mutated in place
+  // by the transport, so its reference never changes and React would never see
+  // a new publisher. See `useSignalSetKey`.
+  const announcedKey = useSignalSetKey(
     reload?.announced ?? new Signal<Set<Moq.Path.Valid>>(EMPTY_PATHS),
   );
 
@@ -71,13 +74,13 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
   const namespace = token?.namespace ?? (roomId ? `lynk/${roomId}` : "");
   const publishers = useMemo<LynkPublisher[]>(() => {
     const out: LynkPublisher[] = [];
-    for (const p of announced) {
-      const path = String(p);
+    for (const path of announcedKey ? announcedKey.split("\n") : []) {
+      if (!path) continue;
       if (namespace && !path.startsWith(namespace + "/")) continue;
       out.push({ path, peerId: path.slice(path.lastIndexOf("/") + 1) });
     }
     return out;
-  }, [announced, namespace]);
+  }, [announcedKey, namespace]);
 
   // Detach backends for publishers that dropped.
   useEffect(() => {

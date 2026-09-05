@@ -1,3 +1,4 @@
+import { selectVenueForecast } from "../_shared/venue-forecast.ts";
 /**
  * Edge Function: live-surface
  * Returns the LiveSurfacePayload for a user — used by iOS Live Activity,
@@ -52,7 +53,7 @@ function makeSupabaseAdmin() {
 // ── Session verification (Better Auth) ─────────────────────────────────
 
 async function verifySession(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ReturnType<typeof makeSupabaseAdmin>,
   token: string,
 ): Promise<{ authId: string; appUserId: number | null } | null> {
   const { data: session, error } = await supabase
@@ -62,9 +63,10 @@ async function verifySession(
     .single();
 
   if (error || !session) return null;
-  if (new Date(session.expiresAt) < new Date()) return null;
+  if (typeof session.expiresAt !== "string" || !Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now() ||
+      typeof session.userId !== "string" || !session.userId) return null;
 
-  const authId = session.userId as string;
+  const authId = session.userId;
 
   // Resolve app users.id (integer)
   const { data: appUser } = await supabase
@@ -73,7 +75,7 @@ async function verifySession(
     .eq("auth_id", authId)
     .single();
 
-  return { authId, appUserId: appUser?.id ?? null };
+  return { authId, appUserId: typeof appUser?.id === "number" && Number.isSafeInteger(appUser.id) ? appUser.id : null };
 }
 
 // ── Tile 1: Upcoming or most recent event ──────────────────────────────
@@ -92,7 +94,7 @@ interface Tile1Result {
 }
 
 async function buildTile1(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ReturnType<typeof makeSupabaseAdmin>,
   _authId: string,
 ): Promise<Tile1Result> {
   const now = new Date().toISOString();
@@ -192,7 +194,7 @@ interface Tile2Result {
 }
 
 async function buildTile2(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ReturnType<typeof makeSupabaseAdmin>,
 ): Promise<Tile2Result> {
   const weekStart = getWeekStartISO();
   const sevenDaysAgo = getSevenDaysAgoISO();
@@ -203,7 +205,7 @@ async function buildTile2(
     .select(
       `
       id, content, likes_count,
-      media:posts_media(type, url, "order")
+      media:posts_media(type, url, _order)
     `,
     )
     .gte("created_at", sevenDaysAgo)
@@ -214,7 +216,7 @@ async function buildTile2(
   const items: Tile2Item[] = [];
   const mediaSorted = (arr: any[]) =>
     Array.isArray(arr)
-      ? [...arr].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0))
+      ? [...arr].sort((a: any, b: any) => (a._order ?? 0) - (b._order ?? 0))
       : [];
 
   for (const post of posts || []) {
@@ -268,7 +270,7 @@ interface Tile3Result {
 }
 
 async function buildTile3(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ReturnType<typeof makeSupabaseAdmin>,
 ): Promise<Tile3Result> {
   const now = new Date().toISOString();
 
@@ -323,7 +325,9 @@ function wmoCodeToIcon(code: number): string {
 async function fetchWeather(
   lat: number,
   lng: number,
+  forecastAt?: string,
 ): Promise<{
+  forecastAt?: string;
   icon: string;
   tempF: number;
   label: string;
@@ -337,10 +341,18 @@ async function fetchWeather(
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
       `&current=weather_code,temperature_2m,apparent_temperature` +
       `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
-      `&timezone=auto&forecast_days=1`;
+      (forecastAt
+        ? `&hourly=temperature_2m,weather_code,precipitation_probability&timezone=UTC&forecast_days=16`
+        : `&timezone=auto&forecast_days=1`);
     const res = await fetch(url);
     if (!res.ok) return null;
     const data = await res.json();
+    if (forecastAt) {
+      const forecast = selectVenueForecast(data, forecastAt);
+      if (!forecast) return null;
+      return { forecastAt, icon: wmoCodeToIcon(forecast.code), tempF: Math.round(forecast.tempC * 9 / 5 + 32),
+        label: wmoCodeToIcon(forecast.code).replaceAll("-", " "), precipPct: forecast.precipPct };
+    }
     const code = data?.current?.weather_code ?? 0;
     const tempC = data?.current?.temperature_2m ?? 0;
     const tempF = Math.round((tempC * 9) / 5 + 32);
@@ -401,17 +413,21 @@ Deno.serve(async (req: Request) => {
     // Parse optional body for lat/lng (weather)
     let lat = 40.7128;
     let lng = -74.006;
+    let forecastAt: string | undefined;
     try {
       const body = (await req.json().catch(() => ({}))) as {
         lat?: number;
         lng?: number;
+        forecastAt?: string;
       };
       if (typeof body?.lat === "number" && typeof body?.lng === "number") {
+        if (!Number.isFinite(body.lat) || !Number.isFinite(body.lng) || Math.abs(body.lat) > 90 || Math.abs(body.lng) > 180) throw new Error("Invalid venue coordinates");
         lat = body.lat;
         lng = body.lng;
       }
+      if (typeof body.forecastAt === "string" && Number.isFinite(Date.parse(body.forecastAt))) forecastAt = new Date(body.forecastAt).toISOString();
     } catch {
-      // ignore
+      return jsonResponse({ ok: false, error: "Invalid weather request" }, 400);
     }
 
     // Check for cached payload (rate limit: recompute at most once per 5 min)
@@ -429,10 +445,10 @@ Deno.serve(async (req: Request) => {
           typeof cached.value === "string"
             ? JSON.parse(cached.value)
             : cached.value;
-        const weather = await fetchWeather(lat, lng);
+        const weather = await fetchWeather(lat, lng, forecastAt);
         return jsonResponse({
           ok: true,
-          data: weather ? { ...cachedPayload, weather } : cachedPayload,
+          data: { ...cachedPayload, generatedAt: new Date().toISOString(), weather },
           cached: true,
         });
       }
@@ -443,7 +459,7 @@ Deno.serve(async (req: Request) => {
       buildTile1(supabase, session.authId),
       buildTile2(supabase),
       buildTile3(supabase),
-      fetchWeather(lat, lng),
+      fetchWeather(lat, lng, forecastAt),
     ]);
 
     const payload = {
@@ -466,21 +482,18 @@ Deno.serve(async (req: Request) => {
         .join(" "),
     );
 
-    // Cache the payload (upsert)
-    await supabase
-      .from("kv_cache")
-      .upsert(
-        {
-          key: cacheKey,
-          value: JSON.stringify(payload),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "key" },
-      )
-      .then(() => {})
-      .catch((err: Error) => {
-        console.warn("[live-surface] Cache write failed:", err.message);
-      });
+    // Cache failures are non-fatal, but PostgREST returns them in .error.
+    // Await the thenable directly; its public PromiseLike contract has no .catch.
+    try {
+      const { error } = await supabase.from("kv_cache").upsert({
+        key: cacheKey,
+        value: JSON.stringify(payload),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "key" });
+      if (error) console.warn("[live-surface] Cache write failed:", error.message);
+    } catch (error) {
+      console.warn("[live-surface] Cache write failed:", error instanceof Error ? error.message : "Unknown cache failure");
+    }
 
     return jsonResponse({ ok: true, data: payload, cached: false });
   } catch (err) {

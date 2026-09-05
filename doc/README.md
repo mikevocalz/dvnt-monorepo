@@ -2,7 +2,7 @@
 
 Build-out documents — distinct from the existing repo `docs/` which holds historical
 audits, fit reports, and product notes. This directory is the gate-record for the
-web-first build-out (see [`../AGENTS.md`](../AGENTS.md), [`../TASKS.md`](../TASKS.md)).
+web-first build-out (see [`../docs/engineering-contract.md`](../docs/engineering-contract.md), [`../TASKS.md`](../TASKS.md)).
 
 Expected contents (in order of gate):
 

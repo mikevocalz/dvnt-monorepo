@@ -5,6 +5,18 @@ import { updateProfilePrivileged } from "../supabase/privileged";
 import { requireBetterAuthToken, getCurrentUserRow } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
 
+/**
+ * Did PostgREST reject our credentials (as opposed to failing for a real
+ * reason)? A bridged JWT that has expired comes back as 401 / PGRST301, and the
+ * right response is to drop it and retry as anon — not to surface an empty list.
+ */
+function isAuthRejection(error: unknown): boolean {
+  const e = error as { code?: string; status?: number; message?: string };
+  if (!e) return false;
+  if (e.status === 401 || e.code === "PGRST301" || e.code === "401") return true;
+  return /jwt|token/i.test(e.message ?? "") && /expired|invalid/i.test(e.message ?? "");
+}
+
 function normalizeUserLinks(value: unknown): string[] {
   const sanitize = (items: unknown[]) =>
     items
@@ -515,6 +527,8 @@ export const usersApi = {
     username?: string;
     pronouns?: string;
     gender?: string;
+    sexuality?: string[];
+    eventAudience?: string;
     bio?: string;
     location?: string;
     name?: string;
@@ -541,43 +555,24 @@ export const usersApi = {
           ? { gender: updates.gender.trim() }
           : {}),
         ...(Array.isArray(updates.links) ? { links: updates.links } : {}),
+        ...(Array.isArray(updates.sexuality)
+          ? { sexuality: updates.sexuality }
+          : {}),
+        ...(updates.eventAudience !== undefined
+          ? { eventAudience: updates.eventAudience }
+          : {}),
       };
 
-      const fallbackPayload = {
-        name: updates.name,
-        firstName: updates.firstName,
-        lastName: updates.lastName,
-        username: updates.username,
-        bio: updates.bio,
-        location: updates.location,
-        website: updates.website,
-        avatarUrl: updates.avatar,
-      };
-
-      let updatedUser;
-      try {
-        updatedUser = await updateProfilePrivileged(primaryPayload);
-      } catch (error: any) {
-        const errorMessage = String(error?.message || "");
-        const usedOptionalFields =
-          "pronouns" in primaryPayload ||
-          "gender" in primaryPayload ||
-          "links" in primaryPayload;
-        const shouldRetryBasePayload =
-          usedOptionalFields &&
-          (errorMessage === "Failed to update profile" ||
-            errorMessage === "An unexpected error occurred");
-
-        if (!shouldRetryBasePayload) {
-          throw error;
-        }
-
-        console.warn(
-          "[Users] updateProfile retrying without optional fields:",
-          errorMessage,
-        );
-        updatedUser = await updateProfilePrivileged(fallbackPayload);
-      }
+      // NO silent retry-without-optional-fields here. There used to be one: on
+      // "Failed to update profile" / "An unexpected error occurred" it re-sent a
+      // payload stripped of pronouns, gender, links, sexuality and eventAudience.
+      // That call succeeded, the user got a green "Saved" toast, and those five
+      // fields were silently discarded — which is why "finish your profile"
+      // stuck at 70% forever: identity (20) + audience (10) never persisted, and
+      // nothing anywhere reported a failure. A partial save that lies is worse
+      // than a visible error. If the update fails now, it fails loudly and the
+      // error reaches the toast in edit-profile.
+      const updatedUser = await updateProfilePrivileged(primaryPayload);
 
       const normalizedUser = {
         ...updatedUser,
@@ -628,88 +623,30 @@ export const usersApi = {
    */
   async getNewestUsers(limit: number = 15) {
     try {
-      // Get current user's auth_id to exclude from results
-      const currentUserRow = await getCurrentUserRow();
-      const currentAuthId = currentUserRow?.authId || null;
-
-      // Query Better Auth `user` table — this is where real signups live
-      let query = supabase
-        .from("user")
-        .select("id, name, email, image, username, createdAt")
-        .order("createdAt", { ascending: false })
-        .limit(limit * 3);
-
-      if (currentAuthId) {
-        query = query.neq("id", currentAuthId);
-      }
-
-      const { data: authUsers, error } = await query;
-
-      if (error) {
-        console.error("[Users] getNewestUsers BA query error:", error);
-        throw error;
-      }
-      if (!authUsers?.length) {
-        console.log("[Users] getNewestUsers: no BA users found");
-        return [];
-      }
-
-      console.log("[Users] getNewestUsers BA raw count:", authUsers.length);
-
-      // Phase 1: Filter out test accounts by email only
-      const TEST_EMAILS = ["@test.com", "@example.com", "@deviant.test"];
-      const emailFiltered = authUsers.filter((u: any) => {
-        const email = (u.email || "").toLowerCase();
-        if (TEST_EMAILS.some((t) => email.endsWith(t))) return false;
-        const name = (u.name || "").toLowerCase().trim();
-        if (name.startsWith("test")) return false;
-        return true;
+      // Reads the get_newest_users definer RPC rather than Better Auth's `user`
+      // table. That table is readable by `anon` but not by `authenticated`, and
+      // an RLS denial comes back as an empty result rather than an error — so a
+      // signed-in member saw "No new profiles to discover right now" while a
+      // signed-out visitor saw the full list, with only a "no BA users found"
+      // log to show for it. The filtering (test accounts, hidden usernames, the
+      // ghost guard) moved into SQL, which also stops `email` being selected
+      // from a table anon can read.
+      const currentUserRow = await getCurrentUserRow().catch(() => null);
+      const { data, error } = await supabase.rpc("get_newest_users", {
+        p_limit: limit,
+        p_exclude_auth_id: currentUserRow?.authId ?? null,
       });
+      if (error) throw error;
 
-      // Enrich with app profile data (username, avatar, bio)
-      const authIds = emailFiltered.map((u: any) => u.id);
-      const { data: profiles } = await supabase
-        .from(DB.users.table)
-        .select(
-          `${DB.users.authId}, ${DB.users.username}, ${DB.users.bio}, ${DB.users.verified}, avatar:${DB.users.avatarId}(url)`,
-        )
-        .in(DB.users.authId, authIds);
-
-      const profileMap: Record<string, any> = {};
-      for (const p of profiles || []) {
-        profileMap[p[DB.users.authId]] = p;
-      }
-
-      // Phase 2: Filter out hidden accounts by BOTH name and username
-      const HIDDEN_USERNAMES = ["mike_test", "applereview"];
-      const filtered = emailFiltered.filter((u: any) => {
-        const profile = profileMap[u.id];
-        const name = (u.name || "").toLowerCase().trim();
-        const username = (profile?.[DB.users.username] || "").toLowerCase();
-        if (HIDDEN_USERNAMES.includes(name)) return false;
-        if (HIDDEN_USERNAMES.includes(username)) return false;
-        return true;
-      });
-
-      console.log("[Users] getNewestUsers filtered count:", filtered.length);
-
-      return filtered.slice(0, limit).map((u: any) => {
-        const profile = profileMap[u.id];
-        const displayName = (u.name || "").trim();
-        const username =
-          profile?.[DB.users.username] ||
-          u.username ||
-          displayName.toLowerCase().replace(/\s+/g, "_");
-        return {
-          id: u.id,
-          username,
-          name: displayName || username,
-          avatar: profile?.avatar?.url || u.image || "",
-          verified: profile?.[DB.users.verified] || false,
-          bio: profile?.[DB.users.bio] || "",
-          postsCount: 0,
-        };
-      });
+      return ((data as any[]) ?? []).map((u) => ({
+        id: String(u.id),
+        username: u.username || "",
+        name: u.name || u.username || "",
+        avatar: u.avatar || "",
+        verified: Boolean(u.verified),
+        bio: u.bio || "",
+        postsCount: 0,
+      }));
     } catch (error) {
       console.error("[Users] getNewestUsers error:", error);
       return [];

@@ -1,10 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -194,7 +195,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    const token = authHeader.replace("Bearer ", "");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -203,14 +203,18 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${serviceKey}` } },
     });
 
-    // Verify Better Auth session
-    const { data: session, error: sessionError } = await supabase
-      .from("session")
-      .select("id, userId, expiresAt")
-      .eq("token", token)
-      .single();
-
-    if (sessionError || !session) {
+    // Verify Better Auth session via shared helper
+    const sessionResult = await verifySessionDetailed(supabase, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "expired") {
+        return new Response(
+          JSON.stringify({ ok: false, error: "Session expired" }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
       return new Response(
         JSON.stringify({ ok: false, error: "Invalid session" }),
         {
@@ -219,17 +223,8 @@ Deno.serve(async (req) => {
         },
       );
     }
-    if (new Date(session.expiresAt) < new Date()) {
-      return new Response(
-        JSON.stringify({ ok: false, error: "Session expired" }),
-        {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
 
-    const authUserId = session.userId;
+    const authUserId = sessionResult.userId;
 
     // 2. Get user's integer ID from users table (auto-provision if needed)
     const userRow = await resolveOrProvisionUser(supabase, authUserId, "id");

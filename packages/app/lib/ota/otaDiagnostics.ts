@@ -116,10 +116,15 @@ export function captureOtaDiagnostics(): OtaDiagnosticsSnapshot {
       () => (Constants.expoConfig as any)?.sdkVersion ?? Constants.expoVersion ?? "unknown",
       "unknown"
     ),
-    reactNativeVersion: safeGet(
-      () => require("react-native/package.json").version ?? "unknown",
-      "unknown"
-    ),
+    // Deep-importing react-native/package.json is deprecated and warns on every
+    // boot. Platform.constants carries the same number without reaching into
+    // the package's internals.
+    reactNativeVersion: safeGet(() => {
+      const v = (Platform.constants as any)?.reactNativeVersion;
+      if (!v) return "unknown";
+      const patch = v.patch ?? 0;
+      return `${v.major}.${v.minor}.${patch}${v.prerelease ? `-${v.prerelease}` : ""}`;
+    }, "unknown"),
     jsEngine: safeGet(() => (globalThis as any).HermesInternal ? "Hermes" : "JSC", "unknown"),
     platform: Platform.OS,
     osVersion: safeGet(() => String(Platform.Version), "unknown"),

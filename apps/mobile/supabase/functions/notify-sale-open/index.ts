@@ -15,6 +15,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { withHeartbeat, tryClaimJob, releaseJob } from "../_shared/heartbeat.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -92,6 +93,15 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Forbidden" }, 403);
   }
 
+  // WS-4 skip-if-running: TTL (4 min) < the */5 cadence so a stuck run clears
+  // before the next tick. The notified_at gate below is the double-send guard;
+  // this only stops an overlap from re-scanning the same window.
+  const JOB = "notify-sale-open";
+  if (!(await tryClaimJob(JOB, 240))) {
+    return json({ skipped: true, reason: "already_running" }, 200);
+  }
+  try {
+   return await withHeartbeat(JOB, async () => {
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -216,5 +226,9 @@ Deno.serve(async (req: Request) => {
   } catch (err: any) {
     console.error("[notify-sale-open] Error:", err);
     return json({ error: err.message || "Internal error" }, 500);
+  }
+   });
+  } finally {
+    await releaseJob(JOB);
   }
 });

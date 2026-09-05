@@ -6,7 +6,7 @@
  * `video_join_room` — it reuses the EXACT same Better-Auth session verification
  * and private-room authorization gate (host / co-host / prior member / invite /
  * public), then mints a Fishjam MoQ token via `@fishjam-cloud/js-server-sdk`
- * `createMoqToken({ publishPath | subscribePath })` instead of a WebRTC peer
+ * `createMoqAccess({ publishPath | subscribePath })` instead of a WebRTC peer
  * token.
  *
  * Roles → paths (multi-speaker model — DECIDED in docs/lynk-moq-fit.md §5.2):
@@ -18,7 +18,7 @@
  *     one tile per path with no reload). Authorized for any permitted member.
  *
  * A token is single-purpose: a subscribe token can NEVER publish (enforced
- * server-side by which field we pass to createMoqToken). A broadcaster requests
+ * server-side by which field we pass to createMoqAccess). A broadcaster requests
  * BOTH a publish token (own path) and a subscribe token (namespace) — two calls.
  *
  * Management token (`FISHJAM_API_KEY`) NEVER leaves the server; the client only
@@ -26,13 +26,20 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { FishjamClient } from "npm:@fishjam-cloud/js-server-sdk";
+import { verifySessionDetailed } from "../_shared/verify-session.ts";
+// PINNED. This import used to be bare `npm:@fishjam-cloud/js-server-sdk`, so
+// Deno resolved whatever was latest at deploy time. 0.30.0 renamed
+// `createMoqToken` to `createMoqAccess`, the call below started throwing
+// TypeError, and every MoQ join — web AND native, product AND genesis — came
+// back as `internal_error: Failed to mint MoQ token`. A silent server-side
+// break with no client change is exactly what a floating range buys you.
+import { FishjamClient } from "npm:@fishjam-cloud/js-server-sdk@0.30.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-auth-token",
+    "authorization, x-client-info, apikey, content-type, x-auth-token, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -73,8 +80,20 @@ function errorResponse(
   );
 }
 
-/** Roles allowed to publish media in the broadcast (multi-speaker model). */
-const PUBLISH_ROLES = new Set(["host", "co-host", "speaker"]);
+/**
+ * Roles allowed to publish media in the broadcast.
+ *
+ * `participant` is the role EVERY joiner gets (video_join_room:360), so leaving
+ * it out meant a Lynk was a broadcast: the host published, and every guest was
+ * a silent, invisible viewer the host could not see. That is not what a Lynk
+ * is. A room is capped at 2..50 and plan-limited at creation
+ * (video_create_room:27), so "everyone who joins is on camera" is bounded —
+ * this is the Zoom model, not an open firehose.
+ *
+ * A guest still chooses camera/mic in pre-join and can arrive with both off;
+ * publishing is a CAPABILITY here, never a state.
+ */
+const PUBLISH_ROLES = new Set(["host", "co-host", "speaker", "participant"]);
 
 /** Path-safe peer id derived from the user (anon users get a stable anon id). */
 function peerIdFor(userId: string, anonLabel: string | null): string {
@@ -95,13 +114,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    const customToken = req.headers.get("x-auth-token");
-    const jwt = (customToken || authHeader?.replace("Bearer ", "") || "").trim();
-    if (!jwt) {
-      return errorResponse("unauthorized", "Missing session token");
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const fishjamId = Deno.env.get("FISHJAM_APP_ID")!;
@@ -112,22 +124,18 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
 
-    // 1. Verify Better-Auth session (direct DB lookup — same as video_join_room)
-    const { data: session } = await supabase
-      .from("session")
-      .select("userId, expiresAt")
-      .eq("token", jwt)
-      .order("createdAt", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!session) {
+    // 1. Verify Better-Auth session (shared helper — same as video_join_room)
+    const sessionResult = await verifySessionDetailed(supabase, req);
+    if (!sessionResult.ok) {
+      if (sessionResult.reason === "missing") {
+        return errorResponse("unauthorized", "Missing session token");
+      }
+      if (sessionResult.reason === "expired") {
+        return errorResponse("unauthorized", "Session expired");
+      }
       return errorResponse("unauthorized", "Invalid or expired session");
     }
-    if (new Date(session.expiresAt) < new Date()) {
-      return errorResponse("unauthorized", "Session expired");
-    }
-    const userId = session.userId as string;
+    const userId = sessionResult.userId as string;
 
     // 2. Validate input
     let body: unknown;
@@ -224,12 +232,15 @@ Deno.serve(async (req) => {
     const path = intent === "publish" ? `${namespace}/${peerId}` : namespace;
 
     const fishjam = new FishjamClient({ fishjamId, managementToken });
-    const { token } =
+    // `createMoqAccess` (0.30.0) returns BOTH the token and a ready connection
+    // URL with the JWT already embedded. Use the URL it gives us rather than
+    // rebuilding `https://relay.fishjam.io/${fishjamId}?jwt=` by hand: the relay
+    // host is Fishjam's to choose, and hardcoding it here is a second thing to
+    // get wrong the day it moves.
+    const { token, connection_url: relayUrl } =
       intent === "publish"
-        ? await fishjam.createMoqToken({ publishPath: path })
-        : await fishjam.createMoqToken({ subscribePath: path });
-
-    const relayUrl = `https://relay.fishjam.io/${fishjamId}?jwt=${token}`;
+        ? await fishjam.createMoqAccess({ publishPath: path })
+        : await fishjam.createMoqAccess({ subscribePath: path });
 
     return jsonResponse({
       ok: true,

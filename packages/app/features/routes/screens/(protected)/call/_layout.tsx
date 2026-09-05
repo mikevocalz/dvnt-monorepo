@@ -1,8 +1,9 @@
 import { Stack, useRouter } from "expo-router";
 import { FishjamProvider } from "@fishjam-cloud/react-native-client";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import { useVideoRoomStore } from "@dvnt/app/src/video/stores/video-room-store";
+import { useVideoRoomStore } from "@dvnt/app/features/video";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
+import { color } from "@dvnt/app/lib/theme";
 
 const FISHJAM_APP_ID = resolveFishjamAppId();
 
@@ -27,7 +28,7 @@ export default function CallLayout() {
       }}
     >
       <FishjamProvider fishjamId={FISHJAM_APP_ID} debug={__DEV__}>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: color.ink } }} />
       </FishjamProvider>
     </ErrorBoundary>
   );

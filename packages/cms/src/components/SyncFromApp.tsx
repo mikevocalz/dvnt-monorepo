@@ -37,11 +37,11 @@ export default function SyncFromApp() {
     <div className="dvnt-sync">
       <div className="dvnt-sync__text">
         <strong>Live app data</strong>
-        <span>Pull events, members &amp; tickets from the app into the CMS collections.</span>
+        <span>Auto-syncs from the app every 10 minutes. Use the button to sync right now.</span>
       </div>
       <div className="dvnt-sync__action">
         <button type="button" className="btn btn--style-primary btn--size-medium" onClick={run} disabled={busy}>
-          {busy ? 'Syncing…' : 'Sync from app'}
+          {busy ? 'Syncing…' : 'Sync now'}
         </button>
         {result?.ok && (
           <span className="dvnt-sync__msg dvnt-sync__msg--ok">

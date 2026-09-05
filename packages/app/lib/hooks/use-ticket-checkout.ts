@@ -17,6 +17,7 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
+import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
 
 interface CheckoutParams {
   eventId: string;
@@ -49,6 +50,10 @@ export function useTicketCheckout() {
         // Get Better Auth token for session verification
         const token = await requireBetterAuthToken();
 
+        // Promoter attribution (WS-4): pending ?ref= from a tracked
+        // share link — MMKV-persisted, attribution-only (no pricing).
+        const promoterCode = getPendingPromoterRef(eventId);
+
         // Step 1: Create PaymentIntent via edge function
         const { data, error } = await supabase.functions.invoke(
           "create-payment-intent",
@@ -58,6 +63,7 @@ export function useTicketCheckout() {
               ticket_type_id: ticketTypeId,
               quantity,
               ...(promoCode ? { promo_code: promoCode } : {}),
+              ...(promoterCode ? { promoter_code: promoterCode } : {}),
             },
             headers: { Authorization: `Bearer ${token}` },
           },

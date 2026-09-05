@@ -1,0 +1,22 @@
+/**
+ * DVNT Live Surface — barrel export.
+ *
+ * Usage:
+ *   import { useLiveSurface, fetchLiveSurface, updateLiveActivity } from '@dvnt/app/features/live-surface';
+ */
+export { fetchLiveSurface } from "./api";
+export { useLiveSurface } from "./hooks/use-live-surface";
+export {
+  addLiveActivityPushToStartListener,
+  areLiveActivitiesEnabled,
+  endLiveActivity,
+  updateLiveActivity,
+} from "./native/ios-bridge";
+export type {
+  LiveActivityState,
+  LiveSurfacePayload,
+  LiveSurfaceTile1,
+  LiveSurfaceTile3,
+  LiveSurfaceTile3Item,
+  LiveSurfaceWeather,
+} from "./types";

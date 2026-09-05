@@ -44,6 +44,8 @@ export const Authors: CollectionConfig = {
     delete: isAdminPlus,
   },
   admin: {
+    group: 'Content',
+    description: 'Blog bylines (linked to staff users).',
     useAsTitle: 'name',
     defaultColumns: ['name', 'slug', 'role'],
     listSearchableFields: ['name', 'email'],

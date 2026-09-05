@@ -252,6 +252,18 @@ function GridCell({
           playsInline
           className="block w-full h-auto"
         />
+      ) : isVideo && !tile.coverUrl && tile.videoUrl ? (
+        // Old videos never got a thumbnail (expo-video-thumbnails is native-only),
+        // so there's no coverUrl → they used to show "No preview" on web. Render
+        // the video's own first frame instead. `#t=0.1` makes browsers (Safari)
+        // seek to a frame; preload="metadata" keeps it light (no full download).
+        <video
+          src={`${tile.videoUrl}#t=0.1`}
+          muted
+          playsInline
+          preload="metadata"
+          className="block w-full h-auto"
+        />
       ) : tile.coverUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img

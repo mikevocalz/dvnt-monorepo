@@ -219,7 +219,7 @@ Verified locally (`/tmp/email-preview/`):
 
 Remaining for a real-client pass (needs deployed assets + accounts):
 
-- [ ] **Deploy the logo assets**: ship `apps/web/public/dvnt-email-logo@2x.png`
+- [x] **Deploy the logo assets** (live 2026-08-08 — `https://dvntapp.live/dvnt-email-logo@2x.png` returns 200): ship `apps/web/public/dvnt-email-logo@2x.png`
       + `dvnt-email-glyph.png` so `https://dvntapp.live/...` resolves (or set the
       `EMAIL_ASSET_BASE` edge env var to wherever they're hosted).
 - [ ] Litmus / Email-on-Acid pass across Apple Mail, Gmail web + app, Outlook

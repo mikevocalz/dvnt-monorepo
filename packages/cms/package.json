@@ -13,12 +13,12 @@
     "./components/*": "./src/components/*.tsx"
   },
   "dependencies": {
-    "@payloadcms/storage-s3": "4.0.0-internal.a0ef1b8"
+    "@payloadcms/storage-s3": "4.0.0-canary.26"
   },
   "peerDependencies": {
-    "@payloadcms/db-postgres": "4.0.0-internal.a0ef1b8",
-    "@payloadcms/richtext-lexical": "4.0.0-internal.a0ef1b8",
-    "payload": "4.0.0-internal.a0ef1b8",
-    "sharp": "0.34.2"
+    "@payloadcms/db-postgres": "4.0.0-canary.26",
+    "@payloadcms/richtext-lexical": "4.0.0-canary.26",
+    "payload": "4.0.0-canary.26",
+    "sharp": "0.35.3"
   }
 }

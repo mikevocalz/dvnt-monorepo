@@ -90,6 +90,18 @@ export type { DrawerProps } from './form/Drawer';
 
 // ── Shared video tile (Lynk MoQ livestream + Fishjam calls) ──────────────────
 export { VideoTile } from './video/VideoTile';
+export { ConnectionBanner } from './video/ConnectionBanner';
+export { RoomTimer } from './video/RoomTimer';
+export type { RoomTimerProps } from './video/RoomTimer.types';
+export {
+  FREE_ROOM_DURATION_MS,
+  COUNTDOWN_THRESHOLD_MS,
+  countdownAt,
+  useRoomCountdown,
+} from './video/RoomTimer.countdown';
+export type { ConnectionBannerProps, ConnectionPhase } from './video/ConnectionBanner.types';
+export { connectionPhaseFromPeerStatus } from './video/ConnectionBanner.phase';
+export type { FishjamPeerStatus } from './video/ConnectionBanner.phase';
 export type { VideoTileProps, MoqViewerSource } from './video/VideoTile.types';
 
 // ── React-equivalent media wrappers (Phase 0) ────────────────────────────────

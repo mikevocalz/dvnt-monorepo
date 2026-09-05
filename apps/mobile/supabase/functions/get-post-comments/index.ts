@@ -4,12 +4,13 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -103,23 +104,15 @@ Deno.serve(async (req) => {
     });
 
     let viewerId: number | null = null;
-    const authHeader = req.headers.get("Authorization");
-    if (authHeader?.startsWith("Bearer ")) {
-      const token = authHeader.replace("Bearer ", "");
-      const { data: sessionData } = await supabaseAdmin
-        .from("session")
-        .select("userId, expiresAt")
-        .eq("token", token)
-        .single();
-
-      if (sessionData && new Date(sessionData.expiresAt) >= new Date()) {
-        const userData = await resolveOrProvisionUser(
-          supabaseAdmin,
-          sessionData.userId,
-          "id",
-        );
-        viewerId = userData?.id ?? null;
-      }
+    // Optional viewer auth via shared helper (failure = anonymous, not an error)
+    const viewerAuthId = await verifySession(supabaseAdmin, req);
+    if (viewerAuthId) {
+      const userData = await resolveOrProvisionUser(
+        supabaseAdmin,
+        viewerAuthId,
+        "id",
+      );
+      viewerId = userData?.id ?? null;
     }
 
     const selectColumns =

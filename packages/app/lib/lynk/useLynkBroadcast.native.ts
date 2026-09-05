@@ -1,160 +1,188 @@
 /**
- * useLynkBroadcast (NATIVE) — TRUE native publish via Fishjam WHIP livestream
- * (`@fishjam-cloud/react-native-client` `useLivestreamStreamer` + camera/mic).
- * No WebView: the host's phone camera publishes a real native `MediaStream`, and
- * co-publishers (cohost/speakers) are watched through the same livestream
- * subscribe path the viewer uses.
+ * useLynkBroadcast (NATIVE) — publish camera + mic to a Lynk room over MoQ via
+ * `react-native-moq` (true native QUIC + hardware encode, no WebView).
  *
- * MUST run under `<FishjamProvider>` (the Lynk native screen wraps it). Teardown
- * on `end()` stops publishing + releases the camera (privacy).
+ * WS-3: replaces the Fishjam WHIP livestream publish path, so native and web
+ * now speak the same transport and interop against each other.
+ *   - publish token (own peer path) ← `lynk-moq-token` (intent: "publish")
+ *   - `useSession(relayUrl)` + `usePublisher(session)`
+ *   - `useCamera()` / `useMicrophone()` → `publish({ path, tracks })`
+ *   - co-publishers are discovered by composing `useLynkViewer` (a SEPARATE,
+ *     subscribe-scoped connection — MoQ tokens are single-purpose, so a
+ *     publisher needs both a publish token to send and a subscribe token to
+ *     watch others). Same composition the web hook uses.
+ *
+ * Unlike web there is no `MediaStream`: the local preview is the native
+ * `<PublisherView camera={cameraTrack} />`, so this hook exposes `cameraTrack`
+ * rather than `localStream`.
+ *
+ * Teardown on `end()` stops publishing and releases the camera — a stream that
+ * keeps publishing after you navigate away is a privacy incident, so the screen
+ * MUST call `end()` on unmount/leave/background.
+ *
+ * `canPublish` exists so a screen with BOTH kinds of member (a Sneaky Lynk room:
+ * speakers publish, listeners only watch) can hold ONE hook unconditionally.
+ * With it false no publish token is minted — `lynk-moq-token` denies `publish`
+ * for a non-speaker role, and an unconditional request would put every listener
+ * into `error` — the camera/mic never start, and the hook degrades to the
+ * composed viewer.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  useSession,
+  usePublisher,
   useCamera,
   useMicrophone,
-  useInitializeDevices,
-  useLivestreamStreamer,
-} from "@fishjam-cloud/react-native-client";
-import { deriveLynkState } from "./lynkState";
-import type { LynkState } from "./lynkState";
+} from "react-native-moq";
+import type { CameraTrack, PublishTrack } from "react-native-moq";
+import { useMoqToken } from "./useMoqToken";
 import {
-  fetchLivestreamPublishToken,
-  fetchLivestreamSubscribe,
-  type LivestreamSubscribeStream,
-} from "./livestreamToken";
+  useLynkViewer,
+  connectionStatusFromSession,
+  type NativeLynkPublisher,
+} from "./useLynkViewer.native";
+import { deriveLynkState } from "./lynkState";
+import type { LynkBroadcastBase } from "./types";
 
-const POLL_MS = 4000;
-
-export interface UseLynkBroadcastNativeResult {
-  state: LynkState;
-  error: string | null;
-  isLive: boolean;
-  /** Local camera preview MediaStream (RN). */
-  localStream: unknown | null;
-  cameraEnabled: boolean;
-  micEnabled: boolean;
-  setCameraEnabled: (on: boolean) => void;
-  setMicEnabled: (on: boolean) => void;
-  /** Co-publishers (cohost/speakers) + viewer tokens to render their tiles. */
-  coPublishers: LivestreamSubscribeStream[];
-  viewerCount: number;
-  goLive: () => Promise<void>;
-  end: () => void;
-  publishUnsupported: false;
+export interface UseLynkBroadcastNativeResult extends LynkBroadcastBase {
+  /** Local camera track — bind to `<PublisherView camera={...} />` for preview. */
+  cameraTrack: CameraTrack;
+  /** Each co-publisher carries the native player its tile renders. */
+  coPublishers: NativeLynkPublisher[];
 }
 
 export function useLynkBroadcast(
   roomId: string | undefined,
+  canPublish = true,
 ): UseLynkBroadcastNativeResult {
-  const { initializeDevices } = useInitializeDevices();
-  const { cameraStream, toggleCamera, startCamera, stopCamera, isCameraOn } = useCamera();
-  const { microphoneStream } = useMicrophone();
-  const streamer = useLivestreamStreamer();
+  const { token, error: tokenError } = useMoqToken(
+    roomId,
+    "publish",
+    !!roomId && canPublish,
+  );
+  // Compose the viewer for co-publisher discovery (separate subscribe token).
+  const viewer = useLynkViewer(roomId);
 
   const [isLive, setIsLive] = useState(false);
+  const [cameraEnabled, setCameraEnabledState] = useState(true);
   const [micEnabled, setMicEnabledState] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
-  const [coPublishers, setCoPublishers] = useState<LivestreamSubscribeStream[]>([]);
-  const selfPeerId = useRef<string | null>(null);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const alive = useRef(true);
 
-  // Bring up camera + mic on mount so the preview is ready before Go Live.
-  useEffect(() => {
-    void initializeDevices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const session = useSession(token?.relayUrl ?? "");
+  const publisher = usePublisher(session);
+  // `enabled: false` stops the native capture outright — that IS camera-off on
+  // this transport; there is no separate "publish black frames" mode.
+  //
+  // videoCodec pinned to h264 per the library's own skill: on Android an
+  // unsupported encoder (usually h265) makes publishing start then silently
+  // stop with NO error — moq-kit reports it as a clean stop. h264 is listed
+  // by getSupportedVideoCodecs() everywhere we ship.
+  const camera = useCamera({
+    enabled: cameraEnabled && !ended && canPublish,
+    videoCodec: "h264",
+  });
+  // `enabled` soft-disables capture (0.3.0 added it to MicrophoneOptions). It
+  // matters beyond mute: an idle iOS capture holds the audio session in
+  // `playAndRecord` and can starve other audio libraries (`insufficientPriority`).
+  const mic = useMicrophone({ enabled: micEnabled && !ended && canPublish });
 
-  // Poll co-publishers (exclude self).
+  const { connect, disconnect } = session;
+  const { publish, stop } = publisher;
+
+  // Connect as soon as the publish token mints, so Go Live is instant.
   useEffect(() => {
-    alive.current = true;
-    const poll = async () => {
-      if (!roomId) return;
-      try {
-        const streams = await fetchLivestreamSubscribe(roomId);
-        if (alive.current)
-          setCoPublishers(streams.filter((s) => s.peerId !== selfPeerId.current));
-      } catch {
-        /* transient */
-      }
-    };
-    void poll();
-    timer.current = setInterval(() => void poll(), POLL_MS);
-    return () => {
-      alive.current = false;
-      if (timer.current) clearInterval(timer.current);
-    };
-  }, [roomId]);
+    if (!token?.relayUrl || ended) return;
+    connect();
+    return () => disconnect();
+  }, [token?.relayUrl, ended, connect, disconnect]);
+
+  // `publish()` snapshots its track list, so every change to the track set
+  // (mic mute, camera off) has to re-publish. Keeping the list in one memo
+  // means the effect below and `goLive` can never disagree about it.
+  const tracks = useMemo<PublishTrack[]>(() => {
+    const next: PublishTrack[] = [];
+    if (cameraEnabled) next.push(camera);
+    if (micEnabled) next.push(mic);
+    return next;
+  }, [cameraEnabled, micEnabled, camera, mic]);
+
+  const publishedPath = useRef<string | null>(null);
+
+  // Publish only once the session is actually connected — calling publish()
+  // earlier sends the publisher straight to `error:session is not connected`
+  // (it does not queue). Depending on session.state means this effect also
+  // re-fires when the connection lands after Go Live was tapped, so the tap
+  // never has to race the handshake.
+  useEffect(() => {
+    if (!isLive || !token?.path || ended) return;
+    if (session.state !== "connected") return;
+    publish({ path: token.path, tracks });
+    publishedPath.current = token.path;
+  }, [isLive, token?.path, tracks, ended, publish, session.state]);
 
   const goLive = useCallback(async () => {
-    if (!roomId || isLive) return;
-    try {
-      if (!isCameraOn) await startCamera();
-      const { token, peerId } = await fetchLivestreamPublishToken(roomId);
-      selfPeerId.current = peerId;
-      if (!cameraStream) {
-        setError("Camera is not ready yet — try again.");
-        return;
-      }
-      await streamer.connect({
-        inputs: { video: cameraStream, audio: microphoneStream ?? null },
-        token,
-      });
-      setIsLive(true);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to go live");
-    }
-  }, [roomId, isLive, isCameraOn, startCamera, cameraStream, microphoneStream, streamer]);
+    if (!token || isLive || !canPublish) return;
+    setIsLive(true);
+  }, [token, isLive, canPublish]);
 
   const setCameraEnabled = useCallback(
-    (_on: boolean) => {
-      void toggleCamera();
-    },
-    [toggleCamera],
+    (on: boolean) => setCameraEnabledState(on),
+    [],
   );
-  const setMicEnabled = useCallback((on: boolean) => {
-    setMicEnabledState(on);
-    // Mic mute on native livestream: stop including audio on next (re)connect;
-    // for v1 we toggle the flag (full hot-mute is a follow-on).
-  }, []);
+  const setMicEnabled = useCallback(
+    (on: boolean) => setMicEnabledState(on),
+    [],
+  );
 
   const end = useCallback(() => {
     setEnded(true);
     setIsLive(false);
-    try {
-      streamer.disconnect();
-    } catch {
-      /* ignore */
-    }
-    stopCamera();
-  }, [streamer, stopCamera]);
+    publishedPath.current = null;
+    stop();
+    disconnect();
+    viewer.leave();
+  }, [stop, disconnect, viewer.leave]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Privacy teardown: stop publishing on unmount.
   useEffect(() => () => end(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const state = deriveLynkState({
-    hasToken: true,
-    connection: streamer.isConnected ? "connected" : "connecting",
-    hasMedia: isLive && streamer.isConnected,
-    ended,
-    error: !!error || !!streamer.error,
-  });
+  // Co-publishers = everyone discovered except ourselves.
+  const coPublishers = useMemo(
+    () => viewer.publishers.filter((p) => p.peerId !== token?.peerId),
+    [viewer.publishers, token?.peerId],
+  );
+
+  const publisherError = publisher.state.startsWith("error:")
+    ? publisher.lastError || publisher.state.slice("error:".length)
+    : null;
+
+  // A listener requests NO publish token (`canPublish` false), so the publish
+  // lifecycle has nothing to report and `deriveLynkState` would sit at
+  // `requesting-token` forever — the screen would never leave "Connecting…".
+  // Their real state is the composed viewer's. Mirrors the web sibling.
+  const state = canPublish
+    ? deriveLynkState({
+        hasToken: !!token,
+        connection: connectionStatusFromSession(session.state),
+        hasMedia: publisher.state === "publishing",
+        ended,
+        error: !!tokenError || !!publisherError,
+      })
+    : viewer.state;
 
   return {
     state,
-    error: error ?? (streamer.error ? String(streamer.error) : null),
+    error: canPublish ? tokenError ?? publisherError : viewer.error,
     isLive,
-    localStream: cameraStream ?? null,
-    cameraEnabled: isCameraOn,
+    cameraTrack: camera,
+    cameraEnabled,
     micEnabled,
     setCameraEnabled,
     setMicEnabled,
     coPublishers,
-    viewerCount: 0,
+    viewerCount: viewer.viewerCount,
     goLive,
     end,
-    publishUnsupported: false,
   };
 }

@@ -31,10 +31,22 @@ export interface ExpoSentryConfig {
   sampleRate?: number;
   /** Sample rate for performance traces (0-1). Default: 0.3 */
   tracesSampleRate?: number;
-  /** Sample rate for profiles (0-1). Default: 0.1 */
+  /** Sample rate for profiles (0-1). Default: 0 — see the init below. */
   profilesSampleRate?: number;
-  /** Enable session replay. Default: false */
-  replaysEnabled?: boolean;
+  /** Seconds before the native watchdog calls it a hang. Default: 5. */
+  appHangTimeoutSeconds?: number;
+  /** Extra integrations appended to the SDK defaults (router, replay, feedback). */
+  integrations?: unknown[];
+  /** Dynamic sampler — wins over tracesSampleRate when provided. */
+  tracesSampler?: (ctx: { name?: string }) => number;
+  /** Hosts that receive sentry-trace/baggage headers for stitched traces. */
+  tracePropagationTargets?: (string | RegExp)[];
+  /** Enable Sentry Logs (structured logging). Default: false. Verified option
+   *  `enableLogs` — @sentry/core options.d.ts:530. Powers the logs.ts seam. */
+  enableLogs?: boolean;
+  /** Appended to MOBILE_IGNORE_ERRORS. Verified: `ignoreErrors` —
+   *  @sentry/core options.d.ts (ClientOptions). */
+  ignoreErrors?: (string | RegExp)[];
 }
 
 /**
@@ -65,20 +77,44 @@ export function initExpoSentry(Sentry: any, config: ExpoSentryConfig): void {
     enabled: config.enabled ?? true,
     environment: config.environment,
     release,
-    dist: config.buildNumber,
+    // dist ties release-health to a specific artifact. Default = native build
+    // number; when an OTA update is live, prefer the EAS Update id so crash-free
+    // sessions/users report per-OTA as well as per-build (see release.ts +
+    // docs/observability-verification.md §Release health & OTA).
+    dist: config.expoUpdateId ?? config.buildNumber,
+    // Structured logging — off unless explicitly enabled (verified: enableLogs,
+    // @sentry/core options.d.ts:530).
+    enableLogs: config.enableLogs ?? false,
 
-    // Sampling
+    // Sampling — tracesSampler (dynamic, per-flow boost) wins when provided.
     sampleRate: config.sampleRate ?? 1.0,
-    tracesSampleRate: config.tracesSampleRate ?? 0.3,
-    profilesSampleRate: config.profilesSampleRate ?? 0.1,
+    ...(config.tracesSampler
+      ? { tracesSampler: config.tracesSampler }
+      : { tracesSampleRate: config.tracesSampleRate ?? 0.3 }),
+    // 2.13: profiling is a BILLED category and appears in no budget line. The
+    // free-tier allowance is unverified, so the default is off rather than a
+    // rate nobody has costed — an unverified spend against a quota already at
+    // 113% is the thing that drops real errors. Opt in per-app once the
+    // allowance is read off Settings -> Subscription.
+    profilesSampleRate: config.profilesSampleRate ?? 0,
+    ...(config.tracePropagationTargets
+      ? { tracePropagationTargets: config.tracePropagationTargets }
+      : {}),
+
+    // Noise floor — neither rail had one before (audit §2 table). Deliberately
+    // has no built-in list: the org this repo's DSN reports to could not be
+    // read from here (token sees org `deviant`, 0 issues/90d; the audit cites
+    // `5th-galaxy-studios`), so any default list would be guessed noise.
+    // ponytail: caller-supplied only — populate from the real top-issues list.
+    ...(config.ignoreErrors ? { ignoreErrors: config.ignoreErrors } : {}),
 
     // Privacy
     beforeSend: createBeforeSend(),
     beforeSendTransaction: createBeforeSendTransaction(),
 
-    // Integrations
+    // Integrations — SDK defaults plus caller-provided (router, replay, …).
     integrations: (defaults: any[]) => {
-      return defaults;
+      return [...defaults, ...((config.integrations as any[]) ?? [])];
     },
 
     // Tags set on every event
@@ -96,20 +132,37 @@ export function initExpoSentry(Sentry: any, config: ExpoSentryConfig): void {
       },
     },
 
-    // Don't send in development
-    enableInExpoDevelopment: false,
+    // §2.4: screenshots are NOT masked by the RN SDK — a crash frame can
+    // contain DMs or profile content, so they never leave the device.
+    attachScreenshot: false,
 
-    // Attach screenshots on crash
-    attachScreenshot: true,
-
-    // Attach view hierarchy for debugging
-    attachViewHierarchy: true,
+    // 2.1: SDK default (options.d.ts:231). `true` installs a main-thread
+    // native view-tree walk at error time — the first half of the crash loop.
+    attachViewHierarchy: false,
 
     // Enable automatic performance instrumentation
     enableAutoPerformanceTracing: true,
 
-    // Enable Hermes symbolication
-    enableHermes: true,
+    // ANR / app-hang detection (native watchdogs).
+    //
+    // 2.2: the SDK default is 2s, which a cold start on a mid-range Android or
+    // a heavy screen mount exceeds routinely — those fire as hangs and burn
+    // quota describing normal behaviour. 5s still catches a real freeze (the
+    // threshold a user perceives as "stuck" is around 3-5s) without reporting
+    // work that completes.
+    //
+    // A live room is handled separately: features/sneaky-lynk/observability
+    // pauses hang tracking for the duration, because the main thread is
+    // committed to media there and a watchdog cannot tell that from a freeze.
+    //
+    // ponytail: 5s is reasoned, not measured. Calibrate against a real
+    // worst-case join once one has been recorded on device.
+    enableAppHangTracking: true,
+    appHangTimeoutInterval: config.appHangTimeoutSeconds ?? 5,
+
+    // 2.6: SDK default (options.d.ts:309). A span per touch is not worth
+    // its cost in a room; dead-tap analysis is not why we are here.
+    enableUserInteractionTracing: false,
   });
 
   // Wire up the observability layer

@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
-import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
+import type { TransitionStackOptions as NativeStackNavigationOptions } from "@dvnt/app/lib/navigation/transition-stack";
 import type { MotionTier } from "@dvnt/app/lib/navigation/use-motion-tier";
 
 function buildPushTransition(): NativeStackNavigationOptions {

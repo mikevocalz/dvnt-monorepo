@@ -14,6 +14,10 @@ interface EventDetailUiState {
   // Ticket checkout sheet
   checkoutOpen: boolean;
   setCheckoutOpen: (open: boolean) => void;
+
+  /** B3: deferred ID-verification interstitial (age-gated RSVP/tickets). */
+  verifyOpen: boolean;
+  setVerifyOpen: (open: boolean) => void;
   selectedTierId: string | null;
   setSelectedTierId: (id: string | null) => void;
   ticketQty: number;
@@ -35,6 +39,19 @@ interface EventDetailUiState {
   promoApplying: boolean;
   setPromoApplying: (v: boolean) => void;
 
+  // Locked-tier unlock ("Have a code?"). Validation is SERVER-side — these
+  // hold only the affordance state + the tier ids the server has unlocked.
+  unlockOpen: boolean;
+  setUnlockOpen: (open: boolean) => void;
+  unlockCodeInput: string;
+  setUnlockCodeInput: (code: string) => void;
+  unlockError: string | null;
+  setUnlockError: (e: string | null) => void;
+  unlockBusy: boolean;
+  setUnlockBusy: (v: boolean) => void;
+  unlockedTierIds: string[];
+  addUnlockedTierIds: (ids: string[]) => void;
+
   // Upgrade confirmation sheet — holds the tier id being upgraded to
   upgradeTierId: string | null;
   setUpgradeTierId: (id: string | null) => void;
@@ -51,6 +68,16 @@ interface EventDetailUiState {
   translated: boolean;
   setTranslated: (v: boolean) => void;
 
+  // WS-9 host destructive/lifecycle actions — which confirm dialog is open
+  // (null = none). `delete_blocked` is the paid-tickets redirect that routes
+  // the host to Cancel. Business state, so it lives here (never useState).
+  hostAction: null | "cancel" | "postpone" | "resume" | "delete" | "delete_blocked";
+  setHostAction: (
+    a: null | "cancel" | "postpone" | "resume" | "delete" | "delete_blocked",
+  ) => void;
+  hostActionBusy: boolean;
+  setHostActionBusy: (v: boolean) => void;
+
   reset: () => void;
 }
 
@@ -60,6 +87,9 @@ export const useEventDetailUiStore = create<EventDetailUiState>((set) => ({
 
   checkoutOpen: false,
   setCheckoutOpen: (checkoutOpen) => set({ checkoutOpen }),
+
+  verifyOpen: false,
+  setVerifyOpen: (verifyOpen) => set({ verifyOpen }),
   selectedTierId: null,
   setSelectedTierId: (selectedTierId) => set({ selectedTierId }),
   ticketQty: 1,
@@ -72,6 +102,20 @@ export const useEventDetailUiStore = create<EventDetailUiState>((set) => ({
   setPromoError: (promoError) => set({ promoError }),
   promoApplying: false,
   setPromoApplying: (promoApplying) => set({ promoApplying }),
+
+  unlockOpen: false,
+  setUnlockOpen: (unlockOpen) => set({ unlockOpen }),
+  unlockCodeInput: "",
+  setUnlockCodeInput: (unlockCodeInput) => set({ unlockCodeInput }),
+  unlockError: null,
+  setUnlockError: (unlockError) => set({ unlockError }),
+  unlockBusy: false,
+  setUnlockBusy: (unlockBusy) => set({ unlockBusy }),
+  unlockedTierIds: [],
+  addUnlockedTierIds: (ids) =>
+    set((s) => ({
+      unlockedTierIds: Array.from(new Set([...s.unlockedTierIds, ...ids])),
+    })),
 
   upgradeTierId: null,
   setUpgradeTierId: (upgradeTierId) => set({ upgradeTierId }),
@@ -86,9 +130,15 @@ export const useEventDetailUiStore = create<EventDetailUiState>((set) => ({
   translated: false,
   setTranslated: (translated) => set({ translated }),
 
+  hostAction: null,
+  setHostAction: (hostAction) => set({ hostAction }),
+  hostActionBusy: false,
+  setHostActionBusy: (hostActionBusy) => set({ hostActionBusy }),
+
   reset: () =>
     set({
       menuOpen: false,
+      verifyOpen: false,
       checkoutOpen: false,
       selectedTierId: null,
       ticketQty: 1,
@@ -96,10 +146,17 @@ export const useEventDetailUiStore = create<EventDetailUiState>((set) => ({
       appliedPromo: null,
       promoError: null,
       promoApplying: false,
+      unlockOpen: false,
+      unlockCodeInput: "",
+      unlockError: null,
+      unlockBusy: false,
+      unlockedTierIds: [],
       upgradeTierId: null,
       reviewOpen: false,
       reviewRating: 5,
       reviewText: "",
       translated: false,
+      hostAction: null,
+      hostActionBusy: false,
     }),
 }));

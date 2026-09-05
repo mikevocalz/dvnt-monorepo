@@ -15,17 +15,13 @@ import {
 } from "@tanstack/react-query";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { postKeys } from "@dvnt/app/lib/hooks/use-posts";
 import { resolveAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import type { AppUser } from "@dvnt/app/lib/auth-client";
+import { postKeys, profileKeys, activityKeys } from "@dvnt/app/lib/query-keys";
+export { profileKeys };
 
 // Query keys - MUST be scoped by userId
-export const profileKeys = {
-  all: ["profile"] as const,
-  byId: (userId: string) => ["profile", userId] as const,
-  byUsername: (username: string) => ["profile", "username", username] as const,
-};
 
 export interface ProfileData {
   id: string;
@@ -59,6 +55,8 @@ type UpdateProfileInput = {
   location?: string;
   pronouns?: string;
   gender?: string;
+  sexuality?: string[];
+  eventAudience?: string;
   hashtags?: string[];
   username?: string;
 };
@@ -483,7 +481,13 @@ export function useUpdateProfile() {
         gender: variables.gender ?? authUser.gender,
         hashtags: variables.hashtags ?? authUser.hashtags,
         name: variables.name ?? authUser.name,
-      };
+        // These two drive the `identity` (20) and `audience` (10) items in
+        // computeProfileCompletion. Omitting them here made the completion ring
+        // snap back to 70% the moment you saved, before the server round-trip
+        // could restore it.
+        sexuality: variables.sexuality ?? (authUser as any).sexuality,
+        eventAudience: variables.eventAudience ?? (authUser as any).eventAudience,
+      } as AppUser;
       setUser(optimisticUser);
       patchCurrentUserEverywhere(queryClient, authUser, optimisticUser);
 
