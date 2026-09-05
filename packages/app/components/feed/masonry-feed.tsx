@@ -763,6 +763,13 @@ export function MasonryFeed() {
     <View style={{ flex: 1 }} onLayout={handleContainerLayout}>
     <LegendList
       ref={listRef}
+      // Remount when the column geometry changes — i.e. on rotation, or when
+      // the iPad tab layout changes the region the feed owns. `recycleItems`
+      // plus an `estimatedItemSize` derived from columnWidth means the list
+      // caches item sizes measured at the OLD width; without this the masonry
+      // keeps portrait geometry in landscape and the columns do not adapt.
+      // The cost is scroll position, which a rotation resets anyway.
+      key={`${numColumns}x${columnWidth}`}
       // Virtualized at SECTION granularity. Each section already carries its own
       // shortest-first column packing, so the masonry layout is byte-identical to
       // the old ScrollView — the only change is that offscreen sections stop

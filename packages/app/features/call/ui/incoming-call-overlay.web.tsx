@@ -61,19 +61,36 @@ export function IncomingCallOverlay() {
     if (!isAuthenticated || !user?.id) return;
     const userId = user.id;
 
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+
     const unsubscribe = callSignalsApi.subscribeToIncomingCalls(
       userId,
       (signal) => {
         setIncomingCall(signal);
-        setTimeout(() => {
+        const timer = setTimeout(() => {
+          timers.delete(timer);
           setIncomingCall((current) =>
             current?.id === signal.id ? null : current,
           );
         }, RING_TIMEOUT_MS);
+        timers.add(timer);
+      },
+      // The caller hanging up is an UPDATE to status, not an INSERT. Web had no
+      // UPDATE handling at all — both native consumers keep their own channel
+      // for it — so a cancelled call kept ringing here for the full 30 seconds
+      // no matter what the caller did.
+      (signal) => {
+        setIncomingCall((current) =>
+          current?.id === signal.id ? null : current,
+        );
       },
     );
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      // Ring timers outlived the effect and could clear a LATER call's UI.
+      for (const timer of timers) clearTimeout(timer);
+    };
   }, [isAuthenticated, user?.id]);
 
   const handleAccept = useCallback(
