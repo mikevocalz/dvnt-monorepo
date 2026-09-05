@@ -44,12 +44,21 @@ import {
 import { TextPostSurface } from "@dvnt/app/features/post";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import { prefetchImagesBlocking } from "@dvnt/app/lib/perf/image-prefetch";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const columnWidth = (SCREEN_WIDTH - 8) / 3;
-const GRID_COLS = SCREEN_WIDTH >= 768 ? 5 : 4;
+/**
+ * Explore's grid used to be computed HERE, at module scope, from
+ * `Dimensions.get("window")` — evaluated once when the bundle loads and never
+ * again. Launch in portrait, rotate to landscape, and the cells were still
+ * sized for the old width while the list drew the old column count: the
+ * jumbled Explore grid. There is no correct module-scope version of this;
+ * it has to be read per-render, so it now lives in `useResponsiveGrid`.
+ */
 const GRID_GAP = 2;
-const GRID_CELL_SIZE = (SCREEN_WIDTH - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
+/** Smallest Explore tile still worth tapping. */
+const MIN_TILE = 110;
+/** Smallest avatar/preview cell in the Discover rails. */
+const MIN_DISCOVER_TILE = 120;
 
 function getSearchPreviewUrls(posts: Post[]) {
   return posts
@@ -268,18 +277,24 @@ function DiscoverGrid({
   posts: Post[];
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
+  const { columns: gridCols, cellWidth: gridCellSize } = useResponsiveGrid({
+    minCellWidth: MIN_TILE,
+    gap: GRID_GAP,
+    horizontalPadding: 0,
+    maxColumns: 8,
+  });
   const renderItem = useCallback(
     ({ item }: { item: Post }) => {
       return (
         <PostGridTile
           post={item}
-          size={GRID_CELL_SIZE}
+          size={gridCellSize}
           router={router}
           queryClient={queryClient}
         />
       );
     },
-    [queryClient, router],
+    [queryClient, router, gridCellSize],
   );
 
   if (posts.length === 0) return null;
@@ -310,8 +325,12 @@ function DiscoverGrid({
         data={posts}
         renderItem={renderItem}
         keyExtractor={(item: Post) => item.id}
-        numColumns={GRID_COLS}
-        estimatedItemSize={GRID_CELL_SIZE}
+        numColumns={gridCols}
+        estimatedItemSize={gridCellSize}
+        // Remount the list when the column count changes: LegendList caches
+        // cell geometry per column count, so rotating without this keeps the
+        // old lanes and overlaps the new ones.
+        key={`explore-${gridCols}`}
         recycleItems
         columnWrapperStyle={{ gap: GRID_GAP }}
         contentContainerStyle={{ gap: GRID_GAP }}
@@ -322,6 +341,13 @@ function DiscoverGrid({
 }
 
 function SearchScreenContent() {
+  // The Discover rails' cells, reactive for the same reason as Explore above.
+  const { cellWidth: columnWidth } = useResponsiveGrid({
+    minCellWidth: MIN_DISCOVER_TILE,
+    gap: 4,
+    horizontalPadding: 8,
+    maxColumns: 8,
+  });
   const router = useRouter();
   const queryClient = useQueryClient();
   const navigation = useNavigation();

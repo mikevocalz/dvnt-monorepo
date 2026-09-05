@@ -64,6 +64,7 @@ import { ProfileScreenGuard } from "@dvnt/app/features/profile";
 import { ProfilePronounsPill } from "@dvnt/app/features/profile";
 import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 
 // mapPostToGridTile is now replaced by safeGridTiles from safe-profile-mappers.ts
 
@@ -110,9 +111,15 @@ function ProfileScreenContent() {
   useBootstrapProfile();
 
   // Responsive grid: 2 columns on phone, 3 on tablet (768px+), 4 on large (1024px+)
-  const { width: screenWidth } = useWindowDimensions();
-  const numColumns = screenWidth >= 1024 ? 4 : screenWidth >= 768 ? 3 : 2;
-  const columnWidth = (screenWidth - 2 * (numColumns + 1)) / numColumns;
+  // Columns from the width, not from three hardcoded breakpoints. The old
+  // ladder topped out at 4 and only at >=1024, so a landscape tablet — which
+  // has room for six — drew four and banked the rest as gutter.
+  const { columns: numColumns, cellWidth: columnWidth } = useResponsiveGrid({
+    minCellWidth: 180,
+    gap: 2,
+    horizontalPadding: 4,
+    maxColumns: 8,
+  });
 
   // DEFENSIVE: Get stores safely
   const { activeTab, setActiveTab } = useProfileStore();

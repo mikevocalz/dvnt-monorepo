@@ -64,6 +64,7 @@ import {
   usePromotedEventIds,
 } from "@dvnt/app/lib/hooks/use-promotions";
 import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 
 function EventCard({
   event,
@@ -102,7 +103,7 @@ function EventCard({
         stiffness: 300,
         delay: index * 0.15,
       }}
-      className="max-w-5xl w-full self-center"
+      className="w-full self-center"
     >
       <Motion.View
         className="rounded-3xl overflow-hidden mb-5"
@@ -329,8 +330,8 @@ function EventCard({
   );
 }
 
-/** Matches the `max-w-5xl` column this screen renders in (Tailwind 5xl = 1024). */
-const EVENTS_MAX_WIDTH = 1024;
+/** Smallest 4:5 flyer card that still shows its title and date. */
+const MIN_CARD_WIDTH = 240;
 
 function EventsScreenContent() {
   const router = useRouter();
@@ -352,13 +353,13 @@ function EventsScreenContent() {
   // laid out exactly like a 768pt one and parked the difference in the
   // gutters. Now the canvas grows and a third column appears when there is
   // genuinely room for one at a sane card width.
-  const contentWidth = Math.min(screenWidth, EVENTS_MAX_WIDTH);
-  const numColumns = contentWidth >= 1000 ? 3 : contentWidth >= 700 ? 2 : 1;
+  const { columns: numColumns, cellWidth } = useResponsiveGrid({
+    minCellWidth: MIN_CARD_WIDTH,
+    gap: 12,
+    horizontalPadding: 32,
+  });
   const gridGap = numColumns > 1 ? 12 : 0;
-  const cardWidth =
-    numColumns > 1
-      ? (contentWidth - 32 - gridGap * (numColumns - 1)) / numColumns
-      : screenWidth - 12;
+  const cardWidth = numColumns > 1 ? cellWidth : screenWidth - 12;
   // PORTRAIT, because a DVNT flyer is authored 3:5 portrait
   // (`BuiltEventMedia.flyerImageUrl`) and these cards render it with
   // `resizeMode="cover"`. At 0.85 (landscape) and 1.0 (square) the card threw
