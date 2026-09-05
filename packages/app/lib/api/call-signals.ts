@@ -194,6 +194,14 @@ export const callSignalsApi = {
   subscribeToIncomingCalls(
     userAuthId: string,
     onIncomingCall: (signal: CallSignal) => void,
+    /**
+     * The call stopped being live — caller hung up, or it was declined,
+     * missed or answered elsewhere. Without this the callee only ever heard
+     * about INSERTs, so a cancelled call kept ringing until its own timeout:
+     * endCallSignals writes status "ended" with an UPDATE, and nothing was
+     * listening for UPDATEs.
+     */
+    onCallResolved?: (signal: CallSignal) => void,
   ): () => void {
     console.log("[CallSignals] Subscribing to calls for:", userAuthId);
 
@@ -236,6 +244,38 @@ export const callSignalsApi = {
               signal.room_id,
             );
             onIncomingCall(signal);
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "call_signals",
+          filter: `callee_id=eq.${userAuthId}`,
+        },
+        (payload) => {
+          const signal = payload.new as CallSignal;
+          if (String(signal.callee_id) !== userAuthId) return;
+          // Anything that is no longer ringing means stop ringing. Treat the
+          // terminal states explicitly rather than "not ringing", so a new
+          // status added later does not silently dismiss a live call.
+          if (
+            signal.status === "ended" ||
+            signal.status === "declined" ||
+            signal.status === "missed" ||
+            signal.status === "accepted"
+          ) {
+            console.log(
+              "[CallSignals] Call resolved:",
+              signal.status,
+              "room:",
+              signal.room_id,
+            );
+            // Let the same room ring again later (a call back).
+            _seenRoomIds.delete(signal.room_id);
+            onCallResolved?.(signal);
           }
         },
       )

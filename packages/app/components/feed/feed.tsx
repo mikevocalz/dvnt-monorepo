@@ -5,6 +5,7 @@ import {
   RefreshControl,
   StyleSheet,
   Animated as RNAnimated,
+  useWindowDimensions,
 } from "react-native";
 import { LegendList } from "@dvnt/app/components/list";
 import type { LegendListRef } from "@dvnt/app/components/list";
@@ -242,6 +243,8 @@ export function Feed({
   headerContent?: ReactNode;
   onGuestGate?: (reason: PublicGateReason) => void;
 }) {
+  // Drives the list remount below when the device rotates.
+  const { width: feedListWidth } = useWindowDimensions();
   const router = useRouter();
   const showToast = useUIStore((s) => s.showToast);
   const deletePostMutation = useDeletePost();
