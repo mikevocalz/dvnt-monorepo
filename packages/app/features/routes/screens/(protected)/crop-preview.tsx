@@ -25,6 +25,7 @@ import {
   Pressable,
   ActivityIndicator,
   Dimensions,
+  useWindowDimensions,
   StyleSheet,
   ScrollView,
 } from "react-native";
@@ -56,11 +57,19 @@ import {
 import { EditToolbar } from "@dvnt/app/features/crop/EditToolbar";
 import { exportImage } from "@dvnt/app/features/crop/export-pipeline";
 
+/**
+ * Fallbacks only. Frozen at launch width by `Dimensions.get`, which on a crop
+ * surface is worse than cosmetic: the frame the user drags inside was sized
+ * for the old window, so after a rotation the crop rect and the image no
+ * longer agreed. The screen reads live below.
+ */
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const FRAME_WIDTH = SCREEN_WIDTH;
 const THUMB_SIZE = 64;
 
 function CropPreviewScreenContent() {
+  // The crop frame must match the window it is drawn in, not the launch one.
+  const { width: frameWidth } = useWindowDimensions();
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -114,7 +123,7 @@ function CropPreviewScreenContent() {
     );
     return val ?? baseAspectRatio;
   })();
-  const frameHeight = Math.round(FRAME_WIDTH * effectiveAspectRatio);
+  const frameHeight = Math.round(frameWidth * effectiveAspectRatio);
 
   // Consume pending crop data on mount
   useEffect(() => {
@@ -290,7 +299,7 @@ function CropPreviewScreenContent() {
           dims.height,
         );
         const imgFrameH = Math.round(
-          FRAME_WIDTH * (imgAspectVal ?? baseAspectRatio),
+          frameWidth * (imgAspectVal ?? baseAspectRatio),
         );
 
         // Read view transform: prefer live viewRefs for the active image,
@@ -301,14 +310,14 @@ function CropPreviewScreenContent() {
         const vs =
           liveRefs?.scale.value ??
           cropState?.scale ??
-          Math.max(FRAME_WIDTH / dims.width, imgFrameH / dims.height);
+          Math.max(frameWidth / dims.width, imgFrameH / dims.height);
         const vtx = liveRefs?.translateX.value ?? cropState?.translateX ?? 0;
         const vty = liveRefs?.translateY.value ?? cropState?.translateY ?? 0;
 
         // Export through the pipeline
         const result = await exportImage(
           state,
-          FRAME_WIDTH,
+          frameWidth,
           imgFrameH,
           vs,
           vtx,
@@ -451,7 +460,7 @@ function CropPreviewScreenContent() {
           style={[
             styles.skeletonFrame,
             {
-              width: FRAME_WIDTH,
+              width: frameWidth,
               height: frameHeight,
               marginTop: 16,
             },
@@ -475,7 +484,7 @@ function CropPreviewScreenContent() {
           uri={activeSourceUri}
           imageWidth={activeDims.width}
           imageHeight={activeDims.height}
-          frameWidth={FRAME_WIDTH}
+          frameWidth={frameWidth}
           aspectRatio={effectiveAspectRatio}
           initialState={cropStates.current.get(activeMedia!.id)}
           onCropChange={handleCropChange}
@@ -487,7 +496,7 @@ function CropPreviewScreenContent() {
       ) : (
         <View
           style={{
-            width: FRAME_WIDTH,
+            width: frameWidth,
             height: frameHeight,
             backgroundColor: "#111",
             alignItems: "center",

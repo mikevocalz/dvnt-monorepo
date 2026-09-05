@@ -5,6 +5,7 @@ import {
   ScrollView,
   Pressable,
   Dimensions,
+  useWindowDimensions,
   Modal,
   StatusBar,
   ActivityIndicator,
@@ -108,6 +109,11 @@ import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detectio
 import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
 import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
+/**
+ * Fallbacks only. Read at module scope, `Dimensions.get` freezes at the width
+ * the app launched with, so on a rotation the media kept its old width and the
+ * 4:5 box no longer matched the screen. The components below read live.
+ */
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 // CRITICAL: Match FeedItem's 4:5 aspect ratio for consistent display
 const PORTRAIT_HEIGHT = Math.round(SCREEN_WIDTH * (5 / 4));
@@ -386,6 +392,7 @@ function PostDetailActionBar({
  * creating (and tearing down) a native player for every image post.
  */
 function PostVideoPlayer({ postId, url }: { postId: string; url?: string }) {
+  const { width: screenWidth } = useWindowDimensions();
   const { isMountedRef, isSafeToOperate } = useVideoLifecycle(
     "PostDetail",
     postId,
@@ -604,7 +611,7 @@ function PostVideoPlayer({ postId, url }: { postId: string; url?: string }) {
           onSeekEnd={() => {
             if (isPlaying) safePlay(player, isMountedRef, "PostDetail");
           }}
-          barWidth={SCREEN_WIDTH - 32}
+          barWidth={screenWidth - 32}
         />
       </View>
 
@@ -934,6 +941,9 @@ const MediaCarousel = memo(function MediaCarousel({
 });
 
 function PostDetailScreenContent() {
+  // Live window width; the media below is sized from it.
+  const { width: screenWidth } = useWindowDimensions();
+  const portraitHeight = Math.round(screenWidth * (5 / 4));
   // DEV-only loop detection
   useRenderLoopDetector("PostDetail");
 
@@ -1586,8 +1596,8 @@ function PostDetailScreenContent() {
           <View
             style={{
               display: hasMedia ? "flex" : "none",
-              width: SCREEN_WIDTH,
-              height: PORTRAIT_HEIGHT,
+              width: screenWidth,
+              height: portraitHeight,
               borderRadius: isVideo ? 0 : 12,
               overflow: "hidden",
             }}
@@ -1602,7 +1612,7 @@ function PostDetailScreenContent() {
                 height: "100%",
               }}
             >
-              <SafeMediaWrapper width={SCREEN_WIDTH} height={PORTRAIT_HEIGHT}>
+              <SafeMediaWrapper width={screenWidth} height={portraitHeight}>
                 <PostVideoPlayer
                   postId={postId}
                   url={isVideo ? safePost.media?.[0]?.url : ""}
@@ -1621,12 +1631,12 @@ function PostDetailScreenContent() {
                   Wrapping the media (not the screen) is what makes the picture
                   fly into place instead of the card ballooning to full screen. */}
               <ZoomTarget>
-              <SafeMediaWrapper width={SCREEN_WIDTH} height={PORTRAIT_HEIGHT}>
+              <SafeMediaWrapper width={screenWidth} height={portraitHeight}>
                 {hasMultipleMedia ? (
                   <MediaCarousel
                     media={stableMedia as MediaItem[]}
                     imageUrls={imageUrls}
-                    width={SCREEN_WIDTH}
+                    width={screenWidth}
                     height={PORTRAIT_HEIGHT}
                     onSlideChange={setCurrentSlide}
                   />
@@ -1640,7 +1650,7 @@ function PostDetailScreenContent() {
                     <Galeria.Image index={0}>
                       <DVNTMediaRenderer
                         item={stableMedia[0] as any}
-                        width={SCREEN_WIDTH}
+                        width={screenWidth}
                         height={PORTRAIT_HEIGHT}
                         // Detail view: contain so the TOP of the photo is
                         // never cropped out. cover was center-cropping
@@ -1700,7 +1710,7 @@ function PostDetailScreenContent() {
           {!isTextPost ? (
             <View
               style={{
-                width: SCREEN_WIDTH,
+                width: screenWidth,
                 paddingHorizontal: 12,
                 paddingTop: 10,
                 paddingBottom: 6,
@@ -1733,7 +1743,7 @@ function PostDetailScreenContent() {
           {isTextPost && (
             <View
               style={{
-                width: SCREEN_WIDTH,
+                width: screenWidth,
                 paddingHorizontal: 20,
                 paddingVertical: 18,
               }}
@@ -1745,7 +1755,7 @@ function PostDetailScreenContent() {
                     pagingEnabled
                     showsHorizontalScrollIndicator={false}
                     onScroll={(event) => {
-                      const slideW = SCREEN_WIDTH - 40;
+                      const slideW = screenWidth - 40;
                       const idx = Math.round(
                         event.nativeEvent.contentOffset.x / slideW,
                       );
@@ -1760,7 +1770,7 @@ function PostDetailScreenContent() {
                       ) => (
                         <View
                           key={slide.id || index}
-                          style={{ width: SCREEN_WIDTH - 40 }}
+                          style={{ width: screenWidth - 40 }}
                         >
                           <TextPostSurface
                             text={slide.content}

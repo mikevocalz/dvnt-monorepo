@@ -4,6 +4,7 @@ import {
   TextInput,
   Pressable,
   Dimensions,
+  useWindowDimensions,
   Alert,
   ActivityIndicator,
   Platform,
@@ -174,6 +175,9 @@ function TextOnlyStoryViewer({
   };
   insets: { top: number; bottom: number };
 }) {
+  // Live window size — the module constants above freeze at launch width, so
+  // these window-fraction offsets drifted out of register after a rotation.
+  const { width, height } = useWindowDimensions();
   const palette = useMemo(
     () => buildTextStoryPalette(item.backgroundColor),
     [item.backgroundColor],
@@ -304,6 +308,9 @@ function StoryViewerLoadingState({
   insets: { top: number; bottom: number };
   label: string;
 }) {
+  // Live window size — the module constants above freeze at launch width, so
+  // these window-fraction offsets drifted out of register after a rotation.
+  const { width, height } = useWindowDimensions();
   return (
     <LinearGradient
       colors={["#050507", "#101119", "#07070a"]}

@@ -4,6 +4,7 @@ import {
   Pressable,
   StyleSheet,
   Dimensions,
+  useWindowDimensions,
   StatusBar,
   Platform,
   Alert,
@@ -140,6 +141,12 @@ import {
 import { ensureOnlineOrToast } from "@dvnt/app/lib/connectivity/guard";
 import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
 
+/**
+ * Fallback only. `StyleSheet.create` runs at module scope, so the image-grid
+ * cells below were sized from the launch width and could not follow a
+ * rotation — the one place in this screen where the frozen read is visible.
+ * The grid overrides them inline from the live width.
+ */
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const HERO_HEIGHT = 420;
 const DEFAULT_EVENT_DURATION_MS = 3 * 60 * 60 * 1000;
@@ -1742,6 +1749,9 @@ function EventDetailScreenContent() {
   }
 
   const event = safeEvent;
+  // Gallery cells follow the window, not the width the app launched with.
+  const { width: liveScreenWidth } = useWindowDimensions();
+  const imageCellSize = (liveScreenWidth - 40 - 8) / 2;
   const host = event.host;
 
   /**
@@ -1758,7 +1768,8 @@ function EventDetailScreenContent() {
   const openEventLynk = async () => {
     const linked = (event as any)?.lynkRoomId as string | undefined;
     if (!linked) return;
-    const go = (roomId: string) => router.push("/sneaky-lynk/room/" + roomId);
+    const go = (roomId: string) =>
+      router.push(`/(protected)/sneaky-lynk/room/${roomId}` as any);
     if (!isHost) {
       go(linked);
       return;
@@ -2443,7 +2454,12 @@ function EventDetailScreenContent() {
                       <Galeria.Image index={idx} key={idx}>
                         <Image
                           source={{ uri: imageUrl }}
-                          style={s.imageGridImage}
+                          // Inline override of the StyleSheet size, which is
+                          // frozen at the launch width. Same 2-up maths, live.
+                          style={[
+                            s.imageGridImage,
+                            { width: imageCellSize, height: imageCellSize },
+                          ]}
                         />
                       </Galeria.Image>
                     );
