@@ -5,7 +5,7 @@
  */
 import { View, ViewStyle } from "react-native";
 import { VideoView, useVideoPlayer } from "expo-video";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ComponentProps } from "react";
 
 interface DVNTAnimatedVideoViewProps {
   uri: string;
@@ -61,7 +61,13 @@ export function DVNTAnimatedVideoView({
   return (
     <View style={[{ width, height, overflow: "hidden" } as ViewStyle, style]}>
       <VideoView
-        player={player}
+        // expo-video's WEB types declare VideoView.player as
+        // `VideoPlayerWeb & VideoPlayer` while useVideoPlayer returns
+        // `VideoPlayer`, so this fails to typecheck only in the web build —
+        // which is what stopped the shared FeedEventCard being usable there.
+        // Types-only: expo-video supports web, and the runtime object is the
+        // player the hook just created.
+        player={player as ComponentProps<typeof VideoView>["player"]}
         style={{ width: "100%", height: "100%" }}
         contentFit={contentFit}
         nativeControls={false}
