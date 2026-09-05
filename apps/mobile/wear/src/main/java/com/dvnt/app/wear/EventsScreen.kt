@@ -24,16 +24,20 @@ import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
 import com.dvnt.app.wear.ui.MessageImage
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
-fun EventsScreen(onInbox: () -> Unit, onTickets: () -> Unit, initialEventId: String? = null, launchToken: Long? = null) {
+fun EventsScreen(onInbox: () -> Unit, onTickets: () -> Unit, initialEventId: String? = null, launchToken: Long? = null, onShowTicket: (String) -> Unit = { onTickets() }) {
     val context = LocalContext.current
     val repository = remember { EventRepository.get(context) }
     val state by repository.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val door by DoorRepository.get(context).state.collectAsState()
+    var showDoor by rememberSaveable(state.accountGen) { mutableStateOf(false) }
+    if (showDoor) { DoorScreen { showDoor = false }; return }
     var selected by rememberSaveable(state.accountGen) { mutableStateOf<String?>(null) }
     val list = rememberTransformingLazyColumnState()
     val saved = key(state.accountGen) { rememberSaveableStateHolder() }
@@ -47,7 +51,7 @@ fun EventsScreen(onInbox: () -> Unit, onTickets: () -> Unit, initialEventId: Str
                 Text(if (state.loading) "Loading event…" else "This event is no longer available", style = Dvnt.Type.body)
                 EventButton("Back") { selected = null }
             }
-        } else saved.SaveableStateProvider(event.id) { EventDetail(event, state, repository, { selected = null }, onTickets) }
+        } else saved.SaveableStateProvider(event.id) { EventDetail(event, state, repository, { selected = null }, onTickets, onShowTicket) }
         return
     }
     BackHandler(onBack = onInbox)
@@ -60,6 +64,7 @@ fun EventsScreen(onInbox: () -> Unit, onTickets: () -> Unit, initialEventId: Str
                     if (state.syncedAt > 0) Text("Updated ${eventTime(state.syncedAt * 1000, null, false)}", style = Dvnt.Type.caption, color = Dvnt.textDim)
                 }
             }
+            if (door.door != null) item { EventButton("Host Door") { showDoor = true } }
             if (state.loading) item { Text("Refreshing…", style = Dvnt.Type.caption) }
             state.error?.let { error -> item { EventButton("$error · Retry") { scope.launch { repository.refresh() } } } }
             if (state.events.isEmpty() && !state.loading && state.error == null) item { Text("No events yet. Invitations, saved events and RSVPs appear here.", style = Dvnt.Type.body) }
@@ -78,6 +83,8 @@ fun EventsScreen(onInbox: () -> Unit, onTickets: () -> Unit, initialEventId: Str
                     }
                 }
             }
+            if (state.hasPrevious && state.events.isNotEmpty()) item { EventButton("Previous events") { scope.launch { repository.perform(state.events.last().id, "archive_previous") } } }
+            if (state.hasMore && state.events.isNotEmpty()) item { EventButton("Next events") { scope.launch { repository.perform(state.events.last().id, "archive_more") } } }
             item { EventButton("Refresh") { scope.launch { repository.refresh() } } }
             item { EventButton("Inbox", onClick = onInbox) }
             item { EventButton("Tickets", onClick = onTickets) }
@@ -86,10 +93,35 @@ fun EventsScreen(onInbox: () -> Unit, onTickets: () -> Unit, initialEventId: Str
 }
 
 @Composable
-private fun EventDetail(event: WatchEvent, state: EventsState, repository: EventRepository, onBack: () -> Unit, onTickets: () -> Unit) {
+private fun EventDetail(event: WatchEvent, state: EventsState, repository: EventRepository, onBack: () -> Unit, onTickets: () -> Unit, onShowTicket: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val list = rememberTransformingLazyColumnState()
+    val broadcasts by BroadcastRepository.get(context).state.collectAsState()
+    var showBroadcasts by rememberSaveable(event.id) { mutableStateOf(false) }
+    if (showBroadcasts) { BroadcastScreen(event.id) { showBroadcasts = false }; return }
+    val passes by TicketRepository.get(context).envelope.collectAsState()
+    val presenceTicket = passes.tickets.firstOrNull { it.eventId == event.id && it.isOwner == true && (it.status.isPresentable || it.status.isUsed) }
+        ?: passes.tickets.firstOrNull { it.eventId == event.id && it.isOwner == true }
+    val ticket = passes.tickets.firstOrNull { it.eventId == event.id && it.status.isPresentable }
+    val momentNow by produceState(System.currentTimeMillis(), event.id, event.moments) {
+        while (true) {
+            value = System.currentTimeMillis()
+            val next = event.moments.map { it.cutoff }.filter { it > value }.minOrNull() ?: break
+            delay((next - value).coerceAtLeast(1))
+        }
+    }
+    var selectedMoment by rememberSaveable(event.id) { mutableStateOf<String?>(null) }
+    if (selectedMoment != null) {
+        BackHandler { selectedMoment = null }
+        val moment = event.moments.firstOrNull { it.id == selectedMoment && it.cutoff > momentNow }
+        Column(Modifier.fillMaxSize().padding(Dvnt.Space.base), verticalArrangement = Arrangement.Center) {
+            if (moment != null) MessageImage(moment.imageURL, state.accountGen, "Event photo", Modifier.weight(1f).fillMaxWidth())
+            else Text("Photo access expired. Refresh event moments while connected.", style = Dvnt.Type.body)
+            EventButton("Back") { selectedMoment = null }
+        }
+        return
+    }
     val pending = event.id in state.pending
     val result = state.results[event.id]
     var directionsError by rememberSaveable(event.id) { mutableStateOf<String?>(null) }
@@ -98,17 +130,30 @@ private fun EventDetail(event: WatchEvent, state: EventsState, repository: Event
         TransformingLazyColumn(state = list, contentPadding = padding, modifier = Modifier.fillMaxSize().padding(horizontal = Dvnt.Space.base)) {
             event.imageURL?.let { url -> item { MessageImage(url, state.accountGen, "${event.title} flyer", Modifier.fillMaxWidth().height(110.dp).clip(RoundedCornerShape(Dvnt.Radius.card))) } }
             item { Text(event.title, style = Dvnt.Type.title) }
+            if (ticket != null) item { EventButton("Show pass") { onShowTicket(event.id) } }
+            if (broadcasts.broadcasts.any { it.eventId == event.id }) item { EventButton("Host notices") { showBroadcasts = true } }
             item { Text(event.stateLabel, style = Dvnt.Type.stamp, color = if (event.status in listOf("cancelled", "postponed")) Dvnt.signal else Dvnt.cyan) }
             item { Text(eventTime(parseIso8601(event.startAt), event.timeZone), style = Dvnt.Type.body) }
             if (event.timeZone != null && event.timeZone != ZoneId.systemDefault().id) item { Text("Your time · ${eventTime(parseIso8601(event.startAt), null)}", style = Dvnt.Type.caption, color = Dvnt.textDim) }
             item { Text(if (event.isOnline) "Online event" else event.location ?: "Location unavailable", style = Dvnt.Type.body) }
             event.weather?.let { weather -> item {
                 Column {
-                    Text("Venue weather · ${kotlin.math.round(weather.tempF).toInt()}°F" + (weather.label?.let { " · $it" } ?: ""), style = Dvnt.Type.body)
+                    Text("${if (weather.forecastAt == null) "Venue weather" else "Weather at doors"} · ${kotlin.math.round(weather.tempF).toInt()}°F" + (weather.label?.let { " · $it" } ?: ""), style = Dvnt.Type.body)
                     Text("Updated ${eventTime(parseIso8601(weather.generatedAt), event.timeZone)}", style = Dvnt.Type.caption, color = Dvnt.textDim)
                     weather.precipPct?.let { Text("Precipitation ${it.toInt()}%", style = Dvnt.Type.caption, color = Dvnt.textDim) }
                 }
             } }
+            if (event.momentsStatus == "ready") {
+                item { Text("Event moments", style = Dvnt.Type.stamp) }
+                val visible = event.moments.filter { it.cutoff > momentNow }.take(6)
+                if (visible.isEmpty()) item { Text(if (event.moments.isEmpty()) "No published photos available" else "Photo access expired. Refresh while connected.", style = Dvnt.Type.caption) }
+                items(visible, key = { "moment-${it.id}" }) { moment ->
+                    Box(Modifier.fillMaxWidth().clickable(role = Role.Button) { selectedMoment = moment.id }) {
+                        MessageImage(moment.imageURL, state.accountGen, "Open event photo", Modifier.fillMaxWidth().height(110.dp))
+                    }
+                }
+            } else if (event.momentsStatus == "unavailable") item { Text("Event photos unavailable. Reconnect and refresh.", style = Dvnt.Type.caption) }
+            if (!pending) item { EventButton(if (event.momentsStatus == null) "View event moments" else "Refresh event moments") { perform("load_moments") } }
             if (pending) item { Text("Confirming on phone…", style = Dvnt.Type.body) }
             result?.let { item { Text(it.message, style = Dvnt.Type.body, color = if (it.status == "confirmed") Dvnt.cyan else Dvnt.signal) } }
             if (!pending && result?.status != "failed" && event.status == "active" && (parseIso8601(event.endAt)?.let { it > System.currentTimeMillis() } != false)) {
@@ -129,6 +174,15 @@ private fun EventDetail(event: WatchEvent, state: EventsState, repository: Event
                     }
                 }
             }
+            if (presenceTicket != null && !pending) {
+                item { Text("Share arrival with the host", style = Dvnt.Type.caption, color = Dvnt.textDim) }
+                val choices = if (result?.status != "failed" && event.section() == "Tonight" && event.status == "active" && (presenceTicket.status.isPresentable || presenceTicket.status.isUsed))
+                    listOf("I'm on my way" to "approaching", "I'm here" to "arrived", "I've left" to "departed", "Stop sharing" to "revoke")
+                    else listOf("Stop sharing" to "revoke")
+                for ((label, presence) in choices) {
+                    item { EventButton(label) { scope.launch { repository.presence(event.id, presenceTicket.id, presence) } } }
+                }
+            }
             if (!pending) item { EventButton("Open event on phone") { perform("open_on_phone") } }
             val lat = event.latitude
             val lng = event.longitude
@@ -145,7 +199,7 @@ private fun EventDetail(event: WatchEvent, state: EventsState, repository: Event
     }
 }
 @Composable
-private fun EventButton(label: String, onClick: () -> Unit) {
+internal fun EventButton(label: String, onClick: () -> Unit) {
     Box(Modifier.fillMaxWidth().heightIn(min = Dvnt.Size.minTouch).clip(RoundedCornerShape(Dvnt.Radius.chip))
         .background(Dvnt.Surface.mid).clickable(role = Role.Button, onClick = onClick).padding(Dvnt.Space.base), contentAlignment = Alignment.Center) {
         Text(label, style = Dvnt.Type.body, color = Dvnt.cyan)

@@ -13,6 +13,9 @@ struct EventDetailView: View {
                     List {
                         DoorHeader(art: event.imageURL.map { .event(imageURL: $0, dominantHex: nil) } ?? .none,
                             title: event.title, stub: event.stateLabel.uppercased(), minimumHeight: geometry.size.height * 0.4)
+                        if let group = tickets.groups.first(where: { $0.id == event.id }), group.hasPresentable {
+                            NavigationLink { TicketStackView(group: group) } label: { Label("Show pass", systemImage: "qrcode") }
+                        }
                         if let startsAt = event.startsAt {
                             VStack(alignment: .leading, spacing: DVNT.Space.hair) {
                                 Text(eventTime(startsAt, zone: event.timeZone)).font(DVNT.TypeScale.body())
@@ -29,7 +32,7 @@ struct EventDetailView: View {
                         }
                         if let weather = event.weather {
                             VStack(alignment: .leading, spacing: DVNT.Space.tight) {
-                                Text("Venue weather · \(String(format: "%.0f", weather.tempF))°F").font(DVNT.TypeScale.body())
+                                Text("\(weather.forecastAt == nil ? "Venue weather" : "Weather at doors") · \(String(format: "%.0f", weather.tempF))°F").font(DVNT.TypeScale.body())
                                 if let label = weather.label { Text(label).font(DVNT.TypeScale.caption()) }
                                 if let stamp = WatchEvent.date(weather.generatedAt) {
                                     Text("As of \(stamp.formatted(date: .abbreviated, time: .shortened))")
@@ -37,12 +40,10 @@ struct EventDetailView: View {
                                 }
                             }.listRowBackground(Color.clear)
                         }
+                        eventMoments(event)
                         if event.status != "active" {
                             Label(event.stateLabel, systemImage: "exclamationmark.circle")
                                 .foregroundStyle(DVNT.signal).listRowBackground(Color.clear)
-                        }
-                        if let group = tickets.groups.first(where: { $0.id == event.id }), group.hasPresentable {
-                            NavigationLink { TicketStackView(group: group) } label: { Label("Show ticket", systemImage: "qrcode") }
                         }
                         if event.status == "active", event.section() != "Past" {
                             actions(event)
@@ -71,6 +72,35 @@ struct EventDetailView: View {
         .navigationTitle("Event")
         .containerBackground(DVNT.canvas, for: .navigation)
         .privacySensitive()
+    }
+
+    @ViewBuilder private func eventMoments(_ event: WatchEvent) -> some View {
+        if event.momentsStatus == "ready" {
+            let moments = Array((event.moments ?? []).prefix(6))
+            TimelineView(.explicit([Date()] + moments.map(\.cutoff))) { context in
+                VStack(alignment: .leading, spacing: DVNT.Space.base) {
+                    Text("Event moments").font(DVNT.TypeScale.body())
+                    let visible = moments.filter { $0.cutoff > context.date }
+                    if visible.isEmpty {
+                        Text(moments.isEmpty ? "No published photos available" : "Photo access expired. Refresh while connected.")
+                            .font(DVNT.TypeScale.caption())
+                    }
+                    ForEach(visible) { moment in
+                        NavigationLink {
+                            EventMomentDetail(eventId: event.id, momentId: moment.id)
+                        } label: {
+                            EventMomentImage(moment: moment, accountGen: events.envelope.accountGen)
+                                .frame(height: 110).accessibilityLabel("Open event photo")
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }.listRowBackground(Color.clear)
+        } else if event.momentsStatus == "unavailable" {
+            Text("Event photos unavailable. Reconnect and refresh.").font(DVNT.TypeScale.caption()).listRowBackground(Color.clear)
+        }
+        Button(event.momentsStatus == nil ? "View event moments" : "Refresh event moments") {
+            events.perform(eventId: event.id, action: "load_moments")
+        }.disabled(events.pending[event.id] != nil)
     }
 
     @ViewBuilder private func actions(_ event: WatchEvent) -> some View {
@@ -107,5 +137,45 @@ struct EventDetailView: View {
         let item = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude)))
         item.name = event.location ?? event.title
         item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
+    }
+}
+
+/// Every render rechecks snapshot permission expiry, including a viewer already open.
+private struct EventMomentDetail: View {
+    let eventId: String
+    let momentId: String
+    @Environment(EventStore.self) private var events
+    var body: some View {
+        let moment = events.events.first { $0.id == eventId }?.moments?.first { $0.id == momentId }
+        TimelineView(.explicit([Date(), moment?.cutoff ?? Date()])) { context in
+            if let moment, moment.cutoff > context.date {
+                EventMomentImage(moment: moment, accountGen: events.envelope.accountGen)
+                    .padding(DVNT.Space.base)
+            } else { ContentUnavailableView("Photo unavailable", systemImage: "photo", description: Text("Refresh event moments while connected.")) }
+        }.navigationTitle("Event photo").privacySensitive()
+    }
+}
+private struct EventMomentImage: View {
+    let moment: WatchEventMoment
+    let accountGen: String
+    @Environment(EventStore.self) private var events
+    @Environment(\.isLuminanceReduced) private var dimmed
+    @State private var image: CGImage?
+    @State private var failed = false
+    var body: some View {
+        Group {
+            if dimmed || moment.cutoff <= Date() { Image(systemName: "photo").foregroundStyle(DVNT.textDim) }
+            else if let image { Image(decorative: image, scale: 1).resizable().scaledToFit() }
+            else if failed { Text("Photo unavailable. Refresh on your phone.").font(DVNT.TypeScale.caption()) }
+            else { ProgressView("Loading photo") }
+        }.privacySensitive().task(id: "\(accountGen)|\(moment.imageURL)|\(dimmed)") {
+            image = nil; failed = false
+            guard !dimmed, moment.cutoff > Date() else { return }
+            do {
+                let decoded = try await WatchMediaCache.shared.image(url: moment.imageURL, accountGen: accountGen, maximumPixels: 320)
+                guard !Task.isCancelled, events.envelope.accountGen == accountGen, moment.cutoff > Date() else { return }
+                image = decoded
+            } catch { if !Task.isCancelled { failed = true } }
+        }
     }
 }

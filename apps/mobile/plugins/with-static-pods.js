@@ -10,9 +10,10 @@
  * then silently does nothing (verified: build 5e13c670 still linked
  * FishjamReactNativeWebrtc dynamically).
  *
- * So we do what upstream react-native-moq's own example Podfile does for its
- * problem pods (RNAudioAPI, react-native-executorch): a raw CocoaPods
- * pre_install hook overriding build_type. pre_install, not post_install —
+ * So we apply the same class of fix upstream react-native-moq is reported to
+ * use for its problem pods: a raw CocoaPods pre_install hook overriding
+ * build_type. (The installed react-native-moq package ships no Podfile or
+ * docs, so that attribution is not verifiable from node_modules.) pre_install, not post_install —
  * build_type must be fixed before CocoaPods generates the pod targets.
  *
  * Current list:
@@ -26,6 +27,12 @@
  *    setup. Static-framework linkage resolves the symbols at app link.
  *    Failed identically with MoQ absent (b0a10cdf) and present (1e013b96).
  *    This entry dies with the Fishjam dependency when WS-3b lands.
+ *  - RNAudioAPI: links prebuilt ffmpeg xcframeworks. CocoaPods emits
+ *    -framework "libavcodec"/"libavformat"/"libavutil"/"libswresample" into
+ *    Pods-DVNT's OTHER_LDFLAGS but not RNAudioAPI's own, so the dynamic-
+ *    framework link fails with ~90 undefined av_* symbols while the app
+ *    target would have resolved them. Static linkage defers them to the app
+ *    link, which already carries the flags.
  */
 
 const { withDangerousMod } = require("expo/config-plugins");
@@ -42,6 +49,11 @@ STATIC_FRAMEWORK_PODS = [
   # (GMLImage / MLKBarcode* undefined when this pod links as its own dynamic
   # framework). Same class as upstream moq's RNAudioAPI force-static.
   'VisionCameraBarcodeScanner',
+  # Consumes prebuilt ffmpeg xcframeworks (libavcodec/libavformat/libavutil/
+  # libswresample). CocoaPods puts their -framework flags only on the app
+  # target, so as its own dynamic framework every av_* symbol is undefined at
+  # its own Ld step. Verified: MACH_O_TYPE=staticlib in Debug and Release.
+  'RNAudioAPI',
 ]
 pre_install do |installer|
   installer.pod_targets.each do |pod|

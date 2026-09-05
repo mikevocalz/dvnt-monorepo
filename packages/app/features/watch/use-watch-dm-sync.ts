@@ -25,6 +25,7 @@ export function useWatchDMSync(): void {
   const quickReplies = useWatchSettingsStore((s) => s.quickReplies);
   const queryClient = useQueryClient();
   const activeThreads = useRef(new Map<string, number>());
+  const retainedMessages = useRef(new Map<string, string[]>());
   const lastSig = useRef<string | null>(null);
   const lastEnv = useRef<WatchDMEnvelope | null>(null);
   const queryKey = ["watch-conversations", viewerId];
@@ -38,6 +39,7 @@ export function useWatchDMSync(): void {
     lastEnv.current = null;
     lastSig.current = null;
     activeThreads.current.clear();
+    retainedMessages.current.clear();
     return useAuthStore.subscribe((state, previous) => {
       if (state.user?.id === previous.user?.id) return;
       const accountGen = useWatchSessionStore.getState().selectAccount(state.user?.id ?? null);
@@ -61,13 +63,26 @@ export function useWatchDMSync(): void {
     },
   ), [queryClient, viewerId]);
 
-  const loadThread = async (conversationId: string, olderCursor?: { createdAt: string; id: string }) => {
+  const loadThread = async (conversationId: string, olderCursor?: { createdAt: string; id: string }, retainedMessageIds?: string[]) => {
     const accountGen = useWatchSessionStore.getState().accountGen;
     // Recheck the current authorized list, including bilateral blocks, per request.
     const conversations = await messagesApi.getConversations({ throwOnError: true });
     if (!conversations.some((c) => String(c.id) === conversationId)) throw new Error("Unavailable");
     const page = await messagesApi.getThreadPage(conversationId, { olderCursor, limit: 25 });
-    return { protocol: 2 as const, accountGen, conversationId, olderCursor: page.olderCursor,
+    const retained = retainedMessageIds ?? retainedMessages.current.get(conversationId) ?? [];
+    let removedMessageIds: string[] = [];
+    if (retained.length) {
+      const { data: existing, error } = await supabase.from("messages").select("id")
+        .eq("conversation_id", conversationId).in("id", retained);
+      if (error) throw error;
+      const available = new Set((existing ?? []).map((row) => String(row.id)));
+      removedMessageIds = retained.filter((id) => !available.has(id));
+    }
+    if (accountGen !== useWatchSessionStore.getState().accountGen) throw new Error("Account changed");
+    retainedMessages.current.set(conversationId, Array.from(new Set([
+      ...retained.filter((id) => !removedMessageIds.includes(id)), ...page.messages.map((m) => m.id),
+    ])).slice(-250));
+    return { protocol: 2 as const, accountGen, conversationId, olderCursor: page.olderCursor, removedMessageIds,
       messages: page.messages.map((m) => ({ id: m.id, conversationId, senderId: m.senderId,
         senderName: conversations.find((c) => String(c.id) === conversationId)?.members?.find((member) => member.id === m.senderId)?.username,
         outgoing: m.sender === "user", text: m.text ?? "", createdAt: m.createdAt,
@@ -75,9 +90,9 @@ export function useWatchDMSync(): void {
         reactions: projectReactions(m.metadata, String(getCurrentUserIdSync() ?? "")) })),
     };
   };
-  useEffect(() => registerWatchThreadHandler((id, cursor) => {
+  useEffect(() => registerWatchThreadHandler((id, cursor, retained) => {
     activeThreads.current.set(id, Date.now());
-    return loadThread(id, cursor);
+    return loadThread(id, cursor, retained);
   }), [viewerId]);
 
   useEffect(() => registerWatchThreadActionHandler(async (command) => {
@@ -108,7 +123,7 @@ export function useWatchDMSync(): void {
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
       for (const [id, openedAt] of activeThreads.current) {
-        if (Date.now() - openedAt > 300000) { activeThreads.current.delete(id); continue; }
+        if (Date.now() - openedAt > 300000) { activeThreads.current.delete(id); retainedMessages.current.delete(id); continue; }
         void loadThread(id).then(pushWatchThreadPage).catch(() => {});
       }
       }, 300);

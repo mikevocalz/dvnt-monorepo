@@ -29,6 +29,9 @@ class MessageRepository private constructor(private val context: Context) {
     val threads = _threads.asStateFlow()
     private val _outbox = MutableStateFlow<List<PendingMessage>>(emptyList())
     val outbox = _outbox.asStateFlow()
+    private val _reactions = MutableStateFlow<List<PendingReaction>>(emptyList())
+    val reactions = _reactions.asStateFlow()
+    private val reactionFlights = mutableSetOf<String>()
     private val pending = ConcurrentHashMap<String, Pair<String, CompletableDeferred<JSONObject>>>()
 
     private var restoring = true
@@ -38,6 +41,21 @@ class MessageRepository private constructor(private val context: Context) {
         val saved = runCatching { JSONArray(prefs.getString("outbox", "[]")) }.getOrDefault(JSONArray())
         _outbox.value = (0 until saved.length()).mapNotNull { i -> runCatching { PendingMessage.from(saved.getJSONObject(i)) }.getOrNull() }
             .filter { it.accountGen == _inbox.value.accountGen && allowedConversation(it.conversationId) }.map { if (it.status == "sending") it.copy(status = "failed", error = "Delivery not confirmed. Retry safely.") else it }
+        val reactionRows = runCatching { JSONArray(prefs.getString("reactions", "[]")) }.getOrDefault(JSONArray())
+        _reactions.value = (0 until reactionRows.length()).mapNotNull { runCatching { PendingReaction.from(reactionRows.getJSONObject(it)) }.getOrNull() }
+            .filter { it.accountGen == _inbox.value.accountGen && allowedConversation(it.conversationId) }.take(50)
+        val cachedThreads = runCatching { JSONObject(prefs.getString("threads", "{}") ?: "{}") }.getOrDefault(JSONObject())
+        if (cachedThreads.optString("accountGen") == _inbox.value.accountGen) {
+            val pages = cachedThreads.optJSONObject("pages") ?: JSONObject()
+            _threads.value = pages.keys().asSequence().filter { allowedConversation(it) }.take(8).mapNotNull { id ->
+                runCatching {
+                    val page = pages.getJSONObject(id)
+                    val rows = page.getJSONArray("messages")
+                    id to ThreadState((0 until minOf(rows.length(), 250)).map { ThreadMessage.from(rows.getJSONObject(it)) },
+                        page.optJSONObject("olderCursor")?.let { ThreadCursor(it.getString("createdAt"), it.getString("id")) })
+                }.getOrNull()
+            }.toMap()
+        }
         restoring = false
     }
 
@@ -53,6 +71,8 @@ class MessageRepository private constructor(private val context: Context) {
             return json
         }
         scopedPayload("payload")?.let { TicketRepository.get(context).ingest(it) }
+        scopedPayload("door")?.let { DoorRepository.get(context).ingest(it) }
+        scopedPayload("broadcasts")?.let { BroadcastRepository.get(context).ingest(it) }
         scopedPayload("events")?.let { EventRepository.get(context).ingest(it) }
         scopedPayload("callDirectory")?.let { CallRepository.get(context).ingestDirectory(it) }
         scopedPayload("activeCall")?.let { CallRepository.get(context).ingestActive(it) }
@@ -66,7 +86,7 @@ class MessageRepository private constructor(private val context: Context) {
                     if (messages != null) {
                         val rows = (0 until messages.length()).mapNotNull { runCatching { ThreadMessage.from(messages.getJSONObject(it)) }.getOrNull() }
                         val cursor = page.optJSONObject("olderCursor")?.let { ThreadCursor(it.optString("createdAt"), it.optString("id")) }
-                        thread(id) { mergeThreadPage(it, rows, cursor, false) }
+                        thread(id) { mergeThreadPage(it, rows, cursor, false, removedIds(page)) }
                     }
                 }
             }
@@ -94,8 +114,10 @@ class MessageRepository private constructor(private val context: Context) {
             val removed = _inbox.value.conversations.any { it.id !in allowed }
             _threads.value = _threads.value.filterKeys { it in allowed }
             _outbox.value = _outbox.value.filter { it.conversationId in allowed }
-            if (removed || allowed.isEmpty()) com.dvnt.app.wear.ui.clearMessageImages()
-            if (!restoring) saveOutbox()
+            _reactions.value = _reactions.value.filter { it.conversationId in allowed }
+            if (!restoring) saveReactions()
+            if (removed || allowed.isEmpty()) com.dvnt.app.wear.ui.clearMessageImages(context)
+            if (!restoring) { saveOutbox(); saveThreads() }
             prefs.all.keys.filter { it.startsWith("draft:") && it.removePrefix("draft:") !in allowed }.forEach { prefs.edit().remove(it).apply() }
         }
         val replies = envelope.optJSONArray("quickReplies") ?: JSONArray()
@@ -110,6 +132,9 @@ class MessageRepository private constructor(private val context: Context) {
         _inbox.value = InboxState()
         _threads.value = emptyMap()
         _outbox.value = emptyList()
+        _reactions.value = emptyList()
+        reactionFlights.clear()
+        com.dvnt.app.wear.ui.clearMessageImages(context)
         pending.values.forEach { it.second.cancel() }
         pending.clear()
         prefs.edit().clear().commit()
@@ -154,11 +179,25 @@ class MessageRepository private constructor(private val context: Context) {
         } finally { pending.remove(id) }
     }
 
+    private fun removedIds(page: JSONObject): Set<String> {
+        val rows = page.optJSONArray("removedMessageIds") ?: return emptySet()
+        if (rows.length() > 0) com.dvnt.app.wear.ui.clearMessageImages(context)
+        return (0 until minOf(rows.length(), 250)).map { rows.optString(it) }.toSet()
+    }
+
     private fun allowedConversation(id: String) = _inbox.value.conversations.any { it.id == id }
 
     @Synchronized private fun thread(id: String, transform: (ThreadState) -> ThreadState) {
         if (!allowedConversation(id)) return
-        _threads.value = _threads.value + (id to transform(_threads.value[id] ?: ThreadState()))
+        _threads.value = (_threads.value - id).entries.toList().takeLast(7).associate { it.toPair() } + (id to transform(_threads.value[id] ?: ThreadState()))
+        saveThreads()
+    }
+
+    private fun saveThreads() {
+        val pages = JSONObject()
+        _threads.value.forEach { (id, state) -> pages.put(id, JSONObject()
+            .put("messages", JSONArray(state.messages.map { it.json() })).put("olderCursor", state.olderCursor?.json())) }
+        prefs.edit().putString("threads", JSONObject().put("accountGen", _inbox.value.accountGen).put("pages", pages).toString()).commit()
     }
 
     suspend fun loadThread(id: String, older: Boolean = false) {
@@ -168,6 +207,7 @@ class MessageRepository private constructor(private val context: Context) {
         thread(id) { it.copy(loading = true, error = null) }
         try {
             val body = JSONObject().put("protocol", 2).put("accountGen", account).put("type", "threadPage").put("conversationId", id)
+            body.put("retainedMessageIds", JSONArray(_threads.value[id]?.messages?.map { it.id } ?: emptyList<String>()))
             cursor?.let { body.put("olderCursor", it.json()) }
             val wire = request(body)
             val response = wire.optStringOrNull("threadPage")?.let { JSONObject(it) } ?: wire
@@ -177,26 +217,57 @@ class MessageRepository private constructor(private val context: Context) {
             val messages = (0 until rows.length()).map { ThreadMessage.from(rows.getJSONObject(it)) }
             val next = response.optJSONObject("olderCursor")?.let { ThreadCursor(it.getString("createdAt"), it.getString("id")) }
             thread(id) { previous ->
-                mergeThreadPage(previous, messages, next, older)
+                mergeThreadPage(previous, messages, next, older, removedIds(response))
             }
         } catch (e: Exception) {
             if (_inbox.value.accountGen == account) thread(id) { it.copy(loading = false, error = e.message ?: "Phone did not respond. Retry.") }
         }
     }
 
+    private fun saveReactions() = prefs.edit().putString("reactions", JSONArray(_reactions.value.map { it.json() }).toString()).commit()
+
+    @Synchronized fun cancelReaction(key: String) {
+        if (key in reactionFlights) return
+        _reactions.value = _reactions.value.filterNot { it.key == key }; saveReactions()
+    }
+
     suspend fun react(conversationId: String, messageId: String, emoji: String, desiredPresent: Boolean): String? {
         val account = _inbox.value.accountGen
-        if (account.isBlank() || emoji !in listOf("😂", "😢", "😊", "😈", "🥵", "💝", "❤️")) return "Reaction unavailable"
-        val issued = System.currentTimeMillis() / 1000
+        if (account.isBlank() || !allowedConversation(conversationId) || emoji !in listOf("😂", "😢", "😊", "😈", "🥵", "💝", "❤️")) return "Reaction unavailable"
+        val intent = PendingReaction(account, conversationId, messageId, emoji, desiredPresent)
+        synchronized(this) {
+            if (intent.key in reactionFlights) return "Updating…"
+            val old = _reactions.value
+            val existing = old.firstOrNull { it.key == intent.key }
+            if (existing != null && existing.desiredPresent != desiredPresent) return "Retry or cancel the pending reaction first."
+            if (existing == null) {
+                if (old.size >= 50) return "Retry or cancel queued reactions first."
+                _reactions.value = old + intent
+                if (!saveReactions()) { _reactions.value = old; return "Could not save reaction. Retry." }
+            }
+        }
+        return retryReaction(intent.key)
+    }
+
+    suspend fun retryReaction(key: String): String? {
+        val intent = synchronized(this) {
+            val item = _reactions.value.firstOrNull { it.key == key } ?: return null
+            if (item.accountGen != _inbox.value.accountGen || !allowedConversation(item.conversationId)) return "Account changed"
+            if (!reactionFlights.add(key)) return "Updating…"
+            item
+        }
         return try {
-            val response = request(JSONObject().put("protocol", 2).put("accountGen", account).put("type", "threadAction")
-                .put("action", "reaction").put("conversationId", conversationId).put("messageId", messageId)
-                .put("emoji", emoji).put("desiredPresent", desiredPresent).put("issuedAt", issued).put("expiresAt", issued + 60))
-            if (_inbox.value.accountGen != account) return "Account changed"
-            if (!response.optBoolean("ok")) return response.optString("error", "Could not update reaction. Retry.")
-            loadThread(conversationId)
+            val response = request(intent.command(System.currentTimeMillis() / 1000))
+            synchronized(this) {
+                if (_inbox.value.accountGen != intent.accountGen) return "Account changed"
+                if (!response.optBoolean("ok")) return response.optString("error", "Could not update reaction. Retry.")
+                _reactions.value = _reactions.value.filterNot { it.operationId == intent.operationId }
+                saveReactions()
+            }
+            loadThread(intent.conversationId)
             null
         } catch (_: Exception) { "Phone did not confirm the reaction. Retry safely." }
+        finally { synchronized(this) { reactionFlights.remove(key) } }
     }
 
     fun draft(id: String): String = prefs.getString("draft:$id", "") ?: ""

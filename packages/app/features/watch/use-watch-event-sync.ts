@@ -1,3 +1,5 @@
+import { projectWatchMoments, type EventMomentRow } from "./watch-event-moments";
+import { loadEventRelationPages as allEventRelations, eventWindowPage } from "./watch-event-pages";
 /**
  * PLATFORM BEHAVIOR: phone-owned event reads and mutations; watch envelopes have
  * no credentials. Sources use their actual identity keys, independent of tickets.
@@ -19,6 +21,7 @@ import { useWatchSessionStore } from "./watch-session-store";
 import { useWatchSettingsStore } from "./watch-settings-store";
 import { buildWatchEvents, validateEventCommand, type WatchEventEnvelope, type WatchEventRelations, type WatchEventResult, type WatchEventRow } from "./watch-event-payload";
 
+let eventWindow = { generation: "", offset: 0, momentEventId: undefined as string | undefined };
 const enrichVenueWeather = createWatchVenueWeatherLoader(fetchLiveSurface);
 
 interface EventOperations {
@@ -52,12 +55,13 @@ export async function loadWatchEventEnvelope(viewerId: string, accountGen: strin
   assertAccount(viewerId, accountGen);
   const { authId, integerId } = await eventIdentity(viewerId, accountGen);
   if (!authId || !integerId) throw new Error("Sign in on your phone to sync events.");
+  if (eventWindow.generation !== accountGen) eventWindow = { generation: accountGen, offset: 0, momentEventId: undefined };
   const [rsvps, invitations, likes, waitlist, hosted] = await Promise.all([
-    supabase.from("event_rsvps").select("event_id,status").eq("user_id", authId).order("created_at", { ascending: false }).limit(100),
-    supabase.from("event_invites").select("event_id,status").eq("invited_user_id", authId).order("created_at", { ascending: false }).limit(100),
-    supabase.from("event_likes").select("event_id").eq("user_id", integerId).order("created_at", { ascending: false }).limit(100),
-    supabase.from("event_waitlist").select("event_id,ticket_type_id,offer_status,offer_expires_at").eq("user_id", authId).order("created_at", { ascending: false }).limit(100),
-    supabase.from("events").select("id").eq("host_id", authId).order("start_date", { ascending: false }).limit(50),
+    allEventRelations(() => supabase.from("event_rsvps").select("event_id,status").eq("user_id", authId).order("created_at", { ascending: false }).order("id", { ascending: false })),
+    allEventRelations(() => supabase.from("event_invites").select("event_id,status").eq("invited_user_id", authId).order("created_at", { ascending: false }).order("id", { ascending: false })),
+    allEventRelations(() => supabase.from("event_likes").select("event_id").eq("user_id", integerId).order("created_at", { ascending: false }).order("id", { ascending: false })),
+    allEventRelations(() => supabase.from("event_waitlist").select("event_id,ticket_type_id,offer_status,offer_expires_at").eq("user_id", authId).order("created_at", { ascending: false }).order("id", { ascending: false })),
+    allEventRelations(() => supabase.from("events").select("id").eq("host_id", authId).order("start_date", { ascending: false }).order("id", { ascending: false })),
   ]);
   assertAccount(viewerId, accountGen);
   for (const result of [rsvps, invitations, likes, waitlist, hosted]) if (result.error) throw result.error;
@@ -66,15 +70,26 @@ export async function loadWatchEventEnvelope(viewerId: string, accountGen: strin
     ...(likes.data ?? []).map((r) => r.event_id), ...(waitlist.data ?? []).map((r) => r.event_id), ...(hosted.data ?? []).map((r) => r.id),
   ])];
   if (!ids.length) return { protocol: 2, accountGen, syncedAt: Date.now() / 1000, events: [], status: "ready" };
-  const [events, tiers] = await Promise.all([
-    supabase.from("events").select("id,title,start_date,end_date,event_tz,cover_image_url,flyer_image_url,video_poster_url,location,location_name,location_lat,location_lng,is_online,status,ticketing_enabled,host_id")
-      .in("id", ids).limit(450),
-    supabase.from("ticket_types").select("event_id,quantity_total,quantity_sold,sale_start,sale_end,tier_visibility").in("event_id", ids).limit(1500),
-  ]);
+  const eventRows: WatchEventRow[] = [];
+  const tierRows: WatchEventRelations["tiers"] = [];
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    assertAccount(viewerId, accountGen);
+    const batch = ids.slice(offset, offset + 100);
+    const [eventPage, tierPage] = await Promise.all([
+      supabase.from("events").select("id,title,start_date,end_date,event_tz,cover_image_url,flyer_image_url,video_poster_url,location,location_name,location_lat,location_lng,is_online,status,ticketing_enabled,host_id").in("id", batch),
+      allEventRelations(() => supabase.from("ticket_types").select("id,event_id,quantity_total,quantity_sold,sale_start,sale_end,tier_visibility").in("event_id", batch).order("id")),
+    ]);
+    if (eventPage.error) throw eventPage.error;
+    if (tierPage.error) throw tierPage.error;
+    eventRows.push(...(eventPage.data ?? []) as WatchEventRow[]);
+    tierRows.push(...tierPage.data);
+  }
+  const events = { data: eventRows, error: null };
+  const tiers = { data: tierRows, error: null };
   if (events.error) throw events.error;
   if (tiers.error) throw tiers.error;
   assertAccount(viewerId, accountGen);
-  const relations: WatchEventRelations = { authId, rsvps: rsvps.data ?? [], invitations: invitations.data ?? [], likes: likes.data ?? [], waitlist: waitlist.data ?? [], tiers: (tiers.data?.length ?? 0) < 1500 ? tiers.data ?? [] : [] };
+  const relations: WatchEventRelations = { authId, rsvps: rsvps.data ?? [], invitations: invitations.data ?? [], likes: likes.data ?? [], waitlist: waitlist.data ?? [], tiers: tiers.data };
   const now = Date.now();
   const rows = buildWatchEvents((events.data ?? []) as WatchEventRow[], relations, now).sort((a, b) => {
     const timeA = Date.parse(a.endAt ?? a.startAt ?? "") || 0;
@@ -83,9 +98,40 @@ export async function loadWatchEventEnvelope(viewerId: string, accountGen: strin
     const pastB = timeB > 0 && timeB < now;
     return pastA !== pastB ? (pastA ? 1 : -1) : pastA ? timeB - timeA : timeA - timeB;
   });
-  const enriched = await enrichVenueWeather(rows.slice(0, 60), accountGen, () => useAuthStore.getState().user?.id === viewerId && useWatchSessionStore.getState().accountGen === accountGen, now);
+  // Keep the near-term focus stable while browsing bounded historical pages.
+  // The transport has a hard size limit; accumulating the full archive is unsafe.
+  const page = eventWindowPage(rows, eventWindow.offset);
+  if (eventWindow.momentEventId) {
+    const event = page.events.find(row => row.id === eventWindow.momentEventId);
+    if (event) {
+      event.moments = [];
+      event.momentsStatus = "unavailable";
+      try {
+        const blocked = await allEventRelations(() => supabase.from("blocks").select("id,blocker_id,blocked_id")
+          .or(`blocker_id.eq.${integerId},blocked_id.eq.${integerId}`).order("id"));
+        if (blocked.error) throw blocked.error;
+        const excluded = new Set(blocked.data.map(row => String(Number(row.blocker_id) === integerId ? row.blocked_id : row.blocker_id)));
+        for (let offset = 0; ; offset += 30) {
+          assertAccount(viewerId, accountGen);
+          const result = await supabase.from("event_moments").select("id,user_id,media_url,media_type,expires_at,is_flagged")
+            .eq("event_id", Number(event.id)).eq("media_type", "photo").eq("is_flagged", false).gt("expires_at", new Date(now).toISOString())
+            .order("created_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + 29);
+          if (result.error) throw result.error;
+          event.moments.push(...projectWatchMoments((result.data ?? []) as EventMomentRow[], excluded, now));
+          event.moments = event.moments.slice(0, 6);
+          if (event.moments.length >= 6 || (result.data?.length ?? 0) < 30) break;
+        }
+        assertAccount(viewerId, accountGen);
+        event.momentsStatus = "ready";
+      } catch {
+        // A block/privacy read failure must not preserve previously permitted photos.
+        event.moments = []; event.momentsStatus = "unavailable";
+      }
+    }
+  }
+  const enriched = await enrichVenueWeather(page.events, accountGen, () => useAuthStore.getState().user?.id === viewerId && useWatchSessionStore.getState().accountGen === accountGen, now);
   assertAccount(viewerId, accountGen);
-  return { protocol: 2, accountGen, syncedAt: now / 1000, events: enriched, status: "ready" };
+  return { protocol: 2, accountGen, syncedAt: now / 1000, events: enriched, hasMore: page.hasMore, hasPrevious: page.hasPrevious, status: "ready" };
 }
 
 export interface WatchEventTransport {
@@ -130,6 +176,16 @@ export function useWatchEventSync({ push, openOnPhone }: WatchEventTransport) {
       const fresh = await loadWatchEventEnvelope(viewerId, accountGen);
       const event = fresh.events.find((item) => item.id === command.eventId);
       if (!event) throw new Error("This event is no longer available.");
+      if (command.action === "archive_more" || command.action === "archive_previous" || command.action === "load_moments") {
+        if (command.action === "load_moments") eventWindow.momentEventId = command.eventId;
+        else eventWindow.offset = Math.max(0, eventWindow.offset + (command.action === "archive_more" ? 40 : -40));
+        const expanded = await loadWatchEventEnvelope(viewerId, accountGen);
+        assertAccount(viewerId, accountGen);
+        await push(expanded);
+        const result: WatchEventResult = { ...base, status: "confirmed", message: command.action === "load_moments" ? "Event moments refreshed" : "Events loaded" };
+        useEventOperations.getState().put(command.operationId, result);
+        return result;
+      }
       const { authId } = await eventIdentity(viewerId, accountGen);
       const token = await requireBetterAuthToken();
       assertAccount(viewerId, accountGen);
@@ -175,6 +231,6 @@ export function useWatchEventSync({ push, openOnPhone }: WatchEventTransport) {
       if (useWatchSessionStore.getState().accountGen === accountGen) useEventOperations.getState().put(command.operationId, result);
       return result;
     }
-  }, [accountGen, viewerId, enabled, openOnPhone, refresh]);
+  }, [accountGen, viewerId, enabled, openOnPhone, refresh, push]);
   return { handleCommand, refresh, envelope: query.data };
 }

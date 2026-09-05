@@ -205,6 +205,12 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         return true
     }
 
+    private func reloadActionControls() {
+        if #available(watchOS 26.0, *) {
+            for kind in ["DVNTShowTicket", "DVNTPresence", "DVNTMuteCall"] { ControlCenter.shared.reloadControls(ofKind: kind) }
+        }
+    }
+
     private func requestThread(_ id: String, cursor: WatchCursor?) {
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else {
@@ -213,6 +219,7 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         let requestedGen = dmStore.envelope.accountGen
         var body: [String: Any] = ["type": "threadPage", "protocol": 2,
             "accountGen": dmStore.envelope.accountGen, "conversationId": id]
+        body["retainedMessageIds"] = dmStore.pages[id]?.messages.map(\.id) ?? []
         if let cursor { body["olderCursor"] = ["createdAt": cursor.createdAt, "id": cursor.id] }
         session.sendMessage(body, replyHandler: { [weak self] reply in
             Task { @MainActor in
@@ -311,7 +318,7 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         guard scoped else { return ["commandResult", "eventResult", "callDirectoryResult", "venueResult", "activeCallResult"].contains { payload[$0] != nil } }
         if let data = jsonData(payload["activeCall"]),
            let envelope = try? JSONDecoder().decode(WatchActiveCallEnvelope.self, from: data),
-           envelope.accountGen == sessionGate.accountGen { activeCallStore.apply(envelope) }
+           envelope.accountGen == sessionGate.accountGen { activeCallStore.apply(envelope); reloadActionControls() }
         if let data = jsonData(payload["callDirectory"]),
            let envelope = try? JSONDecoder().decode(WatchCallDirectory.self, from: data),
            envelope.accountGen == sessionGate.accountGen { callDirectoryStore.apply(envelope) }
@@ -324,7 +331,7 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
 
         if let data = jsonData(payload["payload"]) {
             let beforeUsed = usedTicketIds
-            store.ingest(json: data)
+            store.ingest(json: data, generation: sessionGate.accountGen)
             if !usedTicketIds.subtracting(beforeUsed).isEmpty {
                 WKInterfaceDevice.current().play(.success)
             }
@@ -357,7 +364,7 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         // an event worth buzzing a host's wrist for while they work a door.
         if let data = jsonData(payload["door"]),
            let envelope = try? JSONDecoder().decode(WatchDoorEnvelope.self, from: data),
-           envelope.accountGen == sessionGate.accountGen { doorStore.apply(envelope) }
+           envelope.accountGen == sessionGate.accountGen { doorStore.apply(envelope); reloadActionControls() }
 
         if let data = jsonData(payload["dms"]),
            let envelope = try? JSONDecoder().decode(WatchDMEnvelope.self, from: data),
@@ -372,6 +379,7 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         }
         if ["payload", "events", "broadcasts", "door", "dms"].contains(where: { payload[$0] != nil }) {
             WidgetCenter.shared.reloadAllTimelines()
+            reloadActionControls()
             if #available(watchOS 26.0, *) { WidgetCenter.shared.invalidateRelevance(ofKind: "DVNTRelevantEvent") }
         }
         return true

@@ -34,6 +34,7 @@ export interface LiveSurfaceTile3 {
 }
 
 export interface LiveSurfaceWeather {
+  forecastAt?: string;
   icon: string | null;
   tempF: number | null;
   label: string | null;

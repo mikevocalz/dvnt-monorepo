@@ -8,6 +8,28 @@ class WatchProtocolTest {
     private fun message(id: Int, text: String = "Message $id") = ThreadMessage(id.toString(), "9", text, "7", false,
         "2026-09-05T12:00:00.123456Z", emptyList())
 
+    @Test fun retainedDeletionRemovesOldRowsOutsideLatestPage() {
+        val previous = ThreadState((1..200).map { message(it) })
+        val merged = mergeThreadPage(previous, (180..205).map { message(it) }, null, false, setOf("12", "87"))
+        assertFalse(merged.messages.any { it.id == "12" || it.id == "87" })
+        assertTrue(merged.messages.any { it.id == "13" })
+    }
+
+    @Test fun reactionRetryAfterRelaunchKeepsDesiredStateAndIdentity() {
+        val reaction = PendingReaction("a", "9", "77", "❤️", false)
+        val restored = PendingReaction.from(JSONObject(reaction.json().toString()))
+        assertEquals(reaction, restored)
+        assertFalse(restored.command(200).getBoolean("desiredPresent"))
+        assertEquals(reaction.operationId, restored.command(200).getString("operationId"))
+        assertEquals(260, restored.command(200).getLong("expiresAt"))
+    }
+
+    @Test fun cachedThreadRoundTripsMediaAndReactions() {
+        val message = ThreadMessage("77", "9", "hello", "7", true, "2026-09-05T00:00:00Z",
+            listOf(MessageAttachment("photo", "image", "https://example.com/a", null, "Photo")), listOf(MessageReaction("❤️", 2, true)))
+        assertEquals(message, ThreadMessage.from(JSONObject(message.json().toString())))
+    }
+
     @Test fun olderWindowRetainsRequestedPageAndCursor() {
         val previous = ThreadState((51..300).map { message(it) }, ThreadCursor("2026-09-05T12:00:00.123456Z", "51"))
         val cursor = ThreadCursor("2026-09-05T12:00:00.123456Z", "26")

@@ -11,8 +11,9 @@ struct WatchQRMatrix: Codable, Hashable {
     /// Row-major dark/light modules, or nil if `bits` is malformed or short — a
     /// half-drawn code would scan as the wrong ticket, so it must fail closed.
     var modules: [Bool]? {
-        guard size > 0 else { return nil }
+        guard (21...177).contains(size), (size - 21) % 4 == 0 else { return nil }
         let count = size * size
+        guard bits.utf8.count == (count + 3) / 4, bits.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) else { return nil }
         var out = [Bool]()
         out.reserveCapacity(count)
         for ch in bits {
@@ -91,8 +92,8 @@ struct WatchTicket: Identifiable, Codable, Hashable {
         eventId = try c.decode(String.self, forKey: .eventId)
         qrToken = (try? c.decode(String.self, forKey: .qrToken)) ?? ""
         qrMatrix = try? c.decode(WatchQRMatrix.self, forKey: .qrMatrix)
-        let raw = (try? c.decode(String.self, forKey: .status)) ?? "valid"
-        status = TicketStatus(rawValue: raw) ?? .valid
+        let raw = (try? c.decode(String.self, forKey: .status)) ?? "unknown"
+        status = TicketStatus(rawValue: raw) ?? .unknown
         tier = try? c.decode(String.self, forKey: .tier)
         tierName = try? c.decode(String.self, forKey: .tierName)
         tableNumber = try? c.decode(String.self, forKey: .tableNumber)
@@ -147,6 +148,8 @@ enum TicketStatus: String, Codable {
     case revoked
     case expired
     case transferPending = "transfer_pending"
+    case cancelled
+    case unknown
 
     /// Only a `valid` ticket should present a live, scannable code.
     var isPresentable: Bool { self == .valid }
@@ -160,6 +163,8 @@ enum TicketStatus: String, Codable {
         case .revoked: return "Revoked"
         case .expired: return "Expired"
         case .transferPending: return "Transferring"
+        case .cancelled: return "Cancelled"
+        case .unknown: return "Status unavailable"
         }
     }
 }
@@ -192,12 +197,28 @@ struct WatchTicketEnvelope: Codable {
     /// not know yet", which the UI renders as nothing — never as Free.
     let membership: WatchMembership?
 
+    /// Session scope, in lockstep with `WatchTicketEnvelope` in
+    /// `packages/app/features/watch/watch-payload.ts` and the Kotlin envelope in
+    /// `wear/.../Models.kt`. Both are optional because a released phone that
+    /// predates protocol 2 sends neither, and a lenient decode must still show
+    /// that phone's tickets.
+    let `protocol`: Int?
+    let accountGen: String?
+
     static let empty = WatchTicketEnvelope(tickets: [], syncedAt: 0, membership: nil)
 
-    init(tickets: [WatchTicket], syncedAt: Double, membership: WatchMembership? = nil) {
+    init(
+        tickets: [WatchTicket],
+        syncedAt: Double,
+        membership: WatchMembership? = nil,
+        protocol protocolVersion: Int? = nil,
+        accountGen: String? = nil
+    ) {
         self.tickets = tickets
         self.syncedAt = syncedAt
         self.membership = membership
+        self.protocol = protocolVersion
+        self.accountGen = accountGen
     }
 
     init(from decoder: Decoder) throws {
@@ -205,5 +226,17 @@ struct WatchTicketEnvelope: Codable {
         tickets = (try? c.decode([WatchTicket].self, forKey: .tickets)) ?? []
         syncedAt = (try? c.decode(Double.self, forKey: .syncedAt)) ?? 0
         membership = try? c.decode(WatchMembership.self, forKey: .membership)
+        self.protocol = try? c.decode(Int.self, forKey: .protocol)
+        accountGen = try? c.decode(String.self, forKey: .accountGen)
+    }
+
+    /// Mirrors `TicketRepository.ingest` on Wear: a protocol-2 envelope must name
+    /// the generation the session is on, so a snapshot built for the previous
+    /// account cannot repopulate the wrist. A pre-protocol-2 envelope carries no
+    /// generation to check and is accepted, exactly as Wear accepts it.
+    func belongs(toGeneration generation: String?) -> Bool {
+        guard self.protocol == 2 else { return true }
+        guard let generation, !generation.isEmpty else { return false }
+        return accountGen == generation
     }
 }

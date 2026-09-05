@@ -1,12 +1,19 @@
-# DVNT watch v2 — implementation and release status
+# DVNT Watch v2 — completion ledger
 
-2026-09-05. **Not release ready.** This is the reviewable local implementation and its evidence ledger. No production migrations/functions were deployed, no store release was submitted, and no real messages, calls, invitations or ticket mutations were executed. Existing unrelated native-project changes were preserved. Environment and baseline: [environment record](../watch-v2-environment.json).
+2026-09-05. Local implementation and verification are substantially expanded. **Release acceptance is still open:** full phone builds are running, signing requires Xcode team access, and paired physical acceptance has not run. Production functions/migrations have not been deployed. Existing unrelated native-project changes are preserved.
 
-## User-visible changes
+## Implemented behavior
 
-Apple Watch opens directly into Now, Inbox, Events and Tickets, with the Door artwork as the first scroll item. Conversations have real paginated history, inline images, a bounded viewer, drafts, explicit send, durable outbox, backend-confirmed replies and reactions. Events no longer require a ticket. Tickets retain the existing QR/ring and selected pass. Companion calls identify where audio occurs and show confirmed phone call state. Host Door now has an authorized aggregate sync source and confirmed notice/presence actions. Wear has native conversation, Events and companion-call implementations using the same account-scoped contracts.
-
-The changes retain DVNT fonts, artwork, black canvas and brand colors. Design rationale, journey map, copy and accessibility work are in [design and research](design-and-research.md). These are source-level decisions; missing native captures are not replaced with conceptual mockups.
+| Area | Current source behavior |
+| --- | --- |
+| Navigation | Apple direct Now/Inbox/Events/Tickets roots; compact first-scroll-row Door artwork. Wear native M3 Now, Events, Inbox, Tickets, Broadcasts and authorized Host Door. |
+| Messaging | Paginated threads, sender identity, images/viewer, durable account-scoped media caches, drafts/outbox, explicit send, server-ID confirmation, durable desired-state reaction retries and retained-page deletion reconciliation. Account transitions fence late data and clear private state. |
+| Events | Independent event relationships, bounded archive paging, exact event pass navigation, real forecast at future doors, Maps, confirmed RSVP/waitlist and explicit owner presence. No public attendee counts. Up to six permitted event photo moments have explicit refresh and a five-minute visibility lease; blocked, flagged, expired and video content is excluded. |
+| Tickets | Stable selected-pass identity, native QR quiet zone and membership rings; missing/unknown/cancelled status and malformed QR fail closed. Owner-only membership information and wrist-down privacy. Wallet installation is never inferred from share-sheet success. |
+| Host Door | Authorized aggregate source, validated counts, explicit preview/send notices, uncertain-operation retention and account/disable resets on both platforms. Presence shares no coordinates and does not redeem a ticket. |
+| Calls | Companion call picker/recents, fresh recipient-bound answer/decline, backend-confirmed decisions, truthful phone audio state, desired-state mute/end and interruption recovery. Transactional backend admission caps calls at four total participants. Native wrist media remains disabled pending compatible transport and physical proof. |
+| System surfaces | Apple Show ticket, I’m here and Mute controls; account-scoped intent handoff through the watch app. Complications include event fallback, optional unread state, fresh presence, date relevance and location relevance only with existing location permission. Wear tile/ongoing companion surfaces retain their native integrations. |
+| Notifications | Reply/heart/read, event RSVP/view, waitlist phone continuation, host Door, exact ticket and fresh call actions. Recipient/time/account validation, persistent uncertain message/event actions, server-ID reply confirmation and no persistent call replay. Canonical grouping/collapse and bounded trusted image attachments via a generated notification-service extension. Custom cold-start actions bypass generic navigation; authenticated handler readiness preserves the original response, recipient-bound call hydration uses a conditional backend decision, and only consumed responses are cleared. Handler unmounts/account changes cannot invoke stale callbacks. |
 
 ## Findings A–Q
 
@@ -23,71 +30,114 @@ Paths below are relative to the repository root. “Confirmed” describes the i
 | G — oldest-page limit | Confirmed. Existing `getMessages` callers preserved; `messages-impl.ts:getThreadPage` and `thread-pagination.ts` add descending timestamp/ID cursor queries and reverse for display. |
 | H — ticket-derived Events | Confirmed. `use-watch-event-sync.ts`, `EventStore.swift`, Wear `EventRepository.kt`: authorized RSVP/invitation/saved/waitlist/host relationships independent of tickets. |
 | I — freshness/link conflation | Confirmed. `EventListView.swift:StalenessFooter` separates cached snapshot age from phone link; active calls require fresh heartbeats. |
-| J — native duplex impossible | False platform claim removed. SDK CallKit/PushKit/voice-chat APIs compile; installed Fishjam binary has no watchOS slice. Native audio is an unresolved dependency, not proven impossible. See call evidence. |
+| J — native duplex impossible | False platform claim removed. SDK CallKit/PushKit/voice-chat APIs compile; installed Fishjam binary has no watchOS slice. A matching-architecture link probe confirms the installed binary is built for iOS Simulator, not watchOS Simulator. Compatible native audio transport remains a dependency. See call evidence. |
 | K — stale queued calls | Confirmed. `watch-bridge.ts`, native call stores: expected state, account generation, expiry and ended tombstones. Notification routing now revalidates a current recipient-bound ringing row instead of joining on tap. |
-| L — Wear parity | Confirmed missing baseline coverage. Native additions improve parity; the capability table below explicitly separates missing/untested surfaces. |
+| L — Wear parity | Confirmed missing baseline coverage. Native additions improve parity; the capability table above explicitly separates missing/untested surfaces. |
 | M — absent four-person limit | Confirmed. `call_create`, `video_join_room`, `call_join` and `20260905121000_call_admission.sql`: four total, room-row transaction lock, reconnect membership reuse. Group chats remain larger than four. |
 | N — Lynk coupling | Partially confirmed. Creation applied Lynk rules; fixed initial call domain and separate admission. `video_list_rooms` already filtered all three discovery paths to Lynk and was preserved. |
-| O — missing notification metadata/actions | Confirmed. `_shared/watch-notification.ts`, `send-message`, `send_notification`, `watch-notification-actions.ts` add categories/thread identity and supported interruption levels. Full requested action/image/collapse coverage remains partial. |
-| P — INSERT-only realtime | Confirmed in actual subscriber callers, not the channel factory alone. `message-realtime.ts`, `use-watch-dm-sync.ts`: message changes and read cursors refresh recently opened threads; Wear event transport now carries threadPage. Older-page reconciliation outside refreshed windows remains limited. |
+| O — missing notification metadata/actions | Confirmed. `_shared/watch-notification.ts`, `send-message`, `send_notification`, `watch-notification-actions.ts` add categories/thread identity and supported interruption levels. Message/event/waitlist/host/ticket/call actions, canonical collapse/grouping and trusted image attachments are implemented; paired delivery remains unverified. |
+| P — INSERT-only realtime | Confirmed in actual subscriber callers, not the channel factory alone. `message-realtime.ts`, `use-watch-dm-sync.ts`: message changes and read cursors refresh recently opened threads; Wear event transport now carries threadPage. Retained page IDs are now reconciled through bounded authorized reads, including deletions; unloaded history remains paginated. |
 | Q — iOS-only DMs | Confirmed. `watch-bridge.ts`, phone Wear plugin and `WearDataLayerService.kt`: versioned DataClient snapshots, MessageClient commands/results/live events. Media uses bounded authorized HTTPS URLs; no credentials in snapshots. |
 
-## Capability and acceptance matrix
+## Verification
 
-“Local” means compiler/unit/integration-fixture evidence only. Device validation remains separate.
+- `node scripts/verify-watch.mjs` passes ten checks. It previously compiled only
+  the RingPhase sources; the five suites in `apps/mobile/targets/watch-tests/`
+  existed but no runner executed them, and two of the five were untracked.
+  `DMStoreTests`, `DoorStoreTests`, `TicketSafetyTests`, `VenueActionStoreTests`
+  and `WatchMediaCacheTests` now build and run there.
+- Combined watch contracts, bridge, event/weather, notification, identity and incoming-call decisions: **77 tests passed**, including final notification and event moment regressions. Log `/tmp/dvnt-watch-v2-final-combined-tests.log`; invariant log `/tmp/dvnt-watch-v2-final-invariants.log`.
+- Full application TypeScript check passed after final cold-start/moments integration: `/tmp/dvnt-watch-v2-final-combined-tsc.log`.
+- Wear: **30 Kotlin tests**, Debug APK and unsigned Release APK passed after ticket safety and event moments changes; `/tmp/watch-v2-moments-final-wear.log`.
+- Swift messaging/media/ticket safety, complication-cache and notification-image-source standalone tests passed. Framework, QR wire, feature-gate, DM wire and ring invariant checks passed.
+- Isolated Deno check passed for send-message, send_notification, notify-event-change and event-broadcast-message. Shared notification metadata/image tests passed (4).
+- Real clean Expo prebuild passed twice in an isolated tree. Apple Watch/complication simulator, unsigned Watch device Release and notification-service extension builds passed. Full phone builds resumed after authorized cache cleanup. See the native ledger for final results and reproducible commands.
+- Native simulator captures exist at 40/41/45/49 mm for unpaired/largest-type and two header treatments. Additional actual-screen fixtures are explicitly synthetic and have no command relay or production account data. Corrected 40/41/45/49 mm ticket screenshots decode via Apple Vision to the explicit synthetic payload; the latest conversation capture confirms the initial latest-message position. Captures do not constitute paired-device acceptance.
 
-| Feature | Apple Watch implementation | Wear implementation | Verification and remaining dependency |
-| --- | --- | --- | --- |
-| Navigation / brand | Direct roots, Door headers, retained pass/context | Native M3 navigation | Native builds; no four-case-size captures, two rendered treatments, largest-type or rotary/VoiceOver/TalkBack acceptance. |
-| Inbox / thread | Summaries, categories, history, group sender, images/viewer, read/reactions | Native equivalents | Contracts/stores/query tests; paired delivery and long-thread interaction unverified. Older unloaded/retained page deletion reconciliation requires refetch. |
-| Sending | Persistent drafts/outbox, same-operation retry, confirmed ID | Persistent native outbox | Concurrency/idempotency PostgreSQL and state tests; process-kill paired behavior unverified. Reactions do not have a durable offline outbox. |
-| Privacy | Account-generation gate, retired generations, cache/outbox clear, ambient pass hiding | Account gate, ambient hiding, bounded media | Replay/reset tests pass; hardware preview/privacy behavior unverified. Media is memory cached, not a durable offline image library. |
-| Events / Now | Independent sections, no-ticket fallback, confirmed free RSVP/waitlist, phone continuation, Maps, venue weather | Independent native Events and snapshot weather | Model/action tests; real endpoint/device actions unverified. Full archive pagination, permitted Crew/social proof, album preview, event chat and event-specific crew call are not complete. Weather is a current venue snapshot, not a forecast at future doors. |
-| Tickets | Existing qrToken QR/ECL H/quiet zone/ring, stable pass identity, wrist-down placeholder | Existing native QR, invalid statuses fail closed | QR checks/builds; no physical venue scans. Wallet-installed fact is not available from current share-sheet success, so “Also in Apple Wallet” is not asserted. |
-| Host / presence | Authorized aggregate Door, tier/perk/presence counts, confirmed notice and presence actions | Phone carries Door snapshot; full native host UI parity incomplete | Real isolated aggregate SQL tests; paired host flow unverified. No unsupported “running late” state or location inference. |
-| Calls / capacity | Recents/picker, audio answer/decline, truthful active phone status/mute/end | Native companion flow | Transactional admission/provider fixture tests; physical audio, handoff, interruption, headset and lifecycle acceptance missing. Native watch media transport is not implemented. |
-| Widgets / system surfaces | Existing complications extended; scoped deep links; date relevance and privacy control | M3 three-slot tile, private count/countdown complication, incoming notifications and Ongoing Activity | Compiler evidence only. Requested Show ticket / I'm here / Mute control set and location-based relevance are incomplete. No RelevanceKit hardware proof. |
-| Notifications | Reply/Mark read with persistent retry recovery; category Open actions and stale-call validation | Permission-gated native incoming actions and Ongoing Activity, expiring process-death command recovery | Payload and actual-source retry tests. Full requested heart/event/waitlist/host actions, authorized image thumbnails and collapse behavior remain incomplete. Paired notification delivery and cross-device deduplication unverified. |
-| Accessibility / performance | Semantic font scaling, labels, contrast and motion/privacy provisions | Native M3/ambient provisions | Source checks only. No measured cold/warm launch, scroll, transfer/day, memory plateau or battery data; no invented budgets or performance claims. |
-| Release integration | Unsigned watch/complication simulator product | Debug and unsigned release artifacts | Full phone app integration build, signing/archives, clean real prebuild, installation and paired acceptance remain open. Plugin isolated compile and twice-run prebuild fixture are narrower checks. |
 
-## Verification evidence
+## Full phone build
 
-- [Apple navigation, stores, media, widgets, build and research evidence](../watch-v2-navigation-evidence.md)
-- [Messaging, backend reactions, Wear, Kotlin and plugin evidence](../watch-v2-message-wear-evidence.md)
-- [Call admission, native audio feasibility, companion controls and Host Door evidence](../watch-v2-call-evidence.md)
-- [Events, actions and weather evidence](../watch-v2-events-evidence.md)
-- [Authorized Host Door aggregate and PostgreSQL evidence](../watch-v2-door-evidence.md)
+2026-09-05. The full phone build now completes. `** BUILD SUCCEEDED **` for
+`-workspace ios/DVNT.xcworkspace -scheme DVNT -configuration Debug -destination
+'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`. Log
+`/tmp/dvnt-v2-device-build.log`; product preserved at
+`/tmp/dvnt-v2-device-products/DVNT.app`. The product embeds
+`Watch/DVNTWatch.app`, which embeds `PlugIns/DVNTWatchComplication.appex`, plus
+`PlugIns/ShareExtension.appex`. App binary is arm64 platform 2 minos 17.0; the
+watch binary is arm64_32 + arm64. This is an unsigned compile-and-link result,
+not an install or a signed archive.
 
-Integration regressions added after independent review: Android reset still publishes the composite clear if the legacy ticket transport rejects; old-generation ticket/DM/broadcast/Door publishers cannot restamp data into the current account; Wear receives live thread pages; failed notification replies persist and retry with the same operation ID; account changes erase pending notification text and fence stale retry closures. No notification tap directly enters a call route. CallKit and watch answers/declines now require recipient-bound conditional backend decisions, with account/expiry checks around awaits. Native phone presentation no longer suppresses the corresponding watch ring. Re-enabling ticket/broadcast sync republishes unchanged cached data.
+Two findings changed how this is built.
 
-Latest combined deterministic run:
+**The earlier failure was a real link error, not the disk exhaustion recorded
+against it.** `Ld RNAudioAPI.framework` failed on roughly ninety undefined
+ffmpeg symbols. `react-native-audio-api` declares the four ffmpeg xcframeworks
+as `vendored_frameworks`, and CocoaPods writes `-framework "libavcodec"` and its
+three siblings into the app target's `OTHER_LDFLAGS` but not into the pod's own,
+so the pod could never resolve them while it linked as its own dynamic
+framework. `RNAudioAPI` is now in `STATIC_FRAMEWORK_PODS`
+(`apps/mobile/plugins/with-static-pods.js`, mirrored into
+`apps/mobile/ios/Podfile`), alongside the two pods already there for the same
+reason. `pod install` reports `[with-static-pods] Building RNAudioAPI as a
+static framework` and the generated project carries `MACH_O_TYPE = staticlib` in
+both Debug and Release. The pod's own six `-force_load` flags become inert,
+because Xcode's Libtool task reads `OTHER_LIBTOOLFLAGS` rather than
+`OTHER_LDFLAGS`; the ogg/opus/vorbis archives are now force-loaded once at the
+app link instead of into both binaries. `-ObjC` is present in both
+configurations and on the app target, so `RCT_EXPORT_MODULE(AudioAPIModule)`
+survives archive linkage. `apps/mobile/plugins/with-static-pods.test.cjs` covers
+the list and the plugin's idempotent re-injection.
 
-```sh
-node --import tsx --test packages/app/features/watch/contracts/v2.test.ts packages/app/features/watch/watch-rendition.test.ts packages/app/features/watch/watch-event-payload.test.ts packages/app/features/watch/watch-event-weather.test.ts packages/app/features/watch/watch-active-call.test.ts packages/app/features/watch/watch-call-directory.test.ts packages/app/features/watch/watch-venue-actions.test.ts packages/app/features/watch/watch-door-payload.test.ts packages/app/features/watch/watch-bridge.test.cjs packages/app/features/watch/watch-notification-actions.test.cjs packages/app/lib/auth/identity.test.cjs packages/app/features/services/callkeep/answer-call.test.ts
-```
+**A full iOS Simulator build of this app cannot succeed.** `MoqFFI.xcframework`
+ships `ios-arm64-simulator` and no x86_64 simulator slice; MLKit's
+`MLImage.framework` ships simulator support for x86_64 only, its arm64 slice
+being `platform 2` (device). An arm64 simulator build fails with `building for
+'iOS-simulator', but linking in object file (…MLImage[arm64][2](GMLImage.o))
+built for 'iOS'`, and excluding arm64 strands MoQ. Both dependencies do ship
+device arm64, which is why the device destination above is the one that
+completes. Recorded so the simulator path is not attempted again.
 
-Exit 0, 50 tests. Log `/tmp/dvnt-watch-final-contract-tests.log`. These are actual-source Node/TypeScript tests; they do not substitute for the brief's requested RNTL hook and device tests.
+Not yet in any build: `apps/mobile/targets/notification-service/` is a valid
+`@bacons/apple-targets` target producing `com.dvnt.app.notifications`, but
+`DVNTNotificationService` appears zero times in the committed
+`ios/DVNT.xcodeproj/project.pbxproj`, and the built product's `PlugIns/` holds
+only `ShareExtension.appex`. A prebuild is required before that extension exists
+anywhere. No hardware or signing account is involved.
 
-Final native artifacts and checks:
+## Ticket envelope session scope
 
-| Command / artifact | Outcome |
-| --- | --- |
-| `xcodebuild -project apps/mobile/ios/DVNT.xcodeproj -target DVNTWatch -configuration Debug -sdk watchsimulator -arch arm64 -jobs 2 SYMROOT=/tmp/dvnt-watch-v2-native-products OBJROOT=/tmp/dvnt-watch-v2-native-intermediates CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build` | Exit 0, latest Now/weather/ActiveCall/Venue/Door and complication sources. Product `/tmp/dvnt-watch-v2-native-products/Debug-watchsimulator/DVNTWatch.app`. |
-| `JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home ANDROID_HOME=/Users/mikevocalz/Library/Android/sdk /Users/mikevocalz/dvnt-monorepo/apps/mobile/android/gradlew -p /tmp/dvnt-wear-build :wear:testDebugUnitTest :wear:assembleDebug :wear:assembleRelease --console plain` | Exit 0; 15 Kotlin tests. Log `/tmp/dvnt-wear-surfaces-verified.log`. |
-| `/tmp/dvnt-wear-build/output/wear/outputs/apk/debug/wear-debug.apk` | Debug artifact retained. |
-| `/tmp/dvnt-wear-build/output/wear/outputs/apk/release/wear-release-unsigned.apk` | Unsigned release artifact retained; not a signed release. |
-| `JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home ANDROID_HOME=/Users/mikevocalz/Library/Android/sdk /Users/mikevocalz/dvnt-monorepo/apps/mobile/android/gradlew -p /tmp/dvnt-phonewear-build :bridge:compileDebugKotlin --console plain` | Exit 0 against actual React Android 0.86.0 classes and Wearable 20.0.1; `/tmp/dvnt-phonewear-compile.log`. |
-| `node scripts/verify-watch.mjs` | Exit 0; framework availability, 45×45 QR wire, feature gates, DM wire and ring boundaries. |
-| `pnpm --dir packages/app exec tsc --noEmit` | Exit 0 after final call overlay/bridge integration; `/tmp/dvnt-watch-final-tsc.log`. |
-| `git diff --check` | Exit 0. |
+`WatchTicketEnvelope` on the phone (`packages/app/features/watch/watch-payload.ts`)
+and on Wear (`wear/…/Models.kt`, enforced in `TicketRepository.ingest`) both
+carry optional `protocol` and `accountGen`. The Swift envelope declared neither,
+so tickets and broadcasts were the only domains applied without the generation
+comparison that `events`, `threadPage`, `callDirectory`, `activeCall` and `call`
+each perform, and a protocol-2 snapshot built for a previous account could
+repopulate the wrist. `apps/mobile/targets/watch/Models.swift` now declares both
+fields and a `belongs(toGeneration:)` rule mirroring Wear's: a protocol-2
+envelope must name the session's generation, and an envelope from a released
+pre-protocol-2 phone carries no generation to check and is still accepted.
+`TicketStore.ingest(json:generation:)` applies it at the call site in
+`WatchConnectivityManager`. Covered by `TicketSafetyTests`, including the legacy
+path. Broadcasts still ingest unscoped behind the same session gate; their
+envelope has no generation field on any of the three sides, so closing that one
+is a protocol change rather than a lockstep fix.
 
-The build roots are session-local verification scaffolding. Source files, regression tests and evidence are in the repository. Temporary compiler intermediates were removed after completion to recover disk space; APK/app products, test results and logs were retained.
+## Evidence
 
-## Release dependencies
+- [Final native builds, prebuild, cache cleanup and captures](final-native-verification.md)
+- [Messaging, ticket and Wear evidence](../watch-v2-message-wear-evidence.md)
+- [Events, forecasts and action evidence](../watch-v2-events-evidence.md)
+- [Calls, capacity and native transport evidence](../watch-v2-call-evidence.md)
+- [Authorized Door backend evidence](../watch-v2-door-evidence.md)
+- [Design and research](design-and-research.md)
 
-1. Complete the source gaps explicitly marked above and final acceptance review; implementation coverage is not synonymous with a ship decision.
-2. Full companion phone build/signing/prebuild and approved migration/function rollout. Local machine disk pressure prevented the full Android phone build; isolated plugin compilation does not certify Expo/MoQ integration.
-3. Eligible paired Apple Watch/iPhone and Wear/Android hardware for notifications, calls, QR scans, account switching, privacy, accessibility, captures and performance. No eligible watch destination was available in this session.
-4. A supported native watch audio transport, backend/device registration and physical audio proof if native wrist audio is a release requirement.
-5. Produce two rendered treatments and capture-based critique. Fresh reference lookups cover all twelve screen contexts, with mismatches qualified; phone references do not replace native evidence.
+## Remaining acceptance and dependencies
+
+1. ~~Finish the in-progress full phone builds~~ — **done**, see "Full phone build" below. Physical install still needs item 2.
+2. Xcode reports **No Account for Team 436WA3W63V** and missing Watch provisioning profiles. The discovered iPhone resets its connection; Watch requests Mac pairing. User confirmed iPhone/Apple Watch availability, but signed install and physical actions have not succeeded.
+3. Physical notifications, account switching, process death/retry, wrist privacy, QR scanning, audio routing, background/reconnect, accessibility and measured performance/battery acceptance remain unverified. Wear physical acceptance also needs eligible hardware.
+4. A compatible native watchOS media transport and secure device authentication are required before native wrist audio can be enabled. A matching-architecture probe confirms installed WebRTC links for iOS Simulator, not watchOS Simulator; Apple system call APIs separately typecheck. See the reproducible native-audio probe in the call evidence.
+5. Private Crew visibility, event-specific chat and Crew calling need explicit consent/event-membership contracts. Existing public avatars, one-way follows, host presence and generic conversation creation do not establish those permissions. Published event moments are implemented separately.
+6. Authorized production rollout is separate from local source completion. Existing QA restrictions remain in effect; no real message/call/ticket mutation is claimed by fixture tests.
+
+This ledger supersedes earlier partial follow-up matrices. Passing source checks is not a claim that every physical or release gate has passed.

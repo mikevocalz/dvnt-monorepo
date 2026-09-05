@@ -3,11 +3,13 @@ import ImageIO
 import CryptoKit
 
 /// PLATFORM BEHAVIOR: HTTPS image bytes and ImageIO decoding stay on this actor.
-/// NOT in this cache: credentials, persistent images, URL refresh or original-size decoding.
+/// Persistent account-keyed renditions are bounded and erased on account/authorization reset.
+/// Credentials, URL refresh and original-size decoding stay out of this cache.
 /// STOP-THE-LINE CHECKS: generation keys, byte/pixel limits and cancellation must survive refactors.
 actor WatchMediaCache {
     static let shared = WatchMediaCache()
     static let memoryLimit = 8 * 1024 * 1024
+    static let diskLimit = 24 * 1024 * 1024
     static let transferLimit = 2 * 1024 * 1024
     static let maximumConcurrentTransfers = 2
 
@@ -29,6 +31,7 @@ actor WatchMediaCache {
     }
 
     private let session: URLSession
+    private let diskDirectory: URL
     private var entries: [String: Entry] = [:]
     private var memoryUsed = 0
     private var access: UInt64 = 0
@@ -37,7 +40,12 @@ actor WatchMediaCache {
     private var waiting: [CheckedContinuation<Void, Never>] = []
     private var transfers: [UUID: URLSessionDataTask] = [:]
 
-    init(configuration: URLSessionConfiguration = .ephemeral) {
+    init(configuration: URLSessionConfiguration = .ephemeral, directory: URL? = nil) {
+        diskDirectory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("WatchMessageImages", isDirectory: true)
+        try? FileManager.default.createDirectory(at: diskDirectory, withIntermediateDirectories: true)
+        var excluded = diskDirectory
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        try? excluded.setResourceValues(values)
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil
@@ -56,6 +64,14 @@ actor WatchMediaCache {
         let key = SHA256.hash(data: Data("\(accountGen)|\(pixels)|\(rawURL)".utf8))
             .map { String(format: "%02x", $0) }.joined()
         if let cached = cached(key) { return cached }
+        let diskURL = diskDirectory.appendingPathComponent(key)
+        if let size = try? diskURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           size <= Self.transferLimit, let data = try? Data(contentsOf: diskURL),
+           let image = try? Self.decode(data, maximumPixels: pixels) {
+            try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: diskURL.path)
+            insert(image, key: key)
+            return image
+        }
         let requestedRevision = revision
         await acquire()
         defer { release() }
@@ -83,18 +99,39 @@ actor WatchMediaCache {
         guard requestedRevision == revision else { throw CancellationError() }
         let image = try Self.decode(data, maximumPixels: pixels)
         insert(image, key: key)
+        persist(data, key: key)
         return image
     }
 
     func purge() {
         revision &+= 1
         entries.removeAll()
+        try? FileManager.default.removeItem(at: diskDirectory)
         memoryUsed = 0
         transfers.values.forEach { $0.cancel() }
         transfers.removeAll()
     }
 
     var cachedByteCount: Int { memoryUsed }
+
+    private func persist(_ data: Data, key: String) {
+        guard data.count <= Self.transferLimit else { return }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: diskDirectory, withIntermediateDirectories: true)
+        var directory = diskDirectory
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        try? directory.setResourceValues(values)
+        try? data.write(to: diskDirectory.appendingPathComponent(key), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        let files = (try? fm.contentsOfDirectory(at: diskDirectory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])) ?? []
+        let entries = files.compactMap { url -> (URL, Int, Date)? in
+            guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]) else { return nil }
+            return (url, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
+        }.sorted { $0.2 < $1.2 }
+        var total = entries.reduce(0) { $0 + $1.1 }
+        for entry in entries where total > Self.diskLimit {
+            try? fm.removeItem(at: entry.0); total -= entry.1
+        }
+    }
 
     private func cached(_ key: String) -> CGImage? {
         guard var entry = entries[key] else { return nil }

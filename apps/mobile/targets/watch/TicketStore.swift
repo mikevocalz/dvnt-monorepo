@@ -11,9 +11,12 @@ final class TicketStore: ObservableObject {
 
     @Published private(set) var envelope: WatchTicketEnvelope = .empty
 
-    private var defaults: UserDefaults? { UserDefaults(suiteName: Self.appGroup) }
+    private let defaults: UserDefaults?
 
-    init() { load() }
+    init(defaults: UserDefaults? = UserDefaults(suiteName: "group.com.dvnt.app.watch")) {
+        self.defaults = defaults
+        load()
+    }
 
     /// Tickets grouped by event, sorted soonest-first; valid events float up.
     var groups: [EventGroup] {
@@ -78,9 +81,17 @@ final class TicketStore: ObservableObject {
 
     /// Decode an incoming WCSession dictionary (`{"payload": "<json string>"}`)
     /// or raw JSON data.
-    func ingest(json data: Data) {
-        guard let env = try? JSONDecoder().decode(WatchTicketEnvelope.self, from: data) else { return }
+    /// `generation` is the session generation the watch is currently scoped to.
+    /// Tickets were the one domain applied without that check while every other
+    /// envelope compared it, so a protocol-2 snapshot for a previous account
+    /// could repopulate the wrist. Returns whether the envelope was applied.
+    @discardableResult
+    func ingest(json data: Data, generation: String? = nil) -> Bool {
+        guard let env = try? JSONDecoder().decode(WatchTicketEnvelope.self, from: data),
+              env.belongs(toGeneration: generation)
+        else { return false }
         apply(env)
+        return true
     }
 
     // MARK: - Persistence (App Group)

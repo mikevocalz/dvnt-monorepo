@@ -102,6 +102,7 @@ private fun ConversationScreen(id: String, name: String, repo: MessageRepository
     val inbox by repo.inbox.collectAsState()
     val threads by repo.threads.collectAsState()
     val outbox by repo.outbox.collectAsState()
+    val pendingReactions by repo.reactions.collectAsState()
     val thread = threads[id] ?: ThreadState()
     val scope = rememberCoroutineScope()
     var draft by rememberSaveable(id, inbox.accountGen) { mutableStateOf(repo.draft(id)) }
@@ -171,7 +172,7 @@ private fun ConversationScreen(id: String, name: String, repo: MessageRepository
             items(thread.messages, key = { it.id }) { message ->
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(Dvnt.Radius.card))
                     .background(if (message.outgoing) Dvnt.violet.copy(alpha = 0.25f) else Dvnt.Surface.mid).padding(Dvnt.Space.base)) {
-                    Text(if (message.outgoing) "YOU" else name, style = Dvnt.Type.stamp, color = Dvnt.textDim)
+                    Text(if (message.outgoing) "YOU" else message.senderName ?: name, style = Dvnt.Type.stamp, color = Dvnt.textDim)
                     if (message.text.isNotBlank()) Text(message.text, style = Dvnt.Type.body)
                     message.attachments.forEachIndexed { index, media ->
                         if (media.kind == "video") Text("Video · Watch on phone", style = Dvnt.Type.caption)
@@ -193,6 +194,14 @@ private fun ConversationScreen(id: String, name: String, repo: MessageRepository
                     if (entry.status == "queued") ActionRow("Cancel") { repo.cancel(entry.operationId) }
                 }
             }
+            items(pendingReactions.filter { it.conversationId == id }, key = { "reaction:${it.key}" }) { intent ->
+                Column {
+                    Text("${intent.emoji} ${if (intent.desiredPresent) "Add" else "Remove"} · Not confirmed", style = Dvnt.Type.caption)
+                    ActionRow("Retry reaction") { scope.launch { reactionError = repo.retryReaction(intent.key) } }
+                    ActionRow("Cancel pending reaction") { repo.cancelReaction(intent.key) }
+                }
+            }
+            reactionError?.let { error -> item { Text(error, style = Dvnt.Type.caption, color = Dvnt.signal) } }
             item { ActionRow("Refresh messages") { scope.launch { repo.loadThread(id) } } }
             item { ActionRow(if (draft.isBlank()) "Reply" else "Edit reply") { compose() } }
             if (draft.isNotBlank()) {

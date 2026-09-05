@@ -30,3 +30,14 @@ test("account change during weather await suppresses result", async () => {
   const result = await load([event],"A",()=>current,now);
   assert.equal(result[0].weather,undefined);
 });
+
+test("doors timestamp crosses the transport unchanged and forecast labeling is preserved", async () => {
+  let target: string | undefined;
+  const load = createWatchVenueWeatherLoader(async (opts) => {
+    target = opts.forecastAt;
+    return {...payload, weather: {...payload.weather!, forecastAt: opts.forecastAt}};
+  });
+  const rows = await load([event], "A", () => true, now);
+  assert.equal(target, event.startAt);
+  assert.equal(rows[0].weather?.forecastAt, event.startAt);
+});

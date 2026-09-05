@@ -10,7 +10,7 @@ struct TicketsView: View {
     var body: some View {
         Group {
             if let next = selected {
-                TicketStackView(group: next, showsDoorHeader: true)
+                TicketStackView(group: next)
             } else { TicketEventsView() }
         }
         .toolbar {
@@ -78,6 +78,14 @@ struct EventsView: View {
                     Label(error, systemImage: "exclamationmark.circle").font(DVNT.TypeScale.body())
                         .listRowBackground(Color.clear)
                     Button("Retry sync") { store.requestSync?() }
+                }
+                if store.envelope.hasPrevious == true, let last = store.events.last {
+                    Button("Previous events") { store.perform(eventId: last.id, action: "archive_previous") }
+                        .disabled(store.pending[last.id] != nil)
+                }
+                if store.envelope.hasMore == true, let last = store.events.last {
+                    Button("Next events") { store.perform(eventId: last.id, action: "archive_more") }
+                        .disabled(store.pending[last.id] != nil)
                 }
                 if store.events.isEmpty && store.error == nil {
                     VStack(alignment: .leading, spacing: DVNT.Space.base) {

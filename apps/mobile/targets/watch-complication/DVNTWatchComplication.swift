@@ -2,6 +2,7 @@ import WidgetKit
 import SwiftUI
 import RelevanceKit
 import AppIntents
+import CoreLocation
 
 struct DVNTEntry: TimelineEntry {
     let date: Date
@@ -69,6 +70,11 @@ struct DVNTComplicationView: View {
                     Image("Glyph").resizable().scaledToFit().frame(height: 13).widgetAccentable()
                     if entry.showsDetails && !dimmed {
                         Text(entry.snapshot.title).font(.caption).lineLimit(1).privacySensitive()
+                        if let arrived = entry.snapshot.doorArrived {
+                            Text("Door · \(arrived) arrived").font(.caption2).privacySensitive()
+                        } else if entry.snapshot.unreadCount > 0 {
+                            Text("\(entry.snapshot.unreadCount) unread chats").font(.caption2).privacySensitive()
+                        }
                         if let date = entry.snapshot.eventDate {
                             Text(date, style: .relative).font(.caption2).privacySensitive()
                         }
@@ -109,10 +115,19 @@ struct DVNTRelevantEntry: RelevanceEntry { let entry: DVNTEntry }
 struct DVNTRelevanceProvider: RelevanceEntriesProvider {
     func relevance() async -> WidgetRelevance<DVNTRelevantConfiguration> {
         let snapshot = ComplicationCache.snapshot()
-        guard let date = snapshot.eventDate, date > Date(), snapshot.url != nil else { return WidgetRelevance([]) }
-        // Use only the actual published event date. The system decides Smart Stack placement.
-        return WidgetRelevance([WidgetRelevanceAttribute(configuration: DVNTRelevantConfiguration(),
-            context: .date(date, kind: .scheduled))])
+        guard let date = snapshot.eventDate, snapshot.url != nil else { return WidgetRelevance([]) }
+        let end = snapshot.eventEnd ?? date.addingTimeInterval(8 * 3600)
+        guard end > Date(), end > date else { return WidgetRelevance([]) }
+        var attributes = [WidgetRelevanceAttribute(configuration: DVNTRelevantConfiguration(),
+            context: .date(interval: DateInterval(start: date.addingTimeInterval(-2 * 3600), end: end), kind: .scheduled))]
+        let authorization = CLLocationManager().authorizationStatus
+        if (authorization == .authorizedAlways || authorization == .authorizedWhenInUse),
+           let lat = snapshot.latitude, let lng = snapshot.longitude {
+            // Published venue coordinates only; the system owns relevance. No location is sent to DVNT.
+            let venue = CLCircularRegion(center: CLLocationCoordinate2D(latitude: lat, longitude: lng), radius: 150, identifier: "dvnt.event.venue")
+            attributes.append(WidgetRelevanceAttribute(configuration: DVNTRelevantConfiguration(), context: .location(venue)))
+        }
+        return WidgetRelevance(attributes)
     }
     func entry(configuration: DVNTRelevantConfiguration, context: Context) async throws -> DVNTRelevantEntry {
         DVNTRelevantEntry(entry: context.isPreview ? .preview : .current())
@@ -136,6 +151,9 @@ struct DVNTRelevantWidget: Widget {
         DVNTWatchComplication()
         if #available(watchOS 26.0, *) {
             DVNTRelevantWidget()
+            DVNTShowTicketControl()
+            DVNTPresenceControl()
+            DVNTMuteCallControl()
             DVNTWidgetPrivacyControl()
         }
     }

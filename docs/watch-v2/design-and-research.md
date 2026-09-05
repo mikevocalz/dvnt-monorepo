@@ -82,7 +82,7 @@ The old 40%-white faint text on black computes to 3.66:1, insufficient for ordin
 
 ## Screen handoff and accessibility gate
 
-The same semantic layout applies at40/41/45/49mm; no device-specific pixel offsets are assumed. Door uses40% of available content viewport and may grow with text. Text content wraps; preview truncation is confined to rows. Thread/media/pass identity persists separately from presentation. Root tabs own one stack each, list/detail owns its scroll, the pass stack owns vertical pass paging, and the media viewer owns Crown zoom. The existing pass-page inner scrolling requires native Crown behavior validation.
+The same semantic layout applies at40/41/45/49mm; no device-specific pixel offsets are assumed. Door artwork is a compact first scroll row and may grow with text. The actual pass screen omits decorative artwork so its QR/ring can lead the scan view; branding remains in the ticket list. Text content wraps; preview truncation is confined to rows. Thread/media/pass identity persists separately from presentation. Root tabs own one stack each, list/detail owns its scroll, the pass stack owns vertical pass paging, and the media viewer owns Crown zoom. The existing pass-page inner scrolling requires native Crown behavior validation.
 
 Motion tokens retained: enter240ms, settle280ms, quick180ms, cubic(0.22,1,0.36,1). Repeating state animation pauses when inactive/reduced luminance/reduced motion. No physical timing claim is attached to these design constants. Haptics: page click; incoming-call notification; authoritative new used-ticket success; authoritative sent-message success. Transport receipt and opening a composer do not fire success.
 
@@ -98,3 +98,12 @@ Motion tokens retained: enter240ms, settle280ms, quick180ms, cubic(0.22,1,0.36,1
 | Wear | Native Material3 screens, Data Layer, ambient privacy | Round devices, rotary, TalkBack, ongoing activity: unverified |
 
 Release remains blocked on these runtime gates. A successful compiler run is not a visual/a11y pass.
+
+
+## Completion-pass native visual review
+
+Actual watchOS 26.4 captures now exist at 40, 41, 45 and 49 mm; see [native verification](final-native-verification.md) and [capture directory](captures/). Unpaired states use the app without account data. A/B treatments and actual-screen fixture stores are explicitly synthetic, do not send commands and do not establish hardware or backend acceptance.
+
+The initial 40 mm A/B comparison favors the compact Door artwork: proportional treatment A consumes the useful first screen. Actual 41 mm Event detail keeps the exact Show pass action above metadata. Inbox compact layout exposes the start of the first conversation but still requires scrolling. Conversation uses the production message/composer structure, not a decorative header. The fixture exposed an initial-scroll issue; the bound latest-message target was corrected, and the fresh 41 mm capture now displays the newest message. The actual Ticket fixture exposed a more serious issue: most of its QR was below the initial viewport. The corrected pass layout removes decorative artwork and puts the ring/QR before metadata. Fresh 40, 41, 45 and 49 mm captures show the whole scan surface, and Apple Vision decodes all four native screenshots to the explicit non-ticket fixture payload. QR rendering now reserves a four-module white quiet zone with pixel-aligned modules.
+
+These captures provide layout evidence only. Largest-type wrapping, VoiceOver order, Crown behavior, real venue scanning and physical performance retain their separate acceptance gates. Synthetic QR content is explicitly invalid for redemption.

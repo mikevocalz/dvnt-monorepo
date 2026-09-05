@@ -31,6 +31,7 @@ struct WatchThreadPage: Codable {
     let conversationId: String
     let messages: [WatchMessage]
     let olderCursor: WatchCursor?
+    var removedMessageIds: [String]? = nil
 }
 
 struct WatchSendCommand: Codable, Identifiable {

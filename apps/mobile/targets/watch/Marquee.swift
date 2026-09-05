@@ -10,6 +10,21 @@ struct DoorHeader: View {
     var showsWordmark = false
     let minimumHeight: CGFloat
 
+    private var expandedCapture: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--watch-qa-expanded-door")
+        #else
+        false
+        #endif
+    }
+
+    private var contentMinimumHeight: CGFloat {
+        if expandedCapture { return minimumHeight }
+        // Keep identity on the first scroll row while exposing the first action
+        // sooner on 40/41 mm. Multiline type can still grow this minimum.
+        return min(minimumHeight, 58)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: DVNT.Space.tight) {
             if showsWordmark {
@@ -28,8 +43,9 @@ struct DoorHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(DVNT.Space.base)
-        .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .bottomLeading)
+        .padding(.horizontal, DVNT.Space.base)
+        .padding(.vertical, expandedCapture ? DVNT.Space.base : DVNT.Space.snug)
+        .frame(maxWidth: .infinity, minHeight: contentMinimumHeight, alignment: .bottomLeading)
         .background {
             ZStack {
                 art.view

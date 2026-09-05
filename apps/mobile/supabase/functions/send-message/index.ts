@@ -1,4 +1,4 @@
-import { watchNotificationFields } from "../_shared/watch-notification.ts";
+import { watchNotificationFields, watchNotificationImage } from "../_shared/watch-notification.ts";
 /**
  * Edge Function: send-message
  * Send a message in a conversation with Better Auth verification
@@ -310,6 +310,7 @@ Deno.serve(async (req) => {
             to: t.token,
             sound: "default",
             ...watchNotificationFields("message", { conversationId: String(conversationId) }),
+            ...watchNotificationImage(message.metadata),
             title: senderUsername,
             body: messagePreview,
             data: {

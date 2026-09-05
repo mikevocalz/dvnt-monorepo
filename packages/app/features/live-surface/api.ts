@@ -15,16 +15,18 @@ const EDGE_FUNCTION_NAME = "live-surface";
 export async function fetchLiveSurface(opts?: {
   lat?: number;
   lng?: number;
+  forecastAt?: string;
   /** Optional caller scope fence, checked after the token await before HTTP. */
   shouldContinue?: () => boolean;
 }): Promise<LiveSurfacePayload | null> {
   try {
-    const params: Record<string, string> = {};
+    const params: Record<string, string | number> = {};
     if (opts?.lat != null && opts?.lng != null) {
-      params.lat = String(opts.lat);
-      params.lng = String(opts.lng);
+      params.lat = opts.lat;
+      params.lng = opts.lng;
     }
 
+    if (opts?.forecastAt) params.forecastAt = opts.forecastAt;
     const token = await getAuthToken();
     if (!token) {
       console.warn("[LiveSurface] No auth token available");
@@ -47,7 +49,7 @@ export async function fetchLiveSurface(opts?: {
       return null;
     }
 
-    return data as LiveSurfacePayload;
+    return (data?.data ?? data) as LiveSurfacePayload;
   } catch (e) {
     console.warn("[LiveSurface] fetchLiveSurface failed:", e);
     return null;

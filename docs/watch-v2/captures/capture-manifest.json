@@ -1,0 +1,191 @@
+[
+  {
+    "size": "40mm",
+    "state": "treatment-a",
+    "file": "apple-watch-40mm-treatment-a.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "40mm",
+    "state": "treatment-b",
+    "file": "apple-watch-40mm-treatment-b.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "treatment-a",
+    "file": "apple-watch-41mm-treatment-a.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "treatment-b",
+    "file": "apple-watch-41mm-treatment-b.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "45mm",
+    "state": "treatment-a",
+    "file": "apple-watch-45mm-treatment-a.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "45mm",
+    "state": "treatment-b",
+    "file": "apple-watch-45mm-treatment-b.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "49mm",
+    "state": "treatment-a",
+    "file": "apple-watch-49mm-treatment-a.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "49mm",
+    "state": "treatment-b",
+    "file": "apple-watch-49mm-treatment-b.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "40mm",
+    "state": "unpaired",
+    "file": "apple-watch-40mm-unpaired.png",
+    "synthetic": false,
+    "paired": false
+  },
+  {
+    "size": "40mm",
+    "state": "largest-type",
+    "file": "apple-watch-40mm-largest-type.png",
+    "synthetic": false,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "unpaired",
+    "file": "apple-watch-41mm-unpaired.png",
+    "synthetic": false,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "largest-type",
+    "file": "apple-watch-41mm-largest-type.png",
+    "synthetic": false,
+    "paired": false
+  },
+  {
+    "size": "45mm",
+    "state": "unpaired",
+    "file": "apple-watch-45mm-unpaired.png",
+    "synthetic": false,
+    "paired": false
+  },
+  {
+    "size": "45mm",
+    "state": "largest-type",
+    "file": "apple-watch-45mm-largest-type.png",
+    "synthetic": false,
+    "paired": false
+  },
+  {
+    "size": "49mm",
+    "state": "unpaired",
+    "file": "apple-watch-49mm-unpaired.png",
+    "synthetic": false,
+    "paired": false
+  },
+  {
+    "size": "49mm",
+    "state": "largest-type",
+    "file": "apple-watch-49mm-largest-type.png",
+    "synthetic": false,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "inbox-a",
+    "file": "apple-watch-41mm-inbox-a.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "inbox-b",
+    "file": "apple-watch-41mm-inbox-b.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "conversation-a",
+    "file": "apple-watch-41mm-conversation-a.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "conversation-b",
+    "file": "apple-watch-41mm-conversation-b.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "event-a",
+    "file": "apple-watch-41mm-event-a.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "event-b",
+    "file": "apple-watch-41mm-event-b.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "ticket-a",
+    "file": "apple-watch-41mm-ticket-a.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "41mm",
+    "state": "ticket-b",
+    "file": "apple-watch-41mm-ticket-b.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "40mm",
+    "state": "ticket-b",
+    "file": "apple-watch-40mm-ticket-b.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "45mm",
+    "state": "ticket-b",
+    "file": "apple-watch-45mm-ticket-b.png",
+    "synthetic": true,
+    "paired": false
+  },
+  {
+    "size": "49mm",
+    "state": "ticket-b",
+    "file": "apple-watch-49mm-ticket-b.png",
+    "synthetic": true,
+    "paired": false
+  }
+]

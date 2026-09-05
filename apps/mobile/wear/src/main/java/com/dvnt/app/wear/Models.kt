@@ -78,8 +78,9 @@ data class WatchQrMatrix(val size: Int, val bits: String) {
      */
     val modules: BooleanArray?
         get() {
-            if (size <= 0) return null
+            if (size !in 21..177 || (size - 21) % 4 != 0) return null
             val count = size * size
+            if (bits.length != (count + 3) / 4 || bits.any { it !in '0'..'9' && it !in 'a'..'f' && it !in 'A'..'F' }) return null
             val out = BooleanArray(count)
             var i = 0
             for (ch in bits) {
@@ -100,7 +101,7 @@ data class WatchQrMatrix(val size: Int, val bits: String) {
             if (json == null) return null
             val size = json.optInt("size", 0)
             val bits = json.optString("bits", "")
-            if (size <= 0 || bits.isEmpty()) return null
+            if (size !in 21..177 || (size - 21) % 4 != 0 || bits.isEmpty()) return null
             return WatchQrMatrix(size, bits)
         }
     }
@@ -165,11 +166,7 @@ data class WatchTicket(
             entryWindow = json.optStringOrNull("entryWindow"),
             dominantHex = json.optStringOrNull("dominantHex"),
             imageURL = json.optStringOrNull("imageURL"),
-            isOwner = if (json.has("isOwner") && !json.isNull("isOwner")) {
-                json.optBoolean("isOwner")
-            } else {
-                null
-            },
+            isOwner = json.opt("isOwner") as? Boolean,
         )
     }
 }

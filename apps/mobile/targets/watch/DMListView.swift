@@ -214,7 +214,7 @@ struct DMDetailView: View {
                                 visibleMessage = anchor
                                 positionedInitialPage = true
                             } else if let latest = messages.last?.id {
-                                proxy.scrollTo(latest, anchor: .bottom)
+                                visibleMessage = latest
                                 positionedInitialPage = true
                             }
                             store.requestThread(conversationId)
@@ -225,7 +225,7 @@ struct DMDetailView: View {
                         .onChange(of: messages.last?.id) { old, id in
                             guard let id else { return }
                             if !positionedInitialPage {
-                                proxy.scrollTo(id, anchor: .bottom)
+                                visibleMessage = id
                                 positionedInitialPage = true
                             } else if old != nil && old != id {
                                 hasNewMessages = true
@@ -303,6 +303,7 @@ struct DMDetailView: View {
                 Text(status).font(DVNT.TypeScale.caption())
                 if store.threadActions[conversationId] != nil && status != "Updating…" {
                     Button("Retry update") { store.retryThreadAction(conversationId) }
+                    Button("Cancel pending update") { store.cancelThreadAction(conversationId) }
                 }
             }
             TextFieldLink("Reply") { text in store.drafts[conversationId] = text }

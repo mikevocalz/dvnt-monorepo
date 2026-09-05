@@ -59,6 +59,11 @@ import Foundation
         let page = WatchThreadPage(protocol: 2, accountGen: "b", conversationId: "1", messages: [message], olderCursor: nil)
         store.receive(page, older: false)
         store.receive(WatchThreadPage(protocol: 2, accountGen: "b", conversationId: "2", messages: [], olderCursor: nil), older: false)
+        var deletion = WatchThreadPage(protocol: 2, accountGen: "b", conversationId: "1", messages: [], olderCursor: nil)
+        deletion.removedMessageIds = ["m1"]
+        store.receive(deletion, older: false)
+        precondition(store.pages["1"]?.messages.isEmpty == true)
+        store.receive(page, older: false)
         store.drafts["1"] = "remove"; store.drafts["2"] = "retain"
         store.send(conversationId: "1", text: "remove outbox")
         store.send(conversationId: "2", text: "retain outbox")
@@ -80,6 +85,14 @@ import Foundation
         store.performThreadAction("1", messageId: "22", emoji: "❤️", desiredPresent: true)
         precondition(store.actionStatus["1"] == "Updating…")
         complete?(false, "timeout")
+        let recoveredAction = DMStore(defaults: defaults)
+        precondition(recoveredAction.threadActions["1"]?.desiredPresent == true)
+        precondition(recoveredAction.threadActions["1"]?.messageId == "22")
+        precondition(recoveredAction.actionStatus["1"] == "Update interrupted. Retry to confirm.")
+        var retryIntent: WatchThreadAction?
+        recoveredAction.actionRelay = { command, callback in retryIntent = command; callback(true, nil); return true }
+        recoveredAction.retryThreadAction("1")
+        precondition(retryIntent?.desiredPresent == true && DMStore(defaults: defaults).threadActions.isEmpty)
         store.retryThreadAction("1")
         precondition(actions.count == 2 && actions.allSatisfy { $0.desiredPresent == true })
         complete?(true, nil)

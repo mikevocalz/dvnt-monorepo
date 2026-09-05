@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -44,21 +45,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * The whole Wear UI. Two screens, because two is what a wrist supports: the
- * list of what you hold, and the pass you present at a door.
- *
- * There is no navigation library here on purpose. One nullable `selected`
- * value is the entire graph, and the hardware back button is wired straight to
- * clearing it — a NavHost would be more code to express the same two states.
- */
+/** Account-scoped destinations retain the interrupted screen during companion calls. */
 data class WearLaunch(val destination: String, val accountGen: String, val eventId: String?, val token: Long = System.nanoTime())
 
 class MainActivity : ComponentActivity() {
     private var launchTarget by mutableStateOf<WearLaunch?>(null)
     private fun readLaunch(intent: android.content.Intent?): WearLaunch? {
         val destination = intent?.getStringExtra("destination") ?: return null
-        if (destination !in listOf("Inbox", "Events", "Tickets", "Calls")) return null
+        if (destination !in listOf("Now", "Inbox", "Events", "Tickets", "Calls")) return null
         return WearLaunch(destination, intent.getStringExtra("accountGen") ?: "", intent.getStringExtra("eventId")?.takeIf { it.isNotBlank() })
     }
     override fun onNewIntent(intent: android.content.Intent) {
@@ -110,9 +104,11 @@ private fun WearApp(launchTarget: WearLaunch?) {
     val everSynced by repo.everSynced.collectAsState()
 
     var selectedEventId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-    var destination by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Inbox") }
+    var destination by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Now") }
+    var eventLaunch by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(launchTarget) {
         launchTarget?.let { target ->
+            eventLaunch = null
             if (target.accountGen == WearAccountSession.generation(context)) {
                 destination = target.destination
                 selectedEventId = if (target.destination == "Tickets") target.eventId else null
@@ -122,8 +118,15 @@ private fun WearApp(launchTarget: WearLaunch?) {
     val groups = remember(envelope) { envelope.groups() }
     val selected = groups.firstOrNull { it.id == selectedEventId }
     val callState by CallRepository.get(context).state.collectAsState()
-    androidx.compose.runtime.LaunchedEffect(callState.incoming?.id) {
-        if (callState.incoming?.isFresh() == true) destination = "Calls"
+    var interruptedDestination by androidx.compose.runtime.saveable.rememberSaveable(callState.accountGen) { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(callState.incoming?.id, callState.active?.phase) {
+        if (callState.incoming?.isFresh() == true && destination != "Calls") {
+            interruptedDestination = destination
+            destination = "Calls"
+        } else if (callState.incoming == null && (callState.active == null || callState.active?.phase == "ended")) {
+            interruptedDestination?.let { if (destination == "Calls") destination = it }
+            interruptedDestination = null
+        }
     }
     val messageState by MessageRepository.get(context).inbox.collectAsState()
     val pages = androidx.compose.runtime.key(messageState.accountGen) { androidx.compose.runtime.saveable.rememberSaveableStateHolder() }
@@ -134,12 +137,16 @@ private fun WearApp(launchTarget: WearLaunch?) {
             .fillMaxSize()
             .background(Dvnt.canvas),
     ) {
-        if (destination == "Inbox") {
+        if (destination == "Now") {
+            pages.SaveableStateProvider("now") { NowScreen(onEvent = { eventLaunch = it; destination = "Events" },
+                onShowTicket = { selectedEventId = it; destination = "Tickets" }, onInbox = { destination = "Inbox" }, onEvents = { eventLaunch = null; destination = "Events" }) }
+        } else if (destination == "Inbox") {
+            androidx.activity.compose.BackHandler { destination = "Now" }
             pages.SaveableStateProvider("inbox") { MessagesScreen(onTickets = { destination = "Tickets" }, onEvents = { destination = "Events" }, onCalls = { destination = "Calls" }) }
         } else if (destination == "Calls") {
             pages.SaveableStateProvider("calls") { CallsScreen(onInbox = { destination = "Inbox" }) }
         } else if (destination == "Events") {
-            pages.SaveableStateProvider("events") { EventsScreen(onInbox = { destination = "Inbox" }, onTickets = { destination = "Tickets" }, initialEventId = launchTarget?.takeIf { it.accountGen == WearAccountSession.generation(context) && it.destination == "Events" }?.eventId, launchToken = launchTarget?.token) }
+            pages.SaveableStateProvider("events") { EventsScreen(onInbox = { destination = "Now" }, onTickets = { destination = "Tickets" }, onShowTicket = { selectedEventId = it; destination = "Tickets" }, initialEventId = eventLaunch ?: launchTarget?.takeIf { it.accountGen == WearAccountSession.generation(context) && it.destination == "Events" }?.eventId, launchToken = eventLaunch?.hashCode()?.toLong() ?: launchTarget?.token) }
         } else if (selected != null) {
             TicketScreen(group = selected, onBack = { selectedEventId = null })
         } else {
@@ -166,19 +173,16 @@ private fun EventListScreen(
         return
     }
 
-    val state = rememberScalingLazyListState()
-    ScalingLazyColumn(
-        state = state,
-        modifier = Modifier.fillMaxSize(),
-        // WR-RD-01/02: a round display eats the corners of a full-width row.
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            horizontal = Dvnt.Space.arc,
-            vertical = Dvnt.Space.loose,
-        ),
-        verticalArrangement = Arrangement.spacedBy(Dvnt.Space.base),
-    ) {
-        items(groups, key = { it.id }) { group ->
-            EventRow(group = group, onClick = { onOpen(group) })
+    val state = androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState()
+    androidx.wear.compose.material3.ScreenScaffold(scrollState = state) { padding ->
+        androidx.wear.compose.foundation.lazy.TransformingLazyColumn(
+            state = state,
+            modifier = Modifier.fillMaxSize().padding(horizontal = Dvnt.Space.arc),
+            contentPadding = padding,
+            verticalArrangement = Arrangement.spacedBy(Dvnt.Space.base),
+        ) {
+            item { Text("Tickets", style = Dvnt.Type.title) }
+            items(groups, key = { it.id }) { group -> EventRow(group = group, onClick = { onOpen(group) }) }
         }
     }
 }
@@ -229,53 +233,57 @@ private fun EventRow(group: EventGroup, onClick: () -> Unit) {
 private fun TicketScreen(group: EventGroup, onBack: () -> Unit) {
     androidx.activity.compose.BackHandler(onBack = onBack)
 
-    // Only a valid ticket presents a scannable code. Everything else shows its
-    // status instead — rendering a code for a dead pass is the one failure
-    // that strands a member at a door.
-    var passIndex by androidx.compose.runtime.saveable.rememberSaveable(group.id) { mutableStateOf(0) }
-    val ticket = group.tickets.getOrNull(passIndex) ?: group.tickets.firstOrNull()
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = Dvnt.Space.loose),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(
-            text = group.title,
-            style = Dvnt.Type.caption,
-            color = Dvnt.textDim,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(Dvnt.Space.base))
-
-        if (group.tickets.size > 1) {
-            Text("${passIndex + 1} of ${group.tickets.size} · Next pass", style = Dvnt.Type.caption,
-                modifier = Modifier.clickable { passIndex = (passIndex + 1) % group.tickets.size }.padding(Dvnt.Space.base))
-        }
-        val matrix = ticket?.qrMatrix
-        if (ticket != null && ticket.status.isPresentable && matrix != null) {
-            QrMatrixView(matrix = matrix, size = 132.dp)
-            Spacer(Modifier.height(Dvnt.Space.base))
-            ticket.tierName?.let {
-                Text(
-                    text = it.uppercase(Locale.getDefault()),
-                    style = Dvnt.Type.stamp,
-                    color = Dvnt.tierAccent(ticket.tier),
-                )
+    val context = LocalContext.current
+    val envelope by TicketRepository.get(context).envelope.collectAsState()
+    var selectedId by androidx.compose.runtime.saveable.rememberSaveable(envelope.accountGen, group.id) { mutableStateOf<String?>(null) }
+    val ticket = selectedTicket(group.tickets, selectedId)
+    androidx.compose.runtime.LaunchedEffect(ticket?.id) { selectedId = ticket?.id }
+    val passIndex = group.tickets.indexOfFirst { it.id == ticket?.id }.coerceAtLeast(0)
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    androidx.compose.runtime.LaunchedEffect(ticket?.id) {
+        while (true) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(60_000) }
+    }
+    val state = androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState()
+    androidx.wear.compose.material3.ScreenScaffold(scrollState = state) { padding ->
+        androidx.wear.compose.foundation.lazy.TransformingLazyColumn(
+            state = state, contentPadding = padding,
+            modifier = Modifier.fillMaxSize().padding(horizontal = Dvnt.Space.base),
+        ) {
+            item { Text(group.title, style = Dvnt.Type.caption, color = Dvnt.textDim, textAlign = TextAlign.Center) }
+            if (group.tickets.size > 1) item {
+                Text("${passIndex + 1} of ${group.tickets.size} · Next pass", style = Dvnt.Type.body,
+                    modifier = Modifier.clickable { selectedId = group.tickets[(passIndex + 1) % group.tickets.size].id }
+                        .padding(Dvnt.Space.base))
             }
-        } else if (ticket != null) {
-            BlockedPass(ticket)
-        } else {
-            Text(
-                text = "No pass on this event",
-                style = Dvnt.Type.body,
-                color = Dvnt.textDim,
-                textAlign = TextAlign.Center,
-            )
+            if (ticket != null) {
+                val phase = ticket.ringState(now)
+                item {
+                    // White QR plate is painted above the decorative ring; its quiet zone stays untouched.
+                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        val diameter = minOf(maxWidth, 184.dp)
+                        TicketAccessRing(phase, diameter) {
+                            if (ticket.status.isPresentable && !phase.blocked && ticket.qrMatrix?.modules != null) {
+                                QrMatrixView(matrix = ticket.qrMatrix, size = diameter * .80f)
+                            } else Box(Modifier.size(diameter * .72f), contentAlignment = Alignment.Center) {
+                                Text(if (phase.blocked || ticket.status.isUsed) phase.label else "Code unavailable · Refresh on phone",
+                                    style = Dvnt.Type.body, textAlign = TextAlign.Center)
+                            }
+                        }
+                    }
+                }
+                item { Text(phase.label, style = Dvnt.Type.caption, color = Dvnt.statusAccent(ticket.status)) }
+                ticket.tierName?.let { tier -> item { Text(tier.uppercase(Locale.getDefault()), style = Dvnt.Type.stamp, color = Dvnt.tierAccent(ticket.tier)) } }
+                ticket.tableNumber?.let { table -> item { Text("Table $table", style = Dvnt.Type.body) } }
+                ticket.entryWindow?.let { window -> item { Text(window, style = Dvnt.Type.caption) } }
+                ticket.ownerMembership(envelope.membership)?.let { membership ->
+                    item { Text(membership.planLabel, style = Dvnt.Type.caption, color = when (membership.planLabel) {
+                        "Insider" -> Dvnt.violet; "VIP", "Founders Circle" -> Dvnt.magenta; else -> Dvnt.cyan
+                    }) }
+                    items(membership.doorPerks) { perk -> Text(perk, style = Dvnt.Type.stamp) }
+                }
+                if (ticket.isOwner == false) item { Text("Pass held for you", style = Dvnt.Type.caption, color = Dvnt.textDim) }
+            } else item { Text("No pass on this event", style = Dvnt.Type.body) }
+            item { Text("Back", style = Dvnt.Type.body, modifier = Modifier.clickable(onClick = onBack).padding(Dvnt.Space.base)) }
         }
     }
 }

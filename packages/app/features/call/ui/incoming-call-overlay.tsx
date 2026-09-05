@@ -1,3 +1,4 @@
+import { registerWatchNotificationCallHandler } from "@dvnt/app/features/watch/watch-notification-actions";
 /**
  * IncomingCallOverlay — Global listener for incoming call signals.
  *
@@ -157,9 +158,10 @@ export function IncomingCallOverlay() {
   // current call — so both the call and the handlers are mirrored into refs.
   const incomingCallRef = useRef<CallSignal | null>(null);
   incomingCallRef.current = incomingCall;
-  const handlersRef = useRef<{ accept: (audioOnly?: boolean) => Promise<boolean>; decline: () => Promise<boolean> }>({
+  const handlersRef = useRef<{ accept: (audioOnly?: boolean) => Promise<boolean>; decline: () => Promise<boolean>; notification: (roomId: string, action: "accept" | "accept_audio_only" | "decline") => Promise<boolean> }>({
     accept: async () => false,
     decline: async () => false,
+    notification: async () => false,
   });
 
   // Account-bound realtime projection; CallKeep may own phone presentation,
@@ -213,7 +215,7 @@ export function IncomingCallOverlay() {
 
   // The wearer's decision, coming back over WCSession.
   useEffect(() => {
-    return registerWatchCallHandler((callId, action) => {
+    const unsubscribeWatch = registerWatchCallHandler((callId, action) => {
       const current = incomingCallRef.current;
       // A queued decision can land after the call is gone. Ignore it rather
       // than routing into a room nobody is ringing any more.
@@ -222,6 +224,8 @@ export function IncomingCallOverlay() {
       if (action === "accept" || action === "accept_audio_only") return handlersRef.current.accept(action === "accept_audio_only");
       return handlersRef.current.decline();
     });
+    const unsubscribeNotification = registerWatchNotificationCallHandler((roomId, action) => handlersRef.current.notification(roomId, action));
+    return () => { unsubscribeWatch(); unsubscribeNotification(); };
   }, []);
 
   useEffect(() => {
@@ -254,16 +258,23 @@ export function IncomingCallOverlay() {
     [],
   );
 
-  const decide = useCallback(async (decline: boolean, audioOnly = false): Promise<boolean> => {
-    const signal = incomingCall;
+  const decide = useCallback(async (decline: boolean, audioOnly = false, requestedRoomId?: string): Promise<boolean> => {
+    let signal = requestedRoomId ? null : incomingCall;
     const viewer = user?.id;
-    if (!signal || !viewer || pendingDecision.current !== null) return false;
-    pendingDecision.current = signal.id;
+    if ((!signal && !requestedRoomId) || !viewer || !useAuthStore.getState().isAuthenticated || pendingDecision.current !== null) return false;
+    if (!decline && !["idle", "call_ended", "error"].includes(useVideoRoomStore.getState().callPhase)) return false;
+    pendingDecision.current = signal?.id ?? -1;
     pendingDecisionKind.current = decline ? "declined" : "accepted";
-    const current = () => useAuthStore.getState().user?.id === viewer && useWatchSessionStore.getState().accountGen === generation && !terminalSignals.current.has(signal.id);
+    const current = () => useAuthStore.getState().user?.id === viewer && useWatchSessionStore.getState().accountGen === generation && (!signal || !terminalSignals.current.has(signal.id));
     try {
       const identity = await getCurrentUserRow();
       if (!identity || !current()) return false;
+      if (requestedRoomId) {
+        signal = await callSignalsApi.getFreshIncomingSignal(requestedRoomId, String(identity.id));
+        if (!signal || !current() || !freshRingingSignal(signal, requestedRoomId, String(identity.id))) return false;
+        pendingDecision.current = signal.id;
+      }
+      if (!signal) return false;
       const result = await answerIncomingCall({ roomId: signal.room_id, calleeId: String(identity.id), current,
         decision: decline ? "declined" : "accepted", fetchSignal: callSignalsApi.getFreshIncomingSignal,
         claim: decline ? callSignalsApi.declineRingingSignal : callSignalsApi.answerRingingSignal });
@@ -283,12 +294,13 @@ export function IncomingCallOverlay() {
       }
       return true;
     } catch { return false; }
-    finally { if (pendingDecision.current === signal.id) { pendingDecision.current = null; pendingDecisionKind.current = null; } }
+    finally { if (pendingDecision.current === (signal?.id ?? -1)) { pendingDecision.current = null; pendingDecisionKind.current = null; } }
   }, [incomingCall, user?.id, generation, router, setIncomingCall]);
   const handleAccept = useCallback((audioOnly = false) => decide(false, audioOnly), [decide]);
   const handleDecline = useCallback(() => decide(true), [decide]);
 
-  handlersRef.current = { accept: handleAccept, decline: handleDecline };
+  handlersRef.current = { accept: handleAccept, decline: handleDecline,
+    notification: (roomId, action) => decide(action === "decline", action === "accept_audio_only", roomId) };
 
   const callerName = incomingCall?.caller_username || "Unknown";
   const callerInitial = callerName.charAt(0).toUpperCase();

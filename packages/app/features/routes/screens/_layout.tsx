@@ -390,6 +390,12 @@ function RootLayout() {
 
     Notifications.getLastNotificationResponseAsync().then((response) => {
       if (!response) return;
+      // Action buttons are authenticated and routed by useNotifications.
+      // A generic cold-start route would bypass that check and push twice.
+      if (response.actionIdentifier !== Notifications?.DEFAULT_ACTION_IDENTIFIER) {
+        useAppStore.getState().setSplashAnimationFinished(true);
+        return;
+      }
       const data = response.notification.request.content.data as Record<string, unknown>;
       if (!data?.type) return;
 

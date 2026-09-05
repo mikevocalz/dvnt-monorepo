@@ -271,6 +271,33 @@ try {
     { stdio: "inherit" },
   );
   execFileSync(checkBin, { stdio: "inherit" });
+
+  // 5. The watch-tests suites. Every one of these builds and runs on the host
+  //    for the same reason RingPhase does: Foundation-only sources. They existed
+  //    but no runner executed them, so a regression in ticket fail-closed rules,
+  //    door count validation, venue send locking or media-cache account
+  //    isolation could land green. Wire-format changes should break here.
+  const suites = [
+    ["DMStoreTests", ["WatchProtocol.swift", "DMModels.swift", "DMStore.swift"]],
+    ["DoorStoreTests", ["DoorModels.swift", "DoorStore.swift"]],
+    ["TicketSafetyTests", ["Models.swift"]],
+    ["VenueActionStoreTests", ["VenueActionStore.swift"]],
+    ["WatchMediaCacheTests", ["WatchMediaLoader.swift"]],
+  ];
+  for (const [suite, sources] of suites) {
+    const bin = join(tmp, suite.toLowerCase());
+    execFileSync(
+      "swiftc",
+      [
+        "-parse-as-library",
+        "-o", bin,
+        ...sources.map((file) => join(watchDir, file)),
+        join(root, "apps/mobile/targets/watch-tests", `${suite}.swift`),
+      ],
+      { stdio: "inherit" },
+    );
+    execFileSync(bin, { stdio: "inherit" });
+  }
 } finally {
   rmSync(bundle, { force: true });
   rmSync(tmp, { recursive: true, force: true });

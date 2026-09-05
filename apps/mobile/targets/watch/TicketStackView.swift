@@ -72,6 +72,10 @@ private struct TicketPage: View {
                 if showsDoorHeader {
                     DoorHeader(art: .none, title: "Tickets", stub: "YOUR WAY IN", minimumHeight: WKInterfaceDevice.current().screenBounds.height * 0.4)
                 }
+                // Scan first: metadata follows the existing ring/QR so the
+                // complete quiet zone is visible without scrolling on 40/41 mm.
+                qrZone
+
                 // Tier / guest label per ticket.
                 HStack(spacing: DVNT.Space.snug) {
                     Circle().fill(accent).frame(width: 8, height: 8)
@@ -93,8 +97,6 @@ private struct TicketPage: View {
                     .font(DVNT.TypeScale.caption())
                     .foregroundColor(DVNT.textDim)
                     .lineLimit(1)
-
-                qrZone
 
                 statusLine
 
@@ -133,7 +135,8 @@ private struct TicketPage: View {
                     .fill(Color.white)
 
                 if ticket.status.isPresentable {
-                    QRCodeView(matrix: ticket.qrMatrix, size: cardSide - 12)
+                    QRCodeView(matrix: ticket.qrMatrix, size: cardSide)
+                        .clipShape(RoundedRectangle(cornerRadius: DVNT.Radius.card, style: .continuous))
                 } else {
                     // Blocked: do NOT present a scannable code for a dead ticket.
                     blockedOverlay
@@ -163,6 +166,10 @@ private struct TicketPage: View {
                 Image(systemName: "arrow.left.arrow.right")
                     .font(.system(size: DVNT.TypeScale.Icon.hero)).foregroundColor(DVNT.accent)
                 Text("Transferring").font(DVNT.TypeScale.body()).foregroundColor(.black)
+            case .cancelled, .unknown:
+                Image(systemName: "lock.fill")
+                    .font(.system(size: DVNT.TypeScale.Icon.hero)).foregroundColor(.gray)
+                Text(ticket.status.displayLabel).font(DVNT.TypeScale.body()).foregroundColor(.black)
             case .valid:
                 EmptyView()
             }

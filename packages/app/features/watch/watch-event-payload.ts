@@ -1,13 +1,14 @@
+import type { WatchEventMoment } from "./watch-event-moments";
 import { watchRendition } from "./watch-rendition";
 
-export type WatchEventAction = "going" | "interested" | "not_going" | "waitlist_join" | "waitlist_leave" | "open_on_phone";
+export type WatchEventAction = "going" | "interested" | "not_going" | "waitlist_join" | "waitlist_leave" | "open_on_phone" | "archive_more" | "archive_previous" | "load_moments";
 export type WatchEventSection = "tonight" | "invitations" | "going" | "interested" | "waitlist" | "saved" | "hosting" | "past";
 export interface WatchEventWaitlist {
   ticketTypeId?: string;
   offerStatus: string;
   offerExpiresAt?: string;
 }
-export interface WatchEventWeather { tempF: number; label?: string; generatedAt: string; precipPct?: number }
+export interface WatchEventWeather { tempF: number; label?: string; generatedAt: string; forecastAt?: string; precipPct?: number }
 export interface WatchEvent {
   id: string;
   title: string;
@@ -28,6 +29,8 @@ export interface WatchEvent {
   waitlist: WatchEventWaitlist[];
   canJoinWaitlist: boolean;
   weather?: WatchEventWeather;
+  moments?: WatchEventMoment[];
+  momentsStatus?: "ready" | "unavailable";
 }
 export interface WatchEventEnvelope {
   protocol: 2;
@@ -36,6 +39,8 @@ export interface WatchEventEnvelope {
   events: WatchEvent[];
   status: "ready" | "error";
   error?: string;
+  hasMore?: boolean;
+  hasPrevious?: boolean;
 }
 export interface WatchEventCommand {
   protocol: 2;
@@ -115,7 +120,7 @@ export function validateEventCommand(raw: unknown, accountGen: string, now = Dat
   if (c.protocol !== 2 || c.accountGen !== accountGen || !accountGen || c.type !== "eventAction") return null;
   if (typeof c.operationId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(c.operationId)) return null;
   if (typeof c.eventId !== "string" || !/^[1-9]\d*$/.test(c.eventId)) return null;
-  if (!["going", "interested", "not_going", "waitlist_join", "waitlist_leave", "open_on_phone"].includes(String(c.action))) return null;
+  if (!["going", "interested", "not_going", "waitlist_join", "waitlist_leave", "open_on_phone", "archive_more", "archive_previous", "load_moments"].includes(String(c.action))) return null;
   if (c.ticketTypeId !== undefined && (typeof c.ticketTypeId !== "string" || !/^[0-9a-f-]{36}$/i.test(c.ticketTypeId))) return null;
   if (typeof c.issuedAt !== "number" || typeof c.expiresAt !== "number" || !Number.isFinite(c.issuedAt) || !Number.isFinite(c.expiresAt) ||
       c.issuedAt > now + 5 || c.expiresAt <= now || c.expiresAt <= c.issuedAt || c.expiresAt - c.issuedAt > 30) return null;

@@ -1,3 +1,4 @@
+import { registerWatchNotificationEventHandler } from "./watch-notification-actions";
 import { useWatchDoorSync } from "./use-watch-door-sync";
 import { useCallback, useEffect } from "react";
 import { AppState } from "react-native";
@@ -21,6 +22,7 @@ export function useWatchEvents() {
   }, [router]);
   const { handleCommand, refresh } = useWatchEventSync({ push: syncEventsToWatch, openOnPhone });
   useEffect(() => registerWatchEventHandler(handleCommand, refresh), [handleCommand, refresh]);
+  useEffect(() => registerWatchNotificationEventHandler(handleCommand), [handleCommand]);
 }
 
 export function useWatchCalls() {

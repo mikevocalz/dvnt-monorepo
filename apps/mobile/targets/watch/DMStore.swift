@@ -32,6 +32,8 @@ final class DMStore {
         if let data = defaults?.data(forKey: "dvnt.dms.state"),
            let state = try? JSONDecoder().decode(CachedState.self, from: data), state.accountGen == envelope.accountGen {
             pages = state.pages; outbox = state.outbox; drafts = state.drafts; anchors = state.anchors
+            threadActions = (state.threadActions ?? [:]).filter { $0.value.accountGen == envelope.accountGen }
+            actionStatus = threadActions.mapValues { _ in "Update interrupted. Retry to confirm." }
             for i in outbox.indices where outbox[i].state == "sending" {
                 outbox[i].state = "failed"; outbox[i].error = "Send interrupted. Retry to confirm."
             }
@@ -110,17 +112,24 @@ final class DMStore {
 
     func performThreadAction(_ id: String, messageId: String? = nil, emoji: String? = nil, desiredPresent: Bool? = nil) {
         guard envelope.protocol == 2, envelope.dms.contains(where: { $0.id == id }), actionStatus[id] != "Updating…" else { return }
+        if let pending = threadActions[id],
+           pending.messageId != messageId || pending.emoji != emoji || pending.desiredPresent != desiredPresent {
+            actionStatus[id] = "Retry or cancel the pending update first."
+            return
+        }
         let now = Date().timeIntervalSince1970
         let command = WatchThreadAction(protocol: 2, accountGen: envelope.accountGen, type: "threadAction",
             action: messageId == nil ? "read" : "reaction", conversationId: id, messageId: messageId,
             emoji: emoji, desiredPresent: desiredPresent, issuedAt: now, expiresAt: now + 60)
         threadActions[id] = command
         actionStatus[id] = "Updating…"
+        persistState()
         let completion: (Bool, String?) -> Void = { [weak self] ok, error in
             guard let self, self.envelope.accountGen == command.accountGen,
                   self.threadActions[id]?.issuedAt == command.issuedAt else { return }
             self.actionStatus[id] = ok ? "Updated" : (error ?? "Couldn’t update. Retry.")
             if ok { self.threadActions[id] = nil; self.requestThread(id) }
+            self.persistState()
         }
         if actionRelay?(command, completion) != true { completion(false, "iPhone unavailable. Retry when connected.") }
         Task { [weak self] in
@@ -129,6 +138,11 @@ final class DMStore {
                   self.threadActions[id]?.issuedAt == command.issuedAt else { return }
             completion(false, "Update not confirmed. Retry.")
         }
+    }
+
+    func cancelThreadAction(_ id: String) {
+        guard actionStatus[id] != "Updating…" else { return }
+        threadActions[id] = nil; actionStatus[id] = nil; persistState()
     }
 
     func retryThreadAction(_ id: String) {
@@ -147,6 +161,8 @@ final class DMStore {
         loading.remove(page.conversationId); errors[page.conversationId] = nil
         let existing = pages[page.conversationId]
         var merged = Dictionary(uniqueKeysWithValues: (existing?.messages ?? []).map { ($0.id, $0) })
+        if !(page.removedMessageIds ?? []).isEmpty { onAccountReset?() }
+        for id in page.removedMessageIds ?? [] { merged[id] = nil }
         for message in page.messages { merged[message.id] = message }
         let messages = merged.values.sorted { $0.createdAt == $1.createdAt ? ($0.id.count == $1.id.count ? $0.id < $1.id : $0.id.count < $1.id.count) : $0.createdAt < $1.createdAt }
         let window = older ? Array(messages.prefix(200)) : Array(messages.suffix(200))
@@ -214,9 +230,10 @@ final class DMStore {
         let outbox: [WatchOutboxItem]
         let drafts: [String: String]
         let anchors: [String: String]
+        var threadActions: [String: WatchThreadAction]? = nil
     }
     private func persistState() {
-        let state = CachedState(accountGen: envelope.accountGen, pages: pages, outbox: outbox, drafts: drafts, anchors: anchors)
+        let state = CachedState(accountGen: envelope.accountGen, pages: pages, outbox: outbox, drafts: drafts, anchors: anchors, threadActions: threadActions)
         if let data = try? JSONEncoder().encode(state) { defaults?.set(data, forKey: "dvnt.dms.state") }
     }
 }

@@ -89,3 +89,19 @@ test('Door request refresh has one owner and returns the scoped snapshot',async(
  await h.api.syncDoorToWatch({protocol:2,accountGen:'gen-a',door:{eventId:'9'},status:'ready',syncedAt:1});
  const replies=await h.emit({type:'requestDoor'});assert.equal(replies.length,1);assert.equal(refreshes,1);assert.equal(JSON.parse(replies[0].door).door.eventId,'9');
 });
+for (const platform of ['ios','android']) test(`${platform} disabling Door publishes a versioned clear while retaining tickets`,async()=>{
+ const h=harness(platform);
+ await h.api.syncTicketsToWatch({protocol:2,accountGen:'gen-a',tickets:[{id:'pass'}],syncedAt:1});
+ await h.api.syncDoorToWatch({protocol:2,accountGen:'gen-a',door:{eventId:'9'},status:'ready',syncedAt:1});
+ await h.api.setWatchFeature('door',false);
+ const ctx=h.contexts.at(-1),door=JSON.parse(ctx.door);
+ assert.equal(door.protocol,2);assert.equal(door.accountGen,'gen-a');assert.equal(door.status,'ready');assert.equal(door.door,null);
+ assert.equal(JSON.parse(ctx.payload).tickets[0].id,'pass');
+});
+test('thread refresh bounds and validates retained ids before authorized reconciliation',async()=>{
+ const h=harness();let retained;
+ h.api.registerWatchThreadHandler(async(id,cursor,ids)=>{retained=ids;return {protocol:2,accountGen:'gen-a',conversationId:id,messages:[],removedMessageIds:['12']};});
+ const replies=await h.emit({type:'threadPage',protocol:2,accountGen:'gen-a',conversationId:'1',retainedMessageIds:['12','12','invalid',{},...Array.from({length:400},(_,i)=>String(i+100))]});
+ assert.equal(retained.length,250);assert.equal(retained[0],'12');assert.equal(retained.filter(id=>id==='12').length,1);
+ assert.deepEqual(JSON.parse(replies[0].threadPage).removedMessageIds,['12']);
+});

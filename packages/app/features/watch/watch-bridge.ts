@@ -415,7 +415,7 @@ export function registerWatchThreadActionHandler(
 }
 
 export function registerWatchThreadHandler(
-  load: (conversationId: string, olderCursor?: { createdAt: string; id: string }) => Promise<WatchThreadPage>,
+  load: (conversationId: string, olderCursor?: { createdAt: string; id: string }, retainedMessageIds?: string[]) => Promise<WatchThreadPage>,
 ): () => void {
   const mod = commandTransport();
   if (!mod?.watchEvents?.addListener) return () => {};
@@ -426,7 +426,9 @@ export function registerWatchThreadHandler(
       reply?.({ ok: false, error: "Conversation unavailable. Sync with your iPhone." }); return;
     }
     try {
-      const page = await load(raw.conversationId, raw.olderCursor);
+      const retained = Array.isArray(raw.retainedMessageIds)
+        ? [...new Set(raw.retainedMessageIds.filter((id: unknown): id is string => typeof id === "string" && /^\d{1,20}$/.test(id)))].slice(0, 250) as string[] : [];
+      const page = await load(raw.conversationId, raw.olderCursor, retained);
       if (accountGen !== useWatchSessionStore.getState().accountGen) return;
       reply?.({ session: sessionPayload(), threadPage: JSON.stringify(page) });
     } catch { reply?.({ ok: false, error: "Couldn’t load messages. Open DVNT on your iPhone and retry." }); }
@@ -620,7 +622,8 @@ export async function setWatchFeature(
     await pushBroadcasts({ broadcasts: [], syncedAt });
   if (master || key === "messages") await pushDMs({ protocol: 2, accountGen: useWatchSessionStore.getState().accountGen, dms: [], syncedAt });
   if (master || key === "door") {
-    lastDoorPayload = JSON.stringify({ door: null, syncedAt });
+    lastDoorPayload = JSON.stringify({ protocol: 2, accountGen: useWatchSessionStore.getState().accountGen, status: "ready", door: null, syncedAt });
+    if (Platform.OS === "android") await pushWearContext();
     const mod = connectivityModule();
     if (mod) pushMergedContext(mod);
   }
@@ -633,7 +636,7 @@ export async function clearWatchAccount(accountGen: string): Promise<void> {
   lastTicketsPayload = JSON.stringify({ protocol: 2, accountGen, tickets: [], syncedAt });
   lastBroadcastsPayload = JSON.stringify({ broadcasts: [], syncedAt });
   lastDMsPayload = JSON.stringify({ protocol: 2, accountGen, dms: [], syncedAt });
-  lastDoorPayload = JSON.stringify({ door: null, syncedAt });
+  lastDoorPayload = JSON.stringify({ protocol: 2, accountGen, status: "ready", door: null, syncedAt });
   lastEventsPayload = JSON.stringify({ protocol: 2, accountGen, events: [], syncedAt, status: "ready" });
   lastCallDirectoryPayload = JSON.stringify({ protocol: 2, accountGen, people: [], recents: [], syncedAt });
   lastActiveCallPayload = null; lastActiveCallSignature = "";

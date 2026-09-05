@@ -9,12 +9,25 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
 
-data class WatchEventWeather(val tempF: Double, val label: String?, val generatedAt: String, val precipPct: Double?)
+data class EventMoment(val id: String, val imageURL: String, val expiresAt: String, val visibleUntil: String) {
+    val cutoff: Long get() = minOf(parseIso8601(expiresAt) ?: 0, parseIso8601(visibleUntil) ?: 0)
+    companion object {
+        fun from(row: JSONObject): EventMoment? {
+            val id = row.optString("id")
+            val url = row.optString("imageURL")
+            val expires = row.optString("expiresAt")
+            val visible = row.optString("visibleUntil")
+            if (id.isBlank() || !url.startsWith("https://") || parseIso8601(expires) == null || parseIso8601(visible) == null) return null
+            return EventMoment(id,url,expires,visible)
+        }
+    }
+}
+data class WatchEventWeather(val tempF: Double, val label: String?, val generatedAt: String, val precipPct: Double?, val forecastAt: String? = null)
 data class WatchEventWaitlist(val ticketTypeId: String?, val offerStatus: String, val offerExpiresAt: String?)
 data class WatchEvent(val id: String, val title: String, val startAt: String?, val endAt: String?, val timeZone: String?,
     val imageURL: String?, val location: String?, val latitude: Double?, val longitude: Double?, val isOnline: Boolean,
     val status: String, val ticketingEnabled: Boolean, val rsvp: String?, val inviteStatus: String?, val saved: Boolean,
-    val host: Boolean, val waitlist: List<WatchEventWaitlist>, val canJoinWaitlist: Boolean, val weather: WatchEventWeather? = null) {
+    val host: Boolean, val waitlist: List<WatchEventWaitlist>, val canJoinWaitlist: Boolean, val weather: WatchEventWeather? = null, val moments: List<EventMoment> = emptyList(), val momentsStatus: String? = null) {
     val stateLabel: String get() = when {
         status == "cancelled" -> "Cancelled"
         status == "postponed" -> "Postponed"
@@ -60,14 +73,15 @@ data class WatchEvent(val id: String, val title: String, val startAt: String?, v
                     val temp = weather.optDouble("tempF")
                     val stamp = weather.optString("generatedAt")
                     if (!temp.isFinite() || parseIso8601(stamp) == null) null else WatchEventWeather(temp, weather.optStringOrNull("label"), stamp,
-                        weather.optDouble("precipPct").takeIf { it.isFinite() && it in 0.0..100.0 })
-                })
+                        weather.optDouble("precipPct").takeIf { it.isFinite() && it in 0.0..100.0 }, weather.optStringOrNull("forecastAt"))
+                }, j.optJSONArray("moments")?.let { rows -> (0 until rows.length()).mapNotNull { rows.optJSONObject(it)?.let(EventMoment::from) }.distinctBy { it.id }.take(6) } ?: emptyList(),
+                j.optStringOrNull("momentsStatus"))
         }
     }
 }
 data class EventActionResult(val status: String, val message: String)
 data class EventsState(val accountGen: String = "", val events: List<WatchEvent> = emptyList(), val syncedAt: Long = 0,
-    val error: String? = null, val loading: Boolean = false, val pending: Set<String> = emptySet(), val results: Map<String, EventActionResult> = emptyMap())
+    val error: String? = null, val loading: Boolean = false, val hasMore: Boolean = false, val hasPrevious: Boolean = false, val pending: Set<String> = emptySet(), val results: Map<String, EventActionResult> = emptyMap())
 
 class EventRepository private constructor(private val context: Context) {
     private val prefs = context.getSharedPreferences("dvnt.wear.events", Context.MODE_PRIVATE)
@@ -94,8 +108,8 @@ class EventRepository private constructor(private val context: Context) {
         }
         if (next.optString("status") != "ready") return
         val rows = next.optJSONArray("events") ?: return
-        val events = (0 until rows.length()).mapNotNull { i -> runCatching { WatchEvent.from(rows.getJSONObject(i)) }.getOrNull() }.take(60)
-        _state.value = _state.value.copy(accountGen = account, events = events, syncedAt = stamp, error = null, loading = false)
+        val events = (0 until rows.length()).mapNotNull { i -> runCatching { WatchEvent.from(rows.getJSONObject(i)) }.getOrNull() }
+        _state.value = _state.value.copy(accountGen = account, events = events, syncedAt = stamp, hasMore = next.optBoolean("hasMore"), hasPrevious = next.optBoolean("hasPrevious"), error = null, loading = false)
         prefs.edit().putString("envelope", json).commit()
         WearSurfaces.requestUpdate(context)
     } }
@@ -151,6 +165,33 @@ class EventRepository private constructor(private val context: Context) {
             if (status == "confirmed") refresh()
         } catch (_: Exception) {
             if (WearAccountSession.generation(context) == account) finish(account, eventId, EventActionResult("failed", "Result not confirmed. Check this event on your phone."))
+        }
+    }
+    suspend fun presence(eventId: String, ticketId: String, presence: String) {
+        if (presence !in listOf("approaching", "arrived", "departed", "revoke")) return
+        val account = synchronized(WearAccountSession) {
+            val current = _state.value
+            if (current.accountGen.isBlank() || WearAccountSession.generation(context) != current.accountGen || eventId in current.pending || (current.results[eventId]?.status == "failed" && presence != "revoke")) return
+            if (TicketRepository.get(context).envelope.value.tickets.none { it.id == ticketId && it.eventId == eventId && it.isOwner == true && (presence == "revoke" || it.status.isPresentable || it.status.isUsed) }) return
+            _state.value = current.copy(pending = current.pending + eventId, results = current.results - eventId)
+            if (!prefs.edit().putStringSet("pending", _state.value.pending).commit()) {
+                finish(current.accountGen, eventId, EventActionResult("failed", "Could not save request. Check on phone.")); return
+            }
+            current.accountGen
+        }
+        val operation = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis() / 1000
+        try {
+            val wire = MessageRepository.get(context).request(JSONObject().put("protocol", 2).put("accountGen", account)
+                .put("type", "venueAction").put("operationId", operation).put("eventId", eventId).put("ticketId", ticketId)
+                .put("action", "presence").put("state", presence).put("issuedAt", now).put("expiresAt", now + 60))
+            val result = wire.optStringOrNull("venueResult")?.let { JSONObject(it) } ?: error("No result")
+            if (result.optInt("protocol") != 2 || result.optString("accountGen") != account || result.optString("operationId") != operation || result.optString("eventId") != eventId) error("Invalid result")
+            val status = result.optString("status")
+            if (status !in listOf("confirmed", "rejected", "uncertain")) error("Invalid status")
+            finish(account, eventId, EventActionResult(if (status == "uncertain") "failed" else status, result.optString("message", "Check on your phone.")))
+        } catch (_: Exception) {
+            finish(account, eventId, EventActionResult("failed", "Arrival status not confirmed. Check your phone before sharing again."))
         }
     }
     private fun finish(account: String, id: String, result: EventActionResult) { synchronized(WearAccountSession) {

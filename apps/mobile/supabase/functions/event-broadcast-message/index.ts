@@ -99,7 +99,7 @@ Deno.serve(async (req: Request) => {
     // Permission: owner or accepted admin only.
     const { data: event } = await supabase
       .from("events")
-      .select("id, host_id, title, status")
+      .select("id, host_id, title, status, start_date")
       .eq("id", eventId)
       .maybeSingle();
     if (!event)
@@ -230,7 +230,7 @@ Deno.serve(async (req: Request) => {
     let pushed = 0;
     if (tokens && tokens.length > 0) {
       const messages = tokens.map((t: any) => ({
-        ...watchNotificationFields("event_broadcast", { eventId: String(eventId) }),
+        ...watchNotificationFields("event_broadcast", { eventId: String(eventId), eventStartAt: event.start_date }),
         to: t.token,
         title: body.title || event.title || "Event update",
         body: message,
@@ -239,6 +239,9 @@ Deno.serve(async (req: Request) => {
         categoryId: "dvnt_broadcast",
         data: {
           type: "event_broadcast",
+          eventId: String(eventId),
+          recipientId: String(t.user_id),
+          issuedAt: Date.now() / 1000,
           entityType: "event",
           entityId: String(eventId),
           // Lets the watch long-look show the event name without a lookup.

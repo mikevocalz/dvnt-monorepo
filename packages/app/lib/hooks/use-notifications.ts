@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { registerWatchNotificationCategories, handleWatchNotificationAction, restoreWatchNotificationActions } from "@dvnt/app/features/watch/watch-notification-actions";
+import { registerWatchNotificationCategories, consumeWatchNotificationResponse, subscribeWatchNotificationReadiness, restoreWatchNotificationActions } from "@dvnt/app/features/watch/watch-notification-actions";
 /**
  * Push Notifications Hook
  *
@@ -42,7 +42,9 @@ export function useNotifications() {
   const notificationListener = useRef<{ remove: () => void } | null>(null);
   const responseListener = useRef<{ remove: () => void } | null>(null);
   const router = useRouter();
-  const { user, isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated, authStatus } = useAuthStore();
+  const replayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const replayResponse = useRef<() => void>(() => {});
   const { addActivity } = useActivityStore();
 
   const registerPushNotifications = useCallback(async () => {
@@ -59,6 +61,33 @@ export function useNotifications() {
 
     return token;
   }, [isAuthenticated, user?.id, user?.username]);
+
+  const consumeResponse = useCallback(async (response: import("expo-notifications").NotificationResponse) => {
+    const api = Notifications;
+    if (!api) return "ignored" as const;
+    const result = await consumeWatchNotificationResponse(response, route => router.push(route as never), async () => {
+      const last = await api.getLastNotificationResponseAsync();
+      if (last?.notification.request.identifier === response.notification.request.identifier &&
+          last.actionIdentifier === response.actionIdentifier && last.userText === response.userText) {
+        await api.clearLastNotificationResponseAsync();
+      }
+    });
+    if (result === "deferred" && response.actionIdentifier.startsWith("DVNT_CALL_")) {
+      if (replayTimer.current) clearTimeout(replayTimer.current);
+      const issued = Number(response.notification.request.content.data?.issuedAt);
+      replayTimer.current = setTimeout(() => { replayTimer.current = null; replayResponse.current(); },
+        Math.max(1, Math.min(30_000, issued * 1000 + 30_001 - Date.now())));
+    }
+    return result;
+  }, [router]);
+  replayResponse.current = () => {
+    const api = Notifications;
+    if (api) void api.getLastNotificationResponseAsync().then(response => response ? consumeResponse(response) : undefined).catch(() => {});
+  };
+  useEffect(() => {
+    const unsubscribe = subscribeWatchNotificationReadiness(() => replayResponse.current());
+    return () => { unsubscribe(); if (replayTimer.current) clearTimeout(replayTimer.current); };
+  }, []);
 
   useEffect(() => {
     // Skip on web platform
@@ -181,7 +210,7 @@ export function useNotifications() {
       responseListener.current =
         Notifications.addNotificationResponseReceivedListener(async (response) => {
           try {
-            if (await handleWatchNotificationAction(response)) return;
+            if (await consumeResponse(response) !== "ignored") return;
 
             // Guard: If _layout.tsx already queued a route for this cold-start
             // notification, skip navigation here to prevent double push.
@@ -223,16 +252,13 @@ export function useNotifications() {
       console.error("[Notifications] Error in useEffect:", error);
       // Don't crash the app if notifications fail
     }
-  }, [isWeb, registerPushNotifications, router]);
+  }, [isWeb, registerPushNotifications, router, consumeResponse]);
 
   useEffect(() => {
-    if (!Notifications || !user?.id) return;
-    const api = Notifications;
+    if (!Notifications || !user?.id || !isAuthenticated || authStatus !== "authenticated") return;
     restoreWatchNotificationActions();
-    void api.getLastNotificationResponseAsync().then(async (response) => {
-      if (response && await handleWatchNotificationAction(response)) await api.clearLastNotificationResponseAsync();
-    }).catch(() => {});
-  }, [user?.id]);
+    replayResponse.current();
+  }, [user?.id, isAuthenticated, authStatus]);
 
   // Re-register when user logs in
   useEffect(() => {

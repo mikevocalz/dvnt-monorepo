@@ -7,7 +7,15 @@ struct WatchEventWaitlist: Codable, Hashable {
 }
 
 struct WatchEventWeather: Codable, Hashable {
-    let tempF: Double; let label: String?; let generatedAt: String; let precipPct: Double?
+    let tempF: Double; let label: String?; let generatedAt: String; let precipPct: Double?; var forecastAt: String? = nil
+}
+
+struct WatchEventMoment: Codable, Identifiable, Hashable {
+    let id: String
+    let imageURL: String
+    let expiresAt: String
+    let visibleUntil: String
+    var cutoff: Date { min(WatchEvent.date(expiresAt) ?? .distantPast, WatchEvent.date(visibleUntil) ?? .distantPast) }
 }
 
 struct WatchEvent: Codable, Identifiable, Hashable {
@@ -30,6 +38,8 @@ struct WatchEvent: Codable, Identifiable, Hashable {
     let waitlist: [WatchEventWaitlist]
     let canJoinWaitlist: Bool
     var weather: WatchEventWeather? = nil
+    var moments: [WatchEventMoment]? = nil
+    var momentsStatus: String? = nil
 
     var startsAt: Date? { Self.date(startAt) }
     var endsAt: Date? { Self.date(endAt) }
@@ -74,6 +84,8 @@ struct WatchEventEnvelope: Codable {
     let events: [WatchEvent]
     let status: String
     let error: String?
+    var hasMore: Bool? = nil
+    var hasPrevious: Bool? = nil
     static let empty = WatchEventEnvelope(protocol: 2, accountGen: "", syncedAt: 0, events: [], status: "ready", error: nil)
 }
 

@@ -20,7 +20,12 @@ data class ConversationSummary(val id: String, val name: String, val preview: St
 data class MessageReaction(val emoji: String, val count: Int, val mine: Boolean)
 
 data class ThreadMessage(val id: String, val conversationId: String, val text: String, val senderId: String,
-    val outgoing: Boolean, val createdAt: String, val attachments: List<MessageAttachment>, val reactions: List<MessageReaction> = emptyList()) {
+    val outgoing: Boolean, val createdAt: String, val attachments: List<MessageAttachment>, val reactions: List<MessageReaction> = emptyList(), val senderName: String? = null) {
+    fun json(): JSONObject = JSONObject().put("id", id).put("conversationId", conversationId).put("text", text)
+        .put("senderId", senderId).put("senderName", senderName).put("outgoing", outgoing).put("createdAt", createdAt)
+        .put("attachments", JSONArray(attachments.map { JSONObject().put("id", it.id).put("kind", it.kind)
+            .put("thumbURL", it.thumbURL).put("fullURL", it.fullURL).put("alt", it.alt) }))
+        .put("reactions", JSONArray(reactions.map { JSONObject().put("emoji", it.emoji).put("count", it.count).put("mine", it.mine) }))
     companion object {
         fun from(json: JSONObject) = ThreadMessage(json.getString("id"), json.getString("conversationId"), json.optString("text"),
             json.optString("senderId"), json.optBoolean("outgoing"), json.getString("createdAt"), attachments(json.optJSONArray("attachments")),
@@ -28,7 +33,7 @@ data class ThreadMessage(val id: String, val conversationId: String, val text: S
                 (0 until rows.length()).mapNotNull { i ->
                     rows.optJSONObject(i)?.let { r -> MessageReaction(r.optString("emoji"), r.optInt("count"), r.optBoolean("mine")) }
                 }
-            } ?: emptyList())
+            } ?: emptyList(), json.optStringOrNull("senderName"))
     }
 }
 data class ThreadCursor(val createdAt: String, val id: String) {
@@ -50,9 +55,10 @@ internal fun attachments(array: JSONArray?): List<MessageAttachment> = (0 until 
     array?.optJSONObject(i)?.let { MessageAttachment.from(it) }
 }.take(6)
 
-internal fun mergeThreadPage(previous: ThreadState, messages: List<ThreadMessage>, next: ThreadCursor?, older: Boolean): ThreadState {
-    val all = if (older) (messages + previous.messages).distinctBy { it.id }
-        else (previous.messages.filterNot { old -> messages.any { it.id == old.id } } + messages)
+internal fun mergeThreadPage(previous: ThreadState, messages: List<ThreadMessage>, next: ThreadCursor?, older: Boolean, removed: Set<String> = emptySet()): ThreadState {
+    val retained = previous.messages.filterNot { it.id in removed }
+    val all = if (older) (messages + retained).distinctBy { it.id }
+        else (retained.filterNot { old -> messages.any { it.id == old.id } } + messages)
             .sortedWith(compareBy<ThreadMessage> { parseIso8601(it.createdAt) ?: 0 }.thenBy { it.id.toLongOrNull() ?: 0 })
     val merged = if (older) all.take(250) else all.takeLast(250)
     val cursor = when {
@@ -61,4 +67,18 @@ internal fun mergeThreadPage(previous: ThreadState, messages: List<ThreadMessage
         else -> next
     }
     return ThreadState(merged, cursor, false)
+}
+
+/** Desired state survives uncertainty; retries never toggle a possibly applied reaction. */
+data class PendingReaction(val accountGen: String, val conversationId: String, val messageId: String,
+    val emoji: String, val desiredPresent: Boolean, val operationId: String = java.util.UUID.randomUUID().toString()) {
+    val key: String get() = "$conversationId:$messageId:$emoji"
+    fun json() = JSONObject().put("accountGen", accountGen).put("conversationId", conversationId)
+        .put("messageId", messageId).put("emoji", emoji).put("desiredPresent", desiredPresent).put("operationId", operationId)
+    fun command(now: Long) = json().put("protocol", 2).put("type", "threadAction").put("action", "reaction")
+        .put("issuedAt", now).put("expiresAt", now + 60)
+    companion object {
+        fun from(j: JSONObject) = PendingReaction(j.getString("accountGen"), j.getString("conversationId"),
+            j.getString("messageId"), j.getString("emoji"), j.getBoolean("desiredPresent"), j.getString("operationId"))
+    }
 }

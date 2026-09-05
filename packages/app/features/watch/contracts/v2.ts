@@ -28,6 +28,7 @@ export interface WatchThreadPage {
   conversationId: string;
   messages: WatchMessage[];
   olderCursor?: WatchCursor;
+  removedMessageIds?: string[];
 }
 
 export interface WatchSendCommand {
