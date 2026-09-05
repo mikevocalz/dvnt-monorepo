@@ -323,7 +323,6 @@ function useRoomMembersSync(roomId: string, localUserId: string | undefined) {
         avatar: m.avatar,
       }));
       setMembers(mapped);
-      syncRaisedHands(mapped);
     })();
 
     const unsubscribe = videoApi.subscribeToMembers(roomId, (member, type) => {
@@ -349,7 +348,6 @@ function useRoomMembersSync(roomId: string, localUserId: string | undefined) {
         } else {
           next = [...prev, projected];
         }
-        syncRaisedHands(next);
         return next;
       });
     });
@@ -358,7 +356,21 @@ function useRoomMembersSync(roomId: string, localUserId: string | undefined) {
       active = false;
       unsubscribe();
     };
-  }, [roomId, syncRaisedHands]);
+  }, [roomId]);
+
+  /**
+   * Raised hands are DERIVED from the roster, so they are computed after the
+   * roster commits rather than while it is being computed.
+   *
+   * `syncRaisedHands` used to be called from inside the `setMembers` updater.
+   * React runs updater functions during render, so that wrote to the room
+   * store mid-render — "Cannot update a component while rendering a different
+   * component", on every membership change in every room. An effect on the
+   * committed value is the same data one tick later, with none of that.
+   */
+  useEffect(() => {
+    syncRaisedHands(members);
+  }, [members, syncRaisedHands]);
 
   return members;
 }

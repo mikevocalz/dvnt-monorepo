@@ -407,6 +407,10 @@ export const sneakyLynkApi = {
         status: data.status as "open" | "ended",
         createdAt: data.created_at,
         endedAt: data.ended_at || undefined,
+        // The server's session deadline. A room can be `status: "open"` and
+        // still refuse every join with `session_expired`, so callers that ask
+        // "can anyone get in?" need this, not just the status.
+        endsAt: data.ends_at || null,
         host: {
           id: String(creator?.id || ""),
           username: creator?.username || "unknown",

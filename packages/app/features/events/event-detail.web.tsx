@@ -6,7 +6,7 @@
  * tiers, Attendees, Location (+ Maps), Tags, Disclaimers — plus a header menu
  * popover (Share / Edit / Report / Delete). Raw semantic tags + Tailwind; Solito.
  */
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter, usePathname } from "solito/navigation";
 import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
@@ -47,6 +47,7 @@ import {
   Radio,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
@@ -354,6 +355,8 @@ export function EventDetailScreen() {
 
   const eventId = resolvedId ? String(resolvedId) : "";
 
+
+
   // Promoter attribution (WS-4): capture ?ref=CODE from tracked share
   // links (?promo= is taken by promo codes) into the MMKV/localStorage-
   // persisted store so the Stripe redirect can't lose it. The checkout
@@ -558,6 +561,58 @@ export function EventDetailScreen() {
   if (!e) return <Centered>Event not found</Centered>;
 
   const isHost = !!me && me === e.host?.username;
+
+  /**
+   * Open the event's Lynk — and make sure there is a live one to open.
+   *
+   * The companion room is created when the EVENT is published, which for an
+   * event two weeks out means the room's session expires long before anyone
+   * arrives: `video_join_room` answers `session_expired` and the card is a
+   * dead link on the day it matters most. (A free host's session is capped;
+   * this is not an edge case for them, it is every time.)
+   *
+   * So the host's tap is "start it": if the linked room is gone or ended, mint
+   * a fresh one and re-point the event at it before routing. Guests just go —
+   * if the host has not started it they get the room's own "this Lynk has
+   * ended" screen, which is the honest answer.
+   */
+  const openEventLynk = useCallback(async () => {
+    const linked = e?.lynkRoomId as string | undefined;
+    if (!linked) return;
+    const go = (roomId: string) =>
+      router.push(`/feed/sneaky-lynk/room/${roomId}${isHost ? "?isHost=1" : ""}`);
+    if (!isHost) {
+      go(linked);
+      return;
+    }
+    let roomId = linked;
+    try {
+      const existing = await sneakyLynkApi.getRoomById(linked);
+      // "Open" is not the same as "joinable": the session deadline
+      // (`ends_at`) expires while the row stays open, and every join then
+      // answers `session_expired`. Both have to be checked or the recovery
+      // never fires on the exact rooms that need it.
+      const sessionOver =
+        !!existing?.endsAt && new Date(existing.endsAt).getTime() <= Date.now();
+      if (!existing || existing.status === "ended" || sessionOver) {
+        const fresh = await sneakyLynkApi.createRoom({
+          title: e?.title || "Event Lynk",
+          topic: "",
+          description: e?.description || "",
+          hasVideo: true,
+          isPublic: false,
+        });
+        if (fresh.ok && fresh.data?.room?.id) {
+          roomId = String(fresh.data.room.id);
+          await eventsApi.updateEvent(eventId, { lynkRoomId: roomId } as any);
+        }
+      }
+    } catch {
+      // Fall through to the linked room — the room screen states the problem
+      // better than a toast here can.
+    }
+    go(roomId);
+  }, [e?.lynkRoomId, e?.title, e?.description, eventId, isHost, router]);
   const { videoUrl: coverVideoUrl, posterUrl: coverPosterUrl } = coverFor(e);
   const yt = ytId(e.youtubeVideoUrl || e.youtubeUrl);
   const lineup: string[] = Array.isArray(e.lineup) ? e.lineup : [];
@@ -1241,7 +1296,7 @@ export function EventDetailScreen() {
               <button
                 type="button"
                 data-lynk-room={e.lynkRoomId}
-                onClick={() => router.push(`/feed/sneaky-lynk/room/${e.lynkRoomId}`)}
+                onClick={() => void openEventLynk()}
                 className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 text-left transition-colors hover:bg-white/[0.1]"
               >
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#8A40CF]/20">

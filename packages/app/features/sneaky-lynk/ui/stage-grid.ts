@@ -20,17 +20,6 @@ export function stageGridClass(count: number): string {
   return "grid-cols-2 sm:grid-cols-3 md:grid-cols-4";
 }
 
-/**
- * Cap the grid's width so tiles stay `aspect-video` without overflowing a tall
- * viewport. `22rem` is the chrome above and below the stage (header, disclosure,
- * audience row, controls).
- */
-export function stageMaxWidthStyle(count: number, columns: number): string {
-  const rows = Math.max(1, Math.ceil(count / columns));
-  // width = availableHeight * (16/9) * cols / rows
-  return `min(100%, calc((100dvh - 22rem) * ${(16 * columns) / (9 * rows)}))`;
-}
-
 /** Columns the class above resolves to at a given viewport width. */
 export function stageColumns(count: number, width: number): number {
   const sm = width >= 640;

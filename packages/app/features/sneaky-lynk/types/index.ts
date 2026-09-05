@@ -31,6 +31,10 @@ export interface SneakyUser {
 export interface SneakyRoom {
   id: string;
   createdBy: string;
+  /** Server session deadline, ISO. A room can be `status: "open"` and still
+   *  refuse every join with `session_expired`, so "is it joinable" needs this
+   *  as well as the status. `null` = unlimited (paid tiers). */
+  endsAt?: string | null;
   title: string;
   topic: string;
   description: string;
