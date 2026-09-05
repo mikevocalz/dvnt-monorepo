@@ -562,6 +562,8 @@ function RoomInner({
   // false until then: no publish token is requested, `lynk-moq-token` is never
   // asked to deny one (it denies `publish` for a listener), and the camera/mic
   // stay closed. When the role lands the hook mints, connects and goes live.
+  const joinCameraOn = useRoomUIStore((s) => s.joinCameraOn);
+  const joinMicOn = useRoomUIStore((s) => s.joinMicOn);
   const localRole = useRoomUIStore((s) => s.localRole);
   // Mirrors PUBLISH_ROLES in `lynk-moq-token`. `participant` — the role every
   // joiner gets — belongs here: without it a guest never asked for a publish
@@ -834,6 +836,28 @@ function RoomInner({
     if (!canPublish || lynk.isLive) return;
     void lynk.goLive();
   }, [canPublish, lynk.isLive, lynk.goLive]);
+
+  /**
+   * Arrive the way you said you would.
+   *
+   * The pre-join screen asks whether your camera and mic are on; the room
+   * used to start both regardless, so the answer was decoration and you
+   * walked in live having just said you did not want to. Applied ONCE, when
+   * publishing becomes possible — after that the in-room controls own it.
+   */
+  // Captured on the FIRST render, before anything can wipe it: this screen's
+  // own unmount cleanup calls `useRoomUIStore.reset()`, and React re-runs
+  // effects without unmounting (StrictMode does it every mount), so reading
+  // the store later gave the default "camera on" back — the same shape of bug
+  // as `ended` surviving a transport teardown.
+  const joinPrefsRef = useRef({ camera: joinCameraOn, mic: joinMicOn });
+  useEffect(() => {
+    if (!canPublish) return;
+    lynkRef.current.setCameraEnabled(joinPrefsRef.current.camera && roomHasVideo);
+    lynkRef.current.setMicEnabled(joinPrefsRef.current.mic);
+    // Keyed on the moment publishing becomes possible, so a rebuilt transport
+    // gets the preference again rather than starting from its own defaults.
+  }, [canPublish, roomHasVideo]);
 
   // ── Room phase ────────────────────────────────────────────────────────────
   // Being IN the room is a Supabase fact (`video_join_room` resolved a role),
@@ -1751,6 +1775,74 @@ function PreJoinScreen({
 }) {
   const joinAnonymous = useRoomUIStore((s) => s.joinAnonymous);
   const setJoinAnonymous = useRoomUIStore((s) => s.setJoinAnonymous);
+  const joinCameraOn = useRoomUIStore((s) => s.joinCameraOn);
+  const setJoinCameraOn = useRoomUIStore((s) => s.setJoinCameraOn);
+  const joinMicOn = useRoomUIStore((s) => s.joinMicOn);
+  const setJoinMicOn = useRoomUIStore((s) => s.setJoinMicOn);
+
+  /**
+   * Self-preview.
+   *
+   * This screen asked "how do you want to appear" and then showed you
+   * nothing — you found out what the room could see AFTER it could see it.
+   * Zoom, Meet and Teams all answer that question before the door, and for a
+   * room called Sneaky Lynk it is the one place it really has to be answered.
+   *
+   * Its own `getUserMedia`, not the room's transport: the room's hook is not
+   * mounted yet, and this stream is torn down on join so the two never hold
+   * the camera at once.
+   */
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
+  const [previewDenied, setPreviewDenied] = useState(false);
+  const previewRef = useRef<MediaStream | null>(null);
+
+  const stopPreview = useCallback(() => {
+    previewRef.current?.getTracks().forEach((t) => t.stop());
+    previewRef.current = null;
+    setPreviewStream(null);
+  }, []);
+
+  useEffect(() => {
+    if (!joinCameraOn) {
+      stopPreview();
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        previewRef.current = stream;
+        setPreviewStream(stream);
+        setPreviewDenied(false);
+      } catch {
+        // Denied or no device. Not an error state to argue with — you can
+        // still join, camera off, which is what the copy then says.
+        if (!cancelled) setPreviewDenied(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [joinCameraOn, stopPreview]);
+
+  // Never leave the camera light on behind a screen you have left.
+  useEffect(() => stopPreview, [stopPreview]);
+
+  const bindPreview = useCallback(
+    (el: HTMLVideoElement | null) => {
+      if (el && el.srcObject !== previewStream) el.srcObject = previewStream;
+    },
+    [previewStream],
+  );
+
+  const join = (anonymous: boolean) => {
+    stopPreview();
+    onJoin(anonymous);
+  };
   return (
     <RoomShell title={roomTitle || "Join Lynk"} onBack={onBack}>
       <div className="flex flex-1 flex-col items-center justify-center px-6">
@@ -1758,7 +1850,58 @@ function PreJoinScreen({
           <Radio size={40} color={ROSE} />
         </span>
         <h2 className="mb-2 text-2xl font-bold text-center">{roomTitle || getLynkDisplayName()}</h2>
-        <p className="mb-10 text-center text-white/60">Choose how you want to appear in this room</p>
+        <p className="mb-6 text-center text-white/60">Choose how you want to appear in this room</p>
+
+        {/* Self-preview + the two decisions that matter at a door: is my
+            camera on, is my mic on. Mirrored, because a preview that is not
+            mirrored reads as someone else. */}
+        <div className="mb-4 w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-black">
+          <div className="relative aspect-video w-full">
+            {joinCameraOn && previewStream ? (
+              <video
+                ref={bindPreview}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 h-full w-full object-cover"
+                style={{ transform: "scaleX(-1)" }}
+              />
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/45">
+                <VideoOff size={26} />
+                <span className="text-xs">
+                  {previewDenied
+                    ? "No camera access — you can still join"
+                    : "Camera off — you'll join as your avatar"}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center justify-center gap-3 border-t border-white/10 px-4 py-3">
+            <button
+              type="button"
+              aria-pressed={joinCameraOn}
+              onClick={() => setJoinCameraOn(!joinCameraOn)}
+              className={`flex h-11 w-11 items-center justify-center rounded-full ${
+                joinCameraOn ? "bg-white/15 hover:bg-white/25" : "bg-[#FC253A]"
+              }`}
+              aria-label={joinCameraOn ? "Turn camera off" : "Turn camera on"}
+            >
+              {joinCameraOn ? <Video size={18} /> : <VideoOff size={18} />}
+            </button>
+            <button
+              type="button"
+              aria-pressed={joinMicOn}
+              onClick={() => setJoinMicOn(!joinMicOn)}
+              className={`flex h-11 w-11 items-center justify-center rounded-full ${
+                joinMicOn ? "bg-white/15 hover:bg-white/25" : "bg-[#FC253A]"
+              }`}
+              aria-label={joinMicOn ? "Mute microphone" : "Unmute microphone"}
+            >
+              {joinMicOn ? <Mic size={18} /> : <MicOff size={18} />}
+            </button>
+          </div>
+        </div>
 
         <div className="w-full max-w-md rounded-2xl bg-white/[0.06] px-5 py-4 mb-4">
           <p className="font-semibold mb-2">Room Safety</p>
@@ -1819,7 +1962,7 @@ function PreJoinScreen({
 
         <button
           type="button"
-          onClick={() => onJoin(joinAnonymous)}
+          onClick={() => join(joinAnonymous)}
           className="w-full max-w-md rounded-lg py-4 text-center font-bold text-white active:scale-[0.99]"
           style={{ backgroundColor: ROSE }}
         >

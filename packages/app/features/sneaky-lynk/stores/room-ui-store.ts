@@ -28,6 +28,10 @@ interface RoomUIStore {
   initStarted: boolean;
   phase: RoomPhase;
   joinAnonymous: boolean;
+  /** Pre-join media choices. You decide how you arrive BEFORE the room sees
+   *  you — walking in already live is the thing people are afraid of. */
+  joinCameraOn: boolean;
+  joinMicOn: boolean;
   roomSnapshot: SneakyRoom | null;
   closedReason: string | null;
   errorMessage: string | null;
@@ -82,6 +86,8 @@ interface RoomUIStore {
   setInitStarted: (v: boolean) => void;
   setPhase: (v: RoomPhase) => void;
   setJoinAnonymous: (v: boolean) => void;
+  setJoinCameraOn: (v: boolean) => void;
+  setJoinMicOn: (v: boolean) => void;
   setRoomSnapshot: (v: SneakyRoom | null) => void;
   setClosed: (reason: string) => void;
   setAppOnly: () => void;
@@ -105,6 +111,8 @@ const initialUIState = {
   initStarted: false,
   phase: "prejoin" as RoomPhase,
   joinAnonymous: false,
+  joinCameraOn: true,
+  joinMicOn: true,
   roomSnapshot: null as SneakyRoom | null,
   closedReason: null as string | null,
   errorMessage: null as string | null,
@@ -128,6 +136,8 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setInitStarted: (initStarted) => set({ initStarted }),
   setPhase: (phase) => set({ phase }),
   setJoinAnonymous: (joinAnonymous) => set({ joinAnonymous }),
+  setJoinCameraOn: (joinCameraOn) => set({ joinCameraOn }),
+  setJoinMicOn: (joinMicOn) => set({ joinMicOn }),
   setRoomSnapshot: (roomSnapshot) => set({ roomSnapshot }),
   setClosed: (closedReason) => set({ phase: "closed", closedReason }),
   setAppOnly: () => set({ phase: "app-only" }),
