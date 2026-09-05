@@ -16,9 +16,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.wear.compose.material.Colors
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Typography
+import androidx.wear.compose.material3.ColorScheme
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.Typography
 
 /**
  * DVNT brand on Wear OS. The Android half of `apps/mobile/targets/watch/Theme.swift`
@@ -94,7 +94,7 @@ object Dvnt {
         TicketStatus.VALID -> cyan
         TicketStatus.CHECKED_IN -> gold
         TicketStatus.TRANSFER_PENDING -> violet
-        TicketStatus.REVOKED, TicketStatus.EXPIRED -> signal
+        TicketStatus.REVOKED, TicketStatus.EXPIRED, TicketStatus.CANCELLED, TicketStatus.UNKNOWN -> signal
     }
 
     // ------------------------------------------------------------------- Surfaces
@@ -234,49 +234,21 @@ object Dvnt {
     }
 }
 
-/**
- * Wear Material (M2) palette. `androidx.wear.compose:compose-material3` has no stable
- * release (1.7.0-alpha07 at time of writing) and this ships to production, so M2 it
- * is. Dynamic color (WR-ME-02) is deliberately declined: a ticket pass IS the brand
- * identity at a door, which is the exception the guideline carves out.
- */
-private val DvntColors = Colors(
-    primary = Dvnt.cyan,
-    primaryVariant = Dvnt.violet,
-    secondary = Dvnt.magenta,
-    secondaryVariant = Dvnt.violet,
-    background = Dvnt.canvas,
-    surface = Dvnt.Surface.mid,
-    error = Dvnt.signal,
-    onPrimary = Color.Black,
-    onSecondary = Color.Black,
-    onBackground = Color.White,
-    onSurface = Color.White,
-    onSurfaceVariant = Dvnt.textDim,
-    onError = Color.Black,
+private val DvntColors = ColorScheme(
+    primary = Dvnt.cyan, primaryDim = Dvnt.cyan,
+    secondary = Dvnt.violet, tertiary = Dvnt.magenta,
+    background = Dvnt.canvas, surfaceContainer = Dvnt.Surface.mid,
+    surfaceContainerLow = Dvnt.Surface.low, surfaceContainerHigh = Dvnt.Surface.high,
+    error = Dvnt.signal, onPrimary = Color.Black, onSecondary = Color.White,
+    onBackground = Color.White, onSurface = Color.White, onSurfaceVariant = Dvnt.textDim,
 )
-
-/** Every M2 slot points at a token above, so no screen can invent a size. */
 private val DvntTypography = Typography(
-    display1 = Dvnt.Type.numeral,
-    display2 = Dvnt.Type.numeral,
-    display3 = Dvnt.Type.numeral,
-    title1 = Dvnt.Type.title,
-    title2 = Dvnt.Type.title,
-    title3 = Dvnt.Type.title,
-    body1 = Dvnt.Type.body,
-    body2 = Dvnt.Type.body,
-    button = Dvnt.Type.stamp,
-    caption1 = Dvnt.Type.caption,
-    caption2 = Dvnt.Type.caption,
-    caption3 = Dvnt.Type.caption,
+    titleLarge = Dvnt.Type.title, titleMedium = Dvnt.Type.title, titleSmall = Dvnt.Type.title,
+    bodyLarge = Dvnt.Type.body, bodyMedium = Dvnt.Type.body, bodySmall = Dvnt.Type.caption,
+    labelLarge = Dvnt.Type.body, labelMedium = Dvnt.Type.caption, labelSmall = Dvnt.Type.stamp,
+    numeralLarge = Dvnt.Type.numeral,
 )
-
 @Composable
 fun DvntWearTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colors = DvntColors,
-        typography = DvntTypography,
-        content = content,
-    )
+    MaterialTheme(colorScheme = DvntColors, typography = DvntTypography, content = content)
 }

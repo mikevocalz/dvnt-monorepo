@@ -89,3 +89,5 @@ export function makeFreshChannel(client: SupabaseClient) {
 }
 
 export const freshChannel = makeFreshChannel(supabase);
+
+export { bindMessageChanges } from "./message-realtime";

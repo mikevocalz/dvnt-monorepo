@@ -4,53 +4,74 @@ import WatchKit
 /// One event, N tickets. A full-screen swipeable/Crown-paged stack — one QR per
 /// page (never two QRs on a screen). "1 of 3" indicator, per-ticket tier label.
 struct TicketStackView: View {
-    let group: EventGroup
-    @State private var index = 0
+    private let eventId: String
+    private let showsDoorHeader: Bool
+    @EnvironmentObject private var store: TicketStore
+    private let initialTicketId: String?
+    @SceneStorage("watch.ticketId") private var selectedId = ""
+    init(group: EventGroup, showsDoorHeader: Bool = false, initialTicketId: String? = nil) {
+        eventId = group.id; self.showsDoorHeader = showsDoorHeader; self.initialTicketId = initialTicketId
+    }
+    private var group: EventGroup? { store.groups.first { $0.id == eventId } }
 
     var body: some View {
-        TabView(selection: $index) {
+        Group {
+          if let group {
+           TabView(selection: $selectedId) {
             ForEach(Array(group.tickets.enumerated()), id: \.element.id) { i, ticket in
                 TicketPage(ticket: ticket,
                            position: i + 1,
                            total: group.tickets.count,
-                           eventTitle: group.title)
-                    .tag(i)
+                           eventTitle: group.title, showsDoorHeader: showsDoorHeader)
+                    .tag(ticket.id)
             }
         }
         // Vertical paging = Digital Crown pages through the ticket stack (watchOS-native).
         .tabViewStyle(.verticalPage)
         .background(DVNT.canvas.ignoresSafeArea())
-        .navigationTitle(group.tickets.count > 1 ? "\(index + 1) of \(group.tickets.count)" : "Ticket")
-        .onChange(of: index) {
+        .navigationTitle(group.tickets.count > 1 ? "\((group.tickets.firstIndex { $0.id == selectedId } ?? 0) + 1) of \(group.tickets.count)" : "Ticket")
+        .onChange(of: selectedId) {
             DVNT.Haptic.page()
         }
+        .onChange(of: group.tickets.map(\.id)) { _, ids in
+            if !ids.contains(selectedId) { selectedId = ids.first ?? "" }
+        }
         .onAppear {
-            DVNT.Haptic.enter()
+            if let initialTicketId, group.tickets.contains(where: { $0.id == initialTicketId }) { selectedId = initialTicketId }
+            else if !group.tickets.contains(where: { $0.id == selectedId }) { selectedId = group.tickets.first?.id ?? "" }
+        }
+          } else {
+            ContentUnavailableView("Pass unavailable", systemImage: "ticket")
+          }
         }
     }
 }
 
-/// A single full-bleed ticket page: card-flip into the QR, brightness-maximised
-/// white field, state overlays mirroring the ticket state machine.
+/// Current pass state, with a private wrist-down placeholder.
 private struct TicketPage: View {
     let ticket: WatchTicket
     let position: Int
     let total: Int
     let eventTitle: String
+    let showsDoorHeader: Bool
+    @Environment(\.isLuminanceReduced) private var dimmed
 
     @EnvironmentObject private var broadcasts: BroadcastStore
     @EnvironmentObject private var store: TicketStore
-    @State private var flipped = false
-
-    /// HIG W-AC-04: the card-flip is decorative. Honour Reduce Motion by
-    /// presenting the pass already turned rather than animating into it.
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var accent: Color { DVNT.tierAccent(ticket.tier) }
 
     var body: some View {
-        ScrollView {
+        Group {
+          if dimmed {
+            Label("Raise to show pass", systemImage: "ticket")
+                .font(DVNT.TypeScale.body()).padding()
+          } else {
+           ScrollView {
             VStack(spacing: DVNT.Space.base) {
+                if showsDoorHeader {
+                    DoorHeader(art: .none, title: "Tickets", stub: "YOUR WAY IN", minimumHeight: WKInterfaceDevice.current().screenBounds.height * 0.4)
+                }
                 // Tier / guest label per ticket.
                 HStack(spacing: DVNT.Space.snug) {
                     Circle().fill(accent).frame(width: 8, height: 8)
@@ -82,17 +103,15 @@ private struct TicketPage: View {
                 doorPerks
 
                 hostMessagesLink
+                VenuePresenceView(eventId: ticket.eventId, ticketId: ticket.id)
+                StalenessFooter()
             }
             .padding(.horizontal, DVNT.Space.base)
             .padding(.bottom, DVNT.Space.roomy)
         }
-        .onAppear {
-            if reduceMotion {
-                flipped = true
-            } else {
-                withAnimation(DVNT.Motion.enter) { flipped = true }
-            }
+          }
         }
+        .privacySensitive()
     }
 
     /// The ring is sized from the real screen, not a constant. A 150pt card was
@@ -121,7 +140,7 @@ private struct TicketPage: View {
                 }
             }
             .frame(width: cardSide, height: cardSide)
-            .rotation3DEffect(.degrees(flipped ? 0 : 90), axis: (x: 0, y: 1, z: 0))
+
         }
     }
 
@@ -164,7 +183,7 @@ private struct TicketPage: View {
                 Text(caption(for: phase, now: ctx.date))
                     .font(DVNT.TypeScale.stamp())
                     .tracking(DVNT.TypeScale.stampTracking)
-                    .foregroundColor(phase == .open ? accent : .white)
+                    .foregroundColor(.white)
             }
         }
     }
@@ -201,7 +220,7 @@ private struct TicketPage: View {
     /// not a plan name the watch pattern-matched into perks. Only shown for a
     /// pass that can still get someone in; there is no door to skip afterwards.
     @ViewBuilder private var doorPerks: some View {
-        if ticket.status.isPresentable,
+        if ticket.status.isPresentable, ticket.isOwner == true,
            let perks = store.membership?.doorPerks, !perks.isEmpty {
             VStack(alignment: .leading, spacing: DVNT.Space.tight) {
                 ForEach(perks, id: \.label) { perk in

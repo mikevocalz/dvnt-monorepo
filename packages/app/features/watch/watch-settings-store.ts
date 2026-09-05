@@ -44,12 +44,16 @@ const DEFAULTS: WatchFeatures = {
 
 interface WatchSettingsState extends WatchFeatures {
   set: (key: WatchFeatureKey, value: boolean) => void;
+  quickReplies: string[];
+  setQuickReplies: (replies: string[]) => void;
 }
 
 export const useWatchSettingsStore = create<WatchSettingsState>()(
   persist(
     (set) => ({
       ...DEFAULTS,
+      quickReplies: ["On my way", "I'm outside", "Save me a spot", "Call you after"],
+      setQuickReplies: (replies) => set({ quickReplies: replies.slice(0, 8).map((r) => r.slice(0, 500)) }),
       set: (key, value) => set({ [key]: value } as Partial<WatchFeatures>),
     }),
     {

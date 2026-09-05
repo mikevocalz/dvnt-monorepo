@@ -6,8 +6,12 @@ import SwiftUI
 struct DVNTWatchApp: App {
     @StateObject private var store: TicketStore
     @StateObject private var broadcastStore: BroadcastStore
-    @StateObject private var callStore: CallStore
-    @StateObject private var dmStore: DMStore
+    @State private var callStore: CallStore
+    @State private var dmStore: DMStore
+    @State private var eventStore: EventStore
+    @State private var callDirectoryStore: CallDirectoryStore
+    @State private var venueStore: VenueActionStore
+    @State private var activeCallStore: ActiveCallStore
     @StateObject private var doorStore: DoorStore
     @StateObject private var connectivity: WatchConnectivityManager
 
@@ -16,11 +20,19 @@ struct DVNTWatchApp: App {
         let broadcastStore = BroadcastStore()
         let callStore = CallStore()
         let dmStore = DMStore()
+        let eventStore = EventStore()
+        let callDirectoryStore = CallDirectoryStore()
+        let venueStore = VenueActionStore()
+        let activeCallStore = ActiveCallStore()
         let doorStore = DoorStore()
         _store = StateObject(wrappedValue: store)
         _broadcastStore = StateObject(wrappedValue: broadcastStore)
-        _callStore = StateObject(wrappedValue: callStore)
-        _dmStore = StateObject(wrappedValue: dmStore)
+        _callStore = State(initialValue: callStore)
+        _dmStore = State(initialValue: dmStore)
+        _eventStore = State(initialValue: eventStore)
+        _callDirectoryStore = State(initialValue: callDirectoryStore)
+        _venueStore = State(initialValue: venueStore)
+        _activeCallStore = State(initialValue: activeCallStore)
         _doorStore = StateObject(wrappedValue: doorStore)
         _connectivity = StateObject(
             wrappedValue: WatchConnectivityManager(
@@ -28,6 +40,10 @@ struct DVNTWatchApp: App {
                 broadcastStore: broadcastStore,
                 callStore: callStore,
                 dmStore: dmStore,
+                eventStore: eventStore,
+                callDirectoryStore: callDirectoryStore,
+                venueStore: venueStore,
+                activeCallStore: activeCallStore,
                 doorStore: doorStore
             )
         )
@@ -36,10 +52,15 @@ struct DVNTWatchApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .watchDeepLinks()
                 .environmentObject(store)
                 .environmentObject(broadcastStore)
-                .environmentObject(callStore)
-                .environmentObject(dmStore)
+                .environment(callStore)
+                .environment(dmStore)
+                .environment(eventStore)
+                .environment(callDirectoryStore)
+                .environment(venueStore)
+                .environment(activeCallStore)
                 .environmentObject(doorStore)
                 .environmentObject(connectivity)
                 .preferredColorScheme(.dark)
@@ -62,11 +83,16 @@ struct DVNTWatchApp: App {
 /// freely. `TicketStore.init` loads the App Group cache synchronously, so there
 /// was never anything to wait for. The mark still sits in the navigation title.
 private struct RootView: View {
-    @EnvironmentObject private var callStore: CallStore
+    @Environment(CallStore.self) private var callStore
+    @Environment(ActiveCallStore.self) private var activeCallStore
 
     var body: some View {
         ZStack {
             RootTabs()
+
+            if activeCallStore.call != nil && activeCallStore.presented && callStore.incoming == nil {
+                ActiveCallView().zIndex(0.5)
+            }
 
             // A ringing call covers everything, including a presented pass. It
             // is the only thing on this watch that outranks a ticket, and it

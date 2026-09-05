@@ -4,6 +4,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { provisionCallMedia } from "../_shared/call-media.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
@@ -116,9 +117,6 @@ Deno.serve(async (req) => {
     const fishjamAppId = Deno.env.get("FISHJAM_APP_ID")!;
     const fishjamApiKey = Deno.env.get("FISHJAM_API_KEY")!;
     const fishjamBaseUrl = `https://fishjam.io/api/v1/connect/${fishjamAppId}`;
-    console.log(
-      `[video_join_room] Fishjam config: appId=${fishjamAppId}, apiKey=${fishjamApiKey?.slice(0, 8)}..., baseUrl=${fishjamBaseUrl}`,
-    );
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -149,7 +147,8 @@ Deno.serve(async (req) => {
       return errorResponse("validation_error", parsed.error.errors[0].message);
     }
 
-    const { roomId, anonymous, platform } = parsed.data;
+    const { roomId, platform } = parsed.data;
+    let { anonymous } = parsed.data;
     const isWebClient = platform === "web";
 
     // Rate limit check
@@ -189,6 +188,9 @@ Deno.serve(async (req) => {
       return errorResponse("conflict", "Room is no longer open");
     }
 
+    const isCall = room.room_kind === "call";
+    if (isCall) anonymous = false;
+
     // ── App-only gate ────────────────────────────────────────────────────────
     // The ONLY enforced capture protection. Everything the web room does
     // (blackout, watermark, shortcut blocking) is deterrence; here we simply
@@ -199,7 +201,7 @@ Deno.serve(async (req) => {
     // roster. `app_only` may be absent on a database that has not run
     // 20260805120000_video_rooms_app_only.sql yet — `=== true` treats that as
     // "not app-only" rather than throwing.
-    if (room.app_only === true && isWebClient) {
+    if (!isCall && room.app_only === true && isWebClient) {
       console.log(
         `[video_join_room] Rejected web join to app-only room ${roomId}`,
       );
@@ -216,171 +218,235 @@ Deno.serve(async (req) => {
 
     const internalRoomId = room.id;
 
-    // Check if user is banned
-    const { data: isBanned } = await supabase.rpc("is_user_banned_from_room", {
-      p_user_id: userId,
-      p_room_id: internalRoomId,
-    });
-
-    if (isBanned) {
-      return errorResponse("forbidden", "You are banned from this room");
-    }
-
-    // Check existing membership before private access and capacity gates.
-    // Existing members can rejoin invite-only rooms after disconnects; banned
-    // users are still blocked below.
-    const { data: existingMember } = await supabase
-      .from("video_room_members")
-      .select("*")
-      .eq("room_id", internalRoomId)
-      .eq("user_id", userId)
-      .single();
-
-    if (existingMember?.status === "banned") {
-      return errorResponse("forbidden", "You are banned from this room");
-    }
-
-    if (!room.is_public) {
-      const isHostOrCoHost =
-        userId === room.created_by ||
-        existingMember?.role === "host" ||
-        existingMember?.role === "co-host";
-
-      const hasPriorAccess =
-        !!existingMember &&
-        existingMember.status !== "banned" &&
-        existingMember.status !== "kicked";
-
-      let hasInvite = false;
-      if (!isHostOrCoHost && !hasPriorAccess) {
-        const { data: invite } = await supabase
-          .from("video_room_invites")
-          .select("id")
-          .eq("room_id", internalRoomId)
-          .eq("user_id", userId)
-          .maybeSingle();
-        hasInvite = !!invite;
-      }
-
-      if (!isHostOrCoHost && !hasPriorAccess && !hasInvite) {
-        return errorResponse("forbidden", "This private Lynk is invite-only", {
-          reason: "invite_only",
+    let memberRole = "participant";
+    let anonLabel: string | null = null;
+    if (isCall) {
+      const result = await provisionCallMedia({
+        supabaseUrl,
+        serviceKey: supabaseServiceKey,
+        fishjamBaseUrl,
+        fishjamApiKey,
+        roomId,
+        userId,
+      });
+      if (!result.ok) {
+        const reason = result.reason;
+        const code = reason === "not_found"
+          ? "not_found"
+          : reason === "call_full" || reason === "call_ended" ||
+              reason === "call_join_pending"
+          ? "conflict"
+          : reason === "media_unavailable"
+          ? "internal_error"
+          : "forbidden";
+        const message = reason === "call_full"
+          ? "This call has four people"
+          : reason === "call_ended"
+          ? "This call has ended"
+          : reason === "call_join_pending"
+          ? "A call connection is in progress. Try again."
+          : reason === "media_unavailable"
+          ? "The call could not connect. Try again."
+          : reason === "not_found"
+          ? "Call not found"
+          : "You cannot join this call";
+        return errorResponse(code, message, {
+          reason,
+          ...(reason === "call_full"
+            ? { max: 4, current: result.current }
+            : {}),
         });
       }
-    }
-
-    // Session expiry — the duration twin of the capacity gate below. `ends_at`
-    // is written by video_create_room from the server-resolved plan; NULL means
-    // unlimited. Before this existed the free tier's 5 minutes lived only in the
-    // client's RoomTimer, so a client that did not run the countdown ran the
-    // room forever.
-    //
-    // Structured like `room_full` so the client can render an upgrade surface
-    // rather than a bare error, and reuse the flow it already has.
-    if (room.ends_at && new Date(room.ends_at) <= new Date()) {
-      return errorResponse("conflict", "This Lynk's session has ended", {
-        reason: "session_expired",
-        endsAt: room.ends_at,
-        isHost: userId === room.host_id,
+      return jsonResponse({
+        ok: true,
+        data: {
+          room: {
+            id: room.uuid,
+            internalId: room.id,
+            title: room.title,
+            appOnly: false,
+            endsAt: null,
+            fishjamRoomId: result.fishjamRoomId,
+          },
+          token: result.token,
+          peer: result.peer,
+          user: result.user,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
       });
-    }
+    } else {
+      // Check if user is banned
+      const { data: isBanned } = await supabase.rpc(
+        "is_user_banned_from_room",
+        {
+          p_user_id: userId,
+          p_room_id: internalRoomId,
+        },
+      );
 
-    // Check participant count
-    const { data: participantCount } = await supabase.rpc(
-      "count_active_participants",
-      {
-        p_room_id: internalRoomId,
-      },
-    );
-
-    if (participantCount >= room.max_participants) {
-      // Include structured capacity data so the client can render a
-      // rich "room is full" surface with the real counts + host context
-      // rather than a bare message. Client treats this as the source
-      // of truth for the capacity flow.
-      return errorResponse("conflict", "Room is full", {
-        reason: "room_full",
-        current: participantCount,
-        max: room.max_participants,
-        // Was the user requesting this join the host? Lets the client
-        // show an upgrade CTA for hosts vs a wait-notify UX for viewers.
-        isHost: userId === room.host_id,
-      });
-    }
-
-    let memberRole = "participant";
-
-    // Compute anon label if joining anonymously
-    let anonLabel: string | null = null;
-    if (anonymous) {
-      const { count } = await supabase
-        .from("video_room_members")
-        .select("id", { count: "exact", head: true })
-        .eq("room_id", internalRoomId)
-        .eq("is_anonymous", true);
-      anonLabel = `Anon ${(count ?? 0) + 1}`;
-      anonLabel = normalizeAnonLabel(existingMember?.anon_label) || anonLabel;
-    }
-
-    if (existingMember) {
-      if (existingMember.status === "active") {
-        // Already in room, just refresh token
-        memberRole = existingMember.role;
-        anonLabel = normalizeAnonLabel(existingMember.anon_label) || anonLabel;
-      } else if (existingMember.status === "banned") {
+      if (isBanned) {
         return errorResponse("forbidden", "You are banned from this room");
-      } else {
-        // Rejoin (was kicked or left)
-        const { error: updateError } = await supabase
+      }
+
+      // Check existing membership before private access and capacity gates.
+      // Existing members can rejoin invite-only rooms after disconnects; banned
+      // users are still blocked below.
+      const { data: existingMember } = await supabase
+        .from("video_room_members")
+        .select("*")
+        .eq("room_id", internalRoomId)
+        .eq("user_id", userId)
+        .single();
+
+      if (existingMember?.status === "banned") {
+        return errorResponse("forbidden", "You are banned from this room");
+      }
+
+      if (!room.is_public) {
+        const isHostOrCoHost = userId === room.created_by ||
+          existingMember?.role === "host" ||
+          existingMember?.role === "co-host";
+
+        const hasPriorAccess = !!existingMember &&
+          existingMember.status !== "banned" &&
+          existingMember.status !== "kicked";
+
+        let hasInvite = false;
+        if (!isHostOrCoHost && !hasPriorAccess) {
+          const { data: invite } = await supabase
+            .from("video_room_invites")
+            .select("id")
+            .eq("room_id", internalRoomId)
+            .eq("user_id", userId)
+            .maybeSingle();
+          hasInvite = !!invite;
+        }
+
+        if (!isHostOrCoHost && !hasPriorAccess && !hasInvite) {
+          return errorResponse(
+            "forbidden",
+            "This private Lynk is invite-only",
+            {
+              reason: "invite_only",
+            },
+          );
+        }
+      }
+
+      // Session expiry — the duration twin of the capacity gate below. `ends_at`
+      // is written by video_create_room from the server-resolved plan; NULL means
+      // unlimited. Before this existed the free tier's 5 minutes lived only in the
+      // client's RoomTimer, so a client that did not run the countdown ran the
+      // room forever.
+      //
+      // Structured like `room_full` so the client can render an upgrade surface
+      // rather than a bare error, and reuse the flow it already has.
+      if (room.ends_at && new Date(room.ends_at) <= new Date()) {
+        return errorResponse("conflict", "This Lynk's session has ended", {
+          reason: "session_expired",
+          endsAt: room.ends_at,
+          isHost: userId === room.host_id,
+        });
+      }
+
+      // Check participant count
+      const { data: participantCount } = await supabase.rpc(
+        "count_active_participants",
+        {
+          p_room_id: internalRoomId,
+        },
+      );
+
+      if (participantCount >= room.max_participants) {
+        // Include structured capacity data so the client can render a
+        // rich "room is full" surface with the real counts + host context
+        // rather than a bare message. Client treats this as the source
+        // of truth for the capacity flow.
+        return errorResponse("conflict", "Room is full", {
+          reason: "room_full",
+          current: participantCount,
+          max: room.max_participants,
+          // Was the user requesting this join the host? Lets the client
+          // show an upgrade CTA for hosts vs a wait-notify UX for viewers.
+          isHost: userId === room.host_id,
+        });
+      }
+
+      // Compute anon label if joining anonymously
+      if (anonymous) {
+        const { count } = await supabase
           .from("video_room_members")
-          .update({
+          .select("id", { count: "exact", head: true })
+          .eq("room_id", internalRoomId)
+          .eq("is_anonymous", true);
+        anonLabel = `Anon ${(count ?? 0) + 1}`;
+        anonLabel = normalizeAnonLabel(existingMember?.anon_label) || anonLabel;
+      }
+
+      if (existingMember) {
+        if (existingMember.status === "active") {
+          // Already in room, just refresh token
+          memberRole = existingMember.role;
+          anonLabel = normalizeAnonLabel(existingMember.anon_label) ||
+            anonLabel;
+        } else if (existingMember.status === "banned") {
+          return errorResponse("forbidden", "You are banned from this room");
+        } else {
+          // Rejoin (was kicked or left)
+          const { error: updateError } = await supabase
+            .from("video_room_members")
+            .update({
+              status: "active",
+              joined_at: new Date().toISOString(),
+              left_at: null,
+              hand_raised: false,
+              is_anonymous: anonymous,
+              anon_label: anonLabel,
+            })
+            .eq("room_id", internalRoomId)
+            .eq("user_id", userId);
+
+          if (updateError) {
+            console.error(
+              "[video_join_room] Rejoin error:",
+              updateError.message,
+            );
+            return errorResponse("internal_error", "Failed to rejoin room");
+          }
+          memberRole = existingMember.role;
+        }
+      } else {
+        // New member
+        const { error: insertError } = await supabase
+          .from("video_room_members")
+          .insert({
+            room_id: internalRoomId,
+            user_id: userId,
+            role: "participant",
             status: "active",
-            joined_at: new Date().toISOString(),
-            left_at: null,
             hand_raised: false,
             is_anonymous: anonymous,
             anon_label: anonLabel,
-          })
-          .eq("room_id", internalRoomId)
-          .eq("user_id", userId);
+          });
 
-        if (updateError) {
-          console.error("[video_join_room] Rejoin error:", updateError.message);
-          return errorResponse("internal_error", "Failed to rejoin room");
+        if (insertError) {
+          console.error("[video_join_room] Insert error:", insertError.message);
+          return errorResponse("internal_error", "Failed to join room");
         }
-        memberRole = existingMember.role;
       }
-    } else {
-      // New member
-      const { error: insertError } = await supabase
-        .from("video_room_members")
-        .insert({
-          room_id: internalRoomId,
-          user_id: userId,
-          role: "participant",
-          status: "active",
-          hand_raised: false,
-          is_anonymous: anonymous,
-          anon_label: anonLabel,
+
+      // Update participant count
+      await supabase
+        .rpc("count_active_participants", { p_room_id: internalRoomId })
+        .then(async ({ data: count }) => {
+          if (count !== null) {
+            await supabase
+              .from("video_rooms")
+              .update({ participant_count: count })
+              .eq("id", internalRoomId);
+          }
         });
-
-      if (insertError) {
-        console.error("[video_join_room] Insert error:", insertError.message);
-        return errorResponse("internal_error", "Failed to join room");
-      }
     }
-
-    // Update participant count
-    await supabase
-      .rpc("count_active_participants", { p_room_id: internalRoomId })
-      .then(async ({ data: count }) => {
-        if (count !== null) {
-          await supabase
-            .from("video_rooms")
-            .update({ participant_count: count })
-            .eq("id", internalRoomId);
-        }
-      });
 
     // Reuse existing Fishjam room if one exists; only create a new one if needed.
     // CRITICAL: Creating a new room on every join puts each participant in a
@@ -400,7 +466,7 @@ Deno.serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          maxPeers: room.max_participants,
+          maxPeers: isCall ? 4 : room.max_participants,
           videoCodec: "h264",
         }),
       });
@@ -413,7 +479,9 @@ Deno.serve(async (req) => {
           errText,
         );
         throw new Error(
-          `Fishjam room creation failed (${createRoomRes.status}): ${errText.slice(0, 200)}`,
+          `Fishjam room creation failed (${createRoomRes.status}): ${
+            errText.slice(0, 200)
+          }`,
         );
       }
 
@@ -465,33 +533,35 @@ Deno.serve(async (req) => {
         .select("username, avatar:avatar_id(url)")
         .eq("auth_id", userId)
         .single();
+      const avatar = Array.isArray(profile?.avatar)
+        ? profile.avatar[0]
+        : profile?.avatar;
       joinerProfile = {
         username: profile?.username ?? null,
         displayName: profile?.username ?? null,
-        avatar: profile?.avatar?.url ?? null,
+        avatar: avatar?.url ?? null,
       };
     }
 
-    const peerMetadata =
-      anonymous && anonLabel
-        ? {
-            userId,
-            username: anonLabel,
-            displayName: anonLabel,
-            avatar: null,
-            role: memberRole,
-            isAnonymous: true,
-            anonLabel,
-          }
-        : {
-            userId,
-            username: joinerProfile.username,
-            displayName: joinerProfile.displayName,
-            avatar: joinerProfile.avatar,
-            role: memberRole,
-            isAnonymous: false,
-            anonLabel: null,
-          };
+    const peerMetadata = anonymous && anonLabel
+      ? {
+        userId,
+        username: anonLabel,
+        displayName: anonLabel,
+        avatar: null,
+        role: memberRole,
+        isAnonymous: true,
+        anonLabel,
+      }
+      : {
+        userId,
+        username: joinerProfile.username,
+        displayName: joinerProfile.displayName,
+        avatar: joinerProfile.avatar,
+        role: memberRole,
+        isAnonymous: false,
+        anonLabel: null,
+      };
 
     const createFishjamPeer = (targetRoomId: string) =>
       fetch(`${fishjamBaseUrl}/room/${targetRoomId}/peer`, {
@@ -623,7 +693,9 @@ Deno.serve(async (req) => {
           id: room.uuid || room.id,
           internalId: room.id,
           title: room.title,
-          sweetSpicyMode: room.sweet_spicy_mode || "sweet",
+          ...(isCall
+            ? {}
+            : { sweetSpicyMode: room.sweet_spicy_mode || "sweet" }),
           // Exposed so a joined client can reflect the setting (e.g. a host
           // badge). The disclosure chip does NOT read it — that is driven by
           // live presence, and an app-only room simply never has a web peer.
@@ -632,7 +704,7 @@ Deno.serve(async (req) => {
           // RoomTimer counts down to THIS rather than deriving a limit from
           // created_at plus a constant it holds itself — same fact, one owner.
           // Distinct from `expiresAt` below, which is the Fishjam token's life.
-          endsAt: room.ends_at ?? null,
+          endsAt: isCall ? null : room.ends_at ?? null,
           fishjamRoomId,
         },
         token: fishjamToken,

@@ -35,6 +35,7 @@ import { useEventsTabVisibility } from "@dvnt/app/features/weatherfx";
 import { useLiveSurface } from "@dvnt/app/features/live-surface";
 import { useWatchTicketSync } from "@dvnt/app/features/watch/use-watch-ticket-sync";
 import { useWatchBroadcastSync } from "@dvnt/app/features/watch/use-watch-broadcast-sync";
+import { useWatchEvents, useWatchCalls } from "@dvnt/app/features/watch/use-watch-events";
 import { useWatchDMSync } from "@dvnt/app/features/watch/use-watch-dm-sync";
 import { TransitionStack as Stack } from "@dvnt/app/lib/navigation/transition-stack";
 import {
@@ -165,6 +166,8 @@ export default function ProtectedLayout() {
   // Conversation previews on the wrist + relay a reply typed there back through
   // the phone's own send path. Opt-in — off until the member turns it on.
   useWatchDMSync();
+  useWatchEvents();
+  useWatchCalls();
 
   const user = useAuthStore((s) => s.user);
 

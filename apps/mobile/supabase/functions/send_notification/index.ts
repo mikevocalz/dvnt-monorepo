@@ -1,3 +1,4 @@
+import { watchNotificationFields } from "../_shared/watch-notification.ts";
 /**
  * Send Push Notification Edge Function
  *
@@ -147,7 +148,7 @@ async function sendApnsVoipPush(
 
     if (response.ok) {
       console.log(
-        `[send_notification] APNs VoIP push sent to ${deviceToken.substring(0, 10)}...`,
+        "[send_notification] APNs VoIP push accepted",
       );
       return { ok: true };
     } else {
@@ -159,7 +160,7 @@ async function sendApnsVoipPush(
     }
   } catch (error) {
     console.error("[send_notification] APNs fetch error:", error);
-    return { ok: false, error: error.message };
+    return { ok: false, error: error instanceof Error ? error.message : "Notification failed" };
   }
 }
 
@@ -196,7 +197,9 @@ interface ExpoPushMessage {
   badge?: number;
   channelId?: string;
   priority?: "default" | "normal" | "high"; // For Android
-  categoryId?: string; // For iOS categories
+  categoryId?: string;
+  threadId?: string;
+  interruptionLevel?: "active" | "time-sensitive";
 }
 
 Deno.serve(async (req) => {
@@ -435,11 +438,11 @@ Deno.serve(async (req) => {
         to: t.token,
         title,
         body,
-        data: { ...data, type },
+        data: { ...data, type, recipientId: String(recipientId), issuedAt: Date.now() / 1000 },
         sound: "default",
         channelId: isCallNotification ? "calls" : "default",
         priority: isCallNotification ? "high" : "default",
-        categoryId: isCallNotification ? "CALL" : undefined,
+        ...watchNotificationFields(type, data),
       }));
 
       const expoResponse = await fetch(EXPO_PUSH_URL, {
@@ -482,7 +485,7 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error("[send_notification] Error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Notification failed" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

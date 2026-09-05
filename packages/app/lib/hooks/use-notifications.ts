@@ -1,10 +1,12 @@
+import { create } from "zustand";
+import { registerWatchNotificationCategories, handleWatchNotificationAction, restoreWatchNotificationActions } from "@dvnt/app/features/watch/watch-notification-actions";
 /**
  * Push Notifications Hook
  *
  * Handles push notification registration and listeners
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
@@ -31,11 +33,12 @@ if (Platform.OS !== "web") {
   }
 }
 
+const useNotificationState = create<{ expoPushToken: string | null; notification: unknown | null }>(() => ({ expoPushToken: null, notification: null }));
+
 export function useNotifications() {
   // Skip on web platform
   const isWeb = Platform.OS === "web";
-  const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-  const [notification, setNotification] = useState<unknown | null>(null);
+  const { expoPushToken, notification } = useNotificationState();
   const notificationListener = useRef<{ remove: () => void } | null>(null);
   const responseListener = useRef<{ remove: () => void } | null>(null);
   const router = useRouter();
@@ -46,7 +49,7 @@ export function useNotifications() {
     const token = await registerForPushNotificationsAsync();
 
     if (token) {
-      setExpoPushToken(token);
+      useNotificationState.setState({ expoPushToken: token });
 
       // Save token to backend if user is authenticated
       if (isAuthenticated && user?.id) {
@@ -66,12 +69,13 @@ export function useNotifications() {
       registerPushNotifications();
 
       if (!Notifications) return;
+      void registerWatchNotificationCategories(Notifications).catch(() => {});
 
       // Listen for incoming notifications (app in foreground)
       notificationListener.current =
         Notifications.addNotificationReceivedListener(async (notification) => {
-          console.log("[Notifications] Received:", notification);
-          setNotification(notification);
+
+          useNotificationState.setState({ notification });
 
           // Handle notification based on type
           try {
@@ -175,9 +179,9 @@ export function useNotifications() {
 
       // Listen for notification responses (user tapped notification)
       responseListener.current =
-        Notifications.addNotificationResponseReceivedListener((response) => {
+        Notifications.addNotificationResponseReceivedListener(async (response) => {
           try {
-            console.log("[Notifications] Response:", response);
+            if (await handleWatchNotificationAction(response)) return;
 
             // Guard: If _layout.tsx already queued a route for this cold-start
             // notification, skip navigation here to prevent double push.
@@ -220,6 +224,15 @@ export function useNotifications() {
       // Don't crash the app if notifications fail
     }
   }, [isWeb, registerPushNotifications, router]);
+
+  useEffect(() => {
+    if (!Notifications || !user?.id) return;
+    const api = Notifications;
+    restoreWatchNotificationActions();
+    void api.getLastNotificationResponseAsync().then(async (response) => {
+      if (response && await handleWatchNotificationAction(response)) await api.clearLastNotificationResponseAsync();
+    }).catch(() => {});
+  }, [user?.id]);
 
   // Re-register when user logs in
   useEffect(() => {

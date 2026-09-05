@@ -1,19 +1,7 @@
-/**
- * Projects the member's existing conversation list into the compact DTO the
- * Apple Watch consumes. Mirrors `apps/mobile/targets/watch/DMModels.swift`
- * (WatchDM / WatchDMEnvelope) — keep the two in lockstep.
- *
- * The watch is a presenter: these rows come from the SAME `useConversations`
- * query the Messages tab renders. No new network, no new server code, and no
- * DVNT credentials on the wrist — a reply typed there is relayed back to the
- * phone, which performs the actual send.
- *
- * ponytail: previews only, no thread history. The wrist job is "who wants me,
- * and can I answer in one line" — add a messages array to the DTO when the
- * wrist genuinely needs context before replying.
- */
-
 import type { Conversation } from "@dvnt/app/lib/api/messages";
+import { epochSeconds } from "./contracts/v2";
+import { watchAttachments } from "./watch-media";
+import type { WatchAttachment } from "./contracts/v2";
 import { watchRendition, WATCH_RENDITION } from "./watch-rendition";
 
 export interface WatchDMDTO {
@@ -36,9 +24,17 @@ export interface WatchDMDTO {
   timestamp: number;
   unread: boolean;
   isGroup: boolean;
+  lastMessageId?: string;
+  category?: "inbox" | "request" | "spam";
+  attachments?: WatchAttachment[];
 }
 
 export interface WatchDMEnvelope {
+  status?: "ready" | "error";
+  error?: string;
+  protocol?: 2;
+  accountGen?: string;
+  quickReplies?: string[];
   dms: WatchDMDTO[];
   /** Epoch seconds, stamped by the phone so the watch shows honest staleness. */
   syncedAt: number;
@@ -48,12 +44,6 @@ export interface WatchDMEnvelope {
 export interface WatchDMReply {
   conversationId: string;
   text: string;
-}
-
-function toEpochSeconds(value?: string): number {
-  if (!value) return 0;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
 }
 
 export function toWatchDM(c: Conversation): WatchDMDTO {
@@ -68,7 +58,10 @@ export function toWatchDM(c: Conversation): WatchDMDTO {
       ? undefined
       : watchRendition(c.user?.avatar, WATCH_RENDITION.avatar),
     preview: c.lastMessage ?? "",
-    timestamp: toEpochSeconds(c.timestamp),
+    timestamp: epochSeconds(c.createdAt ?? c.timestamp),
+    lastMessageId: c.lastMessageId,
+    category: c.category,
+    attachments: watchAttachments(c.lastMessageId ?? String(c.id), c.lastMessageMetadata),
     unread: !!c.unread,
     isGroup,
   };
@@ -91,11 +84,9 @@ export function buildDMEnvelope(
   return { dms, syncedAt: Math.floor(Date.now() / 1000) };
 }
 
-/** Stable signature to skip redundant pushes (id + unread + preview). */
+/** All rendered fields participate; sync time alone does not trigger a push. */
 export function dmSignature(env: WatchDMEnvelope): string {
-  return env.dms
-    .map((d) => `${d.id}:${d.unread ? 1 : 0}:${d.preview}`)
-    .join("|");
+  return JSON.stringify([env.accountGen, env.status, env.error, env.quickReplies, env.dms]);
 }
 
 /**

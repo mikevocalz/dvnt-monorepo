@@ -36,7 +36,7 @@ enum DVNT {
     /// than `textFaint`" and each invented its own 0.5–0.55, which is precisely
     /// how a palette drifts.
     static let textMuted = Color.white.opacity(0.55)
-    static let textFaint = Color.white.opacity(0.40)
+    static let textFaint = Color.white.opacity(0.50)
 
     /// Primary accent. Cyan is stop 1 and the design system's "primary accent".
     static let accent = cyan
@@ -116,24 +116,24 @@ extension DVNT {
         /// name; UIAppFonts takes the filename. Swapping them fails silently to
         /// the system face — verify with the name table, never by eye.
         static func stamp(_ size: CGFloat = 13) -> Font {
-            .custom("RepublicaMinor-BoldItalic", size: size)
+            .custom("RepublicaMinor-BoldItalic", size: size, relativeTo: .caption)
         }
 
         /// Screen and row titles. Floor is 18pt.
         static func title(_ size: CGFloat = 18) -> Font {
-            .custom("SpaceGrotesk-Bold", size: max(size, 18))
+            .custom("SpaceGrotesk-Bold", size: max(size, 18), relativeTo: .headline)
         }
 
         /// Body copy: host messages, event names on the pass. Floor is 16pt.
         static func body(_ size: CGFloat = 16) -> Font {
-            .custom("Inter-Regular", size: max(size, 16))
+            .custom("Inter-Regular", size: max(size, 16), relativeTo: .body)
         }
 
         /// Secondary metadata — dates, venue, staleness. Deliberately the one
         /// register allowed under the body floor, so use it only for text the
         /// user never has to read to act.
         static func caption(_ size: CGFloat = 14) -> Font {
-            .custom("Inter-Regular", size: size)
+            .custom("Inter-Regular", size: size, relativeTo: .caption)
         }
 
         /// Tracking for stamped labels. Applied via `.tracking(DVNT.TypeScale.stampTracking)`.
@@ -153,7 +153,7 @@ extension DVNT {
         /// Countdowns and counts. Monospaced digits so a ticking value does not
         /// reflow the row it sits in — pair with `.contentTransition(.numericText())`.
         static func numeral(_ size: CGFloat = 28) -> Font {
-            .custom("SpaceMono-Regular", size: size).monospacedDigit()
+            .custom("SpaceMono-Regular", size: size, relativeTo: .title2).monospacedDigit()
         }
 
         /// A numeral that is *signage* rather than content — the door count, a
@@ -165,7 +165,7 @@ extension DVNT {
         /// `.width(.condensed)` and quietly restyle the one screen a host stares
         /// at all night.
         static func numeralStamp(_ size: CGFloat = 34) -> Font {
-            .custom("SpaceMono-Regular", size: size).monospacedDigit()
+            .custom("SpaceMono-Regular", size: size, relativeTo: .title2).monospacedDigit()
         }
 
         /// SF Symbol sizing. Icons were the one register still set with raw

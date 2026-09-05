@@ -55,6 +55,8 @@ export interface WatchBroadcastDTO {
 }
 
 export interface WatchBroadcastEnvelope {
+  protocol?: 2;
+  accountGen?: string;
   broadcasts: WatchBroadcastDTO[];
   /** Epoch seconds, stamped by the phone so the watch shows honest staleness. */
   syncedAt: number;

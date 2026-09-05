@@ -1,3 +1,5 @@
+import { useWatchSettingsStore } from "./watch-settings-store";
+import { useWatchSessionStore } from "./watch-session-store";
 /**
  * Keeps the Apple Watch in sync with the signed-in member's tickets.
  *
@@ -25,28 +27,34 @@ export function useWatchTicketSync(): void {
   // The wrist gets that resolved object projected — it does no resolving itself.
   const { entitlements, isLoading: entitlementsLoading } = useEntitlements();
   const viewerId = useAuthStore((s) => s.user?.id ?? null);
+  const enabled = useWatchSettingsStore((s) => s.enabled && s.tickets);
   const lastSig = useRef<string | null>(null);
   const lastEnv = useRef<WatchTicketEnvelope | null>(null);
+  const owner = useRef(viewerId);
+  useEffect(() => { owner.current = viewerId; lastEnv.current = null; lastSig.current = null; }, [viewerId]);
 
   // Answer the watch's on-demand "requestTickets" with the freshest envelope.
   useEffect(() => {
-    if (Platform.OS !== "ios") return;
-    return registerWatchRequestHandler({ tickets: () => lastEnv.current });
+    if (Platform.OS === "web") return;
+    return registerWatchRequestHandler({ tickets: () => owner.current === useAuthStore.getState().user?.id ? lastEnv.current : null });
   }, []);
 
   // Push whenever the meaningful contents change.
   useEffect(() => {
-    if (Platform.OS !== "ios" || !data) return;
-    const env = buildWatchEnvelope(data, {
+    if (!enabled) { lastSig.current = null; return; }
+    if (Platform.OS === "web" || !data || !viewerId) return;
+    const env = buildWatchEnvelope(data.filter((ticket) => ticket.user_id === viewerId), {
       // Withhold rather than send Free while the query is in flight: a paying
       // VIP must never see their perks blink off on the wrist mid-refresh.
       entitlements: entitlementsLoading ? undefined : entitlements,
       viewerId,
     });
+    env.protocol = 2;
+    env.accountGen = useWatchSessionStore.getState().selectAccount(viewerId);
     const sig = envelopeSignature(env);
     lastEnv.current = env;
     if (sig === lastSig.current) return;
     lastSig.current = sig;
     void syncTicketsToWatch(env);
-  }, [data, entitlements, entitlementsLoading, viewerId]);
+  }, [data, entitlements, entitlementsLoading, viewerId, enabled]);
 }

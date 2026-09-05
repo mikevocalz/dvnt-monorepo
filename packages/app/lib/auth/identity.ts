@@ -26,6 +26,26 @@ import { logAuth } from "./auth-logger";
 let cachedUserRow: UserRow | null = null;
 let cachedUserRowExpiry = 0;
 const CACHE_TTL_MS = 60000; // 1 minute
+let identityEpoch = 0;
+let latestRowRequest = 0;
+function storeOwner(): string | null {
+  const user = useAuthStore.getState().user;
+  return user?.id ? JSON.stringify([user.id, (user as any).authId ?? null]) : null;
+}
+let activeOwner = storeOwner();
+let cachedOwner: string | null = null;
+// Invalidate synchronously, including A -> B -> A while an old lookup is pending.
+useAuthStore.subscribe(() => {
+  const owner = storeOwner();
+  if (owner !== activeOwner) {
+    activeOwner = owner;
+    clearUserRowCache();
+  }
+});
+function ownedCachedRow(): UserRow | null {
+  const owner = storeOwner();
+  return owner && owner === cachedOwner && Date.now() < cachedUserRowExpiry ? cachedUserRow : null;
+}
 
 /**
  * Get the cached integer user ID synchronously.
@@ -33,7 +53,7 @@ const CACHE_TTL_MS = 60000; // 1 minute
  * Returns null if the cache hasn't been populated yet.
  */
 export function getCachedUserIdInt(): number | null {
-  return cachedUserRow?.id ?? null;
+  return ownedCachedRow()?.id ?? null;
 }
 
 export interface UserRow {
@@ -166,13 +186,13 @@ export function getAuthIdFromStore(): string | null {
 export async function getCurrentUserRow(
   forceRefresh = false,
 ): Promise<UserRow | null> {
-  // Check cache first
-  if (!forceRefresh && cachedUserRow && Date.now() < cachedUserRowExpiry) {
-    return cachedUserRow;
-  }
-
   const user = useAuthStore.getState().user;
-  if (!user) return null;
+  const owner = storeOwner();
+  if (!user || !owner) return null;
+  const cached = ownedCachedRow();
+  if (!forceRefresh && cached) return cached;
+  const epoch = identityEpoch;
+  const request = ++latestRowRequest;
 
   try {
     const isNumeric = /^\d+$/.test(user.id);
@@ -223,9 +243,15 @@ export async function getCurrentUserRow(
       postsCount: (data[DB.users.postsCount] as number) || 0,
     };
 
-    // Update cache
-    cachedUserRow = userRow;
-    cachedUserRowExpiry = Date.now() + CACHE_TTL_MS;
+    // A completed lookup cannot expose the previous account or overwrite a newer lookup.
+    if (epoch !== identityEpoch || owner !== storeOwner()) return null;
+    if ((isNumeric && String(userRow.id) !== user.id) || (!isNumeric && userRow.authId !== user.id)) return null;
+    if ((user as any).authId && (user as any).authId !== userRow.authId) return null;
+    if (request === latestRowRequest) {
+      cachedUserRow = userRow;
+      cachedOwner = owner;
+      cachedUserRowExpiry = Date.now() + CACHE_TTL_MS;
+    }
 
     return userRow;
   } catch (error) {
@@ -270,7 +296,7 @@ export async function getCurrentUserId(): Promise<number | null> {
  */
 export function getCurrentUserIdSync(): number | null {
   const user = useAuthStore.getState().user;
-  if (!user) return getCachedUserIdInt();
+  if (!user) return null;
 
   const isNumeric = /^\d+$/.test(user.id);
   if (!isNumeric) {
@@ -287,6 +313,8 @@ export function getCurrentUserIdSync(): number | null {
  * Call this on logout or when user data changes.
  */
 export function clearUserRowCache(): void {
+  identityEpoch += 1;
+  cachedOwner = null;
   cachedUserRow = null;
   cachedUserRowExpiry = 0;
 }
@@ -296,8 +324,10 @@ export function clearUserRowCache(): void {
  * Call this after profile updates to keep cache in sync.
  */
 export function updateUserRowCache(updates: Partial<UserRow>): void {
-  if (cachedUserRow) {
-    cachedUserRow = { ...cachedUserRow, ...updates };
+  const current = ownedCachedRow();
+  if (current) {
+    // Profile edits cannot change which account owns this cache.
+    cachedUserRow = { ...current, ...updates, id: current.id, authId: current.authId };
     cachedUserRowExpiry = Date.now() + CACHE_TTL_MS;
   }
 }

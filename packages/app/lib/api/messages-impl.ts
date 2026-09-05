@@ -1,3 +1,6 @@
+import type { Conversation } from "./messages";
+import type { ThreadCursor, ThreadPage } from "./messages";
+import { threadPageBounds, threadPageFromRows } from "./thread-pagination";
 import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import { partitionConversationsByFollowState } from "@dvnt/app/lib/messages/conversation-buckets";
@@ -70,7 +73,9 @@ export const messagesApi = {
    * Old approach: N×4 sequential DB queries per conversation = slow pull-to-refresh.
    * New approach: 4 parallel queries across ALL conversations at once.
    */
-  async getConversations() {
+  async getConversations(input: unknown = {}): Promise<Conversation[]> {
+    const options = { throwOnError: !!input && typeof input === "object" &&
+      (input as { throwOnError?: boolean }).throwOnError === true };
     try {
       console.log("[Messages] getConversations");
 
@@ -79,7 +84,10 @@ export const messagesApi = {
         getCurrentUserAuthId(),
         resolveVisitorIdInt(),
       ]);
-      if (!authId) return [];
+      if (!authId || !visitorIntId) {
+        if (options.throwOnError) throw new Error("Sign in to load messages");
+        return [];
+      }
 
       // Step 2: Get all conversation IDs the user belongs to (1 query)
       const { data: relsData, error: relsError } = await supabase
@@ -109,10 +117,11 @@ export const messagesApi = {
           supabase
             .from(DB.messages.table)
             .select(
-              `${DB.messages.conversationId}, ${DB.messages.content}, ${DB.messages.createdAt}`,
+              `${DB.messages.conversationId}, ${DB.messages.id}, ${DB.messages.senderId}, ${DB.messages.metadata}, ${DB.messages.content}, ${DB.messages.createdAt}`,
             )
             .in(DB.messages.conversationId, convIds)
-            .order(DB.messages.createdAt, { ascending: false }),
+            .order(DB.messages.createdAt, { ascending: false })
+            .order(DB.messages.id, { ascending: false }),
 
           // Other participants across all conversations
           supabase
@@ -147,16 +156,25 @@ export const messagesApi = {
             : Promise.resolve({ data: [] as any[] }),
         ]);
 
+      if (options.throwOnError) {
+        for (const result of [lastMsgsResult, otherParticipantsResult, incomingMsgsResult, readStatesResult]) {
+          if ("error" in result && result.error) throw result.error;
+        }
+      }
+
       // Build lookup maps from batch results
       // Last message per conversation (first occurrence = most recent due to DESC order)
       const lastMsgMap = new Map<
         number,
-        { content: string; createdAt: string }
+        { content: string; createdAt: string; id: string; senderId: string; metadata: Record<string, unknown> | null }
       >();
       for (const msg of lastMsgsResult.data || []) {
         const cid = msg[DB.messages.conversationId];
         if (!lastMsgMap.has(cid)) {
           lastMsgMap.set(cid, {
+            id: String(msg[DB.messages.id]),
+            senderId: String(msg[DB.messages.senderId]),
+            metadata: msg[DB.messages.metadata] || null,
             content: msg[DB.messages.content] || "",
             createdAt: msg[DB.messages.createdAt] || "",
           });
@@ -209,12 +227,13 @@ export const messagesApi = {
       const otherAuthIds = [...allUniqueAuthIds];
       let usersByAuthId = new Map<string, any>();
       if (otherAuthIds.length > 0) {
-        const { data: usersData } = await supabase
+        const { data: usersData, error: usersError } = await supabase
           .from(DB.users.table)
           .select(
             `${DB.users.id}, ${DB.users.authId}, ${DB.users.username}, avatar:${DB.users.avatarId}(url)`,
           )
           .in(DB.users.authId, otherAuthIds);
+        if (options.throwOnError && usersError) throw usersError;
         for (const u of usersData || []) {
           usersByAuthId.set(u[DB.users.authId], u);
         }
@@ -280,6 +299,10 @@ export const messagesApi = {
             },
             lastMessage: lastMsg.content,
             timestamp: formatTimeAgo(rawTs),
+            createdAt: rawTs,
+            lastMessageId: lastMsg.id,
+            lastSenderId: lastMsg.senderId,
+            lastMessageMetadata: lastMsg.metadata,
             unread: unreadConvIds.has(convId),
             isGroup,
             groupName,
@@ -313,9 +336,26 @@ export const messagesApi = {
         return tB - tA;
       });
 
-      return conversations.map(({ _rawTs, ...rest }: any) => rest);
+      const summaries = conversations.map(({ _rawTs, ...rest }: any) => rest);
+      if (!options.throwOnError) return summaries;
+      const [following, blocks] = await Promise.all([
+        this.getFollowingState(),
+        supabase.from("blocks").select("blocker_id,blocked_id")
+          .or(`blocker_id.eq.${visitorIntId},blocked_id.eq.${visitorIntId}`),
+      ]);
+      if (!following.isAuthoritative) throw new Error("Could not verify message requests");
+      if (blocks.error) throw blocks.error;
+      const blocked = new Set((blocks.data || []).map((row: any) =>
+        String(Number(row.blocker_id) === visitorIntId ? row.blocked_id : row.blocker_id)));
+      const visible = summaries.filter((row: any) => row.isGroup || !blocked.has(row.user.id));
+      const buckets = partitionConversationsByFollowState(visible, following.ids);
+      return [
+        ...buckets.primary.map((row: any) => ({ ...row, category: "inbox" as const })),
+        ...buckets.requests.map((row: any) => ({ ...row, category: "request" as const })),
+      ].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
     } catch (error) {
       console.error("[Messages] getConversations error:", error);
+      if (options.throwOnError) throw error;
       return [];
     }
   },
@@ -462,6 +502,31 @@ export const messagesApi = {
     }
   },
 
+  async getThreadPage(
+    conversationId: string,
+    options: { limit?: number; olderCursor?: ThreadCursor } = {},
+  ): Promise<ThreadPage> {
+    const { limit, filter } = threadPageBounds(conversationId, options);
+    const [visitorId, authId] = await Promise.all([resolveVisitorIdInt(), getCurrentUserAuthId()]);
+    if (!visitorId || !authId) throw new Error("Sign in to load messages");
+    const membership = await supabase.from(DB.conversationsRels.table)
+      .select(DB.conversationsRels.parentId)
+      .eq(DB.conversationsRels.parentId, conversationId)
+      .eq(DB.conversationsRels.usersId, authId).maybeSingle();
+    if (membership.error) throw membership.error;
+    if (!membership.data) throw new Error("This conversation is no longer available");
+    let query = supabase.from(DB.messages.table)
+      .select("id,content,sender_id,metadata,created_at,read_at")
+      .eq(DB.messages.conversationId, conversationId)
+      .order(DB.messages.createdAt, { ascending: false })
+      .order(DB.messages.id, { ascending: false })
+      .limit(limit + 1);
+    if (filter) query = query.or(filter);
+    const { data, error } = await query;
+    if (error) throw error;
+    return threadPageFromRows(conversationId, data || [], visitorId, limit, formatTimeAgo);
+  },
+
   /**
    * Send message via Edge Function
    */
@@ -470,6 +535,8 @@ export const messagesApi = {
     content: string;
     media?: Array<{ uri: string; type: "image" | "video" }>;
     metadata?: Record<string, unknown>;
+    operationId?: string;
+    expectedViewerId?: string;
   }) {
     try {
       console.log(
@@ -477,13 +544,16 @@ export const messagesApi = {
         data.conversationId,
       );
 
+      if (data.expectedViewerId && useAuthStore.getState().user?.id !== data.expectedViewerId) throw new Error("Account changed");
       const token = await requireBetterAuthToken();
+      if (data.expectedViewerId && useAuthStore.getState().user?.id !== data.expectedViewerId) throw new Error("Account changed");
       const conversationIdInt = parseInt(data.conversationId);
 
       const body: Record<string, unknown> = {
         conversationId: conversationIdInt,
         content: data.content,
       };
+      if (data.operationId) body.operationId = data.operationId;
       if (data.media && data.media.length > 0) {
         body.mediaItems = data.media;
         // Backwards compat: also set mediaUrl for single items
@@ -735,21 +805,11 @@ export const messagesApi = {
 
   /**
    * Create a group conversation
-   * Max 4 members including the creator
    */
   async createGroupConversation(participantIds: string[], groupName: string) {
     try {
       const myAuthId = await getCurrentUserAuthId();
       if (!myAuthId) throw new Error("Not authenticated");
-
-      // Validate max group size (4 members including creator)
-      const MAX_GROUP_MEMBERS = 4;
-      const totalMembers = participantIds.length + 1; // +1 for creator
-      if (totalMembers > MAX_GROUP_MEMBERS) {
-        throw new Error(
-          `Group chats can have max ${MAX_GROUP_MEMBERS} members`,
-        );
-      }
 
       // Look up auth_ids for participant integer IDs
       const { data: participants } = await supabase
@@ -801,10 +861,12 @@ export const messagesApi = {
   /**
    * Mark messages as read in a conversation
    */
-  async markAsRead(conversationId: string) {
+  async markAsRead(conversationId: string, expectedViewerId?: string) {
     try {
       const { requireBetterAuthToken } = await import("@dvnt/app/lib/auth/identity");
+      if (expectedViewerId && useAuthStore.getState().user?.id !== expectedViewerId) throw new Error("Account changed");
       const token = await requireBetterAuthToken();
+      if (expectedViewerId && useAuthStore.getState().user?.id !== expectedViewerId) throw new Error("Account changed");
 
       // Use edge function to bypass RLS — anon key cannot update messages table
       const { data, error } = await supabase.functions.invoke<MarkAsReadResponse>(
@@ -955,9 +1017,11 @@ export const messagesApi = {
    * React to a message with an emoji (toggle)
    * Stores reactions in the metadata JSONB column as an array
    */
-  async reactToMessage(messageId: string, emoji: string) {
+  async reactToMessage(messageId: string, emoji: string, options: { desiredPresent?: boolean; expectedViewerId?: string } = {}) {
     try {
+      if (options.expectedViewerId && useAuthStore.getState().user?.id !== options.expectedViewerId) throw new Error("Account changed");
       const token = await requireBetterAuthToken();
+      if (options.expectedViewerId && useAuthStore.getState().user?.id !== options.expectedViewerId) throw new Error("Account changed");
 
       // Use Edge Function to bypass RLS (messages table RLS checks auth.uid()
       // which is null for Better Auth sessions — direct updates silently fail)
@@ -966,7 +1030,7 @@ export const messagesApi = {
         data?: { reactions: any[]; toggled: string };
         error?: { code: string; message: string };
       }>("react-message", {
-        body: { messageId: parseInt(messageId), emoji },
+        body: { messageId: parseInt(messageId), emoji, ...(options.desiredPresent === undefined ? {} : { desiredPresent: options.desiredPresent }) },
         headers: { Authorization: `Bearer ${token}` },
       });
 

@@ -168,9 +168,8 @@ export function routeFromNotification(
     }
 
     case "call": {
-      if (data.roomId) {
-        return `/(protected)/call/${data.roomId}`;
-      }
+      // NotificationListener validates a fresh recipient-bound ringing signal.
+      // Opening a notification is not an answer or permission to join a room.
       return null;
     }
 

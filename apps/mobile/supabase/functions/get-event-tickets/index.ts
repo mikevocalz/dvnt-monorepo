@@ -141,6 +141,8 @@ Deno.serve(async (req: Request) => {
     let body: {
       event_id?: string | number;
       offline?: boolean;
+      /** Aggregate-only watch projection; no roster/QR/PII returned. */
+      summary?: boolean;
       page?: number;
       pageSize?: number;
       status?: string;
@@ -191,6 +193,20 @@ Deno.serve(async (req: Request) => {
     }
     if (!effectiveRole) {
       return errorResponse("Not your event", 403);
+    }
+
+    if (body.summary === true) {
+      // The SQL function repeats authorization and reads all counts in one
+      // snapshot, avoiding pagination truncation and cross-query drift.
+      const { data: summary, error: summaryError } = await supabase.rpc("watch_door_summary", {
+        p_event_id: eventIdNum, p_auth_id: authId,
+      });
+      if (summaryError) {
+        console.error("[get-event-tickets] aggregate query failed");
+        return errorResponse("Door counts unavailable", 500);
+      }
+      if (!summary?.ok) return jsonResponse(summary ?? { ok: false, code: "unavailable" }, summary?.code === "forbidden" ? 403 : summary?.code === "not_found" ? 404 : 409);
+      return jsonResponse(summary);
     }
 
     // Offline tokens variant — minimal payload, active tickets only.

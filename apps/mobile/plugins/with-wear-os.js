@@ -25,6 +25,7 @@
 
 const {
   withDangerousMod,
+  withAndroidManifest,
   withAppBuildGradle,
   withMainApplication,
   withProjectBuildGradle,
@@ -200,7 +201,28 @@ function withComposeCompilerClasspath(config) {
   });
 }
 
+function withWearListener(config) {
+  return withAndroidManifest(config, (config) => {
+    const app = config.modResults.manifest.application?.[0];
+    if (!app) throw new Error("Missing application for Wear listener");
+    app.service ??= [];
+    const name = "com.dvnt.app.PhoneWearListenerService";
+    const service = {
+      $: { "android:name": name, "android:exported": "true" },
+      "intent-filter": [{
+        action: [{ $: { "android:name": "com.google.android.gms.wearable.MESSAGE_RECEIVED" } }],
+        data: [{ $: { "android:scheme": "wear", "android:host": "*", "android:pathPrefix": "/" } }],
+      }],
+    };
+    const index = app.service.findIndex((row) => row.$?.["android:name"] === name);
+    if (index >= 0) app.service[index] = service;
+    else app.service.push(service);
+    return config;
+  });
+}
+
 module.exports = function withWearOS(config) {
+  config = withWearListener(config);
   return withWearPackageRegistered(
     withComposeCompilerClasspath(withWearableDependency(withWearModuleSources(config)))
   );

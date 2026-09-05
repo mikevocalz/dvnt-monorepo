@@ -1,35 +1,51 @@
 import SwiftUI
 
-/// The hero tab — the single most important thing this watch can answer, which
-/// is "what am I doing tonight and how do I get in".
-///
-/// HIG W-NV-05: the primary action must be reachable within one tap of launch.
-/// `Now` is the first tab, and *Show ticket* is one tap from a cold raise —
-/// previously the same pass took a scroll through an undifferentiated list plus
-/// a tap plus a Crown page.
-///
-/// HIG W-GL-01/W-GL-06: one piece of information leads. Everything else on this
-/// screen is subordinate to the countdown and the pass.
+/// The launch page keeps the ticket action directly below its Door header.
+/// Ticket data can be cached; StalenessFooter reports its age independently.
 struct NowView: View {
+    @Environment(EventStore.self) private var events
     @EnvironmentObject private var store: TicketStore
     @EnvironmentObject private var doors: DoorStore
     @EnvironmentObject private var connectivity: WatchConnectivityManager
 
+    private var nextEvent: WatchEvent? {
+        events.events.filter { $0.status == "active" && $0.section() != "Past" && ($0.inviteStatus == "pending" || $0.rsvp == "going" || $0.rsvp == "interested" || $0.saved || $0.host || !$0.waitlist.isEmpty) }
+            .sorted { ($0.startsAt ?? .distantFuture) < ($1.startsAt ?? .distantFuture) }.first
+    }
+
     var body: some View {
-        NavigationStack {
+        GeometryReader { geometry in
             ScrollView {
-                VStack(alignment: .leading, spacing: DVNT.Space.roomy) {
+                VStack(alignment: .leading, spacing: DVNT.Space.base) {
+                    DoorHeader(
+                        art: store.focus.map { .event(imageURL: $0.imageURL, dominantHex: $0.dominantHex) } ?? nextEvent?.imageURL.map { .event(imageURL: $0, dominantHex: nil) } ?? .none,
+                        title: "Now",
+                        stub: store.nowStub,
+                        showsWordmark: true,
+                        minimumHeight: geometry.size.height * 0.4
+                    )
                     if let group = store.tonight.first {
                         HeroCard(group: group, isTonight: true)
                     } else if let next = store.upcoming.first {
                         HeroCard(group: next, isTonight: false)
+                    } else if let event = nextEvent {
+                        VStack(alignment: .leading, spacing: DVNT.Space.base) {
+                            Text(event.title).font(DVNT.TypeScale.title()).lineLimit(2)
+                            Text(event.stateLabel).font(DVNT.TypeScale.caption()).foregroundStyle(DVNT.textBright)
+                            if let start = event.startsAt {
+                                Text(start.formatted(.dateTime.weekday().month().day().hour().minute()))
+                                    .font(DVNT.TypeScale.body())
+                            }
+                            NavigationLink { EventDetailView(eventId: event.id) } label: {
+                                Label(event.inviteStatus == "pending" ? "View invitation" : "View event", systemImage: "calendar")
+                                    .font(DVNT.TypeScale.body()).frame(maxWidth: .infinity, minHeight: 44)
+                            }.buttonStyle(.borderedProminent).tint(DVNT.accent).foregroundStyle(.black)
+                            SnapshotFreshness(label: "Events", syncedAt: events.syncedAt)
+                        }.padding(DVNT.Space.roomy)
+                            .background(cardBackground(fill: DVNT.Surface.low, stroke: DVNT.hairline))
                     } else {
-                        NothingTonight(reachable: connectivity.isReachable)
+                        NothingTonight()
                     }
-
-                    // Host mode. Only while an event is actually running, and
-                    // deliberately below the member's own pass — a host is a
-                    // member first, and their ticket is what gets them inside.
                     if let d = doors.door {
                         NavigationLink {
                             DoorView()
@@ -40,20 +56,21 @@ struct NowView: View {
                         .padding(DVNT.Space.roomy)
                         .background(cardBackground(fill: DVNT.Surface.low, stroke: DVNT.hairline))
                     }
+                    StalenessFooter()
                 }
-                .padding(.horizontal, DVNT.Space.roomy)
+                .padding(.horizontal, DVNT.Space.base)
                 .padding(.bottom, DVNT.Space.loose)
             }
-            .navigationDestination(for: String.self) { id in
-                if let group = store.groups.first(where: { $0.id == id }) {
-                    TicketStackView(group: group)
-                }
-            }
-            // The wordmark moved into content above; a second one in the corner
-            // would be the same mark twice on one screen.
-            .navigationTitle("Now")
-            .containerBackground(DVNT.canvas, for: .navigation)
         }
+        .navigationDestination(for: String.self) { id in
+            if let group = store.groups.first(where: { $0.id == id }) {
+                TicketStackView(group: group)
+            } else {
+                ContentUnavailableView("Ticket unavailable", systemImage: "ticket")
+            }
+        }
+        .navigationTitle("Now")
+        .containerBackground(DVNT.canvas, for: .navigation)
         .onAppear { connectivity.requestSync() }
     }
 }
@@ -68,33 +85,11 @@ private struct HeroCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DVNT.Space.base) {
-            Text(isTonight ? "TONIGHT" : "NEXT UP")
-                .font(DVNT.TypeScale.stamp())
-                .tracking(DVNT.TypeScale.stampTracking)
-                .foregroundColor(DVNT.accent)
-
             Text(group.title)
-                .font(DVNT.TypeScale.title(20))
+                .font(DVNT.TypeScale.title())
                 .foregroundColor(.white)
-                .lineLimit(3)
+                .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-
-            if let date = group.date {
-                if isTonight {
-                    DoorsCountdown(doorsAt: date)
-                } else {
-                    Text(date.formatted(.dateTime.weekday(.wide).month().day()))
-                        .font(DVNT.TypeScale.title())
-                        .foregroundColor(.white)
-                }
-            }
-
-            if let loc = group.location, !loc.isEmpty {
-                Label(loc, systemImage: "mappin.and.ellipse")
-                    .font(DVNT.TypeScale.caption())
-                    .foregroundColor(DVNT.textDim)
-                    .lineLimit(2)
-            }
 
             if group.hasPresentable {
                 NavigationLink(value: group.id) {
@@ -117,9 +112,25 @@ private struct HeroCard: View {
                     .font(DVNT.TypeScale.caption())
                     .foregroundColor(DVNT.textFaint)
             }
+            if let date = group.date {
+                if isTonight {
+                    DoorsCountdown(doorsAt: date)
+                } else {
+                    Text(date.formatted(.dateTime.weekday(.wide).month().day()))
+                        .font(DVNT.TypeScale.title())
+                        .foregroundColor(.white)
+                }
+            }
+
+            if let loc = group.location, !loc.isEmpty {
+                Label(loc, systemImage: "mappin.and.ellipse")
+                    .font(DVNT.TypeScale.caption())
+                    .foregroundColor(DVNT.textDim)
+                    .lineLimit(2)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(DVNT.Space.roomy)
+        .padding(DVNT.Space.base)
         .background {
             ZStack {
                 // Full-bleed flyer behind the hero, at the larger hero radius.
@@ -151,17 +162,17 @@ private struct HeroCard: View {
 // MARK: - Empty
 
 private struct NothingTonight: View {
-    let reachable: Bool
+    @EnvironmentObject private var store: TicketStore
 
     var body: some View {
-        ContentUnavailableView {
-            Label("Nothing tonight", systemImage: "moon.stars")
+        VStack(alignment: .leading, spacing: DVNT.Space.base) {
+            Text(store.syncedAt == nil ? "Tickets not synced" : "No upcoming ticket")
                 .font(DVNT.TypeScale.title())
-        } description: {
-            Text(reachable
-                 ? "When you have a ticket, tonight's door shows up here."
-                 : "Open DVNT on your iPhone to sync.")
+            Text(store.syncedAt == nil
+                 ? "Open DVNT on your iPhone to sync your tickets."
+                 : "Swipe to Inbox for conversations and host notices.")
                 .font(DVNT.TypeScale.body())
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

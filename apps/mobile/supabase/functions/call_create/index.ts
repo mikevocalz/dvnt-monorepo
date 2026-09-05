@@ -2,17 +2,13 @@
  * Edge Function: call_create
  * WS-1: personal Calls, split from Sneaky Lynk rooms.
  *
- * Thin wrapper — resolves participantIds (integer users.id, matching
- * call_signals.caller_id/callee_id) to auth_id, then forwards to
- * video_create_room verbatim (same rate limits, subscription caps, invite
- * rows, notifications) so the two stacks share one implementation. Stamps
- * room_kind='call' on the created row afterward since video_create_room
- * doesn't know about the discriminator.
+ * Resolves DVNT participant IDs, then delegates creation with the call domain
+ * and its fixed four-person limit set before the room is inserted.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
-import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { CallCreateSchema } from "../_shared/call-create-schema.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,13 +16,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-auth-token, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-
-const CallCreateSchema = z.object({
-  title: z.string().min(1).max(100),
-  participantIds: z.array(z.string().min(1)).min(1).max(50),
-  hasVideo: z.boolean().default(true),
-  maxParticipants: z.number().int().min(2).max(50).default(10),
-});
 
 type ErrorCode =
   | "unauthorized"
@@ -96,7 +85,10 @@ Deno.serve(async (req) => {
     if (!parsed.success) {
       return errorResponse("validation_error", parsed.error.errors[0].message);
     }
-    const { title, participantIds, hasVideo, maxParticipants } = parsed.data;
+    const { title, participantIds, hasVideo } = parsed.data;
+    if (new Set(participantIds).size !== participantIds.length) {
+      return errorResponse("validation_error", "Choose distinct participants");
+    }
 
     // call_signals.caller_id/callee_id and chat participantIds are integer
     // users.id as text (verified live 2026-08-12), NOT auth_id — resolve via
@@ -114,7 +106,10 @@ Deno.serve(async (req) => {
       .in("id", numericIds);
 
     if (calleeErr) {
-      console.error("[call_create] Participant lookup error:", calleeErr.message);
+      console.error(
+        "[call_create] Participant lookup error:",
+        calleeErr.message,
+      );
       return errorResponse("internal_error", "Failed to resolve participants");
     }
 
@@ -122,8 +117,11 @@ Deno.serve(async (req) => {
       .map((r) => r.auth_id)
       .filter((authId): authId is string => !!authId && authId !== userId);
 
-    if (inviteeAuthIds.length === 0) {
-      return errorResponse("validation_error", "No valid participants to call");
+    if (inviteeAuthIds.length !== participantIds.length) {
+      return errorResponse(
+        "validation_error",
+        "Every participant must be a valid user other than yourself",
+      );
     }
 
     const createRes = await fetch(
@@ -142,7 +140,7 @@ Deno.serve(async (req) => {
           // "Sneaky Lynk invite", which is the wrong product.
           roomKind: "call",
           hasVideo,
-          maxParticipants,
+          maxParticipants: 4,
           invitedUserIds: inviteeAuthIds,
           appOnly: false,
         }),
@@ -160,20 +158,6 @@ Deno.serve(async (req) => {
           error: { code: "internal_error", message: "Room creation failed" },
         },
       );
-    }
-
-    const internalId = createPayload.data?.room?.internalId;
-    if (internalId) {
-      const { error: kindErr } = await supabase
-        .from("video_rooms")
-        .update({ room_kind: "call" })
-        .eq("id", internalId);
-      if (kindErr) {
-        console.error(
-          "[call_create] Failed to stamp room_kind=call:",
-          kindErr.message,
-        );
-      }
     }
 
     return jsonResponse(createPayload);

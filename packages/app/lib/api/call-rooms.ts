@@ -58,7 +58,11 @@ export const callRoomsApi = {
     hasVideo?: boolean;
     maxParticipants?: number;
   }): Promise<ApiResponse<CallCreateResponse>> {
-    return callEdgeFunction<CallCreateResponse>("call_create", params);
+    if (params.participantIds.length < 1 || params.participantIds.length > 3 ||
+        new Set(params.participantIds).size !== params.participantIds.length) {
+      return { ok: false, error: { code: "validation_error", message: "Choose one to three people to call" } };
+    }
+    return callEdgeFunction<CallCreateResponse>("call_create", { ...params, maxParticipants: 4 });
   },
 
   async joinCall(

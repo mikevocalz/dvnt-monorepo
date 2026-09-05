@@ -1,6 +1,8 @@
 package com.dvnt.app.wear
 
 import android.os.Bundle
+import androidx.wear.ambient.AmbientLifecycleObserver
+import androidx.compose.foundation.layout.offset
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -34,11 +36,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.material.Scaffold
-import androidx.wear.compose.material.Text
-import androidx.wear.compose.material.TimeText
-import androidx.wear.compose.material.Vignette
-import androidx.wear.compose.material.VignettePosition
+import androidx.wear.compose.material3.AppScaffold
+import androidx.wear.compose.material3.Text
+import androidx.wear.compose.material3.TimeText
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -52,41 +52,98 @@ import java.util.Locale
  * value is the entire graph, and the hardware back button is wired straight to
  * clearing it — a NavHost would be more code to express the same two states.
  */
+data class WearLaunch(val destination: String, val accountGen: String, val eventId: String?, val token: Long = System.nanoTime())
+
 class MainActivity : ComponentActivity() {
+    private var launchTarget by mutableStateOf<WearLaunch?>(null)
+    private fun readLaunch(intent: android.content.Intent?): WearLaunch? {
+        val destination = intent?.getStringExtra("destination") ?: return null
+        if (destination !in listOf("Inbox", "Events", "Tickets", "Calls")) return null
+        return WearLaunch(destination, intent.getStringExtra("accountGen") ?: "", intent.getStringExtra("eventId")?.takeIf { it.isNotBlank() })
+    }
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        launchTarget = readLaunch(intent)
+    }
+    private var ambient by mutableStateOf(false)
+    private var ambientTick by mutableStateOf(0)
+    private val ambientObserver by lazy {
+        AmbientLifecycleObserver(this, object : AmbientLifecycleObserver.AmbientLifecycleCallback {
+            override fun onEnterAmbient(ambientDetails: AmbientLifecycleObserver.AmbientDetails) { ambient = true }
+            override fun onExitAmbient() { ambient = false }
+            override fun onUpdateAmbient() { ambientTick++ }
+        })
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { DvntWearTheme { WearApp() } }
+        launchTarget = readLaunch(intent)
+        lifecycle.addObserver(ambientObserver)
+        setContent {
+            DvntWearTheme {
+                val saved = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+                if (ambient) Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                    Text("DVNT", style = Dvnt.Type.stamp, color = Dvnt.textDim,
+                        modifier = Modifier.offset(((ambientTick % 5) - 2).dp, (((ambientTick / 5) % 5) - 2).dp))
+                } else saved.SaveableStateProvider("watch") { WearApp(launchTarget) }
+            }
+        }
 
         // Ask the phone to resend on cold start. Fire-and-forget: if the phone
         // is unreachable this fails, and the cached envelope is already on
         // screen, which is the entire reason the cache exists. Scoped to the
         // lifecycle so a rotation or an early finish cancels the node lookup
         // instead of leaking it.
-        lifecycleScope.launch { PhoneLink.requestSync(applicationContext) }
+        lifecycleScope.launch {
+            TicketRepository.get(applicationContext).hydrateFromDataLayer()
+            MessageRepository.get(applicationContext).hydrate()
+            PhoneLink.requestSync(applicationContext)
+        }
     }
 }
 
 @Composable
-private fun WearApp() {
+private fun WearApp(launchTarget: WearLaunch?) {
     val context = LocalContext.current
     val repo = remember { TicketRepository.get(context) }
     val envelope by repo.envelope.collectAsState()
     val everSynced by repo.everSynced.collectAsState()
 
-    var selectedEventId by remember { mutableStateOf<String?>(null) }
+    var selectedEventId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var destination by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Inbox") }
+    androidx.compose.runtime.LaunchedEffect(launchTarget) {
+        launchTarget?.let { target ->
+            if (target.accountGen == WearAccountSession.generation(context)) {
+                destination = target.destination
+                selectedEventId = if (target.destination == "Tickets") target.eventId else null
+            } else { destination = "Inbox"; selectedEventId = null }
+        }
+    }
     val groups = remember(envelope) { envelope.groups() }
     val selected = groups.firstOrNull { it.id == selectedEventId }
+    val callState by CallRepository.get(context).state.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(callState.incoming?.id) {
+        if (callState.incoming?.isFresh() == true) destination = "Calls"
+    }
+    val messageState by MessageRepository.get(context).inbox.collectAsState()
+    val pages = androidx.compose.runtime.key(messageState.accountGen) { androidx.compose.runtime.saveable.rememberSaveableStateHolder() }
 
-    Scaffold(
+    AppScaffold(
         timeText = { TimeText() },
-        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
         modifier = Modifier
             .fillMaxSize()
             .background(Dvnt.canvas),
     ) {
-        if (selected != null) {
+        if (destination == "Inbox") {
+            pages.SaveableStateProvider("inbox") { MessagesScreen(onTickets = { destination = "Tickets" }, onEvents = { destination = "Events" }, onCalls = { destination = "Calls" }) }
+        } else if (destination == "Calls") {
+            pages.SaveableStateProvider("calls") { CallsScreen(onInbox = { destination = "Inbox" }) }
+        } else if (destination == "Events") {
+            pages.SaveableStateProvider("events") { EventsScreen(onInbox = { destination = "Inbox" }, onTickets = { destination = "Tickets" }, initialEventId = launchTarget?.takeIf { it.accountGen == WearAccountSession.generation(context) && it.destination == "Events" }?.eventId, launchToken = launchTarget?.token) }
+        } else if (selected != null) {
             TicketScreen(group = selected, onBack = { selectedEventId = null })
         } else {
+            androidx.activity.compose.BackHandler { destination = "Inbox" }
             EventListScreen(
                 groups = groups,
                 everSynced = everSynced,
@@ -175,8 +232,8 @@ private fun TicketScreen(group: EventGroup, onBack: () -> Unit) {
     // Only a valid ticket presents a scannable code. Everything else shows its
     // status instead — rendering a code for a dead pass is the one failure
     // that strands a member at a door.
-    val ticket = group.tickets.firstOrNull { it.status.isPresentable }
-        ?: group.tickets.firstOrNull()
+    var passIndex by androidx.compose.runtime.saveable.rememberSaveable(group.id) { mutableStateOf(0) }
+    val ticket = group.tickets.getOrNull(passIndex) ?: group.tickets.firstOrNull()
 
     Column(
         modifier = Modifier
@@ -195,6 +252,10 @@ private fun TicketScreen(group: EventGroup, onBack: () -> Unit) {
         )
         Spacer(Modifier.height(Dvnt.Space.base))
 
+        if (group.tickets.size > 1) {
+            Text("${passIndex + 1} of ${group.tickets.size} · Next pass", style = Dvnt.Type.caption,
+                modifier = Modifier.clickable { passIndex = (passIndex + 1) % group.tickets.size }.padding(Dvnt.Space.base))
+        }
         val matrix = ticket?.qrMatrix
         if (ticket != null && ticket.status.isPresentable && matrix != null) {
             QrMatrixView(matrix = matrix, size = 132.dp)

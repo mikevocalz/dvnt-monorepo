@@ -15,6 +15,8 @@ const EDGE_FUNCTION_NAME = "live-surface";
 export async function fetchLiveSurface(opts?: {
   lat?: number;
   lng?: number;
+  /** Optional caller scope fence, checked after the token await before HTTP. */
+  shouldContinue?: () => boolean;
 }): Promise<LiveSurfacePayload | null> {
   try {
     const params: Record<string, string> = {};
@@ -29,6 +31,7 @@ export async function fetchLiveSurface(opts?: {
       return null;
     }
 
+    if (opts?.shouldContinue && !opts.shouldContinue()) return null;
     const { data, error } = await supabase.functions.invoke(
       EDGE_FUNCTION_NAME,
       {

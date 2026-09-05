@@ -1,0 +1,149 @@
+{
+  "inspected_at": "2026-09-05",
+  "workspace": "/Users/mikevocalz/dvnt-monorepo",
+  "mobile_root": "apps/mobile",
+  "branch": "ws3b-lynk-moq-product-screens",
+  "head": "b06fd283b68ddc0c346df069c33a8a82b4e3bb30",
+  "is_react_native": true,
+  "is_expo": true,
+  "is_native_ios": false,
+  "is_native_android": false,
+  "native_projects_present": [
+    "ios",
+    "android"
+  ],
+  "native_companions_present": [
+    "watchOS",
+    "Wear OS"
+  ],
+  "versions": {
+    "expo_dependency": "~57.0.11",
+    "react_native": "0.86.0",
+    "react": "19.2.3",
+    "node": "26.8.1",
+    "pnpm": "10.32.1",
+    "cocoapods": "1.16.2",
+    "eas": "21.7.0",
+    "xcode": "26.4.1 (17E202)",
+    "gradle_wrapper": "9.3.1",
+    "agp_catalog": "8.12.0",
+    "kotlin_catalog": "2.1.20",
+    "jdk_installed": [
+      "17.0.20.1",
+      "26.0.2.1"
+    ],
+    "jdk_default": "26.0.2.1"
+  },
+  "dependencies_installed": true,
+  "pods_present": true,
+  "react_native_architecture": "new",
+  "js_engine": "Hermes",
+  "commands": {
+    "metro": "pnpm --filter mobile dev",
+    "android": "pnpm --filter mobile android",
+    "ios_script": "pnpm --filter mobile ios",
+    "ios_script_behavior": "expo start --ios --device; does not build",
+    "typecheck": "pnpm --filter mobile typecheck",
+    "watch_checks": "pnpm verify:watch",
+    "wear_build": "cd apps/mobile/android && JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home ./gradlew :wear:assembleDebug"
+  },
+  "metro_port": "No override detected; default 8081, running state not checked",
+  "apple": {
+    "workspace": "apps/mobile/ios/DVNT.xcworkspace",
+    "project": "apps/mobile/ios/DVNT.xcodeproj",
+    "schemes": [
+      "DVNT",
+      "DVNTWatch",
+      "DVNTWatchComplication",
+      "ShareExtension"
+    ],
+    "watch_sources": "apps/mobile/targets/watch",
+    "watch_deployment_target": "10.0",
+    "watch_bundle_id": "com.dvnt.app.watchkitapp",
+    "complication_bundle_id": "com.dvnt.app.watchkitapp.complications",
+    "installed_sdks": [
+      "iOS 26.4",
+      "iOS Simulator 26.4",
+      "watchOS 26.4",
+      "watchOS Simulator 26.4"
+    ],
+    "watch_destinations": [
+      "Any watchOS Device",
+      "Any watchOS Simulator Device"
+    ],
+    "physical_watch": {
+      "name": "Mike\u2019s Apple Watch",
+      "id": "00008310-001248513E88A01E",
+      "eligible": false,
+      "error": "doesn\u2019t have a known architecture"
+    }
+  },
+  "android": {
+    "wear_source_of_truth": "apps/mobile/wear",
+    "generated_module": "apps/mobile/android/wear",
+    "generation_plugin": "apps/mobile/plugins/with-wear-os.js",
+    "included_modules": [
+      ":app",
+      ":wear"
+    ],
+    "wear_application_id": "com.dvnt.app",
+    "wear_min_sdk": 30,
+    "compile_sdk_catalog": 36,
+    "target_sdk_catalog": 36,
+    "build_tools_catalog": "36.0.0",
+    "installed_platforms": [
+      "33",
+      "34",
+      "36",
+      "37.0"
+    ],
+    "installed_build_tools": [
+      "34.0.0",
+      "35.0.0",
+      "36.0.0",
+      "36.1.0",
+      "37.0.0"
+    ],
+    "installed_system_images": [
+      "android-36/google_apis/arm64-v8a"
+    ],
+    "wear_release_signing_current": "debug signing",
+    "wear_compose_at_inspection": "compose-material:1.6.2; compose-foundation:1.6.2"
+  },
+  "argent_devices": {
+    "running": [],
+    "simulators": [
+      {
+        "name": "DVNT iPad Pro 13",
+        "udid": "C068B218-88EC-4AE1-A3F6-0F0CFB3A69E1",
+        "state": "Shutdown",
+        "runtime": "iOS 26.4"
+      }
+    ],
+    "physical_iphones": "Two paired but unreachable phones; neither connected over USB",
+    "watch_simulators": [],
+    "android_devices": [],
+    "android_avds": []
+  },
+  "gradle_task_discovery": {
+    "command": "JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home ./gradlew :wear:tasks --all --offline --console=plain",
+    "status": "FAILED during configuration; Wear tasks were not listed",
+    "session_id": 52739,
+    "exit_code": 1,
+    "error": "No space left on device while instrumenting react-native-moq AGP 9.1.1 dependencies; Gradle cache and lock writes subsequently failed"
+  },
+  "preexisting_dirty_paths": [
+    "M apps/mobile/ios/DVNT.xcodeproj/project.pbxproj",
+    "M apps/mobile/ios/DVNT/AppDelegate.swift",
+    "D apps/mobile/ios/DVNT/DVNT.entitlements",
+    "M apps/mobile/ios/DVNT/Supporting/Expo.plist",
+    "M apps/mobile/ios/Podfile",
+    "M apps/mobile/ios/Podfile.lock",
+    "M apps/mobile/ios/Podfile.properties.json",
+    "D apps/mobile/ios/sentry.properties",
+    "M apps/mobile/supabase/.temp/cli-latest",
+    "M supabase/.temp/cli-latest",
+    "?? apps/mobile/ios/DVNT.xcworkspace/xcshareddata/",
+    "?? apps/mobile/ios/DVNT/ShareExtension.entitlements"
+  ]
+}

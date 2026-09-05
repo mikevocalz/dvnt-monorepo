@@ -23,7 +23,8 @@ struct IncomingCallView: View {
         ZStack {
             DVNT.canvas.ignoresSafeArea()
 
-            VStack(spacing: DVNT.Space.roomy) {
+            ScrollView {
+             VStack(spacing: DVNT.Space.roomy) {
                 avatar
 
                 VStack(spacing: DVNT.Space.hair) {
@@ -43,6 +44,7 @@ struct IncomingCallView: View {
                 }
             }
             .padding(.horizontal, DVNT.Space.roomy)
+            }
         }
         .accessibilityElement(children: .contain)
     }
@@ -76,14 +78,17 @@ struct IncomingCallView: View {
                         .opacity(isPulsing ? (1 - p) * 0.5 : 0)
                 }
 
-                Circle()
+                RoundedRectangle(cornerRadius: DVNT.Radius.control)
                     .fill(DVNT.surface)
-                    .overlay(Circle().strokeBorder(DVNT.hairline, lineWidth: 1))
-                    .overlay(
-                        Text(call.initial)
-                            .font(DVNT.TypeScale.title(30))
-                            .foregroundColor(.white)
-                    )
+                    .overlay(RoundedRectangle(cornerRadius: DVNT.Radius.control).strokeBorder(DVNT.hairline, lineWidth: 1))
+                    .overlay {
+                        if let url = call.callerAvatar, URL(string: url)?.scheme == "https" {
+                            EventArt(dominantHex: nil, imageURL: url, cornerRadius: DVNT.Radius.control)
+                        } else {
+                            Text(call.initial).font(DVNT.TypeScale.title(30)).foregroundColor(.white)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: DVNT.Radius.control))
             }
             .frame(width: 62, height: 62)
         }
@@ -92,24 +97,21 @@ struct IncomingCallView: View {
 
     // MARK: - Actions
 
-    /// Decline left, accept right, both large. HIG W-NV-05 wants the primary
-    /// action one tap away — on a ringing screen both actions are primary, so
-    /// neither is buried behind a swipe or a confirm.
+    /// Visible labels name the phone audio route before the wearer answers.
     private var actions: some View {
-        HStack(spacing: DVNT.Space.loose) {
+        VStack(spacing: DVNT.Space.base) {
             CallButton(symbol: "phone.down.fill", fill: DVNT.signal,
                        label: "Decline", action: onDecline)
-            CallButton(symbol: call.isVideo ? "video.fill" : "phone.fill",
-                       fill: Color(hex: 0x2ECC71),
-                       label: "Answer", action: onAccept)
+            CallButton(symbol: "phone.fill",
+                       fill: DVNT.accent,
+                       label: call.isVideo ? "Answer as audio on iPhone" : "Answer on iPhone", action: onAccept)
         }
     }
 
     /// Said plainly, because the alternative is a wearer holding a silent watch
-    /// to their ear. The audio is on the phone; watchOS gives no third-party app
-    /// a duplex route to the watch speaker and mic.
+    /// to their ear. Companion mode keeps audio on the iPhone.
     private var handoffNote: some View {
-        Label("Answered — audio is on your iPhone", systemImage: "iphone.gen3")
+        Label(call.isVideo ? "Answering as audio on iPhone…" : "Connecting on iPhone…", systemImage: "iphone.gen3")
             .font(DVNT.TypeScale.caption())
             .foregroundColor(DVNT.textDim)
             .multilineTextAlignment(.center)
@@ -124,11 +126,12 @@ private struct CallButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: DVNT.TypeScale.Icon.control, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 52, height: 52)
-                .background(Circle().fill(fill))
+            Label(label, systemImage: symbol)
+                .font(DVNT.TypeScale.body())
+                .foregroundColor(.black)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.horizontal, DVNT.Space.base)
+                .background(RoundedRectangle(cornerRadius: DVNT.Radius.control).fill(fill))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)

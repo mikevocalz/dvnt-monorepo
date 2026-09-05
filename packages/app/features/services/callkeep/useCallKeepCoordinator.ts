@@ -11,6 +11,9 @@
  * Must be called exactly ONCE from the protected layout.
  */
 
+import { answerIncomingCall, freshRingingSignal } from "./answer-call";
+import { getCurrentUserRow } from "@dvnt/app/lib/auth/identity";
+import { useWatchSessionStore } from "@dvnt/app/features/watch/watch-session-store";
 import { useEffect, useRef } from "react";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -63,6 +66,7 @@ export function useCallKeepCoordinator(): void {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const generation = useWatchSessionStore((s) => s.accountGen);
 
   // Use refs to avoid re-registering listeners on every render
   const routerRef = useRef(router);
@@ -80,6 +84,9 @@ export function useCallKeepCoordinator(): void {
     if (initializedForUserRef.current === user.id) return;
     initializedForUserRef.current = user.id;
 
+    let cancelled = false;
+    const answering = new Set<string>();
+    const current = () => !cancelled && useAuthStore.getState().user?.id === user.id && useWatchSessionStore.getState().accountGen === generation;
     let cleanupListeners: (() => void) | undefined;
     let unsubscribeSignals: (() => void) | undefined;
     let signalUpdateChannel: ReturnType<typeof supabase.channel> | null = null;
@@ -95,64 +102,40 @@ export function useCallKeepCoordinator(): void {
         return;
       }
 
+      if (!current()) return;
+      const identity = await getCurrentUserRow();
+      if (!current() || !identity) return;
+      const userId = String(identity.id);
+
       // 2. Register CallKeep event listeners — all wrapped with CT.guard
       cleanupListeners = registerCallKeepListeners({
         onAnswer: ({ callUUID }) => {
-          CT.guard(
-            "CALLKEEP",
-            "onAnswer",
-            () => {
-              CT.trace("CALLKEEP", "answerPressed", { callUUID });
-
-              const callSessionId = getSessionIdFromUUID(callUUID);
-              const signal = _activeSignals.get(callUUID);
-
-              if (signal) {
-                callSignalsApi
-                  .updateSignalStatus(signal.id, "accepted")
-                  .catch((err) =>
-                    CT.error("CALLKEEP", "updateSignalFailed", {
-                      callUUID,
-                      error: String(err),
-                    }),
-                  );
-              }
-
-              setCallActive(callUUID);
-              backToForeground();
-
-              // Navigate to call screen — callee joins Fishjam ONLY after this navigation
-              // REF: Mandatory principle #3 — MUST NOT join Fishjam until AFTER CallKeep answer
-              const roomId = signal?.room_id || callSessionId;
-              const callType = signal?.call_type || "video";
-
-              if (roomId) {
-                CT.setContext({
-                  sessionId: roomId,
-                  callUUID,
-                  userId: userRef.current?.id,
-                });
-                CT.trace("LIFECYCLE", "navigatingToCallScreen", {
-                  roomId,
-                  callType,
-                });
-                routerRef.current.push({
-                  pathname: "/(protected)/call/[roomId]",
-                  params: {
-                    roomId,
-                    callType,
-                    isGroup: signal?.is_group ? "true" : "false",
-                    recipientUsername: signal?.caller_username || "Unknown",
-                    recipientAvatar: signal?.caller_avatar || "",
-                  },
-                });
-              } else {
-                CT.error("CALLKEEP", "noRoomIdForUUID", { callUUID });
-                endCall(callUUID);
-              }
-            },
-            { callUUID },
-          );
+          if (answering.has(callUUID)) return;
+          answering.add(callUUID);
+          const roomId = _activeSignals.get(callUUID)?.room_id || getSessionIdFromUUID(callUUID);
+          if (!roomId || !current()) { endCall(callUUID); return; }
+          const answerStillCurrent = () => current() && !_recentlyEndedRooms.has(roomId) && !_recentlyEndedRooms.has(callUUID);
+          void answerIncomingCall({ roomId, calleeId: userId, current: answerStillCurrent,
+            fetchSignal: callSignalsApi.getFreshIncomingSignal,
+            claim: callSignalsApi.answerRingingSignal,
+          }).then((signal) => {
+            if (!signal || !answerStillCurrent()) {
+              _activeSignals.delete(callUUID);
+              clearCallMapping(callUUID);
+              endCall(callUUID);
+              return;
+            }
+            _activeSignals.set(callUUID, signal);
+            setCallActive(callUUID);
+            backToForeground();
+            routerRef.current.push({
+              pathname: "/(protected)/call/[roomId]",
+              params: { roomId: signal.room_id, callType: signal.call_type,
+                isGroup: signal.is_group ? "true" : "false",
+                recipientUsername: signal.caller_username || "Unknown",
+                recipientAvatar: signal.caller_avatar || "" },
+            });
+          }).catch(() => { endCall(callUUID); });
         },
 
         onEnd: ({ callUUID }) => {
@@ -160,6 +143,7 @@ export function useCallKeepCoordinator(): void {
             "CALLKEEP",
             "onEnd",
             () => {
+              if (!current()) return;
               CT.trace("CALLKEEP", "endPressed", { callUUID });
 
               const signal = _activeSignals.get(callUUID);
@@ -199,6 +183,7 @@ export function useCallKeepCoordinator(): void {
               // The use-video-call.ts external end effect will handle Fishjam cleanup
               const store = useVideoRoomStore.getState();
               if (
+                (store.roomId === signal?.room_id || store.roomId === getSessionIdFromUUID(callUUID) || store.roomId === callUUID) &&
                 store.callPhase !== "idle" &&
                 store.callPhase !== "call_ended"
               ) {
@@ -268,12 +253,12 @@ export function useCallKeepCoordinator(): void {
 
       // 3. Subscribe to incoming call signals from Supabase
       // REF: Supabase Realtime postgres_changes for call_signals table
-      const userId = user.id;
       CT.trace("CALL", "subscribingToSignals", { userId });
       unsubscribeSignals = callSignalsApi.subscribeToIncomingCalls(
         userId,
         (signal: CallSignal) => {
           CT.guard("CALL", "incomingSignalHandler", () => {
+            if (!current() || !freshRingingSignal(signal, signal.room_id, userId)) return;
             // Cooldown: ignore signals for rooms we just ended
             if (_recentlyEndedRooms.has(signal.room_id)) {
               CT.trace("CALL", "incomingIgnored_recentlyEnded", {
@@ -353,6 +338,7 @@ export function useCallKeepCoordinator(): void {
           (payload) => {
             const updated = payload.new as CallSignal;
             CT.guard("CALL", "signalUpdateHandler", () => {
+              if (!current() || String(updated.callee_id) !== userId) return;
               if (
                 updated.status === "missed" ||
                 updated.status === "ended" ||
@@ -385,9 +371,10 @@ export function useCallKeepCoordinator(): void {
         });
     };
 
-    init();
+    void init().catch(() => { CT.trace("CALLKEEP", "initialization_unavailable"); });
 
     return () => {
+      cancelled = true;
       initializedForUserRef.current = null;
       cleanupListeners?.();
       unsubscribeSignals?.();
@@ -396,5 +383,5 @@ export function useCallKeepCoordinator(): void {
       }
       _activeSignals.clear();
     };
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, user?.id, generation]);
 }

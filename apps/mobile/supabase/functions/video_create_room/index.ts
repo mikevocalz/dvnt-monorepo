@@ -20,8 +20,7 @@ const CreateRoomSchema = z.object({
   description: z.string().max(500).default(""),
   hasVideo: z.boolean().default(false),
   isPublic: z.boolean().default(false),
-  // Which stack is creating this room. Only affects invite copy/type here;
-  // the discriminator column itself is stamped by the caller (call_create).
+  // Persisted at insertion; call limits never depend on a later update.
   roomKind: z.enum(["lynk", "call"]).default("lynk"),
   invitedUserIds: z.array(z.string().min(1)).max(100).default([]),
   maxParticipants: z.number().int().min(2).max(50).default(10),
@@ -92,9 +91,7 @@ async function notifyRoomInvite(
   // a 1:1 video call was arriving as "Sneaky Lynk invite".
   const isCall = params.roomKind === "call";
   const notificationTitle = isCall
-    ? params.hasVideo
-      ? "Incoming video call"
-      : "Incoming call"
+    ? params.hasVideo ? "Incoming video call" : "Incoming call"
     : "Sneaky Lynk invite";
   const notificationBody = isCall
     ? `${senderHandle} is calling you.`
@@ -224,120 +221,158 @@ Deno.serve(async (req) => {
       maxParticipants,
     });
 
-    // ── Subscription-aware participant cap ────────────────────
-    // A DVNT Membership supersedes a standalone Sneaky Lynk subscription. We
-    // check membership first; if active, its cap wins. (Caps mirror
-    // packages/app/lib/subscription/plans.ts — keep in sync.)
-    const MEMBERSHIP_MAX_PARTICIPANTS: Record<string, number> = {
-      free: 5,
-      sneaky_tier_1: 10,
-      sneaky_tier_2: 50,
-      dvnt_core: 10,
-      dvnt_insider: 20,
-      dvnt_vip: 50,
-      dvnt_founders_circle: 50,
-    };
-    let membershipCap: number | null = null;
-    const { data: memSub } = await supabase
-      .from("membership_subscriptions")
-      .select("plan_key, status, grace_period_ends_at")
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (memSub) {
-      const memGraceExpired =
-        memSub.status === "past_due" &&
-        memSub.grace_period_ends_at &&
-        new Date(memSub.grace_period_ends_at) < new Date();
+    let endsAt: string | null = null;
+    if (roomKind === "call") {
+      const invitees = new Set(invitedUserIds);
       if (
-        !memGraceExpired &&
-        ["active", "trialing", "past_due"].includes(memSub.status)
+        isPublic || appOnly || invitees.size < 1 || invitees.size > 3 ||
+        invitees.size !== invitedUserIds.length || invitees.has(userId) ||
+        invitedUserIds.some((id) => id !== id.trim())
       ) {
-        membershipCap = MEMBERSHIP_MAX_PARTICIPANTS[memSub.plan_key] ?? null;
-      }
-    }
-
-    console.log("[video_create_room] Checking subscription...");
-    const { data: userSub, error: subError } = await supabase
-      .from("sneaky_subscriptions")
-      .select("plan_id, status, grace_period_ends_at")
-      .eq("host_id", userId)
-      .maybeSingle();
-
-    if (subError) {
-      console.error(
-        "[video_create_room] Subscription lookup error:",
-        subError.message,
-      );
-    } else {
-      console.log("[video_create_room] Subscription found:", !!userSub);
-    }
-
-    // Determine effective plan limits
-    let planMaxParticipants = 5; // free tier default
-    if (userSub) {
-      console.log("[video_create_room] Subscription status:", userSub.status);
-      const isGraceExpired =
-        userSub.status === "past_due" &&
-        userSub.grace_period_ends_at &&
-        new Date(userSub.grace_period_ends_at) < new Date();
-
-      if (isGraceExpired) {
-        planMaxParticipants = 5;
-        console.log(
-          `[video_create_room] Grace period expired for ${userId}, enforcing free limits`,
+        return errorResponse(
+          "validation_error",
+          "Calls require one to three distinct invitees and a private room",
         );
-      } else if (
-        userSub.status === "active" ||
-        userSub.status === "trialing" ||
-        userSub.status === "past_due"
+      }
+      const { data: resolved, error: resolveError } = await supabase
+        .from("users").select("auth_id").in("auth_id", invitedUserIds);
+      if (resolveError) {
+        return errorResponse(
+          "internal_error",
+          "Failed to resolve participants",
+        );
+      }
+      if (
+        new Set((resolved ?? []).map((row) => row.auth_id)).size !==
+          invitees.size
       ) {
-        const { data: plan, error: planError } = await supabase
-          .from("sneaky_subscription_plans")
-          .select("max_participants")
-          .eq("id", userSub.plan_id)
-          .single();
-        if (planError) {
-          console.error(
-            "[video_create_room] Plan lookup error:",
-            planError.message,
-          );
-        }
-        if (plan) {
-          planMaxParticipants = plan.max_participants;
-          console.log(
-            "[video_create_room] Plan max participants:",
-            planMaxParticipants,
-          );
+        return errorResponse(
+          "validation_error",
+          "Every participant must be a valid user",
+        );
+      }
+      maxParticipants = 4;
+    } else {
+      // ── Subscription-aware participant cap ────────────────────
+      // A DVNT Membership supersedes a standalone Sneaky Lynk subscription. We
+      // check membership first; if active, its cap wins. (Caps mirror
+      // packages/app/lib/subscription/plans.ts — keep in sync.)
+      const MEMBERSHIP_MAX_PARTICIPANTS: Record<string, number> = {
+        free: 5,
+        sneaky_tier_1: 10,
+        sneaky_tier_2: 50,
+        dvnt_core: 10,
+        dvnt_insider: 20,
+        dvnt_vip: 50,
+        dvnt_founders_circle: 50,
+      };
+      let membershipCap: number | null = null;
+      const { data: memSub } = await supabase
+        .from("membership_subscriptions")
+        .select("plan_key, status, grace_period_ends_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (memSub) {
+        const memGraceExpired = memSub.status === "past_due" &&
+          memSub.grace_period_ends_at &&
+          new Date(memSub.grace_period_ends_at) < new Date();
+        if (
+          !memGraceExpired &&
+          ["active", "trialing", "past_due"].includes(memSub.status)
+        ) {
+          membershipCap = MEMBERSHIP_MAX_PARTICIPANTS[memSub.plan_key] ?? null;
         }
       }
-    }
 
-    // Membership supersedes the standalone Sneaky cap when present.
-    if (membershipCap !== null) {
-      planMaxParticipants = membershipCap;
+      console.log("[video_create_room] Checking subscription...");
+      const { data: userSub, error: subError } = await supabase
+        .from("sneaky_subscriptions")
+        .select("plan_id, status, grace_period_ends_at")
+        .eq("host_id", userId)
+        .maybeSingle();
+
+      if (subError) {
+        console.error(
+          "[video_create_room] Subscription lookup error:",
+          subError.message,
+        );
+      } else {
+        console.log("[video_create_room] Subscription found:", !!userSub);
+      }
+
+      // Determine effective plan limits
+      let planMaxParticipants = 5; // free tier default
+      if (userSub) {
+        console.log("[video_create_room] Subscription status:", userSub.status);
+        const isGraceExpired = userSub.status === "past_due" &&
+          userSub.grace_period_ends_at &&
+          new Date(userSub.grace_period_ends_at) < new Date();
+
+        if (isGraceExpired) {
+          planMaxParticipants = 5;
+          console.log(
+            `[video_create_room] Grace period expired for ${userId}, enforcing free limits`,
+          );
+        } else if (
+          userSub.status === "active" ||
+          userSub.status === "trialing" ||
+          userSub.status === "past_due"
+        ) {
+          const { data: plan, error: planError } = await supabase
+            .from("sneaky_subscription_plans")
+            .select("max_participants")
+            .eq("id", userSub.plan_id)
+            .single();
+          if (planError) {
+            console.error(
+              "[video_create_room] Plan lookup error:",
+              planError.message,
+            );
+          }
+          if (plan) {
+            planMaxParticipants = plan.max_participants;
+            console.log(
+              "[video_create_room] Plan max participants:",
+              planMaxParticipants,
+            );
+          }
+        }
+      }
+
+      // Membership supersedes the standalone Sneaky cap when present.
+      if (membershipCap !== null) {
+        planMaxParticipants = membershipCap;
+        console.log(
+          "[video_create_room] Membership cap applied:",
+          membershipCap,
+        );
+      }
+
+      // Cap requested participants to plan limit
+      if (maxParticipants > planMaxParticipants) {
+        maxParticipants = planMaxParticipants;
+      }
       console.log(
-        "[video_create_room] Membership cap applied:",
-        membershipCap,
+        "[video_create_room] Final max participants:",
+        maxParticipants,
+      );
+
+      // Session length gets the same treatment as the participant cap: resolved
+      // here from the plan, written onto the room, enforced at the door. The
+      // client timer counts down to this value instead of deciding it — it had
+      // been the only thing stopping a free room running forever.
+      // NULL = unlimited (any paid tier, or a plan without a limit).
+      const FREE_TIER_SESSION_MINUTES = 5;
+      const isPaidTier = planMaxParticipants > 5 || membershipCap !== null;
+      endsAt = isPaidTier
+        ? null
+        : new Date(Date.now() + FREE_TIER_SESSION_MINUTES * 60_000)
+          .toISOString();
+      console.log(
+        "[video_create_room] Session ends_at:",
+        endsAt ?? "unlimited",
       );
     }
-
-    // Cap requested participants to plan limit
-    if (maxParticipants > planMaxParticipants) {
-      maxParticipants = planMaxParticipants;
-    }
-    console.log("[video_create_room] Final max participants:", maxParticipants);
-
-    // Session length gets the same treatment as the participant cap: resolved
-    // here from the plan, written onto the room, enforced at the door. The
-    // client timer counts down to this value instead of deciding it — it had
-    // been the only thing stopping a free room running forever.
-    // NULL = unlimited (any paid tier, or a plan without a limit).
-    const FREE_TIER_SESSION_MINUTES = 5;
-    const isPaidTier = planMaxParticipants > 5 || membershipCap !== null;
-    const endsAt = isPaidTier
-      ? null
-      : new Date(Date.now() + FREE_TIER_SESSION_MINUTES * 60_000).toISOString();
-    console.log("[video_create_room] Session ends_at:", endsAt ?? "unlimited");
 
     // Rate limit check
     console.log("[video_create_room] Checking rate limit...");
@@ -373,6 +408,7 @@ Deno.serve(async (req) => {
     console.log("[video_create_room] Creating room...");
     const roomUuid = crypto.randomUUID();
     const roomInsert = {
+      room_kind: roomKind,
       created_by: userId,
       title,
       topic,
@@ -543,7 +579,7 @@ Deno.serve(async (req) => {
                 roomTitle: title,
                 roomKind,
                 hasVideo,
-              }),
+              })
             ),
           );
         }
@@ -569,7 +605,9 @@ Deno.serve(async (req) => {
           title: room.title,
           topic: room.topic || "",
           description: room.description || "",
-          sweetSpicyMode: room.sweet_spicy_mode || "sweet",
+          ...(roomKind === "lynk"
+            ? { sweetSpicyMode: room.sweet_spicy_mode || "sweet" }
+            : {}),
           hasVideo: room.has_video || false,
           isPublic: room.is_public,
           // Reflects what was actually persisted, not what was requested —

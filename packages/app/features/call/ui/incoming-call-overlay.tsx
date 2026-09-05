@@ -8,11 +8,17 @@
 
 import React, {
   useEffect,
-  useState,
   useCallback,
   useRef,
   useMemo,
 } from "react";
+import { answerIncomingCall, freshRingingSignal } from "@dvnt/app/features/services/callkeep/answer-call";
+import { getCurrentUserRow } from "@dvnt/app/lib/auth/identity";
+import { useWatchSessionStore } from "@dvnt/app/features/watch/watch-session-store";
+import { useVideoRoomStore } from "@dvnt/app/features/video";
+import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
+import { create } from "zustand";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Image } from "expo-image";
 import Animated, {
@@ -35,6 +41,9 @@ import { callSignalsApi, type CallSignal } from "@dvnt/app/lib/api/call-signals"
 import {
   getUUIDFromSessionId,
   wasCallDisplayed,
+  setCallActive,
+  backToForeground,
+  reportEndCall,
 } from "@dvnt/app/features/services/callkeep";
 import {
   clearCallOnWatch,
@@ -50,6 +59,12 @@ import BottomSheet, {
   BottomSheetView,
 } from "@gorhom/bottom-sheet";
 import type { BottomSheetBackdropProps } from "@gorhom/bottom-sheet";
+
+const useIncomingCallState = create<{
+  incomingCall: CallSignal | null; viewerId: string | null; accountGen: string; nativePresented: boolean;
+  setIncomingCall: (incomingCall: CallSignal | null, viewerId?: string, accountGen?: string, nativePresented?: boolean) => void;
+}>((set) => ({ incomingCall: null, viewerId: null, accountGen: "", nativePresented: false,
+  setIncomingCall: (incomingCall, viewerId, accountGen, nativePresented = false) => set({ incomingCall, viewerId: viewerId ?? null, accountGen: accountGen ?? "", nativePresented }) }));
 
 /** The ring cadence, matched to the watch so wrist and phone pulse together. */
 const RING_INTERVAL_MS = 2400;
@@ -126,58 +141,75 @@ export function IncomingCallOverlay() {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const [incomingCall, setIncomingCall] = useState<CallSignal | null>(null);
+  const generation = useWatchSessionStore((s) => s.accountGen);
+  const cachedIncoming = useIncomingCallState((s) => s.incomingCall);
+  const incomingViewer = useIncomingCallState((s) => s.viewerId);
+  const incomingGeneration = useIncomingCallState((s) => s.accountGen);
+  const nativePresented = useIncomingCallState((s) => s.nativePresented);
+  const incomingCall = incomingViewer === user?.id && incomingGeneration === generation ? cachedIncoming : null;
+  const pendingDecision = useRef<number | null>(null);
+  const pendingDecisionKind = useRef<"accepted" | "declined" | null>(null);
+  const terminalSignals = useRef(new Set<number>());
+  const setIncomingCall = useIncomingCallState((s) => s.setIncomingCall);
   const snapPoints = useMemo(() => ["95%"], []);
 
   // The watch listener is registered once, but accept/decline close over the
   // current call — so both the call and the handlers are mirrored into refs.
   const incomingCallRef = useRef<CallSignal | null>(null);
   incomingCallRef.current = incomingCall;
-  const handlersRef = useRef<{ accept: () => void; decline: () => void }>({
-    accept: () => {},
-    decline: () => {},
+  const handlersRef = useRef<{ accept: (audioOnly?: boolean) => Promise<boolean>; decline: () => Promise<boolean> }>({
+    accept: async () => false,
+    decline: async () => false,
   });
 
-  // Subscribe to incoming calls
+  // Account-bound realtime projection; CallKeep may own phone presentation,
+  // but the same fresh signal must still ring the companion.
   useEffect(() => {
+    setIncomingCall(null); pendingDecision.current = null; pendingDecisionKind.current = null; terminalSignals.current.clear();
     if (!isAuthenticated || !user?.id) return;
-
-    const userId = user.id;
-
-    const unsubscribe = callSignalsApi.subscribeToIncomingCalls(
-      userId,
-      (signal) => {
-        // CallKeep owns the incoming-call UI whenever it managed to show one.
-        // This overlay was added because some incoming calls rendered nowhere,
-        // but it had no CallKeep awareness at all, so a normal call rang the
-        // native UI AND slid this panel up over it — which is not how the app
-        // used to behave. Defer: only take over when CallKeep did not display.
-        // CallKeep maps its device-local UUID to the room id
-        // (persistCallMapping(roomId, callUUID) in NotificationListener).
+    const viewer = user.id;
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    let updates: ReturnType<typeof supabase.channel> | undefined;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const current = () => !cancelled && useAuthStore.getState().user?.id === viewer && useWatchSessionStore.getState().accountGen === generation;
+    void (async () => {
+      const identity = await getCurrentUserRow();
+      if (!identity || !current()) return;
+      const calleeId = String(identity.id);
+      unsubscribe = callSignalsApi.subscribeToIncomingCalls(calleeId, (signal) => {
+        if (!current() || !freshRingingSignal(signal, signal.room_id, calleeId) || terminalSignals.current.has(signal.id)) return;
+        if (!["idle", "call_ended", "error"].includes(useVideoRoomStore.getState().callPhase)) return;
         const callUUID = getUUIDFromSessionId(signal.room_id);
-        if (callUUID && wasCallDisplayed(callUUID)) return;
-
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setIncomingCall(signal);
-        // Ring the wrist too. The watch can only accept or decline — the room
-        // is joined here — but that decision is the whole point of a glance.
+        const native = !!callUUID && wasCallDisplayed(callUUID);
+        if (!native) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setIncomingCall(signal, viewer, generation, native);
         void pushCallToWatch(toWatchCall(signal));
-
-        // Auto-dismiss after 30 seconds
-        setTimeout(() => {
-          setIncomingCall((current) => {
-            if (current?.id !== signal.id) return current;
-            // The watch times out on the same 30s, but tell it anyway: a
-            // wrist left ringing buzzes every 2.4s until someone taps it.
-            void clearCallOnWatch(watchCallId(signal));
-            return null;
-          });
-        }, 30000);
-      },
-    );
-
-    return unsubscribe;
-  }, [isAuthenticated]);
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          if (!current() || useIncomingCallState.getState().incomingCall?.id !== signal.id) return;
+          terminalSignals.current.add(signal.id);
+          void clearCallOnWatch(watchCallId(signal)); setIncomingCall(null);
+        }, Math.max(0, 30_000 - (Date.now() - Date.parse(signal.created_at))));
+        timers.add(timer);
+      });
+      updates = freshChannel(`watch-incoming-status:${calleeId}`).on("postgres_changes", {
+        event: "UPDATE", schema: "public", table: "call_signals", filter: `callee_id=eq.${calleeId}`,
+      }, (payload) => {
+        const signal = payload.new as CallSignal;
+        if (!current() || String(signal.callee_id) !== calleeId || signal.status === "ringing") return;
+        if (["ended", "missed"].includes(signal.status) || (signal.status === "declined" && pendingDecisionKind.current !== "declined")) terminalSignals.current.add(signal.id);
+        if (useIncomingCallState.getState().incomingCall?.id === signal.id) {
+          void clearCallOnWatch(watchCallId(signal)); setIncomingCall(null);
+        }
+      }).subscribe();
+    })().catch(() => { /* Unavailable identity/transport never displays a call. */ });
+    return () => {
+      cancelled = true; unsubscribe?.(); if (updates) void supabase.removeChannel(updates);
+      for (const timer of timers) clearTimeout(timer);
+      setIncomingCall(null);
+    };
+  }, [isAuthenticated, user?.id, generation, setIncomingCall]);
 
   // The wearer's decision, coming back over WCSession.
   useEffect(() => {
@@ -185,32 +217,29 @@ export function IncomingCallOverlay() {
       const current = incomingCallRef.current;
       // A queued decision can land after the call is gone. Ignore it rather
       // than routing into a room nobody is ringing any more.
-      if (!current || callId !== watchCallId(current)) return;
-      if (action === "accept") handlersRef.current.accept();
-      else handlersRef.current.decline();
+      if (!current || callId !== watchCallId(current)) return false;
+      if (current.status !== "ringing" || Date.now() - Date.parse(current.created_at) >= 30000) return false;
+      if (action === "accept" || action === "accept_audio_only") return handlersRef.current.accept(action === "accept_audio_only");
+      return handlersRef.current.decline();
     });
   }, []);
 
   useEffect(() => {
-    if (incomingCall) sheetRef.current?.snapToIndex(0);
+    if (incomingCall && !nativePresented) sheetRef.current?.snapToIndex(0);
     else sheetRef.current?.close();
-  }, [incomingCall]);
+  }, [incomingCall, nativePresented]);
 
   // Keep buzzing while it rings. One buzz on arrival is missed by anyone whose
   // phone is in a pocket — which is most of them. The interval is cleared on
   // answer, decline, timeout and unmount, so it can never outlive the call.
   useEffect(() => {
-    if (!incomingCall) return;
+    if (!incomingCall || nativePresented) return;
     const ring = () => {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     };
     const id = setInterval(ring, RING_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [incomingCall]);
-
-  const handleSheetChange = useCallback((index: number) => {
-    if (index === -1) setIncomingCall(null);
-  }, []);
+  }, [incomingCall, nativePresented]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -225,37 +254,39 @@ export function IncomingCallOverlay() {
     [],
   );
 
-  const handleAccept = useCallback(async () => {
-    if (!incomingCall) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // Stop the ring immediately — the round-trip to Supabase below can take a
-    // second, and a wrist that keeps buzzing after you answered reads as broken.
-    void clearCallOnWatch(watchCallId(incomingCall));
-
+  const decide = useCallback(async (decline: boolean, audioOnly = false): Promise<boolean> => {
+    const signal = incomingCall;
+    const viewer = user?.id;
+    if (!signal || !viewer || pendingDecision.current !== null) return false;
+    pendingDecision.current = signal.id;
+    pendingDecisionKind.current = decline ? "declined" : "accepted";
+    const current = () => useAuthStore.getState().user?.id === viewer && useWatchSessionStore.getState().accountGen === generation && !terminalSignals.current.has(signal.id);
     try {
-      await callSignalsApi.updateSignalStatus(incomingCall.id, "accepted");
-    } catch {}
-
-    const roomId = incomingCall.room_id;
-    const callType = incomingCall.call_type || "video";
-    setIncomingCall(null);
-    router.push({
-      pathname: "/(protected)/call/[roomId]",
-      params: { roomId, callType },
-    });
-  }, [incomingCall, router]);
-
-  const handleDecline = useCallback(async () => {
-    if (!incomingCall) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    void clearCallOnWatch(watchCallId(incomingCall));
-
-    try {
-      await callSignalsApi.updateSignalStatus(incomingCall.id, "declined");
-    } catch {}
-
-    setIncomingCall(null);
-  }, [incomingCall]);
+      const identity = await getCurrentUserRow();
+      if (!identity || !current()) return false;
+      const result = await answerIncomingCall({ roomId: signal.room_id, calleeId: String(identity.id), current,
+        decision: decline ? "declined" : "accepted", fetchSignal: callSignalsApi.getFreshIncomingSignal,
+        claim: decline ? callSignalsApi.declineRingingSignal : callSignalsApi.answerRingingSignal });
+      if (!result || !current()) return false;
+      void clearCallOnWatch(watchCallId(signal));
+      if (useIncomingCallState.getState().incomingCall?.id === signal.id) setIncomingCall(null);
+      const uuid = getUUIDFromSessionId(signal.room_id);
+      if (decline) {
+        if (uuid) reportEndCall(uuid, "REMOTE_ENDED");
+      } else {
+        if (uuid) setCallActive(uuid);
+        backToForeground();
+        router.push({ pathname: "/(protected)/call/[roomId]", params: {
+          roomId: result.room_id, callType: audioOnly ? "audio" : result.call_type,
+          isGroup: result.is_group ? "true" : "false", recipientUsername: result.caller_username || "Unknown",
+          recipientAvatar: result.caller_avatar || "" } });
+      }
+      return true;
+    } catch { return false; }
+    finally { if (pendingDecision.current === signal.id) { pendingDecision.current = null; pendingDecisionKind.current = null; } }
+  }, [incomingCall, user?.id, generation, router, setIncomingCall]);
+  const handleAccept = useCallback((audioOnly = false) => decide(false, audioOnly), [decide]);
+  const handleDecline = useCallback(() => decide(true), [decide]);
 
   handlersRef.current = { accept: handleAccept, decline: handleDecline };
 
@@ -269,12 +300,11 @@ export function IncomingCallOverlay() {
       snapPoints={snapPoints}
       enablePanDownToClose={false}
       backdropComponent={renderBackdrop}
-      onChange={handleSheetChange}
       backgroundStyle={styles.sheetBg}
       handleIndicatorStyle={styles.sheetHandle}
     >
       <BottomSheetView style={[styles.container, { paddingTop: 40 }]}>
-        {incomingCall && (
+        {incomingCall && !nativePresented && (
           <>
             {/* Caller Info */}
             <Motion.View
@@ -323,7 +353,7 @@ export function IncomingCallOverlay() {
               </CallButton>
 
               <CallButton
-                onPress={handleAccept}
+                onPress={() => { void handleAccept(); }}
                 style={styles.acceptButton}
                 label="Accept"
               >

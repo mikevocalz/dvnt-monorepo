@@ -4,6 +4,8 @@
     <!-- RemoteActivityHelper opens the phone app; without this the intent is
          silently dropped on some OEM builds. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="false"
@@ -40,8 +42,24 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
-                <data android:scheme="wear" android:host="*" android:pathPrefix="/tickets" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/dvnt/" />
+            </intent-filter>
+        </service>
+        <receiver android:name=".CallActionReceiver" android:exported="false" />
+        <service android:name=".DvntTileService" android:label="DVNT Now" android:description="@string/dvnt_tile_description"
+            android:icon="@mipmap/ic_launcher" android:exported="true" android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter><action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" /></intent-filter>
+            <meta-data android:name="androidx.wear.tiles.PREVIEW" android:resource="@drawable/dvnt_tile_preview" />
+        </service>
+        <service android:name=".DvntComplicationService" android:label="DVNT" android:icon="@mipmap/ic_launcher"
+            android:exported="true" android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter><action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" /></intent-filter>
+            <meta-data android:name="android.support.wearable.complications.SUPPORTED_TYPES" android:value="SHORT_TEXT,LONG_TEXT" />
+            <meta-data android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS" android:value="300" />
         </service>
     </application>
 </manifest>

@@ -8,12 +8,17 @@ import SwiftUI
 /// dark, with a queue in front of you.
 struct DoorView: View {
     @EnvironmentObject private var doors: DoorStore
+    @EnvironmentObject private var connectivity: WatchConnectivityManager
 
     var body: some View {
         Group {
             if let d = doors.door {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DVNT.Space.roomy) {
+                        if let error = doors.error {
+                            Text(error).font(DVNT.TypeScale.body())
+                            Button("Retry") { connectivity.requestSync() }
+                        }
                         Text(d.eventTitle)
                             .font(DVNT.TypeScale.caption(13))
                             .foregroundColor(DVNT.textDim)
@@ -48,20 +53,22 @@ struct DoorView: View {
                             accent: DVNT.textFaint
                         )
 
-                        // Freshness, always. A host must never mistake a cached
-                        // number for the room as it is right now.
-                        Text(
-                            doors.isStale
-                                ? (doors.syncedAt.map {
-                                    "As of \($0.formatted(date: .omitted, time: .shortened))"
-                                  } ?? "No data yet")
-                                : "Live"
-                        )
-                        .font(DVNT.TypeScale.caption(13))
-                        .foregroundColor(doors.isStale ? DVNT.signal : DVNT.textFaint)
+                        NavigationLink("Send notice") { VenueNoticeView(eventId: d.eventId) }
+                        SnapshotFreshness(label: "Door", syncedAt: doors.syncedAt)
+                        PhoneLinkStatus()
                     }
                     .padding(.horizontal, DVNT.Space.tight)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else if let error = doors.error {
+                ScrollView {
+                    VStack(spacing: DVNT.Space.base) {
+                        Text("Door unavailable").font(DVNT.TypeScale.title())
+                        Text(error).font(DVNT.TypeScale.body())
+                        Button("Retry") { connectivity.requestSync() }
+                        SnapshotFreshness(label: "Door", syncedAt: doors.syncedAt)
+                        PhoneLinkStatus()
+                    }.padding()
                 }
             } else {
                 VStack(spacing: DVNT.Space.base) {

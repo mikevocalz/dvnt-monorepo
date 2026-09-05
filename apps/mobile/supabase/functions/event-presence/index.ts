@@ -17,6 +17,7 @@
  * `arrived` is staging information for the host and nothing more.
  */
 
+import { presenceExpiry } from "../_shared/presence-expiry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   verifySession,
@@ -90,14 +91,10 @@ Deno.serve(async (req: Request) => {
     // back to 6h from now when the event has no end time recorded.
     const { data: ev } = await supabase
       .from("events")
-      .select("end_time")
+      .select("end_date")
       .eq("id", eventId)
       .maybeSingle();
-    const endMs = ev?.end_time ? Date.parse(ev.end_time) : NaN;
-    const expiresAt = new Date(
-      (Number.isFinite(endMs) ? endMs : Date.now() + 6 * 3600_000) +
-        6 * 3600_000,
-    ).toISOString();
+    const expiresAt = presenceExpiry(ev?.end_date);
 
     const { error } = await supabase.from("event_presence").upsert(
       {

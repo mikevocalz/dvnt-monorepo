@@ -1,6 +1,7 @@
 package com.dvnt.app.wear
 
 import android.util.Log
+import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.WearableListenerService
 
@@ -25,7 +26,12 @@ class WearDataLayerService : WearableListenerService() {
 
     override fun onDataChanged(dataEvents: DataEventBuffer) {
         Log.d(TAG, "onDataChanged from the phone")
+        MessageRepository.get(applicationContext).ingest(dataEvents)
         TicketRepository.get(applicationContext).ingest(dataEvents)
+    }
+
+    override fun onMessageReceived(event: MessageEvent) {
+        MessageRepository.get(applicationContext).receive(event)
     }
 
     private companion object {

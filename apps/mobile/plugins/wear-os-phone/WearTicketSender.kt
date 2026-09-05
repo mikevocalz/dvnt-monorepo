@@ -2,6 +2,8 @@ package com.dvnt.app
 
 import android.content.Context
 import android.util.Log
+import com.google.android.gms.tasks.Task
+import com.google.android.gms.wearable.DataItem
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 
@@ -33,7 +35,7 @@ object WearTicketSender {
      * the same path as a no-op and never fires the listener, so a "resend"
      * without a changing field does nothing at all.
      */
-    fun send(context: Context, payloadJson: String, syncedAtEpochMillis: Long) {
+    fun send(context: Context, payloadJson: String, syncedAtEpochMillis: Long): Task<DataItem> {
         val request = PutDataMapRequest.create(PATH_TICKETS).apply {
             dataMap.putString(KEY_PAYLOAD, payloadJson)
             dataMap.putLong(KEY_SYNCED_AT, syncedAtEpochMillis)
@@ -43,7 +45,7 @@ object WearTicketSender {
             // a door does not have tens of minutes.
             .setUrgent()
 
-        Wearable.getDataClient(context.applicationContext)
+        return Wearable.getDataClient(context.applicationContext)
             .putDataItem(request)
             .addOnSuccessListener { Log.d(TAG, "tickets synced to wear") }
             .addOnFailureListener { e -> Log.w(TAG, "wear sync failed", e) }

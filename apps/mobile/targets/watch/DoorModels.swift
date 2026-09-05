@@ -22,23 +22,28 @@ struct WatchDoor: Codable, Hashable {
         case eventId, eventTitle, expected, arrived, remaining, priorityLane, approaching
     }
 
-    /// Lenient decode: a missing count renders as zero rather than blanking the
-    /// whole screen mid-event.
+    /// An absent or invalid count is unknown, never an invented zero.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        eventId = (try? c.decode(String.self, forKey: .eventId)) ?? ""
-        eventTitle = (try? c.decode(String.self, forKey: .eventTitle)) ?? "Event"
-        expected = (try? c.decode(Int.self, forKey: .expected)) ?? 0
-        arrived = (try? c.decode(Int.self, forKey: .arrived)) ?? 0
-        remaining = (try? c.decode(Int.self, forKey: .remaining)) ?? 0
-        priorityLane = (try? c.decode(Int.self, forKey: .priorityLane)) ?? 0
-        approaching = (try? c.decode(Int.self, forKey: .approaching)) ?? 0
+        eventId = try c.decode(String.self, forKey: .eventId)
+        eventTitle = try c.decode(String.self, forKey: .eventTitle)
+        expected = try c.decode(Int.self, forKey: .expected)
+        arrived = try c.decode(Int.self, forKey: .arrived)
+        remaining = try c.decode(Int.self, forKey: .remaining)
+        priorityLane = try c.decode(Int.self, forKey: .priorityLane)
+        approaching = try c.decode(Int.self, forKey: .approaching)
+        guard !eventId.isEmpty, [expected, arrived, remaining, priorityLane, approaching].allSatisfy({ $0 >= 0 }) else {
+            throw DecodingError.dataCorruptedError(forKey: .eventId, in: c, debugDescription: "Invalid door counts")
+        }
     }
 }
 
 struct WatchDoorEnvelope: Codable {
     let door: WatchDoor?
     let syncedAt: Double
-
+    var `protocol`: Int = 2
+    var accountGen: String = ""
+    var status: String = "ready"
+    var error: String?
     static let empty = WatchDoorEnvelope(door: nil, syncedAt: 0)
 }

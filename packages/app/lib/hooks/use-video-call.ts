@@ -44,6 +44,8 @@ import {
   usePeers,
 } from "@fishjam-cloud/react-native-client";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useWatchSessionStore } from "@dvnt/app/features/watch/watch-session-store";
+import { useWatchActiveCall } from "@dvnt/app/features/watch/use-watch-active-call";
 import { callRoomsApi } from "@dvnt/app/lib/api/call-rooms";
 import { callSignalsApi } from "@dvnt/app/lib/api/call-signals";
 import { supabase } from "@dvnt/app/lib/supabase/client";
@@ -90,6 +92,8 @@ function logWarn(...args: unknown[]) {
 
 export function useVideoCall() {
   const user = useAuthStore((s) => s.user);
+  const watchOwnedRoom = useRef<string | null>(null);
+  const watchOwnedGeneration = useRef<string | null>(null);
   const { joinRoom, leaveRoom, peerStatus } = useConnection();
   const cameraHook = useCamera();
   const microphoneHook = useMicrophone();
@@ -547,6 +551,7 @@ export function useVideoCall() {
       callType: CallType = "video",
       chatId?: string,
     ) => {
+      const watchCallGeneration = useWatchSessionStore.getState().accountGen;
       const s = getStore();
       s.clearError();
       s.setCallType(callType);
@@ -617,7 +622,8 @@ export function useVideoCall() {
       const createResult = await callRoomsApi.createCall({
         title,
         participantIds,
-        maxParticipants: Math.max(participantIds.length + 1, 10),
+        maxParticipants: 4,
+        hasVideo: callType === "video",
       });
 
       if (!createResult.ok || !createResult.data) {
@@ -636,7 +642,7 @@ export function useVideoCall() {
       log("Joining room...");
 
       const joinResult = await callRoomsApi.joinCall(newRoomId);
-      log("Join result:", JSON.stringify(joinResult));
+      log("Join result:", joinResult.ok ? "authorized" : "rejected");
       if (!joinResult.ok || !joinResult.data) {
         const msg = joinResult.error?.message || "Failed to join room";
         logError("Room join failed:", msg);
@@ -646,6 +652,8 @@ export function useVideoCall() {
       }
 
       const { token, user: joinedUser, room: joinedRoom } = joinResult.data;
+      watchOwnedRoom.current = joinedRoom.id;
+      watchOwnedGeneration.current = watchCallGeneration;
       log("Got Fishjam token for user:", joinedUser.id);
       // [SESSION] Assertion: verify roomId + fishjamRoomId for debugging
       log(
@@ -866,6 +874,7 @@ export function useVideoCall() {
   // ── Join an existing call (incoming) ───────────────────────────────
   const joinCall = useCallback(
     async (roomId: string, callType: CallType = "video") => {
+      const watchCallGeneration = useWatchSessionStore.getState().accountGen;
       const s = getStore();
       s.clearError();
       s.setCallType(callType);
@@ -894,6 +903,8 @@ export function useVideoCall() {
       }
 
       const { token, user: joinedUser, room: joinedRoom } = joinResult.data;
+      watchOwnedRoom.current = joinedRoom.id;
+      watchOwnedGeneration.current = watchCallGeneration;
       log("Got Fishjam token for user:", joinedUser.id);
       log(
         `[SESSION] roomId=${roomId}, fishjamRoomId=${joinedRoom?.fishjamRoomId}, userId=${joinedUser.id}`,
@@ -1211,6 +1222,8 @@ export function useVideoCall() {
       `(trackToggled=${trackToggled})`,
     );
   }, [getStore]);
+
+  useWatchActiveCall({ ownedRoom: watchOwnedRoom, ownedGeneration: watchOwnedGeneration, peerStatus, tracks: () => micRef.current.microphoneStream?.getAudioTracks() ?? [], toggleMute, leaveCall });
 
   // ── Escalate audio → video (explicit, permission-gated) ────────────
   // This is the ONLY way to enable camera during an audio call.

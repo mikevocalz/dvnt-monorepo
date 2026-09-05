@@ -27,7 +27,9 @@ enum class TicketStatus(val wire: String) {
     CHECKED_IN("checked_in"),
     REVOKED("revoked"),
     EXPIRED("expired"),
-    TRANSFER_PENDING("transfer_pending");
+    TRANSFER_PENDING("transfer_pending"),
+    CANCELLED("cancelled"),
+    UNKNOWN("unknown");
 
     /** Only a `valid` ticket should present a live, scannable code. */
     val isPresentable: Boolean get() = this == VALID
@@ -41,15 +43,17 @@ enum class TicketStatus(val wire: String) {
             REVOKED -> "Revoked"
             EXPIRED -> "Expired"
             TRANSFER_PENDING -> "Transferring"
+            CANCELLED -> "Cancelled"
+            UNKNOWN -> "Status unavailable"
         }
 
     companion object {
         /** The DB's raw `scanned` is normalised to `checked_in` upstream, but accept
          *  either — being defensive here is cheaper than a wrong-looking pass. */
         fun from(raw: String?): TicketStatus = when (raw) {
-            null -> VALID
+            null -> UNKNOWN
             "scanned" -> CHECKED_IN
-            else -> entries.firstOrNull { it.wire == raw } ?: VALID
+            else -> entries.firstOrNull { it.wire == raw } ?: UNKNOWN
         }
     }
 }
@@ -239,6 +243,8 @@ data class WatchTicketEnvelope(
     /** Absent until the phone's entitlement query resolves. Absent means "we do not
      *  know yet", which the UI renders as nothing — never as Free. */
     val membership: WatchMembership?,
+    val protocol: Int? = null,
+    val accountGen: String? = null,
 ) {
     val isEmpty: Boolean get() = tickets.isEmpty()
 
@@ -262,6 +268,8 @@ data class WatchTicketEnvelope(
                     tickets = tickets,
                     syncedAt = root.optLong("syncedAt", 0L),
                     membership = WatchMembership.from(root.optJSONObject("membership")),
+                    protocol = if (root.has("protocol")) root.optInt("protocol") else null,
+                    accountGen = root.optStringOrNull("accountGen"),
                 )
             } catch (_: Throwable) {
                 null

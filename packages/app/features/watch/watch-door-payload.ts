@@ -30,6 +30,10 @@ export interface WatchDoorDTO {
 }
 
 export interface WatchDoorEnvelope {
+  protocol?: 2;
+  accountGen?: string;
+  status?: "ready" | "error";
+  error?: string;
   door: WatchDoorDTO | null;
   /** Epoch seconds, stamped by the phone so the wrist shows honest staleness. */
   syncedAt: number;
@@ -53,4 +57,16 @@ export function doorSignature(env: WatchDoorEnvelope): string {
     d.priorityLane,
     d.approaching,
   ].join(":");
+}
+
+/** Validate authoritative aggregate response; absent counts never become zero. */
+export function authoritativeDoor(value: unknown): WatchDoorDTO | null {
+  if (!value || typeof value !== "object") return null;
+  const d = value as WatchDoorDTO;
+  if (typeof d.eventId !== "string" || !/^[1-9][0-9]*$/.test(d.eventId) || typeof d.eventTitle !== "string") return null;
+  for (const key of ["expected", "arrived", "remaining", "priorityLane", "approaching"] as const) {
+    if (!Number.isSafeInteger(d[key]) || d[key] < 0) return null;
+  }
+  if (d.arrived > d.expected || d.remaining !== d.expected - d.arrived || d.priorityLane > d.remaining || d.approaching > d.remaining) return null;
+  return { eventId: d.eventId, eventTitle: d.eventTitle, expected: d.expected, arrived: d.arrived, remaining: d.remaining, priorityLane: d.priorityLane, approaching: d.approaching };
 }

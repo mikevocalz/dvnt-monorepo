@@ -38,12 +38,13 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
         }
     }
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
     // No compose-bom, and no explicit androidx.compose.* lines. Wear Compose
     // already brings the Compose runtime/foundation/ui it is built against, and
     // every version this module pinned on top of that turned into a fight: the
@@ -51,12 +52,14 @@ dependencies {
     // compileSdk 37 / AGP 9.1, while this project is on 36 / 8.12. Fewer pins,
     // fewer conflicts — add one back only when something is genuinely missing.
 
-    // Wear Compose M2, deliberately. androidx.wear.compose:compose-material3 is
-    // 1.7.0-alpha07 and has NO stable release — Wear OS 6 markets "Material 3
-    // Expressive", which makes it read as the default, but shipping a paid
-    // ticketing app on an alpha dependency is not a trade worth making.
-    implementation 'androidx.wear.compose:compose-material:1.6.2'
+    // Stable Wear Material 3, verified against the 1.6.2 published sources.
+    implementation 'androidx.wear.compose:compose-material3:1.6.2'
     implementation 'androidx.wear.compose:compose-foundation:1.6.2'
+    implementation 'androidx.wear:wear-input:1.2.0'
+    implementation 'androidx.wear.tiles:tiles:1.6.2'
+    implementation 'androidx.wear.protolayout:protolayout-material3:1.4.2'
+    implementation 'androidx.wear.watchface:watchface-complications-data-source:1.2.1'
+    implementation 'androidx.wear:wear-ongoing:1.1.0'
 
     implementation 'androidx.activity:activity-compose:1.10.1'
 

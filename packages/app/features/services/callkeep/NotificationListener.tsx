@@ -22,7 +22,9 @@
 
 import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
-import { useRouter } from "expo-router";
+import { getCurrentUserRow } from "@dvnt/app/lib/auth/identity";
+import { callSignalsApi } from "@dvnt/app/lib/api/call-signals";
+import { useWatchSessionStore } from "@dvnt/app/features/watch/watch-session-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { CT } from "@dvnt/app/features/services/calls/callTrace";
 import {
@@ -53,9 +55,6 @@ interface CallNotificationData {
 export function NotificationListener(): null {
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const router = useRouter();
-  const routerRef = useRef(router);
-  routerRef.current = router;
 
   // Track seen room IDs to prevent duplicate call UI from both Realtime + Push
   const seenRoomIdsRef = useRef<Set<string>>(new Set());
@@ -82,8 +81,8 @@ export function NotificationListener(): null {
           "[NotificationListener] Cold start from call notification:",
           data.roomId,
         );
-        // User already tapped the notification — navigate directly to call
-        handleColdStartCallNotification(data);
+        // Opening a notification still requires a fresh ringing signal and explicit answer.
+        void handleIncomingCallNotification(data);
       }
     });
 
@@ -98,7 +97,7 @@ export function NotificationListener(): null {
             roomId: data.roomId,
             caller: data.callerUsername,
           });
-          handleIncomingCallNotification(data);
+          void handleIncomingCallNotification(data);
         }
       });
 
@@ -113,8 +112,8 @@ export function NotificationListener(): null {
             roomId: data.roomId,
             caller: data.callerUsername,
           });
-          // User tapped the notification — navigate directly to call
-          handleColdStartCallNotification(data);
+          // Opening the notification displays the current incoming-call UI.
+          void handleIncomingCallNotification(data);
         }
       });
 
@@ -130,7 +129,23 @@ export function NotificationListener(): null {
    * Handle incoming call push notification by triggering CallKeep UI.
    * Used when the app is in the FOREGROUND and a call notification arrives.
    */
-  function handleIncomingCallNotification(data: CallNotificationData): void {
+  async function handleIncomingCallNotification(data: CallNotificationData): Promise<void> {
+    const viewerId = useAuthStore.getState().user?.id;
+    const generation = useWatchSessionStore.getState().accountGen;
+    if (!viewerId || !data.roomId) return;
+    try {
+      const identity = await getCurrentUserRow();
+      if (!identity || useAuthStore.getState().user?.id !== viewerId) return;
+      const signal = await callSignalsApi.getFreshIncomingSignal(data.roomId, String(identity.id));
+      if (!signal || useAuthStore.getState().user?.id !== viewerId ||
+          useWatchSessionStore.getState().accountGen !== generation) return;
+      displayIncomingCall({ ...data, callType: signal.call_type, callerUsername: signal.caller_username ?? undefined });
+    } catch {
+      CT.trace("CALL", "call_notification_validation_unavailable");
+    }
+  }
+
+  function displayIncomingCall(data: CallNotificationData): void {
     const { roomId, callType, callerUsername } = data;
 
     // Dedupe: If we already showed CallKeep UI for this room, skip
@@ -184,61 +199,6 @@ export function NotificationListener(): null {
         "[NotificationListener] Failed to show CallKeep UI:",
         error,
       );
-    }
-  }
-
-  /**
-   * Handle a call notification that the user TAPPED (from killed or background state).
-   * Since the user already interacted with the notification, skip CallKeep incoming UI
-   * and navigate directly to the call screen — this is the Instagram/Facebook behavior.
-   */
-  function handleColdStartCallNotification(data: CallNotificationData): void {
-    const { roomId, callType, callerUsername, callerAvatar } = data;
-
-    if (seenRoomIdsRef.current.has(roomId)) {
-      CT.trace("CALL", "cold_start_duplicate_ignored", { roomId });
-      return;
-    }
-    seenRoomIdsRef.current.add(roomId);
-    setTimeout(() => seenRoomIdsRef.current.delete(roomId), 60000);
-
-    CT.trace("CALL", "cold_start_navigating_to_call", {
-      roomId,
-      callType,
-      caller: callerUsername,
-    });
-
-    // Persist mapping for CallKeep event handling
-    persistCallMapping(roomId, roomId);
-
-    // Navigate directly to the call screen — user already "answered" by tapping
-    try {
-      routerRef.current.push({
-        pathname: "/(protected)/call/[roomId]",
-        params: {
-          roomId,
-          callType: callType || "video",
-          isGroup: data.isGroup ? "true" : "false",
-          recipientUsername: callerUsername || "Unknown",
-          recipientAvatar: callerAvatar || "",
-        },
-      });
-      console.log(
-        "[NotificationListener] Cold start → navigated to call:",
-        roomId,
-      );
-    } catch (navError: any) {
-      CT.error("CALL", "cold_start_navigation_failed", {
-        roomId,
-        error: navError?.message,
-      });
-      // Fallback: show CallKeep UI instead
-      showIncomingCall({
-        callUUID: roomId,
-        handle: callerUsername || "Unknown",
-        displayName: callerUsername || "Unknown Caller",
-        hasVideo: callType === "video",
-      });
     }
   }
 

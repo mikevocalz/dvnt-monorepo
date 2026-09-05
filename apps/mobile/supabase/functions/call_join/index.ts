@@ -2,10 +2,8 @@
  * Edge Function: call_join
  * WS-1: personal Calls, split from Sneaky Lynk rooms.
  *
- * Thin wrapper — checks room_kind='call' (structural boundary: a lynk join
- * link can never enter here), then forwards verbatim to video_join_room so
- * the private-room gate, ban check, capacity check, and Fishjam peer minting
- * stay byte-identical between the two stacks.
+ * Requires the call discriminator before forwarding to the call-only admission
+ * and media-provisioning branch of video_join_room.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -25,7 +23,11 @@ const CallJoinSchema = z.object({
   platform: z.string().optional(),
 });
 
-type ErrorCode = "unauthorized" | "validation_error" | "not_found" | "internal_error";
+type ErrorCode =
+  | "unauthorized"
+  | "validation_error"
+  | "not_found"
+  | "internal_error";
 
 interface ApiResponse<T = unknown> {
   ok: boolean;

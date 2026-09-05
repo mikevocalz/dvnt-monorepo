@@ -118,6 +118,8 @@ export interface WatchMembershipDTO {
 }
 
 export interface WatchTicketEnvelope {
+  protocol?: 2;
+  accountGen?: string;
   tickets: WatchTicketDTO[];
   /** Epoch seconds, stamped by the phone so the watch shows honest staleness. */
   syncedAt: number;

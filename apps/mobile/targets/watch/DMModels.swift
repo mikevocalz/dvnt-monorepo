@@ -1,11 +1,5 @@
 import Foundation
 
-/// Mirror of `WatchDMDTO` in
-/// `packages/app/features/watch/watch-dm-payload.ts` — keep the two in lockstep.
-///
-/// A projection of the phone's conversation list, nothing more. There is no
-/// thread history here and no DVNT session on this device: the wrist shows who
-/// wants the member and carries one line back, and the phone does the sending.
 struct WatchDM: Identifiable, Codable, Hashable {
     let id: String
     let name: String
@@ -20,8 +14,12 @@ struct WatchDM: Identifiable, Codable, Hashable {
     /// fills the gap with the Deviant Gradient rather than grey.
     let avatarURL: String?
 
+    let lastMessageId: String?
+    let category: String
+    let attachments: [WatchAttachment]
+
     enum CodingKeys: String, CodingKey {
-        case id, name, handle, preview, timestamp, unread, isGroup, avatarURL
+        case id, name, handle, preview, timestamp, unread, isGroup, avatarURL, lastMessageId, category, attachments
     }
 
     /// Lenient decode throughout: one malformed row must not blank the inbox.
@@ -34,6 +32,9 @@ struct WatchDM: Identifiable, Codable, Hashable {
         timestamp = (try? c.decode(Double.self, forKey: .timestamp)) ?? 0
         unread = (try? c.decode(Bool.self, forKey: .unread)) ?? false
         isGroup = (try? c.decode(Bool.self, forKey: .isGroup)) ?? false
+        lastMessageId = try? c.decode(String.self, forKey: .lastMessageId)
+        category = (try? c.decode(String.self, forKey: .category)) ?? "inbox"
+        attachments = (try? c.decode([WatchAttachment].self, forKey: .attachments)) ?? []
         // Lenient like the rest: an older phone build sends no avatarURL at all.
         avatarURL = (try? c.decode(String.self, forKey: .avatarURL))
             .flatMap { $0.isEmpty ? nil : $0 }
@@ -46,6 +47,23 @@ struct WatchDM: Identifiable, Codable, Hashable {
 struct WatchDMEnvelope: Codable {
     let dms: [WatchDM]
     let syncedAt: Double
+    var `protocol`: Int = 1
+    var accountGen: String = ""
+    var quickReplies: [String] = []
+    var status: String?
+    var error: String?
 
+    enum CodingKeys: String, CodingKey { case dms, syncedAt, `protocol`, accountGen, quickReplies, status, error }
+    init(dms: [WatchDM], syncedAt: Double) { self.dms = dms; self.syncedAt = syncedAt }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        dms = try c.decode([WatchDM].self, forKey: .dms)
+        syncedAt = try c.decode(Double.self, forKey: .syncedAt)
+        `protocol` = (try? c.decode(Int.self, forKey: .protocol)) ?? 1
+        accountGen = (try? c.decode(String.self, forKey: .accountGen)) ?? ""
+        quickReplies = (try? c.decode([String].self, forKey: .quickReplies)) ?? []
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+    }
     static let empty = WatchDMEnvelope(dms: [], syncedAt: 0)
 }

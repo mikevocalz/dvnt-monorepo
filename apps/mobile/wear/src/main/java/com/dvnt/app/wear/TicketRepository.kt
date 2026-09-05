@@ -49,12 +49,15 @@ class TicketRepository private constructor(private val appContext: Context) {
 
     /** Apply a raw envelope JSON string. No-op if it does not parse — a malformed
      *  push must leave the good cache in place rather than blanking the wrist. */
-    fun ingest(json: String?) {
+    fun ingest(json: String?) { synchronized(WearAccountSession) {
         val parsed = WatchTicketEnvelope.parse(json)
         if (parsed == null) {
             Log.w(TAG, "Dropped an unparseable /tickets payload; keeping the cache.")
             return
         }
+        if (parsed.protocol == 2) {
+            if (!WearAccountSession.accept(appContext, parsed.accountGen ?: "", parsed.syncedAt)) return
+        } else if (!WearAccountSession.matches(appContext, parsed.accountGen, parsed.protocol)) return
         // Latest-wins, but never go backwards in time. Data Layer delivery is not
         // ordered, and a redelivered older item must not un-check a checked-in pass.
         val current = _envelope.value
@@ -65,7 +68,8 @@ class TicketRepository private constructor(private val appContext: Context) {
         _envelope.value = parsed
         _everSynced.value = true
         prefs.edit().putString(KEY_PAYLOAD, json).apply()
-    }
+        WearSurfaces.requestUpdate(appContext)
+    } }
 
     /** Drain a Data Layer event buffer, taking only our path. */
     fun ingest(events: DataEventBuffer) {
@@ -99,8 +103,16 @@ class TicketRepository private constructor(private val appContext: Context) {
 
     // -------------------------------------------------------------- persisted cache
 
-    private fun loadCached(): WatchTicketEnvelope =
-        WatchTicketEnvelope.parse(prefs.getString(KEY_PAYLOAD, null)) ?: WatchTicketEnvelope.EMPTY
+    private fun loadCached(): WatchTicketEnvelope {
+        val cached = WatchTicketEnvelope.parse(prefs.getString(KEY_PAYLOAD, null)) ?: return WatchTicketEnvelope.EMPTY
+        return if (WearAccountSession.matches(appContext, cached.accountGen, cached.protocol)) cached else WatchTicketEnvelope.EMPTY
+    }
+
+    private fun clearAccount() {
+        _envelope.value = WatchTicketEnvelope.EMPTY
+        _everSynced.value = false
+        prefs.edit().clear().commit()
+    }
 
     companion object {
         private const val TAG = "DvntWear"
@@ -109,9 +121,10 @@ class TicketRepository private constructor(private val appContext: Context) {
 
         @Volatile
         private var instance: TicketRepository? = null
+        fun clearForAccountSwitch() { instance?.clearAccount() }
 
         fun get(context: Context): TicketRepository =
-            instance ?: synchronized(this) {
+            instance ?: synchronized(WearAccountSession) {
                 instance ?: TicketRepository(context.applicationContext).also { instance = it }
             }
     }

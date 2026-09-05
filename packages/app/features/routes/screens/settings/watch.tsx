@@ -4,10 +4,11 @@
  * AND clears what the wrist already cached (see `setWatchFeature`).
  */
 
-import { View, Text, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, ActivityIndicator, TextInput, Platform } from "react-native";
+import { useQuery } from "@tanstack/react-query";
 import { Main } from "@dvnt/app/components/ui/html";
 import { useNavigation } from "expo-router";
-import { useLayoutEffect, useEffect, useState } from "react";
+import { useLayoutEffect } from "react";
 import {
   Watch,
   Ticket,
@@ -56,7 +57,7 @@ const ROWS: Row[] = [
   {
     key: "messages",
     label: "Messages",
-    detail: "Recent conversations on the wrist, with a one-line reply.",
+    detail: "Conversation history, photos and replies from your watch.",
     icon: <MessageCircle size={20} color="#F5C518" />,
   },
   {
@@ -76,14 +77,17 @@ export default function WatchSettingsScreen() {
   const calls = useWatchSettingsStore((s) => s.calls);
   const messages = useWatchSettingsStore((s) => s.messages);
   const door = useWatchSettingsStore((s) => s.door);
-  const [status, setStatus] = useState<WatchStatus | null>(null);
+  const { data: status } = useQuery({ queryKey: ["watch-status"], queryFn: getWatchStatus, refetchInterval: 10000 });
+  const quickReplies = useWatchSettingsStore((s) => s.quickReplies);
+  const setQuickReplies = useWatchSettingsStore((s) => s.setQuickReplies);
+  const watchName = Platform.OS === "android" ? "Wear OS" : "Apple Watch";
 
   const values = { tickets, broadcasts, calls, messages, door };
 
   useLayoutEffect(() => {
     navigation.setOptions({
       headerShown: true,
-      title: "Apple Watch",
+      title: watchName,
       headerBackButtonDisplayMode: "minimal",
       headerLeft: () => null,
       headerTintColor: colors.foreground,
@@ -96,17 +100,8 @@ export default function WatchSettingsScreen() {
       headerShadowVisible: false,
       headerRight: () => <SettingsCloseButton />,
     });
-  }, [navigation, colors]);
+  }, [navigation, colors, watchName]);
 
-  useEffect(() => {
-    let alive = true;
-    void getWatchStatus().then((s) => {
-      if (alive) setStatus(s);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   const toggle = (key: WatchFeatureKey, value: boolean) => {
     void setWatchFeature(key, value);
@@ -140,16 +135,18 @@ export default function WatchSettingsScreen() {
                 <Watch size={20} color={colors.foreground} />
                 <View className="flex-1">
                   <Text className="font-semibold text-foreground">
-                    DVNT on Apple Watch
+                    DVNT on {watchName}
                   </Text>
                   <Text className="mt-1 text-sm text-muted-foreground">
                     {noWatch
-                      ? "No Apple Watch paired with this iPhone."
+                      ? `No ${watchName} companion detected.`
                       : !status.appInstalled
                         ? "Paired — install DVNT from the Watch app to start."
+                        : Platform.OS === "android"
+                          ? "Companion detected. Delivery is confirmed when you send a request."
                         : status.reachable
-                          ? "Paired and connected."
-                          : "Paired. Out of range — changes sync when it is back."}
+                          ? "Available for watch requests."
+                          : "Watch unavailable right now. Cached content stays on the wrist."}
                   </Text>
                 </View>
               </View>
@@ -190,10 +187,20 @@ export default function WatchSettingsScreen() {
             ))}
           </View>
 
+          <Text className="mb-3 text-sm font-semibold text-muted-foreground">QUICK REPLIES</Text>
+          <View className="mb-6 gap-3">
+            {quickReplies.map((reply, index) => (
+              <TextInput key={index} value={reply} maxLength={500}
+                accessibilityLabel={`Quick reply ${index + 1}`}
+                onChangeText={(text) => setQuickReplies(quickReplies.map((value, i) => i === index ? text : value))}
+                className="rounded-xl border border-border bg-card p-4 text-foreground" />
+            ))}
+            <Text className="text-sm text-muted-foreground">Choose a phrase on your watch, then confirm Send.</Text>
+          </View>
           <View className="mt-2 rounded-xl border border-primary/20 bg-primary/5 p-4">
             <Text className="text-sm text-muted-foreground">
-              Turning something off clears it from the watch straight away. Calls
-              are still answered on this iPhone either way — the watch only ever
+              Turning something off sends a clear request. A disconnected watch keeps cached content until it receives that request. Calls
+              use your phone for audio — the watch only ever
               carries the decision, and a reply typed on the wrist is sent by
               this iPhone. Messages starts off: anyone next to you can read your
               wrist.
