@@ -136,12 +136,13 @@ data class WatchTicket(
      * A watch-sized rendition of the flyer. Carried for schema parity with the
      * Apple Watch and for a future image-loading pass; NOT rendered today.
      *
-     * That is a decision, not an omission. A paired Wear device routinely has no
-     * network of its own, this module ships no image loader (no Coil, no disk
-     * cache), and nothing fetched would survive into the persisted cache that
-     * makes the app work with the phone away. [dominantHex] is the guarantee; art
-     * would be the upgrade, and an upgrade that only renders when the wrist
-     * happens to be online is worse than none on a surface judged in 2 seconds.
+     * That is a decision, not an omission, though no longer for the original
+     * reason: this module used to ship no image loader at all, and now
+     * [ui.MessageImage] and [ui.MessageDiskCache] render and persist artwork for
+     * broadcasts and events. The pass keeps [dominantHex] alone because the scan
+     * surface is judged in two seconds and the code has to own it — the same
+     * call Apple reached from its capture review, which took the flyer off the
+     * ticket entry so the QR and ring are what the screen opens on.
      */
     val imageURL: String?,
     /** `null` when the phone could not resolve identity; `false` means this pass is

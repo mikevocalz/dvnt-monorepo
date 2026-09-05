@@ -188,6 +188,23 @@ struct EventGroup: Identifiable {
     var hasPresentable: Bool { tickets.contains { $0.status.isPresentable } }
 }
 
+/// Whether a snapshot belongs to the session generation the watch is scoped to.
+///
+/// Tickets and broadcasts were the two domains applied without this check while
+/// `events`, `threadPage`, `callDirectory`, `activeCall` and `call` all compared
+/// the generation, so a protocol-2 snapshot built for a previous account could
+/// repopulate the wrist. Wear enforces the same rule in `TicketRepository` and
+/// `BroadcastRepository`; this is the one Swift copy both envelopes call.
+enum WatchSessionScope {
+    static func accepts(protocol protocolVersion: Int?, accountGen: String?, generation: String?) -> Bool {
+        // A phone that predates protocol 2 sends no generation to check. Rejecting
+        // it would blank a working watch on an older released build.
+        guard protocolVersion == 2 else { return true }
+        guard let generation, !generation.isEmpty else { return false }
+        return accountGen == generation
+    }
+}
+
 /// The whole payload the phone sends, with a sync timestamp for honest staleness.
 struct WatchTicketEnvelope: Codable {
     let tickets: [WatchTicket]
@@ -230,13 +247,8 @@ struct WatchTicketEnvelope: Codable {
         accountGen = try? c.decode(String.self, forKey: .accountGen)
     }
 
-    /// Mirrors `TicketRepository.ingest` on Wear: a protocol-2 envelope must name
-    /// the generation the session is on, so a snapshot built for the previous
-    /// account cannot repopulate the wrist. A pre-protocol-2 envelope carries no
-    /// generation to check and is accepted, exactly as Wear accepts it.
+    /// Mirrors `TicketRepository.ingest` on Wear.
     func belongs(toGeneration generation: String?) -> Bool {
-        guard self.protocol == 2 else { return true }
-        guard let generation, !generation.isEmpty else { return false }
-        return accountGen == generation
+        WatchSessionScope.accepts(protocol: self.protocol, accountGen: accountGen, generation: generation)
     }
 }

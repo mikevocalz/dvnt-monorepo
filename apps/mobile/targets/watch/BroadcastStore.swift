@@ -48,9 +48,16 @@ final class BroadcastStore: ObservableObject {
         persist(envelope)
     }
 
-    func ingest(json data: Data) {
-        guard let env = try? JSONDecoder().decode(WatchBroadcastEnvelope.self, from: data) else { return }
+    /// `generation` is the session generation the watch is scoped to. Broadcasts
+    /// and tickets were the two domains applied without that check while every
+    /// other envelope compared it. Returns whether the envelope was applied.
+    @discardableResult
+    func ingest(json data: Data, generation: String? = nil) -> Bool {
+        guard let env = try? JSONDecoder().decode(WatchBroadcastEnvelope.self, from: data),
+              env.belongs(toGeneration: generation)
+        else { return false }
         apply(env)
+        return true
     }
 
     /// IDs of currently-unread broadcasts — used to fire a single arrival haptic

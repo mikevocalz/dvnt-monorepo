@@ -118,9 +118,41 @@ envelope must name the session's generation, and an envelope from a released
 pre-protocol-2 phone carries no generation to check and is still accepted.
 `TicketStore.ingest(json:generation:)` applies it at the call site in
 `WatchConnectivityManager`. Covered by `TicketSafetyTests`, including the legacy
-path. Broadcasts still ingest unscoped behind the same session gate; their
-envelope has no generation field on any of the three sides, so closing that one
-is a protocol change rather than a lockstep fix.
+path.
+
+Broadcasts had the same drift and are fixed the same way. The phone stamps
+`protocol`/`accountGen` in `use-watch-broadcast-sync.ts:50-51` and Wear enforces
+them in `BroadcastRepository.ingest`; the Swift envelope declared neither.
+`WatchBroadcastEnvelope` now carries both and
+`BroadcastStore.ingest(json:generation:)` gates on them. The rule itself lives
+once, in `WatchSessionScope.accepts` in `Models.swift`, which both envelopes
+call — `BroadcastModels.swift` imports WatchKit and cannot build on the host, so
+the host suite covers the shared rule rather than a second copy of it.
+
+## Contract drift closed without protocol changes
+
+Three fields lived on the wire with no entry in
+`packages/app/features/watch/contracts/v2.ts`, which claims to be the mirrored
+contract. `WatchThreadPageRequest` (carrying `retainedMessageIds`, which both
+watches send and `watch-bridge` bounds to 250 numeric IDs) and
+`WatchThreadAction` are now declared there.
+
+`operationId` is deliberately absent from `WatchThreadAction` and stays absent.
+Wear puts one on its thread actions and watchOS does not, which reads as drift
+but is not a correctness gap: the action is desired-state (`read` sets a cursor,
+`reaction` states whether the emoji should be present), so replaying it changes
+nothing, and the phone validator requires no operation identity for it. Each
+client guards duplicate local dispatch its own way — `DMStore.performThreadAction`
+keys pending actions by conversation and refuses a conflicting one, Wear keys its
+persisted queue by its own id. Adding the field to Swift would be churn on the
+messaging path with no behaviour change.
+
+Wear's ticket `imageURL` doc comment justified not rendering flyer art by saying
+the module ships no image loader. That stopped being true when
+`ui/MessageImage.kt` and `ui/MessageDiskCache.kt` landed for broadcasts and
+events. The behaviour is unchanged and now matches Apple, whose capture review
+took the flyer off the ticket entry so the QR and ring own the scan surface; only
+the stale reason was corrected.
 
 ## Evidence
 

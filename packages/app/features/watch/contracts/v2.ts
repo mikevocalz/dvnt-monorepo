@@ -31,6 +31,39 @@ export interface WatchThreadPage {
   removedMessageIds?: string[];
 }
 
+/** What a watch sends to ask for a thread page. `retainedMessageIds` names the
+ *  message IDs the watch still holds, so the phone can report which of them were
+ *  deleted rather than leaving a removed message on the wrist; the phone bounds
+ *  it to 250 numeric IDs. Both watches send it and `watch-bridge` validates it,
+ *  but it had no entry here. */
+export interface WatchThreadPageRequest {
+  protocol: 2;
+  accountGen: string;
+  type: "threadPage";
+  conversationId: string;
+  olderCursor?: WatchCursor;
+  retainedMessageIds?: string[];
+}
+
+/** A desired-state action on a thread. Idempotent by construction: `read` sets a
+ *  cursor and `reaction` states whether the emoji should be present, so replaying
+ *  one changes nothing. That is why no `operationId` is on the wire here, unlike
+ *  `WatchSendCommand` — each client guards duplicate local dispatch its own way
+ *  (`DMStore.performThreadAction` keys pending actions by conversation; Wear
+ *  keys its persisted queue by its own id), and the phone validates neither. */
+export interface WatchThreadAction {
+  protocol: 2;
+  accountGen: string;
+  type: "threadAction";
+  action: "read" | "reaction";
+  conversationId: string;
+  messageId?: string;
+  emoji?: string;
+  desiredPresent?: boolean;
+  issuedAt: number;
+  expiresAt: number;
+}
+
 export interface WatchSendCommand {
   protocol: 2;
   accountGen: string;

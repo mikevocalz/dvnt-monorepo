@@ -106,5 +106,38 @@ struct WatchBroadcastEnvelope: Codable {
     let broadcasts: [WatchBroadcast]
     let syncedAt: Double
 
+    /// Session scope, in lockstep with the phone's `WatchBroadcastEnvelope`
+    /// (`packages/app/features/watch/watch-broadcast-payload.ts`, stamped in
+    /// `use-watch-broadcast-sync.ts`) and enforced on Wear in
+    /// `BroadcastRepository`. Optional for the same reason as the ticket
+    /// envelope: a released pre-protocol-2 phone sends neither.
+    let `protocol`: Int?
+    let accountGen: String?
+
     static let empty = WatchBroadcastEnvelope(broadcasts: [], syncedAt: 0)
+
+    init(
+        broadcasts: [WatchBroadcast],
+        syncedAt: Double,
+        protocol protocolVersion: Int? = nil,
+        accountGen: String? = nil
+    ) {
+        self.broadcasts = broadcasts
+        self.syncedAt = syncedAt
+        self.protocol = protocolVersion
+        self.accountGen = accountGen
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        broadcasts = (try? c.decode([WatchBroadcast].self, forKey: .broadcasts)) ?? []
+        syncedAt = (try? c.decode(Double.self, forKey: .syncedAt)) ?? 0
+        self.protocol = try? c.decode(Int.self, forKey: .protocol)
+        accountGen = try? c.decode(String.self, forKey: .accountGen)
+    }
+
+    /// Same rule Wear applies in `BroadcastRepository.ingest`.
+    func belongs(toGeneration generation: String?) -> Bool {
+        WatchSessionScope.accepts(protocol: self.protocol, accountGen: accountGen, generation: generation)
+    }
 }

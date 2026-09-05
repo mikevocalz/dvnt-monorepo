@@ -350,7 +350,7 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
 
         if let data = jsonData(payload["broadcasts"]) {
             let beforeUnread = broadcastStore.unreadIds
-            broadcastStore.ingest(json: data)
+            broadcastStore.ingest(json: data, generation: sessionGate.accountGen)
             let fresh = broadcastStore.unreadIds.subtracting(beforeUnread)
             if let newest = broadcastStore.broadcasts.first(where: { fresh.contains($0.id) }) {
                 // One deliberate haptic for the newest fresh message; intent picks

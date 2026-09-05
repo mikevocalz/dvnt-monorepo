@@ -40,6 +40,17 @@ import Foundation
         precondition(legacy.protocol == nil && legacy.accountGen == nil)
         precondition(legacy.belongs(toGeneration: "gen-A") && legacy.belongs(toGeneration: nil))
 
-        print("TicketSafety: missing/unknown/cancelled fail closed; QR bounds, exact hex length and canonical45 padding, generation scope passed")
+        // The broadcast envelope lives in a WatchKit-importing file and cannot
+        // build on the host, but it calls this same rule, so covering the rule
+        // covers both domains.
+        precondition(WatchSessionScope.accepts(protocol: 2, accountGen: "gen-A", generation: "gen-A"))
+        precondition(!WatchSessionScope.accepts(protocol: 2, accountGen: "gen-A", generation: "gen-B"))
+        precondition(!WatchSessionScope.accepts(protocol: 2, accountGen: nil, generation: "gen-A"))
+        precondition(!WatchSessionScope.accepts(protocol: 2, accountGen: "gen-A", generation: nil))
+        precondition(!WatchSessionScope.accepts(protocol: 2, accountGen: "gen-A", generation: ""))
+        precondition(WatchSessionScope.accepts(protocol: nil, accountGen: nil, generation: "gen-A"))
+        precondition(WatchSessionScope.accepts(protocol: 1, accountGen: nil, generation: nil))
+
+        print("TicketSafety: missing/unknown/cancelled fail closed; QR bounds, exact hex length and canonical45 padding, ticket and broadcast generation scope passed")
     }
 }
