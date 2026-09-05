@@ -237,25 +237,11 @@ function reportOfferingsFailure(
 ): void {
   if (reason === "no_native_module") return;
   const message = `[revenuecat] offerings unavailable (${offeringKey}): ${reason}`;
-  console.warn(message, detail ?? "");
-  try {
-    // Lazy + guarded: Sentry must never be the reason a paywall crashes.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const Sentry = require("@sentry/react-native");
-    Sentry.captureException(
-      detail instanceof Error ? detail : new Error(message),
-      {
-        tags: {
-          feature: "iap",
-          rc_offering: offeringKey,
-          rc_unavailable_reason: reason,
-        },
-        extra: { detail: safeDetail(detail) },
-      },
-    );
-  } catch {
-    // No Sentry in this build — the console.warn above still stands.
-  }
+  // Sentry was removed from mobile — see packages/app/lib/sentry-boot.native.ts.
+  // This warn is the whole report now, and it is enough: an offerings
+  // failure is a paywall the user is looking at right now, not a silent
+  // background fault that needs a remote copy to be noticed.
+  console.warn(message, safeDetail(detail));
 }
 
 function safeDetail(detail: unknown): string {

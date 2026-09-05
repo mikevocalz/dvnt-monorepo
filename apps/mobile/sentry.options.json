@@ -1,8 +1,0 @@
-{
-  "dsn": "https://8d9aa6e1efeafb58611a687fea5c8548@o4511776624541696.ingest.us.sentry.io/4511776736608256",
-  "attachScreenshot": false,
-  "attachViewHierarchy": false,
-  "enableAutoPerformanceTracing": false,
-  "tracesSampleRate": 0,
-  "profilesSampleRate": 0
-}

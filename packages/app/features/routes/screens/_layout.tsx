@@ -53,6 +53,8 @@ import { NAV_THEME } from "@dvnt/app/theme";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useScreenViewTracking } from "@dvnt/app/lib/analytics/useScreenViewTracking";
+import { usePathname } from "expo-router";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { useDeepLinkStore } from "@dvnt/app/lib/stores/deep-link-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -191,6 +193,11 @@ function RootLayout() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasSeenOnboarding = useAuthStore((s) => s.hasSeenOnboarding);
   const userId = useAuthStore((s) => s.user?.id);
+
+  // Product analytics — what Sentry was being asked for and could not answer.
+  // Mounted here so every route is covered without per-screen instrumentation
+  // and no screen can be forgotten. Refs only; never causes a render.
+  useScreenViewTracking(usePathname(), userId);
   // Root-layout wraps the whole app. Destructuring the store here
   // re-rendered every descendant whenever ANY app-store field updated
   // (pendingShareIntentRoute, nsfwEnabled, feedMode…). Narrow selectors

@@ -7,6 +7,7 @@ import { SiteChrome } from "@/components/site-chrome";
 import { WebVitalsReporter } from "@/components/web-vitals-reporter";
 import { WebToaster } from "@/components/web-toaster";
 import { CohostInviteWatcher } from "@/components/cohost-invite-watcher";
+import { ScreenViewTracker } from "@/components/screen-view-tracker";
 import { RNWStyleRegistry } from "./registry";
 import { RegisterSW } from "@/components/pwa/register-sw";
 import "./globals.css";
@@ -101,6 +102,7 @@ export default function FrontendLayout({
               <RegisterSW />
               {/* Persistent header + footer wrapping every page — mounted once
                   at the root, so the chrome never remounts/jumps on navigation. */}
+              <ScreenViewTracker />
               <SiteChrome>{children}</SiteChrome>
               {/* Single web toast host — the RNW auth screens call sonner's
                   `toast.*`; without this nothing rendered (silent login errors). */}
