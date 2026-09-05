@@ -238,7 +238,9 @@ export function HomeScreen() {
       // measured from its own aspect ratio.
       cols[min].h +=
         tile.kind === "event"
-          ? 224 + GAP
+          ? // 4:5 portrait like the post tiles, plus the card's own 12px
+            // vertical padding. Was a flat 224 for a fixed-height card.
+            columnWidth * 1.25 + 24 + GAP
           : estimateRatio(tile.post) * columnWidth + GAP;
     }
     return cols.map((c) => c.items);

@@ -30,7 +30,12 @@ export interface FeedEventCardData {
   media: EventFlyerMedia;
 }
 
-const CARD_HEIGHT = 200;
+// Portrait, matching the flyer's authored shape and the post tiles it sits
+// beside in the masonry. It was a FIXED 200px, which on a desktop column made
+// the card a squat letterbox next to full-height posts and ignored the column
+// width entirely — the flyer was also handed `aspect: 1` because the old
+// constant was divided by itself.
+const CARD_ASPECT = 4 / 5;
 
 export function FeedEventCard({ data }: { data: FeedEventCardData }) {
   const router = useRouter();
@@ -43,14 +48,14 @@ export function FeedEventCard({ data }: { data: FeedEventCardData }) {
         role="button"
         tabIndex={0}
         onKeyDown={(e) => (e.key === "Enter" ? open() : undefined)}
-        style={{ position: "relative", height: CARD_HEIGHT, borderRadius: 16, overflow: "hidden", background: "#111", cursor: "pointer" }}
+        style={{ position: "relative", width: "100%", aspectRatio: String(CARD_ASPECT), borderRadius: 16, overflow: "hidden", background: "#111", cursor: "pointer" }}
       >
         {/* hero — flyer precedence (video → image → generated fallback) */}
         <div style={{ position: "absolute", inset: 0 }}>
           <EventFlyer
             media={{ ...data.media, eventId: data.media.eventId ?? data.id }}
             autoplay
-            aspect={CARD_HEIGHT / CARD_HEIGHT}
+            aspect={CARD_ASPECT}
             rounded={0}
           />
         </div>
