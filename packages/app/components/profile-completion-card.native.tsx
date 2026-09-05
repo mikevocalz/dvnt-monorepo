@@ -11,15 +11,42 @@ import {
 
 const P = "rgb(62, 164, 229)";
 
+/** Drops null/undefined/empty values so a sparse API row cannot blank a field
+ *  the auth store already knows about. */
+function pruneEmpty(source: Record<string, any> | null | undefined) {
+  if (!source) return {};
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 /**
  * B2 completion mechanism — NATIVE. Weighted ring + the 3 highest-value
  * missing items with one-tap jumps into edit-profile. Hidden at 100%.
  * Mirror of the web ProfileCompletionCard; tokens per the B0 audit.
  */
-export function ProfileCompletionCard() {
+export function ProfileCompletionCard({
+  profile,
+}: {
+  /**
+   * Canonical profile from the API. The auth store is persisted and can lag the
+   * database, which made the card ask for a link the user had already added —
+   * so the screen's own rule applies here too: API first, store as fallback.
+   */
+  profile?: Record<string, any> | null;
+} = {}) {
   const user = useAuthStore((s) => s.user);
   const requestNudge = useOnboardingV2Store((s) => s.requestNudge);
-  const { percent, missing } = computeProfileCompletion(user);
+  // Field-by-field, so a source that omits a key falls back rather than
+  // blanking it. Both sources are partial in different ways.
+  const merged =
+    user || profile ? { ...(user ?? {}), ...pruneEmpty(profile) } : null;
+  const { percent, missing } = computeProfileCompletion(merged as any);
 
   // Session-capped nudge (the cap lives in the store, not here).
   useEffect(() => {

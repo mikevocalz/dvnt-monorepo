@@ -873,7 +873,7 @@ function ProfileScreenContent() {
           </View>
 
           {/* B2: completion ring + checklist (weighted; jumps to edit). */}
-          <ProfileCompletionCard />
+          <ProfileCompletionCard profile={profileData} />
         </View>
 
         {/* Tabs */}
