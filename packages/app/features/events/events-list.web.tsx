@@ -226,7 +226,12 @@ export function EventsListScreen() {
 
   return (
     <div className="min-h-[100dvh] bg-[#02030A] text-white">
-      <div className="mx-auto max-w-3xl px-4 pt-4 pb-28">
+      {/* max-w-3xl (768px) minus px-4 left the list container at exactly
+          736px, so the grid could never reach even a 2-column breakpoint —
+          a media wall inside a reading column. Search hit this same wall and
+          was widened for the same reason; the search FIELD below keeps its
+          own cap so it does not stretch across a desktop. */}
+      <div className="mx-auto max-w-6xl px-4 pt-4 pb-28">
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
@@ -269,7 +274,11 @@ export function EventsListScreen() {
 
         {/* Search + filter popover */}
         <div className="relative flex items-center gap-2 mt-3">
-          <div className="flex-1 flex items-center gap-2 h-11 px-3 rounded-xl border border-white/12 bg-white/[0.05]">
+          {/* Capped, not flex-1: with the page now max-w-6xl an
+              unconstrained field ran the whole width and left the filter
+              button marooned at the far edge — the same correction the
+              search screen needed when it was widened. */}
+          <div className="flex-1 max-w-xl flex items-center gap-2 h-11 px-3 rounded-xl border border-white/12 bg-white/[0.05]">
             <Search size={18} color="rgba(255,255,255,0.5)" />
             <input
               value={searchQuery}
@@ -463,7 +472,10 @@ function VirtualEventList({
     return () => ro.disconnect();
   }, []);
 
-  const columns = width >= 1280 ? 3 : width >= 768 ? 2 : 1;
+  // Thresholds are on the CONTAINER, not the viewport. They sit below the
+  // obvious 768/1280 because the page column is narrower than the window:
+  // 736px used to yield 1 column because it missed 768 by 32px.
+  const columns = width >= 960 ? 3 : width >= 600 ? 2 : 1;
 
   // Rows of `columns` cards. The virtualizer still measures real rows, so this
   // only has to be close; it positions from the estimate before measurement.
