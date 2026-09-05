@@ -7,7 +7,7 @@
  * (useEventsScreenStore — no local useState). The native screen pulls maps/media
  * that crash on web, so this is the web view.
  */
-import { useMemo, useRef, useEffect } from "react";
+import { useMemo, useRef, useEffect, useState } from "react";
 import { useRouter } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
@@ -447,19 +447,51 @@ function VirtualEventList({
   onToggleLike: (e: Event) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+
+  // Columns by container width. One card per row left a ~510px card centred in
+  // a 1372px viewport with ~290px of dead gutter on each side — a phone layout
+  // stretched onto a desktop. Posh, Nextdoor and Eventbrite all run 3-4 columns
+  // for the same portrait-flyer card; 3 keeps the card wide enough for the
+  // overlaid RSVP button, which is why this stops short of Posh's 4.
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    ro.observe(el);
+    setWidth(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, []);
+
+  const columns = width >= 1280 ? 3 : width >= 768 ? 2 : 1;
+
+  // Rows of `columns` cards. The virtualizer still measures real rows, so this
+  // only has to be close; it positions from the estimate before measurement.
+  const rows = useMemo(() => {
+    const out: Event[][] = [];
+    for (let i = 0; i < events.length; i += columns) {
+      out.push(events.slice(i, i + columns));
+    }
+    return out;
+  }, [events, columns]);
+
+  const GAP = 16;
+  // 4:5 portrait, so height follows the column width. The card keeps its
+  // max-w-md cap, which only binds in the single-column case.
+  const cardWidth = width
+    ? Math.min((width - GAP * (columns - 1)) / columns, 448)
+    : 448;
+
   const virtualizer = useWindowVirtualizer({
-    count: events.length,
-    // 4:5 portrait card capped at max-w-md (448px) + 16px gap. This estimate
-    // has to track the card's real geometry — the virtualizer positions rows
-    // from it, so a stale 16:9 number leaves gaps and jumpy scrolling.
-    estimateSize: () => 576,
-    overscan: 6,
+    count: rows.length,
+    estimateSize: () => cardWidth * 1.25 + GAP,
+    overscan: 3,
     scrollMargin: listRef.current?.offsetTop ?? 0,
   });
 
   useEffect(() => {
     virtualizer.measure();
-  }, [events.length, virtualizer]);
+  }, [rows.length, columns, cardWidth, virtualizer]);
 
   const items = virtualizer.getVirtualItems();
 
@@ -470,24 +502,29 @@ function VirtualEventList({
       style={{ height: virtualizer.getTotalSize() }}
     >
       {items.map((item) => {
-        const e = events[item.index];
-        if (!e) return null;
+        const row = rows[item.index];
+        if (!row) return null;
         return (
           <div
-            key={e.id}
+            key={row[0]?.id ?? item.index}
             data-index={item.index}
             ref={virtualizer.measureElement}
-            className="absolute left-0 w-full"
+            className="absolute left-0 grid w-full"
             style={{
               transform: `translateY(${item.start - virtualizer.options.scrollMargin}px)`,
-              paddingBottom: 16,
+              gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+              gap: GAP,
+              paddingBottom: GAP,
             }}
           >
-            <LargeEventCard
-              event={e}
-              onOpen={onOpen}
-              onToggleLike={onToggleLike}
-            />
+            {row.map((e) => (
+              <LargeEventCard
+                key={e.id}
+                event={e}
+                onOpen={onOpen}
+                onToggleLike={onToggleLike}
+              />
+            ))}
           </div>
         );
       })}
@@ -496,7 +533,8 @@ function VirtualEventList({
 }
 
 // Large hero card — matches the mobile event card (full image/VIDEO background,
-// gradient, title/date/location, price + RSVP). Single-column stack (not a grid).
+// gradient, title/date/location, price + RSVP). Laid out in a responsive grid by
+// VirtualEventList: 1 column on phones, 2 from 768px, 3 from 1280px.
 function LargeEventCard({
   event: e,
   onOpen,
@@ -523,8 +561,10 @@ function LargeEventCard({
       //
       // 4:5 rather than the full 3:5: it honours the artwork while still
       // letting more than one card exist on a screen, and it is the ratio the
-      // references settle on for a feed. The width cap is the other half —
-      // a portrait card at the full max-w-3xl column would be a billboard.
+      // references settle on for a feed. The max-w-md cap now only binds in the
+      // single-column phone case — on a desktop the grid column is narrower
+      // than the cap, which is what stopped this being one centred card with
+      // ~290px of dead gutter either side.
       className="relative mx-auto w-full max-w-md rounded-2xl overflow-hidden aspect-4/5 text-left bg-white/[0.04] cursor-pointer"
     >
       {videoUrl ? (
