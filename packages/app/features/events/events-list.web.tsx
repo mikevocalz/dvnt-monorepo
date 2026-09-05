@@ -449,8 +449,10 @@ function VirtualEventList({
   const listRef = useRef<HTMLDivElement>(null);
   const virtualizer = useWindowVirtualizer({
     count: events.length,
-    // aspect-video card (~16:9) on a max-w-3xl column + 16px gap.
-    estimateSize: () => 360,
+    // 4:5 portrait card capped at max-w-md (448px) + 16px gap. This estimate
+    // has to track the card's real geometry — the virtualizer positions rows
+    // from it, so a stale 16:9 number leaves gaps and jumpy scrolling.
+    estimateSize: () => 576,
     overscan: 6,
     scrollMargin: listRef.current?.offsetTop ?? 0,
   });
@@ -513,7 +515,17 @@ function LargeEventCard({
       onKeyDown={(ev) => {
         if (ev.key === "Enter" || ev.key === " ") onOpen(e.title);
       }}
-      className="relative w-full rounded-2xl overflow-hidden aspect-video text-left bg-white/[0.04] cursor-pointer"
+      // A DVNT flyer is authored 3:5 PORTRAIT (see BuiltEventMedia.flyerImageUrl).
+      // This card was `aspect-video`, so `object-cover` threw away roughly
+      // two thirds of every flyer and kept a letterbox strip out of the middle
+      // — the "squished" look. No event app crops a flyer to landscape: DICE,
+      // corner, Posh and Spotify Live Events all present them portrait.
+      //
+      // 4:5 rather than the full 3:5: it honours the artwork while still
+      // letting more than one card exist on a screen, and it is the ratio the
+      // references settle on for a feed. The width cap is the other half —
+      // a portrait card at the full max-w-3xl column would be a billboard.
+      className="relative mx-auto w-full max-w-md rounded-2xl overflow-hidden aspect-4/5 text-left bg-white/[0.04] cursor-pointer"
     >
       {videoUrl ? (
         <video
@@ -609,7 +621,11 @@ function EventCard({
   const img = flyerFor(e).posterUrl;
   return (
     <button onClick={() => onOpen(e.title)} className="text-left w-full">
-      <div className="relative rounded-xl overflow-hidden aspect-square bg-white/[0.06]">
+      {/* Portrait, for the same reason as the card above: a square crop of a
+          3:5 flyer loses its top and bottom, which is usually the lineup and
+          the date. Posh and Spotify Live Events both use a portrait thumb in
+          exactly this row position. */}
+      <div className="relative rounded-xl overflow-hidden aspect-3/4 bg-white/[0.06]">
         {img ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={img} alt={e.title} className="w-full h-full object-cover" />
