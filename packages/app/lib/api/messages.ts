@@ -14,7 +14,13 @@ export interface Conversation {
     avatar: string;
   };
   lastMessage: string;
+  /** Human-friendly timestamp used by phone UI (for example "2m"). */
   timestamp: string;
+  /**
+   * Canonical ISO timestamp for sorting/synchronisation. Keep presentation text
+   * out of transport contracts: Date.parse("2m") is not a timestamp.
+   */
+  timestampISO?: string;
   unread: boolean;
   isGroup?: boolean;
   groupName?: string;
