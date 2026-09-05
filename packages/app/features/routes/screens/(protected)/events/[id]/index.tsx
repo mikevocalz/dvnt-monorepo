@@ -10,6 +10,7 @@ import {
   TextInput,
 } from "react-native";
 // Galeria → MediaLightbox temporary swap (iOS 26 gesture issue, no native dep)
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { MediaLightbox as Galeria } from "@dvnt/app/components/media/MediaLightbox";
 import { LegendList } from "@dvnt/app/components/list";
 import React, { useEffect, useCallback, useMemo } from "react";
@@ -43,6 +44,7 @@ import {
   MoreHorizontal,
   Send,
   Ticket,
+  Radio,
 } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -1741,6 +1743,50 @@ function EventDetailScreenContent() {
 
   const event = safeEvent;
   const host = event.host;
+
+  /**
+   * Open the event's Lynk — and make sure there is a live one to open.
+   *
+   * The companion room is created when the EVENT is published, so for an event
+   * weeks out its session expires long before anyone arrives and the card is a
+   * dead link on the day it matters most. A free host's session is capped, so
+   * this is not an edge case for them, it is every time. The host's tap is
+   * therefore "start it": if the linked room is gone, ended, or its session has
+   * run out, mint a fresh one and re-point the event first. An open `status` is
+   * not enough to decide that — the row stays open while `ends_at` passes.
+   */
+  const openEventLynk = async () => {
+    const linked = (event as any)?.lynkRoomId as string | undefined;
+    if (!linked) return;
+    const go = (roomId: string) => router.push("/sneaky-lynk/room/" + roomId);
+    if (!isHost) {
+      go(linked);
+      return;
+    }
+    let roomId = linked;
+    try {
+      const existing = await sneakyLynkApi.getRoomById(linked);
+      const sessionOver =
+        !!existing?.endsAt && new Date(existing.endsAt).getTime() <= Date.now();
+      if (!existing || existing.status === "ended" || sessionOver) {
+        const fresh = await sneakyLynkApi.createRoom({
+          title: (event as any)?.title || "Event Lynk",
+          topic: "",
+          description: (event as any)?.description || "",
+          hasVideo: true,
+          isPublic: false,
+        });
+        if (fresh.ok && fresh.data?.room?.id) {
+          roomId = String(fresh.data.room.id);
+          await eventsApi.updateEvent(eventId, { lynkRoomId: roomId } as any);
+        }
+      }
+    } catch {
+      // Fall through to the linked room — the room screen states the problem
+      // better than a toast here can.
+    }
+    go(roomId);
+  };
   // CRITICAL: event.date is the day number ("22"), event.fullDate is the ISO string
   const isoDate = event.fullDate || event.date;
   const dateStr = formatEventDate(isoDate);
@@ -2284,6 +2330,40 @@ function EventDetailScreenContent() {
               />
             </View>
           )}
+
+          {/* ── Sneaky Lynk — the room this event is hosted in.
+                 Above the details on purpose: when an event HAS a room,
+                 "where do I go" outranks "what's the dress code". The card
+                 says it is private and that entry follows the event's list,
+                 because a guest who taps into a refusal learns that too
+                 late. */}
+          {(event as any).lynkRoomId ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                isHost ? "Open your event's Lynk" : "Join the event's Lynk"
+              }
+              testID="event-lynk-room"
+              onPress={() => void openEventLynk()}
+              className="mx-4 mb-4 flex-row items-center gap-3 rounded-2xl bg-card px-4 py-3 active:opacity-80"
+            >
+              <View className="w-10 h-10 rounded-xl bg-primary/20 items-center justify-center">
+                <Radio size={18} color="#8A40CF" />
+              </View>
+              <View className="flex-1">
+                <Text
+                  className="text-foreground font-semibold"
+                  numberOfLines={1}
+                >
+                  {isHost ? "Open your event's Lynk" : "Join the event's Lynk"}
+                </Text>
+                <Text className="text-xs text-muted-foreground mt-0.5">
+                  Private video room · only people on this event&apos;s list get
+                  in
+                </Text>
+              </View>
+            </Pressable>
+          ) : null}
 
           {/* ── 4. COLLAPSIBLE EVENT DETAILS ─────────────────────── */}
           <View style={s.collapsibleSection}>

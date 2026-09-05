@@ -135,6 +135,9 @@ function EditEventScreenContent() {
   const [flyerMediaType, setFlyerMediaType] = useState<"image" | "video">(
     "image",
   );
+  // The still kept as the POSTER when a video owns the hero, mirroring the
+  // create screen's two-slot model so an edit cannot drop one of the columns.
+  const [flyerPosterImage, setFlyerPosterImage] = useState<string | null>(null);
 
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
@@ -244,15 +247,23 @@ function EditEventScreenContent() {
 
         setOriginalData(ev);
 
-        // Load existing flyer
-        const existingFlyerUrl = (ev as any).flyerImageUrl || null;
+        // Load existing flyer — VIDEO FIRST.
+        //
+        // This read `flyerImageUrl` only, so opening the editor on an event
+        // with a video flyer showed the still and the editor had no idea a
+        // video existed — then saving wrote whatever was in the slot back
+        // into the still column, leaving the two columns describing different
+        // flyers. A video flyer always takes the hero (EventFlyer resolves
+        // video -> poster -> generated), so the editor has to load it that
+        // way, keeping the still as its poster.
+        const existingVideoUrl =
+          (ev as any).flyerVideoUrl || (ev as any).videoFlyerUrl || null;
+        const existingStillUrl = (ev as any).flyerImageUrl || null;
+        const existingFlyerUrl = existingVideoUrl || existingStillUrl;
         if (existingFlyerUrl) {
           setFlyerImage(existingFlyerUrl);
-          setFlyerMediaType(
-            /\.(mp4|mov|webm|m4v)(\?|$)/i.test(existingFlyerUrl)
-              ? "video"
-              : "image",
-          );
+          setFlyerMediaType(existingVideoUrl ? "video" : "image");
+          setFlyerPosterImage(existingVideoUrl ? existingStillUrl : null);
         }
 
         // Load ticket tiers
@@ -555,7 +566,15 @@ function EditEventScreenContent() {
         perks: perks || undefined,
         youtubeVideoUrl: youtubeVideoUrl.trim() || null,
         ticketingEnabled,
-        ...(flyerImageUrl !== undefined ? { flyerImageUrl } : {}),
+        // Video always takes the hero; the still is its poster and the
+        // fallback for wallet passes, OG images and .ics, which cannot play
+        // video. `videoFlyerUrl` was never written here at all, so an event's
+        // video flyer could not be changed or removed from this screen.
+        ...(flyerImageUrl !== undefined
+          ? flyerMediaType === "video"
+            ? { videoFlyerUrl: flyerImageUrl, flyerImageUrl: flyerPosterImage }
+            : { flyerImageUrl, videoFlyerUrl: null }
+          : {}),
       };
 
       if (locationData) {
@@ -764,7 +783,11 @@ function EditEventScreenContent() {
       // 4. Confirmation + navigation
       showToast("success", "Saved", "Event updated successfully");
       setIsSaving(false);
-      router.back();
+      // The event, not `router.back()`. This screen is reachable from a deep
+      // link and from the host menu, so "Saved" could be followed by landing
+      // somewhere else entirely — or nowhere. The event you just edited is
+      // the only correct destination.
+      router.replace(`/events/${id}`);
       return;
     } catch (error: any) {
       console.error("[EditEvent] Save error:", error);

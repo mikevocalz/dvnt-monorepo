@@ -44,11 +44,13 @@ import {
   ChevronRight,
   Check,
   Eye,
+  Radio,
 } from "lucide-react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Image } from "expo-image";
 import { useColorScheme, useMediaPicker } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 // Popover removed — inline expanding pickers used instead
 import { DvntMap } from "@dvnt/app/components/map";
@@ -196,6 +198,8 @@ function CreateEventScreenContent() {
   const setMaxAttendees = useCreateEventStore((s) => s.setMaxAttendees);
   const youtubeUrl = useCreateEventStore((s) => s.youtubeUrl);
   const setYoutubeUrl = useCreateEventStore((s) => s.setYoutubeUrl);
+  const attachLynkRoom = useCreateEventStore((s) => s.attachLynkRoom);
+  const setAttachLynkRoom = useCreateEventStore((s) => s.setAttachLynkRoom);
   const isSubmitting = useCreateEventStore((s) => s.isSubmitting);
   const setIsSubmitting = useCreateEventStore((s) => s.setIsSubmitting);
   const uploadProgress = useCreateEventStore((s) => s.uploadProgress);
@@ -618,6 +622,39 @@ function CreateEventScreenContent() {
         }
       }
 
+      // Companion Sneaky Lynk room, same rule as web: created BEFORE the event
+      // so its uuid goes in with the insert — one row, one truth, no second
+      // write that can half-fail. A room that cannot be created never blocks
+      // the event: an event without its room is a real event.
+      let lynkRoomId: string | undefined;
+      if (attachLynkRoom) {
+        try {
+          const room = await sneakyLynkApi.createRoom({
+            title: title.trim() || "Event Lynk",
+            topic: eventType || "",
+            description: description.trim(),
+            hasVideo: true,
+            // Private: the guest list is the event's.
+            isPublic: false,
+          });
+          if (room.ok && room.data?.room?.id) {
+            lynkRoomId = String(room.data.room.id);
+          } else {
+            showToast(
+              "warning",
+              "Lynk room not created",
+              "The event will publish without it. You can add one from Edit.",
+            );
+          }
+        } catch {
+          showToast(
+            "warning",
+            "Lynk room not created",
+            "The event will publish without it. You can add one from Edit.",
+          );
+        }
+      }
+
       const eventData: Record<string, any> = {
         title: title.trim(),
         description: description.trim(),
@@ -630,6 +667,7 @@ function CreateEventScreenContent() {
         category: tags[0] || "Event",
         maxAttendees: maxAttendees ? parseInt(maxAttendees, 10) : undefined,
         youtubeVideoUrl: youtubeUrl.trim() || undefined,
+        lynkRoomId,
         flyerImageUrl: flyerImageUrl || undefined,
         // V2 fields — location coordinates from autocomplete
         locationLat: locationData?.latitude,
@@ -1461,6 +1499,41 @@ function CreateEventScreenContent() {
         {/* ==================== STEP 1: MEDIA ==================== */}
         {currentStep === 1 && (
           <>
+            {/* Sneaky Lynk room — same control and copy as the web create
+                screen. Says what it DOES, not what it is: a toggle whose
+                consequence is a second object being created has to name that
+                consequence before the tap, not after. */}
+            <View className="mb-6">
+              <Text className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                Sneaky Lynk Room
+              </Text>
+              <Pressable
+                accessibilityRole="switch"
+                accessibilityState={{ checked: attachLynkRoom }}
+                onPress={() => setAttachLynkRoom(!attachLynkRoom)}
+                className="flex-row items-start gap-3 bg-card rounded-2xl px-4 py-4"
+              >
+                <View className="w-10 h-10 rounded-xl bg-primary/20 items-center justify-center">
+                  <Radio size={20} color={colors.primary} />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-foreground font-semibold">
+                    Host this event in a Sneaky Lynk
+                  </Text>
+                  <Text className="text-xs text-muted-foreground mt-0.5 leading-5">
+                    Creates a private video room for this event. Guests join it
+                    from the event page — you can start it any time.
+                  </Text>
+                </View>
+                <Switch
+                  value={attachLynkRoom}
+                  onValueChange={setAttachLynkRoom}
+                  trackColor={{ false: "#374151", true: colors.primary }}
+                  thumbColor="#fff"
+                />
+              </Pressable>
+            </View>
+
             {/* YouTube Video URL */}
             <View className="mb-6">
               <Text className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
