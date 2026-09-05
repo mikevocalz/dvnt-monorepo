@@ -15,6 +15,7 @@
 
 import { useEffect, useRef } from "react";
 import { useParams, useRouter } from "solito/navigation";
+import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import {
   Calendar,
   DollarSign,
@@ -122,7 +123,16 @@ export function EventEditScreen() {
     }
 
     const isoDate = ev.fullDate || ev.startDate || ev.date;
-    const existingFlyerUrl = ev.flyerImageUrl || null;
+    // Video FIRST. This read `ev.flyerImageUrl` only, so opening Edit on an
+    // event with a video flyer showed the still (or an empty box) and the
+    // editor had no idea a video existed — which is how saving could leave the
+    // two columns describing different flyers. Video takes precedence wherever
+    // a flyer renders (EventFlyer resolves video -> poster -> generated), so
+    // the editor has to load it that way too, with the still kept as the
+    // poster/fallback rather than discarded.
+    const existingVideoUrl = (ev as any).flyerVideoUrl || (ev as any).videoFlyerUrl || null;
+    const existingStillUrl = ev.flyerImageUrl || null;
+    const existingFlyerUrl = existingVideoUrl || existingStillUrl;
 
     s.hydrate({
       hydratedId: id,
@@ -144,9 +154,9 @@ export function EventEditScreen() {
       youtubeVideoUrl: ev.youtubeVideoUrl || "",
       ticketingEnabled: !!ev.ticketingEnabled,
       flyerImage: existingFlyerUrl,
-      flyerMediaType: /\.(mp4|mov|webm|m4v)(\?|$)/i.test(existingFlyerUrl || "")
-        ? "video"
-        : "image",
+      flyerMediaType: existingVideoUrl ? "video" : "image",
+      // The still is the poster when a video owns the primary slot.
+      flyerFallbackImage: existingVideoUrl ? existingStillUrl : null,
       eventImages: images,
     });
 
@@ -215,11 +225,41 @@ export function EventEditScreen() {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ev = event as any;
+
+      // The flyer, resolved the same way the create screen resolves it.
+      //
+      // This used to write `s.flyerImage` straight into `flyerImageUrl`, which
+      // was wrong three ways: the picker hands back a `blob:` URL that dies
+      // with the tab (the create screen already fixed that once and this one
+      // never got it), a VIDEO picked in the editor landed in the STILL
+      // column, and `videoFlyerUrl` was never written at all — so an event's
+      // video flyer could not be changed or removed, and the two columns
+      // could end up describing different flyers.
+      const uploadIfLocal = async (url: string | null | undefined) => {
+        if (!url) return undefined;
+        if (!/^(blob:|data:|file:)/.test(url)) return url;
+        const up = await withTimeout(uploadToServer(url, "events"), 30000, "upload-flyer");
+        if (!up.success || !up.url) {
+          throw new Error(up.error || "Couldn't upload the flyer. Re-select it and try again.");
+        }
+        return up.url;
+      };
+
+      const primaryUrl = await uploadIfLocal(s.flyerImage);
+      const posterUrl = await uploadIfLocal(s.flyerFallbackImage);
+
+      // Video ALWAYS takes the hero; the still is its poster and the fallback
+      // for static contexts (wallet pass, OG, .ics) that can't play video.
+      const isVideoPrimary = s.flyerMediaType === "video" && !!primaryUrl;
+      const nextVideoUrl = isVideoPrimary ? primaryUrl ?? null : null;
+      const nextStillUrl = isVideoPrimary ? posterUrl ?? null : primaryUrl ?? null;
+
+      const originalVideoUrl = ev?.flyerVideoUrl || ev?.videoFlyerUrl || null;
       const originalFlyerUrl = ev?.flyerImageUrl || null;
-      let flyerImageUrl: string | null | undefined = undefined;
-      if (s.flyerImage !== originalFlyerUrl) {
-        flyerImageUrl = s.flyerImage || null;
-      }
+      const videoFlyerUrl =
+        nextVideoUrl !== originalVideoUrl ? nextVideoUrl : undefined;
+      const flyerImageUrl =
+        nextStillUrl !== originalFlyerUrl ? nextStillUrl : undefined;
 
       const updateData: Record<string, unknown> = {
         title: s.title.trim(),
@@ -238,6 +278,7 @@ export function EventEditScreen() {
         youtubeVideoUrl: s.youtubeVideoUrl.trim() || null,
         ticketingEnabled: s.ticketingEnabled,
         ...(flyerImageUrl !== undefined ? { flyerImageUrl } : {}),
+        ...(videoFlyerUrl !== undefined ? { videoFlyerUrl } : {}),
       };
       if (allImages.length > 0) {
         updateData.coverImage = allImages[0];
@@ -428,11 +469,34 @@ export function EventEditScreen() {
     s.setEventImages((prev) => [...prev, ...urls]);
   };
 
+  /**
+   * One picker, two slots — video always wins the hero.
+   *
+   * Picking a video promotes it and keeps whatever still was there as the
+   * poster. Picking an image while a video is the hero replaces the POSTER,
+   * not the video: a still can never silently demote a video flyer, because
+   * every surface that renders a flyer resolves video first. Removing the
+   * video is the explicit way to go back to a still, and that promotes the
+   * poster rather than leaving the event with no flyer at all.
+   */
   const onFlyerPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    s.setFlyerImage(URL.createObjectURL(file));
-    s.setFlyerMediaType(file.type.startsWith("video/") ? "video" : "image");
+    const url = URL.createObjectURL(file);
+    const isVideo = file.type.startsWith("video/");
+    if (isVideo) {
+      if (s.flyerImage && s.flyerMediaType === "image" && !s.flyerFallbackImage) {
+        s.setFlyerFallbackImage(s.flyerImage);
+      }
+      s.setFlyerImage(url);
+      s.setFlyerMediaType("video");
+    } else if (s.flyerMediaType === "video" && s.flyerImage) {
+      s.setFlyerFallbackImage(url);
+    } else {
+      s.setFlyerImage(url);
+      s.setFlyerMediaType("image");
+    }
+    e.currentTarget.value = "";
   };
 
   if (isLoading || s.hydratedId !== id) {
@@ -562,7 +626,14 @@ export function EventEditScreen() {
               )}
               <button
                 onClick={() => {
-                  s.setFlyerImage(null);
+                  // Removing a video promotes its poster, so the event keeps a
+                  // flyer instead of dropping to the generated fallback.
+                  if (s.flyerMediaType === "video" && s.flyerFallbackImage) {
+                    s.setFlyerImage(s.flyerFallbackImage);
+                    s.setFlyerFallbackImage(null);
+                  } else {
+                    s.setFlyerImage(null);
+                  }
                   s.setFlyerMediaType("image");
                 }}
                 className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-black/60 flex items-center justify-center"

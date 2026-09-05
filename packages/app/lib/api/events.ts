@@ -961,6 +961,12 @@ export const eventsApi = {
         updateData[DB.events.isOnline] = updates.isOnline;
       if (updates.flyerImageUrl !== undefined)
         updateData[DB.events.flyerImageUrl] = updates.flyerImageUrl || null;
+      // The VIDEO flyer was not writable here at all, so the editor could only
+      // ever change the still — and a video picked in the editor was written
+      // into the still column. Video takes precedence over the still
+      // everywhere it renders, so it has to be editable where the still is.
+      if (updates.videoFlyerUrl !== undefined)
+        updateData[DB.events.videoFlyerUrl] = updates.videoFlyerUrl || null;
       // Gallery images — the editor sends `images` (jsonb array of {url}); it was
       // previously dropped here, so edits to the gallery never saved.
       if (updates.images !== undefined) updateData.images = updates.images;

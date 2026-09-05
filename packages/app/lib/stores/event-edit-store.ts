@@ -68,6 +68,10 @@ interface EventEditState {
   ticketingEnabled: boolean;
   flyerImage: string | null;
   flyerMediaType: "image" | "video";
+  /** Still image kept as the POSTER when a video owns the primary slot.
+   *  Mirrors the create store's two-slot model so an edit round-trip can't
+   *  drop one of the two flyer columns. */
+  flyerFallbackImage: string | null;
   eventImages: string[];
   ticketTiers: LocalTicketTier[];
   /** Add-on catalog working copy (WS-3). requiresTierId = ticket_types uuid. */
@@ -96,6 +100,7 @@ interface EventEditState {
   setYoutubeVideoUrl: (v: string) => void;
   setTicketingEnabled: (v: boolean) => void;
   setFlyerImage: (v: string | null) => void;
+  setFlyerFallbackImage: (v: string | null) => void;
   setFlyerMediaType: (v: "image" | "video") => void;
   setEventImages: (updater: (prev: string[]) => string[]) => void;
 
@@ -132,6 +137,7 @@ const initial = {
   ticketingEnabled: false,
   flyerImage: null as string | null,
   flyerMediaType: "image" as "image" | "video",
+  flyerFallbackImage: null as string | null,
   eventImages: [] as string[],
   ticketTiers: [] as LocalTicketTier[],
   addons: [] as DraftAddon[],
@@ -159,6 +165,7 @@ export const useEventEditStore = create<EventEditState>((set) => ({
   setYoutubeVideoUrl: (v) => set({ youtubeVideoUrl: v }),
   setTicketingEnabled: (v) => set({ ticketingEnabled: v }),
   setFlyerImage: (v) => set({ flyerImage: v }),
+  setFlyerFallbackImage: (v: string | null) => set({ flyerFallbackImage: v }),
   setFlyerMediaType: (v) => set({ flyerMediaType: v }),
   setEventImages: (updater) =>
     set((s) => ({ eventImages: updater(s.eventImages).slice(0, 4) })),
