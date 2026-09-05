@@ -12,8 +12,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "solito/navigation";
 import { BadgeCheck, ChevronRight, Globe, Check, Plus } from "lucide-react";
-import { useEventOrganizer } from "@dvnt/app/lib/hooks/use-event-organizer";
-import { hostEventsHref } from "./host-events-route";
+import {
+  useEventOrganizer,
+  useEventCoOrganizers,
+} from "@dvnt/app/lib/hooks/use-event-organizer";
+import { hostEventsHref, resolveHosts, needsHostPicker } from "./host-events-route";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 
@@ -48,6 +51,8 @@ export interface OrganizerCardProps {
 export function OrganizerCard({ eventId }: OrganizerCardProps) {
   const router = useRouter();
   const { data: org } = useEventOrganizer(eventId);
+  const { data: coHosts } = useEventCoOrganizers(eventId);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const follow = useFollow();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
@@ -62,7 +67,12 @@ export function OrganizerCard({ eventId }: OrganizerCardProps) {
   const goToProfile = () => router.push(`/profile/${org.username}`);
   /** "More events" must land on the events tab — the profile root shows
    *  posts first, which makes the link look broken. Mirrors the native card. */
-  const goToEvents = () => router.push(hostEventsHref(org.username, { web: true }));
+  const hosts = resolveHosts(
+    { username: org.username, name: displayName, avatar: org.avatar },
+    coHosts,
+  );
+  const goToEvents = (username: string = hosts[0].username) =>
+    router.push(hostEventsHref(username, { web: true }));
 
   const handleFollow = () => {
     if (!isAuthenticated) {
@@ -94,13 +104,58 @@ export function OrganizerCard({ eventId }: OrganizerCardProps) {
             <BadgeCheck size={15} color="#34A2DF" className="ml-1 shrink-0" />
           ) : null}
         </button>
-        <button
-          onClick={goToEvents}
-          aria-label={`More events by ${displayName}`}
-          className="flex items-center gap-0.5 text-white/50 text-sm font-medium shrink-0 hover:text-white/80 transition-colors"
-        >
-          More events <ChevronRight size={16} />
-        </button>
+        <div className="relative shrink-0">
+          <button
+            onClick={() =>
+              needsHostPicker(hosts) ? setPickerOpen((v) => !v) : goToEvents()
+            }
+            aria-haspopup={needsHostPicker(hosts) ? "menu" : undefined}
+            aria-expanded={needsHostPicker(hosts) ? pickerOpen : undefined}
+            aria-label={
+              needsHostPicker(hosts)
+                ? "More events. Choose a host"
+                : `More events by ${displayName}`
+            }
+            className="flex items-center gap-0.5 text-white/50 text-sm font-medium hover:text-white/80 transition-colors"
+          >
+            More events <ChevronRight size={16} />
+          </button>
+
+          {/* One link cannot stand for two people. Each host is named with the
+              role that makes the choice make sense. */}
+          {needsHostPicker(hosts) && pickerOpen ? (
+            <>
+              <button
+                aria-label="Close"
+                onClick={() => setPickerOpen(false)}
+                className="fixed inset-0 z-40 cursor-default"
+              />
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-50 mt-2 w-60 rounded-xl border border-white/10 bg-[#0b0d14] p-1.5 shadow-xl"
+              >
+                {hosts.map((host) => (
+                  <button
+                    key={host.username}
+                    role="menuitem"
+                    onClick={() => {
+                      setPickerOpen(false);
+                      goToEvents(host.username);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-white/[0.06] transition-colors"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-sm text-white">
+                      {host.name}
+                    </span>
+                    <span className="shrink-0 rounded-md border border-[#3FDCFF]/25 bg-[#3FDCFF]/10 px-1.5 py-0.5 text-[11px] font-bold tracking-wide text-[#3FDCFF]">
+                      {host.role}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
       </div>
 
       {/* Logo + name + stats */}

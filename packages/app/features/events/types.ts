@@ -67,6 +67,19 @@ export interface OrganizerSocials {
   website?: string;
 }
 
+/**
+ * A co-organizer as the public event page sees them. Deliberately smaller than
+ * EventOrganizer: no id, no follow relationship, no aggregate stats — this is
+ * billing, not a second organizer card.
+ */
+export interface EventCoOrganizer {
+  username: string;
+  name?: string;
+  avatar: string;
+  verified: boolean;
+  role: string;
+}
+
 export interface EventOrganizer {
   id: string;
   username: string;

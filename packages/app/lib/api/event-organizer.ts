@@ -10,6 +10,7 @@ import { supabase } from "../supabase/client";
 import { getCurrentUserIdSync, getCurrentUserId } from "./auth-helper";
 import type {
   EventOrganizer,
+  EventCoOrganizer,
   OrganizerSocials,
 } from "../../features/events/types";
 
@@ -79,6 +80,40 @@ export const eventOrganizerApi = {
     } catch (error) {
       console.error("[Events] getEventOrganizer error:", error);
       return null;
+    }
+  },
+
+  /**
+   * Accepted co-organizers billed alongside the host.
+   *
+   * Reads the `get_event_co_organizers` definer RPC rather than the table: the
+   * projection is fixed in SQL so `auth_id` never crosses the boundary, and the
+   * table itself stays unreadable to clients. Pending invitees and `scanner`
+   * door staff are excluded server-side — a pending invite is not consent to be
+   * billed publicly, and a scanner is not a co-organizer.
+   *
+   * Failure returns [] so the host still renders; co-hosts are additive.
+   */
+  async getEventCoOrganizers(eventId: string): Promise<EventCoOrganizer[]> {
+    try {
+      const { data, error } = await supabase.rpc("get_event_co_organizers", {
+        p_event_id: parseInt(eventId),
+      });
+      if (error) throw error;
+      return ((data as any[]) ?? [])
+        .filter((c) => c?.username)
+        .map((c) => ({
+          username: String(c.username),
+          name: c.name || undefined,
+          avatar: c.avatar || "",
+          verified: Boolean(c.verified),
+          // admin and editor are both billed as co-hosts; the distinction is an
+          // edit-rights one and means nothing to someone reading the event.
+          role: "Co-host" as const,
+        }));
+    } catch (error) {
+      console.error("[Events] getEventCoOrganizers error:", error);
+      return [];
     }
   },
 };

@@ -15,7 +15,10 @@ import { useRouter } from "expo-router";
 import { BadgeCheck, ChevronRight, Globe, Check, Plus } from "lucide-react-native";
 import Svg, { Path, Rect, Circle } from "react-native-svg";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
-import { useEventOrganizer } from "@dvnt/app/lib/hooks/use-event-organizer";
+import {
+  useEventOrganizer,
+  useEventCoOrganizers,
+} from "@dvnt/app/lib/hooks/use-event-organizer";
 import { HostEventsPickerSheet } from "./host-events-picker-sheet";
 import { hostEventsHref, resolveHosts, needsHostPicker } from "./host-events-route";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
@@ -80,6 +83,8 @@ export function OrganizerCard({
 }: OrganizerCardProps) {
   const router = useRouter();
   const { data: org } = useEventOrganizer(eventId);
+  // Falls back to the prop so a caller can still supply co-hosts directly.
+  const { data: fetchedCoHosts } = useEventCoOrganizers(eventId);
   const follow = useFollow();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [hostPickerOpen, setHostPickerOpen] = useState(false);
@@ -110,7 +115,7 @@ export function OrganizerCard({
 
   const hosts = resolveHosts(
     { username: org.username, name: displayName, avatar: org.avatar },
-    coHosts,
+    coHosts ?? fetchedCoHosts,
   );
 
   const onPressMoreEvents = () => {
