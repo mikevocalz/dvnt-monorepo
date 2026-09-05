@@ -44,3 +44,11 @@ export function dotWindowStart(count: number, current: number): number {
   const half = Math.floor(DOT_WINDOW / 2);
   return Math.min(Math.max(0, current - half), count - DOT_WINDOW);
 }
+
+/**
+ * Carousel dot colours — the brand gradient, cycled by slide index.
+ *
+ * Shared because web was painting every dot plain white while native cycled
+ * these three, so the same carousel looked colourless in the browser.
+ */
+export const CAROUSEL_DOT_COLORS = ["#3FDCFF", "#8A40CF", "#FF5BFC"] as const;

@@ -50,6 +50,7 @@ import { Dialog, Drawer } from "@dvnt/ui";
 import { postsApi } from "@dvnt/app/lib/api/posts";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import { TextPostSurface } from "./ui/TextPostSurface";
+import { CAROUSEL_DOT_COLORS } from "@dvnt/app/components/feed/feed-media-mode";
 
 const VIDEO_URL_RE = /post-video|\.mp4(\?|$)|\.mov(\?|$)|\.m3u8(\?|$)|\.webm(\?|$)/i;
 
@@ -648,8 +649,16 @@ function MediaCarousel({
               <span
                 key={i}
                 className={`h-1.5 rounded-full transition-all ${
-                  i === index ? "w-4 bg-white" : "w-1.5 bg-white/45"
+                  i === index ? "w-4" : "w-1.5 bg-white/45"
                 }`}
+                style={
+                  i === index
+                    ? {
+                        backgroundColor:
+                          CAROUSEL_DOT_COLORS[i % CAROUSEL_DOT_COLORS.length],
+                      }
+                    : undefined
+                }
               />
             ))}
           </div>

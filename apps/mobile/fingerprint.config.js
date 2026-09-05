@@ -31,5 +31,15 @@ module.exports = {
     '../../node_modules/@react-native-masked-view/masked-view/**',
     '../../node_modules/react-native-audio-api',
     '../../node_modules/react-native-audio-api/**',
+    // Workspace packages are FIRST-PARTY native modules, so their source is
+    // real native contract and must stay fingerprinted — only their build
+    // output is dropped. These paths are gitignored, so they exist on this
+    // machine and never reach EAS (the project is uploaded via git), which is
+    // the general form of the mismatch above: local hashes build artifacts EAS
+    // has never seen. dvnt-translation carries android/build, android/.gradle
+    // and a nested node_modules.
+    '../../packages/*/android/build/**',
+    '../../packages/*/android/.gradle/**',
+    '../../packages/*/node_modules/**',
   ],
 };

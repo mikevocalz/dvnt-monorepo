@@ -623,105 +623,30 @@ export const usersApi = {
    */
   async getNewestUsers(limit: number = 15) {
     try {
-      // Get current user's auth_id to exclude from results
-      const currentUserRow = await getCurrentUserRow();
-      const currentAuthId = currentUserRow?.authId || null;
-
-      // Query Better Auth `user` table — this is where real signups live
-      let query = supabase
-        .from("user")
-        .select("id, name, email, image, username, createdAt")
-        .order("createdAt", { ascending: false })
-        .limit(limit * 3);
-
-      if (currentAuthId) {
-        query = query.neq("id", currentAuthId);
-      }
-
-      let { data: authUsers, error } = await query;
-
-      // A rejected bridged JWT (expired mint) reads as 401/PGRST301 here. The
-      // table is readable by anon, so the recovery is to drop the dead token
-      // and retry — otherwise a signed-in member sees an empty Discover while a
-      // signed-out visitor sees the full list. `reauthAfter401` is the module's
-      // own documented recovery path and nothing was calling it.
-      if (error && isAuthRejection(error)) {
-        const { reauthAfter401 } = await import(
-          "@dvnt/app/lib/auth/supabase-jwt"
-        );
-        await reauthAfter401().catch(() => false);
-        ({ data: authUsers, error } = await query);
-      }
-
-      if (error) {
-        console.error("[Users] getNewestUsers BA query error:", error);
-        throw error;
-      }
-      if (!authUsers?.length) {
-        console.log("[Users] getNewestUsers: no BA users found");
-        return [];
-      }
-
-      console.log("[Users] getNewestUsers BA raw count:", authUsers.length);
-
-      // Phase 1: Filter out test accounts by email only
-      const TEST_EMAILS = ["@test.com", "@example.com", "@deviant.test"];
-      const emailFiltered = authUsers.filter((u: any) => {
-        const email = (u.email || "").toLowerCase();
-        if (TEST_EMAILS.some((t) => email.endsWith(t))) return false;
-        const name = (u.name || "").toLowerCase().trim();
-        if (name.startsWith("test")) return false;
-        return true;
+      // Reads the get_newest_users definer RPC rather than Better Auth's `user`
+      // table. That table is readable by `anon` but not by `authenticated`, and
+      // an RLS denial comes back as an empty result rather than an error — so a
+      // signed-in member saw "No new profiles to discover right now" while a
+      // signed-out visitor saw the full list, with only a "no BA users found"
+      // log to show for it. The filtering (test accounts, hidden usernames, the
+      // ghost guard) moved into SQL, which also stops `email` being selected
+      // from a table anon can read.
+      const currentUserRow = await getCurrentUserRow().catch(() => null);
+      const { data, error } = await supabase.rpc("get_newest_users", {
+        p_limit: limit,
+        p_exclude_auth_id: currentUserRow?.authId ?? null,
       });
+      if (error) throw error;
 
-      // Enrich with app profile data (username, avatar, bio)
-      const authIds = emailFiltered.map((u: any) => u.id);
-      const { data: profiles } = await supabase
-        .from(DB.users.table)
-        .select(
-          `${DB.users.authId}, ${DB.users.username}, ${DB.users.bio}, ${DB.users.verified}, avatar:${DB.users.avatarId}(url)`,
-        )
-        .in(DB.users.authId, authIds);
-
-      const profileMap: Record<string, any> = {};
-      for (const p of profiles || []) {
-        profileMap[p[DB.users.authId]] = p;
-      }
-
-      // Phase 2: Filter out hidden accounts by BOTH name and username
-      const HIDDEN_USERNAMES = ["mike_test", "applereview"];
-      const filtered = emailFiltered.filter((u: any) => {
-        const profile = profileMap[u.id];
-        const name = (u.name || "").toLowerCase().trim();
-        const username = (profile?.[DB.users.username] || "").toLowerCase();
-        if (HIDDEN_USERNAMES.includes(name)) return false;
-        if (HIDDEN_USERNAMES.includes(username)) return false;
-        // Ghost guard: a BA user with no profile row, no BA username, and no
-        // name has nothing to render (and no profile route to open) — these
-        // are magic-link-minted identities that skipped signup provisioning.
-        if (!username && !u.username && !name) return false;
-        return true;
-      });
-
-      console.log("[Users] getNewestUsers filtered count:", filtered.length);
-
-      return filtered.slice(0, limit).map((u: any) => {
-        const profile = profileMap[u.id];
-        const displayName = (u.name || "").trim();
-        const username =
-          profile?.[DB.users.username] ||
-          u.username ||
-          displayName.toLowerCase().replace(/\s+/g, "_");
-        return {
-          id: u.id,
-          username,
-          name: displayName || username,
-          avatar: profile?.avatar?.url || u.image || "",
-          verified: profile?.[DB.users.verified] || false,
-          bio: profile?.[DB.users.bio] || "",
-          postsCount: 0,
-        };
-      });
+      return ((data as any[]) ?? []).map((u) => ({
+        id: String(u.id),
+        username: u.username || "",
+        name: u.name || u.username || "",
+        avatar: u.avatar || "",
+        verified: Boolean(u.verified),
+        bio: u.bio || "",
+        postsCount: 0,
+      }));
     } catch (error) {
       console.error("[Users] getNewestUsers error:", error);
       return [];

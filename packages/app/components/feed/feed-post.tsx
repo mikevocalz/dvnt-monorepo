@@ -42,6 +42,7 @@ import {
   showsCarouselDots,
   dotWindowStart,
   DOT_WINDOW,
+  CAROUSEL_DOT_COLORS,
 } from "./feed-media-mode";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { usePrefetchComments } from "@dvnt/app/lib/hooks/use-comments";
@@ -144,7 +145,7 @@ interface FeedPostProps {
  * the standard way to say "there is more this way" without widening the row.
  */
 function CarouselDots({ count, current }: { count: number; current: number }) {
-  const COLORS = ["#3FDCFF", "#8A40CF", "#FF5BFC"];
+  const COLORS = CAROUSEL_DOT_COLORS;
 
   const start = dotWindowStart(count, current);
   const shown = Math.min(count, DOT_WINDOW);
