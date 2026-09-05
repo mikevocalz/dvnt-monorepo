@@ -367,7 +367,18 @@ function PreJoinScreen({
           the cap is wider than they are. Same column width as the web
           pre-join, so the two rails describe the same screen. */}
       <ScrollView
-        contentContainerClassName="flex-grow items-center justify-center px-6 py-6"
+        // contentContainerSTYLE, not className: NativeWind does not map
+        // `contentContainerClassName` in this setup, so the class version
+        // silently applies nothing — the same trap already documented at
+        // (tabs)/profile.tsx:619. The centring and padding here are the whole
+        // layout, so losing them would undo the fix this screen exists for.
+        contentContainerStyle={{
+          flexGrow: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingHorizontal: 24,
+          paddingVertical: 24,
+        }}
         showsVerticalScrollIndicator={false}
       >
        <View className="w-full max-w-md self-center items-center">
