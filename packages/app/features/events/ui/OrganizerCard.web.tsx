@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "solito/navigation";
 import { BadgeCheck, ChevronRight, Globe, Check, Plus } from "lucide-react";
 import { useEventOrganizer } from "@dvnt/app/lib/hooks/use-event-organizer";
+import { hostEventsHref } from "./host-events-route";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 
@@ -59,6 +60,9 @@ export function OrganizerCard({ eventId }: OrganizerCardProps) {
 
   const displayName = org.name || org.username;
   const goToProfile = () => router.push(`/profile/${org.username}`);
+  /** "More events" must land on the events tab — the profile root shows
+   *  posts first, which makes the link look broken. Mirrors the native card. */
+  const goToEvents = () => router.push(hostEventsHref(org.username, { web: true }));
 
   const handleFollow = () => {
     if (!isAuthenticated) {
@@ -91,7 +95,8 @@ export function OrganizerCard({ eventId }: OrganizerCardProps) {
           ) : null}
         </button>
         <button
-          onClick={goToProfile}
+          onClick={goToEvents}
+          aria-label={`More events by ${displayName}`}
           className="flex items-center gap-0.5 text-white/50 text-sm font-medium shrink-0 hover:text-white/80 transition-colors"
         >
           More events <ChevronRight size={16} />

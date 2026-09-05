@@ -18,6 +18,8 @@ export { BroadcastModal } from "./ui/broadcast-modal";
 export { CompTicketsModal } from "./ui/comp-tickets-modal";
 export { RefundConfirmModal } from "./ui/refund-confirm-modal";
 export { EventActionSheet } from "./ui/event-action-sheet";
+export { HostEventsPickerSheet } from "./ui/host-events-picker-sheet";
+export { hostEventsHref, resolveHosts, needsHostPicker } from "./ui/host-events-route";
 export { EventEditSheet } from "./ui/event-edit-sheet";
 export { ShareEventSheet } from "./ui/share-event-sheet";
 export { UpgradeTierCard } from "./ui/UpgradeTierCard";

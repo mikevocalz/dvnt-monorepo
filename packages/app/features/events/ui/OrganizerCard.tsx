@@ -16,6 +16,8 @@ import { BadgeCheck, ChevronRight, Globe, Check, Plus } from "lucide-react-nativ
 import Svg, { Path, Rect, Circle } from "react-native-svg";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { useEventOrganizer } from "@dvnt/app/lib/hooks/use-event-organizer";
+import { HostEventsPickerSheet } from "./host-events-picker-sheet";
+import { hostEventsHref, resolveHosts, needsHostPicker } from "./host-events-route";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import * as Linking from "expo-linking";
@@ -60,13 +62,27 @@ export interface OrganizerCardProps {
   eventId: string;
   /** Override profile navigation (defaults to the protected profile route). */
   onPressProfile?: (username: string) => void;
+  /**
+   * Co-hosts billed alongside the host. When this is empty — which is every
+   * event today, because `eventsApi` hardcodes `coOrganizer: null`
+   * (`packages/app/lib/api/events.ts:662`) and `getCoOrganizers` returns
+   * `user_id`/`role` with no username or avatar to render — "More events" is a
+   * direct link. Supply real co-hosts and the same control becomes a picker
+   * instead, so one link never has to stand for two people.
+   */
+  coHosts?: { username: string; name?: string; avatar?: string; role?: string }[];
 }
 
-export function OrganizerCard({ eventId, onPressProfile }: OrganizerCardProps) {
+export function OrganizerCard({
+  eventId,
+  onPressProfile,
+  coHosts,
+}: OrganizerCardProps) {
   const router = useRouter();
   const { data: org } = useEventOrganizer(eventId);
   const follow = useFollow();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const [hostPickerOpen, setHostPickerOpen] = useState(false);
 
   // Local follow state, seeded from the server and optimistically toggled.
   const [following, setFollowing] = useState(false);
@@ -77,9 +93,30 @@ export function OrganizerCard({ eventId, onPressProfile }: OrganizerCardProps) {
   if (!org) return null;
 
   const displayName = org.name || org.username;
-  const goToProfile = () => {
-    if (onPressProfile) return onPressProfile(org.username);
-    router.push(`/(protected)/profile/${org.username}` as any);
+  const goToProfile = (username: string = org.username) => {
+    if (onPressProfile) return onPressProfile(username);
+    router.push(`/(protected)/profile/${username}` as any);
+  };
+
+  /**
+   * "More events" promises this person's events, so it has to land on their
+   * events tab — it used to drop on the profile root, which reads as a broken
+   * link when the first thing you see is their posts.
+   */
+  const goToEvents = (username: string) => {
+    if (onPressProfile) return onPressProfile(username);
+    router.push(hostEventsHref(username) as any);
+  };
+
+  const hosts = resolveHosts(
+    { username: org.username, name: displayName, avatar: org.avatar },
+    coHosts,
+  );
+
+  const onPressMoreEvents = () => {
+    // One host is the common case and must stay one tap.
+    if (!needsHostPicker(hosts)) return goToEvents(hosts[0].username);
+    setHostPickerOpen(true);
   };
 
   const handleFollow = () => {
@@ -112,7 +149,7 @@ export function OrganizerCard({ eventId, onPressProfile }: OrganizerCardProps) {
       <View style={s.topRow}>
         <Pressable
           style={s.hostedBy}
-          onPress={goToProfile}
+          onPress={() => goToProfile()}
           hitSlop={8}
           accessibilityRole="button"
         >
@@ -124,14 +161,24 @@ export function OrganizerCard({ eventId, onPressProfile }: OrganizerCardProps) {
             <BadgeCheck size={15} color="#34A2DF" style={{ marginLeft: 4 }} />
           ) : null}
         </Pressable>
-        <Pressable style={s.moreEvents} onPress={goToProfile} hitSlop={8}>
+        <Pressable
+          style={s.moreEvents}
+          onPress={onPressMoreEvents}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={
+            hosts.length > 1
+              ? "More events. Choose a host"
+              : `More events by ${displayName}`
+          }
+        >
           <Text style={s.moreEventsText}>More events</Text>
           <ChevronRight size={16} color="rgba(255,255,255,0.5)" />
         </Pressable>
       </View>
 
       {/* Logo + name + stats */}
-      <Pressable style={s.identity} onPress={goToProfile}>
+      <Pressable style={s.identity} onPress={() => goToProfile()}>
         <Avatar uri={org.avatar} username={org.username} size={88} />
         <Text style={s.orgName} numberOfLines={1}>
           {displayName}
@@ -181,7 +228,7 @@ export function OrganizerCard({ eventId, onPressProfile }: OrganizerCardProps) {
       {/* Actions */}
       {!org.isSelf ? (
         <View style={s.actions}>
-          <Pressable style={[s.actionBtn, s.contactBtn]} onPress={goToProfile}>
+          <Pressable style={[s.actionBtn, s.contactBtn]} onPress={() => goToProfile()}>
             <Text style={s.contactText}>Contact</Text>
           </Pressable>
           <Pressable
@@ -200,6 +247,13 @@ export function OrganizerCard({ eventId, onPressProfile }: OrganizerCardProps) {
           </Pressable>
         </View>
       ) : null}
+
+      <HostEventsPickerSheet
+        visible={hostPickerOpen}
+        onClose={() => setHostPickerOpen(false)}
+        hosts={hosts}
+        onSelect={goToEvents}
+      />
     </View>
   );
 }

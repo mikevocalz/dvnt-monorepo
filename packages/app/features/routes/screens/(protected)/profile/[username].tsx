@@ -1,3 +1,4 @@
+import * as Haptics from "expo-haptics";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
@@ -26,6 +27,7 @@ import { Motion } from "@legendapp/motion";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ProfileActionSheet } from "@dvnt/app/components/profile-action-sheet";
 import { useReportSheetStore } from "@dvnt/app/lib/stores/report-sheet-store";
+import { useProfileStore } from "@dvnt/app/lib/stores/profile-store";
 import { Skeleton } from "@dvnt/app/components/ui/skeleton";
 
 import { useCallback, memo, useState, useMemo, useEffect, useRef } from "react";
@@ -329,6 +331,7 @@ function UserProfileScreenComponent() {
     postsCount: postsCountParam,
     followersCount: followersCountParam,
     followingCount: followingCountParam,
+    tab: tabParam,
   } = useLocalSearchParams<{
     username: string;
     userId?: string;
@@ -339,8 +342,14 @@ function UserProfileScreenComponent() {
     postsCount?: string;
     followersCount?: string;
     followingCount?: string;
+    /** `events` lands on the hosted-events tab — how "More events" on an event
+     *  page arrives here. Anything else falls back to posts. */
+    tab?: string;
   }>();
   const router = useRouter();
+  // The own-profile screen owns its tab in this store; the redirect below
+  // hands the requested tab over to it.
+  const setOwnProfileTab = useProfileStore((s) => s.setActiveTab);
   const { colors } = useColorScheme();
   const nsfwEnabled = useAppStore((state) => state.nsfwEnabled);
   const currentUser = useAuthStore((state) => state.user);
@@ -486,9 +495,12 @@ function UserProfileScreenComponent() {
   // This ensures consistent UI/UX and correct avatar display
   useEffect(() => {
     if (isOwnProfile) {
+      // Carry `?tab=events` across the hop. Without it, tapping "More events"
+      // on your own event drops you on your posts and looks like a dead link.
+      if (tabParam === "events") setOwnProfileTab("events");
       router.replace("/(protected)/(tabs)/profile");
     }
-  }, [isOwnProfile, router]);
+  }, [isOwnProfile, router, tabParam, setOwnProfileTab]);
 
   // Use API data or fallback to route params — renders INSTANTLY without waiting for query.
   // Route params (username, avatarParam, nameParam) are available synchronously on mount.
@@ -587,6 +599,15 @@ function UserProfileScreenComponent() {
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [isAvatarViewerOpen, setIsAvatarViewerOpen] = useState(false);
+  // Seeded from `?tab=` so an event page can land straight on this host's
+  // events. Re-seeds when the param or the profile changes, because this screen
+  // is reused across pushes and would otherwise keep the previous tab.
+  const [activeTab, setActiveTab] = useState<"posts" | "events">(
+    tabParam === "events" ? "events" : "posts",
+  );
+  useEffect(() => {
+    setActiveTab(tabParam === "events" ? "events" : "posts");
+  }, [tabParam, username]);
   const showToast = useUIStore((s) => s.showToast);
   const creatingConvRef = useRef(false);
 
@@ -1076,15 +1097,47 @@ function UserProfileScreenComponent() {
           </View>
         </View>
 
-        {/* Tab Bar */}
+        {/* Tab Bar. Was a single Grid pressable with no onPress — it looked
+            interactive and did nothing, and there was no way to link to this
+            user's events. Two real tabs now, matching the web sibling's
+            posts/events split. Events is offered only when there are some, so
+            the tab never leads to an empty screen. */}
         <View className="flex-row border-b border-border">
-          <Pressable className="flex-1 items-center border-b-2 border-foreground py-3">
-            <Grid size={24} color={colors.foreground} />
-          </Pressable>
+          {(hostEvents.length > 0
+            ? (["posts", "events"] as const)
+            : (["posts"] as const)
+          ).map((tab) => {
+            const selected = activeTab === tab;
+            const Icon = tab === "posts" ? Grid : CalendarDays;
+            return (
+              <Pressable
+                key={tab}
+                onPress={() => {
+                  if (selected) return;
+                  Haptics.selectionAsync().catch(() => {});
+                  setActiveTab(tab);
+                }}
+                className="flex-1 items-center py-3"
+                style={{
+                  borderBottomWidth: 2,
+                  borderBottomColor: selected ? colors.foreground : "transparent",
+                }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected }}
+                accessibilityLabel={tab === "posts" ? "Posts" : "Events"}
+                hitSlop={8}
+              >
+                <Icon
+                  size={24}
+                  color={selected ? colors.foreground : "rgba(255,255,255,0.4)"}
+                />
+              </Pressable>
+            );
+          })}
         </View>
 
         {/* Events hosted by this user — the "More events" surface. */}
-        {hostEvents.length > 0 ? (
+        {activeTab === "events" && hostEvents.length > 0 ? (
           <View className="px-4 mt-4 mb-2">
             <View className="flex-row items-center mb-3" style={{ gap: 8 }}>
               <CalendarDays size={18} color="#fff" />
@@ -1131,7 +1184,7 @@ function UserProfileScreenComponent() {
         ) : null}
 
         {/* Posts Grid — Masonry */}
-        {isLoading || isLoadingPosts ? (
+        {activeTab === "posts" && (isLoading || isLoadingPosts) ? (
           <View className="flex-row flex-wrap">
             {Array.from({ length: 6 }).map((_, i) => (
               <View
@@ -1144,7 +1197,7 @@ function UserProfileScreenComponent() {
               </View>
             ))}
           </View>
-        ) : (
+        ) : activeTab === "posts" ? (
           <ProfileMasonryGrid
             data={userPosts}
             userId={userId}
@@ -1155,7 +1208,7 @@ function UserProfileScreenComponent() {
               </View>
             }
           />
-        )}
+        ) : null}
       </ScrollView>
 
       <Modal

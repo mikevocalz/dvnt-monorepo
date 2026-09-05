@@ -81,9 +81,17 @@ export function UserProfileScreen() {
   const safeUsername = username.length > 0 ? username : null;
 
   // The tab store is global — don't carry one profile's tab onto another.
+  // `?tab=events` is how "More events" on an event page asks for the events
+  // tab, so honour it here; resetting unconditionally discarded it and landed
+  // the reader on posts.
+  const requestedTab =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("tab") === "events"
+      ? "events"
+      : "posts";
   useEffect(() => {
-    setUserProfileTab("posts");
-  }, [safeUsername, setUserProfileTab]);
+    setUserProfileTab(requestedTab);
+  }, [safeUsername, requestedTab, setUserProfileTab]);
   const isOwnProfile = currentUser?.username === safeUsername;
 
   // Canonical user read by username (matches native useUser).
