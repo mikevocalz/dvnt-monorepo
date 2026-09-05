@@ -108,6 +108,7 @@ import { useTranslation } from "react-i18next";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
 import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
 import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
+import { feedMediaMode } from "@dvnt/app/components/feed/feed-media-mode";
 
 /**
  * Fallbacks only. Read at module scope, `Dimensions.get` freezes at the width
@@ -1230,7 +1231,11 @@ function PostDetailScreenContent() {
   // CRITICAL: Compute all derived values and useMemo BEFORE early returns
   // These must be called unconditionally to maintain stable hook count
   const isTextPost = safePost.kind === "text";
-  const isVideo = !isTextPost && safePost.media?.[0]?.type === "video";
+  // Same rule as the feed — see packages/app/components/feed/feed-media-mode.ts.
+  // Keying off media[0] alone sent [video, image, image] down the single-video
+  // path, so the images could not be reached and the dots never showed.
+  const mediaMode = feedMediaMode(safePost.media as any, { isTextPost });
+  const isVideo = mediaMode === "single-video";
 
   // Translation support for caption
   const { i18n } = useTranslation();
@@ -1269,7 +1274,7 @@ function PostDetailScreenContent() {
     safePost.media &&
     Array.isArray(safePost.media) &&
     safePost.media.length > 0;
-  const hasMultipleMedia = hasMedia && safePost.media.length > 1 && !isVideo;
+  const hasMultipleMedia = mediaMode === "carousel";
   const postIdString = safePost.id ? String(safePost.id) : postId;
   const handlePrimaryCommentsPress = useCallback(() => {
     if (!postIdString) return;
