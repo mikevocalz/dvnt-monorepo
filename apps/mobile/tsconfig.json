@@ -33,6 +33,14 @@
     "node_modules",
     "server",
     "supabase/functions",
-    "scripts"
+    "scripts",
+    // Build output is not source. A derivedDataPath inside the project drags
+    // vendored fixtures into the typecheck — moq-kit ships a BINARY `ac3.ts`
+    // test file, which fails with "File appears to be binary" for a file
+    // nobody in this repo wrote.
+    "ios/build",
+    "android/build",
+    "android/app/build",
+    ".expo"
   ]
 }

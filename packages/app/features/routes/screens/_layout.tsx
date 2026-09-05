@@ -40,7 +40,9 @@ import {
 } from "@dvnt/app/lib/query-persistence";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
-import { useEffect } from "react";
+import { useEffect,
+  useState,
+} from "react";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import AnimatedSplashScreen from "@dvnt/app/components/animated-splash-screen";
@@ -64,6 +66,7 @@ import {
   Pressable,
   Text,
   ActivityIndicator,
+  InteractionManager,
 } from "react-native";
 import { useUpdates } from "@dvnt/app/lib/hooks/use-updates";
 import { useNotifications } from "@dvnt/app/lib/hooks/use-notifications";
@@ -187,6 +190,34 @@ try {
 bootSentry();
 
 function RootLayout() {
+  /**
+   * Stripe must NOT initialise while the app is starting. Constructing its
+   * TurboModule runs `StripeSdkImpl.init` -> `STPAPIClient` ->
+   * `StripeAPI.deviceSupportsApplePay` -> `PKCanMakePayments` ->
+   * `MCProfileConnection`, which is a BLOCKING mach IPC. Mounted at the root
+   * with a live key, that ran on the JS thread during bundle evaluation and
+   * parked it — expo-updates' ErrorRecovery then exhausted its pipeline and
+   * aborted the process (SIGABRT at `ErrorRecovery.crash`, Sentry
+   * DVNT-MOBILE-2, seen on iPad 9 seconds after launch).
+   *
+   * `StripeProvider` early-returns when `publishableKey` is falsy and renders
+   * a bare Fragment, so withholding the key defers `initStripe` without
+   * changing the tree — the provider stays mounted and nothing below it
+   * remounts when the real key arrives.
+   *
+   * Payments are a sub-flow here (checkout, ticket upgrade, promote, payment
+   * methods); none of them can be reached before interactions settle.
+   */
+  const [deferredStripeKey, setDeferredStripeKey] = useState("");
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setDeferredStripeKey(
+        process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || "",
+      );
+    });
+    return () => task.cancel();
+  }, []);
+
   const { colorScheme } = useColorScheme();
   const loadAuthState = useAuthStore((s) => s.loadAuthState);
   const authStatus = useAuthStore((s) => s.authStatus);
@@ -571,10 +602,9 @@ function RootLayout() {
         <LayoutAnimationConfig skipEntering={false} skipExiting={false}>
           <BottomSheetModalProvider>
             <KeyboardProvider statusBarTranslucent navigationBarTranslucent>
+              {/* Key is withheld until after startup — see `deferredStripeKey`. */}
               <StripeProvider
-                publishableKey={
-                  process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""
-                }
+                publishableKey={deferredStripeKey}
                 merchantIdentifier="merchant.com.dvnt.app"
               >
                 <PersistQueryClientProvider
