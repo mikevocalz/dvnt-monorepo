@@ -1324,6 +1324,19 @@ function MessagesScreenContent() {
     );
   }
 
+  // A conversation list is a READING column, not a canvas: full-bleed rows on a
+  // landscape tablet put the avatar and the timestamp ~1300pt apart, so the eye
+  // has to travel the whole width to pair a name with its preview. Every
+  // messaging app caps this (Telegram, Fiverr, Peerspace all keep a narrow
+  // list). 720pt is that column; phones are unaffected because they are
+  // narrower than the cap.
+  //
+  // The cap goes on an INNER view on purpose. The outer one keeps its explicit
+  // window dimensions — see the regression guard above, where a flex-only
+  // container collapsed to zero height under the Stack presentation.
+  const INBOX_MAX_WIDTH = 720;
+  const inboxWidth = Math.min(windowWidth, INBOX_MAX_WIDTH);
+
   return (
     <View
       style={{
@@ -1334,6 +1347,7 @@ function MessagesScreenContent() {
         alignSelf: "center",
       }}
     >
+     <View style={{ width: inboxWidth, alignSelf: "center", flex: 1 }}>
       {/* Header */}
       <View className="flex-row items-center justify-between border-b border-border px-4 py-3">
         <Pressable onPress={() => router.back()} hitSlop={12}>
@@ -1477,6 +1491,7 @@ function MessagesScreenContent() {
           <SneakyLynkContent router={router} isActive={activeTab === 2} />
         </View>
       </PagerView>
+     </View>
     </View>
   );
 }
