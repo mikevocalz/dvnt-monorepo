@@ -11,11 +11,22 @@
  * Styling = raw semantic tags + Tailwind; media via @dvnt/ui Image (next/image);
  * routing via Solito. Avatars/story tiles are rounded squares (never circles).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
 import { Heart, Bookmark, Play, Grid3x3, Plus } from "lucide-react";
 import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
+import { useEvents } from "@dvnt/app/lib/hooks/use-events";
+// Event cards rendered in the feed on mobile and never on web, because this
+// screen only ever fetched posts. Same builder the native masonry uses.
+import {
+  buildFeedSections,
+  EVENT_INTERVAL,
+} from "@dvnt/app/components/feed/feed-sections";
+// The native card renders here: next.config aliases expo-router to a
+// next/navigation bridge and transpiles expo-image / expo-linear-gradient,
+// which is what lets shared screens run on Next.
+import { FeedEventCard } from "@dvnt/app/components/feed/feed-event-card";
 import { useFeedRealtime } from "@dvnt/app/lib/hooks/use-feed-realtime";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { useToggleBookmark } from "@dvnt/app/lib/hooks/use-bookmarks";
@@ -83,6 +94,7 @@ export function HomeScreen() {
     useInfiniteFeedPosts();
   // Live feed: refetch when other users post/delete (web has no pull-to-refresh).
   useFeedRealtime();
+  const { data: feedEvents } = useEvents();
   // Reconcile hearts against the server, the way the native feeds do
   // (masonry-feed / feed both call this). Without it web had no path to
   // correct a like made on another device.
@@ -127,21 +139,33 @@ export function HomeScreen() {
   // recomputed from a mix of estimated and freshly-measured heights.) Each
   // column is a normal vertical flex stack, so the browser wraps the images at
   // their real natural heights.
-  const columns = useMemo(() => {
-    const cols = Array.from({ length: numColumns }, () => ({
-      items: [] as Post[],
-      h: 0,
-    }));
-    for (const post of posts) {
-      let min = 0;
-      for (let c = 1; c < numColumns; c++) {
-        if (cols[c].h < cols[min].h) min = c;
+  // Masonry runs interleaved with full-width event cards, matching mobile.
+  const sections = useMemo(
+    () => buildFeedSections(posts, feedEvents ?? [], EVENT_INTERVAL),
+    [posts, feedEvents],
+  );
+
+  // Packs one masonry run into balanced columns. Was applied to the whole feed
+  // at once; now runs per section so an event card can sit between runs.
+  const packColumns = useCallback(
+    (chunk: Post[]): Post[][] => {
+      const cols = Array.from({ length: numColumns }, () => ({
+        items: [] as Post[],
+        h: 0,
+      }));
+      for (const post of chunk) {
+        let min = 0;
+        for (let c = 1; c < numColumns; c++) {
+          if (cols[c].h < cols[min].h) min = c;
+        }
+        cols[min].items.push(post);
+        cols[min].h += estimateRatio(post) * columnWidth + GAP;
       }
-      cols[min].items.push(post);
-      cols[min].h += estimateRatio(post) * columnWidth + GAP;
-    }
-    return cols.map((c) => c.items);
-  }, [posts, numColumns, columnWidth]);
+      return cols.map((c) => c.items);
+    },
+    [numColumns, columnWidth],
+  );
+
 
   // Infinite scroll — observe a sentinel near the end of the list inside the
   // scroller (replaces the virtualizer's last-item heuristic).
@@ -202,23 +226,37 @@ export function HomeScreen() {
             style={{ width: containerWidth }}
             aria-label="Feed"
           >
-            <div className="flex" style={{ gap: GAP }}>
-              {columns.map((col, ci) => (
+            {sections.map((section) =>
+              section.type === "event" ? (
+                // Full width, like the native feed — the card is the break
+                // between masonry runs, not another tile in one.
+                <div key={section.key} style={{ paddingBottom: GAP }}>
+                  <FeedEventCard event={section.event} />
+                </div>
+              ) : (
                 <div
-                  key={ci}
-                  className="flex flex-col"
-                  style={{ width: columnWidth, gap: GAP }}
+                  key={section.key}
+                  className="flex"
+                  style={{ gap: GAP, paddingBottom: GAP }}
                 >
-                  {col.map((post) => (
-                    <MasonryCell
-                      key={post.id}
-                      post={post}
-                      fallbackHeight={cellHeight(post)}
-                    />
+                  {packColumns(section.posts).map((col, ci) => (
+                    <div
+                      key={ci}
+                      className="flex flex-col"
+                      style={{ width: columnWidth, gap: GAP }}
+                    >
+                      {col.map((post) => (
+                        <MasonryCell
+                          key={post.id}
+                          post={post}
+                          fallbackHeight={cellHeight(post)}
+                        />
+                      ))}
+                    </div>
                   ))}
                 </div>
-              ))}
-            </div>
+              ),
+            )}
             <div ref={sentinelRef} aria-hidden style={{ height: 1 }} />
             {isFetchingNextPage ? (
               <p className="text-white/40 text-center text-sm pt-4">Loading…</p>

@@ -57,6 +57,13 @@ import { DVNTGifView } from "@dvnt/app/components/media/DVNTGifView";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import { DVNTLivePhotoView } from "@dvnt/app/components/media/DVNTLivePhotoView";
 import { FeedEventCard } from "./feed-event-card";
+// Shared with the web feed so event cards cannot appear on one and not the
+// other — which is exactly what had happened.
+import {
+  buildFeedSections,
+  EVENT_INTERVAL,
+  type FeedSection,
+} from "./feed-sections";
 import { shouldRenderInFeed } from "./renderable-posts";
 import { useEvents } from "@dvnt/app/lib/hooks/use-events";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
@@ -80,7 +87,6 @@ import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 
 const CELL_RADIUS = 12;
 const VARIATION = 0.3;
-const EVENT_INTERVAL = 7;
 
 // ─── Height estimation (deterministic per post) ─────────────────────────────
 
@@ -507,47 +513,6 @@ function packIntoColumns(
 
 // ─── Build sections: masonry chunks interleaved with event cards ────────────
 
-type MasonrySection =
-  | { type: "masonry"; key: string; posts: Post[] }
-  | { type: "event"; key: string; event: Event };
-
-function buildSections(posts: Post[], events: Event[]): MasonrySection[] {
-  const sections: MasonrySection[] = [];
-  let eventIdx = 0;
-  let chunkStart = 0;
-
-  for (let i = 0; i < posts.length; i++) {
-    if ((i + 1) % EVENT_INTERVAL === 0 && eventIdx < events.length) {
-      // Flush current chunk of posts as masonry section
-      if (i >= chunkStart) {
-        sections.push({
-          type: "masonry",
-          key: `m-${chunkStart}`,
-          posts: posts.slice(chunkStart, i + 1),
-        });
-      }
-      // Insert event card
-      sections.push({
-        type: "event",
-        key: `e-${events[eventIdx].id}`,
-        event: events[eventIdx],
-      });
-      eventIdx++;
-      chunkStart = i + 1;
-    }
-  }
-
-  // Remaining posts after last event
-  if (chunkStart < posts.length) {
-    sections.push({
-      type: "masonry",
-      key: `m-${chunkStart}`,
-      posts: posts.slice(chunkStart),
-    });
-  }
-
-  return sections;
-}
 
 // ─── Masonry section renderer ───────────────────────────────────────────────
 
@@ -719,7 +684,7 @@ export function MasonryFeed() {
 
   // Build interleaved sections
   const sections = useMemo(
-    () => buildSections(filteredPosts, forYouEvents ?? []),
+    () => buildFeedSections(filteredPosts, forYouEvents ?? [], EVENT_INTERVAL),
     [filteredPosts, forYouEvents],
   );
 
@@ -804,8 +769,8 @@ export function MasonryFeed() {
       // rendering. Under a plain ScrollView every post in an infinite feed stayed
       // mounted with its images decoded and its videos alive.
       data={sections}
-      keyExtractor={(section: MasonrySection) => section.key}
-      renderItem={({ item }: { item: MasonrySection }) =>
+      keyExtractor={(section: FeedSection<Post, Event>) => section.key}
+      renderItem={({ item }: { item: FeedSection<Post, Event> }) =>
         item.type === "event" ? (
           <FeedEventCard event={item.event} />
         ) : (
