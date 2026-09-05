@@ -23,10 +23,6 @@ import {
   buildFeedSections,
   EVENT_INTERVAL,
 } from "@dvnt/app/components/feed/feed-sections";
-// The native card renders here: next.config aliases expo-router to a
-// next/navigation bridge and transpiles expo-image / expo-linear-gradient,
-// which is what lets shared screens run on Next.
-import { FeedEventCard } from "@dvnt/app/components/feed/feed-event-card";
 import { useFeedRealtime } from "@dvnt/app/lib/hooks/use-feed-realtime";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { useToggleBookmark } from "@dvnt/app/lib/hooks/use-bookmarks";
@@ -227,13 +223,18 @@ export function HomeScreen() {
             aria-label="Feed"
           >
             {sections.map((section) =>
-              section.type === "event" ? (
-                // Full width, like the native feed — the card is the break
-                // between masonry runs, not another tile in one.
-                <div key={section.key} style={{ paddingBottom: GAP }}>
-                  <FeedEventCard event={section.event} />
-                </div>
-              ) : (
+              // REVERTED on web. Rendering the native FeedEventCard here threw
+              // React error #130 (`args[]=undefined` — rendering undefined as a
+              // component) and painted the whole feed black in production. The
+              // web build and typecheck both passed, so this only shows up at
+              // runtime: something in that card's import chain resolves to
+              // undefined under the Next bundler even though the types resolve.
+              //
+              // Event cards on web need a card proven to render here — most
+              // likely components/event/FeedEventCard.web.tsx, which already
+              // exists and is used by the design page — not this one. Until
+              // then the feed shows posts, which is what it did before.
+              section.type === "event" ? null : (
                 <div
                   key={section.key}
                   className="flex"
