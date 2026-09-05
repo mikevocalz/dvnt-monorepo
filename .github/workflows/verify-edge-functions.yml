@@ -12,7 +12,10 @@ on:
       - "scripts/verify-edge-functions.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
-    branches: [master]
+    # Both branch names: `master` is the repo default, `main` is what
+    # release PRs merge into. Listing only master meant every push check
+    # silently never ran on merged work.
+    branches: [master, main]
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"

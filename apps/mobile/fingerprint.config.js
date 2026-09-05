@@ -38,8 +38,14 @@ module.exports = {
     // the general form of the mismatch above: local hashes build artifacts EAS
     // has never seen. dvnt-translation carries android/build, android/.gradle
     // and a nested node_modules.
+    // Both forms, like the entries above: the bare path drops the directory
+    // itself, the glob drops what is inside it. The glob alone left the entry
+    // in the hash.
+    '../../packages/*/android/build',
     '../../packages/*/android/build/**',
+    '../../packages/*/android/.gradle',
     '../../packages/*/android/.gradle/**',
+    '../../packages/*/node_modules',
     '../../packages/*/node_modules/**',
   ],
 };
