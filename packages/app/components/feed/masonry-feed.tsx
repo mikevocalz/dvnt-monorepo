@@ -683,10 +683,6 @@ export function MasonryFeed() {
   }, [isRefetching]);
 
   // Build interleaved sections
-  const sections = useMemo(
-    () => buildFeedSections(filteredPosts, forYouEvents ?? [], EVENT_INTERVAL),
-    [filteredPosts, forYouEvents],
-  );
 
   // Layout. Window width is only the ESTIMATE: on iPadOS the native tab
   // layout insets the content region (~180pt on the 11"), so sizing columns
@@ -696,6 +692,26 @@ export function MasonryFeed() {
   const feedWidth = containerWidth ?? screenWidth;
   const numColumns = columnsForWidth(feedWidth);
   const columnWidth = columnWidthFor(feedWidth, numColumns);
+
+  // Section size is a MULTIPLE of the column count, and much larger than the
+  // bare EVENT_INTERVAL.
+  //
+  // Each section packs its own columns and the next one starts below the
+  // TALLEST column of the previous, so every section boundary leaves a void
+  // under its shorter columns. Seven posts across four columns is 2/2/2/1 — the
+  // one-tile column leaves a hole the height of a whole post. Captured on the
+  // iPad: a flyer alone in column three with a large black gap beneath it.
+  //
+  // A multiple of numColumns gives every column the same NUMBER of tiles, and
+  // six rows per section makes the seams rare instead of every seventh post.
+  // Heights still vary per tile, so this shrinks the voids rather than removing
+  // them — LegendList has no masonry mode, and one un-chunked section would
+  // mean no virtualization at all.
+  const sectionSize = Math.max(numColumns * 6, EVENT_INTERVAL);
+  const sections = useMemo(
+    () => buildFeedSections(filteredPosts, forYouEvents ?? [], sectionSize),
+    [filteredPosts, forYouEvents, sectionSize],
+  );
   const handleContainerLayout = useCallback(
     (e: { nativeEvent: { layout: { width: number } } }) => {
       const w = Math.round(e.nativeEvent.layout.width);
