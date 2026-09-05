@@ -347,7 +347,14 @@ function EventsScreenContent() {
   const cardWidth = isLargeScreen
     ? (Math.min(screenWidth, 768) - 32 - gridGap) / 2
     : screenWidth - 12;
-  const cardHeight = Math.round(cardWidth * (isLargeScreen ? 0.85 : 1));
+  // PORTRAIT, because a DVNT flyer is authored 3:5 portrait
+  // (`BuiltEventMedia.flyerImageUrl`) and these cards render it with
+  // `resizeMode="cover"`. At 0.85 (landscape) and 1.0 (square) the card threw
+  // away most of every flyer and kept a band out of the middle — the squished
+  // look, on the iPad worst of all because the 2-up grid makes each card wider
+  // and so crops even harder. 4:5 matches the web feed card, and matches how
+  // DICE, corner, Posh and Spotify Live Events all present flyers.
+  const cardHeight = Math.round(cardWidth * 1.25);
 
   // Zustand store — replaces all useState
   const activeTab = useEventsScreenStore((s) => s.activeTab);
