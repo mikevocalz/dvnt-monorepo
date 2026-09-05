@@ -39,11 +39,16 @@ import {
   getStaticMapUrl,
 } from "@dvnt/app/lib/utils/location";
 import { searchApi } from "@dvnt/app/lib/api/search";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const GRID_COLS = 3;
+/**
+ * The grid was computed here from a module-scope `Dimensions.get("window")`,
+ * which is read once at import and never updates — so a rotation left the
+ * tiles sized for the old width in lanes counted for the old width. Same fault
+ * as Explore. It is read per-render now.
+ */
 const GRID_GAP = 2;
-const GRID_CELL_SIZE = (SCREEN_WIDTH - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
+const MIN_TILE = 110;
 
 // Location header with map preview
 function LocationHeader({
@@ -118,7 +123,16 @@ function LocationHeader({
 }
 
 // Post grid item
-function PostGridItem({ post, onPress }: { post: Post; onPress: () => void }) {
+function PostGridItem({
+  post,
+  onPress,
+  size,
+}: {
+  post: Post;
+  onPress: () => void;
+  /** Cell size from the screen's responsive grid — never a module constant. */
+  size: number;
+}) {
   const imageUri = post.thumbnail || post.media?.[0]?.url;
   const isVideo = post.type === "video";
 
@@ -126,8 +140,8 @@ function PostGridItem({ post, onPress }: { post: Post; onPress: () => void }) {
     <Pressable onPress={onPress}>
       <View
         style={{
-          width: GRID_CELL_SIZE,
-          height: GRID_CELL_SIZE,
+          width: size,
+          height: size,
           marginRight: GRID_GAP,
           marginBottom: GRID_GAP,
         }}
@@ -312,11 +326,23 @@ function LocationScreenContent() {
     }
   }, [location]);
 
+  const { columns: gridCols, cellWidth: gridCellSize } = useResponsiveGrid({
+    minCellWidth: MIN_TILE,
+    gap: GRID_GAP,
+    horizontalPadding: 0,
+    maxColumnsPortrait: 4,
+    maxColumnsLandscape: 5,
+    maxColumns: 5,
+  });
   const renderGridItem = useCallback(
     ({ item }: { item: Post }) => (
-      <PostGridItem post={item} onPress={() => handlePostPress(item.id)} />
+      <PostGridItem
+        post={item}
+        size={gridCellSize}
+        onPress={() => handlePostPress(item.id)}
+      />
     ),
-    [handlePostPress],
+    [handlePostPress, gridCellSize],
   );
 
   return (
@@ -370,14 +396,17 @@ function LocationScreenContent() {
         ) : (
           <LegendList
             data={posts}
-            numColumns={GRID_COLS}
+            numColumns={gridCols}
             renderItem={renderGridItem}
             keyExtractor={(item) => item.id}
             contentContainerStyle={{
               padding: GRID_GAP,
               paddingBottom: insets.bottom + 20,
             }}
-            estimatedItemSize={GRID_CELL_SIZE}
+            estimatedItemSize={gridCellSize}
+            // LegendList caches cell geometry per column count; without a
+            // remount a rotation keeps the old lanes.
+            key={`location-grid-${gridCols}`}
             refreshControl={
               <RefreshControl refreshing={isLoading} onRefresh={refetch} />
             }

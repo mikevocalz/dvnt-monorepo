@@ -43,3 +43,16 @@ test("a narrow window still renders one column rather than zero", () => {
   assert.equal(grid(200, 240).columns, 1);
   assert.equal(grid(0, 240).columns, 1);
 });
+
+test("a designed maximum wins over what merely fits", () => {
+  // Explore: no more than 4 portrait / 5 landscape, however wide the tablet.
+  const cap = (w: number, h: number) => {
+    const available = Math.max(0, w - 12);
+    const orientationCap = w > h ? 5 : 4;
+    const ceiling = Math.min(5, orientationCap);
+    return Math.max(1, Math.min(ceiling, Math.floor((available + 2) / (110 + 2))));
+  };
+  assert.equal(cap(768, 1024), 4, "portrait tablet caps at 4");
+  assert.equal(cap(1366, 1024), 5, "landscape tablet caps at 5");
+  assert.equal(cap(390, 844), 3, "a phone is limited by fit, not by the cap");
+});

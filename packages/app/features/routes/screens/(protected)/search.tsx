@@ -55,6 +55,8 @@ import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
  * it has to be read per-render, so it now lives in `useResponsiveGrid`.
  */
 const GRID_GAP = 2;
+/** Explore + Discover breathing room, per side. */
+const EXPLORE_PADDING = 6;
 /** Smallest Explore tile still worth tapping. */
 const MIN_TILE = 110;
 /** Smallest avatar/preview cell in the Discover rails. */
@@ -277,11 +279,19 @@ function DiscoverGrid({
   posts: Post[];
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
+  // 6px each side, and the SAME number is subtracted from the available width
+  // below — when the container had padding the maths did not know about, each
+  // cell came out too wide and the tiles overlapped, which is why they sat on
+  // top of one another.
   const { columns: gridCols, cellWidth: gridCellSize } = useResponsiveGrid({
     minCellWidth: MIN_TILE,
     gap: GRID_GAP,
-    horizontalPadding: 0,
-    maxColumns: 8,
+    horizontalPadding: EXPLORE_PADDING * 2,
+    // A designed maximum, not just whatever fits: past this the tiles get
+    // small enough that the wall stops reading as individual posts.
+    maxColumnsPortrait: 4,
+    maxColumnsLandscape: 5,
+    maxColumns: 5,
   });
   const renderItem = useCallback(
     ({ item }: { item: Post }) => {
@@ -306,7 +316,7 @@ function DiscoverGrid({
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
-          paddingHorizontal: 16,
+          paddingHorizontal: EXPLORE_PADDING,
           marginBottom: 12,
         }}
       >
@@ -558,12 +568,16 @@ function SearchScreenContent() {
 
   return (
     <View
-      className={SCREEN_SHELL}
+      // Full width, NOT SCREEN_SHELL. That shell is a reading column
+      // (max-w-4xl, centred) which is right for text screens and wrong here:
+      // Explore is a media wall, and capping it was what put the tablet's
+      // extra width into gutters instead of into tiles.
+      className="flex-1 bg-background w-full"
       style={{ paddingTop: insets.top }}
     >
       {/* Header */}
       <View
-        className="flex-row items-center gap-3 border-b border-border px-4 py-3"
+        className="flex-row items-center justify-center gap-3 border-b border-border px-4 py-3"
         style={{ zIndex: 20, elevation: 20 }}
       >
         <Pressable
@@ -574,7 +588,10 @@ function SearchScreenContent() {
         >
           <ArrowLeft size={24} color="#fff" />
         </Pressable>
-        <View className="flex-1">
+        {/* Capped, not `flex-1`: at full tablet width an unconstrained field
+            stretched the entire header and left the location button marooned
+            at the far edge. */}
+        <View className="flex-1 max-w-xl">
           {searchMode === "content" ? (
             <View className="flex-row items-center bg-secondary rounded-xl px-3">
               <Search size={20} color="#999" />

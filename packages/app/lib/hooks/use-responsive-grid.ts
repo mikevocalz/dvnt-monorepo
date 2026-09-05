@@ -37,17 +37,26 @@ export function useResponsiveGrid({
   gap = 12,
   horizontalPadding = 32,
   maxColumns = 6,
+  maxColumnsPortrait,
+  maxColumnsLandscape,
 }: {
   minCellWidth: number;
   gap?: number;
   horizontalPadding?: number;
   maxColumns?: number;
+  /** Hard ceiling in portrait, when a surface has a designed maximum. */
+  maxColumnsPortrait?: number;
+  /** Hard ceiling in landscape. */
+  maxColumnsLandscape?: number;
 }): ResponsiveGrid {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
+  const orientationCap =
+    width > height ? maxColumnsLandscape : maxColumnsPortrait;
   const available = Math.max(0, width - horizontalPadding);
+  const ceiling = Math.min(maxColumns, orientationCap ?? maxColumns);
   const columns = Math.max(
     1,
-    Math.min(maxColumns, Math.floor((available + gap) / (minCellWidth + gap))),
+    Math.min(ceiling, Math.floor((available + gap) / (minCellWidth + gap))),
   );
   const cellWidth = (available - gap * (columns - 1)) / columns;
   return { columns, cellWidth, available, isGrid: columns > 1 };
