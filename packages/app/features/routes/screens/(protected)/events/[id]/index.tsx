@@ -2707,6 +2707,20 @@ function EventDetailScreenContent() {
               <Text style={s.addCommentText}>Add a Comment</Text>
             </Pressable>
           </View>
+
+          {/* ── Disclaimers — organiser fine print ─────────────────
+              The create form has always captured this and the events
+              table has a `disclaimers` column, but only web ever showed
+              it, so anything a host wrote here was invisible to every
+              app user. Last, quiet, and low-contrast: it is fine print,
+              not a section competing with the event. */}
+          {(event as any).disclaimers ? (
+            <View style={s.section}>
+              <Text selectable style={s.disclaimersText}>
+                {(event as any).disclaimers}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </Animated.ScrollView>
 
@@ -3064,6 +3078,14 @@ const s = StyleSheet.create({
   // Sections
   section: {
     marginTop: 24,
+  },
+  // Fine print: deliberately the quietest text on the screen, mirroring
+  // web's text-white/35 text-xs. Not a section header — it should read as
+  // a footnote to the event, not another block competing with it.
+  disclaimersText: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 12,
+    lineHeight: 17,
   },
   collapsibleSection: {
     marginTop: 24,

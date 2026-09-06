@@ -30,12 +30,16 @@ export interface FeedEventCardData {
   media: EventFlyerMedia;
 }
 
-// Portrait, matching the flyer's authored shape and the post tiles it sits
-// beside in the masonry. It was a FIXED 200px, which on a desktop column made
-// the card a squat letterbox next to full-height posts and ignored the column
-// width entirely — the flyer was also handed `aspect: 1` because the old
-// constant was divided by itself.
-const CARD_ASPECT = 4 / 5;
+// Landscape rounded rectangle — the shape this card has always had, and the
+// one it is meant to keep: an event in the feed reads as a wide banner, not as
+// another portrait tile competing with the posts around it.
+//
+// Expressed as a RATIO rather than the old fixed `height: 200`. The fixed
+// height ignored the column width, so the same card was a squat letterbox in a
+// wide desktop column and too tall in a narrow one. 16:9 holds the rectangle at
+// every column width. Briefly shipped as 4/5 portrait, which changed the shape
+// instead of fixing the responsiveness.
+export const CARD_ASPECT = 16 / 9;
 
 export function FeedEventCard({ data }: { data: FeedEventCardData }) {
   const router = useRouter();

@@ -30,6 +30,7 @@ import { useEvents } from "@dvnt/app/lib/hooks/use-events";
 import { EVENT_INTERVAL } from "@dvnt/app/components/feed/feed-sections";
 import {
   FeedEventCard,
+  CARD_ASPECT as EVENT_CARD_ASPECT,
   type FeedEventCardData,
 } from "@dvnt/app/components/event/FeedEventCard.web";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
@@ -234,13 +235,14 @@ export function HomeScreen() {
         if (cols[c].h < cols[min].h) min = c;
       }
       cols[min].items.push(tile);
-      // The event card is a fixed 200px hero plus its padding; a post is
-      // measured from its own aspect ratio.
+      // A post is measured from its own aspect ratio; the event card is a
+      // landscape rectangle plus its own 12px vertical padding. The ratio is
+      // IMPORTED rather than repeated: when the packer and the card disagree,
+      // the column below reserves the wrong height and either overlaps the
+      // card or leaves a void.
       cols[min].h +=
         tile.kind === "event"
-          ? // 4:5 portrait like the post tiles, plus the card's own 12px
-            // vertical padding. Was a flat 224 for a fixed-height card.
-            columnWidth * 1.25 + 24 + GAP
+          ? columnWidth / EVENT_CARD_ASPECT + 24 + GAP
           : estimateRatio(tile.post) * columnWidth + GAP;
     }
     return cols.map((c) => c.items);

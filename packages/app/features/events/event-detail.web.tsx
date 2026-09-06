@@ -93,6 +93,8 @@ import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog } from "@dvnt/ui";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 import { GuestRsvpSheet } from "./guest-rsvp-sheet.web";
+import { TicketsOpeningSoonCard } from "@dvnt/app/components/event/TicketsOpeningSoonCard.web";
+import { useSaleNotifyStore } from "@dvnt/app/lib/stores/sale-notify-store";
 import { useGuestRsvpStore } from "@dvnt/app/lib/stores/guest-rsvp-store";
 import { GuestCheckoutSheet } from "./guest-checkout-sheet.web";
 import { useGuestCheckoutStore } from "@dvnt/app/lib/stores/guest-checkout-store";
@@ -354,6 +356,33 @@ export function EventDetailScreen() {
   useEffect(() => () => resetUi(), [resetUi]);
 
   const eventId = resolvedId ? String(resolvedId) : "";
+
+  // Sale-open reminder. Same store and same `toggle-sale-notify` edge function
+  // as native, so a reminder set on the phone is the same subscription here.
+  // Optimistic with rollback, matching native: local truth must never claim a
+  // reminder the server will not actually deliver.
+  const saleNotifyOn = useSaleNotifyStore((st) => st.subscribedEventIds.includes(eventId));
+  const toggleSaleSubscription = useSaleNotifyStore((st) => st.toggle);
+  const handleToggleSaleNotify = useCallback(async () => {
+    const nowSubscribed = toggleSaleSubscription(eventId);
+    showToast(
+      nowSubscribed ? "success" : "info",
+      nowSubscribed ? "Reminder set" : "Reminder removed",
+      nowSubscribed
+        ? "We'll notify you the moment tickets go on sale."
+        : "You won't be notified when tickets go on sale.",
+    );
+    try {
+      const { supabase: sb } = await import("@dvnt/app/lib/supabase/client");
+      const { error } = await sb.functions.invoke("toggle-sale-notify", {
+        body: { eventId, subscribe: nowSubscribed },
+      });
+      if (error) throw error;
+    } catch {
+      toggleSaleSubscription(eventId); // roll back
+      showToast("error", "Couldn't save reminder", "Try again in a moment.");
+    }
+  }, [eventId, toggleSaleSubscription, showToast]);
 
 
 
@@ -1379,6 +1408,22 @@ export function EventDetailScreen() {
             </Section>
           ) : null}
 
+          {/* TICKETS NOT YET ON SALE — parity with native's "Sale Starts" card.
+              A PAID event with no tier rows rendered nothing here on web: no
+              tiers, no CTA, no explanation, so the page read as though the
+              event had no tickets rather than tickets that had not opened yet.
+              Free events keep the normal RSVP CTA — gating a free RSVP behind
+              tier setup is the polish bug native already fixed. */}
+          {!isCancelledEvent &&
+          tiers.length === 0 &&
+          (Number(e.price) || 0) > 0 ? (
+            <TicketsOpeningSoonCard
+              saleStart={(e as any).ticketSaleStart ?? null}
+              notifyEnabled={saleNotifyOn}
+              onToggleNotify={handleToggleSaleNotify}
+            />
+          ) : null}
+
           {/* Ticket tiers — selectable. Tapping a tier selects it and (when
               not already ticketed) opens the checkout sheet. The live
               ticket_types query (useTicketTypes) is the source of truth for
@@ -1519,9 +1564,17 @@ export function EventDetailScreen() {
             </Section>
           ) : null}
 
-          {/* Attendees — members-only; logged-out sees a blurred teaser. */}
-          {going > 0 || attendeeAvatars.length > 0 || !isAuthenticated ? (
-            <Section title="Who's going" Icon={Users}>
+          {/* Attendees — members-only; logged-out sees a blurred teaser.
+
+              Always rendered. The gate used to be
+              `going > 0 || attendeeAvatars.length > 0 || !isAuthenticated`,
+              which dropped the whole section for a SIGNED-IN viewer the moment
+              an event had no RSVPs yet — so a logged-out visitor saw more of
+              the page than a member did, and the section went missing exactly
+              when the event most needed a "be the first" nudge. Native never
+              had this hole: GoingAccordion renders unconditionally and says
+              "0 going". */}
+          <Section title="Who's going" Icon={Users}>
               <MembersOnly
                 locked={!isAuthenticated}
                 label="Sign in to see who's going."
@@ -1555,12 +1608,18 @@ export function EventDetailScreen() {
                       {remaining > 0 ? ` · ${remaining} spots left` : ""}
                     </span>
                   </div>
-                ) : (
+                ) : !isAuthenticated ? (
                   <TeaserRows kind="avatar" />
+                ) : (
+                  // Honest, not a blurred teaser: a signed-in member is not
+                  // being kept from anything here — there is genuinely nobody
+                  // yet. Teaser rows would imply hidden people.
+                  <p className="text-white/60 text-sm">
+                    No one&apos;s going yet. Be the first to RSVP.
+                  </p>
                 )}
               </MembersOnly>
             </Section>
-          ) : null}
 
           {/* Who All Over There — ephemeral event moments (ticket holders + host) */}
           <WhoAllOverThere eventId={eventId} canUpload={isHost || hasTicket} />
@@ -1721,7 +1780,13 @@ export function EventDetailScreen() {
           {/* Hosted by — organizer card (posh-style) */}
           <OrganizerCard eventId={eventId} />
 
-          {/* Tags */}
+          {/* Tags — STRUCK 2026-09-06: unreachable, kept only so the shape is
+              on record. `events` has NO `tags` column (verified against the
+              live schema); the create form's tags fall back into `category`,
+              and no API populates `e.tags`, so `tags.length` is always 0. Do
+              not "fix" this by pointing it at `category` — that is the Event
+              Type, one value, not freeform tags. Revive it if a tags column
+              lands; native deliberately does not render it. */}
           {tags.length > 0 ? (
             <div className="flex flex-wrap gap-2 mt-6">
               {tags.map((t, i) => (
