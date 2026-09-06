@@ -1413,8 +1413,12 @@ export function EventDetailScreen() {
               tiers, no CTA, no explanation, so the page read as though the
               event had no tickets rather than tickets that had not opened yet.
               Free events keep the normal RSVP CTA — gating a free RSVP behind
-              tier setup is the polish bug native already fixed. */}
+              tier setup is the polish bug native already fixed.
+              Hidden once the viewer holds a ticket: telling someone
+              "Tickets coming soon" directly under their own "View ticket"
+              button reads as a bug. */}
           {!isCancelledEvent &&
+          !hasTicket &&
           tiers.length === 0 &&
           (Number(e.price) || 0) > 0 ? (
             <TicketsOpeningSoonCard

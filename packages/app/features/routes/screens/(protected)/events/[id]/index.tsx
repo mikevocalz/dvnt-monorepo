@@ -1977,8 +1977,10 @@ function EventDetailScreenContent() {
               Shows only for PAID events without tier rows. FREE events
               (price=0) use the normal RSVP CTA instead — gating a free
               RSVP behind tier setup was the polish issue Micah hit on
-              NYC "Euphoria". */}
+              NYC "Euphoria". Hidden once the viewer holds a ticket —
+              "Tickets coming soon" above their own ticket reads as a bug. */}
           {!isCancelled &&
+            !myTicketData &&
             ticketTiers.length === 0 &&
             (Number((eventData as any).price) || 0) > 0 && (
             <TicketsOpeningSoonCard
