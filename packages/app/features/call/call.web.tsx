@@ -157,7 +157,6 @@ function CallRoom({
   recipientUsername: string;
 }) {
   const router = useRouter();
-  const user = useAuthStore((s) => s.user);
 
   const { joinRoom, leaveRoom, peerStatus } = useConnection();
   const camera = useCamera();
@@ -236,6 +235,31 @@ function CallRoom({
         }
         joinTargetId = created.data.room.id;
         s.setRoomId(joinTargetId);
+
+        // Ring the callees. Creating the room does NOT notify anyone — the
+        // callee's device only rings on a `call_signals` INSERT, and the web
+        // never wrote one. `sendCallSignal` had exactly one caller in the
+        // codebase, the native hook, so calls out of the browser opened a room,
+        // joined it, and sat there alone while the other end stayed silent.
+        // Native treats this as non-fatal and so do we: the room is already
+        // live, and the callee can still be reached by other means.
+        try {
+          // Read at send time, not captured: the auth store rehydrates on the
+          // same tick this screen mounts, so a captured `user` can still be
+          // null here and would ring the callee from nobody.
+          const caller = useAuthStore.getState().user;
+          await callSignalsApi.sendCallSignal({
+            roomId: joinTargetId,
+            callerId: String(caller?.id ?? ""),
+            calleeIds: participantIds,
+            callerUsername: caller?.username || undefined,
+            callerAvatar: caller?.avatar || undefined,
+            isGroup: participantIds.length > 1,
+            callType,
+          });
+        } catch (signalErr) {
+          console.warn("[call.web] Failed to ring callees:", signalErr);
+        }
       }
 
       const joinResult = await callRoomsApi.joinCall(joinTargetId);
