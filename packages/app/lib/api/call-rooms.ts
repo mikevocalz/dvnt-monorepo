@@ -9,6 +9,7 @@
 
 import { supabase } from "../supabase/client";
 import { requireBetterAuthToken } from "../auth/identity";
+import { callErrorMessage } from "./call-error-message";
 
 interface ApiResponse<T> {
   ok: boolean;
@@ -69,6 +70,16 @@ export const callRoomsApi = {
     roomId: string,
     anonymous = false,
   ): Promise<ApiResponse<CallJoinResponse>> {
-    return callEdgeFunction<CallJoinResponse>("call_join", { roomId, anonymous });
+    const res = await callEdgeFunction<CallJoinResponse>("call_join", {
+      roomId,
+      anonymous,
+    });
+    if (!res.ok && res.error) {
+      return {
+        ...res,
+        error: { ...res.error, message: callErrorMessage(res.error.message) },
+      };
+    }
+    return res;
   },
 };

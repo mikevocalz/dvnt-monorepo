@@ -23,7 +23,7 @@
     "verify:sentry": "node scripts/verify-sentry.mjs",
     "verify:lynk": "node scripts/verify-lynk.mjs",
     "test": "pnpm run test:calls && pnpm run test:lynk-session",
-    "test:calls": "node --test packages/app/features/call/join-effect-deps.test.ts packages/app/components/feed/feed-media-mode.test.ts packages/app/components/feed/feed-sections.test.ts packages/app/components/feed/masonry-layout.test.ts",
+    "test:calls": "node --test packages/app/features/call/join-effect-deps.test.ts packages/app/lib/api/call-error-message.test.ts packages/app/components/feed/feed-media-mode.test.ts packages/app/components/feed/feed-sections.test.ts packages/app/components/feed/masonry-layout.test.ts",
     "test:lynk-session": "node --test packages/app/features/sneaky-lynk/session/machine.test.ts packages/ui/src/video/RoomTimer.countdown.test.ts packages/ui/src/video/ConnectionBanner.phase.test.ts packages/app/lib/user-label.test.ts packages/app/features/sneaky-lynk/ui/hand-queue.test.ts packages/app/lib/video/host-mute.test.ts packages/app/features/sneaky-lynk/session/moq-transport.test.ts packages/app/features/sneaky-lynk/ui/grid-layout.test.ts",
     "verify:functions": "node scripts/verify-edge-functions.mjs",
     "verify:functions:live": "node scripts/verify-edge-functions.mjs --live --project-ref npfjanxturvmjyevoyfo",
