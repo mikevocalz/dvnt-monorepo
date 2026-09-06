@@ -9,7 +9,7 @@ import {
   columnsForWidth,
   columnWidthFor,
   packByHeight,
-} from "./masonry-layout";
+} from "./masonry-layout.ts";
 
 test("columnsForWidth: phone stays two columns", () => {
   assert.equal(columnsForWidth(390), 2); // iPhone

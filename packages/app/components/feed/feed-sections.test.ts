@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildFeedSections, EVENT_INTERVAL } from "./feed-sections";
+import { buildFeedSections, EVENT_INTERVAL } from "./feed-sections.ts";
 
 const posts = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${i}` }));
 const events = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `e${i}` }));

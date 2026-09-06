@@ -210,7 +210,8 @@ function Room({ roomId }: { roomId: string }) {
   const errorMsg = useVideoRoomStore((s) => s.error);
   const getStore = useVideoRoomStore.getState;
 
-  const initStarted = useVideoRoomUIStore((s) => s.initStarted);
+  // Read imperatively, never as a reactive subscription: the join effect below
+  // SETS this flag, so subscribing made that effect depend on its own write.
   const setInitStarted = useVideoRoomUIStore((s) => s.setInitStarted);
 
   // Stable refs for SDK fns (identity not guaranteed stable across renders).
@@ -225,7 +226,7 @@ function Room({ roomId }: { roomId: string }) {
 
   // ── JOIN: fetch peer token (SAME edge fn as native) → joinRoom → start media ─
   useEffect(() => {
-    if (initStarted || !roomId) return;
+    if (!roomId || useVideoRoomUIStore.getState().initStarted) return;
     setInitStarted(true);
 
     let cancelled = false;
@@ -300,7 +301,13 @@ function Room({ roomId }: { roomId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [roomId, initStarted, setInitStarted, getStore]);
+  // ONLY roomId — same self-cancelling trap the web CALL screen had: this
+  // effect writes `initStarted`, so listing it meant setInitStarted(true)
+  // changed a dependency, React ran the cleanup (`cancelled = true`), the
+  // re-run hit the early-return, and the in-flight join died silently at
+  // `if (cancelled) return` — stuck on "Connecting…" with no error logged.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
 
   // ── Sync Fishjam peerStatus → store connectionState ───────────────────────
   useEffect(() => {

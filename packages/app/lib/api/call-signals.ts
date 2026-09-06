@@ -294,4 +294,49 @@ export const callSignalsApi = {
       supabase.removeChannel(channel);
     };
   },
+
+  /**
+   * Subscribe to THIS room going dead, for whoever is sitting on the call
+   * screen. Returns an unsubscribe function.
+   *
+   * subscribeToIncomingCalls is user-scoped and filters on `callee_id` plus a
+   * 30s ringing-freshness window, so it can only ever tell the callee about a
+   * call that has not started yet. Once a call is live, either side may hang
+   * up, and the remote party's screen had nothing listening at all — it stayed
+   * on the call UI after the other end left. Filtering by room covers caller
+   * and callee with one subscription.
+   */
+  subscribeToRoomEnded(
+    roomId: string,
+    onEnded: (signal: CallSignal) => void,
+  ): () => void {
+    const channel = freshChannel(`call_room_ended:${roomId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "call_signals",
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          const signal = payload.new as CallSignal;
+          // "accepted" is not terminal — it is the answer, and firing on it
+          // would tear the screen down the instant the call connects.
+          if (
+            signal.status === "ended" ||
+            signal.status === "declined" ||
+            signal.status === "missed"
+          ) {
+            console.log("[CallSignals] Room ended:", roomId, signal.status);
+            onEnded(signal);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  },
 };

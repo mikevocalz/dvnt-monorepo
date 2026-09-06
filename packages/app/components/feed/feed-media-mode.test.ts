@@ -5,7 +5,7 @@ import {
   showsCarouselDots,
   dotWindowStart,
   DOT_WINDOW,
-} from "./feed-media-mode";
+} from "./feed-media-mode.ts";
 
 const img = { type: "image" };
 const vid = { type: "video" };

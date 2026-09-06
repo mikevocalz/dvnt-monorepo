@@ -49,6 +49,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useVideoRoomStore } from "@dvnt/app/features/video";
 import type { Participant } from "@dvnt/app/features/video/types";
 import { color } from "@dvnt/app/lib/theme";
+import { callSignalsApi } from "@dvnt/app/lib/api/call-signals";
 import { useCallUIStore } from "./call-ui-store";
 
 const ACCENT = color.cyan;
@@ -172,7 +173,9 @@ function CallRoom({
   const errorMsg = useVideoRoomStore((s) => s.error);
   const getStore = useVideoRoomStore.getState;
 
-  const initStarted = useCallUIStore((s) => s.initStarted);
+  // Read imperatively, never as a reactive subscription: this flag is SET by
+  // the join effect below, so subscribing to it made the effect depend on its
+  // own write. See the dependency-array comment on that effect.
   const setInitStarted = useCallUIStore((s) => s.setInitStarted);
 
   // Stable refs for SDK fns (identity not guaranteed stable across renders).
@@ -187,7 +190,7 @@ function CallRoom({
 
   // ── JOIN: fetch peer token (SAME edge fn as native) → joinRoom → start media ──
   useEffect(() => {
-    if (initStarted || !roomId) return;
+    if (!roomId || useCallUIStore.getState().initStarted) return;
     setInitStarted(true);
 
     let cancelled = false;
@@ -297,11 +300,16 @@ function CallRoom({
     return () => {
       cancelled = true;
     };
-  // participantIds is a fresh array each render, so it is keyed by its joined
-  // string; the initStarted guard means this effect runs once regardless.
+  // ONLY roomId. This effect writes `initStarted`, so listing that flag (or
+  // anything else that changes as a result of joining) made React tear the
+  // effect down mid-flight: setInitStarted(true) changed a dependency, so the
+  // cleanup ran and set `cancelled = true`, the re-run hit the initStarted
+  // early-return, and the in-flight join resolved into `if (cancelled) return`
+  // — silently, with no error and no log. The call sat on "Connecting…"
+  // forever at phase `joining_room` and never reached `connecting_peer`.
+  // Everything else here is read once at join time, so capturing it is correct.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, initStarted, setInitStarted, getStore, isOutgoing, callType,
-      recipientUsername, participantIds.join(",")]);
+  }, [roomId]);
 
   // ── Sync Fishjam peerStatus → store connectionState ───────────────────────
   useEffect(() => {
@@ -393,6 +401,19 @@ function CallRoom({
     s.setCallEnded(duration);
     router.back();
   }, [getStore, router]);
+
+  // ── Remote hangup: the OTHER side left, so this screen must go too ────────
+  // Only the person who pressed the button ran `leave()`; the remote party was
+  // left sitting on a live-looking call screen until they navigated away by
+  // hand.
+  useEffect(() => {
+    if (!roomId) return;
+    return callSignalsApi.subscribeToRoomEnded(roomId, () => {
+      const s = getStore();
+      if (s.callPhase === "call_ended" || s.callPhase === "error") return;
+      leave();
+    });
+  }, [roomId, getStore, leave]);
 
   // Leave Fishjam on unmount (mirrors native cleanup effect).
   useEffect(() => {
