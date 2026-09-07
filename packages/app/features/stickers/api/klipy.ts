@@ -38,6 +38,9 @@ export interface KlipyItem {
     webm?: KlipyMediaFormat;
     tinywebm?: KlipyMediaFormat;
     nanowebm?: KlipyMediaFormat;
+    webp?: KlipyMediaFormat;
+    tinywebp?: KlipyMediaFormat;
+    nanowebp?: KlipyMediaFormat;
     webp_transparent?: KlipyMediaFormat;
     tinywebp_transparent?: KlipyMediaFormat;
     nanowebp_transparent?: KlipyMediaFormat;
@@ -189,6 +192,12 @@ function toKlipyItem(raw: KlipyRawItem, tab: KlipyTab): KlipyItem {
       webm: firstFile(hd.webm, md.webm),
       tinywebm: firstFile(sm.webm, md.webm),
       nanowebm: firstFile(xs.webm, sm.webm),
+      // Animated WebP, the same clip at roughly half the GIF's bytes
+      // (measured 873,745 -> 435,968 at md). expo-image and <img> both play
+      // it, so this is a format swap and not a renderer change.
+      webp: firstFile(hd.webp, md.webp, sm.webp, xs.webp),
+      tinywebp: firstFile(sm.webp, md.webp, xs.webp),
+      nanowebp: firstFile(xs.webp, sm.webp, md.webp),
       png: firstFile(hd.png, md.png),
       tinypng: firstFile(sm.png, md.png),
       nanopng: firstFile(xs.png, sm.png),
@@ -509,7 +518,13 @@ export function getItemImageUri(item: KlipyItem, tab: KlipyTab): string {
     );
   }
 
-  return m.gif?.url ?? m.mediumgif?.url ?? m.tinygif?.url ?? "";
+  return (
+    m.webp?.url ??
+    m.gif?.url ??
+    m.mediumgif?.url ??
+    m.tinygif?.url ??
+    ""
+  );
 }
 
 /**
@@ -530,6 +545,8 @@ export function getItemPreviewUri(item: KlipyItem, tab: KlipyTab): string {
   }
 
   return (
+    m.nanowebp?.url ??
+    m.tinywebp?.url ??
     m.nanogif?.url ??
     m.tinygif?.url ??
     m.nanopng?.url ??
