@@ -1512,7 +1512,7 @@ export function DrawingPanel() {
 
 // ---- Sticker panel (tabs + search) ----
 
-type StickerTab = "dvnt-native" | "emoji" | "gif" | string; // string = image pack id
+type StickerTab = "dvnt-native" | "emoji" | "gif" | "clip" | string; // string = image pack id
 
 const WS4_STICKERS: {
   id: string;
@@ -1580,17 +1580,29 @@ export function StickerPanel() {
     ...IMAGE_STICKER_PACKS.map((p) => ({ id: p.id, label: p.name })),
     { id: "emoji", label: "Emoji" },
     { id: "gif", label: "GIFs" },
+    { id: "clip", label: "Clips" },
   ];
 
   const q = query.trim().toLowerCase();
   const imagePack = IMAGE_STICKER_PACKS.find((p) => p.id === activeTab);
   const emojis = EMOJI_STICKERS;
   const isGifTab = activeTab === "gif";
+  const isClipTab = activeTab === "clip";
+  // Klipy serves clips as animated webp, so they render as an image and reuse
+  // the GIF grid and the animated-overlay path unchanged.
+  const isKlipyTab = isGifTab || isClipTab;
 
   const gifQuery = useQuery({
-    queryKey: ["story-editor-web", "stickers", "klipy", "gifs", q],
-    queryFn: ({ signal }) => klipySearch("gifs", query, { signal }),
-    enabled: isGifTab,
+    queryKey: [
+      "story-editor-web",
+      "stickers",
+      "klipy",
+      isClipTab ? "clips" : "gifs",
+      q,
+    ],
+    queryFn: ({ signal }) =>
+      klipySearch(isClipTab ? "clips" : "gifs", query, { signal }),
+    enabled: isKlipyTab,
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 10,
     placeholderData: (previous) => previous,
@@ -1599,7 +1611,7 @@ export function StickerPanel() {
   // Klipy's credit is a condition of API access, so it shows only while their
   // content is what's on screen — not for the bundled packs or emoji.
   const showKlipyCredit =
-    isGifTab && gifQuery.data?.source !== "fallback" && !gifQuery.isError;
+    isKlipyTab && gifQuery.data?.source !== "fallback" && !gifQuery.isError;
 
   return (
     <Panel title="Stickers">
@@ -1616,7 +1628,13 @@ export function StickerPanel() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={isGifTab ? "Search GIFs…" : "Search stickers…"}
+              placeholder={
+                isClipTab
+                  ? "Search clips…"
+                  : isGifTab
+                    ? "Search GIFs…"
+                    : "Search stickers…"
+              }
               className="flex-1 bg-transparent text-sm outline-none text-white"
             />
           </div>
@@ -1698,7 +1716,7 @@ export function StickerPanel() {
               );
             })}
         </div>
-      ) : isGifTab ? (
+      ) : isKlipyTab ? (
         <>
           {gifQuery.isLoading && gifItems.length === 0 ? (
             <div className="grid grid-cols-4 gap-2">
@@ -1723,14 +1741,14 @@ export function StickerPanel() {
           ) : (
             <div className="grid grid-cols-4 gap-2">
               {gifItems.map((item, i) => {
-                const preview = getItemPreviewUri(item, "gifs");
+                const preview = getItemPreviewUri(item, isClipTab ? "clips" : "gifs");
                 const title =
                   item.title || item.content_description || "GIF";
                 return (
                   <button
                     key={`${item.id}-${i}`}
                     onClick={() => {
-                      const url = getItemImageUri(item, "gifs");
+                      const url = getItemImageUri(item, isClipTab ? "clips" : "gifs");
                       if (url) addSticker(url, { category: "gif" });
                     }}
                     className="rounded-xl overflow-hidden text-left"

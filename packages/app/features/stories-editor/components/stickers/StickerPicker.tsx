@@ -27,6 +27,7 @@ import {
   klipySearch,
   KlipyAttribution,
   type KlipyItem,
+  type KlipyTab,
 } from "@dvnt/app/features/stickers";
 import { emitLog } from "@dvnt/observability";
 import { GLASS_SURFACE, GLASS_TEXT_COLORS } from "@dvnt/app/lib/ui/glass";
@@ -40,7 +41,7 @@ interface StickerPickerProps {
 }
 
 type PackKey = keyof typeof stickerPacks;
-type StickerTab = "dvnt" | "ballroom" | PackKey | "all" | "gif";
+type StickerTab = "dvnt" | "ballroom" | PackKey | "all" | "gif" | "clip";
 
 const TWEMOJI_TABS: { id: StickerTab; label: string; icon: string }[] = [
   { id: "all", label: "All", icon: "✨" },
@@ -81,10 +82,15 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
     })),
     ...TWEMOJI_TABS,
     { id: "gif", label: "GIFs", icon: "🎞️" },
+    { id: "clip", label: "Clips", icon: "🎬" },
   ];
 
   const activeImagePack = IMAGE_STICKER_PACKS.find((p) => p.id === activeTab);
   const isGifTab = activeTab === "gif";
+  const isClipTab = activeTab === "clip";
+  // Clips reuse the GIF grid and the animated-overlay path — Klipy serves them
+  // as animated webp, so they are an image to every renderer here.
+  const isKlipyTab = isGifTab || isClipTab;
   const activeImageStickers = useMemo(() => {
     if (!activeImagePack) return [];
     if (!searchQuery.trim()) return activeImagePack.stickers;
@@ -96,25 +102,26 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
   }, [activeImagePack, searchQuery]);
 
   const twemojiStickers = useMemo(() => {
-    if (activeImagePack || activeTab === "gif") return [];
+    if (activeImagePack || isKlipyTab) return [];
     const packKey = activeTab as PackKey;
     const items =
       activeTab === "all" ? ALL_TWEMOJI : (stickerPacks[packKey] ?? []);
     if (!searchQuery.trim()) return items;
     return ALL_TWEMOJI;
-  }, [activeTab, searchQuery, activeImagePack]);
+  }, [activeTab, searchQuery, activeImagePack, isKlipyTab]);
 
-  const isTwemojiTab = !activeImagePack && activeTab !== "gif";
+  const isTwemojiTab = !activeImagePack && !isKlipyTab;
   const gifQuery = useQuery({
     queryKey: [
       "story-editor",
       "stickers",
       "klipy",
-      "gifs",
+      isClipTab ? "clips" : "gifs",
       searchQuery.trim().toLowerCase(),
     ],
-    queryFn: ({ signal }) => klipySearch("gifs", searchQuery, { signal }),
-    enabled: isGifTab,
+    queryFn: ({ signal }) =>
+      klipySearch(isClipTab ? "clips" : "gifs", searchQuery, { signal }),
+    enabled: isKlipyTab,
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 10,
     placeholderData: (previous) => previous,
@@ -126,7 +133,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
   // Klipy's attribution is a condition of API access, so it tracks the query
   // serving the active tab. GIFs are the only Klipy-served tab here — every
   // other tab renders bundled DVNT/Ballroom art or Twemoji.
-  const activeKlipyQuery = isGifTab ? gifQuery : null;
+  const activeKlipyQuery = isKlipyTab ? gifQuery : null;
   const showKlipyAttribution =
     activeKlipyQuery !== null &&
     activeKlipyQuery.data?.source !== "fallback" &&
@@ -238,7 +245,13 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
             className="flex-1 text-[15px]"
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholder={isGifTab ? "Search GIFs..." : "Search stickers..."}
+            placeholder={
+              isClipTab
+                ? "Search clips..."
+                : isGifTab
+                  ? "Search GIFs..."
+                  : "Search stickers..."
+            }
             placeholderTextColor={GLASS_TEXT_COLORS.muted}
             style={{ color: GLASS_TEXT_COLORS.primary }}
             returnKeyType="search"
@@ -246,7 +259,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
         </View>
       </View>
 
-      {isGifTab && isGifFallback ? (
+      {isKlipyTab && isGifFallback ? (
         <View
           style={{
             marginHorizontal: 20,
@@ -428,7 +441,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
         />
       ) : (
         <LegendList
-          key="gif"
+          key={isClipTab ? "clip" : "gif"}
           style={{ flex: 1 }}
           data={
             gifQuery.isLoading && gifItems.length === 0
@@ -448,9 +461,10 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
               <GifGridItem
                 item={item}
                 width={imageStickerSize}
+                tab={isClipTab ? "clips" : "gifs"}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  const uri = getItemImageUri(item, "gifs");
+                  const uri = getItemImageUri(item, isClipTab ? "clips" : "gifs");
                   if (uri) {
                     onSelectSticker(uri, { category: "gif" });
                   }
@@ -519,13 +533,15 @@ const GifSkeletonItem = ({ width }: { width: number }) => (
 const GifGridItem = ({
   item,
   width,
+  tab,
   onPress,
 }: {
   item: KlipyItem;
   width: number;
+  tab: KlipyTab;
   onPress: () => void;
 }) => {
-  const previewUri = getItemPreviewUri(item, "gifs");
+  const previewUri = getItemPreviewUri(item, tab);
 
   return (
     <Pressable

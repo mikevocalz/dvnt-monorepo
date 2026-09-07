@@ -14,7 +14,7 @@ const NOTO_GIF_BASE = "https://fonts.gstatic.com/s/e/notoemoji/latest";
 
 // ── Types ──────────────────────────────────────────────
 
-export type KlipyTab = "stickers" | "gifs";
+export type KlipyTab = "stickers" | "gifs" | "clips";
 
 export interface KlipyMediaFormat {
   url: string;
@@ -141,12 +141,20 @@ type KlipyRawVariant = Partial<
   Record<"gif" | "webp" | "png" | "jpg" | "mp4" | "webm", KlipyRawFile>
 >;
 
+/** Clips do not use the hd/md/sm/xs ladder — `file` is format -> url. */
+type KlipyClipFiles = Partial<Record<"gif" | "webp" | "mp4", string>>;
+
 interface KlipyRawItem {
   id: number | string;
   slug?: string;
   title?: string;
   tags?: string[];
-  file?: Partial<Record<"hd" | "md" | "sm" | "xs", KlipyRawVariant>>;
+  file?:
+    | Partial<Record<"hd" | "md" | "sm" | "xs", KlipyRawVariant>>
+    | KlipyClipFiles;
+  file_meta?: Partial<
+    Record<string, { width?: number; height?: number; size?: number }>
+  >;
 }
 
 interface KlipyRawPage {
@@ -166,11 +174,61 @@ function firstFile(
   return candidates.find((file) => Boolean(file?.url));
 }
 
+/**
+ * Clips ship one URL per format with sizes in `file_meta`, so they flatten into
+ * the same KlipyItem the gif/sticker ladder produces. They carry an animated
+ * webp (measured 67,480 bytes against the same clip's 725,208-byte gif), which
+ * is why a clip can ride the existing animated-overlay path as an image instead
+ * of needing a video overlay type and a player on both platforms.
+ */
+function clipToKlipyItem(raw: KlipyRawItem): KlipyItem {
+  const files = (raw.file ?? {}) as KlipyClipFiles;
+  const meta = raw.file_meta ?? {};
+  const asFile = (fmt: "gif" | "webp" | "mp4"): KlipyMediaFormat | undefined => {
+    const url = files[fmt];
+    if (!url) return undefined;
+    const m = meta[fmt];
+    return {
+      url,
+      ...(m?.width ? { width: m.width } : {}),
+      ...(m?.height ? { height: m.height } : {}),
+    } as KlipyMediaFormat;
+  };
+
+  const gif = asFile("gif");
+  const webp = asFile("webp");
+  const mp4 = asFile("mp4");
+  const title = raw.title ?? "";
+
+  return {
+    id: raw.slug ?? String(raw.id),
+    title,
+    content_description: title,
+    created: 0,
+    url: "",
+    media_formats: {
+      gif,
+      mediumgif: gif,
+      tinygif: gif,
+      nanogif: gif,
+      webp,
+      tinywebp: webp,
+      nanowebp: webp,
+      mp4,
+    },
+  };
+}
+
 function toKlipyItem(raw: KlipyRawItem, tab: KlipyTab): KlipyItem {
-  const hd = raw.file?.hd ?? {};
-  const md = raw.file?.md ?? {};
-  const sm = raw.file?.sm ?? {};
-  const xs = raw.file?.xs ?? {};
+  if (tab === "clips") return clipToKlipyItem(raw);
+
+  const file = (raw.file ?? {}) as Partial<
+    Record<"hd" | "md" | "sm" | "xs", KlipyRawVariant>
+  >;
+  const hd = file.hd ?? {};
+  const md = file.md ?? {};
+  const sm = file.sm ?? {};
+  const xs = file.xs ?? {};
 
   const gif = firstFile(hd.gif, md.gif, sm.gif, xs.gif);
   const title = raw.title ?? "";
@@ -394,12 +452,14 @@ function fallbackGifSearch(
 const TAB_CATALOGUE: Record<KlipyTab, string> = {
   stickers: "stickers",
   gifs: "gifs",
+  clips: "clips",
 };
 
 // Default search terms when no user query
 const TAB_DEFAULT_QUERY: Record<KlipyTab, string> = {
   stickers: "trending",
   gifs: "popular",
+  clips: "popular",
 };
 
 // ── Public API ─────────────────────────────────────────
