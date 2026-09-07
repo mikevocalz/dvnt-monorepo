@@ -478,15 +478,6 @@ function ProfileScreenContent() {
     refetch,
   } = useProfilePosts(loggedInUserId);
 
-  // Don't render if no user
-  if (!user) {
-    return (
-      <View className="flex-1 bg-background items-center justify-center">
-        <Text className="text-muted-foreground">Loading profile...</Text>
-      </View>
-    );
-  }
-
   // PHASE 1 INSTRUMENTATION: Log posts query state with date range
   if (__DEV__) {
     const postDates =

@@ -1722,6 +1722,13 @@ function EventDetailScreenContent() {
     return "";
   }, [isPast, hasTicket, isHostUser]);
 
+  // Gallery cells follow the window, not the width the app launched with.
+  // MUST stay above the loading/error guards below. It used to sit after them,
+  // so the skeleton render called one fewer hook than the loaded render, and
+  // React threw "Rendered more hooks than during the previous render" the
+  // moment the event data arrived — the EventDetail error screen in 1.0.347.
+  const { width: liveScreenWidth } = useWindowDimensions();
+
   // ── Loading state ───────────────────────────────────────────────────
   // Show skeleton while: params not ready, query disabled/pending, or actively fetching
   if (!eventId || isPending || isLoading) {
@@ -1749,8 +1756,6 @@ function EventDetailScreenContent() {
   }
 
   const event = safeEvent;
-  // Gallery cells follow the window, not the width the app launched with.
-  const { width: liveScreenWidth } = useWindowDimensions();
   const imageCellSize = (liveScreenWidth - 40 - 8) / 2;
   const host = event.host;
 
