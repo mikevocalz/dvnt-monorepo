@@ -119,6 +119,13 @@ import { searchApi } from "@dvnt/app/lib/api/search";
 // Single source of truth for image-sticker web URLs — shared with the story
 // viewer / create-preview overlay renderer so the maps can't drift.
 import { STICKER_WEB_URLS } from "@dvnt/app/components/story-overlays-layer.web";
+import {
+  getItemImageUri,
+  getItemPreviewUri,
+  klipySearch,
+  type KlipyItem,
+} from "@dvnt/app/features/stickers";
+import { SHEET_BOTTOM_INSET } from "@dvnt/app/lib/ui/sheet-metrics";
 import type {
   StoryOverlay,
   StoryAnimatedGifOverlay,
@@ -238,6 +245,24 @@ function hasVisibleColorMatrix(
   if (filter && filter.id !== "normal") return true;
   return ADJ_KEYS_IN_MATRIX.some((k) => adj[k] !== 0);
 }
+
+/**
+ * The one story-canvas sizing rule, shared with the create screen's empty state
+ * so the two never drift and the layout does not jump when media lands.
+ *
+ * Width is the ONLY size input: the height budget is folded into the same
+ * `min()` through the story ratio. A `maxHeight` alongside `aspectRatio` does
+ * NOT preserve the ratio — CSS keeps the width and overrides the height, which
+ * squashed the canvas on any short window (a 1440x900 laptop measured 0.65
+ * against the 0.5625 target).
+ *
+ * The budget is `100dvh` minus the screen's own chrome rather than a guessed
+ * percentage, because a percentage that ignores the header/rail pushed the
+ * bottom rail off the fold on a short window.
+ */
+/** Header + main padding + visibility row + tool rail, measured on /feed/story/create. */
+const STORY_SCREEN_CHROME_PX = 280;
+export const STORY_CANVAS_WIDTH_CSS = `min(84vw, 400px, calc((100dvh - ${STORY_SCREEN_CHROME_PX}px) * ${CANVAS_WIDTH} / ${CANVAS_HEIGHT}))`;
 
 // ============================================================
 // Export mappers — same ratios native uses (0..1 on 1080×1920).
@@ -446,8 +471,7 @@ export function EditorStage({
       className="relative overflow-hidden rounded-2xl select-none"
       style={{
         aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
-        width: "min(84vw, 400px)",
-        maxHeight: "68dvh",
+        width: STORY_CANVAS_WIDTH_CSS,
         touchAction: "none",
         containerType: "inline-size",
         background: INK,
@@ -1207,12 +1231,15 @@ function Panel({
 }) {
   return (
     <div
-      className="fixed left-1/2 -translate-x-1/2 w-full max-w-3xl z-30 rounded-t-3xl"
+      className="fixed left-1/2 -translate-x-1/2 w-[calc(100%-48px)] max-w-3xl z-30 rounded-3xl"
       style={{
-        bottom: 0,
+        // Detached, matching `sheet-metrics` on native: lifted off the bottom,
+        // capped at max-w-3xl, centred, and rounded on all four corners. The
+        // 46px lift already clears the home indicator, so no safe-area padding.
+        bottom: SHEET_BOTTOM_INSET,
         background: "#141414",
-        borderTop: `1px solid ${HAIRLINE}`,
-        paddingBottom: "calc(env(safe-area-inset-bottom) + 16px)",
+        border: `1px solid ${HAIRLINE}`,
+        paddingBottom: 16,
         maxHeight: "48dvh",
         overflowY: "auto",
       }}
@@ -1485,7 +1512,7 @@ export function DrawingPanel() {
 
 // ---- Sticker panel (tabs + search) ----
 
-type StickerTab = "dvnt-native" | "emoji" | string; // string = image pack id
+type StickerTab = "dvnt-native" | "emoji" | "gif" | string; // string = image pack id
 
 const WS4_STICKERS: {
   id: string;
@@ -1552,11 +1579,27 @@ export function StickerPanel() {
     { id: "dvnt-native", label: "Tags" },
     ...IMAGE_STICKER_PACKS.map((p) => ({ id: p.id, label: p.name })),
     { id: "emoji", label: "Emoji" },
+    { id: "gif", label: "GIFs" },
   ];
 
   const q = query.trim().toLowerCase();
   const imagePack = IMAGE_STICKER_PACKS.find((p) => p.id === activeTab);
   const emojis = EMOJI_STICKERS;
+  const isGifTab = activeTab === "gif";
+
+  const gifQuery = useQuery({
+    queryKey: ["story-editor-web", "stickers", "klipy", "gifs", q],
+    queryFn: ({ signal }) => klipySearch("gifs", query, { signal }),
+    enabled: isGifTab,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
+    placeholderData: (previous) => previous,
+  });
+  const gifItems: KlipyItem[] = gifQuery.data?.results ?? [];
+  // Klipy's credit is a condition of API access, so it shows only while their
+  // content is what's on screen — not for the bundled packs or emoji.
+  const showKlipyCredit =
+    isGifTab && gifQuery.data?.source !== "fallback" && !gifQuery.isError;
 
   return (
     <Panel title="Stickers">
@@ -1573,7 +1616,7 @@ export function StickerPanel() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search stickers…"
+              placeholder={isGifTab ? "Search GIFs…" : "Search stickers…"}
               className="flex-1 bg-transparent text-sm outline-none text-white"
             />
           </div>
@@ -1625,7 +1668,7 @@ export function StickerPanel() {
           </div>
         )
       ) : imagePack ? (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           {imagePack.stickers
             .filter((s) => (q ? s.label.toLowerCase().includes(q) : true))
             .map((s) => {
@@ -1655,6 +1698,68 @@ export function StickerPanel() {
               );
             })}
         </div>
+      ) : isGifTab ? (
+        <>
+          {gifQuery.isLoading && gifItems.length === 0 ? (
+            <div className="grid grid-cols-4 gap-2">
+              {Array.from({ length: 12 }, (_, i) => (
+                <div
+                  key={`gif-skeleton-${i}`}
+                  className="rounded-xl"
+                  style={{
+                    aspectRatio: "1 / 1.2",
+                    background: SURFACE,
+                    border: `1px solid ${HAIRLINE}`,
+                  }}
+                />
+              ))}
+            </div>
+          ) : gifItems.length === 0 ? (
+            <p className="text-center text-xs text-white/50 py-6">
+              {gifQuery.isError
+                ? "GIF search is unavailable right now. Try again in a moment."
+                : "No GIFs match that."}
+            </p>
+          ) : (
+            <div className="grid grid-cols-4 gap-2">
+              {gifItems.map((item, i) => {
+                const preview = getItemPreviewUri(item, "gifs");
+                const title =
+                  item.title || item.content_description || "GIF";
+                return (
+                  <button
+                    key={`${item.id}-${i}`}
+                    onClick={() => {
+                      const url = getItemImageUri(item, "gifs");
+                      if (url) addSticker(url, { category: "gif" });
+                    }}
+                    className="rounded-xl overflow-hidden text-left"
+                    style={{ border: `1px solid ${HAIRLINE}` }}
+                    title={title}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={preview}
+                      alt={title}
+                      loading="lazy"
+                      draggable={false}
+                      className="w-full object-cover"
+                      style={{ aspectRatio: "1 / 1.2", background: SURFACE }}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {showKlipyCredit && (
+            <p
+              className="sticky bottom-0 mt-2 -mx-4 px-4 py-2 text-center text-[11px] font-semibold text-white/50"
+              style={{ background: "#141414", letterSpacing: 0.4 }}
+            >
+              Powered by KLIPY
+            </p>
+          )}
+        </>
       ) : (
         <div className="grid grid-cols-8 gap-1.5">
           {emojis.map((emoji, i) => (

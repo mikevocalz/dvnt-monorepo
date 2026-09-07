@@ -311,7 +311,11 @@ export function CameraScreen({
   const allowedModesKey = allowedModes.join(",");
   const cameraRef = useRef<CameraRef>(null);
   const recorderRef = useRef<Recorder | null>(null);
-  const photoOutput = usePhotoOutput();
+  // JPEG, not the `native` default. On iOS `native` is HEIC, and the story
+  // editor draws the capture through Skia's `useImage`, which has no HEIC
+  // decoder — the photo previewed fine here (expo-image uses the OS decoder)
+  // and then rendered as a black canvas in the editor.
+  const photoOutput = usePhotoOutput({ containerFormat: "jpeg" });
   const videoOutput = useVideoOutput({ enableAudio: true });
   const requiresMicrophone = allowedModes.includes("video");
 

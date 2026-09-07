@@ -76,6 +76,59 @@ export type StoryAnimatedGifOverlay = {
   rotation: number;
 };
 
+/** Runtime twin of StoryTextStylePreset — keep in step with the union below. */
+export const STORY_TEXT_STYLE_PRESETS = [
+  "classic",
+  "modern",
+  "neon",
+  "typewriter",
+  "strong",
+  "outline",
+  "shadow",
+  "gradient",
+] as const;
+
+/** Style preset key the story text editor writes onto every text element. */
+export type StoryTextStylePreset = (typeof STORY_TEXT_STYLE_PRESETS)[number];
+
+/**
+ * The one text-styling contract. Every field here is something the story text
+ * editor can actually set, and every field survives serialize → store → parse.
+ * Lengths are ratios of the story canvas WIDTH so they stay resolution-free.
+ */
+export type StoryTextStyle = {
+  color: string;
+  backgroundColor?: string;
+  fontFamily?: string;
+  fontSizeRatio: number;
+  maxWidthRatio: number;
+  textAlign?: "left" | "center" | "right";
+  textStyle?: StoryTextStylePreset;
+  /** Multiplier on font size, not an absolute length. */
+  lineHeight?: number;
+  letterSpacingRatio?: number;
+  strokeColor?: string;
+  strokeWidthRatio?: number;
+  shadowColor?: string;
+  shadowBlurRatio?: number;
+};
+
+export type StoryTextOverlay = StoryTextStyle & {
+  id: string;
+  type: "text";
+  content: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  opacity?: number;
+  // WS-4: text overlays that stand in for a tappable DVNT sticker
+  // (mention / link / event / ticket) carry the sticker kind + metadata
+  // so create-story stores the tappable region. Additive + optional.
+  stickerKind?: string;
+  metadata?: Record<string, string>;
+};
+
 export type StoryOverlay =
   | {
       id: string;
@@ -99,31 +152,7 @@ export type StoryOverlay =
       rotation: number;
       opacity?: number;
     }
-  | {
-      id: string;
-      type: "text";
-      content: string;
-      x: number;
-      y: number;
-      scale: number;
-      rotation: number;
-      opacity?: number;
-      color: string;
-      backgroundColor?: string;
-      fontFamily?: string;
-      fontSizeRatio: number;
-      maxWidthRatio: number;
-      textAlign?: "left" | "center" | "right";
-      // Style preset key from the editor (neon/shadow/classic/outline/strong/
-      // gradient/…). Optional + additive — round-trips so the viewer renders the
-      // same preset CSS the editor showed. Absent ⇒ plain text.
-      textStyle?: string;
-      // WS-4: text overlays that stand in for a tappable DVNT sticker
-      // (mention / link / event / ticket) carry the sticker kind + metadata
-      // so create-story stores the tappable region. Additive + optional.
-      stickerKind?: string;
-      metadata?: Record<string, string>;
-    }
+  | StoryTextOverlay
   | {
       id: string;
       type: "sticker";

@@ -97,6 +97,9 @@ function extractStoryOverlays(
           fontSizeRatio: Number((element.fontSize / CANVAS_WIDTH).toFixed(6)),
           maxWidthRatio: Number((element.maxWidth / CANVAS_WIDTH).toFixed(6)),
           textAlign: element.textAlign,
+          // The editor's presets and STORY_TEXT_STYLE_PRESETS are the same
+          // list; the parser re-validates, so an unknown one falls back.
+          textStyle: element.style,
         };
       }
 
@@ -134,6 +137,9 @@ function extractStoryOverlays(
           type: "sticker" as const,
           source: "asset" as const,
           assetId: element.assetId,
+          category: element.category,
+          label: element.label,
+          metadata: element.metadata,
           x: Number((element.transform.translateX / CANVAS_WIDTH).toFixed(6)),
           y: Number((element.transform.translateY / CANVAS_HEIGHT).toFixed(6)),
           sizeRatio: Number((element.size / CANVAS_WIDTH).toFixed(6)),
@@ -149,6 +155,9 @@ function extractStoryOverlays(
           type: "sticker" as const,
           source: "url" as const,
           url: element.source,
+          category: element.category,
+          label: element.label,
+          metadata: element.metadata,
           x: Number((element.transform.translateX / CANVAS_WIDTH).toFixed(6)),
           y: Number((element.transform.translateY / CANVAS_HEIGHT).toFixed(6)),
           sizeRatio: Number((element.size / CANVAS_WIDTH).toFixed(6)),
@@ -196,6 +205,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const addTextElement = useEditorStore((s) => s.addTextElement);
   const addStickerElement = useEditorStore((s) => s.addStickerElement);
   const updateElement = useEditorStore((s) => s.updateElement);
+  const commitElement = useEditorStore((s) => s.commitElement);
   const removeElement = useEditorStore((s) => s.removeElement);
   const selectElement = useEditorStore((s) => s.selectElement);
   const addDrawingPath = useEditorStore((s) => s.addDrawingPath);
@@ -369,6 +379,15 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       updateElement(id, updates);
     },
     [updateElement],
+  );
+
+  // Fires once when the editor closes, so undo steps back over the whole edit
+  // rather than one character at a time.
+  const handleCommitText = useCallback(
+    (id: string, updates: Partial<TextElement>) => {
+      commitElement(id, updates);
+    },
+    [commitElement],
   );
 
   // ---- Sticker Handlers ----
@@ -829,13 +848,28 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
         rotation: number;
       },
     ) => {
-      updateElement(id, { transform } as any);
+      // Gesture end is the commit point: one undo step per drag/pinch/rotate.
+      commitElement(id, { transform } as any);
       // Keep the element selected after pinch/rotate so the user retains
       // control (Instagram/Snap behavior). Tapping the canvas background
       // deselects via `deselectTap` — that's the right release point, not
       // every gesture end.
     },
-    [updateElement],
+    [commitElement],
+  );
+
+  // Long press: text opens the editor, a sticker/GIF is just picked up so it
+  // can be dragged. Haptic marks the moment the element becomes grabbable.
+  const handleElementLongPress = useCallback(
+    (id: string) => {
+      const el = elements.find((e) => e.id === id);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      selectElement(id);
+      if (el?.type === "text") {
+        setMode("text");
+      }
+    },
+    [elements, selectElement, setMode],
   );
 
   const handleElementDoubleTap = useCallback(
@@ -924,6 +958,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               onSelect={selectElement}
               onTransformEnd={handleElementTransformEnd}
               onDoubleTap={handleElementDoubleTap}
+              onLongPress={handleElementLongPress}
               onDelete={removeElement}
             />
           );
@@ -991,6 +1026,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
           }
           onAdd={handleAddText}
           onUpdate={handleUpdateText}
+          onCommit={handleCommitText}
           onRemove={removeElement}
           onDone={handleTextEditorDone}
           onCancel={() => setMode("idle")}
@@ -999,6 +1035,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
       {/* ---- Sticker Panel (animated overlay — no touch interception above) ---- */}
       <AnimatedToolPanel
+        id="sticker-picker"
         visible={mode === "sticker"}
         onDismiss={() => setMode("idle")}
         heightRatio={0.62}
@@ -1013,6 +1050,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
       {/* ---- Filter Panel (animated overlay) ---- */}
       <AnimatedToolPanel
+        id="filter-selector"
         visible={mode === "filter"}
         onDismiss={() => setMode("idle")}
         heightRatio={0.42}
@@ -1032,6 +1070,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
       {/* ---- Adjustment Panel (animated overlay) ---- */}
       <AnimatedToolPanel
+        id="adjustment-panel"
         visible={mode === "adjust"}
         onDismiss={() => setMode("idle")}
         heightRatio={0.55}

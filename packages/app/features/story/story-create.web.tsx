@@ -1,8 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "solito/navigation";
-import { X, Image as ImageIcon, Type, Globe, Star, Check } from "lucide-react";
+import {
+  X,
+  Image as ImageIcon,
+  Type,
+  Globe,
+  Star,
+  Check,
+  Camera,
+  UserPlus,
+} from "lucide-react";
 import { useCreateStoryStore } from "@dvnt/app/lib/stores/create-story-store";
 import { useCreateStory } from "@dvnt/app/lib/hooks/use-stories";
 import {
@@ -12,6 +21,7 @@ import {
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { storyTagsApi } from "@dvnt/app/lib/api/stories";
+import type { TaggedUser } from "@dvnt/app/features/stories";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
 import type {
   StoryOverlay,
@@ -47,6 +57,7 @@ import {
   DEVIANT_GRADIENT,
   HAIRLINE,
   type EditorToolMode,
+  STORY_CANVAS_WIDTH_CSS,
 } from "./story-editor.web";
 
 const MAX_STORY_ITEMS = 4;
@@ -111,6 +122,252 @@ function loadEditorForItem(asset: MediaAsset | undefined, edit?: ItemEdit) {
   });
 }
 
+
+// ============================================================
+// Camera capture (web) — getUserMedia, the browser's own camera API.
+// Mirrors the native Camera tool: shoot, confirm, and the frame joins the
+// same media pipeline a gallery pick uses.
+// ============================================================
+
+function CameraCapture({
+  onCapture,
+  onClose,
+}: {
+  onCapture: (file: File) => void;
+  onClose: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    navigator.mediaDevices
+      ?.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+      .then((stream) => {
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      })
+      .catch(() =>
+        setError(
+          "Camera unavailable. Check the site's camera permission, or use Gallery.",
+        ),
+      );
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+  }, []);
+
+  const shoot = () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    setBusy(true);
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")?.drawImage(video, 0, 0);
+    canvas.toBlob(
+      (blob) => {
+        setBusy(false);
+        if (!blob) return;
+        onCapture(
+          new File([blob], `camera-${Date.now()}.jpg`, { type: "image/jpeg" }),
+        );
+        onClose();
+      },
+      "image/jpeg",
+      0.92,
+    );
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.92)" }}
+      role="dialog"
+      aria-label="Camera"
+    >
+      <button
+        onClick={onClose}
+        aria-label="Close camera"
+        className="absolute top-4 left-4 w-10 h-10 rounded-xl flex items-center justify-center text-white/80"
+        style={{ background: "rgba(255,255,255,0.1)" }}
+      >
+        <X size={20} />
+      </button>
+
+      {error ? (
+        <p className="px-8 text-center text-sm text-white/70">{error}</p>
+      ) : (
+        <>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="rounded-2xl bg-black"
+            style={{ width: STORY_CANVAS_WIDTH_CSS, aspectRatio: "9 / 16", objectFit: "cover" }}
+          />
+          <button
+            onClick={shoot}
+            disabled={busy}
+            aria-label="Take photo"
+            className="mt-6 w-16 h-16 rounded-full border-4 border-white/80 disabled:opacity-40"
+            style={{ background: "rgba(255,255,255,0.9)" }}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Tag people (web) — the Mention tool. Writes the shared draft store's
+// `taggedUsers`; story-create's success handler persists them via
+// storyTagsApi.addTags, exactly as native does.
+// ============================================================
+
+function TagPeople({
+  selected,
+  onChange,
+  onClose,
+}: {
+  selected: TaggedUser[];
+  onChange: (users: TaggedUser[]) => void;
+  onClose: () => void;
+}) {
+  const [term, setTerm] = useState("");
+  const [results, setResults] = useState<TaggedUser[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    const q = term.trim();
+    if (!q) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      storyTagsApi
+        .searchUsers(q, 15)
+        .then((users) => {
+          if (!cancelled) setResults(users as TaggedUser[]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [term]);
+
+  const toggle = (u: TaggedUser) =>
+    onChange(
+      selected.some((s) => s.id === u.id)
+        ? selected.filter((s) => s.id !== u.id)
+        : [...selected, u],
+    );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col"
+      style={{ background: "rgba(0,0,0,0.92)" }}
+      role="dialog"
+      aria-label="Tag people"
+    >
+      <div className="flex items-center justify-between px-4 py-3">
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-white/80"
+          style={{ background: "rgba(255,255,255,0.1)" }}
+        >
+          <X size={20} />
+        </button>
+        <h2 className="text-[15px] font-semibold text-white">Tag people</h2>
+        <button
+          onClick={onClose}
+          className="h-9 px-4 rounded-xl text-sm font-semibold text-white"
+          style={{ background: "rgba(255,255,255,0.12)" }}
+        >
+          Done
+        </button>
+      </div>
+
+      <div className="mx-auto w-full max-w-md px-4">
+        <input
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          placeholder="Search by username…"
+          autoFocus
+          className="w-full h-11 px-3 rounded-xl bg-white/10 text-white text-sm outline-none placeholder:text-white/40"
+        />
+
+        {selected.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-3">
+            {selected.map((u) => (
+              <button
+                key={u.id}
+                onClick={() => toggle(u)}
+                className="h-8 px-3 rounded-full text-xs font-semibold text-white"
+                style={{ background: "rgba(62,164,229,0.25)" }}
+              >
+                @{u.username} ×
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-3 overflow-y-auto" style={{ maxHeight: "50dvh" }}>
+          {searching && results.length === 0 ? (
+            <p className="py-6 text-center text-xs text-white/50">Searching…</p>
+          ) : term.trim() && results.length === 0 ? (
+            <p className="py-6 text-center text-xs text-white/50">
+              No one matches that username.
+            </p>
+          ) : (
+            results.map((u) => {
+              const on = selected.some((sel) => sel.id === u.id);
+              return (
+                <button
+                  key={u.id}
+                  onClick={() => toggle(u)}
+                  className="w-full flex items-center gap-3 h-14 px-2 rounded-xl text-left"
+                >
+                  {u.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={u.avatar}
+                      alt=""
+                      className="w-10 h-10 rounded-full object-cover shrink-0"
+                    />
+                  ) : (
+                    <span className="w-10 h-10 rounded-full bg-white/10 shrink-0" />
+                  )}
+                  <span className="flex-1 text-sm text-white">
+                    @{u.username}
+                  </span>
+                  {on ? <Check size={18} color="#3EA4E5" /> : null}
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function StoryCreateScreen() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -130,7 +387,13 @@ export function StoryCreateScreen() {
     visibility,
     setVisibility,
     taggedUsers,
+    setTaggedUsers,
   } = useCreateStoryStore();
+
+  // Camera + tag-people overlays. Local UI state: neither belongs in the
+  // shared draft store, and both close without leaving anything behind.
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [tagOpen, setTagOpen] = useState(false);
 
   const { mutate: createStoryMutate, isPending: isCreateStoryPending } =
     useCreateStory();
@@ -201,10 +464,8 @@ export function StoryCreateScreen() {
   );
 
   // ── Media intake (file input) ───────────────────────────────────────
-  const onPickFiles = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files ?? []);
-      e.target.value = ""; // allow re-picking the same file
+  const addFiles = useCallback(
+    (files: File[]) => {
       if (files.length === 0) return;
 
       const room = MAX_STORY_ITEMS - mediaAssets.length;
@@ -276,6 +537,16 @@ export function StoryCreateScreen() {
   }, []);
 
   // ── Publish (bake + direct upload — no route hop, no result-store) ──────
+  /** File-input adapter — the camera path calls `addFiles` directly. */
+  const onPickFiles = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      e.target.value = ""; // allow re-picking the same file
+      addFiles(files);
+    },
+    [addFiles],
+  );
+
   const handleShare = useCallback(async () => {
     if (busy) return;
     if (!isValid) {
@@ -550,7 +821,10 @@ export function StoryCreateScreen() {
         ) : (
           <button
             onClick={() => fileRef.current?.click()}
-            className="w-full max-w-md aspect-[9/16] rounded-2xl bg-black flex flex-col items-center justify-center gap-3 text-white/45 border border-white/10"
+            className="aspect-[9/16] rounded-2xl bg-black flex flex-col items-center justify-center gap-3 text-white/45 border border-white/10"
+            // Same rule as the live canvas: `max-w-md` with no height budget
+            // forced a 796px box that pushed the rail below the fold.
+            style={{ width: STORY_CANVAS_WIDTH_CSS }}
           >
             <ImageIcon size={48} />
             <span className="text-base">Add media to get started</span>
@@ -654,6 +928,17 @@ export function StoryCreateScreen() {
           </button>
 
           <button
+            onClick={() => setCameraOpen(true)}
+            disabled={mediaAssets.length >= MAX_STORY_ITEMS || busy}
+            className={`flex flex-col items-center gap-1 ${mediaAssets.length >= MAX_STORY_ITEMS || busy ? "opacity-40" : ""}`}
+          >
+            <span className="w-14 h-14 rounded-xl bg-white/8 flex items-center justify-center">
+              <Camera size={24} color="#fff" />
+            </span>
+            <span className="text-white/55 text-xs">Camera</span>
+          </button>
+
+          <button
             onClick={startTextStory}
             disabled={busy || hasMedia}
             className={`flex flex-col items-center gap-1 ${busy || hasMedia ? "opacity-40" : ""}`}
@@ -662,6 +947,36 @@ export function StoryCreateScreen() {
               <Type size={24} color="#fff" />
             </span>
             <span className="text-white/55 text-xs">Text</span>
+          </button>
+
+          <button
+            onClick={() => setTagOpen(true)}
+            disabled={busy}
+            className={`flex flex-col items-center gap-1 ${busy ? "opacity-40" : ""}`}
+          >
+            <span
+              className="w-14 h-14 rounded-xl flex items-center justify-center"
+              style={{
+                background:
+                  taggedUsers.length > 0
+                    ? "rgba(62,164,229,0.2)"
+                    : "rgba(255,255,255,0.08)",
+              }}
+            >
+              <UserPlus
+                size={24}
+                color={taggedUsers.length > 0 ? "#3EA4E5" : "#fff"}
+              />
+            </span>
+            <span
+              className="text-xs"
+              style={{
+                color:
+                  taggedUsers.length > 0 ? "#3EA4E5" : "rgba(255,255,255,0.55)",
+              }}
+            >
+              {taggedUsers.length > 0 ? `${taggedUsers.length} Tag` : "Mention"}
+            </span>
           </button>
         </div>
       </main>
@@ -682,6 +997,20 @@ export function StoryCreateScreen() {
       {mode === "filter" ? <FilterPanel mediaUri={editorMediaUri} /> : null}
       {mode === "adjust" ? <AdjustPanel /> : null}
       {textOnly && mode === "idle" ? <BackgroundStrip /> : null}
+
+      {cameraOpen ? (
+        <CameraCapture
+          onCapture={(file) => addFiles([file])}
+          onClose={() => setCameraOpen(false)}
+        />
+      ) : null}
+      {tagOpen ? (
+        <TagPeople
+          selected={taggedUsers}
+          onChange={setTaggedUsers}
+          onClose={() => setTagOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

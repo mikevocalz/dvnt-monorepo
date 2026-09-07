@@ -61,6 +61,8 @@ interface TextEditorProps {
   element?: TextElement | null;
   onAdd: (options: Partial<TextElement>) => string;
   onUpdate: (id: string, updates: Partial<TextElement>) => void;
+  /** End of the edit session. Records ONE undo step; onUpdate records none. */
+  onCommit: (id: string, updates: Partial<TextElement>) => void;
   onRemove: (id: string) => void;
   onDone: () => void;
   onCancel: () => void;
@@ -70,6 +72,7 @@ export const TextEditor: React.FC<TextEditorProps> = ({
   element,
   onAdd,
   onUpdate,
+  onCommit,
   onRemove,
   onDone,
   onCancel,
@@ -187,12 +190,13 @@ export const TextEditor: React.FC<TextEditorProps> = ({
 
     const updates = buildUpdates();
     if (currentElementId) {
-      onUpdate(currentElementId, updates);
+      // Commit, not update: the whole typing session is one undo step.
+      onCommit(currentElementId, updates);
     } else {
       onAdd(updates);
     }
     onDone();
-  }, [buildUpdates, onAdd, onUpdate, onRemove, onDone, onCancel]);
+  }, [buildUpdates, onAdd, onCommit, onRemove, onDone, onCancel]);
 
   // ---- Keyboard tracking ----
   const keyboardHeight = useSharedValue(0);

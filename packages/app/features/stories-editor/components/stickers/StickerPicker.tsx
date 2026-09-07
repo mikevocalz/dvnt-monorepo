@@ -2,7 +2,7 @@
 // Instagram Stories Editor - Sticker Picker
 // ============================================================
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import {
   View,
   Pressable,
@@ -25,9 +25,12 @@ import {
   getItemImageUri,
   getItemPreviewUri,
   klipySearch,
+  KlipyAttribution,
   type KlipyItem,
 } from "@dvnt/app/features/stickers";
+import { emitLog } from "@dvnt/observability";
 import { GLASS_SURFACE, GLASS_TEXT_COLORS } from "@dvnt/app/lib/ui/glass";
+import { useDetachedSheetMetrics } from "@dvnt/app/lib/ui/sheet-metrics";
 import type { StickerInsertOptions } from "../../types";
 
 interface StickerPickerProps {
@@ -59,9 +62,11 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
   onSelectImageSticker,
   onClose,
 }) => {
-  const { width: screenWidth } = useWindowDimensions();
-  const imageStickerSize = (screenWidth - 64) / 3;
-  const twemojiStickerSize = (screenWidth - 64) / 5;
+  // Size the grid to the sheet, not the window — the tool panel is detached and
+  // capped at max-w-3xl, so window width overflows it on an iPad.
+  const { width: sheetWidth } = useDetachedSheetMetrics();
+  const imageStickerSize = (sheetWidth - 64) / 4;
+  const twemojiStickerSize = (sheetWidth - 64) / 5;
 
   const activeTab = useEditorStore((s) => s.stickerActiveTab) as StickerTab;
   const setActiveTab = useEditorStore((s) => s.setStickerActiveTab);
@@ -116,18 +121,38 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
   });
   const gifItems = gifQuery.data?.results ?? [];
   const isGifFallback = gifQuery.data?.source === "fallback";
+  const gifFallbackReason = gifQuery.data?.fallbackReason;
+
+  // Klipy's attribution is a condition of API access, so it tracks the query
+  // serving the active tab. GIFs are the only Klipy-served tab here — every
+  // other tab renders bundled DVNT/Ballroom art or Twemoji.
+  const activeKlipyQuery = isGifTab ? gifQuery : null;
+  const showKlipyAttribution =
+    activeKlipyQuery !== null &&
+    activeKlipyQuery.data?.source !== "fallback" &&
+    !activeKlipyQuery.isError;
+
+  // Every reason maps to copy about what the user can see and do — why the
+  // request failed is a diagnostic and goes to the logger below, not on screen.
   const gifFallbackCopy = useMemo(() => {
-    switch (gifQuery.data?.fallbackReason) {
-      case "restricted_key":
-        return "Klipy is returning 204 with the current key, so this tab is showing bundled animated reactions instead.";
-      case "missing_api_key":
-        return "No Klipy key is configured in this build, so this tab is using bundled animated reactions.";
+    switch (gifFallbackReason) {
       case "request_failed":
-        return "Klipy search is temporarily unavailable, so this tab is using bundled animated reactions.";
+        return "GIF search didn't load. Pick a built-in reaction, or search again in a moment.";
+      case "restricted_key":
+      case "missing_api_key":
       default:
-        return "Showing bundled animated reactions while GIF search is unavailable.";
+        return "GIF search isn't available right now. Pick a built-in reaction instead.";
     }
-  }, [gifQuery.data?.fallbackReason]);
+  }, [gifFallbackReason]);
+
+  useEffect(() => {
+    if (!gifFallbackReason) return;
+    emitLog("warn", "Klipy GIF search fell back to bundled reactions", {
+      feature: "stories-editor.stickers",
+      tab: "gifs",
+      fallbackReason: gifFallbackReason,
+    });
+  }, [gifFallbackReason]);
 
   const renderEmptyState = (title: string, body: string) => (
     <View className="items-center gap-2 px-8 pt-5">
@@ -242,7 +267,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
               fontWeight: "700",
             }}
           >
-            Animated emoji fallback
+            Built-in reactions
           </Text>
           <Text
             style={{
@@ -316,7 +341,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
           key={`image-${activeImagePack.id}`}
           data={activeImageStickers}
           style={{ flex: 1 }}
-          numColumns={3}
+          numColumns={4}
           recycleItems
           estimatedItemSize={imageStickerSize}
           keyExtractor={(item) => item.id}
@@ -410,7 +435,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
               ? GIF_SKELETONS
               : gifItems
           }
-          numColumns={3}
+          numColumns={4}
           recycleItems
           estimatedItemSize={imageStickerSize}
           keyExtractor={(item: string | KlipyItem, index: number) =>
@@ -438,26 +463,28 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
             gifQuery.isError
               ? renderEmptyState(
                   "GIF search is unavailable right now",
-                  "Klipy didn't return results. Try again in a moment.",
+                  "Try again in a moment.",
                 )
               : renderEmptyState(
-                  isGifFallback ? "No fallback GIFs found" : "No GIFs found",
+                  isGifFallback ? "No reactions match that" : "No GIFs found",
                   isGifFallback
                     ? "Try happy, party, fire, love, wow, or dance."
                     : "Try another search term.",
                 )
           }
           ListFooterComponent={
-            <View className="items-center pt-4 pb-10">
-              <Text
-                className="text-[11px] font-medium"
-                style={{ color: GLASS_TEXT_COLORS.muted }}
-              >
-                {isGifFallback
-                  ? "Bundled animated reactions"
-                  : "Powered by Klipy"}
-              </Text>
-            </View>
+            isGifFallback ? (
+              <View className="items-center pt-4 pb-10">
+                <Text
+                  className="text-[11px] font-medium"
+                  style={{ color: GLASS_TEXT_COLORS.muted }}
+                >
+                  Built-in reactions
+                </Text>
+              </View>
+            ) : (
+              <View className="pt-4 pb-10" />
+            )
           }
           contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 4 }}
           showsVerticalScrollIndicator={false}
@@ -465,22 +492,28 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
           keyboardDismissMode="interactive"
         />
       )}
+
+      {showKlipyAttribution ? <KlipyAttribution /> : null}
     </View>
   );
 };
 
+// Half of the 10pt row rhythm on each side, so the gutter between two tiles
+// reads the same as the gap between two rows.
+const GIF_GUTTER = 5;
+
 const GifSkeletonItem = ({ width }: { width: number }) => (
-  <View
-    style={{
-      width,
-      height: width * 1.2,
-      borderRadius: 18,
-      backgroundColor: "rgba(255,255,255,0.08)",
-      borderWidth: 1,
-      borderColor: GLASS_SURFACE.border,
-      marginBottom: 10,
-    }}
-  />
+  <View style={{ width, paddingHorizontal: GIF_GUTTER, marginBottom: 10 }}>
+    <View
+      style={{
+        height: width * 1.2,
+        borderRadius: 18,
+        backgroundColor: "rgba(255,255,255,0.08)",
+        borderWidth: 1,
+        borderColor: GLASS_SURFACE.border,
+      }}
+    />
+  </View>
 );
 
 const GifGridItem = ({
@@ -499,6 +532,7 @@ const GifGridItem = ({
       onPress={onPress}
       style={{
         width,
+        paddingHorizontal: GIF_GUTTER,
         marginBottom: 10,
       }}
     >

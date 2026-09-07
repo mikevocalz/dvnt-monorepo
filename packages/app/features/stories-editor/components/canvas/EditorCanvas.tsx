@@ -170,11 +170,13 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(
     if (liveImage) lastImageRef.current = liveImage;
     const backgroundImage = liveImage ?? lastImageRef.current;
 
-    // For video, use Skia's useVideo hook
-    const video =
-      mediaType === "video" && mediaUri
-        ? useVideo(mediaUri, { paused: !isPlaying })
-        : null;
+    // Skia's useVideo. Called unconditionally — `source: string | null` is
+    // part of its contract, and a hook behind a `mediaType === "video"` test
+    // breaks the moment the user swaps a photo for a clip.
+    const video = useVideo(
+      mediaType === "video" && mediaUri ? mediaUri : null,
+      { paused: !isPlaying },
+    );
 
     // Compute combined color matrix (memoized — only recomputes on filter/adj change)
     const combinedMatrix = useMemo(() => {
@@ -282,7 +284,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(
             )}
 
             {/* Background video frame */}
-            {mediaType === "video" && video?.currentFrame && (
+            {mediaType === "video" && mediaUri && (
               <SkiaImage
                 image={video.currentFrame}
                 x={0}

@@ -6,6 +6,23 @@
 // import "react-native-canvas-kit" directly anywhere else in stories-editor.
 // The kit swap is NATIVE-ONLY — never import this module from a *.web.tsx
 // file or apps/web (baseline §5).
+//
+// DEFERRED, not blocked (2026-09-07). That rule is a project decision, not a
+// technical limit, and the two reasons usually given for it are both wrong:
+//   • react-native-canvas-kit is pure JS (no ios/ or android/, zero runtime
+//     deps, peer-deps @shopify/react-native-skia >=1.0.0), so webpack resolves
+//     it through exports.default like any other package.
+//   • Skia itself already runs on web here. Verified in the running Next app:
+//     /canvaskit.wasm serves 200 application/wasm (8,076,553 bytes),
+//     WebAssembly.compile() succeeds, and CanvasKit drew a rect whose pixel
+//     read back [255,0,0,255]. next.config.ts already has CopySkiaPlugin,
+//     `AssetRegistry: false` and the node fallbacks.
+// The one genuinely missing piece is the runtime loader: nothing calls
+// LoadSkiaWeb()/<WithSkiaWeb/>, so window.CanvasKit is undefined. Adding it is
+// deliberately deferred until a web surface actually renders Skia — the story
+// editor's web path is its own DOM implementation today, so the loader would
+// cost an 8MB wasm fetch for no consumer. Wire the loader in the SAME change
+// that gives it one.
 // ============================================================
 
 // Allow-listed kit component surface (values)

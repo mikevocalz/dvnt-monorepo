@@ -49,6 +49,8 @@ interface ElementGestureOverlayProps {
     },
   ) => void;
   onDoubleTap?: (id: string) => void;
+  /** Long press: edits a text element, picks up a sticker/GIF to move. */
+  onLongPress?: (id: string) => void;
   onDelete?: (id: string) => void;
 }
 
@@ -65,6 +67,7 @@ export const ElementGestureOverlay: React.FC<ElementGestureOverlayProps> =
       onSelect,
       onTransformEnd,
       onDoubleTap,
+      onLongPress,
       onDelete,
     }) => {
       // Get the shared values from the registry (created by useElementTransform in Skia renderer)
@@ -216,6 +219,19 @@ export const ElementGestureOverlay: React.FC<ElementGestureOverlayProps> =
           runOnJS(commitTransform)(elementId);
         });
 
+      // ---- Long press: edit text, or pick up a sticker/GIF ----
+      // Simultaneous with the transform group so a hold-then-drag still moves
+      // the element rather than being swallowed by the press.
+      const longPress = Gesture.LongPress()
+        .minDuration(300)
+        .onStart(() => {
+          "worklet";
+          runOnJS(selectIfNeeded)();
+          if (onLongPress) {
+            runOnJS(onLongPress)(elementId);
+          }
+        });
+
       // ---- Double tap to edit text ----
       const doubleTap = Gesture.Tap()
         .numberOfTaps(2)
@@ -228,7 +244,7 @@ export const ElementGestureOverlay: React.FC<ElementGestureOverlayProps> =
 
       const gesture = Gesture.Race(
         doubleTap,
-        Gesture.Simultaneous(pan, pinch, rotate),
+        Gesture.Simultaneous(longPress, pan, pinch, rotate),
       );
 
       // Position the invisible overlay at the element's screen location
@@ -278,6 +294,7 @@ export const ElementGestureOverlay: React.FC<ElementGestureOverlayProps> =
               tx={tx}
               ty={ty}
               sc={sc}
+              rot={rot}
               elementWidth={elementWidth}
               elementHeight={elementHeight}
               surface={surface}
@@ -293,6 +310,7 @@ interface DeleteHandleProps {
   tx: { value: number };
   ty: { value: number };
   sc: { value: number };
+  rot: { value: number };
   elementWidth: number;
   elementHeight: number;
   surface: RenderSurface;
@@ -303,6 +321,7 @@ function DeleteHandle({
   tx,
   ty,
   sc,
+  rot,
   elementWidth,
   elementHeight,
   surface,
@@ -313,20 +332,23 @@ function DeleteHandle({
     // Mirror the gesture overlay's screen position so the delete X tracks
     // the element while it's being moved/scaled. Use the unrotated box;
     // we DO follow scale so the X stays visually anchored to the corner.
-    const scaledW = Math.max(
-      elementWidth * (sc as any).value * surface.scale,
-      120,
-    );
-    const scaledH = Math.max(
-      elementHeight * (sc as any).value * surface.scale,
-      120,
-    );
+    // No minimum box. The old Math.max(..., 120) floor pinned the X a fixed
+    // 60px from centre on anything smaller, so it drifted off the corner as
+    // the sticker scaled. And rotating the element left it behind entirely —
+    // rotate the corner offset so it stays welded to the visual corner.
+    const halfW = (elementWidth * (sc as any).value * surface.scale) / 2;
+    const halfH = (elementHeight * (sc as any).value * surface.scale) / 2;
+    const theta = ((rot as any).value * Math.PI) / 180;
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    const cornerX = halfW * cos + halfH * sin;
+    const cornerY = halfW * sin - halfH * cos;
     const centerScreenX = (tx as any).value * surface.scale + surface.offsetX;
     const centerScreenY = (ty as any).value * surface.scale + surface.offsetY;
     return {
       position: "absolute" as const,
-      left: centerScreenX + scaledW / 2 - SIZE / 2,
-      top: centerScreenY - scaledH / 2 - SIZE / 2,
+      left: centerScreenX + cornerX - SIZE / 2,
+      top: centerScreenY + cornerY - SIZE / 2,
       width: SIZE,
       height: SIZE,
     };

@@ -11,7 +11,7 @@
 // • Lucide icons, NativeWind className, borderCurve continuous
 // ============================================================
 
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import { View, Pressable, Text, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -21,6 +21,8 @@ import Animated, {
   runOnJS,
   interpolate,
   Extrapolation,
+  cancelAnimation,
+  clamp,
   type SharedValue,
 } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
@@ -35,6 +37,7 @@ import {
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { EditorMode } from "../../types";
+import { useEditorStore } from "../../stores/editor-store";
 
 // Spring config from the reference — snappy with minimal overshoot
 const SPRING = {
@@ -109,7 +112,12 @@ export const RightIslandMenu: React.FC<RightIslandMenuProps> = React.memo(
     allowedModes,
   }) => {
     const { height: screenH } = useWindowDimensions();
-    const isOpen = useSharedValue(0); // 0 = collapsed, 1 = expanded
+    // Position lives on the UI thread; intent lives in the store. Keeping them
+    // separate is what lets a drag and a tap interrupt each other cleanly.
+    const progress = useSharedValue(0); // 0 = collapsed, 1 = expanded
+    const startProgress = useSharedValue(0);
+    const railOpen = useEditorStore((s) => s.railOpen);
+    const setRailOpen = useEditorStore((s) => s.setRailOpen);
     const visibleTools = React.useMemo(
       () =>
         allowedModes?.length
@@ -125,70 +133,86 @@ export const RightIslandMenu: React.FC<RightIslandMenuProps> = React.memo(
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }, []);
 
+    // withSpring starts from the value the rail currently holds, so a tap during
+    // an in-flight spring reverses from that point instead of snapping first.
+    useEffect(() => {
+      progress.value = withSpring(railOpen ? 1 : 0, SPRING);
+    }, [railOpen, progress]);
+
     const openMenu = useCallback(() => {
       hapticFeedback();
-      isOpen.value = withSpring(1, SPRING);
-    }, [isOpen, hapticFeedback]);
+      setRailOpen(true);
+    }, [setRailOpen, hapticFeedback]);
 
     const closeMenu = useCallback(() => {
       hapticFeedback();
-      isOpen.value = withSpring(0, SPRING);
-    }, [isOpen, hapticFeedback]);
+      setRailOpen(false);
+    }, [setRailOpen, hapticFeedback]);
 
     const toggleMenu = useCallback(() => {
-      if (isOpen.value > 0.5) {
+      // getState() instead of the subscribed value: this callback is captured by
+      // a gesture worklet that outlives the render it was created in.
+      if (useEditorStore.getState().railOpen) {
         closeMenu();
       } else {
         openMenu();
       }
-    }, [isOpen, openMenu, closeMenu]);
+    }, [openMenu, closeMenu]);
 
     const handleToolPress = useCallback(
       (toolId: EditorMode) => {
         hapticFeedback();
         onModeChange(mode === toolId ? "idle" : toolId);
-        isOpen.value = withSpring(0, SPRING);
+        setRailOpen(false);
       },
-      [mode, onModeChange, isOpen, hapticFeedback],
+      [mode, onModeChange, setRailOpen, hapticFeedback],
     );
 
     // Drag gesture on the indicator — swipe left to open, right to close
-    const dragGesture = Gesture.Pan()
-      .activeOffsetX([-10, 10])
-      .onUpdate((e) => {
-        "worklet";
-        // Map drag to 0-1 range (dragging left = opening)
-        const progress = interpolate(
-          e.translationX,
-          [-PANEL_WIDTH, 0, PANEL_WIDTH],
-          [1, isOpen.value > 0.5 ? 1 : 0, 0],
-          Extrapolation.CLAMP,
-        );
-        isOpen.value = progress;
-      })
-      .onEnd((e) => {
-        "worklet";
-        // Velocity-based snapping: fast flick snaps to nearest edge
-        if (Math.abs(e.velocityX) > 500) {
-          isOpen.value = withSpring(e.velocityX < 0 ? 1 : 0, SPRING);
-        } else {
-          // Position-based snapping
-          isOpen.value = withSpring(isOpen.value > 0.5 ? 1 : 0, SPRING);
-        }
-      });
+    const dragGesture = useMemo(
+      () =>
+        Gesture.Pan()
+          .activeOffsetX([-10, 10])
+          .onBegin(() => {
+            cancelAnimation(progress);
+            startProgress.value = progress.value;
+          })
+          .onUpdate((e) => {
+            progress.value = clamp(
+              startProgress.value - e.translationX / PANEL_WIDTH,
+              0,
+              1,
+            );
+          })
+          .onEnd((e) => {
+            // Project the flick forward so a fast swipe past the midpoint wins
+            // even when the finger lifted short of it.
+            const projected = progress.value - e.velocityX / (PANEL_WIDTH * 4);
+            const open = projected > 0.5;
+            progress.value = withSpring(open ? 1 : 0, SPRING);
+            runOnJS(setRailOpen)(open);
+          }),
+      [progress, startProgress, setRailOpen],
+    );
 
     // Tap on indicator to toggle
-    const tapGesture = Gesture.Tap().onEnd(() => {
-      "worklet";
-      runOnJS(toggleMenu)();
-    });
+    const tapGesture = useMemo(
+      () =>
+        Gesture.Tap().onEnd(() => {
+          runOnJS(toggleMenu)();
+        }),
+      [toggleMenu],
+    );
 
-    const indicatorGesture = Gesture.Race(dragGesture, tapGesture);
+    const indicatorGesture = useMemo(
+      () => Gesture.Race(dragGesture, tapGesture),
+      [dragGesture, tapGesture],
+    );
 
     // The entire container translates: starts with panel off-screen, indicator visible
     const containerStyle = useAnimatedStyle(() => {
       const translateX = interpolate(
-        isOpen.value,
+        progress.value,
         [0, 1],
         [PANEL_WIDTH, 0],
         Extrapolation.CLAMP,
@@ -200,8 +224,8 @@ export const RightIslandMenu: React.FC<RightIslandMenuProps> = React.memo(
 
     // Click-outside overlay opacity
     const overlayStyle = useAnimatedStyle(() => ({
-      opacity: interpolate(isOpen.value, [0, 1], [0, 1]),
-      pointerEvents: isOpen.value > 0.5 ? "auto" : "none",
+      opacity: interpolate(progress.value, [0, 1], [0, 1]),
+      pointerEvents: progress.value > 0.5 ? "auto" : "none",
     }));
 
     // Center vertically
@@ -255,7 +279,7 @@ export const RightIslandMenu: React.FC<RightIslandMenuProps> = React.memo(
                 boxShadow: "-2px 0px 10px rgba(255,91,252,0.35)",
               }}
             >
-              <AnimatedArrow isOpen={isOpen} />
+              <AnimatedArrow isOpen={progress} />
             </Animated.View>
           </GestureDetector>
 

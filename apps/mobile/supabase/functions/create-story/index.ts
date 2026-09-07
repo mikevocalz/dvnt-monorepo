@@ -6,6 +6,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
+import { cleanMetadata, str } from "../_shared/overlay-sanitize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -61,6 +62,11 @@ interface CreateStoryBody {
     maxWidthRatio?: number;
     textAlign?: "left" | "center" | "right";
     textStyle?: string;
+    // Tappable-sticker payload: mention / link / event / ticket pills.
+    stickerKind?: string;
+    category?: string;
+    label?: string;
+    metadata?: Record<string, unknown>;
     x: number;
     y: number;
     sizeRatio?: number;
@@ -349,6 +355,8 @@ Deno.serve(async (req) => {
                     maxWidthRatio: overlay.maxWidthRatio ?? 0.8,
                     textAlign: overlay.textAlign ?? "center",
                     textStyle: overlay.textStyle,
+                    stickerKind: str(overlay.stickerKind),
+                    metadata: cleanMetadata(overlay.metadata),
                   }
                 : {
                     source: overlay.source === "asset" ? "asset" : "url",
@@ -361,6 +369,9 @@ Deno.serve(async (req) => {
                     scale: overlay.scale ?? 1,
                     rotation: overlay.rotation ?? 0,
                     opacity: overlay.opacity ?? 1,
+                    category: str(overlay.category),
+                    label: str(overlay.label),
+                    metadata: cleanMetadata(overlay.metadata),
                   },
       }));
 

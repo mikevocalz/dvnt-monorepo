@@ -1,3 +1,5 @@
+import type { StoryTextStylePreset } from "../../../lib/types";
+
 // ============================================================
 // Instagram Stories Editor - Type Definitions
 // ============================================================
@@ -94,6 +96,18 @@ export type TextStylePreset =
   | "shadow"
   | "gradient";
 
+// The serializer writes `TextElement.style` straight into the overlay's
+// `textStyle`, and the parser drops anything outside STORY_TEXT_STYLE_PRESETS.
+// If the two lists ever drift, a user's text style would silently vanish on
+// save — so fail the build here instead.
+type Expect<T extends true> = T;
+type _StoryPresetsCoverEditor = Expect<
+  StoryTextStylePreset extends TextStylePreset ? true : false
+>;
+type _EditorPresetsCoverStory = Expect<
+  TextStylePreset extends StoryTextStylePreset ? true : false
+>;
+
 export interface DrawingPath {
   id: string;
   points: Position[];
@@ -172,8 +186,27 @@ export type EditorMode =
 export type TextEditorTab = "style" | "font" | "color" | "typography";
 export type FilterMainTab = "filters" | "effects";
 
+/**
+ * Mount/animation phase of a tool panel. "closing" keeps the panel mounted so
+ * its exit animation is visible; only the exit completion moves it to "closed".
+ */
+export type Presence = "opening" | "open" | "closing" | "closed";
+
 export interface EditorState {
   mode: EditorMode;
+  /**
+   * Where the right rail is *asked* to be. The rail's on-screen position
+   * is a shared value that animates toward this; the two are deliberately
+   * separate so a tap during a drag (or during a settle) reverses from the
+   * current position instead of snapping to an endpoint first.
+   */
+  railOpen: boolean;
+  /**
+   * Presence per tool panel, keyed by the panel's stable id. Keyed rather than
+   * a single value because several panels are mounted at once and each runs its
+   * own open/close animation.
+   */
+  panelPresence: Record<string, Presence>;
   elements: CanvasElement[];
   selectedElementId: string | null;
   drawingPaths: DrawingPath[];
@@ -187,6 +220,16 @@ export interface EditorState {
   canvasSize: Size;
   undoStack: { elements: CanvasElement[]; drawingPaths: DrawingPath[] }[];
   redoStack: { elements: CanvasElement[]; drawingPaths: DrawingPath[] }[];
+  /**
+   * State captured when an interaction opened (a text-edit session), so the
+   * continuous updates inside it collapse into a single undo step on close.
+   */
+  interactionSnapshot: {
+    elements: CanvasElement[];
+    drawingPaths: DrawingPath[];
+  } | null;
+  /** Last gesture-end commit, used to coalesce simultaneous pan/pinch/rotate ends. */
+  lastCommit: { elementId: string; at: number } | null;
   // ---- Drawing UI ----
   drawingTool: DrawingTool;
   drawingColor: string;

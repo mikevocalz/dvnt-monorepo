@@ -1,18 +1,20 @@
 /**
- * Klipy API client — Stickers, GIFs, Memes
+ * Klipy API client — Stickers and GIFs
  * Docs: https://docs.klipy.com
  *
- * Auth: Bearer token in Authorization header.
- * Base URL: https://api.klipy.com/v1
+ * Auth: the app key is a path segment, not a header.
+ * Base URL: https://api.klipy.com/api/v1/{appKey}/{catalogue}/search
  */
 
-const KLIPY_BASE = "https://api.klipy.com/v1";
+import { emitLog } from "@dvnt/observability";
+
+const KLIPY_BASE = "https://api.klipy.com/api/v1";
 const KLIPY_API_KEY = process.env.EXPO_PUBLIC_KLIPY_API_KEY ?? "";
 const NOTO_GIF_BASE = "https://fonts.gstatic.com/s/e/notoemoji/latest";
 
 // ── Types ──────────────────────────────────────────────
 
-export type KlipyTab = "stickers" | "gifs" | "memes";
+export type KlipyTab = "stickers" | "gifs";
 
 export interface KlipyMediaFormat {
   url: string;
@@ -59,14 +61,14 @@ export interface KlipySearchResponse {
   fallbackReason?: "missing_api_key" | "restricted_key" | "request_failed";
 }
 
-export interface KlipyAutocompleteResponse {
-  results: string[];
+export interface KlipyCategoriesResponse {
+  data?: { categories?: { category?: string; query?: string }[] };
 }
 
 // ── Helpers ────────────────────────────────────────────
 
 function buildUrl(path: string, params: Record<string, string>): string {
-  const url = new URL(`${KLIPY_BASE}${path}`);
+  const url = new URL(`${KLIPY_BASE}/${KLIPY_API_KEY}${path}`);
   for (const [k, v] of Object.entries(params)) {
     if (v) url.searchParams.set(k, v);
   }
@@ -76,7 +78,7 @@ function buildUrl(path: string, params: Record<string, string>): string {
 class KlipyNoContentError extends Error {
   readonly status = 204;
 
-  constructor(message = "Klipy returned 204 No Content") {
+  constructor(message = "Klipy returned no content") {
     super(message);
     this.name = "KlipyNoContentError";
   }
@@ -98,37 +100,116 @@ async function klipyFetch<T>(
 ): Promise<T> {
   const url = buildUrl(path, params);
   const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${KLIPY_API_KEY}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
+    headers: { Accept: "application/json" },
     signal,
   });
 
   if (!res.ok && res.status !== 204) {
-    const errText = await res.text().catch(() => "");
-    console.error("[Klipy] API error:", res.status, errText);
-    throw new Error(`Klipy API error: ${res.status}`);
+    emitLog("warn", "Klipy request failed", {
+      feature: "stickers.klipy",
+      path,
+      status: res.status,
+    });
+    throw new Error(`Klipy request failed with status ${res.status}`);
   }
 
   if (res.status === 204) {
-    throw new KlipyNoContentError(
-      "[Klipy] 204 No Content — key may be test-restricted",
-    );
+    throw new KlipyNoContentError();
   }
 
   const text = await res.text();
-  if (!text) return { results: [] } as T;
+  if (!text) throw new KlipyNoContentError();
 
-  const json = JSON.parse(text);
+  return JSON.parse(text) as T;
+}
 
-  // Klipy may return { data: [...] } or { results: [...] }
-  if (json.data && !json.results) {
-    json.results = json.data;
-  }
+// ── Response shape ─────────────────────────────────────
+// Klipy nests one page under `data.data` and splits every asset into four
+// render sizes (hd/md/sm/xs); the app consumes the flattened KlipyItem instead.
 
-  return json as T;
+interface KlipyRawFile {
+  url: string;
+  width: number;
+  height: number;
+  size?: number;
+}
+
+type KlipyRawVariant = Partial<
+  Record<"gif" | "webp" | "png" | "jpg" | "mp4" | "webm", KlipyRawFile>
+>;
+
+interface KlipyRawItem {
+  id: number | string;
+  slug?: string;
+  title?: string;
+  tags?: string[];
+  file?: Partial<Record<"hd" | "md" | "sm" | "xs", KlipyRawVariant>>;
+}
+
+interface KlipyRawPage {
+  data?: KlipyRawItem[];
+  current_page?: number;
+  has_next?: boolean;
+}
+
+interface KlipyRawResponse {
+  result?: boolean;
+  data?: KlipyRawPage;
+}
+
+function firstFile(
+  ...candidates: (KlipyRawFile | undefined)[]
+): KlipyRawFile | undefined {
+  return candidates.find((file) => Boolean(file?.url));
+}
+
+function toKlipyItem(raw: KlipyRawItem, tab: KlipyTab): KlipyItem {
+  const hd = raw.file?.hd ?? {};
+  const md = raw.file?.md ?? {};
+  const sm = raw.file?.sm ?? {};
+  const xs = raw.file?.xs ?? {};
+
+  const gif = firstFile(hd.gif, md.gif, sm.gif, xs.gif);
+  const title = raw.title ?? "";
+
+  return {
+    // Klipy ids exceed Number.MAX_SAFE_INTEGER and lose digits through
+    // JSON.parse, so the slug is the only stable per-item key.
+    id: raw.slug ?? String(raw.id),
+    title,
+    content_description: title,
+    media_formats: {
+      gif,
+      mediumgif: firstFile(md.gif, gif),
+      tinygif: firstFile(sm.gif, md.gif, gif),
+      nanogif: firstFile(xs.gif, sm.gif, gif),
+      mp4: firstFile(hd.mp4, md.mp4),
+      tinymp4: firstFile(sm.mp4, md.mp4),
+      nanomp4: firstFile(xs.mp4, sm.mp4),
+      webm: firstFile(hd.webm, md.webm),
+      tinywebm: firstFile(sm.webm, md.webm),
+      nanowebm: firstFile(xs.webm, sm.webm),
+      png: firstFile(hd.png, md.png),
+      tinypng: firstFile(sm.png, md.png),
+      nanopng: firstFile(xs.png, sm.png),
+      // Only the sticker catalogue ships alpha, so transparent slots stay empty
+      // for GIFs — getItemImageUri would otherwise pick an opaque frame.
+      ...(tab === "stickers"
+        ? {
+            webp_transparent: firstFile(hd.webp, md.webp),
+            tinywebp_transparent: firstFile(sm.webp, md.webp),
+            nanowebp_transparent: firstFile(xs.webp, sm.webp),
+            gif_transparent: firstFile(hd.gif, md.gif),
+            tinygif_transparent: firstFile(sm.gif, md.gif),
+            nanogif_transparent: firstFile(xs.gif, sm.gif),
+          }
+        : {}),
+    },
+    created: 0,
+    url: gif?.url ?? firstFile(hd.webp, hd.png)?.url ?? "",
+    tags: raw.tags ?? [],
+    hasaudio: false,
+  };
 }
 
 type FallbackGifDefinition = {
@@ -299,20 +380,17 @@ function fallbackGifSearch(
   };
 }
 
-// ── Tab → API path mapping ────────────────────────────
-// Correct Klipy endpoints: /search/stickers, /search/gifs, /search (memes)
+// ── Tab → catalogue mapping ───────────────────────────
 
-const TAB_SEARCH_PATH: Record<KlipyTab, string> = {
-  stickers: "/search/stickers",
-  gifs: "/search/gifs",
-  memes: "/search",
+const TAB_CATALOGUE: Record<KlipyTab, string> = {
+  stickers: "stickers",
+  gifs: "gifs",
 };
 
-// Default search terms when no user query (Klipy has no trending endpoint)
+// Default search terms when no user query
 const TAB_DEFAULT_QUERY: Record<KlipyTab, string> = {
   stickers: "trending",
   gifs: "popular",
-  memes: "funny",
 };
 
 // ── Public API ─────────────────────────────────────────
@@ -328,25 +406,32 @@ export async function klipySearch(
   const limit = options?.limit ?? 30;
 
   if (!KLIPY_API_KEY) {
-    console.warn("[Klipy] Missing EXPO_PUBLIC_KLIPY_API_KEY");
+    emitLog("warn", "Klipy search skipped without an API key", {
+      feature: "stickers.klipy",
+      tab,
+    });
     return tab === "gifs"
       ? fallbackGifSearch(effectiveQuery, limit, "missing_api_key")
       : { results: [] };
   }
 
   try {
-    const response = await klipyFetch<KlipySearchResponse>(
-      TAB_SEARCH_PATH[tab],
+    const response = await klipyFetch<KlipyRawResponse>(
+      `/${TAB_CATALOGUE[tab]}/search`,
       {
         q: effectiveQuery,
-        limit: String(limit),
-        ...(options?.next ? { pos: options.next } : {}),
+        per_page: String(limit),
+        ...(options?.next ? { page: options.next } : {}),
       },
       options?.signal,
     );
 
+    const page = response.data;
+    const results = (page?.data ?? []).map((raw) => toKlipyItem(raw, tab));
+
     return {
-      ...response,
+      results,
+      ...(page?.has_next ? { next: String((page.current_page ?? 1) + 1) } : {}),
       source: "klipy",
     };
   } catch (error) {
@@ -354,35 +439,41 @@ export async function klipySearch(
       throw error;
     }
 
-    if (tab === "gifs" && error instanceof KlipyNoContentError) {
-      console.warn("[Klipy] Falling back to bundled animated GIFs");
-      return fallbackGifSearch(effectiveQuery, limit, "restricted_key");
-    }
-
     if (tab === "gifs") {
-      console.warn("[Klipy] GIF request failed, using fallback library", error);
-      return fallbackGifSearch(effectiveQuery, limit, "request_failed");
+      return fallbackGifSearch(
+        effectiveQuery,
+        limit,
+        error instanceof KlipyNoContentError
+          ? "restricted_key"
+          : "request_failed",
+      );
     }
 
     throw error;
   }
 }
 
+// Klipy publishes a category list rather than a per-keystroke suggest endpoint,
+// so suggestions are that list narrowed to what the user has typed.
 export async function klipyAutocomplete(
   query: string,
   signal?: AbortSignal,
 ): Promise<string[]> {
-  if (!query.trim()) return [];
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
   if (!KLIPY_API_KEY) return [];
 
   try {
-    const data = await klipyFetch<KlipyAutocompleteResponse>(
-      "/autocomplete",
-      { q: query.trim(), limit: "8" },
+    const response = await klipyFetch<KlipyCategoriesResponse>(
+      "/gifs/categories",
+      {},
       signal,
     );
 
-    return data.results ?? [];
+    return (response.data?.categories ?? [])
+      .map((entry) => entry.query ?? entry.category ?? "")
+      .filter((term) => term.toLowerCase().includes(q))
+      .slice(0, 8);
   } catch (error) {
     if (isAbortError(error)) {
       throw error;
@@ -399,7 +490,7 @@ export async function klipyAutocomplete(
 
 /**
  * Extract the best image URI from a Klipy item for canvas insertion.
- * Prioritizes transparent formats for stickers, full-size for GIFs/memes.
+ * Prioritizes transparent formats for stickers, full-size for GIFs.
  */
 export function getItemImageUri(item: KlipyItem, tab: KlipyTab): string {
   const m = item.media_formats;
@@ -418,12 +509,7 @@ export function getItemImageUri(item: KlipyItem, tab: KlipyTab): string {
     );
   }
 
-  if (tab === "gifs") {
-    return m.gif?.url ?? m.mediumgif?.url ?? m.tinygif?.url ?? "";
-  }
-
-  // memes
-  return m.gif?.url ?? m.png?.url ?? m.tinygif?.url ?? m.tinypng?.url ?? "";
+  return m.gif?.url ?? m.mediumgif?.url ?? m.tinygif?.url ?? "";
 }
 
 /**

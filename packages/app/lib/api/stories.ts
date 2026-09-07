@@ -9,7 +9,21 @@ import {
   requireBetterAuthToken,
   getCurrentUserId as getIdentityUserId,
 } from "../auth/identity";
-import type { StoryAnimatedGifOverlay, StoryOverlay } from "../types";
+import type {
+  StoryAnimatedGifOverlay,
+  StoryOverlay,
+  StoryTextStylePreset,
+} from "../types";
+import { STORY_TEXT_STYLE_PRESETS } from "../types";
+
+function isStringMap(value: unknown): value is Record<string, string> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every((v) => typeof v === "string")
+  );
+}
 
 function parseStoryOverlayRow(
   row: any,
@@ -81,10 +95,19 @@ function parseStoryOverlayRow(
             data.textAlign === "center"
               ? data.textAlign
               : "center",
-          textStyle:
-            typeof data.textStyle === "string"
-              ? String(data.textStyle)
-              : undefined,
+          // Validate against the union: an unknown preset from the server must
+          // fall back, not be cast into a type it does not belong to.
+          textStyle: STORY_TEXT_STYLE_PRESETS.includes(
+            data.textStyle as StoryTextStylePreset,
+          )
+            ? (data.textStyle as StoryTextStylePreset)
+            : undefined,
+          // The web editor serializes mention / link / event / ticket pills as
+          // text overlays carrying their kind; without these two the pill
+          // reads back as plain text and stops being tappable.
+          stickerKind:
+            typeof data.stickerKind === "string" ? data.stickerKind : undefined,
+          metadata: isStringMap(data.metadata) ? data.metadata : undefined,
         },
       };
     }
@@ -105,6 +128,12 @@ function parseStoryOverlayRow(
           assetId,
           url,
           sizeRatio: Number(data.sizeRatio ?? 0.2),
+          // Tappable-sticker metadata. Free-form on the wire, so it is kept
+          // only when it has the shape the overlay type promises.
+          category:
+            typeof data.category === "string" ? data.category : undefined,
+          label: typeof data.label === "string" ? data.label : undefined,
+          metadata: isStringMap(data.metadata) ? data.metadata : undefined,
         },
       };
     }

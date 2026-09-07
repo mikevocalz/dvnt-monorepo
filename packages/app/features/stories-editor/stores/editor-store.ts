@@ -20,6 +20,7 @@ import {
   TextStylePreset,
   TextEditorTab,
   FilterMainTab,
+  Presence,
   ExportSession,
   ExportArtifact,
   ExportStatus,
@@ -34,6 +35,17 @@ import {
   DRAWING_TOOL_CONFIG,
 } from "../constants";
 import { generateId, getNextZIndex } from "../utils/helpers";
+import {
+  applyRedo,
+  applyUndo,
+  beginInteraction,
+  commitStep,
+  endInteraction,
+  recordStep,
+  type HistoryState,
+} from "./editor-history";
+
+type EditorHistory = HistoryState<CanvasElement, DrawingPath>;
 
 // Default sticker size: ~26% of canvas width (280px on 1080w)
 const DEFAULT_STICKER_SIZE = Math.round(CANVAS_WIDTH * 0.26);
@@ -43,6 +55,10 @@ const DEFAULT_STICKER_SIZE = Math.round(CANVAS_WIDTH * 0.26);
 interface EditorStore extends EditorState {
   // Mode
   setMode: (mode: EditorMode) => void;
+  // Rail
+  setRailOpen: (open: boolean) => void;
+  // Panels
+  setPanelPresence: (id: string, presence: Presence) => void;
   // Media
   setMedia: (uri: string, mediaType: "image" | "video") => void;
   // Elements
@@ -52,6 +68,7 @@ interface EditorStore extends EditorState {
     options?: StickerInsertOptions,
   ) => string;
   updateElement: (id: string, updates: Partial<CanvasElement>) => void;
+  commitElement: (id: string, updates: Partial<CanvasElement>) => void;
   removeElement: (id: string) => void;
   selectElement: (id: string | null) => void;
   // Drawing
@@ -127,6 +144,8 @@ interface EditorStore extends EditorState {
 // ---- Initial State (data only) ----
 
 const initialEditorData: EditorState = {
+  railOpen: false,
+  panelPresence: {},
   mode: "idle",
   elements: [],
   selectedElementId: null,
@@ -141,6 +160,8 @@ const initialEditorData: EditorState = {
   canvasSize: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
   undoStack: [],
   redoStack: [],
+  interactionSnapshot: null,
+  lastCommit: null,
   // Drawing UI
   drawingTool: "pen",
   drawingColor: DRAWING_COLORS[0],
@@ -178,6 +199,26 @@ const initialEditorData: EditorState = {
 export const useEditorStore = create<EditorStore>((set, get) => ({
   ...initialEditorData,
 
+  // ---- Rail ----
+  setRailOpen: (railOpen) => set({ railOpen }),
+
+  // ---- Panels ----
+  // "closed" is stored as absence: readers fall back to it, so the record only
+  // ever holds live panels and cannot grow across editor sessions.
+  setPanelPresence: (id, presence) =>
+    set((state) => {
+      if ((state.panelPresence[id] ?? "closed") === presence) {
+        return state;
+      }
+      const panelPresence = { ...state.panelPresence };
+      if (presence === "closed") {
+        delete panelPresence[id];
+      } else {
+        panelPresence[id] = presence;
+      }
+      return { panelPresence };
+    }),
+
   // ---- Mode ----
   setMode: (mode) => {
     if (__DEV__) {
@@ -185,10 +226,17 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         `[Store] setMode "${mode}" elements=${get().elements.length} selected=${get().selectedElementId?.slice(0, 6) ?? "null"}`,
       );
     }
-    set({
+    // Entering/leaving the text editor brackets one interaction, so a whole
+    // typing + restyling session costs exactly one undo step.
+    set((s) => ({
       mode,
-      selectedElementId: mode === "drawing" ? null : get().selectedElementId,
-    });
+      selectedElementId: mode === "drawing" ? null : s.selectedElementId,
+      ...(mode === "text"
+        ? beginInteraction(s as EditorHistory)
+        : s.mode === "text"
+          ? endInteraction(s as EditorHistory)
+          : null),
+    }));
   },
 
   // ---- Media ----
@@ -232,13 +280,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       );
     }
     set((s) => ({
+      ...recordStep(s as EditorHistory),
       elements: [...s.elements, element],
       selectedElementId: null,
-      undoStack: [
-        ...s.undoStack,
-        { elements: s.elements, drawingPaths: s.drawingPaths },
-      ],
-      redoStack: [],
     }));
     if (__DEV__) {
       console.log(
@@ -268,13 +312,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       },
     };
     set((s) => ({
+      ...recordStep(s as EditorHistory),
       elements: [...s.elements, element],
       selectedElementId: id,
-      undoStack: [
-        ...s.undoStack,
-        { elements: s.elements, drawingPaths: s.drawingPaths },
-      ],
-      redoStack: [],
     }));
     return id;
   },
@@ -292,6 +332,17 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }));
   },
 
+  // End-of-interaction twin of updateElement: same write, plus the one history
+  // step for the gesture that produced it.
+  commitElement: (id, updates) => {
+    set((s) => ({
+      ...commitStep(s as EditorHistory, id, Date.now()),
+      elements: s.elements.map((el) =>
+        el.id === id ? ({ ...el, ...updates } as CanvasElement) : el,
+      ),
+    }));
+  },
+
   removeElement: (id) => {
     if (__DEV__) {
       const el = get().elements.find((e) => e.id === id);
@@ -300,14 +351,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       );
     }
     set((s) => ({
+      ...recordStep(s as EditorHistory),
       elements: s.elements.filter((el) => el.id !== id),
       selectedElementId:
         s.selectedElementId === id ? null : s.selectedElementId,
-      undoStack: [
-        ...s.undoStack,
-        { elements: s.elements, drawingPaths: s.drawingPaths },
-      ],
-      redoStack: [],
     }));
     if (__DEV__) {
       console.log(
@@ -321,12 +368,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   // ---- Drawing ----
   addDrawingPath: (path) =>
     set((s) => ({
+      ...recordStep(s as EditorHistory),
       drawingPaths: [...s.drawingPaths, path],
-      undoStack: [
-        ...s.undoStack,
-        { elements: s.elements, drawingPaths: s.drawingPaths },
-      ],
-      redoStack: [],
     })),
 
   undoLastPath: () =>
@@ -416,35 +459,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   togglePlay: () => set((s) => ({ isPlaying: !s.isPlaying })),
 
   // ---- History ----
-  undo: () =>
-    set((s) => {
-      if (s.undoStack.length === 0) return s;
-      const prev = s.undoStack[s.undoStack.length - 1];
-      return {
-        elements: prev.elements,
-        drawingPaths: prev.drawingPaths,
-        undoStack: s.undoStack.slice(0, -1),
-        redoStack: [
-          ...s.redoStack,
-          { elements: s.elements, drawingPaths: s.drawingPaths },
-        ],
-      };
-    }),
+  undo: () => set((s) => applyUndo(s as EditorHistory)),
 
-  redo: () =>
-    set((s) => {
-      if (s.redoStack.length === 0) return s;
-      const next = s.redoStack[s.redoStack.length - 1];
-      return {
-        elements: next.elements,
-        drawingPaths: next.drawingPaths,
-        redoStack: s.redoStack.slice(0, -1),
-        undoStack: [
-          ...s.undoStack,
-          { elements: s.elements, drawingPaths: s.drawingPaths },
-        ],
-      };
-    }),
+  redo: () => set((s) => applyRedo(s as EditorHistory)),
 
   clearAll: () =>
     set((s) => ({
