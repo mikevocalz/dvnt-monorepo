@@ -12,7 +12,7 @@
  *   happens inside the screen.
  */
 import { useEffect } from "react";
-import { View, StyleSheet, useWindowDimensions } from "react-native";
+import { View, StyleSheet } from "react-native";
 import { Main } from "@dvnt/app/components/ui/html";
 import { useRouter, usePathname } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -30,8 +30,6 @@ export function WebAppShell({
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? "";
-  const { width } = useWindowDimensions();
-  const isMobile = width < 768;
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
   // Sub-screens that render their own top header get no global header from
@@ -52,13 +50,21 @@ export function WebAppShell({
 
   return (
     <View style={styles.root}>
+      {/* The mobile notch clearance is a CSS breakpoint, not a JS branch.
+          It used to read `useWindowDimensions()`, which returns a fallback
+          width during server rendering — so the server picked the mobile
+          padding and the client picked the desktop one, and React reported a
+          hydration mismatch on every load of the app shell
+          (`r-paddingTop-10xqauy` vs `r-paddingTop-wk8lta`). A media query is
+          resolved by the browser after the HTML is already correct. */}
       <Main
-        style={
-          ownsHeader
+        className={
+          ownsHeader || publicChrome
             ? undefined
-            : publicChrome
-              ? styles.contentPublic
-              : [styles.content, isMobile && styles.contentMobile]
+            : "pt-[env(safe-area-inset-top)] md:pt-0"
+        }
+        style={
+          ownsHeader ? undefined : publicChrome ? styles.contentPublic : undefined
         }
       >
         {children}
@@ -74,11 +80,8 @@ const styles = StyleSheet.create({
   root: { minHeight: "100vh" as any, backgroundColor: "#02030A" },
   // The rail AppShell (site-chrome) is now the authed shell and renders NO fixed
   // top header, so the old WebAppHeader offset is a phantom gap above every app
-  // screen — zero it out. (The feed self-balances its own -78/+78 so it stays
-  // flush either way.) Mobile keeps only notch clearance.
-  content: { paddingTop: 0 },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  contentMobile: { paddingTop: "env(safe-area-inset-top)" as any },
+  // screen — zero it out. Mobile keeps only notch clearance, applied above as a
+  // `md:` breakpoint so it survives server rendering.
   // Public marketing chrome (GlassHeader floats taller): ~100px clearance.
   contentPublic: { paddingTop: 100 },
 });

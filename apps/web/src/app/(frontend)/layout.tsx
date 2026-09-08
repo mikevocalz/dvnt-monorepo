@@ -81,7 +81,16 @@ export default function FrontendLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+      {/* Browser extensions inject attributes into <body> before React loads
+          (ColorZilla's `cz-shortcut-listen`, password managers, and so on), and
+          React reports each as a hydration mismatch. Suppressing it HERE, on
+          the one element extensions target, keeps a real mismatch inside the
+          app visible instead of buried under a permanent false positive. It
+          does not cascade to children. */}
+      <body
+        suppressHydrationWarning
+        className={`${geistSans.variable} ${geistMono.variable}`}
+      >
         {/* Deviant top progress bar. The gradient + glow are themed in
             globals.css (#nprogress overrides); color here is the fallback. */}
         <NextTopLoader
