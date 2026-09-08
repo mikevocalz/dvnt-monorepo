@@ -106,6 +106,7 @@ import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 import type { SneakyBilling } from "@dvnt/app/features/screens/membership/billing";
 import { isFeatureEnabled } from "@dvnt/app/lib/feature-flags";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
 
 // ── Error Boundary (per-route) — surfaces real crash message ────────
 
@@ -270,7 +271,9 @@ function ClosedRoomScreen({
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <View className="flex-row items-center px-4 py-3 border-b border-border">
+      <View className="w-full py-3 border-b border-border">
+        {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+        <View className="flex-row items-center px-4" style={DETAIL_HEADER_ROW}>
         <Pressable onPress={onBack} hitSlop={12}>
           <ArrowLeft size={24} color="#fff" />
         </Pressable>
@@ -283,6 +286,7 @@ function ClosedRoomScreen({
           </Text>
         </View>
         <View className="w-6" />
+      </View>
       </View>
 
       <View className="flex-1 items-center justify-center px-6">

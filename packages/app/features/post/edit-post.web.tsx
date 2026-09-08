@@ -39,6 +39,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import type { Post } from "@dvnt/app/lib/types";
 import { useEditPostStore } from "./edit-post-store";
+import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 
 const MAX_CAPTION = 2200;
 
@@ -137,10 +138,10 @@ export function EditPostScreen() {
       }),
     onMutate: async (updates) => {
       await queryClient.cancelQueries({ queryKey: postKeys.detail(id) });
-      await queryClient.cancelQueries({ queryKey: postKeys.feedInfinite() });
+      await queryClient.cancelQueries({ queryKey: postKeys.feedInfiniteAll() });
 
       const previousPost = queryClient.getQueryData<Post>(postKeys.detail(id));
-      const previousFeed = queryClient.getQueryData(postKeys.feedInfinite());
+      const previousFeed = queryClient.getQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled));
 
       queryClient.setQueryData<Post | null>(postKeys.detail(id), (old) => {
         if (!old) return old;
@@ -153,7 +154,7 @@ export function EditPostScreen() {
       });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      queryClient.setQueryData(postKeys.feedInfinite(), (old: any) => {
+      queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), (old: any) => {
         if (!old?.pages) return old;
         return {
           ...old,
@@ -201,7 +202,7 @@ export function EditPostScreen() {
         queryClient.setQueryData(postKeys.detail(id), context.previousPost);
       }
       if (context?.previousFeed) {
-        queryClient.setQueryData(postKeys.feedInfinite(), context.previousFeed);
+        queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), context.previousFeed);
       }
       showToast("error", "Error", "Couldn't save changes. Try again.");
     },

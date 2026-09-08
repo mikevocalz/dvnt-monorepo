@@ -14,7 +14,6 @@ import {
   Platform,
 } from "react-native";
 import {
-  ArrowLeft,
   RefreshCw,
   TicketX,
   Shield,
@@ -48,6 +47,8 @@ import { addonsApi, type OrderAddonRecord } from "@dvnt/app/lib/api/addons";
 import QRCodeSvg from "react-native-qrcode-svg";
 import { WeatherStrip } from "@dvnt/app/features/events";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import { CONTENT_MAX_WIDTH } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 const TIER_ACCENT: Record<TicketTierLevel, string> = {
   free: "#3FDCFF",
@@ -320,13 +321,11 @@ function ViewTicketScreenContent() {
   if (!ticket) {
     return (
       <View style={[styles.screen, { paddingTop: insets.top }]}>
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={16}
-          style={styles.backButton}
-        >
-          <ArrowLeft size={22} color="#fff" />
-        </Pressable>
+        {/* Absolute, clear of the status bar — the shared button has no
+            position of its own, and in normal flow it landed on the clock. */}
+        <View style={[styles.backButton, { top: insets.top + 8 }]}>
+          <DetailBackButton />
+        </View>
 
         <View style={styles.emptyContainer}>
           <TicketX size={56} color="rgba(255,255,255,0.2)" />
@@ -355,13 +354,12 @@ function ViewTicketScreenContent() {
 
   return (
     <View style={styles.screen}>
-      {/* Back button overlay */}
-      <Pressable
-        onPress={() => router.back()}
-        style={[styles.backButton, { top: insets.top + 8 }]}
-      >
-        <ArrowLeft size={22} color="#fff" />
-      </Pressable>
+      {/* Back button overlay — absolute, clear of the status bar. The shared
+          button carries no position of its own, so in normal flow it landed on
+          top of the clock. */}
+      <View style={[styles.backButton, { top: insets.top + 8 }]}>
+        <DetailBackButton />
+      </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -952,10 +950,22 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: "#0a0a0a",
+    // Full-bleed. Capping the SCREEN also capped the floating back button and
+    // drew the surface's edge inboard — the border you could see down each
+    // side. The ticket body caps itself instead (`scrollContent`).
+    width: "100%",
+  },
+  // The ticket is a document: centre it, but only it.
+  scrollContent: {
+    paddingTop: 0,
+    width: "100%",
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: "center",
   },
   backButton: {
     position: "absolute",
-    top: 56,
+    // `top` is set inline from the safe-area inset; 56 was a hardcoded guess
+    // that only matched one device.
     left: 16,
     zIndex: 10,
     width: 40,
@@ -965,9 +975,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  scrollContent: {
-    paddingTop: 0,
-  },
+
   bottomActionsWrap: {
     position: "absolute",
     left: 0,

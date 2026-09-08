@@ -35,6 +35,8 @@ import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useMediaPicker } from "@dvnt/app/lib/hooks";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
+import { useCreateHeaderStore } from "@dvnt/app/lib/stores/create-header-store";
+import { useTabBarTopInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { useCreatePost } from "@dvnt/app/lib/hooks/use-posts";
 import { postTagsApi } from "@dvnt/app/lib/api/post-tags";
 import {
@@ -49,13 +51,13 @@ import { UserMentionAutocomplete } from "@dvnt/app/components/ui/user-mention-au
 import { Switch } from "react-native";
 import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
 import { setPendingCrop } from "@dvnt/app/features/crop/crop-utils";
+import Logo from "@dvnt/app/components/logo";
 import { TextPostSlidesComposer } from "@dvnt/app/features/post";
 import {
   TEXT_POST_MAX_LENGTH,
   serializeTextSlidesForMutation,
 } from "@dvnt/app/lib/posts/text-post";
 import { AppTrace, getErrorMessage } from "@dvnt/app/lib/diagnostics/app-trace";
-import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -630,66 +632,31 @@ function CreateScreenContent() {
     }
   };
 
-  return (
-    <View className={SCREEN_SHELL}>
-      {/* Header — Close / Title / Post */}
-      <View
-        style={{
-          paddingTop: insets.top,
-          paddingHorizontal: 16,
-          paddingBottom: 10,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          backgroundColor: "#000",
-          borderBottomWidth: 1,
-          borderBottomColor: "rgba(255,255,255,0.06)",
-        }}
-      >
-        <Pressable
-          onPress={handleClose}
-          hitSlop={12}
-          style={{
-            width: 44,
-            height: 44,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <X size={24} color="#fff" />
-        </Pressable>
-        <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700" }}>
-          New Post
-        </Text>
-        <Pressable
-          onPress={handlePost}
-          disabled={!isValid || isCreating || isUploading || isSubmitLocked}
-          hitSlop={12}
-          style={{
-            paddingHorizontal: 18,
-            paddingVertical: 8,
-            borderRadius: 20,
-            backgroundColor:
-              isValid && !isCreating && !isUploading && !isSubmitLocked
-                ? "#3EA4E5"
-                : "rgba(255,255,255,0.08)",
-          }}
-        >
-          <Text
-            style={{
-              color:
-                isValid && !isCreating && !isUploading && !isSubmitLocked
-                  ? "#fff"
-                  : "rgba(255,255,255,0.3)",
-              fontSize: 15,
-              fontWeight: "700",
-            }}
-          >
-            {isCreating || isSubmitLocked ? "Posting..." : "Post"}
-          </Text>
-        </Pressable>
-      </View>
+  // Publish this screen's header actions to the layout, which draws them in the
+  // Stack header slot above the tab bar — the same place every other tab's
+  // header lives. Cleared on unmount so a stale Post handler can never fire.
+  // iPad puts the tab bar at the TOP, over the content.
+  const tabBarTopInset = useTabBarTopInset();
+  const registerHeader = useCreateHeaderStore((s) => s.register);
+  const resetHeader = useCreateHeaderStore((s) => s.reset);
+  const canPost = isValid && !isCreating && !isUploading && !isSubmitLocked;
+  useEffect(() => {
+    registerHeader({
+      canPost,
+      postLabel: isCreating || isSubmitLocked ? "Posting..." : "Post",
+      onClose: handleClose,
+      onPost: handlePost,
+    });
+  }, [canPost, isCreating, isSubmitLocked, handleClose, handlePost, registerHeader]);
+  useEffect(() => () => resetHeader(), [resetHeader]);
 
+  return (
+    <View
+      className="flex-1 bg-background w-full"
+      style={{ paddingTop: tabBarTopInset }}
+    >
+      {/* Full-bleed canvas, centred composer — same rule as the other tabs. */}
+      <View className="flex-1 w-full max-w-3xl self-center">
       <KeyboardAwareScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ flexGrow: 1, paddingBottom: 100 }}
@@ -1318,6 +1285,7 @@ function CreateScreenContent() {
           </Motion.View>
         </View>
       )}
+      </View>
     </View>
   );
 }

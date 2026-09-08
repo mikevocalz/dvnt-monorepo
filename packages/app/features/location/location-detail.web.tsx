@@ -14,6 +14,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { isVideoKind } from "@dvnt/app/lib/media/types";
 import { useWindowDimensions } from "react-native";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useParams, useRouter, useSearchParams } from "solito/navigation";
@@ -340,7 +341,7 @@ export function LocationDetailScreen() {
               const post = posts[item.index];
               if (!post) return null;
               const cover = coverFor(post);
-              const isVideo = post.media?.[0]?.type === "video";
+              const isVideo = isVideoKind(post.media?.[0]?.type);
               const isCarousel =
                 post.hasMultipleImages || (post.media?.length ?? 0) > 1;
               return (

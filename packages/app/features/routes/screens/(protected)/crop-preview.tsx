@@ -24,7 +24,6 @@ import {
   Text,
   Pressable,
   ActivityIndicator,
-  Dimensions,
   useWindowDimensions,
   StyleSheet,
   ScrollView,
@@ -56,15 +55,8 @@ import {
 } from "@dvnt/app/features/crop/edit-state";
 import { EditToolbar } from "@dvnt/app/features/crop/EditToolbar";
 import { exportImage } from "@dvnt/app/features/crop/export-pipeline";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
-/**
- * Fallbacks only. Frozen at launch width by `Dimensions.get`, which on a crop
- * surface is worse than cosmetic: the frame the user drags inside was sized
- * for the old window, so after a rotation the crop rect and the image no
- * longer agreed. The screen reads live below.
- */
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-const FRAME_WIDTH = SCREEN_WIDTH;
 const THUMB_SIZE = 64;
 
 function CropPreviewScreenContent() {
@@ -401,19 +393,7 @@ function CropPreviewScreenContent() {
     },
     headerShadowVisible: false,
     headerLeft: () => (
-      <Pressable
-        onPress={handleBack}
-        hitSlop={12}
-        style={{
-          marginLeft: 4,
-          width: 44,
-          height: 44,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <ArrowLeft size={24} color="#fff" />
-      </Pressable>
+      <DetailBackButton onPress={handleBack} />
     ),
     headerRight: () => (
       <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>

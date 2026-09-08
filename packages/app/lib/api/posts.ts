@@ -356,6 +356,13 @@ export const postsApi = {
       }
 
       // Strict spicy contract:
+      // ⚠️ POLICY DIVERGENCE — DEFERRED, do not "fix" by copying either side.
+      //   Here (client):        spicy = ALL public spicy posts.
+      //   bootstrap-feed edge:  spicy = only authors you follow, and guests get
+      //                         an empty feed (index.ts ~246-275, ~311).
+      // The edge gate is deliberate (consent/safety), this one is not gated.
+      // Which wins is an adult-content distribution decision, not an
+      // implementation detail — resolve it before touching either filter.
       //   includeNsfw=false → ONLY safe posts (is_nsfw=false OR NULL)
       //   includeNsfw=true  → ONLY spicy posts (is_nsfw=true)
       // Any other path is a data-leak regression.

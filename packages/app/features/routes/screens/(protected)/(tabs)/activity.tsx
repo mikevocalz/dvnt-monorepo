@@ -35,7 +35,10 @@ import {
 } from "@dvnt/app/lib/hooks/use-activities-query";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
+import {
+  useTabBarInset,
+  useTabBarTopInset,
+} from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
 import { navigateToPost } from "@dvnt/app/lib/routes/post-routes";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
@@ -47,7 +50,6 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import * as privileged from "@dvnt/app/lib/api/privileged";
-import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 
 const TABS = [
   "All",
@@ -585,6 +587,8 @@ function ActivityScreenContent() {
   const { colors } = useColorScheme();
   const insets = useSafeAreaInsets();
   const tabBarInset = useTabBarInset();
+  // iPad puts the tab bar at the TOP, over the content.
+  const tabBarTopInset = useTabBarTopInset();
   const [activeTab, setActiveTab] = useState<TabType>("All");
   const [refreshing, setRefreshing] = useState(false);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
@@ -1177,7 +1181,12 @@ function ActivityScreenContent() {
   }
 
   return (
-    <View className={SCREEN_SHELL}>
+    <View className="flex-1 bg-background w-full">
+      {/* Full-bleed screen, centred content — same rule as Events. The
+          max-w-4xl cap used to sit on the SCREEN, so on a tablet the
+          background stopped short of the edges and left a band either
+          side. The cap belongs on the content, not the canvas. */}
+      <View className="flex-1 w-full max-w-3xl self-center">
       {activeTab === "Liked" ? (
         <LegendList
           data={likedActivities}
@@ -1210,6 +1219,7 @@ function ActivityScreenContent() {
           extraData={{ followedUsers, pendingFollows }}
         />
       )}
+      </View>
     </View>
   );
 }

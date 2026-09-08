@@ -167,7 +167,7 @@ function ReplyComposer({
     return (
       <div
         className="sticky bottom-0 z-20 mx-auto w-full max-w-2xl px-3"
-        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 12px)" }}
+        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 12px + var(--dvnt-tabbar-clearance))" }}
       >
         <button
           onClick={() => openComposer()}
@@ -182,7 +182,7 @@ function ReplyComposer({
   return (
     <div
       className="sticky bottom-0 z-20 mx-auto w-full max-w-2xl px-3"
-      style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 12px)" }}
+      style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 12px + var(--dvnt-tabbar-clearance))" }}
     >
       <div className="flex items-center justify-between rounded-t-xl bg-white/5 px-3 py-1.5 text-xs text-white/55">
         <span>{replyTo ? `Replying to @${replyTo.username}` : "Add a reply"}</span>

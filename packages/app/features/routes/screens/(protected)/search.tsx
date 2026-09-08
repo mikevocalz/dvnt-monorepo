@@ -12,7 +12,6 @@ import { Link, useRouter, useLocalSearchParams } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useNavigation } from "expo-router";
 import {
-  ArrowLeft,
   Search,
   X,
   Play,
@@ -23,6 +22,7 @@ import {
 import { Image } from "expo-image";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { useSearchStore } from "@dvnt/app/lib/stores/search-store";
+import { isVideoKind } from "@dvnt/app/lib/media/types";
 import { useEffect, useCallback, useMemo, useState } from "react";
 import { Debouncer } from "@tanstack/pacer";
 import { SearchSkeleton, SearchResultsSkeleton } from "@dvnt/app/components/skeletons";
@@ -45,6 +45,7 @@ import { TextPostSurface } from "@dvnt/app/features/post";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import { prefetchImagesBlocking } from "@dvnt/app/lib/perf/image-prefetch";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 /**
  * Explore's grid used to be computed HERE, at module scope, from
@@ -66,7 +67,7 @@ function getSearchPreviewUrls(posts: Post[]) {
   return posts
     .flatMap((post) => {
       const firstMedia = post.media?.[0];
-      const isVideo = post.type === "video" || firstMedia?.type === "video";
+      const isVideo = isVideoKind(post.type) || isVideoKind(firstMedia?.type);
       const imageUri =
         post.thumbnail || (!isVideo ? firstMedia?.url : undefined);
       return imageUri ? [imageUri] : [];
@@ -97,7 +98,10 @@ function PostGridTile({
     post.textSlides,
     post.caption,
   );
-  const isVideo = post.type === "video" || firstMedia?.type === "video";
+  // isVideoKind, not `=== "video"`: an `animated_video` post also carries an
+  // .mp4 url, so the narrow check let it fall through to the image branch and
+  // handed the mp4 to <Image>, which renders nothing — the missing thumbnails.
+  const isVideo = isVideoKind(post.type) || isVideoKind(firstMedia?.type);
   const videoUrl = isVideo ? firstMedia?.url : undefined;
   const imageUri = post.thumbnail || (!isVideo ? firstMedia?.url : undefined);
 
@@ -577,21 +581,20 @@ function SearchScreenContent() {
     >
       {/* Header */}
       <View
-        className="flex-row items-center justify-center gap-3 border-b border-border px-4 py-3"
+        // justify-BETWEEN, not center: centring bunched the back chevron and
+        // the mode toggle either side of the field in the middle of the bar,
+        // so neither control sat where you reach for it. Back pins to the
+        // left edge, the toggle to the right, and the capped field takes
+        // what is left — the same three-slot shape as the inbox header.
+        className="flex-row items-center justify-between gap-3 border-b border-border px-4 py-3"
         style={{ zIndex: 20, elevation: 20 }}
       >
-        <Pressable
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <ArrowLeft size={24} color="#fff" />
-        </Pressable>
+        <DetailBackButton />
         {/* Capped, not `flex-1`: at full tablet width an unconstrained field
             stretched the entire header and left the location button marooned
-            at the far edge. */}
-        <View className="flex-1 max-w-xl">
+            at the far edge. max-w-3xl matches the content column the rest of
+            the app centres on. */}
+        <View className="flex-1 max-w-3xl">
           {searchMode === "content" ? (
             <View className="flex-row items-center bg-secondary rounded-xl px-3">
               <Search size={20} color="#999" />

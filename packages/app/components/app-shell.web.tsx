@@ -271,14 +271,20 @@ export function AppShell({
       )}
 
       {/* ── Center column ── fills the available track (IG/X width), the inner
-           screens cap themselves (the feed grid is responsive). overflowX hidden
-           so a child can never spawn a horizontal scrollbar on the shell. */}
+           screens cap themselves (the feed grid is responsive). overflowX CLIP,
+           not hidden, so a child can never spawn a horizontal scrollbar on the
+           shell: `overflow-x: hidden` forces the used `overflow-y` to `auto`,
+           which makes this <main> a scroll container, and every `sticky top-0`
+           header inside it then sticks to a box as tall as its own content —
+           i.e. never. On a phone that read as the chat/screen headers scrolling
+           away with the content. `clip` blocks the same overflow without
+           creating a scroll container, so sticky keeps working. */}
       <main
         style={{
           minWidth: 0,
           width: "100%",
           margin: "0 auto",
-          overflowX: "hidden",
+          overflowX: "clip",
         }}
       >
         {children}

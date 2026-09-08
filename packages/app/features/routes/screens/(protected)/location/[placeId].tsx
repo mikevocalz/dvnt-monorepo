@@ -18,7 +18,6 @@ import { navigateToPost } from "@dvnt/app/lib/routes/post-routes";
 import { useEffect, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   MapPin,
   Navigation,
   Grid3X3,
@@ -40,6 +39,8 @@ import {
 } from "@dvnt/app/lib/utils/location";
 import { searchApi } from "@dvnt/app/lib/api/search";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 /**
  * The grid was computed here from a module-scope `Dimensions.get("window")`,
@@ -348,10 +349,10 @@ function LocationScreenContent() {
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       {/* Header */}
-      <View className="flex-row items-center px-4 py-3 gap-3">
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={24} color={colors.foreground} />
-        </Pressable>
+      <View className="w-full py-3">
+        {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+        <View className="flex-row items-center px-4 gap-3" style={DETAIL_HEADER_ROW}>
+        <DetailBackButton />
         <Text
           className="flex-1 text-lg font-semibold text-foreground"
           numberOfLines={1}
@@ -363,6 +364,7 @@ function LocationScreenContent() {
             <Navigation size={22} color={colors.primary} />
           </Pressable>
         )}
+      </View>
       </View>
 
       {/* Location Header with Map */}

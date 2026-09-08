@@ -62,9 +62,13 @@ import {
 import { appendCacheBuster, getAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { ProfileScreenGuard } from "@dvnt/app/features/profile";
 import { ProfilePronounsPill } from "@dvnt/app/features/profile";
-import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
-import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
+import {
+  useTabBarInset,
+  useTabBarTopInset,
+} from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
+import { TierBadge } from "@dvnt/app/components/membership/TierBadge";
+import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 
 // mapPostToGridTile is now replaced by safeGridTiles from safe-profile-mappers.ts
 
@@ -102,6 +106,8 @@ function normalizeProfileLinks(value: unknown): string[] {
 
 function ProfileScreenContent() {
   const tabBarInset = useTabBarInset();
+  // iPad puts the tab bar at the TOP, over the content.
+  const tabBarTopInset = useTabBarTopInset();
   const router = useRouter();
   const navigation = useNavigation();
   const { colors } = useColorScheme();
@@ -366,6 +372,7 @@ function ProfileScreenContent() {
 
   // PHASE 0: Compute display values from profileData (API) with user (auth store) fallback
   // CRITICAL: profileData is the canonical source, user is fallback only
+  const { entitlements } = useEntitlements();
   const displayName =
     profileData?.displayName || profileData?.name || user?.name || "User";
   // CRITICAL: Use canonical resolver — never fall back to empty string.
@@ -607,9 +614,14 @@ function ProfileScreenContent() {
 
   return (
     <View
-      className={SCREEN_SHELL}
+      className="flex-1 bg-background w-full"
       testID="screen.profile"
     >
+      {/* Full-bleed screen, centred content — same rule as Events. The
+          max-w-4xl cap used to sit on the SCREEN, so on a tablet the
+          background stopped short of the edges and left a band either
+          side. The cap belongs on the content, not the canvas. */}
+      <View className="flex-1 w-full max-w-3xl self-center">
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentInsetAdjustmentBehavior="automatic"
@@ -793,6 +805,13 @@ function ProfileScreenContent() {
               <Text className="text-base font-semibold text-foreground">
                 {displayName}
               </Text>
+              {/* Your OWN profile, so the tier is spelled out — you should be
+                  able to see what you are paying for without decoding a colour.
+                  Everyone else gets the mark alone (see profile/[username]).
+                  Free renders nothing at all: there is no badge for not
+                  subscribing, and a "Free" chip beside your name is a scarlet
+                  letter rather than a feature. */}
+              <TierBadge plan={entitlements?.planKey} size={16} showLabel />
               <ProfilePronounsPill
                 pronouns={displayPronouns}
                 inline
@@ -1326,6 +1345,7 @@ function ProfileScreenContent() {
           )}
         </View>
       </ScrollView>
+      </View>
 
       <Modal
         visible={isAvatarViewerOpen && !!avatarUri}

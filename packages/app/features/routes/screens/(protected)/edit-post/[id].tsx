@@ -60,6 +60,9 @@ import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import type { Post } from "@dvnt/app/lib/types";
 import * as ImageManipulator from "expo-image-manipulator";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
+import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 
 /**
  * Fallback only — see the live read inside the screen. A module-scope
@@ -175,11 +178,11 @@ function EditPostScreenContent() {
     onMutate: async (updates) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: postKeys.detail(id!) });
-      await queryClient.cancelQueries({ queryKey: postKeys.feedInfinite() });
+      await queryClient.cancelQueries({ queryKey: postKeys.feedInfiniteAll() });
 
       // Snapshot previous values
       const previousPost = queryClient.getQueryData<Post>(postKeys.detail(id!));
-      const previousFeed = queryClient.getQueryData(postKeys.feedInfinite());
+      const previousFeed = queryClient.getQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled));
 
       // Optimistic update — post detail
       queryClient.setQueryData<Post | null>(postKeys.detail(id!), (old) => {
@@ -192,7 +195,7 @@ function EditPostScreenContent() {
       });
 
       // Optimistic update — infinite feed
-      queryClient.setQueryData(postKeys.feedInfinite(), (old: any) => {
+      queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), (old: any) => {
         if (!old?.pages) return old;
         return {
           ...old,
@@ -239,7 +242,7 @@ function EditPostScreenContent() {
         queryClient.setQueryData(postKeys.detail(id!), context.previousPost);
       }
       if (context?.previousFeed) {
-        queryClient.setQueryData(postKeys.feedInfinite(), context.previousFeed);
+        queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), context.previousFeed);
       }
       showToast("error", "Error", "Couldn't save changes. Try again.");
     },
@@ -402,13 +405,14 @@ function EditPostScreenContent() {
   if (isError || !post) {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
-        <View className="flex-row items-center border-b border-border px-4 py-3">
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ArrowLeft size={24} color="#fff" />
-          </Pressable>
+        <View className="w-full border-b border-border py-3">
+          {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+          <View className="flex-row items-center px-4" style={DETAIL_HEADER_ROW}>
+          <DetailBackButton />
           <Text className="ml-4 text-lg font-semibold text-foreground">
             Edit Post
           </Text>
+        </View>
         </View>
         <View className="flex-1 items-center justify-center px-6">
           <Motion.View
@@ -445,9 +449,7 @@ function EditPostScreenContent() {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-row items-center border-b border-border px-4 py-3">
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ArrowLeft size={24} color="#fff" />
-          </Pressable>
+          <DetailBackButton />
           <Text className="ml-4 text-lg font-semibold text-foreground">
             Edit Post
           </Text>
@@ -496,13 +498,7 @@ function EditPostScreenContent() {
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className="flex-row items-center justify-between border-b border-border px-4 py-3"
       >
-        <Pressable
-          onPress={handleCancel}
-          hitSlop={12}
-          className="w-10 h-10 items-center justify-center rounded-full"
-        >
-          <ArrowLeft size={24} color="#fff" />
-        </Pressable>
+        <DetailBackButton onPress={handleCancel} />
 
         <Text className="text-lg font-bold text-foreground">Edit Post</Text>
 

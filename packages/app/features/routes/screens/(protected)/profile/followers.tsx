@@ -5,6 +5,7 @@ import { LegendList } from "@dvnt/app/components/list";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ArrowLeft, Search, X } from "lucide-react-native";
+import { DetailHeader } from "@dvnt/app/components/layout/detail-header";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
@@ -119,7 +120,7 @@ const FollowerRow = memo(function FollowerRow({
       </View>
       {/* Follow/Following button */}
       {!isCurrentUser && (
-        <Pressable
+        <Motion.Pressable
           onPress={onFollowPress}
           disabled={isFollowPending}
           hitSlop={12}
@@ -147,7 +148,7 @@ const FollowerRow = memo(function FollowerRow({
               {user.isFollowing ? "Following" : "Follow"}
             </Text>
           </Motion.View>
-        </Pressable>
+        </Motion.Pressable>
       )}
     </Pressable>
   );
@@ -305,16 +306,7 @@ function FollowersScreenContent() {
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
-      {/* Header */}
-      <View className="flex-row items-center border-b border-border px-4 py-3">
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={24} color={colors.foreground} />
-        </Pressable>
-        <Text className="flex-1 text-center text-lg font-semibold text-foreground">
-          Followers
-        </Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <DetailHeader title="Followers" />
 
       {/* Search bar */}
       <View className="px-4 py-2 border-b border-border">

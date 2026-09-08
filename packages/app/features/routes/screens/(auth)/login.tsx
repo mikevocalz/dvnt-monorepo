@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, Pressable, StyleSheet, Dimensions } from "react-native";
+import { View, Text, Pressable, StyleSheet } from "react-native";
 import { toast } from "sonner-native";
 import { useForm } from "@tanstack/react-form";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -18,8 +18,6 @@ import { VideoView, useVideoPlayer } from "expo-video";
 import { AppleButton } from "@dvnt/app/features/auth";
 import { LinearGradient } from "expo-linear-gradient";
 import { useVideoLifecycle, logVideoHealth } from "@dvnt/app/lib/video-lifecycle";
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 export default function LoginScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -311,19 +309,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000",
   },
-  backgroundVideo: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
-  },
+  // Filling the parent is rotation-proof; the width/height these used to carry
+  // came from a module-scope `Dimensions.get`, frozen at whatever the window
+  // was when the bundle loaded, so a tablet rotation left bare black beside it.
+  backgroundVideo: { ...StyleSheet.absoluteFill },
   overlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
 });

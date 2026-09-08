@@ -475,7 +475,17 @@ function CallRoom({
             : "Waiting for others…";
 
   return (
-    <main className="relative flex h-screen w-screen flex-col overflow-hidden bg-[#06070d]">
+    // FIXED and above the app chrome. Two things were covering the controls:
+    //   1. `h-screen` is 100vh = the LARGE viewport (mobile toolbars retracted),
+    //      and with `overflow-hidden` the bar under the browser toolbar was not
+    //      just hidden but unreachable — you could not scroll to End Call.
+    //   2. The app's own tab bar is `position: fixed; z-index: 1000`, so it
+    //      painted over the mic/camera/hang-up row.
+    // Padding around the tab bar would be the wrong fix: an active call is a
+    // takeover surface, and offering Home/Events/Profile mid-call invites you to
+    // navigate out of the call you are on. z-2000 sits above the tab bar and
+    // below the incoming-call overlay (3000), which must still interrupt.
+    <main className="fixed inset-x-0 top-0 z-[2000] flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d]">
       {/* Remote tile fills the screen */}
       <div className="absolute inset-0">
         {remoteStream ? (
@@ -515,7 +525,10 @@ function CallRoom({
       </div>
 
       {/* Top status bar */}
-      <header className="relative z-10 flex items-center justify-between px-5 pt-5">
+      <header
+        className="relative z-10 flex items-center justify-between px-5"
+        style={{ paddingTop: "max(1.25rem, calc(env(safe-area-inset-top) + 0.5rem))" }}
+      >
         <div className="flex items-center gap-2 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur">
           <span
             className="h-2 w-2 rounded-full"
@@ -539,7 +552,10 @@ function CallRoom({
 
       {/* Local PiP tile — rounded-2xl */}
       {localStream && isCameraOn ? (
-        <div className="absolute right-4 top-20 z-10 h-44 w-32 overflow-hidden rounded-2xl border border-white/15 shadow-lg">
+        <div
+          className="absolute right-4 z-10 h-44 w-32 overflow-hidden rounded-2xl border border-white/15 shadow-lg"
+          style={{ top: "calc(env(safe-area-inset-top) + 5rem)" }}
+        >
           <VideoTile
             stream={localStream}
             muted
@@ -550,7 +566,10 @@ function CallRoom({
       ) : null}
 
       {/* Controls bar — circular icon buttons */}
-      <footer className="relative z-10 mt-auto flex items-center justify-center gap-5 pb-10">
+      <footer
+        className="relative z-10 mt-auto flex items-center justify-center gap-5"
+        style={{ paddingBottom: "max(2.5rem, calc(env(safe-area-inset-bottom) + 1rem))" }}
+      >
         <ControlButton
           onClick={toggleMic}
           active={isMicOn}

@@ -11,7 +11,6 @@ import {
 } from "react-native";
 
 import {
-  ArrowLeft,
   Grid,
   MoreHorizontal,
   Share2,
@@ -50,7 +49,10 @@ import {
   safeGridTiles,
   type SafeGridTile,
 } from "@dvnt/app/lib/utils/safe-profile-mappers";
-import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { TierBadge } from "@dvnt/app/components/membership/TierBadge";
+import { useBadgeTier } from "@dvnt/app/lib/subscription/use-badge-tier";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 const GRID_GAP = 2;
 
@@ -354,6 +356,7 @@ function UserProfileScreenComponent() {
   const nsfwEnabled = useAppStore((state) => state.nsfwEnabled);
   const currentUser = useAuthStore((state) => state.user);
   const queryClient = useQueryClient();
+  const { planKey: badgeTier } = useBadgeTier(username);
 
   // Responsive grid: 2 columns on phone, 3 on tablet (768px+), 4 on large (1024px+)
   const { width: screenWidth } = useWindowDimensions();
@@ -751,16 +754,13 @@ function UserProfileScreenComponent() {
   if (!safeUsername) {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
-        <View className="flex-row items-center justify-between border-b border-border px-4 py-3">
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={16}
-            style={{ padding: 8, margin: -8, marginRight: 8 }}
-          >
-            <ArrowLeft size={24} color={colors.foreground} />
-          </Pressable>
+        <View className="w-full border-b border-border py-3">
+          {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+          <View className="flex-row items-center justify-between px-4" style={DETAIL_HEADER_ROW}>
+          <DetailBackButton />
           <Text className="text-lg font-semibold text-foreground">Profile</Text>
           <View style={{ width: 24 }} />
+        </View>
         </View>
         <View className="flex-1 items-center justify-center p-4">
           <Text className="text-muted-foreground">User not found</Text>
@@ -785,25 +785,17 @@ function UserProfileScreenComponent() {
   return (
     <SafeAreaView
       edges={["top"]}
-      className={SCREEN_SHELL}
+      // Full-bleed: SCREEN_SHELL capped the whole screen, so the header was
+      // indented with the body and could not reach the corners it is anchored
+      // to. The body caps itself below; the header does not.
+      className="flex-1 bg-background w-full"
     >
       {/* Header */}
       <View
         className="flex-row items-center justify-between border-b border-border px-4 py-1"
         style={{ zIndex: 10 }}
       >
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={8}
-          style={{
-            width: 44,
-            height: 44,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <ArrowLeft size={24} color={colors.foreground} />
-        </Pressable>
+        <DetailBackButton />
         <Text className="text-lg font-semibold text-foreground">
           {user.username || safeUsername || "Profile"}
         </Text>
@@ -857,6 +849,9 @@ function UserProfileScreenComponent() {
           showToast("success", `Blocked @${user.username}`, "");
         }}
       />
+
+      {/* Capped reading column — the header above stays full width. */}
+      <View className="flex-1 w-full max-w-3xl self-center">
 
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Profile Info - Centered */}
@@ -980,9 +975,15 @@ function UserProfileScreenComponent() {
 
           <View className="mt-4">
             <View className="flex-row flex-wrap items-center gap-2">
-              <Text className="font-semibold text-foreground">
-                {user.name || user.username}
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text className="font-semibold text-foreground">
+                  {user.name || user.username}
+                </Text>
+                {/* Mark only — no tier name. Someone else's plan is not
+                    yours to read; the colour says "member", the label would
+                    say "paying for the VIP tier". Free renders nothing. */}
+                <TierBadge plan={badgeTier} size={14} />
+              </View>
               <ProfilePronounsPill
                 pronouns={(user as any).pronouns}
                 inline
@@ -999,7 +1000,7 @@ function UserProfileScreenComponent() {
           <View className="mt-4 flex-row gap-2">
             {isOwnProfile ? (
               <>
-                <Pressable
+                <Motion.Pressable
                   onPress={() =>
                     router.push("/(protected)/edit-profile" as any)
                   }
@@ -1014,8 +1015,8 @@ function UserProfileScreenComponent() {
                       Edit Profile
                     </Text>
                   </Motion.View>
-                </Pressable>
-                <Pressable
+                </Motion.Pressable>
+                <Motion.Pressable
                   onPress={() =>
                     shareProfile(user.username, user.name || user.username)
                   }
@@ -1027,7 +1028,7 @@ function UserProfileScreenComponent() {
                   >
                     <Share2 size={20} color="#fff" />
                   </Motion.View>
-                </Pressable>
+                </Motion.Pressable>
               </>
             ) : (
               <>
@@ -1038,7 +1039,7 @@ function UserProfileScreenComponent() {
                     />
                   </View>
                 ) : (
-                  <Pressable
+                  <Motion.Pressable
                     onPress={handleFollowPress}
                     disabled={followMutation.isPending || !followTargetId}
                     style={{ flex: 1 }}
@@ -1070,9 +1071,9 @@ function UserProfileScreenComponent() {
                             : "Follow"}
                       </Text>
                     </Motion.View>
-                  </Pressable>
+                  </Motion.Pressable>
                 )}
-                <Pressable
+                <Motion.Pressable
                   onPress={handleMessagePress}
                   disabled={isCreatingConversation || !messageTargetId}
                   style={{ flex: 1 }}
@@ -1091,7 +1092,7 @@ function UserProfileScreenComponent() {
                       {isCreatingConversation ? "Opening..." : "Message"}
                     </Text>
                   </Motion.View>
-                </Pressable>
+                </Motion.Pressable>
               </>
             )}
           </View>
@@ -1261,6 +1262,7 @@ function UserProfileScreenComponent() {
           </Pressable>
         </View>
       </Modal>
+      </View>
     </SafeAreaView>
   );
 }

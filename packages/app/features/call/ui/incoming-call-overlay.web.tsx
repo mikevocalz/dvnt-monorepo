@@ -57,6 +57,18 @@ export function IncomingCallOverlay() {
     };
   }, [incomingCall, startRing, stopRing]);
 
+  // Lock the page behind the overlay while it is up. Without this the feed
+  // still scrolls under a modal dialog, and on a phone that scroll is exactly
+  // what a caller reaches for when the actions look out of reach.
+  useEffect(() => {
+    if (!incomingCall || typeof document === "undefined") return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [incomingCall]);
+
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return;
     const userId = user.id;
@@ -132,8 +144,17 @@ export function IncomingCallOverlay() {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[3000] flex flex-col items-center justify-between px-6 py-16"
-      style={{ backgroundColor: "rgba(6,7,13,0.95)" }}
+      className="fixed inset-x-0 top-0 z-[3000] flex h-[100dvh] flex-col items-center justify-between overflow-y-auto px-6"
+      style={{
+        backgroundColor: "rgba(6,7,13,0.95)",
+        // `inset-0` sized this against the LARGE viewport (toolbars retracted),
+        // so on a phone the accept/decline row rendered underneath the browser's
+        // bottom toolbar — you had to scroll the page to reach it. `100dvh` is
+        // the *visible* viewport, and the safe-area insets keep the actions off
+        // the home indicator in standalone/PWA mode.
+        paddingTop: "max(3rem, calc(env(safe-area-inset-top) + 1.5rem))",
+        paddingBottom: "max(2.5rem, calc(env(safe-area-inset-bottom) + 1.5rem))",
+      }}
       role="dialog"
       aria-modal="true"
       aria-label={`Incoming call from ${callerName}`}

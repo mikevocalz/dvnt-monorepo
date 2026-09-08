@@ -9,7 +9,10 @@ import {
 import { Image } from "expo-image";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
+import {
+  useTabBarInset,
+  useTabBarTopInset,
+} from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { Main, LinearGradient } from "@dvnt/app/components/ui/html";
 import {
   Heart,
@@ -63,8 +66,10 @@ import {
   useSpotlightFeed,
   usePromotedEventIds,
 } from "@dvnt/app/lib/hooks/use-promotions";
-import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
+import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
+import { CONTENT_MAX_WIDTH } from "@dvnt/app/components/layout/screen-shell";
+import { EVENT_CARD_ASPECT } from "@dvnt/app/components/event/feed-event-card-shape";
 
 function EventCard({
   event,
@@ -105,10 +110,14 @@ function EventCard({
       }}
       className="w-full self-center"
     >
-      <Motion.View
+      {/* Plain View, not Motion.View. Its only animation prop was the
+          press-scale, and the App Store zoom needs that gone (a shrink fights
+          the zoom for the same frames). A Motion.View left with a `transition`
+          but nothing to animate cannot build a stable dependency array, which
+          threw "the final argument passed to useMemo changed size between
+          renders" on every card. Shadow stays here; the clip is on the child. */}
+      <View
         className="rounded-3xl overflow-hidden mb-5"
-        whileTap={{ scale: 0.98 }}
-        transition={{ type: "spring", damping: 20, stiffness: 300 }}
         style={{
           shadowColor: "#fff",
           shadowOpacity: 0.2,
@@ -120,16 +129,21 @@ function EventCard({
         {/* Wrap card content so the like button can be a sibling of the
             navigation Pressable — prevents touch conflicts on Android/iOS. */}
         <View style={{ height: cardHeight }}>
-          <Pressable
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-            onPressIn={() => {
+          {/* ZoomCard, not a bare Pressable: the feed and the profile grid open
+              an event with the App Store card zoom, and this one pushed a flat
+              stack instead — same card, same destination, two different
+              transitions depending on which tab you tapped it from.
+              `router.push` gets no zoom at all; the router threads it through
+              the href, which is why this has to be a Link. */}
+          <ZoomCard
+            href={`/(protected)/events/${event.id}` as never}
+            onPress={() => {
               queryClient.prefetchQuery({
                 queryKey: eventKeys.detail(event.id),
                 queryFn: () => eventsApi.getEventById(event.id),
                 staleTime: 5 * 60 * 1000,
               });
             }}
-            onPress={() => router.push(`/(protected)/events/${event.id}` as any)}
           >
             <View style={{ height: cardHeight }} className="w-full">
               {/* Parallax image layer — branded gradient fallback when
@@ -294,7 +308,7 @@ function EventCard({
               </View>
             </Animated.View>
             </View>
-          </Pressable>
+          </ZoomCard>
 
           {/* Like Button — outside navigation Pressable to avoid touch conflicts */}
           <View
@@ -325,19 +339,30 @@ function EventCard({
             </Pressable>
           </View>
         </View>
-      </Motion.View>
+      </View>
     </Motion.View>
   );
 }
 
 /** Smallest 4:5 flyer card that still shows its title and date. */
-const MIN_CARD_WIDTH = 240;
+/**
+ * Smallest event card worth showing — set so the grid resolves to ONE column
+ * inside the max-w-3xl content column, i.e. cards at the full 768pt width.
+ *
+ * At 240 the same column fitted two ~362pt cards, which made a tablet card
+ * NARROWER than the ~378pt one a phone shows: the tablet was getting more
+ * cards rather than bigger ones, and an event flyer is the content here. This
+ * matches the feed's event card, which is also capped to the content column.
+ */
+const MIN_CARD_WIDTH = 400;
 
 function EventsScreenContent() {
   const router = useRouter();
   const { colors } = useColorScheme();
   const insets = useSafeAreaInsets();
   const tabBarInset = useTabBarInset();
+  // iPad puts the tab bar at the TOP, over the content.
+  const tabBarTopInset = useTabBarTopInset();
   const queryClient = useQueryClient();
   const pagerRef = useRef<any>(null);
   const trace = useScreenTrace("Events");
@@ -353,21 +378,25 @@ function EventsScreenContent() {
   // laid out exactly like a 768pt one and parked the difference in the
   // gutters. Now the canvas grows and a third column appears when there is
   // genuinely room for one at a sane card width.
+  // The grid lays out inside the centred max-w-3xl column, NOT the window. Left
+  // on the window width it sized every card for a 1024pt iPad while the box
+  // holding them was 768 — cards wider than their container, which is why they
+  // stopped looking like the full-width cards they are on a phone.
+  const contentWidth = Math.min(screenWidth, CONTENT_MAX_WIDTH);
   const { columns: numColumns, cellWidth } = useResponsiveGrid({
     minCellWidth: MIN_CARD_WIDTH,
     gap: 12,
     horizontalPadding: 32,
+    containerWidth: contentWidth,
   });
   const gridGap = numColumns > 1 ? 12 : 0;
-  const cardWidth = numColumns > 1 ? cellWidth : screenWidth - 12;
-  // PORTRAIT, because a DVNT flyer is authored 3:5 portrait
-  // (`BuiltEventMedia.flyerImageUrl`) and these cards render it with
-  // `resizeMode="cover"`. At 0.85 (landscape) and 1.0 (square) the card threw
-  // away most of every flyer and kept a band out of the middle — the squished
-  // look, on the iPad worst of all because the 2-up grid makes each card wider
-  // and so crops even harder. 4:5 matches the web feed card, and matches how
-  // DICE, corner, Posh and Spotify Live Events all present flyers.
-  const cardHeight = Math.round(cardWidth * 1.25);
+  const cardWidth = numColumns > 1 ? cellWidth : contentWidth - 12;
+  // Height follows the width through EVENT_CARD_ASPECT (6:5), so it stays
+  // responsive at every column width. The flyer is authored 3:5 portrait and
+  // renders `resizeMode="cover"`, so the card always crops it — the question is
+  // only how much. 4:5 was right at a phone's ~378pt but made the full 768pt
+  // card 960pt tall, taller than the screen it sits on.
+  const cardHeight = Math.round(cardWidth / EVENT_CARD_ASPECT);
 
   // Zustand store — replaces all useState
   const activeTab = useEventsScreenStore((s) => s.activeTab);
@@ -598,8 +627,28 @@ function EventsScreenContent() {
   const showEventSkeletons = isLoading && events.length === 0;
 
   return (
-    <View className={SCREEN_SHELL}>
+    // FULL WIDTH, not SCREEN_SHELL. The cap and this screen's own grid were
+    // fighting: `useResponsiveGrid` above is explicitly built to let a third
+    // column appear "when there is genuinely room for one", but max-w-4xl
+    // (896pt) meant a 1024pt iPad could never offer that room — it parked the
+    // difference in gutters, which is the empty band either side reported from
+    // the iPad. The header was inside the cap too, so it stopped short of the
+    // screen edges while the tab header above it ran full width.
+    <View
+      className="flex-1 bg-background w-full"
+      // Top clearance goes on the SCREEN, not the lists: this screen has no
+      // `contentInsetAdjustmentBehavior="automatic"` (unlike profile/activity,
+      // where iOS inserts it and ours doubled it), and the header sits above
+      // the lists — padding a list left the header itself under the tab bar.
+      style={{ paddingTop: tabBarTopInset }}
+    >
       <Main className="flex-1">
+        {/* Everything on this screen reads in one centred column — the date and
+            title row included. Capping from the search bar down left the title
+            and its map/tickets/spicy actions stretched to the tablet's full
+            width while the search field beneath them stopped short, so the two
+            rows disagreed about where the screen's edge was. */}
+        <View className="flex-1 w-full max-w-3xl self-center">
         {/* Header — date+title left, actions right */}
         <View className="px-4 pt-2 pb-1">
           <View className="flex-row items-center justify-between">
@@ -618,60 +667,57 @@ function EventsScreenContent() {
             <View className="flex-row items-center gap-2">
               {/* Map button — left of Tickets. Opens a detached Gorhom
                   BottomSheetModal instead of swapping the whole screen. */}
-              <Motion.View
-                whileTap={{ scale: 0.9 }}
-                className="h-10 w-10 items-center justify-center rounded-xl bg-card border border-border"
-                style={
-                  showMapView
-                    ? {
-                        backgroundColor: colors.primary,
-                        borderColor: colors.primary,
-                      }
-                    : undefined
-                }
+              <Motion.Pressable
+                onPress={toggleMapView}
+                accessibilityLabel="Open events map"
               >
-                <Pressable
-                  onPress={toggleMapView}
-                  className="w-full h-full items-center justify-center"
-                  accessibilityLabel="Open events map"
+                <Motion.View
+                  whileTap={{ scale: 0.9 }}
+                  className="h-10 w-10 items-center justify-center rounded-xl bg-card border border-border"
+                  style={
+                    showMapView
+                      ? {
+                          backgroundColor: colors.primary,
+                          borderColor: colors.primary,
+                        }
+                      : undefined
+                  }
                 >
                   <Map
                     size={18}
                     color={showMapView ? "#fff" : colors.foreground}
                   />
-                </Pressable>
-              </Motion.View>
-              <Motion.View
-                whileTap={{ scale: 0.9 }}
-                className="h-10 w-10 items-center justify-center rounded-xl bg-card border border-border"
-              >
-                <Pressable
-                  onPress={() =>
-                    router.push("/(protected)/events/my-tickets" as any)
-                  }
-                  className="w-full h-full items-center justify-center"
-                >
-                  <Ticket size={18} color={colors.foreground} />
-                </Pressable>
-              </Motion.View>
-              {/* Spicy toggle button */}
-              <Motion.View
-                whileTap={{ scale: 0.9 }}
-                className="h-10 w-10 items-center justify-center rounded-xl bg-card border border-border"
-                style={
-                  nsfwFilter === true
-                    ? { backgroundColor: "rgba(153,27,27,0.3)", borderColor: "rgba(153,27,27,0.6)" }
-                    : undefined
+                </Motion.View>
+              </Motion.Pressable>
+              <Motion.Pressable
+                onPress={() =>
+                  router.push("/(protected)/events/my-tickets" as any)
                 }
               >
-                <Pressable
-                  onPress={() => setNsfwFilter(nsfwFilter === true ? false : true)}
-                  className="w-full h-full items-center justify-center"
-                  accessibilityLabel="Toggle spicy events"
+                <Motion.View
+                  whileTap={{ scale: 0.9 }}
+                  className="h-10 w-10 items-center justify-center rounded-xl bg-card border border-border"
+                >
+                  <Ticket size={18} color={colors.foreground} />
+                </Motion.View>
+              </Motion.Pressable>
+              {/* Spicy toggle button */}
+              <Motion.Pressable
+                onPress={() => setNsfwFilter(nsfwFilter === true ? false : true)}
+                accessibilityLabel="Toggle spicy events"
+              >
+                <Motion.View
+                  whileTap={{ scale: 0.9 }}
+                  className="h-10 w-10 items-center justify-center rounded-xl bg-card border border-border"
+                  style={
+                    nsfwFilter === true
+                      ? { backgroundColor: "rgba(153,27,27,0.3)", borderColor: "rgba(153,27,27,0.6)" }
+                      : undefined
+                  }
                 >
                   <Text style={{ fontSize: 18 }}>{nsfwFilter === true ? "😈" : "😇"}</Text>
-                </Pressable>
-              </Motion.View>
+                </Motion.View>
+              </Motion.Pressable>
             </View>
           </View>
         </View>
@@ -1051,6 +1097,8 @@ function EventsScreenContent() {
             </PagerViewWrapper>
           </>
         }
+        </View>
+        {/* /centred content column */}
       </Main>
 
       {/* Event Filter Sheet */}

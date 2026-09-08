@@ -2,10 +2,11 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "expo-router";
 import { View, Text, Pressable, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Settings } from "lucide-react-native";
+import { Settings, X } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { TabHeaderLogo, TabHeaderRight } from "@dvnt/app/components/tab-header";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useCreateHeaderStore } from "@dvnt/app/lib/stores/create-header-store";
 import { useCallKeepCoordinator } from "@dvnt/app/features/services/callkeep";
 import { NotificationListener } from "@dvnt/app/features/services/callkeep/NotificationListener";
 import { usePresenceManager } from "@dvnt/app/lib/hooks/use-presence";
@@ -77,6 +78,16 @@ const fullScreenModalConfig = {
   animationDuration: 250,
 };
 
+/**
+ * Fixed content height for the tab header row.
+ *
+ * The bar used to be sized by its tallest child, and the children differ per
+ * tab — Profile's 44pt settings button, Create's Post pill, the icon pair
+ * elsewhere — so the header changed height as you moved between tabs and the
+ * screen under it jumped. Pinning the row makes the chrome stationary.
+ */
+const TAB_HEADER_ROW_HEIGHT = 44;
+
 function TabsHeader() {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
@@ -85,11 +96,83 @@ function TabsHeader() {
     pathname === "/profile" || pathname === "/(protected)/(tabs)/profile";
   const isCreate =
     pathname === "/create" || pathname === "/(protected)/(tabs)/create";
-  const user = useAuthStore.getState().user;
+  const username = useAuthStore((st) => st.user?.username);
   const router = useRouter();
 
-  // Create screen renders its own header
-  if (isCreate) return null;
+  // Create's actions are screen state, so the screen publishes them here and
+  // this slot draws them. It used to draw its own bar inside the screen, which
+  // put the Create header BELOW the tab bar while every sibling's sat above it.
+  const createCanPost = useCreateHeaderStore((s) => s.canPost);
+  const createPostLabel = useCreateHeaderStore((s) => s.postLabel);
+  const createOnClose = useCreateHeaderStore((s) => s.onClose);
+  const createOnPost = useCreateHeaderStore((s) => s.onPost);
+
+  if (isCreate) {
+    return (
+      <View
+        style={{
+          backgroundColor: "#000",
+          paddingTop: insets.top,
+          paddingHorizontal: 16,
+          paddingBottom: 8,
+          height: insets.top + TAB_HEADER_ROW_HEIGHT + 8,
+          flexDirection: "row",
+          alignItems: "center",
+        }}
+      >
+        {/* Equal-weight side slots so the mark is centred on the HEADER, not on
+            whatever the controls happen to measure — the Post pill is far wider
+            than the close glyph. */}
+        <View style={{ flex: 1, alignItems: "flex-start" }}>
+          <Pressable
+            onPress={() => createOnClose?.()}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            style={{
+              width: 44,
+              height: 44,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <X size={24} color="#fff" />
+          </Pressable>
+        </View>
+
+        <TabHeaderLogo />
+
+        <View style={{ flex: 1, alignItems: "flex-end" }}>
+          <Pressable
+            onPress={() => createOnPost?.()}
+            disabled={!createCanPost}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={createPostLabel}
+            accessibilityState={{ disabled: !createCanPost }}
+            style={{
+              paddingHorizontal: 18,
+              paddingVertical: 8,
+              borderRadius: 20,
+              backgroundColor: createCanPost
+                ? "#3EA4E5"
+                : "rgba(255,255,255,0.08)",
+            }}
+          >
+            <Text
+              style={{
+                color: createCanPost ? "#fff" : "rgba(255,255,255,0.3)",
+                fontSize: 15,
+                fontWeight: "700",
+              }}
+            >
+              {createPostLabel}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View
@@ -98,20 +181,40 @@ function TabsHeader() {
         paddingTop: insets.top,
         paddingHorizontal: 16,
         paddingBottom: 8,
+        height: insets.top + TAB_HEADER_ROW_HEIGHT + 8,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",
       }}
     >
+      {/* Logo keeps the left slot on every tab, profile included. Equal-weight
+          side slots so the title lands in the true middle — with
+          `space-between` alone it sat left of centre, because the logo is far
+          wider than the settings glyph opposite it. */}
+      <View style={{ flex: 1, alignItems: "flex-start" }}>
+        <TabHeaderLogo />
+      </View>
+      {/* Your own profile names itself in the title slot, the same way another
+          member's profile does — otherwise the two screens show the same thing
+          and only one of them says whose it is. Other tabs have no title: the
+          selected tab already says where you are. */}
       {isProfile ? (
         <Text
-          style={{ color: colors.foreground, fontWeight: "700", fontSize: 14 }}
+          numberOfLines={1}
+          accessibilityRole="header"
+          style={{
+            color: colors.foreground,
+            fontSize: 17,
+            fontWeight: "600",
+            flexShrink: 1,
+            maxWidth: "55%",
+            textAlign: "center",
+          }}
         >
-          @{user?.username || ""}
+          {username ?? ""}
         </Text>
-      ) : (
-        <TabHeaderLogo />
-      )}
+      ) : null}
+      <View style={{ flex: 1, alignItems: "flex-end" }}>
       {isProfile ? (
         <Pressable
           onPress={() => router.push("/settings" as any)}
@@ -131,6 +234,7 @@ function TabsHeader() {
       ) : (
         <TabHeaderRight />
       )}
+      </View>
     </View>
   );
 }

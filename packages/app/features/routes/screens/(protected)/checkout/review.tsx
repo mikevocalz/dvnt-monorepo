@@ -5,7 +5,6 @@ import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   CreditCard,
   Minus,
   Plus,
@@ -23,6 +22,7 @@ import { useMixedCartCheckout } from "@dvnt/app/lib/hooks/use-mixed-cart-checkou
 import { computeFees, formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 import {
   effectiveAddonUnitPriceCents,
   filterEligibleAddons,
@@ -426,14 +426,7 @@ export default function CartReviewScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          style={styles.headerButton}
-        >
-          <ArrowLeft size={22} color="#F8FAFC" />
-        </Pressable>
+        <DetailBackButton />
         <View style={styles.headerTitleWrap}>
           <Text style={styles.headerTitle}>Review Cart</Text>
           <Text style={styles.headerSubtitle}>{holdLabel}</Text>
@@ -610,6 +603,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(255,255,255,0.1)",
+    // Full-bleed: this style carries the border, so a maxWidth here stops the
+    // BAR short of the screen edge rather than only its contents.
   },
   headerButton: {
     width: 44,

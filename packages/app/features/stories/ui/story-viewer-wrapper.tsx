@@ -12,7 +12,7 @@
  * Media renders true fullscreen (behind status bar, no letterboxing).
  */
 
-import { Dimensions, StyleSheet } from "react-native";
+import { StyleSheet, useWindowDimensions, type ImageStyle } from "react-native";
 import InstaStory from "react-native-insta-story";
 import type { IUserStory } from "react-native-insta-story";
 import { useCallback, useMemo } from "react";
@@ -27,9 +27,6 @@ import {
 } from "./story-overlays";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } =
-  Dimensions.get("window");
-
 interface StoryViewerWrapperProps {
   /** If provided, open viewer directly to this story ID on mount */
   initialStoryId?: string;
@@ -42,12 +39,20 @@ export function StoryViewerWrapper({
   const { data: stories = [] } = useStories();
   const user = useAuthStore((s) => s.user);
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
 
   // Transform app stories → InstaStory data format
   const instaData = useMemo(() => {
     if (!stories.length) return [];
     return toInstaStoryData(stories);
   }, [stories]);
+  // Sized from the live window: the old module-scope `Dimensions.get` froze at
+  // bundle load, so on a tablet the media kept the pre-rotation size and left
+  // the container's black showing around it.
+  const fullscreenImageStyle = useMemo<ImageStyle>(
+    () => ({ width, height, resizeMode: "cover" }),
+    [width, height],
+  );
   const progressContainerStyle = useMemo(
     () => ({
       ...progressStyles.container,
@@ -101,7 +106,7 @@ export function StoryViewerWrapper({
       // ── Fullscreen media override (CRITICAL) ───────────────
       // Force true fullscreen: width 100%, height 100%, cover, no letterbox
       storyContainerStyle={fullscreenStyles.container}
-      storyImageStyle={fullscreenStyles.image}
+      storyImageStyle={fullscreenImageStyle}
       // ── Custom progress bar styling ────────────────────────
       animationBarContainerStyle={progressContainerStyle}
       loadedAnimationBarStyle={progressStyles.loaded}
@@ -134,11 +139,6 @@ const fullscreenStyles = StyleSheet.create({
     // No padding, no margin — true edge-to-edge
     padding: 0,
     margin: 0,
-  },
-  image: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
-    resizeMode: "cover",
   },
 });
 

@@ -14,7 +14,6 @@ import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
-  ArrowLeft,
   MapPin,
   Calendar,
   DollarSign,
@@ -34,6 +33,8 @@ import { DB } from "@dvnt/app/lib/supabase/db-map";
 import { useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 function EditEventScreenContent() {
   const router = useRouter();
@@ -237,10 +238,10 @@ function EditEventScreenContent() {
           borderBottomColor: colors.border,
         }}
       >
-        <View className="flex-row items-center justify-between px-4 py-3">
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ArrowLeft size={24} color={colors.foreground} />
-          </Pressable>
+        <View className="w-full py-3">
+          {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+          <View className="flex-row items-center justify-between px-4" style={DETAIL_HEADER_ROW}>
+          <DetailBackButton />
           <Text
             className="text-lg font-semibold"
             style={{ color: colors.foreground }}
@@ -266,6 +267,7 @@ function EditEventScreenContent() {
             )}
           </Pressable>
         </View>
+        </View>
       </View>
 
       <KeyboardAwareScrollView
@@ -283,7 +285,7 @@ function EditEventScreenContent() {
           >
             Cover Image
           </Text>
-          <Pressable onPress={pickCoverImage} disabled={isUploadingCover}>
+          <Motion.Pressable onPress={pickCoverImage} disabled={isUploadingCover}>
             <Motion.View
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", damping: 15, stiffness: 400 }}
@@ -319,7 +321,7 @@ function EditEventScreenContent() {
                 </View>
               )}
             </Motion.View>
-          </Pressable>
+          </Motion.Pressable>
         </View>
 
         {/* Title */}

@@ -1,4 +1,4 @@
-import { View, Text, Pressable } from "react-native";
+import { View, Text } from "react-native";
 import { Main } from "@dvnt/app/components/ui/html";
 import { Feed } from "@dvnt/app/components/feed/feed";
 import { MasonryFeed } from "@dvnt/app/components/feed/masonry-feed";
@@ -28,41 +28,48 @@ export const FeedModeToggle = memo(function FeedModeToggle() {
   const setNsfwEnabled = useAppStore((s) => s.setNsfwEnabled);
 
   const toggleSpicy = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // void: async, and it rejects where the native module is absent.
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setNsfwEnabled(!nsfwEnabled, "feed_toggle");
   }, [nsfwEnabled, setNsfwEnabled]);
 
   return (
-    <Motion.View
-      whileTap={{ scale: 0.9 }}
-      style={[
-        {
-          width: 40,
-          height: 40,
-          borderRadius: 12,
-          alignItems: "center",
-          justifyContent: "center",
-          borderWidth: 1,
-          backgroundColor: nsfwEnabled
-            ? "rgba(153,27,27,0.3)"
-            : "rgba(255,255,255,0.06)",
-          borderColor: nsfwEnabled
-            ? "rgba(153,27,27,0.6)"
-            : "rgba(255,255,255,0.12)",
-        },
-      ]}
-      transition={{ type: "spring", damping: 20, stiffness: 300 }}
+    // Motion.Pressable, not a bare Pressable: `whileTap` reads a context ONLY
+    // MotionPressable provides, so nested in a plain Pressable the press
+    // animation never ran and the button acknowledged a tap with nothing.
+    <Motion.Pressable
+      onPress={toggleSpicy}
+      hitSlop={12}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: nsfwEnabled }}
+      accessibilityLabel={nsfwEnabled ? "Switch to sweet feed" : "Switch to spicy feed"}
+      testID="feed-spicy-toggle"
     >
-      <Pressable
-        onPress={toggleSpicy}
-        style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}
-        accessibilityLabel={nsfwEnabled ? "Switch to sweet feed" : "Switch to spicy feed"}
+      <Motion.View
+        whileTap={{ scale: 0.9 }}
+        style={[
+          {
+            width: 40,
+            height: 40,
+            borderRadius: 12,
+            alignItems: "center",
+            justifyContent: "center",
+            borderWidth: 1,
+            backgroundColor: nsfwEnabled
+              ? "rgba(153,27,27,0.3)"
+              : "rgba(255,255,255,0.06)",
+            borderColor: nsfwEnabled
+              ? "rgba(153,27,27,0.6)"
+              : "rgba(255,255,255,0.12)",
+          },
+        ]}
+        transition={{ type: "spring", damping: 20, stiffness: 300 }}
       >
         <Text style={{ fontSize: 18 }}>
           {nsfwEnabled ? "😈" : "😇"}
         </Text>
-      </Pressable>
-    </Motion.View>
+      </Motion.View>
+    </Motion.Pressable>
   );
 });
 

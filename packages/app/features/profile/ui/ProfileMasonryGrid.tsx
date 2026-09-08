@@ -16,6 +16,7 @@ import {
   Pressable,
   StyleSheet,
   useWindowDimensions,
+  type LayoutChangeEvent,
   ScrollView,
 } from "react-native";
 import { Image } from "expo-image";
@@ -34,6 +35,11 @@ import { LegendList } from "@dvnt/app/components/list";
 import { TextPostSurface } from "@dvnt/app/features/post";
 import { postsApi } from "@dvnt/app/lib/api/posts";
 import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
+import { CONTENT_MAX_WIDTH } from "@dvnt/app/components/layout/screen-shell";
+import { useGridMeasureStore } from "@dvnt/app/lib/stores/grid-measure-store";
+
+/** Store key for this grid's measured container width. */
+const GRID_ID = "profile-masonry";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -329,9 +335,25 @@ export function ProfileMasonryGrid({
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  // Featured masonry dimensions
+  // Featured masonry dimensions, sized off the MEASURED container.
+  //
+  // Every guess at this width has been wrong. The window (1024) ignored the
+  // capped column; `min(window, CONTENT_MAX_WIDTH)` ignored the padding between
+  // that column and this grid, so cells still ran past the right edge and the
+  // small column was clipped mid-image. onLayout reports the box this grid
+  // actually got, which is the only number that cannot drift when a parent adds
+  // padding. The window stays as the first-paint fallback, before layout runs.
+  const measuredWidth = useGridMeasureStore((st) => st.widthById[GRID_ID] ?? 0);
+  const setWidth = useGridMeasureStore((st) => st.setWidth);
+  const onLayout = useCallback(
+    (e: LayoutChangeEvent) => setWidth(GRID_ID, e.nativeEvent.layout.width),
+    [setWidth],
+  );
+
   const pad = CELL_GAP;
-  const available = screenWidth - pad * 2 - CELL_GAP;
+  const containerWidth =
+    measuredWidth > 0 ? measuredWidth : Math.min(screenWidth, CONTENT_MAX_WIDTH);
+  const available = containerWidth - pad * 2 - CELL_GAP;
   const largeW = Math.floor(available * 0.58);
   const smallW = available - largeW;
   const smallH = Math.floor(smallW * 1.15);
@@ -507,6 +529,12 @@ export function ProfileMasonryGrid({
   const keyExtractor = useCallback((item: GridRow) => item.key, []);
 
   return (
+    // The grid measures itself here — see the dimensions block above.
+    // No flex here. All three callers nest this grid in a vertical ScrollView
+    // with scrollEnabled={false}, and flex:1 is flexBasis:0% — inside a
+    // content container there is no free space to grow into, so the box
+    // measured 0 tall and the virtualized list rendered nothing.
+    <View style={{ width: "100%" }} onLayout={onLayout}>
     <LegendList
       data={gridData}
       renderItem={renderItem}
@@ -517,6 +545,7 @@ export function ProfileMasonryGrid({
       ListHeaderComponent={ListHeaderComponent}
       ListEmptyComponent={ListEmptyComponent}
     />
+    </View>
   );
 }
 

@@ -6,6 +6,7 @@ import {
   Pressable,
   Dimensions,
   useWindowDimensions,
+  Image as RNImage,
   Modal,
   StatusBar,
   ActivityIndicator,
@@ -22,7 +23,6 @@ import React, {
 import * as Haptics from "expo-haptics";
 
 import {
-  ArrowLeft,
   Heart,
   MessageCircle,
   Send,
@@ -107,8 +107,11 @@ import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { useTranslation } from "react-i18next";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
 import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
-import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
 import { feedMediaMode } from "@dvnt/app/components/feed/feed-media-mode";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
+import { CONTENT_MAX_WIDTH } from "@dvnt/app/components/layout/screen-shell";
+import { useMediaFrameStore } from "@dvnt/app/lib/stores/media-frame-store";
 
 /**
  * Fallbacks only. Read at module scope, `Dimensions.get` freezes at the width
@@ -943,8 +946,42 @@ const MediaCarousel = memo(function MediaCarousel({
 
 function PostDetailScreenContent() {
   // Live window width; the media below is sized from it.
-  const { width: screenWidth } = useWindowDimensions();
-  const portraitHeight = Math.round(screenWidth * (5 / 4));
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const aspectByUrl = useMediaFrameStore((st) => st.aspectByUrl);
+  const setAspect = useMediaFrameStore((st) => st.setAspect);
+  // The media is BOUNDED, not the whole screen.
+  //
+  // At 4:5 on a tablet the photo filled the viewport, so opening a post showed
+  // a picture and nothing else — no likes, no comments, no reply box until you
+  // scrolled past it. Every social post detail worth copying (Bluesky, Beli,
+  // Alta, Substack) bounds the media and puts the engagement row and the start
+  // of the comments in the same screenful, because the comments ARE the reason
+  // you opened the detail view rather than staying in the feed.
+  //
+  // Width caps to the reading column so the media stops overflowing on a
+  // tablet; height caps to 62% of the viewport so what follows is always
+  // visible. The photo is `contain`ed, never cropped — a detail view exists to
+  // show the whole image, and `cover` here cut the bottom off a tall portrait.
+  // KNOWN GAP: a photo whose aspect differs from this frame letterboxes against
+  // the container, so the rounded corners hug the frame rather than the image.
+  // The real fix is sizing the frame to the photo's own aspect (read it on load
+  // and clamp to the height cap) rather than choosing between crop and bands.
+  const mediaWidth = Math.min(screenWidth, CONTENT_MAX_WIDTH);
+
+  // The frame takes the PHOTO's aspect, so the detail view neither crops nor
+  // letterboxes.
+  //
+  // With a fixed 4:5 frame there were only two options and both were wrong:
+  // `cover` cut the bottom off a tall portrait, `contain` left bg-muted bands
+  // down the sides so the rounded corners hugged the frame instead of the
+  // image. Reading the real dimensions removes the choice — the frame becomes
+  // the picture's shape, clamped so a very tall photo still leaves the
+  // engagement row and comments on screen.
+
+  // Both dimensions follow the photo. Clamping only the HEIGHT left the frame
+  // wider than the picture whenever a tall portrait hit the cap, which put the
+  // band back — just on one side instead of two. When the height clamps, the
+  // width has to come down with it or the frame stops being the photo's shape.
   // DEV-only loop detection
   useRenderLoopDetector("PostDetail");
 
@@ -1301,6 +1338,44 @@ function PostDetailScreenContent() {
     [mediaSignature],
   );
 
+  // Measure the photo so the frame can take its shape (see `portraitHeight`).
+  // Cached in the store by URL — the aspect belongs to the image, not to this
+  // mount, so reopening a post should not re-measure. (House rule: Zustand,
+  // never useState.)
+  const singleImageUrl =
+    !hasMultipleMedia && !isVideo ? stableMedia[0]?.url : undefined;
+  useEffect(() => {
+    if (!singleImageUrl?.startsWith("http")) return;
+    let cancelled = false;
+    RNImage.getSize(
+      singleImageUrl,
+      (w, h) => {
+        if (!cancelled && h > 0) setAspect(singleImageUrl, w / h);
+      },
+      // Failure is not exceptional — fall back to the 4:5 frame.
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [singleImageUrl, setAspect]);
+
+  // Read the cached aspect for whichever single image this post shows.
+  const naturalAspect =
+    !hasMultipleMedia && !isVideo && stableMedia[0]?.url
+      ? (aspectByUrl[stableMedia[0].url] ?? null)
+      : null;
+  const frameAspect = naturalAspect ?? 4 / 5;
+  const maxFrameHeight = Math.round(screenHeight * 0.62);
+  const portraitHeight = Math.min(
+    Math.round(mediaWidth / frameAspect),
+    maxFrameHeight,
+  );
+  const frameWidth = Math.min(
+    mediaWidth,
+    Math.round(portraitHeight * frameAspect),
+  );
+
   // Collect valid image URLs for Galeria full-screen viewer
   const imageUrls = useMemo(() => {
     if (!hasMedia || isVideo) return [];
@@ -1346,15 +1421,12 @@ function PostDetailScreenContent() {
     // Post became null after initial load (likely deleted)
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
-        <View className="flex-row items-center border-b border-border bg-background px-4 py-3">
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={16}
-            style={{ padding: 8, margin: -8, marginRight: 8 }}
-          >
-            <ArrowLeft size={24} color={colors.foreground} />
-          </Pressable>
+        <View className="w-full border-b border-border bg-background py-3">
+          {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+          <View className="flex-row items-center px-4" style={DETAIL_HEADER_ROW}>
+          <DetailBackButton />
           <Text className="text-lg font-semibold text-foreground">Post</Text>
+        </View>
         </View>
         <View className="flex-1 items-center justify-center p-4">
           <Text className="text-muted-foreground text-center">
@@ -1385,13 +1457,7 @@ function PostDetailScreenContent() {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-row items-center border-b border-border bg-background px-4 py-3">
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={16}
-            style={{ padding: 8, margin: -8, marginRight: 8 }}
-          >
-            <ArrowLeft size={24} color={colors.foreground} />
-          </Pressable>
+          <DetailBackButton />
           <Text className="text-lg font-semibold text-foreground">Post</Text>
         </View>
         <View className="flex-1 items-center justify-center p-4">
@@ -1419,13 +1485,7 @@ function PostDetailScreenContent() {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-row items-center border-b border-border bg-background px-4 py-3">
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={16}
-            style={{ padding: 8, margin: -8, marginRight: 8 }}
-          >
-            <ArrowLeft size={24} color={colors.foreground} />
-          </Pressable>
+          <DetailBackButton />
           <Text className="text-lg font-semibold text-foreground">Post</Text>
         </View>
         <View className="flex-1 items-center justify-center p-4">
@@ -1449,13 +1509,7 @@ function PostDetailScreenContent() {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-row items-center border-b border-border bg-background px-4 py-3">
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={16}
-            style={{ padding: 8, margin: -8, marginRight: 8 }}
-          >
-            <ArrowLeft size={24} color={colors.foreground} />
-          </Pressable>
+          <DetailBackButton />
           <Text className="text-lg font-semibold text-foreground">Post</Text>
         </View>
         <PostDetailSkeleton />
@@ -1472,13 +1526,7 @@ function PostDetailScreenContent() {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-row items-center border-b border-border bg-background px-4 py-3">
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={16}
-            style={{ padding: 8, margin: -8, marginRight: 8 }}
-          >
-            <ArrowLeft size={24} color={colors.foreground} />
-          </Pressable>
+          <DetailBackButton />
           <Text className="text-lg font-semibold text-foreground">Post</Text>
         </View>
         <View className="flex-1 items-center justify-center p-4">
@@ -1505,13 +1553,7 @@ function PostDetailScreenContent() {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-row items-center border-b border-border bg-background px-4 py-3">
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={16}
-            style={{ padding: 8, margin: -8, marginRight: 8 }}
-          >
-            <ArrowLeft size={24} color={colors.foreground} />
-          </Pressable>
+          <DetailBackButton />
           <Text className="text-lg font-semibold text-foreground">Post</Text>
         </View>
         <View className="flex-1 items-center justify-center p-4">
@@ -1534,7 +1576,7 @@ function PostDetailScreenContent() {
   return (
     <SafeAreaView
       edges={["top"]}
-      className={SCREEN_SHELL}
+      className="flex-1 bg-background w-full"
     >
       <View
         style={{
@@ -1543,18 +1585,12 @@ function PostDetailScreenContent() {
           justifyContent: "space-between",
           paddingHorizontal: 12,
           paddingVertical: 10,
+          // Full width, contents included: back in the screen's top-left
+          // corner, actions top-right. The post body below stays capped.
+          width: "100%",
         }}
       >
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <DVNTLiquidGlassIconButton size={40}>
-            <ArrowLeft size={20} color="#fff" />
-          </DVNTLiquidGlassIconButton>
-        </Pressable>
+        <DetailBackButton />
         <Text className="text-lg font-semibold text-foreground">Post</Text>
         <Pressable
           onPress={() => setShowActionSheet(true)}
@@ -1568,7 +1604,18 @@ function PostDetailScreenContent() {
         </Pressable>
       </View>
 
-      <ScrollView keyboardShouldPersistTaps="handled">
+      {/* Page caps to the content column. The header above is OUTSIDE this and
+          stays full width. Safe to cap here only because every child below now
+          sizes off `mediaWidth` — a child measuring the window inside this box
+          is what made the image overflow it before. */}
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{
+          width: "100%",
+          maxWidth: CONTENT_MAX_WIDTH,
+          alignSelf: "center",
+        }}
+      >
         <View className="border-b border-border">
           {/* Header */}
           <View className="flex-row items-center justify-between p-4 bg-card">
@@ -1602,7 +1649,8 @@ function PostDetailScreenContent() {
           <View
             style={{
               display: hasMedia ? "flex" : "none",
-              width: screenWidth,
+              width: frameWidth,
+              alignSelf: "center",
               height: portraitHeight,
               borderRadius: isVideo ? 0 : 12,
               overflow: "hidden",
@@ -1618,7 +1666,7 @@ function PostDetailScreenContent() {
                 height: "100%",
               }}
             >
-              <SafeMediaWrapper width={screenWidth} height={portraitHeight}>
+              <SafeMediaWrapper width={frameWidth} height={portraitHeight}>
                 <PostVideoPlayer
                   postId={postId}
                   url={isVideo ? safePost.media?.[0]?.url : ""}
@@ -1637,13 +1685,13 @@ function PostDetailScreenContent() {
                   Wrapping the media (not the screen) is what makes the picture
                   fly into place instead of the card ballooning to full screen. */}
               <ZoomTarget>
-              <SafeMediaWrapper width={screenWidth} height={portraitHeight}>
+              <SafeMediaWrapper width={frameWidth} height={portraitHeight}>
                 {hasMultipleMedia ? (
                   <MediaCarousel
                     media={stableMedia as MediaItem[]}
                     imageUrls={imageUrls}
-                    width={screenWidth}
-                    height={PORTRAIT_HEIGHT}
+                    width={frameWidth}
+                    height={portraitHeight}
                     onSlideChange={setCurrentSlide}
                   />
                 ) : stableMedia[0]?.url &&
@@ -1656,8 +1704,8 @@ function PostDetailScreenContent() {
                     <Galeria.Image index={0}>
                       <DVNTMediaRenderer
                         item={stableMedia[0] as any}
-                        width={screenWidth}
-                        height={PORTRAIT_HEIGHT}
+                        width={frameWidth}
+                        height={portraitHeight}
                         // Detail view: contain so the TOP of the photo is
                         // never cropped out. cover was center-cropping
                         // tall portraits (heads cut off). The 4:5 frame
@@ -1716,7 +1764,7 @@ function PostDetailScreenContent() {
           {!isTextPost ? (
             <View
               style={{
-                width: screenWidth,
+                width: mediaWidth,
                 paddingHorizontal: 12,
                 paddingTop: 10,
                 paddingBottom: 6,
@@ -1749,7 +1797,7 @@ function PostDetailScreenContent() {
           {isTextPost && (
             <View
               style={{
-                width: screenWidth,
+                width: mediaWidth,
                 paddingHorizontal: 20,
                 paddingVertical: 18,
               }}
@@ -1761,7 +1809,7 @@ function PostDetailScreenContent() {
                     pagingEnabled
                     showsHorizontalScrollIndicator={false}
                     onScroll={(event) => {
-                      const slideW = screenWidth - 40;
+                      const slideW = mediaWidth - 40;
                       const idx = Math.round(
                         event.nativeEvent.contentOffset.x / slideW,
                       );
@@ -1776,7 +1824,7 @@ function PostDetailScreenContent() {
                       ) => (
                         <View
                           key={slide.id || index}
-                          style={{ width: screenWidth - 40 }}
+                          style={{ width: mediaWidth - 40 }}
                         >
                           <TextPostSurface
                             text={slide.content}

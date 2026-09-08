@@ -24,6 +24,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isVideoKind } from "@dvnt/app/lib/media/types";
 import { useRouter } from "solito/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Debouncer } from "@tanstack/pacer";
@@ -75,7 +76,7 @@ function coverFor(post: Post): string {
 function PostTile({ post, big = false }: { post: Post; big?: boolean }) {
   const router = useRouter();
   const media = post.media?.[0];
-  const isVideo = post.type === "video" || media?.type === "video";
+  const isVideo = isVideoKind(post.type) || isVideoKind(media?.type);
   const isCarousel = post.hasMultipleImages || (post.media?.length ?? 0) > 1;
   const isText = post.kind === "text" || (post.textSlides?.length ?? 0) > 0;
   const rawCover = coverFor(post);
@@ -192,8 +193,8 @@ function PostGrid({ posts, mosaic = false }: { posts: Post[]; mosaic?: boolean }
     >
       {posts.map((post, i) => {
         const eyecatcher =
-          post.type === "video" ||
-          post.media?.[0]?.type === "video" ||
+          isVideoKind(post.type) ||
+          isVideoKind(post.media?.[0]?.type) ||
           post.kind === "text";
         // A big cell roughly every 7 tiles, only for tiles that reward it.
         const big = mosaic && eyecatcher && i % 7 === 1;

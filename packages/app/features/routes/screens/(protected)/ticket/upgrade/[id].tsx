@@ -24,7 +24,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Motion } from "@legendapp/motion";
 import {
-  ArrowLeft,
   Check,
   Crown,
   Sparkles,
@@ -47,6 +46,7 @@ import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { addToWallet } from "@dvnt/app/features/ticket/helpers";
 import type { Ticket, TicketTierLevel } from "@dvnt/app/lib/stores/ticket-store";
 import type { TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 type TierLevel = "free" | "ga" | "vip" | "table";
 
@@ -515,9 +515,7 @@ function ViewTicketUpgradeScreenContent() {
     <View style={styles.screen}>
       {/* ─── Header ─── */}
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <Pressable onPress={() => router.back()} hitSlop={16} style={styles.backIcon}>
-          <ArrowLeft size={22} color="#fff" />
-        </Pressable>
+        <DetailBackButton />
         <Text style={styles.headerTitle}>Upgrade Ticket</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -775,6 +773,8 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.04)",
+    // Full-bleed: this style carries the border, so a maxWidth here stops the
+    // BAR short of the screen edge rather than only its contents.
   },
   backIcon: {
     width: 40,

@@ -9,7 +9,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import {
-  ArrowLeft,
   Radio,
   Video,
   Globe,
@@ -29,6 +28,8 @@ import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 type Invitee = {
   id: string;
@@ -224,15 +225,16 @@ function CreateLynkScreenContent() {
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       {/* Header */}
-      <View className="flex-row items-center justify-between px-4 py-3 border-b border-border">
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={24} color="#fff" />
-        </Pressable>
+      <View className="w-full py-3 border-b border-border">
+        {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+        <View className="flex-row items-center justify-between px-4" style={DETAIL_HEADER_ROW}>
+        <DetailBackButton />
         <View className="flex-row items-center gap-2">
           <Radio size={20} color="#FC253A" />
           <Text className="text-lg font-bold text-foreground">Create Lynk</Text>
         </View>
         <View className="w-6" />
+      </View>
       </View>
 
       <KeyboardAwareScrollView

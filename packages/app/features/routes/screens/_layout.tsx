@@ -97,6 +97,7 @@ import { OtaUpdateBanner } from "@dvnt/app/components/ota/OtaUpdateBanner";
 import { OtaRecoveryBoundary } from "@dvnt/app/components/system/OtaRecoveryBoundary";
 import { confirmUpdateSuccess } from "@dvnt/app/lib/ota/updateSafety";
 import { captureOtaDiagnostics, logDiagnostics } from "@dvnt/app/lib/ota/otaDiagnostics";
+import { emitLog } from "@dvnt/observability";
 
 // CRITICAL: Check for OTA update and clear stale cache BEFORE creating QueryClient
 // This prevents crashes from incompatible persisted cache after OTA updates
@@ -106,6 +107,9 @@ checkAndClearCacheOnOTAUpdate();
 enforceListPolicy();
 
 SplashScreen.preventAutoHideAsync();
+
+/** Longest the boot gate will wait on `useFonts` before starting without it. */
+const FONT_LOAD_DEADLINE_MS = 4000;
 
 // Supabase URL for health checks
 const _rawLayoutUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -460,7 +464,20 @@ function RootLayout() {
   useEffect(() => {
     if (fontsLoaded || fontError) {
       setAppReady(true);
+      return;
     }
+    // useFonts can settle neither way — 11 files, and one asset request that
+    // never returns leaves the promise pending forever. That kept the native
+    // splash on top of a fully-booted app: black screen, login video audible
+    // underneath, nothing tappable. Boot with fallback fonts instead of never.
+    const timer = setTimeout(() => {
+      emitLog("warn", "Fonts did not settle before boot deadline", {
+        feature: "boot",
+        timeoutMs: FONT_LOAD_DEADLINE_MS,
+      });
+      setAppReady(true);
+    }, FONT_LOAD_DEADLINE_MS);
+    return () => clearTimeout(timer);
   }, [fontsLoaded, fontError, setAppReady]);
 
   // Hide native splash as soon as app is ready so the Rive animated splash is visible.
