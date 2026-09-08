@@ -40,6 +40,7 @@ import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import type { Post } from "@dvnt/app/lib/types";
 import { useEditPostStore } from "./edit-post-store";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
+import { ownsContent } from "@dvnt/app/lib/profile/same-user";
 
 const MAX_CAPTION = 2200;
 
@@ -115,12 +116,17 @@ export function EditPostScreen() {
   useDirtyGuard(isDirty);
 
   // ── Author-only guard (mirrors native isOwner + event-edit ownership) ──
+  // By id, not username: a handle comparison failed for anyone who had renamed
+  // themselves, locking them out of editing their own post.
+  //
+  // The `return true` on missing data is kept deliberately — this guard runs
+  // while the post is still loading, and defaulting to "not the owner" would
+  // flash an access-denied state at the author on every open. The server
+  // enforces the real rule on update.
   const isOwner = useMemo(() => {
-    if (!post?.author?.username || !currentUser?.username) return true;
-    return (
-      post.author.username.toLowerCase() === currentUser.username.toLowerCase()
-    );
-  }, [post?.author?.username, currentUser?.username]);
+    if (!post?.author || !currentUser) return true;
+    return ownsContent(currentUser, post);
+  }, [post, currentUser]);
 
   // ── Optimistic mutation — EXACT native path: postsApi.updatePost ──
   const updateMutation = useMutation({

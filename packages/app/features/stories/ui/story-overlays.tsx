@@ -33,6 +33,7 @@ import { usersApi } from "@dvnt/app/lib/api/users";
 import { useQueryClient } from "@tanstack/react-query";
 import { getOrCreateConversationCached } from "@dvnt/app/lib/hooks/use-conversation-resolution";
 import type { StoryItemCustomData } from "./story-adapter";
+import { isSameUser } from "@dvnt/app/lib/profile/same-user";
 import type {
   IUserStoryItem,
   RenderCustomButton,
@@ -133,9 +134,20 @@ export const StoryHeaderText: RenderCustomText = ({ profileName, item }) => {
 
   const handleProfilePress = useCallback(() => {
     if (!customData?.username) return;
-    if (
-      customData.username.toLowerCase() === currentUser?.username?.toLowerCase()
-    ) {
+    // Prefer the id; the story payload carries it as `appUserId`. Matching on
+    // handle alone sent a member who had renamed themselves to
+    // `/profile/<their old handle>` — a route for a username that no longer
+    // exists — instead of their own profile tab.
+    //
+    // The username fallback stays ONLY because `appUserId` is resolved lazily
+    // here (see below) and this is routing, not authorization: a wrong route is
+    // recoverable, and requiring an id would break the self-case whenever it
+    // has not resolved yet.
+    const isSelf = customData.appUserId
+      ? isSameUser(currentUser, { userId: customData.appUserId })
+      : customData.username.toLowerCase() ===
+        currentUser?.username?.toLowerCase();
+    if (isSelf) {
       router.push("/(protected)/(tabs)/profile");
     } else {
       router.push(`/(protected)/profile/${customData.username}` as any);

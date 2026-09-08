@@ -112,6 +112,7 @@ import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 import { CONTENT_MAX_WIDTH } from "@dvnt/app/components/layout/screen-shell";
 import { useMediaFrameStore } from "@dvnt/app/lib/stores/media-frame-store";
+import { ownsContent } from "@dvnt/app/lib/profile/same-user";
 
 /**
  * Fallbacks only. Read at module scope, `Dimensions.get` freezes at the width
@@ -1055,7 +1056,9 @@ function PostDetailScreenContent() {
     post?.author?.id,
   );
 
-  const isOwner = currentUser?.username === post?.author?.username;
+  // By id, not username — a rename used to strip the author of their own
+  // post's Edit and Delete actions.
+  const isOwner = ownsContent(currentUser, post);
 
   // Debug ownership check
   if (__DEV__) {

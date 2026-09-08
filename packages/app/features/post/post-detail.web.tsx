@@ -51,6 +51,7 @@ import { postsApi } from "@dvnt/app/lib/api/posts";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import { TextPostSurface } from "./ui/TextPostSurface";
 import { CAROUSEL_DOT_COLORS } from "@dvnt/app/components/feed/feed-media-mode";
+import { ownsContent } from "@dvnt/app/lib/profile/same-user";
 
 const VIDEO_URL_RE = /post-video|\.mp4(\?|$)|\.mov(\?|$)|\.m3u8(\?|$)|\.webm(\?|$)/i;
 
@@ -133,10 +134,10 @@ export function PostDetailScreen() {
   // Clear transient menu/dialog/sheet flags when leaving the screen.
   useEffect(() => () => resetPostDetailUI(), [id, resetPostDetailUI]);
 
-  const isOwner =
-    !!currentUser?.username &&
-    !!post?.author?.username &&
-    currentUser.username.toLowerCase() === post.author.username.toLowerCase();
+  // By id, not username. This compared handles, so the moment a member renamed
+  // themselves the cached post still carried the old one, the comparison
+  // failed, and Delete vanished from their own post.
+  const isOwner = ownsContent(currentUser, post);
 
   const handleDelete = () => {
     if (!id || isDeleting) return;
