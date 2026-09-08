@@ -24,6 +24,7 @@ import { LinearGradient as EXLinearGradient } from "expo-linear-gradient";
 import {
   A as EA,
   Article as EArticle,
+  Aside as EAside,
   Footer as EFooter,
   H1 as EH1,
   H2 as EH2,
@@ -48,6 +49,16 @@ Section.displayName = "CSS(Section)";
 export const Article = (props: React.ComponentProps<typeof EArticle> & CN) =>
   useCssElement(EArticle, props, { className: "style" });
 Article.displayName = "CSS(Article)";
+
+/**
+ * The `complementary` landmark. Its first use is the web feed's right rail, so
+ * an advertising unit sits inside a labelled region a screen-reader user can
+ * skip by landmark instead of scrolling past — the Google-generated
+ * `<ins class="adsbygoogle">` being the only non-semantic element in the tree.
+ */
+export const Aside = (props: React.ComponentProps<typeof EAside> & CN) =>
+  useCssElement(EAside, props, { className: "style" });
+Aside.displayName = "CSS(Aside)";
 
 export const Nav = (props: React.ComponentProps<typeof ENav> & CN) =>
   useCssElement(ENav, props, { className: "style" });

@@ -144,16 +144,20 @@ export function EventsListScreen() {
       ...e,
       isPromoted: promoted.has(parseInt(e.id)) || e.isPromoted || false,
     }));
-    // Stable sort: promoted first, original order preserved otherwise.
-    return flagged
-      .map((e, i) => ({ e, i }))
-      .sort((a, b) => {
-        const pa = a.e.isPromoted ? 1 : 0;
-        const pb = b.e.isPromoted ? 1 : 0;
-        if (pa !== pb) return pb - pa;
-        return a.i - b.i;
-      })
-      .map(({ e }) => e);
+    // Order is left alone on purpose.
+    //
+    // This used to stable-sort promoted first. That is permanent pinning: a
+    // campaign that is promoted wins the top of this list on every screen for
+    // its whole run, and a second campaign in the same city never displaces
+    // it. Paying more, or simply paying first, bought a position rather than a
+    // share of delivery.
+    //
+    // Promotion reaches a viewer through the feed's boost slots, where
+    // lib/ads/boost-selection.ts rotates campaigns by delivery deficit with
+    // frequency and organizer-diversity caps. A browse list a member is
+    // actively filtering and searching is not a placement surface — the
+    // `isPromoted` flag survives so the card still carries its label.
+    return flagged;
   }, [events, promotedIds]);
 
   const all = withPromotion;
