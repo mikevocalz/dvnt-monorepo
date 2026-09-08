@@ -24,6 +24,12 @@ interface SneakyPurchaseState {
   activatingPlanKey: PlanKey | null;
   restoring: boolean;
   error: string | null;
+  /** Neutral outcome copy — a restore that found nothing is an answer, not
+   *  an error, and must not wear the red banner. */
+  notice: string | null;
+  /** A restore came back with an entitlement; we are waiting for the RC
+   *  webhook to write the row useEntitlements reads. */
+  restoreSettling: boolean;
 
   startPurchase: (planKey: PlanKey) => void;
   purchaseSucceeded: (planKey: PlanKey) => void;
@@ -32,6 +38,8 @@ interface SneakyPurchaseState {
   /** Entitlements now show the purchased plan — activation complete. */
   activationConfirmed: () => void;
   setRestoring: (restoring: boolean) => void;
+  setNotice: (notice: string | null) => void;
+  setRestoreSettling: (settling: boolean) => void;
   clearError: () => void;
 }
 
@@ -40,8 +48,11 @@ export const useSneakyPurchaseStore = create<SneakyPurchaseState>()((set) => ({
   activatingPlanKey: null,
   restoring: false,
   error: null,
+  notice: null,
+  restoreSettling: false,
 
-  startPurchase: (planKey) => set({ purchasingPlanKey: planKey, error: null }),
+  startPurchase: (planKey) =>
+    set({ purchasingPlanKey: planKey, error: null, notice: null }),
   purchaseSucceeded: (planKey) =>
     set({ purchasingPlanKey: null, activatingPlanKey: planKey, error: null }),
   purchaseCancelled: () => set({ purchasingPlanKey: null }),
@@ -49,5 +60,7 @@ export const useSneakyPurchaseStore = create<SneakyPurchaseState>()((set) => ({
     set({ purchasingPlanKey: null, error: message }),
   activationConfirmed: () => set({ activatingPlanKey: null }),
   setRestoring: (restoring) => set({ restoring }),
-  clearError: () => set({ error: null }),
+  setNotice: (notice) => set({ notice }),
+  setRestoreSettling: (restoreSettling) => set({ restoreSettling }),
+  clearError: () => set({ error: null, notice: null }),
 }));

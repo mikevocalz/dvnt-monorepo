@@ -122,12 +122,22 @@ const STRIPE_PLANS: Plan[] = [
   },
 ];
 
+/** How long a restore waits for the RC webhook to land the row before it
+ *  stops claiming to be working. Long enough for the usual case, short
+ *  enough that it is not an infinite spinner. */
+const RESTORE_SETTLE_MS = 20000;
+
 interface SneakySubscriptionModalProps {
   visible: boolean;
   onClose: () => void;
   currentPlan?: string;
   reason?: "participant_limit" | "duration_limit" | "upgrade";
   dismissible?: boolean;
+  /** The way out when `dismissible` is false. A forced paywall still owes the
+   *  user an exit — without one the room's time-limit sheet had no X, no
+   *  backdrop tap and no action but "buy", which is a trap, not a choice. */
+  onExit?: () => void;
+  exitLabel?: string;
   onSubscribed?: (planId: string) => void;
   /** Native RC seam, injected by the apps/mobile route file. Absent →
    *  read-only tier cards (web / expo-go / dev builds without the pod). */
@@ -172,6 +182,8 @@ function NativeSneakySubscriptionModal({
   onClose,
   reason = "upgrade",
   dismissible = true,
+  onExit,
+  exitLabel = "Leave room",
   onSubscribed,
   billing = null,
 }: SneakySubscriptionModalProps) {
@@ -186,6 +198,8 @@ function NativeSneakySubscriptionModal({
 
   const purchasingPlanKey = useSneakyPurchaseStore((s) => s.purchasingPlanKey);
   const activatingPlanKey = useSneakyPurchaseStore((s) => s.activatingPlanKey);
+  const purchaseNotice = useSneakyPurchaseStore((s) => s.notice);
+  const restoreSettling = useSneakyPurchaseStore((st) => st.restoreSettling);
   const restoring = useSneakyPurchaseStore((s) => s.restoring);
   const purchaseError = useSneakyPurchaseStore((s) => s.error);
 
@@ -272,6 +286,30 @@ function NativeSneakySubscriptionModal({
     return () => clearInterval(timer);
   }, [activatingPlanKey, currentKey, queryClient]);
 
+  // Bounded: a restore that never resolves to a plan must not poll forever.
+  useEffect(() => {
+    if (!restoreSettling) return;
+    if (currentSneakyKey) {
+      const st = useSneakyPurchaseStore.getState();
+      st.setRestoreSettling(false);
+      st.setNotice("Purchases restored — your plan is active.");
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (Date.now() - startedAt > RESTORE_SETTLE_MS) {
+        const st = useSneakyPurchaseStore.getState();
+        st.setRestoreSettling(false);
+        st.setNotice(
+          `No active subscription found on ${OWN_STORE_NAME}. If you subscribed with a different account, sign in with that one and try again.`,
+        );
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: ENTITLEMENTS_QUERY_KEY });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [restoreSettling, currentSneakyKey, queryClient]);
+
   const onBuy = useCallback(
     async (planKey: PlanKey) => {
       const pkg = packageByPlan[planKey];
@@ -306,12 +344,25 @@ function NativeSneakySubscriptionModal({
     if (!billing) return;
     const store = useSneakyPurchaseStore.getState();
     if (store.restoring || store.purchasingPlanKey) return;
+    store.setNotice(null);
     store.setRestoring(true);
     const res = await billing.restoreMembershipPurchases();
     store.setRestoring(false);
-    if (!res.ok && res.error) store.purchaseFailed(res.error);
-    // Any restored entitlement lands via the RC webhook → DB — refetch it.
+
+    if (!res.ok) {
+      store.purchaseFailed(res.error ?? "Restore failed. Please try again.");
+      return;
+    }
+
     void queryClient.invalidateQueries({ queryKey: ENTITLEMENTS_QUERY_KEY });
+
+    // The store call only says the receipts were re-sent. Whether a
+    // subscription came back is answered by the DB after the RC webhook
+    // lands (I3), so one immediate refetch races ahead of it. Settle for a
+    // few seconds, then say which of the two things happened — both used to
+    // be silent, which is what made the button look broken.
+    store.setNotice("Checking your purchases…");
+    store.setRestoreSettling(true);
   }, [billing, queryClient]);
 
   if (!visible) return null;
@@ -390,6 +441,29 @@ function NativeSneakySubscriptionModal({
                 a few seconds.
               </Text>
             </View>
+          ) : null}
+
+          {/* Restore outcome — neutral by design. "Nothing to restore" is an
+              answer, not a failure, and red would misreport it. */}
+          {purchaseNotice ? (
+            <Pressable
+              onPress={() => useSneakyPurchaseStore.getState().clearError()}
+              className="rounded-2xl p-4 mb-2 flex-row items-center gap-3"
+              style={{
+                backgroundColor: "rgba(63,220,255,0.10)",
+                borderWidth: 1,
+                borderColor: "rgba(63,220,255,0.30)",
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={purchaseNotice}
+            >
+              {restoreSettling ? (
+                <ActivityIndicator size="small" color="#3FDCFF" />
+              ) : null}
+              <Text className="text-sm text-foreground flex-1">
+                {purchaseNotice}
+              </Text>
+            </Pressable>
           ) : null}
 
           {/* Purchase error */}
@@ -628,6 +702,19 @@ function NativeSneakySubscriptionModal({
                   Restore Purchases
                 </Text>
               )}
+            </Pressable>
+          ) : null}
+
+          {!dismissible && onExit ? (
+            <Pressable
+              onPress={onExit}
+              className="items-center justify-center py-3"
+              accessibilityRole="button"
+              accessibilityLabel={exitLabel}
+            >
+              <Text className="text-sm font-sans-bold text-muted-foreground">
+                {exitLabel}
+              </Text>
             </Pressable>
           ) : null}
 

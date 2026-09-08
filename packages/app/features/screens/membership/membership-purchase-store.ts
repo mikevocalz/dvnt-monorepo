@@ -20,6 +20,11 @@ interface MembershipPurchaseState {
   activatingPlanKey: PlanKey | null;
   restoring: boolean;
   error: string | null;
+  /** Neutral outcome copy — see the sneaky store. A restore that found
+   *  nothing is an answer, not a failure. */
+  notice: string | null;
+  /** Waiting for the RC webhook to land the row useEntitlements reads. */
+  restoreSettling: boolean;
 
   startPurchase: (planKey: PlanKey) => void;
   purchaseSucceeded: (planKey: PlanKey) => void;
@@ -28,6 +33,8 @@ interface MembershipPurchaseState {
   /** Entitlements now show the purchased plan — activation complete. */
   activationConfirmed: () => void;
   setRestoring: (restoring: boolean) => void;
+  setNotice: (notice: string | null) => void;
+  setRestoreSettling: (settling: boolean) => void;
   clearError: () => void;
 }
 
@@ -37,9 +44,11 @@ export const useMembershipPurchaseStore = create<MembershipPurchaseState>()(
     activatingPlanKey: null,
     restoring: false,
     error: null,
+    notice: null,
+    restoreSettling: false,
 
     startPurchase: (planKey) =>
-      set({ purchasingPlanKey: planKey, error: null }),
+      set({ purchasingPlanKey: planKey, error: null, notice: null }),
     purchaseSucceeded: (planKey) =>
       set({ purchasingPlanKey: null, activatingPlanKey: planKey, error: null }),
     purchaseCancelled: () => set({ purchasingPlanKey: null }),
@@ -47,6 +56,8 @@ export const useMembershipPurchaseStore = create<MembershipPurchaseState>()(
       set({ purchasingPlanKey: null, error: message }),
     activationConfirmed: () => set({ activatingPlanKey: null }),
     setRestoring: (restoring) => set({ restoring }),
-    clearError: () => set({ error: null }),
+    setNotice: (notice) => set({ notice }),
+    setRestoreSettling: (restoreSettling) => set({ restoreSettling }),
+    clearError: () => set({ error: null, notice: null }),
   }),
 );

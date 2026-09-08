@@ -83,6 +83,8 @@ export interface MembershipBilling {
     pkg: RCPackageLike,
     opts?: { googleOldProductId?: string | null },
   ): Promise<MembershipPurchaseResult>;
+  /** ok/error only — I3. Whether a subscription actually came back is
+   *  decided by the entitlements read path after the webhook lands. */
   restoreMembershipPurchases(): Promise<{ ok: boolean; error?: string }>;
 }
 
@@ -101,5 +103,7 @@ export interface SneakyBilling {
     pkg: RCPackageLike,
     opts?: { googleOldProductId?: string | null },
   ): Promise<MembershipPurchaseResult>;
+  /** ok/error only — I3. Whether a subscription actually came back is
+   *  decided by the entitlements read path after the webhook lands. */
   restoreMembershipPurchases(): Promise<{ ok: boolean; error?: string }>;
 }

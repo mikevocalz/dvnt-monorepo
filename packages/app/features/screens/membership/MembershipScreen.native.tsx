@@ -83,6 +83,9 @@ function fallbackPrice(cents: number) {
 /** The store this build can sell through. */
 const OWN_RAIL: MembershipRail = Platform.OS === "ios" ? "ios_iap" : "play_iap";
 const OWN_STORE_NAME = Platform.OS === "ios" ? "the App Store" : "Google Play";
+/** How long a restore waits for the webhook before it stops claiming to
+ *  be working. See the same constant in SneakySubscriptionModal. */
+const RESTORE_SETTLE_MS = 20000;
 
 /** Documented store subscription-management URLs. */
 function openStoreSubscriptions(sku?: string | null) {
@@ -122,6 +125,8 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
   );
   const restoring = useMembershipPurchaseStore((s) => s.restoring);
   const purchaseError = useMembershipPurchaseStore((s) => s.error);
+  const purchaseNotice = useMembershipPurchaseStore((s) => s.notice);
+  const restoreSettling = useMembershipPurchaseStore((s) => s.restoreSettling);
 
   // ── Cross-rail resolution (WS-3): which rail owns the active membership? ──
   const activeMembership = useMemo(
@@ -218,13 +223,47 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
     if (!billing) return;
     const store = useMembershipPurchaseStore.getState();
     if (store.restoring || store.purchasingPlanKey) return;
+    store.setNotice(null);
     store.setRestoring(true);
     const res = await billing.restoreMembershipPurchases();
     store.setRestoring(false);
-    if (!res.ok && res.error) store.purchaseFailed(res.error);
+
+    if (!res.ok) {
+      store.purchaseFailed(res.error ?? "Restore failed. Please try again.");
+      return;
+    }
     // Any restored entitlement lands via the RC webhook → DB — refetch it.
     void queryClient.invalidateQueries({ queryKey: ENTITLEMENTS_QUERY_KEY });
+    // The store call only says the receipts were re-sent; the DB answers
+    // whether anything came back (I3). Settle, then say which happened —
+    // both outcomes used to be silent, so the button read as broken.
+    store.setNotice("Checking your purchases…");
+    store.setRestoreSettling(true);
   }, [billing, queryClient]);
+
+  // Bounded — a restore that resolves to nothing must not spin forever.
+  useEffect(() => {
+    if (!restoreSettling) return;
+    if (currentKey) {
+      const st = useMembershipPurchaseStore.getState();
+      st.setRestoreSettling(false);
+      st.setNotice("Purchases restored — your plan is active.");
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (Date.now() - startedAt > RESTORE_SETTLE_MS) {
+        const st = useMembershipPurchaseStore.getState();
+        st.setRestoreSettling(false);
+        st.setNotice(
+          `No active subscription found on ${OWN_STORE_NAME}. If you subscribed with a different account, sign in with that one and try again.`,
+        );
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: ENTITLEMENTS_QUERY_KEY });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [restoreSettling, currentKey, queryClient]);
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
@@ -256,6 +295,20 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
             seconds.
           </Animated.Text>
         </View>
+      ) : null}
+
+      {/* Restore outcome — neutral. Red would misreport "nothing to restore". */}
+      {purchaseNotice ? (
+        <Pressable
+          onPress={() => useMembershipPurchaseStore.getState().clearError()}
+          style={styles.noticeBanner}
+          accessibilityRole="button"
+          accessibilityLabel={purchaseNotice}
+        >
+          <Animated.Text style={styles.errorText}>
+            {purchaseNotice}
+          </Animated.Text>
+        </Pressable>
       ) : null}
 
       {/* Purchase error */}
@@ -536,6 +589,13 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   errorText: { color: C.text, fontSize: 14, lineHeight: 20 },
+  noticeBanner: {
+    backgroundColor: "rgba(63,220,255,0.10)",
+    borderColor: "rgba(63,220,255,0.30)",
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+  },
   railBanner: {
     flexDirection: "row",
     alignItems: "flex-start",

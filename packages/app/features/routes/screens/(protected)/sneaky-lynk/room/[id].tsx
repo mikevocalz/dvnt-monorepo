@@ -994,6 +994,10 @@ function LocalRoom({
         onClose={() => setShowTimesUpPaywall(false)}
         reason="duration_limit"
         dismissible={false}
+        // The free session is over, so this sheet does not close on its own —
+        // but "upgrade or be stuck" is not a choice. Leaving is the honest
+        // second option.
+        onExit={handleLeave}
         billing={billing}
         // isPaidHost is derived from useEntitlements — the modal's activation
         // loop already invalidated the query, so the flag flips on its own.
@@ -2299,6 +2303,10 @@ function ServerRoom({
         onClose={() => setShowTimesUpPaywall(false)}
         reason="duration_limit"
         dismissible={false}
+        // The free session is over, so this sheet does not close on its own —
+        // but "upgrade or be stuck" is not a choice. Leaving is the honest
+        // second option.
+        onExit={handleLeave}
         billing={billing}
         // isPaidHost is derived from useEntitlements — the modal's activation
         // loop already invalidated the query, so the flag flips on its own.

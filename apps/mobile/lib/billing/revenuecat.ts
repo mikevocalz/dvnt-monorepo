@@ -374,7 +374,10 @@ export async function restoreMembershipPurchases(): Promise<{
     return { ok: false, error: "Purchases are unavailable in this build." };
   }
   try {
-    // CustomerInfo is deliberately discarded — I3.
+    // CustomerInfo is deliberately discarded — I3. Whether anything actually
+    // came back is answered by the DB read path, not from here: the caller
+    // waits for the webhook to land the row. Reading entitlements off this
+    // result would be a second source of truth.
     await Purchases.restorePurchases();
     return { ok: true };
   } catch (err) {
