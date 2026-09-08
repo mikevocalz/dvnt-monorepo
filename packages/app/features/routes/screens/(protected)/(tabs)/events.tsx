@@ -71,6 +71,12 @@ import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 import { CONTENT_MAX_WIDTH } from "@dvnt/app/components/layout/screen-shell";
 import { EVENT_CARD_ASPECT } from "@dvnt/app/components/event/feed-event-card-shape";
 
+/**
+ * Entrance stagger is capped at this many cards. Beyond it every card shares
+ * the last delay, so a long list finishes appearing in well under a second.
+ */
+const MAX_STAGGERED_CARDS = 6;
+
 function EventCard({
   event,
   index,
@@ -106,7 +112,9 @@ function EventCard({
         type: "spring",
         damping: 20,
         stiffness: 300,
-        delay: index * 0.15,
+        // Capped. Uncapped, `index * 0.15` meant the fortieth card waited six
+        // seconds before it appeared.
+        delay: Math.min(index, MAX_STAGGERED_CARDS) * 0.15,
       }}
       className="w-full self-center"
     >
@@ -199,7 +207,10 @@ function EventCard({
             <Motion.View
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: "spring", delay: index * 0.1 }}
+              transition={{
+                type: "spring",
+                delay: Math.min(index, MAX_STAGGERED_CARDS) * 0.1,
+              }}
               className="absolute top-4 right-4 bg-background rounded-2xl px-4 py-3 items-center min-w-[70px]"
             >
               <Text className="text-2xl font-bold text-foreground">
@@ -693,6 +704,9 @@ function EventsScreenContent() {
                 onPress={() =>
                   router.push("/(protected)/events/my-tickets" as any)
                 }
+                accessibilityRole="button"
+                accessibilityLabel="My tickets"
+                accessibilityHint="Opens the passes you already hold"
               >
                 <Motion.View
                   whileTap={{ scale: 0.9 }}

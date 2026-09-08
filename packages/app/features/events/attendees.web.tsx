@@ -31,6 +31,7 @@
  */
 
 import { useMemo, useRef, useEffect } from "react";
+import { CardLink } from "@dvnt/app/components/ui/card-link.web";
 import { useParams, useRouter } from "solito/navigation";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
@@ -63,6 +64,31 @@ const FILTERS: { value: AttendeesStatusFilter; label: string }[] = [
   { value: "transfer_pending", label: "Transferring" },
   { value: "void", label: "Void" },
 ];
+
+/**
+ * A row that opens a profile is a link; a row for an attendee with no username
+ * is not interactive at all and must not claim to be.
+ */
+function RowShell({
+  username,
+  children,
+}: {
+  username?: string | null;
+  children: React.ReactNode;
+}) {
+  const className =
+    "flex items-center gap-3 rounded-xl border border-white/8 bg-white/4 px-3 py-3";
+  if (!username) return <div className={className}>{children}</div>;
+  return (
+    <CardLink
+      href={`/profile/${username}`}
+      ariaLabel={`Open @${username}'s profile`}
+      className={`${className} cursor-pointer active:bg-white/6`}
+    >
+      {children}
+    </CardLink>
+  );
+}
 
 function statusBadge(status: string): {
   Icon: typeof CheckCircle2;
@@ -108,15 +134,11 @@ function AttendeeRow({ item }: { item: TicketRecord }) {
   const planColor = planAccent(planKey);
 
   return (
-    <div
-      onClick={() => {
-        if (username) router.push(`/profile/${username}`);
-      }}
-      role="button"
-      className={`flex items-center gap-3 rounded-xl border border-white/8 bg-white/4 px-3 py-3 ${
-        username ? "cursor-pointer active:bg-white/6" : ""
-      }`}
-    >
+    // Only a row that goes somewhere is interactive. This was
+    // `role="button"` with no tabIndex and no key handler, so it announced as
+    // a button, could not be focused or activated from a keyboard, and said
+    // "button" even for an attendee with no profile to open.
+    <RowShell username={username}>
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/6 text-[13px] font-bold tracking-wide text-white/70">
         {initial}
       </span>
@@ -165,7 +187,7 @@ function AttendeeRow({ item }: { item: TicketRecord }) {
           </span>
         ) : null}
       </div>
-    </div>
+    </RowShell>
   );
 }
 

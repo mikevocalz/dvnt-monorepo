@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CardLink } from "@dvnt/app/components/ui/card-link.web";
 import { useRouter } from "solito/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -93,22 +94,21 @@ function isUpcoming(ticket: TicketRecord): boolean {
 function TicketCard({
   ticket,
   addonCount = 0,
-  onPress,
 }: {
   ticket: TicketRecord;
   /** Owned add-ons for this event (order_addons) — WS-3 wallet badge. */
   addonCount?: number;
-  onPress: () => void;
 }) {
   const status = STATUS_COLORS[ticket.status] || STATUS_COLORS.void;
   const isCoatCheck = ticket.category === "coat_check";
   const imageUrl = resolveImageUrl(ticket.event_image);
 
   return (
-    <div
-      onClick={onPress}
-      role="button"
-      tabIndex={0}
+    <CardLink
+      href={`/feed/ticket/${ticket.id}`}
+      ariaLabel={`${
+        isCoatCheck ? "Coat check" : ticket.ticket_type_name || "Admission"
+      } for ${ticket.event_title || "event"}. ${status.label}.`}
       className={`flex overflow-hidden rounded-2xl border cursor-pointer transition-colors ${
         isCoatCheck
           ? "border-purple-500/20 bg-slate-950 active:bg-slate-900"
@@ -192,7 +192,7 @@ function TicketCard({
           )
         ) : null}
       </div>
-    </div>
+    </CardLink>
   );
 }
 
@@ -314,15 +314,6 @@ export function MyTicketsScreen() {
     refetch();
   }, [loadTransfers, refetch]);
 
-  const handleTicketPress = useCallback(
-    (ticket: TicketRecord) => {
-      // By ticket id, matching native. Navigating by `event_id` and seeding an
-      // event-keyed cache meant a member holding an admission ticket and a
-      // coat-check claim could be shown either one.
-      router.push(`/feed/ticket/${ticket.id}`);
-    },
-    [router],
-  );
 
   const { upcoming, past } = useMemo(() => {
     const all = tickets || [];
@@ -482,7 +473,6 @@ export function MyTicketsScreen() {
                           addonCountByEvent.get(String(row.ticket.event_id)) ??
                           0
                         }
-                        onPress={() => handleTicketPress(row.ticket)}
                       />
                     )}
                   </div>

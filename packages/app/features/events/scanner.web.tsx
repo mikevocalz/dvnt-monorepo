@@ -30,6 +30,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DismissOverlayButton } from "@dvnt/app/components/ui/card-link.web";
 import { useParams, useRouter } from "solito/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -129,12 +130,15 @@ function DuplicateFlash({
 
   return (
     <div
-      onClick={onDismiss}
-      role="button"
       aria-live="assertive"
       className="dvnt-dup-flash fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 px-8 text-center"
       style={{ backgroundColor: "#FC253A" }}
     >
+      {/* The panel is a live region announcing a door result, not a control.
+          It used to be `role="button"`, which made a screen reader read the
+          whole result — icon, heading, check-in facts — as one button, and
+          gave no keyboard way to dismiss it. */}
+      <DismissOverlayButton onPress={onDismiss} label="Dismiss scan result" />
       <style>{`
         @keyframes dvnt-dup-flash {
           0% { opacity: 0.35; }
@@ -211,11 +215,8 @@ function ScanResultOverlay({
       : "Scan Error";
 
   return (
-    <div
-      onClick={onDismiss}
-      role="button"
-      className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 px-10"
-    >
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 px-10">
+      <DismissOverlayButton onPress={onDismiss} label="Dismiss scan result" />
       <div
         className="flex w-full max-w-sm flex-col items-center gap-3 rounded-3xl p-8 text-center"
         style={{ backgroundColor: bg }}

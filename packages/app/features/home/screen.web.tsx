@@ -22,6 +22,7 @@ import {
 } from "react";
 import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
+import { CardLink } from "@dvnt/app/components/ui/card-link.web";
 import { Heart, Bookmark, Play, Grid3x3, Plus } from "lucide-react";
 import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
 import { useEvents } from "@dvnt/app/lib/hooks/use-events";
@@ -418,10 +419,13 @@ function MasonryCell({
     );
 
   return (
-    <div
-      onClick={open}
-      className="group relative overflow-hidden rounded-2xl bg-white/5 cursor-pointer"
-      role="button"
+    // A post tile goes somewhere, so it is a link. It was `role="button"` with
+    // no tabIndex and no key handler: focusable by nothing, operable by nothing,
+    // and announced as a button it could never be.
+    <CardLink
+      href={`/feed/post/${post.id}`}
+      ariaLabel={post.caption || "Open post"}
+      className="group relative block overflow-hidden rounded-2xl bg-white/5 cursor-pointer"
     >
       {isText ? (
         // Real shared surface (gradient + DVNT badge + glow + subtitle) so web
@@ -508,7 +512,7 @@ function MasonryCell({
           </span>
         </div>
       </div>
-    </div>
+    </CardLink>
   );
 }
 
