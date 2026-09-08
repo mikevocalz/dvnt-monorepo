@@ -33,8 +33,27 @@ const NATIVE_PATTERNS: Array<{ pattern: RegExp; category: string }> = [
   { pattern: /app\.json$/,            category: "Expo config" },
   { pattern: /^plugins\//,            category: "Config plugin" },
   { pattern: /^modules\//,            category: "Native module" },
-  { pattern: /^package\.json$/,       category: "Package deps" },
+  // Anchored at the repo root, this missed apps/mobile/package.json and every
+  // workspace package — the ones that actually move the fingerprint here.
+  { pattern: /(^|\/)package\.json$/,  category: "Package deps" },
   { pattern: /\.(lock|lockb)$/,       category: "Lockfile" },
+  // pnpm's lockfile ends in .yaml, so the rule above never matched it.
+  { pattern: /(^|\/)(pnpm-lock\.yaml|yarn\.lock|package-lock\.json)$/,
+    category: "Lockfile" },
+  // eas.json is a fingerprint input. Adding one line to the production build
+  // profile on 2026-09-08 moved the runtimeVersion off the hash every
+  // installed build asks for, and three OTA updates published successfully to
+  // an audience of nobody before anyone noticed. This preflight existed to
+  // catch that and did not list the file.
+  { pattern: /(^|\/)eas\.json$/,      category: "EAS build config" },
+  // Babel and Metro config change how the bundle is produced, and adding a
+  // babel plugin can pull in a dependency that shifts autolinking — verified
+  // with `eas fingerprint:compare`, which reported a changed React Native
+  // autolinking config after adding babel-plugin-transform-remove-console.
+  { pattern: /(^|\/)babel\.config\.(js|cjs|mjs|ts)$/,
+    category: "Babel config" },
+  { pattern: /(^|\/)metro\.config\.(js|cjs|mjs|ts)$/,
+    category: "Metro config" },
 ];
 
 function getChangedFiles(): string[] {
