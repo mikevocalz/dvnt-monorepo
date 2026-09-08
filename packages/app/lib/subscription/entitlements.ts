@@ -15,12 +15,12 @@
  *  - DVNT Membership SUPERSEDES standalone Sneaky Lynk: if a user holds both,
  *    the membership wins (it already includes Sneaky Lynk).
  */
-import { PLANS, PLAN_RANK } from "./plans";
+import { PLANS, PLAN_RANK } from "./plans.ts";
 import type {
   Entitlements,
   PlanKey,
   SubscriptionRecord,
-} from "./types";
+} from "./types.ts";
 
 export const FREE_ENTITLEMENTS: Entitlements = {
   family: "dvnt_membership",

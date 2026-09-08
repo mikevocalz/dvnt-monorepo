@@ -8,7 +8,7 @@ import type {
   Entitlements,
   PlanKey,
   ProductFamily,
-} from "./types";
+} from "./types.ts";
 
 /** Per-plan entitlement values (everything except family/planKey). */
 type PlanEntitlements = Omit<Entitlements, "family" | "planKey">;
@@ -69,6 +69,7 @@ const FREE_ENTITLEMENTS: PlanEntitlements = {
   limitedCapacityPriority: false,
   featuredMemberStatus: false,
   experimentalFeatures: false,
+  adsGoogleFree: false,
 };
 
 /** Paid Sneaky-Lynk host controls shared by tier 1/2 and membership Core+. */
@@ -112,6 +113,8 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     },
     entitlements: {
       ...FREE_ENTITLEMENTS,
+      // Every paid tier: no Google advertising. Promoted events still appear.
+      adsGoogleFree: true,
       ...PAID_HOST_CONTROLS,
       sessionMinutes: null,
       maxParticipants: 10,
@@ -136,6 +139,8 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     },
     entitlements: {
       ...FREE_ENTITLEMENTS,
+      // Every paid tier: no Google advertising. Promoted events still appear.
+      adsGoogleFree: true,
       ...PAID_HOST_CONTROLS,
       sessionMinutes: null,
       maxParticipants: 50,
@@ -162,6 +167,8 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     },
     entitlements: {
       ...FREE_ENTITLEMENTS,
+      // Every paid tier: no Google advertising. Promoted events still appear.
+      adsGoogleFree: true,
       faceForAccess: true,
       blockAccounts: true,
       muteChat: true,
@@ -193,6 +200,8 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     },
     entitlements: {
       ...FREE_ENTITLEMENTS,
+      // Every paid tier: no Google advertising. Promoted events still appear.
+      adsGoogleFree: true,
       ...PAID_HOST_CONTROLS,
       sessionMinutes: null,
       maxParticipants: 20,
@@ -229,6 +238,8 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     },
     entitlements: {
       ...FREE_ENTITLEMENTS,
+      // Every paid tier: no Google advertising. Promoted events still appear.
+      adsGoogleFree: true,
       ...PAID_HOST_CONTROLS,
       sessionMinutes: null,
       maxParticipants: 50,
@@ -271,6 +282,8 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     },
     entitlements: {
       ...FREE_ENTITLEMENTS,
+      // Every paid tier: no Google advertising. Promoted events still appear.
+      adsGoogleFree: true,
       ...PAID_HOST_CONTROLS,
       sessionMinutes: null,
       maxParticipants: 50,

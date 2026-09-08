@@ -65,7 +65,9 @@ export type EntitlementKey =
   | "dvnt_invite_only_experiences"
   | "dvnt_limited_capacity_priority"
   | "dvnt_featured_member_status"
-  | "dvnt_experimental_features";
+  | "dvnt_experimental_features"
+  // Advertising
+  | "ads_google_free";
 
 /** Period over which an event allowance is granted. */
 export type AllowancePeriod = "month" | "quarter" | null;
@@ -111,6 +113,15 @@ export interface Entitlements {
   limitedCapacityPriority: boolean;
   featuredMemberStatus: boolean;
   experimentalFeatures: boolean;
+  /**
+   * No Google-served advertising anywhere in the app for this member.
+   *
+   * Deliberately NOT "ad-free". DVNT's own promoted events may still appear to
+   * paid members — they are first-party content, not a Google placement — and
+   * the subscription copy has to say both halves. See
+   * `lib/ads/ad-eligibility.ts`, which is the only thing allowed to act on this.
+   */
+  adsGoogleFree: boolean;
 }
 
 /**
