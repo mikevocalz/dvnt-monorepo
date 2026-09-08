@@ -77,7 +77,10 @@ import {
   prefetchImages,
   prefetchImagesBlocking,
 } from "@dvnt/app/lib/perf/image-prefetch";
-import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
+import {
+  useTabBarInset,
+  useTabBarTopInset,
+} from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { LegendList } from "@dvnt/app/components/list";
 import type { LegendListRef } from "@dvnt/app/components/list";
 import { feedScrollY, resetFeedScroll } from "@dvnt/app/lib/stores/feed-scroll-shared";
@@ -560,6 +563,8 @@ export function MasonryFeed() {
   const viewerId = useAuthStore((s) => s.user?.id) || "";
   const listRef = useRef<LegendListRef>(null);
   const tabBarInset = useTabBarInset();
+  // iPad puts the tab bar at the TOP, over the content.
+  const tabBarTopInset = useTabBarTopInset();
   const scrollToTopTrigger = useFeedScrollStore((s) => s.scrollToTopTrigger);
 
   useEffect(() => {
@@ -808,7 +813,7 @@ export function MasonryFeed() {
       recycleItems
       estimatedItemSize={columnWidth * 2.4}
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: tabBarInset }}
+      contentContainerStyle={{ paddingTop: tabBarTopInset, paddingBottom: tabBarInset }}
       onScroll={handleScroll}
       scrollEventThrottle={16}
       onEndReached={() => {
@@ -836,8 +841,15 @@ export function MasonryFeed() {
       ListEmptyComponent={
         <EmptyState
           icon={ImageOff}
-          title="No Posts Yet"
-          description="When you or people you follow share posts, they'll appear here"
+          title={nsfwEnabled ? "No Spicy Posts Yet" : "No Posts Yet"}
+          // Spicy empty has a DIFFERENT cause than sweet empty — the server
+          // only serves spicy from creators you follow, so a blank grid here
+          // is a follow problem, not an "add a post" problem.
+          description={
+            nsfwEnabled
+              ? "Spicy posts only appear from creators you follow. Follow someone who posts spicy to see them here."
+              : "When you or people you follow share posts, they'll appear here"
+          }
         />
       }
       ListFooterComponent={

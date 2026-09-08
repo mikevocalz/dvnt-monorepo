@@ -10,6 +10,7 @@ import { useCallback } from "react";
 import { AVATAR_COLORS } from "@dvnt/app/lib/constants/events";
 import { useRouter } from "expo-router";
 import { useResponsiveMedia } from "@dvnt/app/lib/hooks/use-responsive-media";
+import { CONTENT_MAX_WIDTH } from "@dvnt/app/components/layout/screen-shell";
 import { useToggleEventLike } from "@dvnt/app/lib/hooks/use-events";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -106,7 +107,8 @@ export function EventCard({
     width: cardWidth,
     height: CARD_HEIGHT,
     containerClass,
-  } = useResponsiveMedia("square"); // 1:1 aspect ratio for events
+    // `useResponsiveMedia` takes height/width, so 6:4 width/height is 4/6 here.
+  } = useResponsiveMedia(4 / 6, { maxWidth: CONTENT_MAX_WIDTH });
   const animatedImageStyle = useAnimatedStyle(() => {
     "worklet";
     const translateY = (scrollY.value - index * (CARD_HEIGHT + 20)) * -0.15;
@@ -127,13 +129,13 @@ export function EventCard({
       }}
       className={containerClass}
     >
-      <Motion.View
-        className="rounded-3xl overflow-hidden mb-5"
-        whileTap={{ scale: 0.98 }}
-        transition={{ type: "spring", damping: 20, stiffness: 300 }}
-      >
-        <Pressable
-          onPress={handleOpen}
+      {/* Motion.Pressable, not a bare Pressable: whileTap reads a context only
+          MotionPressable provides, so the press animation never ran. */}
+      <Motion.Pressable onPress={handleOpen}>
+        <Motion.View
+          className="rounded-3xl overflow-hidden mb-5"
+          whileTap={{ scale: 0.98 }}
+          transition={{ type: "spring", damping: 20, stiffness: 300 }}
         >
           <View style={{ height: CARD_HEIGHT }} className="w-full">
             <Animated.View
@@ -330,8 +332,8 @@ export function EventCard({
               </View>
             </Animated.View>
           </View>
-        </Pressable>
-      </Motion.View>
+        </Motion.View>
+      </Motion.Pressable>
     </Motion.View>
   );
 }

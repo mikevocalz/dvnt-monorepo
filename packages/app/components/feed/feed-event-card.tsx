@@ -23,7 +23,14 @@ import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
 import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 
-const CARD_HEIGHT = 200;
+// Shape is shared with the web card and the masonry packer so the three cannot
+// drift. The old fixed `200` ignored the width it was given: this card spans the
+// FULL feed width, so on a 1024pt tablet it was a 5:1 sliver — a wide band of
+// empty space above the title, which is how it was reported from the iPad.
+import {
+  CARD_ASPECT,
+  CARD_MAX_WIDTH,
+} from "@dvnt/app/components/event/feed-event-card-shape";
 
 export const FeedEventCard = memo(function FeedEventCard({
   event,
@@ -81,7 +88,17 @@ export const FeedEventCard = memo(function FeedEventCard({
   });
 
   return (
-    <View style={{ paddingHorizontal: 4, paddingVertical: 12 }}>
+    <View
+      style={{
+        paddingHorizontal: 4,
+        paddingVertical: 12,
+        // max-w-3xl, centred: the card keeps one shape at every screen size
+        // instead of stretching to the full width of a tablet.
+        width: "100%",
+        maxWidth: CARD_MAX_WIDTH,
+        alignSelf: "center",
+      }}
+    >
       <ZoomCard
         href={`/(protected)/events/${event.id}` as never}
         onPress={handlePress}
@@ -90,7 +107,10 @@ export const FeedEventCard = memo(function FeedEventCard({
       >
         <View
           style={{
-            height: CARD_HEIGHT,
+            width: "100%",
+            // Ratio drives the height at every width, the same rule the web
+            // card follows.
+            aspectRatio: CARD_ASPECT,
             borderRadius: 16,
             overflow: "hidden",
             backgroundColor: heroBg,

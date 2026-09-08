@@ -2,6 +2,32 @@ import type { ReactNode } from "react";
 import { View } from "react-native";
 import { useIsLargeScreen } from "@dvnt/app/lib/hooks/use-is-large-screen";
 
+/**
+ * Width of the centred content column, in points — the numeric twin of the
+ * `max-w-3xl` class the screens use.
+ *
+ * Anything that MEASURES the column rather than just sitting in it reads this:
+ * a grid working out how many cells fit, a card capping its own width. They
+ * drifted once already — a grid sized off the window laid cards out wider than
+ * the column holding them.
+ */
+export const CONTENT_MAX_WIDTH = 768;
+
+/**
+ * A pushed screen's header row: FULL WIDTH, contents included.
+ *
+ * The body below still caps to CONTENT_MAX_WIDTH — chrome and content follow
+ * different rules here on purpose. The header is the app frame: back sits in
+ * the top-left corner of the SCREEN, actions in the top-right corner, the way
+ * every OS puts them, and it reads as broken when it floats inboard of the
+ * corner it is anchored to. Capping the row to the reading column was an
+ * earlier attempt at "aligned with the content"; it made the header look
+ * indented instead.
+ */
+export const DETAIL_HEADER_ROW = {
+  width: "100%",
+} as const;
+
 /** Content column for routed screens. Pair with `useScreenGutter()`. */
 export const SCREEN_SHELL = "flex-1 bg-background w-full max-w-4xl self-center";
 

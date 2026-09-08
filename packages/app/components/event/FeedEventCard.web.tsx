@@ -4,6 +4,7 @@ import { useRouter } from "solito/navigation";
 import { MapPin, Clock, Users, Calendar, Zap } from "lucide-react";
 import { EventFlyer, type EventFlyerMedia } from "@dvnt/app/components/event/EventFlyer.web";
 import { color } from "@dvnt/app/lib/theme";
+import { CARD_ASPECT } from "./feed-event-card-shape";
 
 /**
  * Web port of `../deviant/components/feed/feed-event-card.tsx` — the existing
@@ -30,16 +31,10 @@ export interface FeedEventCardData {
   media: EventFlyerMedia;
 }
 
-// Landscape rounded rectangle — the shape this card has always had, and the
-// one it is meant to keep: an event in the feed reads as a wide banner, not as
-// another portrait tile competing with the posts around it.
-//
-// Expressed as a RATIO rather than the old fixed `height: 200`. The fixed
-// height ignored the column width, so the same card was a squat letterbox in a
-// wide desktop column and too tall in a narrow one. 16:9 holds the rectangle at
-// every column width. Briefly shipped as 4/5 portrait, which changed the shape
-// instead of fixing the responsiveness.
-export const CARD_ASPECT = 16 / 9;
+// Shape now lives in `feed-event-card-shape.ts` so the native card and the
+// masonry packer read the same number. Re-exported because the packer
+// (`features/home/screen.web.tsx`) imports it from here.
+export { CARD_ASPECT } from "./feed-event-card-shape";
 
 export function FeedEventCard({ data }: { data: FeedEventCardData }) {
   const router = useRouter();

@@ -61,7 +61,10 @@ import { useCreateStory } from "@dvnt/app/lib/hooks/use-stories";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useFocusEffect } from "expo-router";
 import type { PublicGateReason } from "@dvnt/app/lib/access/public-gates";
-import { useTabBarInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
+import {
+  useTabBarInset,
+  useTabBarTopInset,
+} from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { feedScrollY, resetFeedScroll } from "@dvnt/app/lib/stores/feed-scroll-shared";
 
 type FeedPostItem = { _type: "post"; data: Post };
@@ -307,6 +310,8 @@ export function Feed({
   const prevNsfwEnabled = useRef(nsfwEnabled);
   const listRef = useRef<LegendListRef>(null);
   const tabBarInset = useTabBarInset();
+  // iPad puts the tab bar at the TOP, over the content.
+  const tabBarTopInset = useTabBarTopInset();
   const handleFeedScroll = useCallback((e: any) => {
     feedScrollY.value = Math.max(0, e?.nativeEvent?.contentOffset?.y ?? 0);
   }, []);
