@@ -4,6 +4,7 @@ import {
   buildDrawerSections,
   drawerAvailableOn,
   drawerGestureEnabled,
+  isDrawerRowActive,
 } from "./drawer-destinations.ts";
 
 const NONE = { upcomingEvents: 0, upcomingPasses: 0, needsAttention: 0 };
@@ -65,4 +66,17 @@ test("the drawer belongs to top-level surfaces, not to pushed screens", () => {
   assert.equal(drawerAvailableOn("/events"), true);
   assert.equal(drawerAvailableOn("/(protected)/events/my-tickets"), false);
   assert.equal(drawerAvailableOn("/(protected)/ticket/abc"), false);
+});
+
+test("the selected row matches the current screen, group segments and all", () => {
+  const tickets = "/(protected)/events/my-tickets";
+  // expo-router reports the pathname without groups; the href carries them.
+  assert.equal(isDrawerRowActive("/events/my-tickets", tickets), true);
+  assert.equal(isDrawerRowActive("/(protected)/events/my-tickets", tickets), true);
+  // A child screen keeps its parent row selected, as on web.
+  assert.equal(isDrawerRowActive("/settings/membership", "/settings"), true);
+  // A sibling does not.
+  assert.equal(isDrawerRowActive("/events/host", tickets), false);
+  assert.equal(isDrawerRowActive("/settings-other", "/settings"), false);
+  assert.equal(isDrawerRowActive("/", tickets), false);
 });

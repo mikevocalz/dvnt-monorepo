@@ -18,7 +18,7 @@
 
 import { useCallback, useMemo } from "react";
 import { Platform, Pressable, ScrollView, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { usePathname, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { BlurView } from "expo-blur";
@@ -47,7 +47,11 @@ import {
 import { ticketPath } from "@dvnt/app/lib/tickets/ticket-identity";
 import { getHostDashboard } from "@dvnt/app/lib/api/privileged";
 import { color, radius, space } from "@dvnt/app/lib/theme";
-import { buildDrawerSections, type DrawerRow } from "./drawer-destinations";
+import {
+  buildDrawerSections,
+  isDrawerRowActive,
+  type DrawerRow,
+} from "./drawer-destinations";
 import { drawerTheme } from "./drawer-theme";
 
 const ICONS: Record<DrawerRow["icon"], LucideIcon> = {
@@ -62,22 +66,23 @@ const ICONS: Record<DrawerRow["icon"], LucideIcon> = {
 
 function DrawerRowView({
   row,
+  active,
   onPress,
 }: {
   row: DrawerRow;
+  active: boolean;
   onPress: (row: DrawerRow) => void;
 }) {
   const Icon = ICONS[row.icon];
   const { row: r } = drawerTheme;
-  // The rail marks the current destination. On a phone the drawer is never the
-  // current destination — you are always somewhere else when you open it — so
-  // the accent is reserved for the row that has something waiting on you.
-  const flagged = !!row.badge;
 
   return (
     <Pressable
       onPress={() => onPress(row)}
       accessibilityRole="link"
+      // The rail's `aria-current="page"`. VoiceOver announces the selected row
+      // rather than leaving the accent bar as a sighted-only cue.
+      accessibilityState={{ selected: active }}
       accessibilityLabel={row.detail ? `${row.label}. ${row.detail}` : row.label}
       style={({ pressed }) => ({
         minHeight: r.minHeight,
@@ -88,15 +93,17 @@ function DrawerRowView({
         borderRadius: r.borderRadius,
         borderCurve: "continuous",
         overflow: "hidden",
-        backgroundColor: pressed
-          ? r.pressedBackground
-          : flagged
-            ? r.activeBackground
+        // Press is the phone's hover. Selected wins over it, the way the rail
+        // leaves the active row's tint alone on mouse-over.
+        backgroundColor: active
+          ? r.activeBackground
+          : pressed
+            ? r.pressedBackground
             : "transparent",
       })}
     >
       {/* Leading accent bar, the rail's `inset 2px 0 0 ACCENT`. */}
-      {flagged ? (
+      {active ? (
         <View
           style={{
             position: "absolute",
@@ -110,16 +117,16 @@ function DrawerRowView({
       ) : null}
       <Icon
         size={r.iconSize}
-        strokeWidth={flagged ? 2.4 : 2}
-        color={flagged ? r.activeIcon : r.inactiveIcon}
+        strokeWidth={active ? 2.4 : 2}
+        color={active ? r.activeIcon : r.inactiveIcon}
       />
       <View style={{ flex: 1 }}>
         <Text
           numberOfLines={1}
           style={{
-            color: flagged ? r.activeLabel : r.inactiveLabel,
+            color: active ? r.activeLabel : r.inactiveLabel,
             fontSize: r.fontSize,
-            fontWeight: flagged ? "700" : "600",
+            fontWeight: active ? "700" : "600",
             letterSpacing: r.letterSpacing,
           }}
         >
@@ -166,6 +173,7 @@ function DrawerRowView({
 
 export function AppDrawerContent() {
   const router = useRouter();
+  const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const closeDrawer = useDrawerStore((s) => s.closeDrawer);
   const user = useAuthStore((s) => s.user);
@@ -414,7 +422,12 @@ export function AppDrawerContent() {
               </Text>
             ) : null}
             {s.rows.map((row) => (
-              <DrawerRowView key={row.id} row={row} onPress={handleRow} />
+              <DrawerRowView
+                key={row.id}
+                row={row}
+                active={isDrawerRowActive(pathname, row.href)}
+                onPress={handleRow}
+              />
             ))}
           </View>
         ))}

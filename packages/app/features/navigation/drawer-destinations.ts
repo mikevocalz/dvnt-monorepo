@@ -163,6 +163,31 @@ function ticketsDetail(counts: LibraryCounts): string | undefined {
 }
 
 /**
+ * Is this row the screen the member is currently on?
+ *
+ * Mirrors the web rail's rule (`app-shell.web.tsx:65-68`): exact match, or the
+ * row is an ancestor of the current path. The one difference is that
+ * expo-router's `usePathname()` omits group segments — it reports
+ * `/events/my-tickets`, not `/(protected)/events/my-tickets` — so both sides
+ * are stripped of `(group)` segments before comparing. Without that, no row
+ * ever matched and the rail's selected state simply never appeared on a phone.
+ */
+export function isDrawerRowActive(pathname: string, href: string): boolean {
+  const a = stripGroups(pathname);
+  const b = stripGroups(href);
+  if (!b || b === "/") return a === "/";
+  return a === b || a.startsWith(b + "/");
+}
+
+function stripGroups(path: string): string {
+  const cleaned = path
+    .split("/")
+    .filter((segment) => segment && !/^\(.*\)$/.test(segment))
+    .join("/");
+  return cleaned ? `/${cleaned}` : "/";
+}
+
+/**
  * Routes where a horizontal edge-swipe belongs to the screen, not the drawer.
  *
  * Checkout and the scanner because a stray drawer mid-payment or mid-door is a
