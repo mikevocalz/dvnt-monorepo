@@ -31,6 +31,10 @@ import {
   useLocalSearchParams,
 } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
+import {
+  DVNTLiquidGlass,
+  DVNTLiquidGlassIconButton,
+} from "@dvnt/app/components/media/DVNTLiquidGlass";
 import { Motion } from "@legendapp/motion";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useCreateStoryStore } from "@dvnt/app/lib/stores/create-story-store";
@@ -59,6 +63,46 @@ import type { StoryAnimatedGifOverlay, StoryOverlay } from "@dvnt/app/lib/types"
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import { DVNTGifView } from "@dvnt/app/components/media/DVNTGifView";
 import { getImageStickerSourceById } from "@dvnt/app/features/stories-editor/constants";
+
+/**
+ * The back button's radius: `DVNTLiquidGlassIconButton` derives it as
+ * `size / 4`, and every header wears that button at size 40. Anything that
+ * sits beside it in a header uses this so the shapes match.
+ */
+const GLASS_BUTTON_RADIUS = 40 / 4;
+
+/**
+ * The bottom rail and the visibility pill sit OVER the user's photo, so they
+ * carry their own contrast instead of relying on the backdrop. Against a bright
+ * frame the dark tiles and the muted labels both washed out.
+ *
+ * boxShadow, not the legacy shadow or elevation props — those are deprecated
+ * on the New Architecture, and elevation is Android-only regardless.
+ */
+const RAIL_TILE_SHADOW = {
+  boxShadow: "0 2px 8px rgba(0, 0, 0, 0.55)",
+  // A hairline edge does the real work. Once media is added the rail sits on
+  // BLACK, and `bg-card` against black is nearly the same colour — a shadow
+  // alone gives an unlit tile nothing to separate from.
+  borderWidth: 1,
+  borderColor: "rgba(255, 255, 255, 0.14)",
+} as const;
+
+/**
+ * Glyph shadow. iOS derives a shadow from the layer's ALPHA, so wrapping the
+ * icon in a transparent view casts a shadow shaped like the glyph itself
+ * rather than around the tile's rectangle.
+ */
+const RAIL_GLYPH_SHADOW = {
+  boxShadow: "0 1px 3px rgba(0, 0, 0, 0.9)",
+} as const;
+
+/** Text takes a shadow rather than a box, so the glyphs stay crisp. */
+const RAIL_LABEL_SHADOW = {
+  textShadowColor: "rgba(0, 0, 0, 0.85)",
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 3,
+} as const;
 
 function StoryVideoPreview({ uri }: { uri: string }) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -305,8 +349,12 @@ function CreateStoryScreenContent() {
   }, []);
 
   // ── Responsive layout ─────────────────────────────────────────────
-  const CANVAS_WIDTH = width - 32;
-  const CANVAS_HEIGHT = Math.min(height * 0.55, CANVAS_WIDTH * (16 / 9));
+  // Stories are 9:16. Deriving width from the screen and only clamping height
+  // never produced that ratio — it was 1.32 on a portrait iPad and 2.37 in
+  // landscape, so `contentFit="cover"` cropped most of the frame away. Fit the
+  // tallest 9:16 box that clears BOTH budgets, then derive width from it.
+  const CANVAS_HEIGHT = Math.min(height * 0.55, (width - 32) * (16 / 9));
+  const CANVAS_WIDTH = CANVAS_HEIGHT * (9 / 16);
 
   const {
     reset,
@@ -870,13 +918,20 @@ function CreateStoryScreenContent() {
       fontWeight: "600",
       fontSize: 18,
     },
+    // Same object as `DetailBackButton` — glass disc, 40pt, 20pt icon in #fff.
+    // A bare chevron and a bare X on adjacent screens read as two different
+    // apps; the X stays because this closes the composer rather than going back.
     headerLeft: () => (
       <Pressable
         onPress={handleClose}
         hitSlop={12}
-        className="ml-2 w-11 h-11 items-center justify-center"
+        className="ml-2"
+        accessibilityRole="button"
+        accessibilityLabel="Close"
       >
-        <X size={24} color={colors.foreground} strokeWidth={2.5} />
+        <DVNTLiquidGlassIconButton size={40}>
+          <X size={20} color="#fff" strokeWidth={2.5} />
+        </DVNTLiquidGlassIconButton>
       </Pressable>
     ),
     headerRight: () => (
@@ -885,12 +940,20 @@ function CreateStoryScreenContent() {
         disabled={isSharing || !isValid}
         hitSlop={12}
         className="mr-2"
+        accessibilityRole="button"
+        accessibilityLabel="Share story"
+        accessibilityState={{ disabled: isSharing || !isValid }}
       >
-        <Text
-          className={`text-sm font-semibold ${isValid && !isSharing ? "text-primary" : "text-muted-foreground"}`}
-        >
-          {isSharing ? "Sharing..." : "Share"}
-        </Text>
+        {/* GLASS_BUTTON_RADIUS keeps this the same shape as the close button
+            beside it, which gets its radius from `size / 4` inside
+            DVNTLiquidGlassIconButton. */}
+        <DVNTLiquidGlass radius={GLASS_BUTTON_RADIUS} paddingH={14} paddingV={9}>
+          <Text
+            className={`text-sm font-semibold ${isValid && !isSharing ? "text-primary" : "text-muted-foreground"}`}
+          >
+            {isSharing ? "Sharing..." : "Share"}
+          </Text>
+        </DVNTLiquidGlass>
       </Pressable>
     ),
   }, [handleClose, handleShare, isSharing, isValid]);
@@ -1210,11 +1273,16 @@ function CreateStoryScreenContent() {
             >
               <View
                 className="w-14 h-14 rounded-xl bg-card items-center justify-center"
-                style={{ borderCurve: "continuous" }}
+                style={{ borderCurve: "continuous", ...RAIL_TILE_SHADOW }}
               >
-                <ImageIcon size={24} color="#fff" />
+                <View style={RAIL_GLYPH_SHADOW}>
+                  <ImageIcon size={24} color="#fff" />
+                </View>
               </View>
-              <Text className="text-muted-foreground text-xs">
+              <Text
+                className="text-xs"
+                style={[{ color: "rgba(255,255,255,0.75)" }, RAIL_LABEL_SHADOW]}
+              >
                 Gallery{" "}
                 {mediaAssets.length > 0
                   ? `(${mediaAssets.length}/${MAX_STORY_ITEMS})`
@@ -1229,11 +1297,16 @@ function CreateStoryScreenContent() {
             >
               <View
                 className="w-14 h-14 rounded-xl bg-card items-center justify-center"
-                style={{ borderCurve: "continuous" }}
+                style={{ borderCurve: "continuous", ...RAIL_TILE_SHADOW }}
               >
-                <Camera size={24} color="#fff" />
+                <View style={RAIL_GLYPH_SHADOW}>
+                  <Camera size={24} color="#fff" />
+                </View>
               </View>
-              <Text className="text-muted-foreground text-xs">Camera</Text>
+              <Text
+                className="text-xs"
+                style={[{ color: "rgba(255,255,255,0.75)" }, RAIL_LABEL_SHADOW]}
+              >Camera</Text>
             </Pressable>
 
             <Pressable
@@ -1242,11 +1315,16 @@ function CreateStoryScreenContent() {
             >
               <View
                 className="w-14 h-14 rounded-xl bg-card items-center justify-center"
-                style={{ borderCurve: "continuous" }}
+                style={{ borderCurve: "continuous", ...RAIL_TILE_SHADOW }}
               >
-                <Type size={24} color="#fff" />
+                <View style={RAIL_GLYPH_SHADOW}>
+                  <Type size={24} color="#fff" />
+                </View>
               </View>
-              <Text className="text-muted-foreground text-xs">Text</Text>
+              <Text
+                className="text-xs"
+                style={[{ color: "rgba(255,255,255,0.75)" }, RAIL_LABEL_SHADOW]}
+              >Text</Text>
             </Pressable>
 
             <Pressable
@@ -1264,20 +1342,24 @@ function CreateStoryScreenContent() {
                     taggedUsers.length > 0
                       ? "rgba(62,164,229,0.2)"
                       : colors.card,
+                  ...RAIL_TILE_SHADOW,
                 }}
               >
-                <UserPlus
-                  size={24}
-                  color={taggedUsers.length > 0 ? "#3EA4E5" : "#fff"}
-                />
+                <View style={RAIL_GLYPH_SHADOW}>
+                  <UserPlus
+                    size={24}
+                    color={taggedUsers.length > 0 ? "#3EA4E5" : "#fff"}
+                  />
+                </View>
               </View>
               <Text
                 style={{
                   color:
                     taggedUsers.length > 0
                       ? "#3EA4E5"
-                      : "rgba(255,255,255,0.5)",
+                      : "rgba(255,255,255,0.75)",
                   fontSize: 12,
+                  ...RAIL_LABEL_SHADOW,
                 }}
               >
                 {taggedUsers.length > 0

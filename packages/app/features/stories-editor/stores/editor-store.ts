@@ -240,7 +240,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   // ---- Media ----
-  setMedia: (uri, mediaType) => set({ mediaUri: uri, mediaType }),
+  // Opening the rail here rather than at each call site: media arriving IS the
+  // moment the tools become useful, and a user who has just picked a photo is
+  // looking for text/stickers/GIFs next. Collapsed-by-default made them hunt
+  // for a tab first, and the bottom row that duplicated the entry points was
+  // covering the same ground twice.
+  setMedia: (uri, mediaType) =>
+    set({ mediaUri: uri, mediaType, railOpen: Boolean(uri) }),
 
   // ---- Elements ----
   addTextElement: (options) => {
