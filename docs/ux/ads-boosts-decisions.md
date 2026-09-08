@@ -44,6 +44,44 @@ A `google_ad` slot is an opportunity, never a creative.
 Not yet wired into the three feeds. That refactor touches `feed.tsx`,
 `masonry-feed.tsx` and `screen.web.tsx` and is the next honest slice.
 
+### The serving selector — `lib/ads/boost-selection.ts`
+
+§5, and the piece with real money consequences. Ranks by **delivery deficit**
+— the share of a campaign's eligible opportunities it has not been served — so
+a seven-day package buys time, not weight. Price and priority are not merely
+unused; they are absent from the input type, with a test asserting that.
+
+Eleven assertions: the brief's worked example (A, B and C each lead some
+session, none pinned), an organizer with five events unable to take five
+consecutive slots, a session stable across re-renders, and simulations at 1, 3,
+30 and 300 campaigns asserting nothing is starved and the spread stays bounded.
+`hasCapacityForAnotherCampaign` refuses a sale rather than overselling and
+relaxing caps afterwards.
+
+**Applied**: `events-list.web.tsx` no longer sorts promoted-first.
+
+### The schedule — `lib/ads/boost-schedule.ts`
+
+Both timezone bugs fixed in `promotion-checkout/index.ts`, computing in
+`events.event_tz` (the IANA column migration `20260708171038` already added)
+with UTC as the fallback when it is null. `deno check` passes.
+
+Two further bugs surfaced while writing the tests: `offsetMinutes` compared
+second-precision parts against a millisecond instant, so `.999` leaked into the
+offset and pushed the result into Monday; and a minute-precision formatter
+rounds `23:59:59.999` up, so the review label would have told an organizer
+their weekend boost ran into Monday.
+
+### The lifecycle — `lib/ads/boost-lifecycle.ts`
+
+§10's three machines. Ten assertions, including that a refunded campaign never
+resumes however out-of-order a later webhook arrives.
+
+### The landmark — `components/ui/html.tsx`
+
+`Aside` added in the file's per-component style. Zero direct
+`@expo/html-elements` imports exist outside that file.
+
 ---
 
 ## Verified facts, including two the brief gets wrong
