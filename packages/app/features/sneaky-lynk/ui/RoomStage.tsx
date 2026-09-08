@@ -9,7 +9,7 @@
  *   │  CROWD · N               │  ← divider + label (fixed height)
  *   │  ┌───┬───┐   ┌───┬───┐   │
  *   │  │ A │ B │ → │ E │ F │   │  ← horizontal paged carousel
- *   │  │ C │ D │   │ G │ H │   │    (2x2 per page)
+ *   │  │ C │ D │   │ G │ H │   │    (2 rows; columns follow width)
  *   │  └───┴───┘   └───┴───┘   │
  *   │       •  o  o            │  ← DVNT dot pagination (width+opacity)
  *   └──────────────────────────┘
@@ -20,11 +20,18 @@
  *   small phones, 42% of stage height was smaller than the tiles'
  *   natural height, so the scroller clipped the bottom half off.
  *
- *   Now: hero = min(pageWidth/HERO_ASPECT, availableHeight * heroCap).
- *   Crowd zone = flex:1 of the remaining space, with overflow:hidden
- *   so content can never spill onto the hero. Attendee tiles size
- *   themselves from the measured crowd height via onLayout — 2 rows
- *   always fit the visible area.
+ *   Now: the hero is `heroBox(pageWidth, availableHeight * heroCap)`,
+ *   which narrows the width when the height cap binds so the feed keeps
+ *   16:9 instead of stretching into a letterbox — the tablet-landscape
+ *   case. Crowd zone = flex:1 of the remaining space, with
+ *   overflow:hidden so content can never spill onto the hero. Attendee
+ *   tiles size themselves from the measured crowd height via onLayout —
+ *   2 rows always fit the visible area.
+ *
+ *   Columns come from `crowdColumns(screenWidth)`: 2 on a phone, 3 on a
+ *   tablet, 4 once there is room. They were fixed at 2, so an iPad drew
+ *   the phone layout at twice the scale — two 496x237 slabs per row.
+ *   Geometry and its tests live in stage-layout.ts.
  *
  *   heroCap drops from 0.5 → 0.42 when the room has 10+ participants
  *   so the crowd gets more breathing room.
@@ -55,6 +62,7 @@ import type { SharedValue } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
 import { Users } from "lucide-react-native";
 import { VideoTile, type VideoParticipant } from "./VideoGrid";
+import { crowdColumns, crowdTileBox, heroBox } from "./stage-layout";
 
 interface RoomStageProps {
   /** Full flat list including local/host + remotes. */
@@ -79,12 +87,9 @@ interface RoomStageProps {
   hostOverlay?: React.ReactNode;
 }
 
-const HERO_ASPECT = 16 / 9; // webcam-native landscape main stage
 const SIDE_PAD = 12;
 const TILE_GAP = 8;
-const TILES_PER_ROW = 2;
 const ROWS_PER_PAGE = 2;
-const TILES_PER_PAGE = TILES_PER_ROW * ROWS_PER_PAGE; // 4
 // Reserved vertical inside the crowd zone for chrome (divider + label
 // row + vertical padding + pagination dots). Tiles get what's left
 // after this overhead is subtracted from the measured crowd height.
@@ -154,8 +159,10 @@ export const RoomStage = memo(function RoomStage({
   // Lower cap gives the crowd zone more height — matches Zoom's ~40/60 split.
   const heroCap = totalCount >= 10 ? 0.38 : 0.44;
   const heroMaxHeight = Math.round(screenHeight * heroCap);
-  const heroAspectHeight = Math.round(pageWidth / HERO_ASPECT);
-  const heroHeight = Math.min(heroAspectHeight, heroMaxHeight);
+  // Width comes down with the cap so the hero stays 16:9 — see stage-layout.
+  const hero = heroBox(pageWidth, heroMaxHeight);
+  const heroHeight = hero.height;
+  const heroWidth = hero.width;
 
   // ── Crowd-zone height — derived from the measured stage height ───
   // The parent (RoomLayout) measures the stage container via onLayout
@@ -172,21 +179,28 @@ export const RoomStage = memo(function RoomStage({
 
   const tilesAreaHeight = Math.max(200, crowdZoneHeight - CROWD_CHROME_HEIGHT);
 
-  const tileHeight = Math.floor(
-    (tilesAreaHeight - TILE_GAP * (ROWS_PER_PAGE - 1)) / ROWS_PER_PAGE,
+  // A tablet carries more faces per row than a phone; a fixed 2 drew the
+  // phone layout at twice the scale.
+  const tilesPerRow = crowdColumns(screenWidth);
+  const tilesPerPage = tilesPerRow * ROWS_PER_PAGE;
+  const tile = crowdTileBox(
+    pageWidth,
+    tilesAreaHeight,
+    tilesPerRow,
+    ROWS_PER_PAGE,
+    TILE_GAP,
   );
-  const tileWidth = Math.floor(
-    (pageWidth - TILE_GAP * (TILES_PER_ROW - 1)) / TILES_PER_ROW,
-  );
+  const tileWidth = tile.width;
+  const tileHeight = tile.height;
 
   const pages = useMemo<VideoParticipant[][]>(() => {
     if (attendees.length === 0) return [];
     const chunks: VideoParticipant[][] = [];
-    for (let i = 0; i < attendees.length; i += TILES_PER_PAGE) {
-      chunks.push(attendees.slice(i, i + TILES_PER_PAGE));
+    for (let i = 0; i < attendees.length; i += tilesPerPage) {
+      chunks.push(attendees.slice(i, i + tilesPerPage));
     }
     return chunks;
-  }, [attendees]);
+  }, [attendees, tilesPerPage]);
 
   const pageCount = pages.length;
   const showPagination = pageCount > 1;
@@ -221,11 +235,12 @@ export const RoomStage = memo(function RoomStage({
           paddingHorizontal: SIDE_PAD,
           paddingTop: 4,
           height: heroHeight + 4,
+          alignItems: "center",
         }}
       >
         <View
           style={{
-            width: pageWidth,
+            width: heroWidth,
             height: heroHeight,
             borderRadius: 20,
             overflow: "hidden",
@@ -234,7 +249,7 @@ export const RoomStage = memo(function RoomStage({
           <VideoTile
             participant={host}
             isSpeaking={activeSpeakers.has(host.user.id)}
-            tileWidth={pageWidth}
+            tileWidth={heroWidth}
             tileHeight={heroHeight}
             isHost={isHost}
             onPress={
@@ -254,7 +269,7 @@ export const RoomStage = memo(function RoomStage({
   }, [
     host,
     isHost,
-    pageWidth,
+    heroWidth,
     heroHeight,
     activeSpeakers,
     onParticipantPress,
@@ -315,7 +330,7 @@ export const RoomStage = memo(function RoomStage({
             {/* Fill the last row with invisible placeholders so a partial
                 page doesn't left-align into an awkward L-shape. */}
             {Array.from({
-              length: Math.max(0, TILES_PER_PAGE - page.length),
+              length: Math.max(0, tilesPerPage - page.length),
             }).map((_, i) => (
               <View
                 key={`placeholder-${pageIndex}-${i}`}
@@ -331,6 +346,7 @@ export const RoomStage = memo(function RoomStage({
       pageWidth,
       tileWidth,
       tileHeight,
+      tilesPerPage,
       activeSpeakers,
       isHost,
       onParticipantPress,
@@ -534,6 +550,7 @@ const styles = StyleSheet.create({
   pageGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
+    justifyContent: "center",
     gap: TILE_GAP,
   },
   hostOverlay: {

@@ -27,6 +27,7 @@ import {
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { RoomVideo } from "./RoomVideo";
 import { getSneakyUserLabel } from "./user-labels";
+import { gridColumns } from "./stage-layout";
 import type { SneakyUser } from "../types";
 import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
 import Animated, {
@@ -376,12 +377,6 @@ export const VideoTile = memo(function VideoTile({
  * columns FIT; participant count decides how many are WANTED; the layout takes
  * the smaller.
  */
-const TABLET_MIN_WIDTH = 700;
-/** Below this a tile stops reading as a face and starts reading as a chip.
- *  120 is deliberate: it is what a 390pt phone already produced at 3 columns,
- *  so this floor constrains narrow screens without reflowing phones. */
-const MIN_TILE_WIDTH = 120;
-
 function getGridLayout(
   count: number,
   screenWidth: number,
@@ -389,10 +384,9 @@ function getGridLayout(
 ) {
   const availableHeight = screenHeight - 130;
   const gap = 6;
-  const isTablet = screenWidth >= TABLET_MIN_WIDTH;
-  // How many columns the width can carry without shrinking tiles below legible.
-  const maxCols = Math.max(1, Math.floor(screenWidth / MIN_TILE_WIDTH));
-  const fit = (wanted: number) => Math.max(1, Math.min(wanted, maxCols));
+  // The column rule lives in stage-layout so the stage and this grid cannot
+  // drift into different rooms, and so a test can import the real thing.
+  const cols = gridColumns(count, screenWidth);
 
   if (count === 1) {
     return {
@@ -403,10 +397,7 @@ function getGridLayout(
     };
   }
   if (count === 2) {
-    // Two people stack on a phone and sit side by side on a tablet, where a
-    // full-width tile would be a letterbox strip.
-    const cols = isTablet ? 2 : 1;
-    const rows = isTablet ? 1 : 2;
+    const rows = cols === 2 ? 1 : 2;
     return {
       cols,
       rows,
@@ -415,9 +406,6 @@ function getGridLayout(
     };
   }
   if (count <= 6) {
-    // 3-up on a tablet keeps four people square rather than stretching two
-    // across the width; 2-up on a phone is unchanged.
-    const cols = fit(isTablet ? 3 : 2);
     const rows = Math.ceil(count / cols);
     const tileWidth = (screenWidth - gap * (cols + 1)) / cols;
     const tileHeight = (availableHeight - gap * (rows + 1)) / rows;
@@ -425,7 +413,6 @@ function getGridLayout(
   }
   // 7+ participants: scrollable. Wider screens carry more columns rather than
   // taller tiles, so the grid keeps a face-shaped ratio instead of drifting.
-  const cols = fit(isTablet ? 4 : 3);
   const tileWidth = (screenWidth - gap * (cols + 1)) / cols;
   // Cap the portrait bias: 1.2 on a 340pt tablet tile is a 408pt column.
   const tileHeight = Math.min(tileWidth * 1.2, tileWidth + 40);
