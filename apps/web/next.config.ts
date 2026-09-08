@@ -51,6 +51,20 @@ const nextConfig: NextConfig = {
   // client component (S3ClientUploadHandler, referenced from the import map),
   // and externalizing them breaks /admin's build-time page-data collection.
   serverExternalPackages: ['@aws-sdk/client-s3', '@smithy/node-http-handler'],
+  /**
+   * Next only inlines NEXT_PUBLIC_*, so every EXPO_PUBLIC_* the shared packages
+   * read is `undefined` in the browser. `features/stickers/api/klipy.ts` reads
+   * EXPO_PUBLIC_KLIPY_API_KEY, found an empty string on web, and took its
+   * missing-key branch — Klipy content rendered on native and silently fell
+   * back to bundled reactions on web.
+   *
+   * Same exposure as native, where this key is already inlined into the app
+   * bundle: EXPO_PUBLIC_* is public by definition. Anything secret must not
+   * come through here.
+   */
+  env: {
+    EXPO_PUBLIC_KLIPY_API_KEY: process.env.EXPO_PUBLIC_KLIPY_API_KEY,
+  },
   transpilePackages: [
     'react-native',
     'react-native-web',
