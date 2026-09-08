@@ -31,7 +31,8 @@
     "test:tickets": "node --test packages/app/lib/tickets/ticket-identity.test.ts packages/app/lib/tickets/ticket-library.test.ts packages/app/lib/tickets/checkout-outcome.test.ts packages/app/lib/tickets/pricing.test.ts packages/app/features/navigation/drawer-destinations.test.ts",
     "test:ads": "node --test packages/app/lib/ads/ad-eligibility.test.ts packages/app/lib/ads/ad-config.test.ts packages/app/lib/ads/boost-selection.test.ts packages/app/lib/ads/boost-schedule.test.ts packages/app/lib/ads/boost-lifecycle.test.ts packages/app/lib/ads/boost-feed-bridge.test.ts packages/app/lib/ads/boost-payment-route.test.ts packages/app/components/feed/feed-slots.test.ts",
     "test:feed": "node --test packages/app/components/feed/feed-sections.test.ts packages/app/components/feed/feed-slots.test.ts packages/app/components/feed/masonry-pack.test.ts",
-    "test:events": "node --test packages/app/lib/events/event-role.test.ts"
+    "test:events": "node --test packages/app/lib/events/event-role.test.ts",
+    "test:profile": "node --test packages/app/lib/profile/patch-user-in-cache.test.ts"
   },
   "keywords": [],
   "author": "",

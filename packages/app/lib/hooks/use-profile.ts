@@ -20,6 +20,10 @@ import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import type { AppUser } from "@dvnt/app/lib/auth-client";
 import { postKeys, profileKeys, activityKeys } from "@dvnt/app/lib/query-keys";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
+import {
+  displayablePatch,
+  patchUserInTree,
+} from "@dvnt/app/lib/profile/patch-user-in-cache";
 export { profileKeys };
 
 // Query keys - MUST be scoped by userId
@@ -287,6 +291,31 @@ function patchCurrentUserEverywhere(
     if (!old || !Array.isArray(old)) return old;
     return old.map(patchStory);
   });
+
+  /**
+   * Everything else.
+   *
+   * The blocks above hand-shape the caches whose structure this file knows —
+   * the profile, the two username lookups, the feed, profile posts, stories.
+   * That list WAS the bug: comments, post detail, likers, search results,
+   * message threads, event attendees and ticket holder names were never on it,
+   * so they kept the old username until they happened to refetch, and because
+   * the cache is persisted to disk a stale username survived a restart.
+   *
+   * This sweeps every remaining cache, including ones added after today, by
+   * walking the cached value rather than knowing its shape. It runs last so the
+   * specific handlers above win where they apply, and it returns caches
+   * untouched by identity so React Query does not re-render the world.
+   */
+  const patch = displayablePatch({
+    username: nextUser.username,
+    name: nextUser.name,
+    avatar: nextUser.avatar,
+    isVerified: nextUser.isVerified,
+  });
+  queryClient.setQueriesData({ predicate: () => true }, (old: unknown) =>
+    patchUserInTree(old, userId, patch),
+  );
 }
 
 /**

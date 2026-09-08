@@ -245,6 +245,27 @@ Deno.serve(async (req) => {
       }
 
       updateData.username = desiredUsername;
+
+      /**
+       * Better Auth keeps its OWN copy of the username on the `user` table —
+       * `auth-sync/index.ts:131` selects it, and `stores/auth-store.ts:388`
+       * falls back to it when the profile cannot be loaded. Nothing used to
+       * update it, so the two drifted apart from the first rename onward and
+       * the stale copy could resurface on a bad session restore.
+       *
+       * Best-effort: `users` is the source of truth and its update must not
+       * fail because the mirror did. A failure is logged, not raised.
+       */
+      const { error: baUpdateError } = await supabaseAdmin
+        .from("user")
+        .update({ username: desiredUsername })
+        .eq("id", authUserId);
+      if (baUpdateError) {
+        console.error(
+          "[Edge:update-profile] Better Auth username mirror failed (continuing):",
+          baUpdateError,
+        );
+      }
     }
 
     // Handle avatar: accept both 'avatar' and 'avatarUrl' field names
