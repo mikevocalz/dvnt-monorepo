@@ -86,6 +86,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ splashAnimationFinished: finished });
   },
   onAnimationFinish: (isCancelled) => {
+    // Reconcile before the once-only guard. `splashHasFinishedEver` is a module
+    // flag and `splashAnimationFinished` is store state, so a store reset can
+    // leave them disagreeing — and then this early-returned without ever
+    // clearing the gate, pinning the app on the splash with no way out.
+    if (splashHasFinishedEver && !get().splashAnimationFinished) {
+      set({ splashAnimationFinished: true });
+      return;
+    }
     // Guard: Never call this more than once
     if (splashHasFinishedEver || get().splashAnimationFinished) {
       console.log(

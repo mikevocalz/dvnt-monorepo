@@ -30,7 +30,7 @@ export function useFeedRealtime(enabled = true): void {
       if (timer) return;
       timer = setTimeout(() => {
         timer = null;
-        queryClient.invalidateQueries({ queryKey: postKeys.feedInfinite() });
+        queryClient.invalidateQueries({ queryKey: postKeys.feedInfiniteAll() });
       }, 1500);
     };
 

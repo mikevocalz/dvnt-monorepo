@@ -33,18 +33,30 @@ interface MediaDimensions {
  */
 export function useResponsiveMedia(
   aspectRatio: keyof typeof ASPECT_RATIOS | number = "portrait",
-  options?: { cardMargin?: number; cardBorder?: number },
+  options?: {
+    cardMargin?: number;
+    cardBorder?: number;
+    /**
+     * Override the tablet content cap. Feed posts keep the 614pt Instagram
+     * width; event cards use the app's max-w-3xl content column, because an
+     * event card is a flyer-led banner rather than a photo in a reading column
+     * and 614 left it visibly narrower than everything around it.
+     */
+    maxWidth?: number;
+  },
 ): MediaDimensions {
   const { width: screenWidth } = useWindowDimensions();
-  const { cardMargin = 4, cardBorder = 1 } = options || {};
+  const {
+    cardMargin = 4,
+    cardBorder = 1,
+    maxWidth = MAX_CONTENT_WIDTH,
+  } = options || {};
 
   // Determine if tablet (768px = md breakpoint in NativeWind)
   const isTablet = screenWidth >= 768;
 
   // Content width: full on phone, max 614px on tablet
-  const contentWidth = isTablet
-    ? Math.min(screenWidth, MAX_CONTENT_WIDTH)
-    : screenWidth;
+  const contentWidth = isTablet ? Math.min(screenWidth, maxWidth) : screenWidth;
 
   // Media width (subtract card decorations)
   const mediaWidth = contentWidth - (cardMargin + cardBorder) * 2;
@@ -55,9 +67,14 @@ export function useResponsiveMedia(
   const mediaHeight = Math.round(mediaWidth * ratio);
 
   // Container classes: centered on tablet with max-width
-  const containerClass = isTablet
-    ? "md:max-w-[614px] md:mx-auto w-full"
-    : "w-full";
+  // Arbitrary Tailwind values must be statically analysable, so the two widths
+  // in use are spelled out rather than interpolated — a `max-w-[${n}px]` class
+  // is never emitted by the compiler and silently does nothing.
+  const containerClass = !isTablet
+    ? "w-full"
+    : maxWidth >= 768
+      ? "md:max-w-3xl md:mx-auto w-full"
+      : "md:max-w-[614px] md:mx-auto w-full";
 
   return {
     width: mediaWidth,

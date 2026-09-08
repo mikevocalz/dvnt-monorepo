@@ -20,7 +20,16 @@ import type { EventFilters } from "@dvnt/app/lib/hooks/use-events";
 export const postKeys = {
   all: ["posts"] as const,
   feed: () => [...postKeys.all, "feed"] as const,
-  feedInfinite: () => [...postKeys.all, "feed", "infinite"] as const,
+  /**
+   * Exact key. The sweet and spicy feeds are DIFFERENT lists, so they must not
+   * share a cache entry — four writers (feed query, boot prefetch, tab
+   * prefetch, bootstrap) seed this key, and whichever ran last used to decide
+   * which list you saw.
+   */
+  feedInfinite: (nsfw: boolean) =>
+    [...postKeys.all, "feed", "infinite", nsfw ? "spicy" : "sweet"] as const,
+  /** Prefix key — matches BOTH feeds. For invalidate/cancel/remove only. */
+  feedInfiniteAll: () => [...postKeys.all, "feed", "infinite"] as const,
   profilePosts: (userId: string) => ["profilePosts", userId] as const,
   profile: (userId: string) => postKeys.profilePosts(userId),
   detail: (id: string) => [...postKeys.all, "detail", id] as const,

@@ -45,7 +45,7 @@ import { useAppStore } from "@dvnt/app/lib/stores/app-store";
  * If it does, we log "cache-first" mode — the user sees zero loading.
  */
 function detectCacheStatus(queryClient: any, userId: string): string {
-  const hasFeed = !!queryClient.getQueryData(postKeys.feedInfinite());
+  const hasFeed = !!queryClient.getQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled));
   const hasProfile = !!queryClient.getQueryData(profileKeys.byId(userId));
   const hasMessages = !!queryClient.getQueryData(
     messageKeys.unreadCount(userId),
@@ -133,12 +133,18 @@ export function useBootPrefetch() {
     // Feed query's filter and doesn't hydrate the cache with SFW posts when
     // the user has spicy ON (which would leak non-spicy rows into the feed
     // after the strict filter was added in posts.ts).
-    const nsfwEnabledAtBoot = useAppStore.getState().nsfwEnabled;
+
     Promise.allSettled([
       queryClient.prefetchInfiniteQuery({
-        queryKey: postKeys.feedInfinite(),
+        queryKey: postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
         queryFn: ({ pageParam = 0 }: { pageParam: number }) =>
-          postsApi.getFeedPostsPaginated(pageParam, nsfwEnabledAtBoot),
+          // Read live, not captured at boot: this seeds the same cache key
+          // the feed reads, so a value frozen before the user flipped the
+          // spicy toggle lands as the wrong list after they flipped it.
+          postsApi.getFeedPostsPaginated(
+            pageParam,
+            useAppStore.getState().nsfwEnabled,
+          ),
         initialPageParam: 0,
       }),
       queryClient.prefetchQuery({

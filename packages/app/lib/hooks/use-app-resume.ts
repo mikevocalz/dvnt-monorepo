@@ -79,7 +79,7 @@ export function useAppResume() {
 
         // Invalidate feed so next scroll triggers background refetch
         queryClient.invalidateQueries({
-          queryKey: postKeys.feedInfinite(),
+          queryKey: postKeys.feedInfiniteAll(),
           refetchType: "none", // Don't refetch now — just mark stale
         }),
 

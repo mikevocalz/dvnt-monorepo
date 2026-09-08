@@ -116,3 +116,16 @@ export interface ValidationError {
   current: number;
   max: number;
 }
+
+/**
+ * Is this media kind backed by a video file?
+ *
+ * `animated_video` is the trap: it carries an `.mp4` url exactly like `video`
+ * does, but a check written as `type === "video"` misses it, and the url then
+ * reaches an <Image>, which renders nothing. `transformPost` guards its own
+ * `thumbnail` field against this ("NEVER use a video URL as thumbnail") — every
+ * grid tile that picks a preview url needs the same guard.
+ */
+export function isVideoKind(kind: string | undefined | null): boolean {
+  return kind === "video" || kind === "animated_video";
+}

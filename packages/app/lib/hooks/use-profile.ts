@@ -19,6 +19,7 @@ import { resolveAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import type { AppUser } from "@dvnt/app/lib/auth-client";
 import { postKeys, profileKeys, activityKeys } from "@dvnt/app/lib/query-keys";
+import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 export { profileKeys };
 
 // Query keys - MUST be scoped by userId
@@ -227,7 +228,7 @@ function patchCurrentUserEverywhere(
     return old.map(patchPost);
   });
 
-  queryClient.setQueryData(postKeys.feedInfinite(), (old: any) => {
+  queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), (old: any) => {
     if (!old?.pages) return old;
     return {
       ...old,
@@ -461,7 +462,7 @@ export function useUpdateProfile() {
           : undefined;
       const previousFeed = queryClient.getQueryData(["posts", "feed"]);
       const previousInfiniteFeed = queryClient.getQueryData(
-        postKeys.feedInfinite(),
+        postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
       );
       const previousProfilePosts = queryClient.getQueryData(
         postKeys.profilePosts(userId),
@@ -551,7 +552,7 @@ export function useUpdateProfile() {
       restoreQueryData(queryClient, postKeys.feed(), context?.previousFeed);
       restoreQueryData(
         queryClient,
-        postKeys.feedInfinite(),
+        postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
         context?.previousInfiniteFeed,
       );
       if (context?.userId) {

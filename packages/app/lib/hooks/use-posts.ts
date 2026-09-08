@@ -11,7 +11,7 @@ import { postsApi } from "@dvnt/app/lib/api/posts";
 import type { Post } from "@dvnt/app/lib/types";
 import { deriveMediaKind } from "@dvnt/app/lib/api/posts";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
-import { useRef, useCallback, useMemo, useEffect } from "react";
+import { useCallback, useMemo } from "react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { STALE_TIMES, GC_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
@@ -38,7 +38,7 @@ function findCachedPostSnapshot(
   const feedMatch = feed?.find((post: Post) => post.id === postId);
   if (feedMatch) return feedMatch;
 
-  const infiniteFeed = queryClient.getQueryData<any>(postKeys.feedInfinite());
+  const infiniteFeed = queryClient.getQueryData<any>(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled));
   const pagedMatch = infiniteFeed?.pages
     ?.flatMap((page: any) => page?.data || [])
     ?.find((post: Post) => post.id === postId);
@@ -75,13 +75,14 @@ function restoreCachedQuery(
  * - Always use factory functions, never construct keys manually
  * - Profile posts MUST include userId for proper scoping
  * - Detail keys MUST include post ID
- * - Use feedInfinite() for infinite scroll queries
+ * - Use feedInfinite(nsfw) for infinite scroll queries; feedInfiniteAll()
+ *   is the prefix key for invalidate/cancel/remove across both feeds
  *
  * @example
  * // ✅ Correct
  * queryKey: postKeys.detail(postId)
  * queryKey: postKeys.profilePosts(userId)
- * queryKey: postKeys.feedInfinite()
+ * queryKey: postKeys.feedInfinite(nsfwEnabled)
  *
  * // ❌ Wrong - never construct manually
  * queryKey: ["posts", "detail", postId]
@@ -105,22 +106,11 @@ export function useInfiniteFeedPosts({
   const nsfwEnabled = useAppStore((s) => s.nsfwEnabled);
   const queryClient = useQueryClient();
 
-  // Clear the feed cache ONLY when the NSFW setting actually changes (so the
-  // filter re-applies). Previously this ran on every mount — which wiped the
-  // cache each time the feed remounted (e.g. routing back from a post detail),
-  // forcing a full slow refetch from page 0 and resetting scroll. The ref guard
-  // skips the initial mount so back-navigation reuses the cached pages
-  // (staleTime + refetchOnMount:false below keep it instant).
-  const prevNsfw = useRef(nsfwEnabled);
-  useEffect(() => {
-    if (prevNsfw.current !== nsfwEnabled) {
-      queryClient.removeQueries({ queryKey: postKeys.feedInfinite(), exact: true });
-      prevNsfw.current = nsfwEnabled;
-    }
-  }, [nsfwEnabled, queryClient]);
-
+  // No cache-clearing on toggle: sweet and spicy now have separate cache
+  // entries via feedInfinite(nsfw), so switching just reads the other one.
+  // Wiping here would throw away the list the user is switching back to.
   return useInfiniteQuery({
-    queryKey: postKeys.feedInfinite(),
+    queryKey: postKeys.feedInfinite(nsfwEnabled),
     queryFn: ({ pageParam = 0 }) => postsApi.getFeedPostsPaginated(pageParam, nsfwEnabled),
     enabled,
     initialPageParam: 0,
@@ -303,7 +293,7 @@ export function useLikePost() {
       );
 
       // Update infinite feed cache
-      queryClient.setQueryData(postKeys.feedInfinite(), (old: any) => {
+      queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), (old: any) => {
         if (!old?.pages) return old;
         return {
           ...old,
@@ -449,7 +439,7 @@ export function useCreatePost() {
           : { textSlides: [], caption: "", previewText: "" };
 
       // Optimistically add the new post to infinite feed
-      queryClient.setQueryData(postKeys.feedInfinite(), (old: any) => {
+      queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), (old: any) => {
         if (!old || !old.pages || old.pages.length === 0) return old;
         // Add to first page
         const firstPage = old.pages[0];
@@ -650,7 +640,7 @@ export function useCreatePost() {
       // This prevents double posts from appearing
       if (newPost?.id) {
         // Update infinite feed - replace temp post with real one
-        queryClient.setQueryData(postKeys.feedInfinite(), (old: any) => {
+        queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), (old: any) => {
           if (!old?.pages) return old;
           const filteredPages = old.pages.map((page: any) => {
             if (!page?.data) return page;
@@ -727,7 +717,7 @@ export function useUpdatePost() {
       }
       // Invalidate feed to show updated content
       queryClient.invalidateQueries({ queryKey: postKeys.feed() });
-      queryClient.invalidateQueries({ queryKey: postKeys.feedInfinite() });
+      queryClient.invalidateQueries({ queryKey: postKeys.feedInfiniteAll() });
     },
   });
 }
@@ -761,7 +751,7 @@ export function useDeletePost() {
       ]);
 
       const previousInfinite = queryClient.getQueryData(
-        postKeys.feedInfinite(),
+        postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
       );
       const previousFeed = queryClient.getQueryData(postKeys.feed());
       const previousDetail = queryClient.getQueryData(postKeys.detail(idStr));
@@ -809,7 +799,7 @@ export function useDeletePost() {
     onError: (_err, deletedPostId, context) => {
       if (context?.previousInfinite) {
         queryClient.setQueryData(
-          postKeys.feedInfinite(),
+          postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
           context.previousInfinite,
         );
       }
@@ -860,7 +850,7 @@ export function useDeletePost() {
       const markStale = (queryKey: readonly unknown[]) =>
         queryClient.invalidateQueries({ queryKey, refetchType: "none" });
 
-      markStale(postKeys.feedInfinite());
+      markStale(postKeys.feedInfiniteAll());
       markStale(postKeys.feed());
       markStale(["profilePosts"]);
 

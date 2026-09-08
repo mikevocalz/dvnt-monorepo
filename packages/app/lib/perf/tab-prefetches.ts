@@ -28,7 +28,7 @@ registerPrefetch("index", (qc, userId) => {
   // infinite-feed cache with SFW rows even when spicy is ON.
   const nsfwEnabled = useAppStore.getState().nsfwEnabled;
   qc.prefetchInfiniteQuery({
-    queryKey: postKeys.feedInfinite(),
+    queryKey: postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
     queryFn: ({ pageParam = 0 }: { pageParam: number }) =>
       postsApi.getFeedPostsPaginated(pageParam, nsfwEnabled),
     initialPageParam: 0,

@@ -219,7 +219,7 @@ function updatePostInAllCaches(
 
   // Infinite feed — pages may expose `data` or `posts` depending on the source
   queryClient.setQueriesData<any>(
-    { queryKey: postKeys.feedInfinite() },
+    { queryKey: postKeys.feedInfiniteAll() },
     (old: any) => {
       if (!old?.pages) return old;
       return {

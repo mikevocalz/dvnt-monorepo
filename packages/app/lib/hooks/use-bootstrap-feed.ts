@@ -55,7 +55,7 @@ function wouldClobber(
 ): boolean {
   if (data.posts?.length) return false;
   const existing = queryClient.getQueryData<{ pages?: { data?: unknown[] }[] }>(
-    postKeys.feedInfinite(),
+    postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
   );
   const cachedCount =
     existing?.pages?.reduce((n, page) => n + (page?.data?.length ?? 0), 0) ?? 0;
@@ -128,10 +128,16 @@ function hydrateFromBootstrap(
     hasMore: data.hasMore,
   };
 
-  queryClient.setQueryData(postKeys.feedInfinite(), {
-    pages: [feedPage],
-    pageParams: [0],
-  });
+  // Never seed an EMPTY page. The bootstrap edge function scopes spicy to
+  // followed authors only, while the client feed query returns all public
+  // spicy posts — so seeding its 0 results marked the cache "loaded" and the
+  // real query never ran, leaving the spicy feed blank after the toggle.
+  if (feedPage.data.length > 0) {
+    queryClient.setQueryData(
+      postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
+      { pages: [feedPage], pageParams: [0] },
+    );
+  }
 
   // 2. Seed unread counts only when backend confirms the source is authoritative.
   if (data.viewer?.unreadMessagesAuthoritative) {
@@ -165,9 +171,29 @@ function hydrateFromBootstrap(
 function getCachedFeedItems(
   queryClient: ReturnType<typeof useQueryClient>,
 ): unknown[] {
-  const existingFeed = queryClient.getQueryData(postKeys.feedInfinite()) as any;
+  const existingFeed = queryClient.getQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled)) as any;
   if (!Array.isArray(existingFeed?.pages)) return [];
   return existingFeed.pages.flatMap((page: any) => page?.data || []);
+}
+
+/**
+ * Any feed data at all, sweet OR spicy. The bootstrap gate exists to stop a
+ * cold start double-loading — not to block a mode switch. Keying the feed by
+ * nsfw means the mode you switch TO is always empty, so checking only that key
+ * disabled the feed query on every toggle.
+ */
+function hasAnyCachedFeed(
+  queryClient: ReturnType<typeof useQueryClient>,
+): boolean {
+  return queryClient
+    .getQueriesData({ queryKey: postKeys.feedInfiniteAll() })
+    .some(([, data]) => {
+      const pages = (data as any)?.pages;
+      return (
+        Array.isArray(pages) &&
+        pages.some((page: any) => (page?.data || []).length > 0)
+      );
+    });
 }
 
 /**
@@ -195,7 +221,7 @@ export function useBootstrapFeed() {
   const enabled = isFeatureEnabled("perf_bootstrap_feed");
   const canBootstrap = enabled && !!userId;
   const bootstrapKey = canBootstrap ? `${userId}:${nsfwEnabled}` : "disabled";
-  const hasCachedFeed = getCachedFeedItems(queryClient).length > 0;
+  const hasCachedFeed = hasAnyCachedFeed(queryClient);
   const status =
     bootstrapState.key === bootstrapKey ? bootstrapState.status : "idle";
 
@@ -217,7 +243,7 @@ export function useBootstrapFeed() {
     if (hasRun.current || isBootstrapping.current) return;
 
     // Check if we already have fresh feed data from MMKV cache
-    const existingFeed = queryClient.getQueryData(postKeys.feedInfinite()) as any;
+    const existingFeed = queryClient.getQueryData(postKeys.feedInfinite(nsfwEnabled)) as any;
     const cachedItems = getCachedFeedItems(queryClient);
 
     if (
@@ -239,7 +265,7 @@ export function useBootstrapFeed() {
       cachedItems.length === 0
     ) {
       queryClient.removeQueries({
-        queryKey: postKeys.feedInfinite(),
+        queryKey: postKeys.feedInfinite(nsfwEnabled),
         exact: true,
       });
     }

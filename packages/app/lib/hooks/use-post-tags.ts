@@ -88,7 +88,7 @@ export function useSaveTagsDiff() {
       // Replace optimistic data with server data
       queryClient.setQueryData(postTagKeys.forPost(postId), data);
       // Invalidate related caches - use proper key factories
-      queryClient.invalidateQueries({ queryKey: postKeys.feedInfinite() });
+      queryClient.invalidateQueries({ queryKey: postKeys.feedInfiniteAll() });
       queryClient.invalidateQueries({ queryKey: postKeys.detail(postId) });
     },
   });

@@ -39,6 +39,7 @@ export function useResponsiveGrid({
   maxColumns = 6,
   maxColumnsPortrait,
   maxColumnsLandscape,
+  containerWidth,
 }: {
   minCellWidth: number;
   gap?: number;
@@ -48,10 +49,21 @@ export function useResponsiveGrid({
   maxColumnsPortrait?: number;
   /** Hard ceiling in landscape. */
   maxColumnsLandscape?: number;
+  /**
+   * Width the grid actually lays out inside, when that is NOT the window.
+   *
+   * A screen that caps its content column (max-w-3xl and friends) is the case
+   * this exists for: sizing cells off the window there makes every cell too
+   * wide for the box holding them, so the last column runs past the edge. The
+   * orientation ceilings still read the real window, because portrait vs
+   * landscape is a property of the device, not of the container.
+   */
+  containerWidth?: number;
 }): ResponsiveGrid {
-  const { width, height } = useWindowDimensions();
+  const { width: windowWidth, height } = useWindowDimensions();
+  const width = containerWidth ?? windowWidth;
   const orientationCap =
-    width > height ? maxColumnsLandscape : maxColumnsPortrait;
+    windowWidth > height ? maxColumnsLandscape : maxColumnsPortrait;
   const available = Math.max(0, width - horizontalPadding);
   const ceiling = Math.min(maxColumns, orientationCap ?? maxColumns);
   const columns = Math.max(

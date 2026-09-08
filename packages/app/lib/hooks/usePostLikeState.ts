@@ -23,6 +23,7 @@ import { activityKeys } from "@dvnt/app/lib/hooks/use-activities-query";
 import { updatePostLikeEverywhere } from "@dvnt/app/lib/query/patch";
 import type { Post } from "@dvnt/app/lib/types";
 import { postLikersKeys, likeStateKeys } from "@dvnt/app/lib/query-keys";
+import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 export { likeStateKeys };
 
 interface LikeState {
@@ -67,7 +68,7 @@ function findPostInCache(
   const feedMatch = feed?.find((post) => post.id === postId);
   if (feedMatch) return feedMatch;
 
-  const infiniteFeed = queryClient.getQueryData<any>(postKeys.feedInfinite());
+  const infiniteFeed = queryClient.getQueryData<any>(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled));
   for (const page of infiniteFeed?.pages || []) {
     const match = page?.data?.find((post: Post) => post.id === postId);
     if (match) return match;
@@ -149,12 +150,12 @@ export function usePostLikeState(
     onMutate: async ({ action }) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: likeStateQueryKey });
-      await queryClient.cancelQueries({ queryKey: postKeys.feedInfinite() });
+      await queryClient.cancelQueries({ queryKey: postKeys.feedInfiniteAll() });
 
       // Snapshot previous state for rollback
       const previousLikeState =
         queryClient.getQueryData<LikeState>(likeStateQueryKey);
-      const prevFeedData = queryClient.getQueryData(postKeys.feedInfinite());
+      const prevFeedData = queryClient.getQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled));
       const prevDetailData = queryClient.getQueryData([
         "posts",
         "detail",
@@ -224,7 +225,7 @@ export function usePostLikeState(
         queryClient.setQueryData(likeStateQueryKey, context.previousLikeState);
       }
       if (context?.prevFeedData) {
-        queryClient.setQueryData(postKeys.feedInfinite(), context.prevFeedData);
+        queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), context.prevFeedData);
       }
       if (context?.prevDetailData) {
         queryClient.setQueryData(
