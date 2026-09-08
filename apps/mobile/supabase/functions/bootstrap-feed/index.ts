@@ -243,6 +243,13 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
       { intUserId, authUserId },
     );
 
+    // ⚠️ POLICY DIVERGENCE — DEFERRED, do not "fix" by copying either side.
+    //   Here (edge):    spicy = only authors you follow (gate below).
+    //   Client query:   spicy = ALL public spicy posts
+    //                   (packages/app/lib/api/posts.ts, getFeedPostsPaginated).
+    // Because this returns 0 for a viewer who follows no spicy authors, the
+    // client no longer seeds an empty bootstrap result — see
+    // use-bootstrap-feed.ts. Resolve the policy before removing that guard.
     // ── NSFW follow gate: resolve which author IDs viewer may see spicy from ──
     // Spicy posts are only shown to logged-in users who follow the author (or are the author).
     // Guests (intUserId=null) requesting include_nsfw=true get an empty feed.
