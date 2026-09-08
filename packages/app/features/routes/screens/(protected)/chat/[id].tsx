@@ -37,7 +37,6 @@ import {
 import { Image } from "expo-image";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import {
-  ArrowLeft,
   Send,
   ImageIcon,
   X,
@@ -105,6 +104,8 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
 import { SCREEN_SHELL } from "@dvnt/app/components/layout/screen-shell";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 export const unstable_settings = {
   options: {
@@ -1444,11 +1445,12 @@ function ChatScreenContent() {
   if (!hasValidRouteId) {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
-        <View className="flex-row items-center gap-3 border-b border-border px-4 py-3">
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ArrowLeft size={24} color="#fff" />
-          </Pressable>
+        <View className="w-full border-b border-border py-3">
+          {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+          <View className="flex-row items-center gap-3 px-4" style={DETAIL_HEADER_ROW}>
+          <DetailBackButton />
           <Text className="text-lg font-semibold text-foreground">Chat</Text>
+        </View>
         </View>
         <View className="flex-1 items-center justify-center p-6">
           <MessageCircle size={64} color="#666" strokeWidth={1.5} />
@@ -1482,9 +1484,7 @@ function ChatScreenContent() {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-row items-center gap-3 border-b border-border px-4 py-3">
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ArrowLeft size={24} color="#fff" />
-          </Pressable>
+          <DetailBackButton />
           <Text className="text-lg font-semibold text-foreground">Chat</Text>
         </View>
         <View className="flex-1 items-center justify-center p-6">
@@ -1527,9 +1527,7 @@ function ChatScreenContent() {
         className={SCREEN_SHELL}
       >
         <View className="flex-row items-center gap-3 border-b border-border px-4 py-3">
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ArrowLeft size={24} color="#fff" />
-          </Pressable>
+          <DetailBackButton />
 
           {isGroupChat ? (
             /* ── Group chat header ── */

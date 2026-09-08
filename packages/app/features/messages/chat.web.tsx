@@ -1244,7 +1244,7 @@ export function ChatScreen() {
         {/* ── Composer (pinned above bottom safe-area) ── */}
         <div
           className="sticky bottom-0 z-20 border-t border-white/8 bg-[#06070d]/95 backdrop-blur"
-          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }}
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 8px + var(--dvnt-tabbar-clearance))" }}
         >
           {pendingMedia.length > 0 && (
             <div className="mx-4 mt-2 flex items-center gap-3 rounded-xl bg-white/8 p-2">
@@ -1358,7 +1358,10 @@ export function ChatScreen() {
 
       {/* ── Edit bar ── */}
       {editingMessage && (
-        <div className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-3xl border-t border-white/12 bg-[#1a1a1a] px-4 py-2.5">
+        <div
+          className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-3xl border-t border-white/12 bg-[#1a1a1a] px-4 pt-2.5"
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 10px + var(--dvnt-tabbar-clearance))" }}
+        >
           <div className="mb-2 flex items-center justify-between">
             <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3EA4E5]">
               <Pencil size={16} color="#3EA4E5" /> Editing message

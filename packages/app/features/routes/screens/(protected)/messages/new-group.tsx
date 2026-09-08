@@ -19,7 +19,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import { ArrowLeft, Search, X, Check, Users } from "lucide-react-native";
+import { Search, X, Check, Users } from "lucide-react-native";
 import { Image } from "expo-image";
 import { useCallback, useEffect } from "react";
 import { useNewGroupStore } from "@dvnt/app/lib/stores/new-group-store";
@@ -28,6 +28,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { messagesApi } from "@dvnt/app/lib/api/messages-impl";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 interface SelectedUser {
   id: string;
@@ -118,15 +120,10 @@ function NewGroupScreenContent() {
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
       {/* Header */}
-      <View className="flex-row items-center gap-3 border-b border-border px-4 py-3">
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <ArrowLeft size={24} color="#fff" />
-        </Pressable>
+      <View className="w-full border-b border-border py-3">
+        {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+        <View className="flex-row items-center gap-3 px-4" style={DETAIL_HEADER_ROW}>
+        <DetailBackButton />
         <Text className="flex-1 text-lg font-bold text-foreground">
           New Group
         </Text>
@@ -143,6 +140,7 @@ function NewGroupScreenContent() {
             )}
           </Pressable>
         )}
+      </View>
       </View>
 
       {/* Group Name Input */}

@@ -20,7 +20,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import {
-  ArrowLeft,
   Edit,
   MessageSquare,
   Inbox,
@@ -61,6 +60,9 @@ import { useFocusEffect } from "expo-router";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useScreenTrace } from "@dvnt/app/lib/perf/screen-trace";
 import { useBootstrapMessages } from "@dvnt/app/lib/hooks/use-bootstrap-messages";
+import { NewMessageSheet } from "@dvnt/app/features/messages/ui/new-message-sheet";
+import { useMessagesSheetsStore } from "@dvnt/app/lib/stores/messages-sheets-store";
+import { NewGroupSheet } from "@dvnt/app/features/messages/ui/new-group-sheet";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
 import { useChatStore } from "@dvnt/app/lib/stores/chat-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
@@ -68,6 +70,7 @@ import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 interface ConversationItem {
   id: string;
@@ -980,6 +983,15 @@ function MessagesScreenContent() {
   const router = useRouter();
   const { tab } = useLocalSearchParams<{ tab?: string }>();
   const insets = useSafeAreaInsets();
+  // Sheet visibility lives in the store (house rule: Zustand, never useState).
+  // Kept at the top with the other hooks regardless — this component
+  // early-returns a skeleton while loading, and a hook added below that return
+  // crashes the inbox with "Rendered more hooks than during the previous
+  // render".
+  const newMessageOpen = useMessagesSheetsStore((st) => st.newMessageOpen);
+  const setNewMessageOpen = useMessagesSheetsStore((st) => st.setNewMessageOpen);
+  const newGroupOpen = useMessagesSheetsStore((st) => st.newGroupOpen);
+  const setNewGroupOpen = useMessagesSheetsStore((st) => st.setNewGroupOpen);
   // BUG REGRESSION GUARD: see /Users/mikevocalz/deviant/app/(protected)/messages.tsx
   // history (commits b1c33c55..5363c242). The previous revert went back
   // to className="flex-1 bg-background" but the outer container
@@ -1347,31 +1359,42 @@ function MessagesScreenContent() {
         alignSelf: "center",
       }}
     >
-     <View style={{ width: inboxWidth, alignSelf: "center", flex: 1 }}>
-      {/* Header */}
-      <View className="flex-row items-center justify-between border-b border-border px-4 py-3">
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={24} color="#fff" />
-        </Pressable>
+      {/* Header — full width, outside the capped column below. Equal-weight side
+          slots so "Messages" is centred on the HEADER: with `justify-between`
+          it sat left of centre, because the two right icons are wider than the
+          single back chevron. */}
+      <View
+        // FULL WIDTH, contents included — same rule as every other detail
+        // header: back in the screen's top-left corner, actions top-right. The
+        // conversation list below stays capped to `inboxWidth`; chrome and
+        // content follow different rules.
+        className="w-full flex-row items-center border-b border-border px-4 py-3"
+      >
+        <View style={{ flex: 1, alignItems: "flex-start" }}>
+          <DetailBackButton />
+        </View>
         <Text className="text-lg font-bold text-foreground">Messages</Text>
-        <View className="flex-row items-center gap-4">
+        <View className="flex-row items-center justify-end gap-4" style={{ flex: 1 }}>
           <Pressable
-            onPress={() =>
-              router.push("/(protected)/messages/new-group" as any)
-            }
+            onPress={() => setNewGroupOpen(true)}
             hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="New group"
           >
             <Users size={24} color="#fff" />
           </Pressable>
           <Pressable
-            onPress={() => router.push("/(protected)/messages/new" as any)}
+            onPress={() => setNewMessageOpen(true)}
             hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="New message"
           >
             <Edit size={24} color="#fff" />
           </Pressable>
         </View>
       </View>
 
+     <View style={{ width: inboxWidth, alignSelf: "center", flex: 1 }}>
       {/* Tab Bar - 3 tabs */}
       <View className="flex-row border-b border-border">
         {/* Inbox Tab */}
@@ -1492,6 +1515,16 @@ function MessagesScreenContent() {
         </View>
       </PagerView>
      </View>
+
+      <NewMessageSheet
+        visible={newMessageOpen}
+        onDismiss={() => setNewMessageOpen(false)}
+      />
+
+      <NewGroupSheet
+        visible={newGroupOpen}
+        onDismiss={() => setNewGroupOpen(false)}
+      />
     </View>
   );
 }

@@ -10,7 +10,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import { ArrowLeft, Search, X } from "lucide-react-native";
+import { Search, X } from "lucide-react-native";
 import { Image } from "expo-image";
 import { useNewMessageStore } from "@dvnt/app/lib/stores/comments-store";
 import { useCallback, useState } from "react";
@@ -22,6 +22,8 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { messagesApiClient } from "@dvnt/app/lib/api/messages";
 import { getOrCreateConversationCached } from "@dvnt/app/lib/hooks/use-conversation-resolution";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 function NewMessageScreenContent() {
   const router = useRouter();
@@ -116,18 +118,14 @@ function NewMessageScreenContent() {
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
-      <View className="flex-row items-center gap-3 border-b border-border px-4 py-3">
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <ArrowLeft size={24} color="#fff" />
-        </Pressable>
+      <View className="w-full border-b border-border py-3">
+        {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+        <View className="flex-row items-center gap-3 px-4" style={DETAIL_HEADER_ROW}>
+        <DetailBackButton />
         <Text className="flex-1 text-lg font-bold text-foreground">
           New Message
         </Text>
+      </View>
       </View>
 
       <View className="px-4 py-3 border-b border-border">
