@@ -204,3 +204,39 @@ while the ticket-identity contract moved — see the navigation map.
 Device-measured performance numbers (warm/cold pass access, checkout-to-issuance
 latency, drawer responsiveness, scroll percentiles) were **not** collected. No
 build was run against a device this session.
+
+---
+
+## Delegated audits that returned (2026-09-08, second attempt)
+
+### Events discovery + attendee detail
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| Four overlapping segments | CONFIRMED | `events.tsx:580-585` — Upcoming / For You / All Events / Past Events. Upcoming is a strict subset of All Events (`:546-557`), and For You *returns* All Events whenever a filter is active (`:551-552`) |
+| **The event title is the seventh element on the screen** | CONFIRMED | `[id]/index.tsx` — hero (`1832`), cancelled banner (`1931`), sale card (`1990`), tier selection (`2011`), promo-code input (`2031`), "Upgrade Your Ticket" (`2185`), then the title (`2213`). An attendee's first read of an event is a commercial prompt naming the tier they already hold (`2191-2199`) |
+| "VIP" is any non-free tier | CONFIRMED | `[id]/index.tsx:1904-1907` — the chip is `FREE` when every tier is free, else the literal string `VIP`. The real tier name is never read |
+| Five host actions inline on the attendee page | CONFIRMED | `[id]/index.tsx:2262-2322` — Edit, Dashboard, Scanner, Promote, Download offline. No single "Manage event" entry; the overflow sheet (`2865-2920`) mixes attendee and host verbs |
+| Unlabelled My Tickets icon | CONFIRMED · **fixed** | `events.tsx:692` had no `accessibilityLabel` while both neighbours in the row did |
+| Uncapped index stagger | CONFIRMED · **fixed** | `events.tsx:109` `delay: index * 0.15` — the fortieth card waited six seconds |
+| Bare `useState` holding server data | **REFUTED** | Zero `useState` in either file; both carry explicit "banned pattern" comments. The brief's M3 was specific to `my-tickets.tsx`, now fixed |
+
+### Host dashboard + door scanner
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| **A delegated door scanner cannot open the scanner** | CONFIRMED — **highest-severity finding of this pass** | The server admits `admin`/`editor`/`scanner` co-organizers (`get-event-tickets/index.ts:176-195`), but the client gate is owner-only: `scanner.tsx:979-983` `if (String(user.id) === hostId) return true;` → otherwise "Not authorized" (`:997`). Someone given the scanner role is blocked before the server is ever asked. Same owner-only pattern at `[id]/index.tsx:1123`, `scanner.web.tsx:620`, `lib/api/events.ts:1131` |
+| The scanner names neither its event nor its readiness | CONFIRMED | `scanner.tsx:824-826` renders only "Scan Tickets". `hasOfflineData` is computed at `:497` and never rendered; the only offline mention is a failure toast (`:747`) |
+| Scanner-role PII redaction exists | CONFIRMED | `get-event-tickets/index.ts:404-411` — scanner gets id/status/qr_token/check-in fields plus `holder_name`, owner gets the full row. Note the code has widened past its own comment |
+| Duplicate scan returns the original facts | CONFIRMED | `20260806100200_door_single_checkin_cas.sql:64-67` returns the original `checked_in_at`/`checked_in_by`; rendered at `scanner.tsx:293-299` |
+| Offline acceptances marked provisional | **REFUTED** | `offline-scanner.ts:144` returns the same `valid: true` an online success produces. No provisional flag, no upload, no conflict comparison — and the file has **zero importers**. The live path is `stores/offline-checkin-store.ts`, whose drain failures only `console.warn` (`:222`, `:227`) and never surface in the scanner UI |
+
+### My own drawer has the same owner-only gap
+
+`features/navigation/app-drawer.tsx:202-207` derives `canHost` from
+`getHostDashboard()` returning at least one event. That endpoint is
+server-authoritative, but a co-organizer whose only role is `scanner` may own
+no events — so the Hosting row does not appear for exactly the person who
+needs the door. Recorded rather than patched: the fix belongs with the
+owner-only client gates above, as one change to how event-scoped roles reach
+the client, not as a special case in a menu.
