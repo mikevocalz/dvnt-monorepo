@@ -51,6 +51,16 @@ const noopShareIntent: ShareIntentResult = {
 
 export const useShareIntentSafe: () => ShareIntentResult = () => {
   const useShareIntentImpl = getUseShareIntent();
+  // rules-of-hooks flags this call as conditional, and structurally it is.
+  // It is safe here and deliberately not "fixed": getUseShareIntent memoises
+  // on `_shareIntentAttempted`, so it returns the same value for the life of
+  // the process — the branch is decided before any component mounts and never
+  // flips, which is what the rule actually protects against.
+  //
+  // The alternative — resolving at module scope — would undo the lazy
+  // require directly above, which exists to avoid the SDK 55 init crash.
+  // Trading a real crash for a theoretical one is the wrong way round.
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   return useShareIntentImpl ? useShareIntentImpl() : noopShareIntent;
 };
 

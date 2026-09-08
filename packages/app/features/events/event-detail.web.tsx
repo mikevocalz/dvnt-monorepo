@@ -586,10 +586,11 @@ export function EventDetailScreen() {
 
   const resolving =
     (isLoading && !listEvent) || !slugIndex || (!!resolvedId && !full);
-  if (!e && resolving) return <Centered>Loading…</Centered>;
-  if (!e) return <Centered>Event not found</Centered>;
-
-  const isHost = !!me && me === e.host?.username;
+  // isHost and the callback below BOTH sit above the guards now. The
+  // callback is a hook, and it used to run only after `if (!e) return` —
+  // so the render where the event resolved called one hook more than the
+  // render before it and React threw.
+  const isHost = !!me && me === e?.host?.username;
 
   /**
    * Open the event's Lynk — and make sure there is a live one to open.
@@ -642,6 +643,11 @@ export function EventDetailScreen() {
     }
     go(roomId);
   }, [e?.lynkRoomId, e?.title, e?.description, eventId, isHost, router]);
+
+  if (!e && resolving) return <Centered>Loading…</Centered>;
+  if (!e) return <Centered>Event not found</Centered>;
+
+
   const { videoUrl: coverVideoUrl, posterUrl: coverPosterUrl } = coverFor(e);
   const yt = ytId(e.youtubeVideoUrl || e.youtubeUrl);
   const lineup: string[] = Array.isArray(e.lineup) ? e.lineup : [];

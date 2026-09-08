@@ -26,6 +26,9 @@ import { getRotatedDimensions, getStraightenedDimensions } from "./crop-math";
 
 const SPRING_CONFIG = { damping: 20, stiffness: 200, mass: 0.8 };
 const MAX_ZOOM_FACTOR = 5;
+/** Stand-in frame used only while the image is still reporting its size. */
+const FALLBACK_FRAME_WIDTH = 300;
+const FALLBACK_FRAME_HEIGHT = 375;
 
 export interface ViewRefs {
   scale: { value: number };
@@ -62,32 +65,28 @@ export function ImageCropView({
 }: ImageCropViewProps) {
   const frameHeight = Math.round(frameWidth * aspectRatio);
 
-  // Guard: invalid dimensions would cause Infinity/NaN in gesture math → native crash
-  if (!imageWidth || !imageHeight || !frameWidth || !frameHeight) {
-    return (
-      <View
-        style={[
-          styles.container,
-          { width: frameWidth || 300, height: frameHeight || 375 },
-        ]}
-      >
-        <View
-          style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
-        >
-          <Image
-            source={{ uri }}
-            style={{ width: "80%", height: "80%" }}
-            contentFit="contain"
-          />
-        </View>
-      </View>
-    );
-  }
+  // Invalid dimensions put Infinity/NaN through the gesture math and crash
+  // natively, so they still get a plain preview — but the check CANNOT return
+  // here. Eleven hooks follow, and an image reports its size a render or two
+  // after mount: returning early meant React saw eleven fewer hooks on the
+  // first render than the second and threw "Rendered more hooks than during
+  // the previous render". That is the 1.0.347 launch crash, in a component
+  // reached from the story editor.
+  //
+  // So: detect it, feed the hooks below sane stand-ins, and return the
+  // fallback once every hook has run.
+  const hasValidDims = Boolean(
+    imageWidth && imageHeight && frameWidth && frameHeight,
+  );
+  const safeImageWidth = imageWidth || 1;
+  const safeImageHeight = imageHeight || 1;
+  const safeFrameWidth = frameWidth || FALLBACK_FRAME_WIDTH;
+  const safeFrameHeight = frameHeight || FALLBACK_FRAME_HEIGHT;
 
   // Compute effective image dimensions after rotate + straighten
   const rotatedDims = useMemo(
-    () => getRotatedDimensions(imageWidth, imageHeight, rotate90),
-    [imageWidth, imageHeight, rotate90],
+    () => getRotatedDimensions(safeImageWidth, safeImageHeight, rotate90),
+    [safeImageWidth, safeImageHeight, rotate90],
   );
   const effectiveDims = useMemo(
     () => getStraightenedDimensions(rotatedDims.w, rotatedDims.h, straighten),
@@ -100,8 +99,8 @@ export function ImageCropView({
   const effH = effectiveDims.h;
 
   const minScale = useMemo(
-    () => Math.max(frameWidth / effW, frameHeight / effH),
-    [effW, effH, frameWidth, frameHeight],
+    () => Math.max(safeFrameWidth / effW, safeFrameHeight / effH),
+    [effW, effH, safeFrameWidth, safeFrameHeight],
   );
   const maxScale = minScale * MAX_ZOOM_FACTOR;
 
@@ -222,6 +221,27 @@ export function ImageCropView({
       ],
     };
   });
+
+  if (!hasValidDims) {
+    return (
+      <View
+        style={[
+          styles.container,
+          { width: safeFrameWidth, height: safeFrameHeight },
+        ]}
+      >
+        <View
+          style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+        >
+          <Image
+            source={{ uri }}
+            style={{ width: "80%", height: "80%" }}
+            contentFit="contain"
+          />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View

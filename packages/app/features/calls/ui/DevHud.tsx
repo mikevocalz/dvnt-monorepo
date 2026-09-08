@@ -46,12 +46,15 @@ export function DevHud({
   hasRemoteVideo,
   roomId,
 }: DevHudProps) {
-  if (!__DEV__) return null;
-
+  // Hooks first, then the gate. __DEV__ reads as constant, but the rule is
+  // about shape: three hooks behind a condition is the same defect as three
+  // behind a loading guard, and it only takes one bundler flag to bite.
   const insets = useSafeAreaInsets();
   const [expanded, setExpanded] = useState(true);
   const audioState = audioSession.getState();
   const mic = useMicrophone();
+
+  if (!__DEV__) return null;
   const remotePeer = participants[0];
   const remoteAudioCount = participants.filter((p) => p.isMicOn).length;
   const remoteVideoCount = participants.filter((p) => p.isCameraOn).length;

@@ -93,13 +93,16 @@ export function PostCaption({
 }: PostCaptionProps) {
   const router = useRouter();
 
+  // Parsed BEFORE the guard below: a caption arrives a render after the post
+  // does, so returning null first and calling useMemo second changed the hook
+  // count between those two renders and threw.
+  const parts = useMemo(() => parseCaption(caption ?? ""), [caption]);
+
   // CRITICAL: Only render if BOTH username AND caption have content
   // Never show "Unknown User" - if no username, don't render at all
   if (!username || !caption || caption.trim().length === 0) {
     return null;
   }
-
-  const parts = useMemo(() => parseCaption(caption), [caption]);
 
   const handleHashtagPress = (hashtag: string) => {
     router.push({

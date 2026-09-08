@@ -56,8 +56,22 @@ function todayString(): string {
 }
 
 // ── Internal Canvas Renderer ────────────────────────────────────────
+/** The optional WebGPU module resolved? Callers gate the mount on this so
+ *  WeatherCanvas never has to decide whether it owns a hook. */
+function canWeatherCanvasRender(): boolean {
+  return Boolean(useCanvasEffect && WgpuCanvas);
+}
+
 function WeatherCanvas() {
-  if (!useCanvasEffect || !WgpuCanvas) return null;
+  // `useCanvasEffect` is resolved from an optional native module, so the
+  // guard cannot move below it — there may be no hook to call. Bail in the
+  // PARENT instead, so this component either mounts with the module present
+  // or never mounts at all, and its hook order is fixed either way.
+  if (!useCanvasEffect || !WgpuCanvas) {
+    throw new Error(
+      "WeatherCanvas mounted without the WebGPU module; render it only when canWeatherCanvasRender() is true.",
+    );
+  }
 
   const canvasRef = useCanvasEffect(async () => {
     // Init GPU device (once for entire app)
@@ -374,7 +388,7 @@ export function WeatherGPUEngine() {
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      <WeatherCanvas />
+      {canWeatherCanvasRender() ? <WeatherCanvas /> : null}
     </View>
   );
 }

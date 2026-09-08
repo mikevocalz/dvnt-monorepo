@@ -683,17 +683,19 @@ export function Feed({
   const feedResolved = !isLoading;
   const isActuallyLoading = !feedResolved || !nsfwLoaded;
 
-  if (__DEV__) {
-    useEffect(() => {
-      console.log("[Feed] Loading state changed:", {
-        isLoading,
-        nsfwLoaded,
-        hasData: !!data,
-        allPostsLength: allPosts.length,
-        isActuallyLoading,
-      });
-    }, [isLoading, nsfwLoaded, data, allPosts.length, isActuallyLoading]);
-  }
+  // The __DEV__ test moved INSIDE the effect. It reads as constant, but a
+  // hook behind any condition is one bundler flag away from a different hook
+  // count between two renders.
+  useEffect(() => {
+    if (!__DEV__) return;
+    console.log("[Feed] Loading state changed:", {
+      isLoading,
+      nsfwLoaded,
+      hasData: !!data,
+      allPostsLength: allPosts.length,
+      isActuallyLoading,
+    });
+  }, [isLoading, nsfwLoaded, data, allPosts.length, isActuallyLoading]);
 
   if (isActuallyLoading) {
     return <FeedSkeleton />;

@@ -465,6 +465,11 @@ export function VideoStage({
   useNativeCamera = false,
   onSelectSpeaker,
 }: VideoStageProps) {
+  // Hoisted above both guards below. It sat past `if (!featuredSpeaker)` and
+  // the dual-view return, so the render where a speaker arrives — or where a
+  // co-host joins or leaves — called one more hook than the render before it.
+  const frontDevice = useCameraDevice("front");
+
   if (!featuredSpeaker) return null;
 
   const isDual = !!coHost;
@@ -524,7 +529,6 @@ export function VideoStage({
   const hasVideoStream = isVideoEnabled && videoTrack?.stream;
   const showNativeCamera = useNativeCamera && isLocalUser && isVideoEnabled;
   const showVideo = isVideoEnabled && (hasVideoStream || showNativeCamera);
-  const frontDevice = useCameraDevice("front");
 
   // Audio-only: large avatar tile with speaking ring
   if (!showVideo) {

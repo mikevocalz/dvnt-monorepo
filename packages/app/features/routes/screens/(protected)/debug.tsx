@@ -67,27 +67,6 @@ function DebugScreenContent() {
   const [results, setResults] = useState<TestResult[]>([]);
 
   // Gate debug screen to development only
-  if (!__DEV__) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: colors.background,
-          paddingTop: insets.top,
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <Text className="text-foreground text-lg">
-          Debug screen is only available in development
-        </Text>
-        <Pressable onPress={() => router.back()} className="mt-4 p-4">
-          <Text className="text-primary">Go Back</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
   useEffect(() => {
     setApiBase(SUPABASE_URL);
   }, []);
@@ -282,6 +261,10 @@ function DebugScreenContent() {
   };
 
   useEffect(() => {
+    // The __DEV__ gate now sits below the hooks, so this effect also runs in
+    // a release build — keep the guard here or the debug suite fires against
+    // production on mount.
+    if (!__DEV__) return;
     // Auto-run tests on mount
     runTests();
   }, []);
@@ -298,6 +281,31 @@ function DebugScreenContent() {
         return <AlertTriangle size={20} color={colors.mutedForeground} />;
     }
   };
+
+  // Gate the debug screen to development only.
+  // Below the hooks, not above them: this used to return before two
+  // useEffects, so a build where __DEV__ flipped changed the hook count
+  // between renders — the defect that crashed 1.0.347 on launch.
+  if (!__DEV__) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: colors.background,
+          paddingTop: insets.top,
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <Text className="text-foreground text-lg">
+          Debug screen is only available in development
+        </Text>
+        <Pressable onPress={() => router.back()} className="mt-4 p-4">
+          <Text className="text-primary">Go Back</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View
