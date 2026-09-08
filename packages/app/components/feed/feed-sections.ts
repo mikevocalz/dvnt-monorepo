@@ -9,6 +9,8 @@
  * nothing could import its logic without dragging native code along.
  */
 
+import { buildFeedSlots } from "./feed-slots.ts";
+
 /** One event card every N posts. */
 export const EVENT_INTERVAL = 7;
 
@@ -21,6 +23,10 @@ export type FeedSection<Post, Event> =
  * `EVENT_INTERVAL` posts until the events run out. Trailing posts always flush
  * as a final masonry section, so no post is dropped when the counts do not
  * divide evenly.
+ *
+ * A narrowed view of `buildFeedSlots` for callers that only ever show organic
+ * events — the masonry feed, which passes its own much larger `interval` for
+ * virtualization reasons rather than the seven-post cadence.
  */
 export function buildFeedSections<
   Post extends { id: string | number },
@@ -30,42 +36,26 @@ export function buildFeedSections<
   events: Event[],
   interval: number = EVENT_INTERVAL,
 ): FeedSection<Post, Event>[] {
-  const sections: FeedSection<Post, Event>[] = [];
-  // A non-positive interval would place an event between every post (or loop);
-  // treat it as "no interleaving" rather than producing a broken feed.
-  if (!Number.isFinite(interval) || interval < 1) {
-    return posts.length ? [{ type: "masonry", key: "m-0", posts }] : [];
-  }
+  // Delegates to the slot builder so there is ONE implementation of the
+  // interleave rule. With no Google slots and no boosts, every interval
+  // boundary resolves to an ordinary event, which is exactly what this
+  // function has always produced — the tests below this file are the proof.
+  const { slots } = buildFeedSlots<Post, Event>({
+    posts,
+    events,
+    googleSlotsAllowed: false,
+    interval,
+    eventId: (event) => String(event.id),
+  });
 
-  let eventIdx = 0;
-  let chunkStart = 0;
-
-  for (let i = 0; i < posts.length; i++) {
-    if ((i + 1) % interval === 0 && eventIdx < events.length) {
-      if (i >= chunkStart) {
-        sections.push({
-          type: "masonry",
-          key: `m-${chunkStart}`,
-          posts: posts.slice(chunkStart, i + 1),
-        });
-      }
-      sections.push({
-        type: "event",
-        key: `e-${events[eventIdx].id}`,
-        event: events[eventIdx],
-      });
-      eventIdx++;
-      chunkStart = i + 1;
+  return slots.flatMap((slot): FeedSection<Post, Event>[] => {
+    if (slot.type === "masonry") {
+      return [{ type: "masonry", key: slot.key, posts: slot.posts }];
     }
-  }
-
-  if (chunkStart < posts.length) {
-    sections.push({
-      type: "masonry",
-      key: `m-${chunkStart}`,
-      posts: posts.slice(chunkStart),
-    });
-  }
-
-  return sections;
+    if (slot.type === "organic_event" || slot.type === "promoted_event") {
+      return [{ type: "event", key: slot.key, event: slot.event }];
+    }
+    // A feed that asks for no ad slots cannot receive one.
+    return [];
+  });
 }

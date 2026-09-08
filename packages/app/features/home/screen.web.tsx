@@ -27,7 +27,7 @@ import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use
 import { useEvents } from "@dvnt/app/lib/hooks/use-events";
 // Event cards rendered in the feed on mobile and never on web, because this
 // screen only ever fetched posts. Same builder the native masonry uses.
-import { EVENT_INTERVAL } from "@dvnt/app/components/feed/feed-sections";
+import { buildFeedSlots } from "@dvnt/app/components/feed/feed-slots";
 import {
   packMasonry,
   type PackTile,
@@ -213,18 +213,32 @@ export function HomeScreen() {
   // packing. Treating an event as just another tile keeps the columns tall and
   // balanced, which is what a masonry is for.
   const columns = useMemo(() => {
-    const events = feedEvents ?? [];
-    // Interleave into a single ordered list first, so events are spread through
-    // the feed rather than clustered at the end.
-    const tiles: PackTile<Post, Event>[] = [];
-    let e = 0;
-    posts.forEach((post, i) => {
-      tiles.push({ kind: "post", key: `p-${post.id}`, post });
-      if ((i + 1) % EVENT_INTERVAL === 0 && e < events.length) {
-        tiles.push({ kind: "event", key: `e-${events[e].id}`, event: events[e] });
-        e++;
-      }
+    // The cadence comes from the shared contract, not from a loop repeated
+    // here. Slots are flattened back into individual tiles because the masonry
+    // packs per tile; the ORDER is the contract's.
+    const { slots } = buildFeedSlots<Post, Event>({
+      posts,
+      events: feedEvents ?? [],
+      googleSlotsAllowed: false,
+      eventId: (event) => String(event.id),
     });
+    const tiles: PackTile<Post, Event>[] = slots.flatMap(
+      (slot): PackTile<Post, Event>[] => {
+        if (slot.type === "masonry") {
+          return slot.posts.map((post) => ({
+            kind: "post" as const,
+            key: `p-${post.id}`,
+            post,
+          }));
+        }
+        if (slot.type === "organic_event" || slot.type === "promoted_event") {
+          return [
+            { kind: "event" as const, key: `e-${slot.event.id}`, event: slot.event },
+          ];
+        }
+        return [];
+      },
+    );
 
     return packMasonry<Post, Event>({
       tiles,

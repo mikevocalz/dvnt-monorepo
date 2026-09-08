@@ -15,6 +15,7 @@ import { shouldRenderInFeed } from "./renderable-posts";
 import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
 import { useEvents } from "@dvnt/app/lib/hooks/use-events";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
+import { buildFeedSlots } from "@dvnt/app/components/feed/feed-slots";
 import { FeedSkeleton } from "@dvnt/app/components/skeletons";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import {
@@ -71,7 +72,9 @@ type FeedPostItem = { _type: "post"; data: Post };
 type FeedEventItem = { _type: "event"; data: Event };
 type FeedItem = FeedPostItem | FeedEventItem;
 
-const EVENT_INTERVAL = 7;
+// The cadence lives in feed-slots.ts. This file used to re-declare
+// `EVENT_INTERVAL = 7` and run its own `(i + 1) % EVENT_INTERVAL` loop, so the
+// rule existed three times across the classic feed, the masonry feed and web.
 
 const REFRESH_COLORS = ["#34A2DF", "#8A40CF", "#FF5BFC"];
 
@@ -447,19 +450,25 @@ export function Feed({
     isError: eventsErrored,
   } = useEvents();
 
-  // Interleave event cards every EVENT_INTERVAL posts
+  // Interleave event cards on the shared cadence. This is a flat list rather
+  // than a masonry, so each slot's posts are spread back out into individual
+  // rows; the ORDER is the contract's, not this file's.
   const feedItems: FeedItem[] = useMemo(() => {
-    const events = forYouEvents ?? [];
-    const items: FeedItem[] = [];
-    let eventIdx = 0;
-    for (let i = 0; i < filteredPosts.length; i++) {
-      items.push({ _type: "post", data: filteredPosts[i] });
-      if ((i + 1) % EVENT_INTERVAL === 0 && eventIdx < events.length) {
-        items.push({ _type: "event", data: events[eventIdx] });
-        eventIdx++;
+    const { slots } = buildFeedSlots<Post, Event>({
+      posts: filteredPosts,
+      events: forYouEvents ?? [],
+      googleSlotsAllowed: false,
+      eventId: (event) => String(event.id),
+    });
+    return slots.flatMap((slot): FeedItem[] => {
+      if (slot.type === "masonry") {
+        return slot.posts.map((post) => ({ _type: "post", data: post }) as FeedItem);
       }
-    }
-    return items;
+      if (slot.type === "organic_event" || slot.type === "promoted_event") {
+        return [{ _type: "event", data: slot.event } as FeedItem];
+      }
+      return [];
+    });
   }, [filteredPosts, forYouEvents]);
 
   const renderItem = useCallback(
