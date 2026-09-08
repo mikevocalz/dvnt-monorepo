@@ -38,6 +38,7 @@ import {
   Calendar,
   Radio,
   ImageOff,
+  Megaphone,
 } from "lucide-react";
 
 import {
@@ -208,6 +209,9 @@ function webRouteForActivity(activity: Activity): string {
     case "sneaky_lynk":
       if (entityId) return `/sneaky-lynk/room/${entityId}`;
       return `/messages`;
+    // An announcement is not a link to anywhere; keep the reader put.
+    case "system":
+      return "";
     default:
       return `/profile/${encodeURIComponent(user.username)}`;
   }
@@ -249,6 +253,8 @@ function ActivityIcon({ type }: { type: Activity["type"] }) {
     case "room_invite":
     case "sneaky_lynk":
       return <Radio size={14} color="#38BDF8" />;
+    case "system":
+      return <Megaphone size={14} color="#FF5BFC" />;
     default:
       return null;
   }
@@ -256,6 +262,9 @@ function ActivityIcon({ type }: { type: Activity["type"] }) {
 
 function getActivityText(activity: Activity): string {
   switch (activity.type) {
+    // Stands alone — the row renders no actor for a system notice.
+    case "system":
+      return activity.payload?.title || "Announcement";
     case "like":
       return " liked your post.";
     case "comment":
@@ -457,40 +466,55 @@ function ActivityRow({
         !activity.isRead ? "bg-[#3FDCFF]/10" : ""
       }`}
     >
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onUserPress(activity.user.username, activity.user.avatar);
-        }}
-        className="relative shrink-0"
-        style={{ width: 48, height: 48 }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={avatarUrl(activity.user.avatar)}
-          alt={activity.user.username}
-          className="h-11 w-11 rounded-xl object-cover bg-white/10"
-        />
-        <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full border-2 border-[#06070d] bg-[#18181b] p-1">
+      {activity.type === "system" ? (
+        // No actor, so the icon IS the avatar — an avatar here would render a
+        // placeholder for a person who does not exist.
+        <span
+          className="flex shrink-0 items-center justify-center rounded-xl bg-white/10"
+          style={{ width: 44, height: 44 }}
+        >
           <ActivityIcon type={activity.type} />
         </span>
-      </button>
+      ) : (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onUserPress(activity.user.username, activity.user.avatar);
+          }}
+          className="relative shrink-0"
+          style={{ width: 48, height: 48 }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={avatarUrl(activity.user.avatar)}
+            alt={activity.user.username}
+            className="h-11 w-11 rounded-xl object-cover bg-white/10"
+          />
+          <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full border-2 border-[#06070d] bg-[#18181b] p-1">
+            <ActivityIcon type={activity.type} />
+          </span>
+        </button>
+      )}
 
       <div className="min-w-0 flex-1">
         <p className="text-sm text-white line-clamp-2">
-          <span
-            className="font-semibold text-white"
-            onClick={(e) => {
-              e.stopPropagation();
-              onUserPress(activity.user.username, activity.user.avatar);
-            }}
-          >
-            {activity.user.username}
-          </span>
+          {activity.type === "system" ? null : (
+            <span
+              className="font-semibold text-white"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUserPress(activity.user.username, activity.user.avatar);
+              }}
+            >
+              {activity.user.username}
+            </span>
+          )}
           {getActivityText(activity)}
         </p>
-        {activity.type === "event_broadcast" && activity.payload?.body ? (
+        {(activity.type === "event_broadcast" ||
+          activity.type === "system") &&
+        activity.payload?.body ? (
           <p className="mt-1 text-sm text-white/85 line-clamp-3">
             “{activity.payload.body}”
           </p>

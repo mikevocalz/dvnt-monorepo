@@ -41,7 +41,10 @@ export type ActivityType =
   | "ticket_comped"
   | "ticket_refunded"
   | "room_invite"
-  | "sneaky_lynk";
+  | "sneaky_lynk"
+  // App-wide announcement. No actor and no entity — the copy travels in
+  // `entity_payload` as { title, body }.
+  | "system";
 
 export interface Activity {
   id: string;

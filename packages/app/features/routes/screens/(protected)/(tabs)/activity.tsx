@@ -18,6 +18,7 @@ import {
   CheckCheck,
   Calendar,
   Radio,
+  Megaphone,
 } from "lucide-react-native";
 import { ActivitySkeleton } from "@dvnt/app/components/skeletons";
 import { useActivityStore } from "@dvnt/app/lib/stores/activity-store";
@@ -92,6 +93,10 @@ const ActivityIcon = memo(({ type }: { type: Activity["type"] }) => {
     case "room_invite":
     case "sneaky_lynk":
       return <Radio size={16} color="#38BDF8" />;
+    // App-wide announcement. It has no actor, so this icon is the whole
+    // identity of the row rather than a badge on someone's avatar.
+    case "system":
+      return <Megaphone size={16} color="#FF5BFC" />;
     default:
       return null;
   }
@@ -99,6 +104,10 @@ const ActivityIcon = memo(({ type }: { type: Activity["type"] }) => {
 
 function getActivityText(activity: Activity): string {
   switch (activity.type) {
+    // No leading username: the row renders no actor for a system notice, so
+    // the title is the sentence rather than a suffix to somebody's name.
+    case "system":
+      return activity.payload?.title || "Announcement";
     case "like":
       return " liked your post.";
     case "comment":
@@ -319,6 +328,17 @@ const ActivityItem = memo(
       }`}
       style={{ paddingLeft: 16, paddingRight: 16 }}
     >
+      {activity.type === "system" ? (
+        // No actor to attribute this to, so the icon IS the avatar. Rendering
+        // the usual Avatar would fall back to a placeholder for a person who
+        // does not exist.
+        <View
+          className="bg-card rounded-2xl items-center justify-center"
+          style={{ width: 44, height: 44, marginRight: 4 }}
+        >
+          <ActivityIcon type={activity.type} />
+        </View>
+      ) : (
       <Pressable
         onPress={() =>
           onUserPress(activity.user.username, activity.user.avatar)
@@ -340,28 +360,33 @@ const ActivityItem = memo(
           </View>
         </View>
       </Pressable>
+      )}
 
       <View className="flex-1 ml-3">
         <Text className="text-sm text-foreground" numberOfLines={2}>
-          <Text
-            className="font-semibold text-foreground"
-            onPress={() =>
-              onUserPress(activity.user.username, activity.user.avatar)
-            }
-          >
-            {activity.user.username}
-          </Text>
+          {activity.type === "system" ? null : (
+            <Text
+              className="font-semibold text-foreground"
+              onPress={() =>
+                onUserPress(activity.user.username, activity.user.avatar)
+              }
+            >
+              {activity.user.username}
+            </Text>
+          )}
           {getActivityText(activity)}
         </Text>
-        {activity.type === "event_broadcast" && activity.payload?.body && (
+        {(activity.type === "event_broadcast" ||
+          activity.type === "system") &&
+          activity.payload?.body && (
           <Text
             className="mt-1 text-sm text-foreground"
             numberOfLines={3}
             style={{ opacity: 0.85 }}
           >
-            “{activity.payload.body}”
-          </Text>
-        )}
+              “{activity.payload.body}”
+            </Text>
+          )}
         {activity.type === "event_changed" && activity.payload?.summary && (
           <Text
             className="mt-1 text-xs text-muted-foreground"
