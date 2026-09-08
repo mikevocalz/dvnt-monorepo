@@ -80,6 +80,7 @@ import {
   normalizeArray,
 } from "@dvnt/app/lib/normalization/safe-entity";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useTicketViewerId } from "@dvnt/app/lib/hooks/use-tickets";
 import { qk } from "@dvnt/app/lib/query/keys";
 import * as WebBrowser from "expo-web-browser";
@@ -1754,6 +1755,37 @@ function EventDetailScreenContent() {
   }
 
   const event = safeEvent;
+
+  /**
+   * What the hero chip says about price. `unknown` renders nothing rather than
+   * guessing — a chip that is wrong while loading is worse than no chip.
+   */
+  const heroPrice = useMemo<
+    { kind: "free" } | { kind: "from"; label: string } | { kind: "unknown" }
+  >(() => {
+    const cents = liveTicketTypes.length
+      ? liveTicketTypes.map((t) => t.price_cents || 0)
+      : ticketTiers.length
+        ? ticketTiers.map((t) => Math.round((t.price || 0) * 100))
+        : null;
+
+    if (cents && cents.length) {
+      const lowest = Math.min(...cents);
+      return lowest === 0
+        ? { kind: "free" }
+        : { kind: "from", label: `From ${formatCents(lowest)}` };
+    }
+    if (isLoading) return { kind: "unknown" };
+    if (event?.price === 0) return { kind: "free" };
+    if (typeof event?.price === "number" && event.price > 0) {
+      return {
+        kind: "from",
+        label: `From ${formatCents(Math.round(event.price * 100))}`,
+      };
+    }
+    return { kind: "unknown" };
+  }, [liveTicketTypes, ticketTiers, isLoading, event?.price]);
+
   // Two-up off the CONTENT column, not the window. `s.root` caps this screen at
   // CONTENT_MAX_WIDTH, so dividing the 1024pt window gave two 488pt cells that
   // could not both fit in a 768pt column — they wrapped to one photo per row.
@@ -1892,21 +1924,22 @@ function EventDetailScreenContent() {
 
           {/* Floating chips */}
           <View style={s.heroChips}>
-            {(
-              liveTicketTypes.length > 0
-                ? liveTicketTypes.every((t) => (t.price_cents || 0) === 0)
-                : ticketTiers.length > 0
-                  ? ticketTiers.every((t) => t.price === 0)
-                  : !isLoading && event.price === 0
-            ) ? (
+            {/* The price, or nothing.
+                This chip used to read the literal string "VIP" for anything
+                that was not entirely free — so an event selling one $20
+                General Admission tier announced itself as VIP, and while the
+                tiers were still loading the `!isLoading` term made the
+                condition false and EVERY event showed VIP, free ones included.
+                A price is a fact; a tier name we invented is not. */}
+            {heroPrice.kind === "free" ? (
               <View style={[s.chip, s.chipFree]}>
                 <Text style={s.chipFreeText}>FREE</Text>
               </View>
-            ) : (
+            ) : heroPrice.kind === "from" ? (
               <View style={[s.chip, s.chipVip]}>
-                <Text style={s.chipVipText}>VIP</Text>
+                <Text style={s.chipVipText}>{heroPrice.label}</Text>
               </View>
-            )}
+            ) : null}
             <View style={s.chip}>
               <Text style={s.chipText}>{dateStr}</Text>
             </View>
@@ -1928,6 +1961,42 @@ function EventDetailScreenContent() {
 
         {/* ── 2. CORE INFO BLOCK ───────────────────────────────── */}
         <View style={s.content}>
+          {/* Identity first. The title used to be the SEVENTH element on
+              this screen — below the hero, a cancellation banner, a sale
+              card, the tier selector, a promo-code field and an "Upgrade
+              Your Ticket" upsell that named the tier you already held. An
+              attendee's first read of an event was a commercial prompt. */}
+          <View>
+            <Text style={s.eventTitle}>{translatedTitle || event.title}</Text>
+
+            {/* Translate button — adjacent to title, only when foreign text detected */}
+            {showTranslateButton && (
+              <View style={{ marginTop: 8, marginBottom: 4 }}>
+                <TranslateButton
+                  onTranslate={handleTranslateEvent}
+                  isTranslated={isEventTranslated}
+                  onToggleOriginal={showOriginalEvent}
+                  size="md"
+                  showLabel
+                />
+              </View>
+            )}
+
+            {/* Host */}
+            <Pressable style={s.hostRow}>
+              <Image
+                source={{
+                  uri: host?.avatar || "",
+                }}
+                style={s.hostAvatar}
+              />
+              <Text style={s.hostName}>
+                {host?.name || host?.username || "Organizer"}
+              </Text>
+              {host?.verified && <BadgeCheck size={16} color="#34A2DF" />}
+            </Pressable>
+          </View>
+
           {/* ── CANCELLED — premium full-bleed banner that replaces
                  the entire ticketing surface. The cancel-event edge
                  function already refunded buyers + sent push notifs;
@@ -2208,37 +2277,6 @@ function EventDetailScreenContent() {
                 ))}
               </View>
             )}
-
-          <View>
-            <Text style={s.eventTitle}>{translatedTitle || event.title}</Text>
-
-            {/* Translate button — adjacent to title, only when foreign text detected */}
-            {showTranslateButton && (
-              <View style={{ marginTop: 8, marginBottom: 4 }}>
-                <TranslateButton
-                  onTranslate={handleTranslateEvent}
-                  isTranslated={isEventTranslated}
-                  onToggleOriginal={showOriginalEvent}
-                  size="md"
-                  showLabel
-                />
-              </View>
-            )}
-
-            {/* Host */}
-            <Pressable style={s.hostRow}>
-              <Image
-                source={{
-                  uri: host?.avatar || "",
-                }}
-                style={s.hostAvatar}
-              />
-              <Text style={s.hostName}>
-                {host?.name || host?.username || "Organizer"}
-              </Text>
-              {host?.verified && <BadgeCheck size={16} color="#34A2DF" />}
-            </Pressable>
-          </View>
 
           {/* ── 3. GOING — expandable attendees grid ─────────────── */}
           <View style={s.section}>

@@ -188,10 +188,16 @@ export function AppDrawerContent() {
   const nextEvent = library.upcoming[0];
 
   /**
-   * Hosting is a server-resolved capability: the dashboard endpoint returns the
-   * events this account may manage. Comparing `user.id` to `event.host_id` on
-   * the client would show the row to anyone whose id happened to match a
-   * cached shape.
+   * Hosting is a server-resolved capability rather than a client guess about
+   * ids — but it is currently narrower than it should be.
+   *
+   * `get-host-dashboard/index.ts:70` filters `events.host_id = authId`, i.e.
+   * events this account OWNS. A co-organizer whose only role is `scanner` owns
+   * nothing, so this row does not appear for exactly the person who needs to
+   * reach a door. Fixing it means widening that endpoint to include accepted
+   * `event_co_organizers` rows; there is no client-side signal that would do
+   * it honestly, and inventing one is how the owner-only gates in the scanner
+   * screens happened. See docs/ux/events-tickets-audit.md.
    */
   const hostDashboard = useQuery({
     queryKey: ["host-dashboard", user?.id ?? "anon"],

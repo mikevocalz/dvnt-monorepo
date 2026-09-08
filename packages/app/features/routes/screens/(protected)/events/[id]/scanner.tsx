@@ -39,6 +39,8 @@ import type { ScanAddonSummary } from "@dvnt/app/lib/api/tickets";
 import { useScanTicket } from "@dvnt/app/lib/hooks/use-tickets";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canScanTickets } from "@dvnt/app/lib/events/event-role";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/auth/identity";
 import * as Haptics from "expo-haptics";
@@ -969,22 +971,19 @@ function ScannerContent({ eventId }: { eventId: string }) {
   const user = useAuthStore((s) => s.user);
   const { data: event, isLoading: eventLoading } = useEvent(eventId);
 
-  // Host-only gate. Without this, anyone could deep-link to
-  // /events/<id>/scanner and access the camera. Server enforces the
-  // same check on ticket-scan, but failing fast on the client avoids
-  // even rendering the camera surface to unauthorized users.
-  const isHost = (() => {
-    if (!user?.id || !event?.host?.id) return false;
-    const hostId = String(event.host.id);
-    if (String(user.id) === hostId) return true;
-    const intId = getCurrentUserIdSync();
-    if (intId != null && String(intId) === hostId) return true;
-    const authId = (user as any)?.authId || (user as any)?.auth_id;
-    if (authId && String(authId) === hostId) return true;
-    return false;
-  })();
+  /**
+   * Staff gate, from the server's role ladder rather than event ownership.
+   *
+   * This used to compare `user.id` to `event.host.id`, which is owner-only —
+   * so somebody explicitly given the `scanner` role was shown "Not authorized"
+   * before the server was ever asked, and could not work the door they were
+   * added to work. The server still enforces on every `ticket-scan`; this only
+   * decides whether to render the camera.
+   */
+  const { role, isLoading: roleLoading } = useEventRole(eventId);
+  const mayScan = canScanTickets(role);
 
-  if (eventLoading) {
+  if (eventLoading || roleLoading) {
     return (
       <View className="flex-1 bg-black items-center justify-center">
         <ActivityIndicator color="#fff" />
@@ -992,7 +991,7 @@ function ScannerContent({ eventId }: { eventId: string }) {
     );
   }
 
-  if (!isHost) {
+  if (!mayScan) {
     return (
       <View className="flex-1 bg-black items-center justify-center px-8">
         <XCircle size={64} color="#ef4444" />
@@ -1000,8 +999,7 @@ function ScannerContent({ eventId }: { eventId: string }) {
           Not authorized
         </Text>
         <Text className="text-white/60 text-sm mt-2 text-center">
-          Only the event host can scan tickets at the door.
-        </Text>
+          You are not on this event's door staff. Ask the host to add you.</Text>
         <Pressable
           onPress={() => router.back()}
           className="mt-6 bg-white/10 rounded-full px-6 py-3"

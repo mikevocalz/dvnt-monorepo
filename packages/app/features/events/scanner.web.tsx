@@ -32,6 +32,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DismissOverlayButton } from "@dvnt/app/components/ui/card-link.web";
 import { useParams, useRouter } from "solito/navigation";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canScanTickets } from "@dvnt/app/lib/events/event-role";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   X,
@@ -613,19 +615,13 @@ export function EventScannerScreen() {
   const user = useAuthStore((s) => s.user);
   const { data: event, isLoading: eventLoading } = useEvent(eventId);
 
-  // Host-only gate — same client-side check native runs before exposing the
-  // camera surface. The edge fn enforces it server-side too.
-  const isHost = useMemo(() => {
-    if (!user?.id || !event?.host?.id) return false;
-    const hostId = String(event.host.id);
-    if (String(user.id) === hostId) return true;
-    const intId = getCurrentUserIdSync();
-    if (intId != null && String(intId) === hostId) return true;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const authId = (user as any)?.authId || (user as any)?.auth_id;
-    if (authId && String(authId) === hostId) return true;
-    return false;
-  }, [user, event]);
+  /**
+   * Staff gate, from the server's role ladder rather than event ownership.
+   * The owner-only comparison this replaces refused the scanner screen to
+   * anyone given the `scanner` role — the people it exists for.
+   */
+  const { role, isLoading: roleLoading } = useEventRole(eventId);
+  const mayScan = canScanTickets(role);
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -645,16 +641,17 @@ export function EventScannerScreen() {
         </button>
       </div>
 
-      {eventLoading ? (
+      {eventLoading || roleLoading ? (
         <div className="flex flex-col items-center justify-center py-24">
           <Loader2 size={32} className="animate-spin text-white/60" />
         </div>
-      ) : !isHost ? (
+      ) : !mayScan ? (
         <main className="mx-auto flex w-full max-w-xl flex-col items-center px-8 py-24 text-center">
           <XCircle size={64} color="#F43F5E" />
           <p className="mt-4 text-lg font-semibold text-white">Not authorized</p>
           <p className="mt-2 text-sm text-white/60">
-            Only the event host can scan tickets at the door.
+            You are not on this event&rsquo;s door staff. Ask the host to add
+            you.
           </p>
           <button
             onClick={() => router.back()}
