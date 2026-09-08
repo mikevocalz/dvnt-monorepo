@@ -57,7 +57,7 @@ import {
   DEVIANT_GRADIENT,
   HAIRLINE,
   type EditorToolMode,
-  STORY_CANVAS_WIDTH_CSS,
+  STORY_CANVAS_BOX,
 } from "./story-editor.web";
 
 const MAX_STORY_ITEMS = 4;
@@ -213,7 +213,7 @@ function CameraCapture({
             playsInline
             muted
             className="rounded-2xl bg-black"
-            style={{ width: STORY_CANVAS_WIDTH_CSS, aspectRatio: "9 / 16", objectFit: "cover" }}
+            style={{ ...STORY_CANVAS_BOX, objectFit: "cover" }}
           />
           <button
             onClick={shoot}
@@ -745,7 +745,7 @@ export function StoryCreateScreen() {
 
   return (
     <div
-      className="min-h-[100dvh] w-full flex flex-col text-white select-none"
+      className="h-[100dvh] w-full flex flex-col text-white select-none"
       style={{ background: INK }}
     >
       {/* Sticky header — close / title / gradient Share */}
@@ -778,7 +778,7 @@ export function StoryCreateScreen() {
         </button>
       </header>
 
-      <main className="flex-1 flex flex-col items-center px-3 py-4 w-full">
+      <main className="flex-1 min-h-0 flex flex-col items-center px-3 py-4 w-full">
         {/* Upload progress */}
         {busy && (
           <div className="w-full max-w-md mb-4 rounded-2xl bg-black/80 p-4">
@@ -800,7 +800,12 @@ export function StoryCreateScreen() {
         {showEditor ? (
           <>
             {/* Stage + persistent rail (RightIslandMenu) + inline tool sheets */}
-            <div className="relative flex items-start justify-center w-full">
+            {/* Its own flex row: the canvas is height-driven, so it needs a
+                parent that owns the leftover space. Siblings below (thumbnail
+                strip, visibility, rail) keep their intrinsic height and the
+                canvas absorbs the remainder — which is what stops media being
+                added from pushing the rail under the fold. */}
+            <div className="relative flex-1 min-h-0 flex items-center justify-center w-full">
               <EditorStage
                 stageRef={stageRef}
                 textOnly={textOnly}
@@ -819,47 +824,57 @@ export function StoryCreateScreen() {
             </p>
           </>
         ) : (
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="aspect-[9/16] rounded-2xl bg-black flex flex-col items-center justify-center gap-3 text-white/45 border border-white/10"
-            // Same rule as the live canvas: `max-w-md` with no height budget
-            // forced a 796px box that pushed the rail below the fold.
-            style={{ width: STORY_CANVAS_WIDTH_CSS }}
-          >
-            <ImageIcon size={48} />
-            <span className="text-base">Add media to get started</span>
-          </button>
+          <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="rounded-2xl bg-black flex flex-col items-center justify-center gap-3 text-white/45 border border-white/10"
+              // Same box as the live canvas, so the layout does not jump when
+              // media lands.
+              style={STORY_CANVAS_BOX}
+            >
+              <ImageIcon size={48} />
+              <span className="text-base">Add media to get started</span>
+            </button>
+          </div>
         )}
 
         {/* Media thumbnails */}
         {hasMedia && (
-          <div className="w-full max-w-md mt-4 flex gap-2 overflow-x-auto pb-1">
+          <div
+            // mt-[19px], not mt-5: 16 + 3. Off the 4px spacing scale on purpose
+            // — the strip sat a touch tight under the canvas and 20px overshot.
+            className="w-full max-w-md mt-[11px] pt-2 px-1 flex gap-2 overflow-x-auto pb-1"
+          >
             {mediaAssets.map((asset, idx) => (
               <button
                 key={asset.id}
                 onClick={() => setCurrentIndex(idx)}
-                className={`relative shrink-0 w-14 h-14 rounded-lg overflow-hidden ${idx === currentIndex ? "ring-2 ring-cyan-400" : ""}`}
+                className={`relative shrink-0 w-14 h-14 rounded-lg ${idx === currentIndex ? "ring-2 ring-cyan-400" : ""}`}
               >
-                {asset.type === "video" ? (
-                  <video
-                    src={asset.uri}
-                    className="w-full h-full object-cover"
-                    muted
-                  />
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={asset.uri}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                )}
+                {/* Clipping lives here, not on the button: the rounded corner
+                    should crop the MEDIA, not the delete control on top of it. */}
+                <div className="w-full h-full rounded-lg overflow-hidden">
+                  {asset.type === "video" ? (
+                    <video
+                      src={asset.uri}
+                      className="w-full h-full object-cover"
+                      muted
+                    />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={asset.uri}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </div>
                 <span
                   onClick={(e) => {
                     e.stopPropagation();
                     handleRemoveMedia(idx);
                   }}
-                  className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-red-500 flex items-center justify-center"
+                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 flex items-center justify-center"
                 >
                   <X size={10} />
                 </span>
@@ -868,7 +883,6 @@ export function StoryCreateScreen() {
           </div>
         )}
 
-        <div className="flex-1" />
 
         {/* Visibility toggle */}
         <div className="w-full max-w-md flex justify-center mt-5 mb-4">

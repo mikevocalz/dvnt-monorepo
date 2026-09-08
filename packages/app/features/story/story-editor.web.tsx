@@ -251,19 +251,26 @@ function hasVisibleColorMatrix(
  * The one story-canvas sizing rule, shared with the create screen's empty state
  * so the two never drift and the layout does not jump when media lands.
  *
- * Width is the ONLY size input: the height budget is folded into the same
- * `min()` through the story ratio. A `maxHeight` alongside `aspectRatio` does
- * NOT preserve the ratio — CSS keeps the width and overrides the height, which
- * squashed the canvas on any short window (a 1440x900 laptop measured 0.65
- * against the 0.5625 target).
+ * HEIGHT-driven: the canvas fills whatever vertical space its flex parent has
+ * left and derives its width from the story ratio. It used to be width-driven
+ * against a hardcoded chrome budget, which only held for the state it was
+ * measured in — adding media introduced a 56px thumbnail strip the budget knew
+ * nothing about, and the tool rail went under the fold again.
  *
- * The budget is `100dvh` minus the screen's own chrome rather than a guessed
- * percentage, because a percentage that ignores the header/rail pushed the
- * bottom rail off the fold on a short window.
+ * A `maxHeight` alongside `aspectRatio` does NOT preserve the ratio (CSS keeps
+ * the width and overrides the height), which is why the box is sized on one
+ * axis only and the other is left to the ratio.
  */
-/** Header + main padding + visibility row + tool rail, measured on /feed/story/create. */
-const STORY_SCREEN_CHROME_PX = 280;
-export const STORY_CANVAS_WIDTH_CSS = `min(84vw, 400px, calc((100dvh - ${STORY_SCREEN_CHROME_PX}px) * ${CANVAS_WIDTH} / ${CANVAS_HEIGHT}))`;
+export const STORY_CANVAS_BOX = {
+  height: "100%",
+  width: "auto",
+  // 400px was a phone-shaped cap. The canvas is height-bound on a
+  // desktop anyway, so this only stops it going comically wide on a
+  // short, very wide window.
+  maxWidth: "min(84vw, 520px)",
+  aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
+} as const;
+
 
 // ============================================================
 // Export mappers — same ratios native uses (0..1 on 1080×1920).
@@ -471,8 +478,7 @@ export function EditorStage({
       ref={stageRef}
       className="relative overflow-hidden rounded-2xl select-none"
       style={{
-        aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
-        width: STORY_CANVAS_WIDTH_CSS,
+        ...STORY_CANVAS_BOX,
         touchAction: "none",
         containerType: "inline-size",
         background: INK,
