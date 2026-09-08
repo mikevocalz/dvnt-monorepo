@@ -76,16 +76,59 @@ We use your information to:
 **DVNT does NOT:**
 
 - Sell user data
-- Share data with advertisers
-- Allow targeted advertising based on personal data
+- Share your identity verification documents with anyone outside DVNT
+- Share your messages, calls, or Sneaky Lynk activity with advertisers
+- Use your sexuality, gender, HIV status, community membership, or any other
+  sensitive characteristic to target advertising
 
 We may share data only:
 
 - With your consent
+- With Google, when advertising is shown to you — see Section 8
 - To comply with legal requirements
 - To protect safety
 
-## 8. Security Measures
+
+## 8. Advertising
+
+DVNT shows two different things that can look similar, and they work
+differently.
+
+**Promoted events** are DVNT's own. An organizer pays to give their event
+priority in the Home feed. Nothing about you is sent anywhere: the event is
+chosen on DVNT's servers, and the organizer learns only aggregate counts — never
+who saw it. Promoted events can appear to any member, including paid
+subscribers.
+
+**Google ads** are served by Google, and only to members without a paid
+subscription. When one is shown, Google receives the data its advertising SDK
+collects — typically a device advertising identifier, approximate location
+derived from your IP address, and information about the app or page the ad
+appeared on. DVNT does not send Google your name, email, phone number, identity
+verification data, messages, or profile content.
+
+**If you have any paid DVNT subscription, no Google ad is requested for you.**
+Not hidden after loading — not requested at all. Promoted events may still
+appear.
+
+**Your choices:**
+
+- Where the law requires it, you will be asked before any personalized
+  advertising is enabled, and you can decline or change your answer later.
+  Declining does not remove ads; it makes them non-personalized.
+- Non-personalized ads still involve data collection by Google. They are not
+  the same as no data collection.
+- On iOS you control the advertising identifier through the system App Tracking
+  Transparency prompt and in Settings.
+- Google's own handling of this data is governed by its policies:
+  https://policies.google.com/technologies/partner-sites
+
+**Where ads never appear:** checkout and payment, your tickets and entry codes,
+transfers and refunds, ticket scanning, identity verification, direct messages,
+calls, and Sneaky Lynk rooms. Advertising is also disabled entirely while Spicy
+mode is on.
+
+## 9. Security Measures
 
 We implement:
 
@@ -95,7 +138,7 @@ We implement:
 - Regular security audits
 - Anti-bot systems
 
-## 9. Member Privacy Rights
+## 10. Member Privacy Rights
 
 You have the right to:
 
@@ -105,26 +148,32 @@ You have the right to:
 - Export your data
 - Object to processing
 
-## 10. Data Retention
+## 11. Data Retention
 
 We retain data only as long as necessary for the purposes described. Verification data is deleted or anonymized after its purpose is fulfilled.
 
-## 11. International Transfers
+## 12. International Transfers
 
 If you access DVNT from outside the United States, your data may be transferred to and processed in the United States.
 
-## 12. Children's Privacy (Strict 18+)
+## 13. Children's Privacy (Strict 18+)
 
 DVNT is strictly for adults 18 and older. We do not knowingly collect data from anyone under 18.
 
-## 13. Cookies
+## 14. Cookies
 
-DVNT uses essential cookies for functionality. We do not use tracking cookies for advertising.
+DVNT uses essential cookies to keep you signed in and to make the site work.
 
-## 14. Policy Changes
+On the website, members without a paid subscription may also be shown Google
+ads, which set their own cookies or similar identifiers. Where the law requires
+consent, you are asked first and can change your answer at any time. Paid
+subscribers are not served Google ads, and no advertising cookie is set for
+them.
+
+## 15. Policy Changes
 
 We may update this Policy. Continued use constitutes acceptance of changes.
 
-## 15. Contact Information
+## 16. Contact Information
 
 For privacy inquiries: DeviantEventsDC@gmail.com

@@ -395,6 +395,84 @@ export default {
         },
       ],
       "./plugins/with-stripe-merchant-entitlement",
+      // Google Mobile Ads. Configured, NOT enabled: nothing initialises the
+      // SDK or requests an ad until lib/ads/ad-eligibility.ts says it may and
+      // the ads_google_native kill switch is on, and both default to off.
+      //
+      // The IDs below are GOOGLE'S OFFICIAL TEST APP IDs, not placeholders.
+      // The plugin docs are explicit that a missing or invalid App ID crashes
+      // the app on start, so a real-looking dummy is the one thing that must
+      // never sit here. Swap them for the production AdMob App IDs in the same
+      // change that turns the kill switch on, and never before.
+      //
+      // Adding this package changes the native fingerprint: it is not
+      // OTA-deliverable and needs `expo prebuild --clean` plus a real build.
+      [
+        "react-native-google-mobile-ads",
+        {
+          androidAppId: "ca-app-pub-3940256099942544~3347511713",
+          iosAppId: "ca-app-pub-3940256099942544~1458002511",
+          // ATT is requested only when the consent flow decides it is needed;
+          // a paid subscriber is never shown this prompt.
+          userTrackingUsageDescription:
+            "This lets DVNT show you ads that are more relevant. You can decline and still use everything — you'll just see less relevant ads.",
+          // The 50 SKAdNetwork identifiers Google publishes for the current
+          // SDK, from the google-mobile-ads-get-started skill.
+          skAdNetworkItems: [
+            "22mmun2rn5.skadnetwork",
+            "2fnua5tdw4.skadnetwork",
+            "2u9pt9hc89.skadnetwork",
+            "3qcr597p9d.skadnetwork",
+            "3qy4746246.skadnetwork",
+            "3rd42ekr43.skadnetwork",
+            "3sh42y64q3.skadnetwork",
+            "4468km3ulz.skadnetwork",
+            "44jx6755aq.skadnetwork",
+            "47vhws6wlr.skadnetwork",
+            "4dzt52r2t5.skadnetwork",
+            "4fzdc2evr5.skadnetwork",
+            "578prtvx9j.skadnetwork",
+            "7ug5zh24hu.skadnetwork",
+            "8c4e2ghe7u.skadnetwork",
+            "8s468mfl3y.skadnetwork",
+            "97r2b46745.skadnetwork",
+            "9t245vhmpl.skadnetwork",
+            "a2p9lx4jpn.skadnetwork",
+            "c3frkrj4fj.skadnetwork",
+            "c6k4g5qg8m.skadnetwork",
+            "cp8zw746q7.skadnetwork",
+            "cstr6suwn9.skadnetwork",
+            "e5fvkxwrpn.skadnetwork",
+            "f38h382jlk.skadnetwork",
+            "gta9lk7p23.skadnetwork",
+            "hs6bdukanm.skadnetwork",
+            "k674qkevps.skadnetwork",
+            "kbd757ywx3.skadnetwork",
+            "kbmxgpxpgc.skadnetwork",
+            "klf5c3l5u5.skadnetwork",
+            "ludvb6z3bs.skadnetwork",
+            "mlmmfzh3r3.skadnetwork",
+            "n38lu8286q.skadnetwork",
+            "p78axxw29g.skadnetwork",
+            "ppxm28t8ap.skadnetwork",
+            "s39g8k73mm.skadnetwork",
+            "su67r6k2v3.skadnetwork",
+            "t38b2kh725.skadnetwork",
+            "tl55sbb4fm.skadnetwork",
+            "uw77j35x4d.skadnetwork",
+            "v4nxqhlyqp.skadnetwork",
+            "v72qych5uu.skadnetwork",
+            "v9wttpbfk9.skadnetwork",
+            "vutu7akeur.skadnetwork",
+            "wg4vff78zm.skadnetwork",
+            "wzmmz9fp6w.skadnetwork",
+            "y5ghdn5j9k.skadnetwork",
+            "yclnxrl5pm.skadnetwork",
+            "ydx93a7ass.skadnetwork"
+          ],
+        },
+      ],
+
       [
         "expo-router",
         {
