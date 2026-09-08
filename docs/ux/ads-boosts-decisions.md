@@ -134,3 +134,38 @@ fact: the `20260613181543` boost migration's constraints and trigger bodies,
 `boost_prorata_refund`'s semantics, the `20260806100000` promoter-economy
 overlap, the pg_cron expiry job, `BottomSheet.web.tsx`'s prop defaults, and
 every direct `@expo/html-elements` import outside `html.tsx`.
+
+---
+
+## Integration validation (2026-09-08)
+
+Run against Google's own `google-mobile-ads-validate` skill
+(`google/skills@skills/ads`), plus a real `expo prebuild --platform ios` to
+confirm the config plugin does what it claims.
+
+| Check | Result | Evidence |
+|---|---|---|
+| No test application ID present | **Expected fail, by design** | `app.config.js:413-414` carries `ca-app-pub-3940256099942544~3347511713` / `~1458002511` — Google's official test IDs. Deliberate: the plugin docs state a missing or invalid App ID crashes the app on start, so a real-looking dummy is the one thing that must never sit there. **Swap for production IDs in the same change that opens the `ads_google_native` kill switch.** |
+| No test ad units, format correct | PASS | No ad unit id (`ca-app-pub-…/…`) exists anywhere in the repo. Nothing requests an ad yet. |
+| All Google SKAdNetwork IDs present | PASS | 50 configured, 50 published by Google in the skill's iOS reference. Zero missing, zero extra. |
+| Mediation adapter compatibility | PASS (N/A) | No mediation adapters installed. |
+| Ad preloading validation | PASS (N/A) | No `BannerAd`/`InterstitialAd`/`RewardedAd`/`NativeAd` object is constructed anywhere; nothing loads or preloads. |
+
+### Prebuild verification — the plugin does write Info.plist
+
+`expo config` shows none of these keys because the plugin applies through
+`withInfoPlist` **mods**, which run during prebuild rather than config
+resolution (`plugin/build/index.js:57-75`). Running the real prebuild resolves
+it. From the generated `apps/mobile/ios/DVNT/Info.plist`:
+
+- `GADApplicationIdentifier` = `ca-app-pub-3940256099942544~1458002511`
+- `SKAdNetworkItems` = **50** entries
+- `NSUserTrackingUsageDescription` present
+
+The generated native tree was then reverted. `--no-install` produces an
+incomplete regeneration — it deletes `Podfile.lock` and the `.xcworkspace`
+because no pod install runs — and committing that would break the build. The
+verification above is the deliverable; the regeneration is not.
+
+**Still not done:** no app was compiled or run. Signing, pod resolution, and
+runtime behaviour on a device remain unverified.
