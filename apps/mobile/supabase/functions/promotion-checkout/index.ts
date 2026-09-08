@@ -36,19 +36,93 @@ const PRICING: Record<string, number> = {
 const DURATION_HOURS: Record<string, number> = {
   "24h": 24,
   "7d": 168,
-  weekend: 72, // Fri 6pm → Mon 6am approx
+  // Unused for `weekend` — that package ends at the close of the coming
+  // Sunday in the event's timezone, not after a fixed span. Kept as the
+  // fallback for an unrecognised duration.
+  weekend: 72,
 };
 
-function computeEndDate(startDate: Date, duration: string): Date {
+const WEEKDAY_INDEX: Record<string, number> = {
+  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+};
+
+/** Wall-clock parts of an instant as seen in `timeZone`. */
+function zonedParts(instant: Date, timeZone: string) {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    weekday: "short",
+  });
+  const parts: Record<string, string> = {};
+  for (const p of fmt.formatToParts(instant)) parts[p.type] = p.value;
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour) % 24,
+    minute: Number(parts.minute),
+    second: Number(parts.second),
+    weekday: WEEKDAY_INDEX[parts.weekday] ?? 0,
+  };
+}
+
+/** Zone offset from UTC at `instant`, whole minutes. */
+function offsetMinutes(instant: Date, timeZone: string): number {
+  const p = zonedParts(instant, timeZone);
+  const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  // Rounded: `asUtc` is second-precision and `instant` carries milliseconds.
+  return Math.round((asUtc - instant.getTime()) / 60_000);
+}
+
+/** The instant at which a wall-clock time occurs in `timeZone`. */
+function instantFromZoned(
+  wall: { year: number; month: number; day: number; hour: number; minute: number; second: number; ms?: number },
+  timeZone: string,
+): Date {
+  const naive = Date.UTC(
+    wall.year, wall.month - 1, wall.day,
+    wall.hour, wall.minute, wall.second, wall.ms ?? 0,
+  );
+  // Resolved twice: the offset depends on the instant, so across a DST
+  // boundary the first guess uses the wrong one.
+  let guess = new Date(naive - offsetMinutes(new Date(naive), timeZone) * 60_000);
+  guess = new Date(naive - offsetMinutes(guess, timeZone) * 60_000);
+  return guess;
+}
+
+/**
+ * When a boost ends, in the EVENT'S timezone.
+ *
+ * This used `getDay()` / `setDate()` / `setHours()` — local-time methods, in a
+ * Deno runtime whose local zone is UTC. Two bugs followed:
+ *
+ *   1. "Sunday 23:59:59.999" was UTC, so a New York organizer's weekend boost
+ *      ended 19:59 EDT — four hours early, on Sunday evening.
+ *   2. `(7 - day) % 7 || 7` read the UTC day of week. A campaign bought
+ *      Saturday 9pm EDT is Sunday 01:00 UTC, so `day === 0`, so the expression
+ *      fell through to 7 and the boost ended the FOLLOWING Sunday — roughly
+ *      eight days of delivery sold as a weekend.
+ *
+ * Mirrors packages/app/lib/ads/boost-schedule.ts, which carries the tests.
+ */
+function computeEndDate(
+  startDate: Date,
+  duration: string,
+  timeZone = "UTC",
+): Date {
   if (duration === "weekend") {
-    // Find next Sunday 23:59 from start
-    const end = new Date(startDate);
-    const day = end.getDay();
-    // If it's before Friday, jump to coming Sunday
-    const daysUntilSunday = (7 - day) % 7 || 7;
-    end.setDate(end.getDate() + daysUntilSunday);
-    end.setHours(23, 59, 59, 999);
-    return end;
+    const p = zonedParts(startDate, timeZone);
+    // Buying on a Sunday gives that Sunday, not a whole extra week.
+    const daysUntilSunday = (7 - p.weekday) % 7;
+    return instantFromZoned(
+      {
+        year: p.year, month: p.month, day: p.day + daysUntilSunday,
+        hour: 23, minute: 59, second: 59, ms: 999,
+      },
+      timeZone,
+    );
   }
   const hours = DURATION_HOURS[duration] || 24;
   return new Date(startDate.getTime() + hours * 60 * 60 * 1000);
@@ -227,7 +301,7 @@ Deno.serve(async (req: Request) => {
     // Verify event ownership
     const { data: event, error: eventError } = await supabase
       .from("events")
-      .select("id, title, host_id")
+      .select("id, title, host_id, event_tz")
       .eq("id", event_id)
       .single();
 
@@ -248,9 +322,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Compute time window
+    // Compute time window IN THE EVENT'S ZONE.
+    //
+    // `events.event_tz` is the IANA zone added by
+    // migrations/20260708171038_events_event_tz.sql. It is nullable, and UTC is
+    // the honest fallback: without a zone we cannot know when "the end of
+    // Sunday" is for this organizer, and guessing the server's zone is exactly
+    // what produced the eight-day weekend.
     const startsAt = start_now ? new Date() : new Date(); // TODO: scheduled start
-    const endsAt = computeEndDate(startsAt, duration);
+    const eventTz =
+      typeof event.event_tz === "string" && event.event_tz ? event.event_tz : "UTC";
+    const endsAt = computeEndDate(startsAt, duration, eventTz);
 
     // Create pending campaign row
     const { data: campaign, error: campaignError } = await supabase
