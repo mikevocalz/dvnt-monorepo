@@ -189,6 +189,10 @@ async function fetchActivities(): Promise<Activity[]> {
   return allActivities.filter((a) => {
     if (seenIds.has(a.id)) return false;
     seenIds.add(a.id);
+    // A system notice has no actor and no entity, so every one of them keys as
+    // `system::` — the second announcement would be dropped as a duplicate of
+    // the first for anyone still holding it. They are already unique by id.
+    if (a.type === "system") return true;
     const compositeKey = `${a.type}:${a.user?.id || ""}:${a.entityId || a.post?.id || ""}`;
     if (seenKeys.has(compositeKey)) return false;
     seenKeys.add(compositeKey);
