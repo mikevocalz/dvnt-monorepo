@@ -116,8 +116,12 @@ const STATUS_BAR_CLEARANCE = 24;
  * puts the 44pt tap target close to the status bar. This drops the button back
  * down so it stays comfortably thumb-reachable and optically centred against
  * the mark, which has more visual mass above its baseline than below.
+ *
+ * Applied as `marginTop: DROP` with `marginBottom: -DROP`, so the button moves
+ * without adding height to the row — otherwise every other slot re-centres in
+ * a taller band and the mark loses the lift.
  */
-const MENU_BUTTON_DROP = 6;
+const MENU_BUTTON_DROP = 14;
 
 function headerLift(insetTop: number): number {
   return Math.min(HEADER_LIFT, Math.max(0, insetTop - STATUS_BAR_CLEARANCE));
@@ -242,7 +246,15 @@ function TabsHeader() {
           gap: 4,
         }}
       >
-        <View style={{ marginTop: MENU_BUTTON_DROP }}>
+        {/* The negative bottom margin cancels the drop in LAYOUT, so the
+            button moves down without growing the row — the mark and the
+            right-hand slot hold the positions the lift gave them. */}
+        <View
+          style={{
+            marginTop: MENU_BUTTON_DROP,
+            marginBottom: -MENU_BUTTON_DROP,
+          }}
+        >
           <DrawerTrigger badge={attentionCount} />
         </View>
         <TabHeaderLogo />
