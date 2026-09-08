@@ -13,48 +13,15 @@
 
 import { execSync } from "child_process";
 import * as path from "path";
+import { NATIVE_PATTERNS } from "./native-patterns";
 
 const ROOT = path.resolve(__dirname, "../..");
 const base = process.argv[2] ?? "HEAD~1";
 const head = process.argv[3] ?? "HEAD";
 
-const NATIVE_PATTERNS: Array<{ pattern: RegExp; category: string }> = [
-  { pattern: /^ios\//,                category: "iOS native" },
-  { pattern: /^android\//,            category: "Android native" },
-  { pattern: /Podfile(\.lock)?$/,     category: "CocoaPods" },
-  { pattern: /build\.gradle/,         category: "Android build" },
-  { pattern: /AndroidManifest\.xml/,  category: "Android manifest" },
-  { pattern: /\.pbxproj$/,            category: "Xcode project" },
-  { pattern: /\.entitlements$/,       category: "iOS entitlements" },
-  { pattern: /\.swift$/,              category: "Swift" },
-  { pattern: /\.(m|mm|h)$/,           category: "Objective-C" },
-  { pattern: /\.kt$/,                 category: "Kotlin" },
-  { pattern: /app\.config\.(ts|js)$/, category: "Expo config" },
-  { pattern: /app\.json$/,            category: "Expo config" },
-  { pattern: /^plugins\//,            category: "Config plugin" },
-  { pattern: /^modules\//,            category: "Native module" },
-  // Anchored at the repo root, this missed apps/mobile/package.json and every
-  // workspace package — the ones that actually move the fingerprint here.
-  { pattern: /(^|\/)package\.json$/,  category: "Package deps" },
-  { pattern: /\.(lock|lockb)$/,       category: "Lockfile" },
-  // pnpm's lockfile ends in .yaml, so the rule above never matched it.
-  { pattern: /(^|\/)(pnpm-lock\.yaml|yarn\.lock|package-lock\.json)$/,
-    category: "Lockfile" },
-  // eas.json is a fingerprint input. Adding one line to the production build
-  // profile on 2026-09-08 moved the runtimeVersion off the hash every
-  // installed build asks for, and three OTA updates published successfully to
-  // an audience of nobody before anyone noticed. This preflight existed to
-  // catch that and did not list the file.
-  { pattern: /(^|\/)eas\.json$/,      category: "EAS build config" },
-  // Babel and Metro config change how the bundle is produced, and adding a
-  // babel plugin can pull in a dependency that shifts autolinking — verified
-  // with `eas fingerprint:compare`, which reported a changed React Native
-  // autolinking config after adding babel-plugin-transform-remove-console.
-  { pattern: /(^|\/)babel\.config\.(js|cjs|mjs|ts)$/,
-    category: "Babel config" },
-  { pattern: /(^|\/)metro\.config\.(js|cjs|mjs|ts)$/,
-    category: "Metro config" },
-];
+// The list lives in native-patterns.ts so this and the preflight cannot
+// drift apart again — they had, and the gap is what let eas.json through.
+
 
 function getChangedFiles(): string[] {
   try {

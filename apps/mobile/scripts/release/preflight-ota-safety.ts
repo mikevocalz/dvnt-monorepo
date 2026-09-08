@@ -20,6 +20,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
+import { NATIVE_PATTERNS as SHARED_NATIVE_PATTERNS } from "./native-patterns";
 
 const ROOT = path.resolve(__dirname, "../..");
 const channel = process.argv.find((a) => a.startsWith("--channel="))?.split("=")[1] ?? "production";
@@ -71,30 +72,14 @@ function getChangedFiles(base: string = "HEAD~1"): string[] {
 
 // ── 2. Native-affecting file patterns ─────────────────────────────────────────
 
-const NATIVE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-  { pattern: /^ios\//,                             reason: "iOS native directory changed" },
-  { pattern: /^android\//,                         reason: "Android native directory changed" },
-  { pattern: /Podfile(\.lock)?$/,                  reason: "Podfile/Podfile.lock changed" },
-  { pattern: /\.podspec$/,                         reason: "Podspec changed" },
-  { pattern: /build\.gradle/,                      reason: "Android build.gradle changed" },
-  { pattern: /AndroidManifest\.xml/,               reason: "AndroidManifest changed" },
-  { pattern: /\.pbxproj$/,                         reason: "Xcode project file changed" },
-  { pattern: /\.xcconfig$/,                        reason: "Xcode config changed" },
-  { pattern: /\.entitlements$/,                    reason: "iOS entitlements changed" },
-  { pattern: /\.swift$/,                           reason: "Swift file changed" },
-  { pattern: /\.(m|mm|h)$/,                        reason: "Objective-C file changed" },
-  { pattern: /\.kt$/,                              reason: "Kotlin file changed" },
-  { pattern: /app\.config\.(ts|js)$/,              reason: "app.config changed (may affect plugins)" },
-  { pattern: /app\.json$/,                         reason: "app.json changed" },
-  { pattern: /plugins\//,                          reason: "Config plugin changed" },
-  { pattern: /modules\//,                          reason: "Native module changed" },
-  { pattern: /^package\.json$/,                    reason: "package.json changed (check native deps)" },
-  { pattern: /^package-lock\.json$/,               reason: "package-lock.json changed" },
-  { pattern: /^yarn\.lock$/,                       reason: "yarn.lock changed" },
-  { pattern: /^bun\.lockb$/,                       reason: "bun.lockb changed" },
-  { pattern: /expo-updates/,                       reason: "expo-updates config changed" },
-  { pattern: /eas\.json$/,                         reason: "eas.json changed (verify channel/runtime)" },
-];
+// Shared with check-native-diff via native-patterns.ts. This file used to
+// keep its own copy, which listed npm/yarn/bun lockfiles but not pnpm's and
+// anchored package.json at the repo root.
+const NATIVE_PATTERNS = SHARED_NATIVE_PATTERNS.map(({ pattern, category }) => ({
+  pattern,
+  reason: `${category} changed`,
+}));
+
 
 // ── 3. Package.json native dep check ──────────────────────────────────────────
 
