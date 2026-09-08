@@ -209,7 +209,10 @@ export function HomeScreen() {
   // balanced, which is what a masonry is for.
   type Tile =
     | { kind: "post"; key: string; post: Post }
-    | { kind: "event"; key: string; event: Event };
+    | { kind: "event"; key: string; event: Event; span?: 2 }
+    // Reserves the neighbouring column's height under a two-column event so the
+    // masonry stays level instead of sliding a post under the banner.
+    | { kind: "spacer"; key: string; height: number };
 
   const columns = useMemo(() => {
     const events = feedEvents ?? [];
@@ -229,7 +232,40 @@ export function HomeScreen() {
       items: [] as Tile[],
       h: 0,
     }));
+    // An event spans TWO columns wherever there are two to span, so it reads as
+    // the wide banner it is on mobile instead of another portrait tile.
+    //
+    // Spanning inside the packer rather than breaking the masonry into
+    // full-width rows: a full-width break restarts the column packing, which is
+    // what produced sixteen ragged stacks on desktop last time. Here the
+    // shorter neighbour takes a spacer of the same height, so the columns stay
+    // level and the run continues.
+    const eventSpan = numColumns >= 2 ? 2 : 1;
     for (const tile of tiles) {
+      if (tile.kind === "event" && eventSpan === 2) {
+        // Cheapest adjacent PAIR, so the banner never straddles a tall column.
+        let pair = 0;
+        for (let c = 1; c + 1 < numColumns + 1 && c + 1 <= numColumns - 1; c++) {
+          if (
+            Math.max(cols[c].h, cols[c + 1].h) <
+            Math.max(cols[pair].h, cols[pair + 1].h)
+          ) {
+            pair = c;
+          }
+        }
+        const top = Math.max(cols[pair].h, cols[pair + 1].h);
+        const spanW = columnWidth * 2 + GAP;
+        const eventH = spanW / EVENT_CARD_ASPECT + 24 + GAP;
+        cols[pair].items.push({ ...tile, span: 2 });
+        cols[pair + 1].items.push({
+          kind: "spacer",
+          key: `${tile.key}-spacer`,
+          height: eventH,
+        });
+        cols[pair].h = top + eventH;
+        cols[pair + 1].h = top + eventH;
+        continue;
+      }
       let min = 0;
       for (let c = 1; c < numColumns; c++) {
         if (cols[c].h < cols[min].h) min = c;
@@ -243,7 +279,9 @@ export function HomeScreen() {
       cols[min].h +=
         tile.kind === "event"
           ? columnWidth / EVENT_CARD_ASPECT + 24 + GAP
-          : estimateRatio(tile.post) * columnWidth + GAP;
+          : tile.kind === "spacer"
+            ? tile.height
+            : estimateRatio(tile.post) * columnWidth + GAP;
     }
     return cols.map((c) => c.items);
   }, [posts, feedEvents, numColumns, columnWidth]);
@@ -312,20 +350,40 @@ export function HomeScreen() {
                 <div
                   key={ci}
                   className="flex flex-col"
-                  style={{ width: columnWidth, gap: GAP }}
+                  // `overflow: visible` is load-bearing: a two-column event card
+                  // is wider than the column that holds it.
+                  style={{ width: columnWidth, gap: GAP, overflow: "visible" }}
                 >
                   {col.map((tile) =>
-                    tile.kind === "event" ? (
+                    tile.kind === "spacer" ? (
+                      <div
+                        key={tile.key}
+                        aria-hidden
+                        style={{ height: tile.height - GAP }}
+                      />
+                    ) : tile.kind === "event" ? (
                       <EventCardBoundary key={tile.key}>
-                        <FeedEventCard data={toFeedEventCardData(tile.event)} />
+                        {/* A spanning card breaks OUT of its column: the
+                            neighbour holds a spacer of the same height, so the
+                            overflow lands on reserved space rather than on a
+                            post. */}
+                        <div
+                          style={
+                            tile.span === 2
+                              ? { width: columnWidth * 2 + GAP }
+                              : undefined
+                          }
+                        >
+                          <FeedEventCard data={toFeedEventCardData(tile.event)} />
+                        </div>
                       </EventCardBoundary>
-                    ) : (
+                    ) : tile.kind === "post" ? (
                       <MasonryCell
                         key={tile.key}
                         post={tile.post}
                         fallbackHeight={cellHeight(tile.post)}
                       />
-                    ),
+                    ) : null,
                   )}
                 </div>
               ))}
