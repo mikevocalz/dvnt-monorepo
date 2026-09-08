@@ -9,8 +9,14 @@
  * is a mode you choose, not the default you get for being the host.
  *
  * Count decides how many columns are WANTED; the breakpoint decides how many
- * FIT. Same rule as the native grid (see grid-layout.test.ts) so the two rails
- * do not drift into different rooms.
+ * FIT — the same principle the native side applies in stage-layout.ts, which
+ * is where that rule and its tests now live (grid-layout.test.ts is gone; it
+ * asserted against its own copy of the rule and so could never fail).
+ *
+ * The two are NOT identical and cannot be: this side expresses breakpoints as
+ * Tailwind classes the server can render, while native measures a real width.
+ * They agree on the shape of the answer — more width, more columns, capped at
+ * four — not on every count.
  */
 export function stageGridClass(count: number): string {
   if (count <= 1) return "grid-cols-1";

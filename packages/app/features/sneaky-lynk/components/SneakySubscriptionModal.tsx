@@ -183,7 +183,7 @@ function NativeSneakySubscriptionModal({
   reason = "upgrade",
   dismissible = true,
   onExit,
-  exitLabel = "Leave room",
+  exitLabel = "Leave Lynk",
   onSubscribed,
   billing = null,
 }: SneakySubscriptionModalProps) {
