@@ -600,7 +600,12 @@ export const postsApi = {
 
       if (error) {
         console.error("[Posts] getProfilePosts error:", error);
-        return [];
+        // THROWS. This used to `return []`, which the query cached as a
+        // successful empty result — for five minutes (STALE_TIMES.profilePosts)
+        // and across launches, since "profilePosts" is in the persist
+        // whitelist. One transient failure therefore rendered as "No posts yet"
+        // on a profile whose own counter said 19, and stayed that way.
+        throw new Error(error.message || "Could not load posts");
       }
 
       const hydratedPosts = await hydrateTextPostSlides(data || []);
@@ -613,7 +618,11 @@ export const postsApi = {
       });
     } catch (error) {
       console.error("[Posts] getProfilePosts error:", error);
-      return [];
+      // Rethrow for the same reason: an empty array is an answer about the
+      // account, and a failure is not.
+      throw error instanceof Error
+        ? error
+        : new Error("Could not load posts");
     }
   },
 

@@ -48,10 +48,35 @@ export function Drawer({
 
   const isBottom = side === "bottom";
   const panelStyle: React.CSSProperties = isBottom
-    ? { left: 0, right: 0, bottom: 0, height: size ?? undefined, maxHeight: "85vh" }
+    ? {
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: size ?? undefined,
+        maxHeight: "85vh",
+      }
     : side === "left"
       ? { left: 0, top: 0, bottom: 0, width: size ?? 420, maxWidth: "92vw" }
       : { right: 0, top: 0, bottom: 0, width: size ?? 420, maxWidth: "92vw" };
+
+  /**
+   * Clearance for the home-indicator strip and the bottom tab bar.
+   *
+   * The panel sits at `bottom: 0`, so its last row landed in the gesture area
+   * on a phone — and on the post menu that last row is Delete, which is why it
+   * read as "the delete button isn't visible": it sat under the tab bar and was
+   * awkward to hit even where it showed. The drawer paints ABOVE the bar
+   * (z-1500 vs z-1000), so this is clearance, not stacking.
+   *
+   * A breakpoint rather than an inline style, because the tab bar only exists
+   * below 768px (`app-shell.web.tsx` switches at `width < 768`) — padding
+   * desktop by 64px would just add dead space. `md:` matches that switch, and
+   * being CSS it also survives server rendering. 64px is the bar's own height
+   * (`web-tab-bar.web.tsx:95`).
+   */
+  const bottomClearance = isBottom
+    ? "pb-[calc(env(safe-area-inset-bottom,0px)+72px)] md:pb-0"
+    : "";
 
   const radius = isBottom
     ? "rounded-t-3xl"
@@ -67,7 +92,7 @@ export function Drawer({
       aria-modal="true"
     >
       <div
-        className={`absolute flex flex-col ${radius} border border-white/10 bg-[#101321] shadow-2xl`}
+        className={`absolute flex flex-col ${radius} ${bottomClearance} border border-white/10 bg-[#101321] shadow-2xl`}
         style={panelStyle}
         onClick={(e) => e.stopPropagation()}
       >

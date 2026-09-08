@@ -146,7 +146,11 @@ export function ProfileScreen() {
   }, [userId, queryClient]);
 
   // Profile posts + tab datasets (same queries native uses).
-  const { data: userPostsData } = useProfilePosts(userId);
+  const {
+    data: userPostsData,
+    isError: postsFailed,
+    refetch: refetchPosts,
+  } = useProfilePosts(userId);
   const { data: bookmarkedPostsData = [] } = useBookmarkedPosts();
   const { data: taggedPostsRaw = [] } = useTaggedPosts(userId);
   const { data: myEventsRaw } = useMyEvents();
@@ -487,18 +491,40 @@ export function ProfileScreen() {
             data={displayPosts}
             username={displayUsername}
             ListEmptyComponent={
-              <div className="flex flex-col items-center justify-center py-16">
-                <Bookmark size={48} className="text-white/30" />
-                <p className="mt-4 text-base text-white/55">
-                  {activeTab === "saved"
-                    ? "No saved posts yet"
-                    : activeTab === "tagged"
-                      ? "No tagged posts yet"
-                      : activeTab === "video"
-                        ? "No videos yet"
-                        : "No posts yet"}
-                </p>
-              </div>
+              /* A failed read is not an empty profile. This said "No posts yet"
+                 on an account whose own counter read 19, because the fetch
+                 returned [] on error and the query cached that as a successful
+                 empty result for five minutes. */
+              postsFailed && activeTab === "posts" ? (
+                <div className="flex flex-col items-center justify-center py-16">
+                  <Bookmark size={48} className="text-white/30" />
+                  <p className="mt-4 text-base text-white/70">
+                    We couldn&rsquo;t load your posts
+                  </p>
+                  <p className="mt-1 text-sm text-white/50">
+                    They&rsquo;re still there. This is a connection problem.
+                  </p>
+                  <button
+                    onClick={() => void refetchPosts()}
+                    className="mt-5 rounded-full bg-white/10 px-5 py-2 text-sm font-semibold text-white active:bg-white/15"
+                  >
+                    Try again
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16">
+                  <Bookmark size={48} className="text-white/30" />
+                  <p className="mt-4 text-base text-white/55">
+                    {activeTab === "saved"
+                      ? "No saved posts yet"
+                      : activeTab === "tagged"
+                        ? "No tagged posts yet"
+                        : activeTab === "video"
+                          ? "No videos yet"
+                          : "No posts yet"}
+                  </p>
+                </div>
+              )
             }
           />
         )}
