@@ -10,7 +10,7 @@ import {
   View,
   Pressable,
   StyleSheet,
-  Dimensions,
+  useWindowDimensions,
   ScrollView,
   Platform,
   BackHandler,
@@ -19,8 +19,6 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Motion } from "@legendapp/motion";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useEffect } from "react";
-
-const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");
 
 interface PopoverContextType {
   open: boolean;
@@ -92,6 +90,10 @@ export function PopoverContent({
 }: PopoverContentProps) {
   const { open, setOpen } = usePopover();
   const insets = useSafeAreaInsets();
+  // The cap has to come off the window the dropdown is open in; the old
+  // module-scope `Dimensions.get` was frozen at bundle load, so a rotated
+  // tablet could size the dropdown taller than the screen it sits on.
+  const { height: windowHeight } = useWindowDimensions();
 
   const handleClose = useCallback(() => setOpen(false), [setOpen]);
 
@@ -132,7 +134,7 @@ export function PopoverContent({
           styles.dropdown,
           {
             top: 100 + insets.top,
-            maxHeight: SCREEN_HEIGHT - 200 - insets.top - insets.bottom,
+            maxHeight: windowHeight - 200 - insets.top - insets.bottom,
           },
         ]}
       >

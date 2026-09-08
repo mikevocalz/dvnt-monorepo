@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
 import BottomSheet, {
   BottomSheetView,
+  BottomSheetScrollView,
   BottomSheetBackdrop,
 } from "@gorhom/bottom-sheet";
 import type { BottomSheetBackdropProps } from "@gorhom/bottom-sheet";
@@ -164,7 +165,10 @@ export function ReportSheet() {
           {headerSubtitle}. Reports are anonymous to the person you report.
         </Text>
 
-        <View style={styles.reasonList}>
+        {/* Scrolls: 10 reasons plus the header exceed the snap height on a
+            phone, and BottomSheetView does not scroll — Submit ended up
+            unreachable, which is the Guideline 1.2 path being blocked. */}
+        <BottomSheetScrollView contentContainerStyle={styles.reasonList}>
           {REPORT_REASON_OPTIONS.map((option) => {
             const isSelected = selectedReason === option.value;
             return (
@@ -190,7 +194,7 @@ export function ReportSheet() {
               </Pressable>
             );
           })}
-        </View>
+        </BottomSheetScrollView>
 
         <View style={styles.footer}>
           <Pressable
@@ -222,6 +226,8 @@ export function ReportSheet() {
 
 const styles = StyleSheet.create({
   content: {
+    // flex so the scrollable reason list is bounded and the footer stays pinned.
+    flex: 1,
     paddingBottom: 40,
   },
   header: {

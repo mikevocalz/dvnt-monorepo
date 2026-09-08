@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   StyleSheet,
   TextInput,
+  useWindowDimensions,
 } from "react-native";
 import BottomSheet, {
   BottomSheetView,
@@ -21,6 +22,10 @@ import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useConversations } from "@dvnt/app/lib/hooks/use-messages";
 import { useShareSheetStore } from "@dvnt/app/lib/stores/share-sheet-store";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
+import {
+  useDetachedSheetMetrics,
+  SHEET_BOTTOM_INSET,
+} from "@dvnt/app/lib/ui/sheet-metrics";
 import type { Conversation } from "@dvnt/app/lib/api/messages";
 
 interface ShareToInboxSheetProps {
@@ -43,7 +48,11 @@ export function ShareToInboxSheet({
 }: ShareToInboxSheetProps) {
   const { colors } = useColorScheme();
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ["60%"], []);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheet = useDetachedSheetMetrics();
+  // Numeric, not "%": a detached sheet sized off a percentage resolved against
+  // the feed's scroll content, which put the body below the screen edge.
+  const snapPoints = useMemo(() => [sheet.height], [sheet.height]);
 
   // Conversations live in React Query — already prefetched at app boot
   // (see lib/hooks/use-boot-prefetch.ts) so the sheet opens with cached
@@ -186,72 +195,87 @@ export function ShareToInboxSheet({
   if (!visible) return null;
 
   return (
-    <BottomSheet
-      ref={bottomSheetRef}
-      index={0}
-      snapPoints={snapPoints}
-      enablePanDownToClose
-      enableOverDrag={false}
-      onChange={handleSheetChange}
-      backdropComponent={renderBackdrop}
-      detached={true}
-      bottomInset={46}
-      backgroundComponent={GlassSheetBackground}
-      handleIndicatorStyle={{
-        backgroundColor: colors.mutedForeground,
-        width: 40,
-      }}
-      style={[styles.sheetContainer, { zIndex: 9999, elevation: 9999 }]}
+    // The feed renders this beside its list, so the sheet's own `absoluteFill`
+    // host measures the scroll content unless it is pinned to the viewport.
+    <View
+      pointerEvents="box-none"
+      style={[styles.viewport, { height: windowHeight }]}
     >
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>
-          Share to...
-        </Text>
-        <Pressable
-          onPress={() => bottomSheetRef.current?.close()}
-          hitSlop={12}
-          style={styles.closeButton}
-        >
-          <X size={20} color={colors.mutedForeground} />
-        </Pressable>
-      </View>
-
-      {/* Search */}
-      <View style={[styles.searchContainer, { backgroundColor: colors.muted }]}>
-        <Search size={16} color={colors.mutedForeground} />
-        <TextInput
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder="Search conversations..."
-          placeholderTextColor={colors.mutedForeground}
-          style={[styles.searchInput, { color: colors.foreground }]}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-      </View>
-
-      {/* Content */}
-      {isLoading ? (
-        <BottomSheetView style={styles.centered}>
-          <ActivityIndicator size="small" color={colors.primary} />
-        </BottomSheetView>
-      ) : filtered.length === 0 ? (
-        <BottomSheetView style={styles.centered}>
-          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-            {searchQuery ? "No conversations found" : "No conversations yet"}
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={0}
+        snapPoints={snapPoints}
+        enablePanDownToClose
+        enableOverDrag={false}
+        onChange={handleSheetChange}
+        backdropComponent={renderBackdrop}
+        detached
+        enableDynamicSizing={false}
+        bottomInset={SHEET_BOTTOM_INSET}
+        backgroundComponent={GlassSheetBackground}
+        handleIndicatorStyle={{
+          backgroundColor: colors.mutedForeground,
+          width: 40,
+        }}
+        style={[
+          styles.sheetContainer,
+          {
+            zIndex: 9999,
+            elevation: 9999,
+            marginHorizontal: sheet.marginHorizontal,
+          },
+        ]}
+      >
+        {/* Header */}
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.headerTitle, { color: colors.foreground }]}>
+            Share to...
           </Text>
-        </BottomSheetView>
-      ) : (
-        <BottomSheetFlatList
-          data={filtered}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16 }}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
-    </BottomSheet>
+          <Pressable
+            onPress={() => bottomSheetRef.current?.close()}
+            hitSlop={12}
+            style={styles.closeButton}
+          >
+            <X size={20} color={colors.mutedForeground} />
+          </Pressable>
+        </View>
+
+        {/* Search */}
+        <View style={[styles.searchContainer, { backgroundColor: colors.muted }]}>
+          <Search size={16} color={colors.mutedForeground} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search conversations..."
+            placeholderTextColor={colors.mutedForeground}
+            style={[styles.searchInput, { color: colors.foreground }]}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+
+        {/* Content */}
+        {isLoading ? (
+          <BottomSheetView style={styles.centered}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </BottomSheetView>
+        ) : filtered.length === 0 ? (
+          <BottomSheetView style={styles.centered}>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+              {searchQuery ? "No conversations found" : "No conversations yet"}
+            </Text>
+          </BottomSheetView>
+        ) : (
+          <BottomSheetFlatList
+            data={filtered}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16 }}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+      </BottomSheet>
+    </View>
   );
 }
 
@@ -314,8 +338,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  // Bottom-anchored at an explicit viewport height, so the detached sheet
+  // rises from the screen edge rather than the bottom of the feed's content.
+  viewport: { position: "absolute", left: 0, right: 0, bottom: 0 },
   sheetContainer: {
-    marginHorizontal: 16,
     overflow: "hidden",
     borderRadius: 24,
   },

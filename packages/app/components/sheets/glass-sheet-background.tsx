@@ -44,11 +44,7 @@ function GlassSheetBackgroundComponent({
         <View
           pointerEvents="none"
           style={[
-            {
-              flex: 1,
-              borderTopLeftRadius: BORDER_RADIUS,
-              borderTopRightRadius: BORDER_RADIUS,
-            },
+            { flex: 1, borderRadius: BORDER_RADIUS },
             createGlassScrimStyle("sheet"),
           ]}
         />
@@ -73,11 +69,7 @@ function GlassSheetBackgroundComponent({
         <View
           pointerEvents="none"
           style={[
-            {
-              flex: 1,
-              borderTopLeftRadius: BORDER_RADIUS,
-              borderTopRightRadius: BORDER_RADIUS,
-            },
+            { flex: 1, borderRadius: BORDER_RADIUS },
             createGlassScrimStyle("sheet", true),
           ]}
         />
@@ -91,8 +83,9 @@ function GlassSheetBackgroundComponent({
       style={[
         style,
         {
-          borderTopLeftRadius: BORDER_RADIUS,
-          borderTopRightRadius: BORDER_RADIUS,
+          // All four corners: a detached sheet floats clear of the screen edge,
+          // and on an attached sheet the bottom pair is off-screen anyway.
+          borderRadius: BORDER_RADIUS,
           backgroundColor: GLASS_SURFACE.androidSurface,
           borderWidth: 1,
           borderColor: GLASS_SURFACE.borderStrong,

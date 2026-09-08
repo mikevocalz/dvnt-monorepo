@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
-import { View, Text, Pressable, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+} from "react-native";
 import BottomSheet, {
   BottomSheetView,
   BottomSheetBackdrop,
@@ -15,8 +21,11 @@ import {
   ImagePlus,
   Languages,
 } from "lucide-react-native";
+import {
+  useDetachedSheetMetrics,
+  SHEET_BOTTOM_INSET,
+} from "@dvnt/app/lib/ui/sheet-metrics";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
-import { SHEET_SNAPS_ACTION } from "@dvnt/app/lib/constants/sheets";
 
 interface PostActionSheetProps {
   visible: boolean;
@@ -46,8 +55,11 @@ export function PostActionSheet({
   isTranslationCapable,
 }: PostActionSheetProps) {
   const { colors } = useColorScheme();
+  const { height: windowHeight } = useWindowDimensions();
+  const sheet = useDetachedSheetMetrics();
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => [isOwner ? "60%" : "55%"], [isOwner]);
+  // Numeric, not "%": detached sizing is driven by the shared 3:4 metrics.
+  const snapPoints = useMemo(() => [sheet.height], [sheet.height]);
 
   useEffect(() => {
     if (visible) {
@@ -80,140 +92,168 @@ export function PostActionSheet({
   if (!visible) return null;
 
   return (
-    <BottomSheet
-      ref={bottomSheetRef}
-      index={0}
-      snapPoints={snapPoints}
-      enablePanDownToClose
-      enableOverDrag={false}
-      onChange={handleSheetChange}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={{ backgroundColor: colors.card }}
-      handleIndicatorStyle={{
-        backgroundColor: colors.mutedForeground,
-        width: 40,
-      }}
-      style={{ zIndex: 9999, elevation: 9999 }}
+    // A non-modal <BottomSheet> hosts itself in an absoluteFill View that
+    // measures ITSELF, so `%` snap points resolve against whatever the parent
+    // is — a feed taller than the screen pushed the body off the bottom.
+    <View
+      pointerEvents="box-none"
+      style={[styles.viewport, { height: windowHeight }]}
     >
-      <BottomSheetView style={styles.content}>
-        {/* Header */}
-        <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.headerTitle, { color: colors.foreground }]}>
-            Post Options
-          </Text>
-          <Pressable
-            onPress={() => bottomSheetRef.current?.close()}
-            hitSlop={12}
-          >
-            <X size={20} color={colors.mutedForeground} />
-          </Pressable>
-        </View>
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={0}
+        snapPoints={snapPoints}
+        enablePanDownToClose
+        enableOverDrag={false}
+        onChange={handleSheetChange}
+        backdropComponent={renderBackdrop}
+        enableDynamicSizing={false}
+        detached
+        bottomInset={SHEET_BOTTOM_INSET}
+        backgroundStyle={{
+          backgroundColor: colors.card,
+          // Detached floats, so all four corners — top-only leaves square
+          // corners hanging over the inset.
+          borderRadius: 24,
+        }}
+        handleIndicatorStyle={{
+          backgroundColor: colors.mutedForeground,
+          width: 40,
+        }}
+        style={{
+          zIndex: 9999,
+          elevation: 9999,
+          marginHorizontal: sheet.marginHorizontal,
+        }}
+      >
+        <BottomSheetView style={styles.content}>
+          {/* Header */}
+          <View style={[styles.header, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.headerTitle, { color: colors.foreground }]}>
+              Post Options
+            </Text>
+            <Pressable
+              onPress={() => bottomSheetRef.current?.close()}
+              hitSlop={12}
+            >
+              <X size={20} color={colors.mutedForeground} />
+            </Pressable>
+          </View>
 
-        {/* Actions */}
-        {isOwner && (
-          <>
+          {/* Actions */}
+          {isOwner && (
+            <>
+              <Pressable
+                onPress={() => {
+                  onEdit();
+                  onClose();
+                }}
+                style={styles.row}
+              >
+                <Edit size={22} color={colors.foreground} />
+                <Text style={[styles.rowText, { color: colors.foreground }]}>
+                  Edit Post
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  onDelete();
+                  onClose();
+                }}
+                style={styles.row}
+              >
+                <Trash2 size={22} color="#ef4444" />
+                <Text style={[styles.rowText, { color: "#ef4444" }]}>
+                  Delete Post
+                </Text>
+              </Pressable>
+            </>
+          )}
+
+          {/* Common options */}
+          {isTranslationCapable && (
             <Pressable
               onPress={() => {
-                onEdit();
+                if (onTranslate) onTranslate();
                 onClose();
               }}
               style={styles.row}
             >
-              <Edit size={22} color={colors.foreground} />
+              <Languages size={22} color={colors.foreground} />
               <Text style={[styles.rowText, { color: colors.foreground }]}>
-                Edit Post
+                {isTranslated ? "Show Original" : "Translate Post"}
               </Text>
             </Pressable>
+          )}
 
+          <Pressable
+            onPress={() => {
+              onClose();
+            }}
+            style={styles.row}
+          >
+            <Link size={22} color={colors.foreground} />
+            <Text style={[styles.rowText, { color: colors.foreground }]}>
+              Copy Link
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              if (onShare) onShare();
+              onClose();
+            }}
+            style={styles.row}
+          >
+            <Share2 size={22} color={colors.foreground} />
+            <Text style={[styles.rowText, { color: colors.foreground }]}>
+              Share
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              if (onShareToStory) onShareToStory();
+              onClose();
+            }}
+            style={styles.row}
+          >
+            <ImagePlus size={22} color={colors.foreground} />
+            <Text style={[styles.rowText, { color: colors.foreground }]}>
+              Share to Story
+            </Text>
+          </Pressable>
+
+          {!isOwner && (
             <Pressable
               onPress={() => {
-                onDelete();
+                if (onReport) onReport();
                 onClose();
               }}
               style={styles.row}
             >
-              <Trash2 size={22} color="#ef4444" />
+              <Flag size={22} color="#ef4444" />
               <Text style={[styles.rowText, { color: "#ef4444" }]}>
-                Delete Post
+                Report Post
               </Text>
             </Pressable>
-          </>
-        )}
-
-        {/* Common options */}
-        {isTranslationCapable && (
-          <Pressable
-            onPress={() => {
-              if (onTranslate) onTranslate();
-              onClose();
-            }}
-            style={styles.row}
-          >
-            <Languages size={22} color={colors.foreground} />
-            <Text style={[styles.rowText, { color: colors.foreground }]}>
-              {isTranslated ? "Show Original" : "Translate Post"}
-            </Text>
-          </Pressable>
-        )}
-
-        <Pressable
-          onPress={() => {
-            onClose();
-          }}
-          style={styles.row}
-        >
-          <Link size={22} color={colors.foreground} />
-          <Text style={[styles.rowText, { color: colors.foreground }]}>
-            Copy Link
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => {
-            if (onShare) onShare();
-            onClose();
-          }}
-          style={styles.row}
-        >
-          <Share2 size={22} color={colors.foreground} />
-          <Text style={[styles.rowText, { color: colors.foreground }]}>
-            Share
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => {
-            if (onShareToStory) onShareToStory();
-            onClose();
-          }}
-          style={styles.row}
-        >
-          <ImagePlus size={22} color={colors.foreground} />
-          <Text style={[styles.rowText, { color: colors.foreground }]}>
-            Share to Story
-          </Text>
-        </Pressable>
-
-        {!isOwner && (
-          <Pressable
-            onPress={() => {
-              if (onReport) onReport();
-              onClose();
-            }}
-            style={styles.row}
-          >
-            <Flag size={22} color="#ef4444" />
-            <Text style={[styles.rowText, { color: "#ef4444" }]}>
-              Report Post
-            </Text>
-          </Pressable>
-        )}
-      </BottomSheetView>
-    </BottomSheet>
+          )}
+        </BottomSheetView>
+      </BottomSheet>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // Bottom-anchored so the sheet still rises from the screen edge; the fixed
+  // height is what makes the `%` snap points resolve against the viewport.
+  viewport: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   content: {
     paddingBottom: 40,
   },

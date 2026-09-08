@@ -1,4 +1,9 @@
-import { View, Pressable, Dimensions, StyleSheet } from "react-native";
+import {
+  View,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+} from "react-native";
 import { Image } from "expo-image";
 import { VideoView, useVideoPlayer } from "expo-video";
 import { X } from "lucide-react-native";
@@ -26,8 +31,6 @@ interface MediaPreviewModalProps {
   } | null;
 }
 
-const { width, height } = Dimensions.get("window");
-
 export function MediaPreviewModal({
   visible,
   onClose,
@@ -35,6 +38,9 @@ export function MediaPreviewModal({
 }: MediaPreviewModalProps) {
   const sheetRef = useRef<BottomSheet>(null);
   const insets = useSafeAreaInsets();
+  // Read per-render, not at module scope: a module-scope size is captured once
+  // at import and never follows an iPad rotation or Split View resize.
+  const { width, height } = useWindowDimensions();
   const snapPoints = useMemo(() => ["95%"], []);
 
   useEffect(() => {
@@ -123,7 +129,9 @@ export function MediaPreviewModal({
           </View>
         </Pressable>
 
-        <View style={styles.mediaContainer}>
+        <View
+          style={[styles.mediaContainer, { width, height: height * 0.75 }]}
+        >
           {media.type === "image" ? (
             <Image
               source={{ uri: media.uri }}
@@ -173,8 +181,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   mediaContainer: {
-    width,
-    height: height * 0.75,
     justifyContent: "center",
     alignItems: "center",
   },

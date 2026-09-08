@@ -1,12 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
-import { View, Text, Pressable, Alert, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  Pressable,
+  Alert,
+  StyleSheet,
+  useWindowDimensions,
+} from "react-native";
 import BottomSheet, {
   BottomSheetView,
   BottomSheetBackdrop,
 } from "@gorhom/bottom-sheet";
 import type { BottomSheetBackdropProps } from "@gorhom/bottom-sheet";
 import { Share2, Users, Flag, ShieldBan, X } from "lucide-react-native";
-import { SHEET_SNAPS_ACTION } from "@dvnt/app/lib/constants/sheets";
+import {
+  useDetachedSheetMetrics,
+  SHEET_BOTTOM_INSET,
+} from "@dvnt/app/lib/ui/sheet-metrics";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
 
 interface ProfileActionSheetProps {
@@ -29,7 +39,10 @@ export function ProfileActionSheet({
   onBlock,
 }: ProfileActionSheetProps) {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => [...SHEET_SNAPS_ACTION], []);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheet = useDetachedSheetMetrics();
+  // Numeric, not "%": detached sizing is driven by the shared 3:4 metrics.
+  const snapPoints = useMemo(() => [sheet.height], [sheet.height]);
 
   useEffect(() => {
     if (visible) {
@@ -80,76 +93,93 @@ export function ProfileActionSheet({
   if (!visible) return null;
 
   return (
-    <BottomSheet
-      ref={bottomSheetRef}
-      index={0}
-      snapPoints={snapPoints}
-      enablePanDownToClose
-      enableOverDrag={false}
-      onChange={handleSheetChange}
-      backdropComponent={renderBackdrop}
-      backgroundComponent={GlassSheetBackground}
-      handleIndicatorStyle={styles.handleIndicator}
-      style={{ zIndex: 9999, elevation: 9999 }}
+    // A non-modal <BottomSheet> hosts itself in an `absoluteFill` View that
+    // measures ITSELF, so the height must come from the window, not the parent.
+    <View
+      pointerEvents="box-none"
+      style={[styles.viewport, { height: windowHeight }]}
     >
-      <BottomSheetView style={styles.content}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>@{username}</Text>
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={0}
+        snapPoints={snapPoints}
+        enablePanDownToClose
+        enableOverDrag={false}
+        onChange={handleSheetChange}
+        backdropComponent={renderBackdrop}
+        backgroundComponent={GlassSheetBackground}
+        handleIndicatorStyle={styles.handleIndicator}
+        enableDynamicSizing={false}
+        detached
+        bottomInset={SHEET_BOTTOM_INSET}
+        style={{
+          zIndex: 9999,
+          elevation: 9999,
+          marginHorizontal: sheet.marginHorizontal,
+        }}
+      >
+        <BottomSheetView style={styles.content}>
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>@{username}</Text>
+            <Pressable
+              onPress={() => bottomSheetRef.current?.close()}
+              hitSlop={12}
+            >
+              <X size={20} color="#999" />
+            </Pressable>
+          </View>
+
+          {/* Actions */}
           <Pressable
-            onPress={() => bottomSheetRef.current?.close()}
-            hitSlop={12}
+            onPress={() => {
+              onShareProfile();
+              onClose();
+            }}
+            style={styles.row}
           >
-            <X size={20} color="#999" />
+            <Share2 size={22} color="#fff" />
+            <Text style={styles.rowText}>Share Profile</Text>
           </Pressable>
-        </View>
 
-        {/* Actions */}
-        <Pressable
-          onPress={() => {
-            onShareProfile();
-            onClose();
-          }}
-          style={styles.row}
-        >
-          <Share2 size={22} color="#fff" />
-          <Text style={styles.rowText}>Share Profile</Text>
-        </Pressable>
+          <Pressable
+            onPress={() => {
+              onAddCloseFriend();
+              onClose();
+            }}
+            style={styles.row}
+          >
+            <Users size={22} color="#22C55E" />
+            <Text style={styles.rowText}>Add to Close Friends</Text>
+          </Pressable>
 
-        <Pressable
-          onPress={() => {
-            onAddCloseFriend();
-            onClose();
-          }}
-          style={styles.row}
-        >
-          <Users size={22} color="#22C55E" />
-          <Text style={styles.rowText}>Add to Close Friends</Text>
-        </Pressable>
+          <View style={styles.separator} />
 
-        <View style={styles.separator} />
+          <Pressable
+            onPress={() => {
+              onReport();
+              onClose();
+            }}
+            style={styles.row}
+          >
+            <Flag size={22} color="#ef4444" />
+            <Text style={styles.rowTextDanger}>Report</Text>
+          </Pressable>
 
-        <Pressable
-          onPress={() => {
-            onReport();
-            onClose();
-          }}
-          style={styles.row}
-        >
-          <Flag size={22} color="#ef4444" />
-          <Text style={styles.rowTextDanger}>Report</Text>
-        </Pressable>
-
-        <Pressable onPress={handleBlock} style={styles.row}>
-          <ShieldBan size={22} color="#ef4444" />
-          <Text style={styles.rowTextDanger}>Block User</Text>
-        </Pressable>
-      </BottomSheetView>
-    </BottomSheet>
+          <Pressable onPress={handleBlock} style={styles.row}>
+            <ShieldBan size={22} color="#ef4444" />
+            <Text style={styles.rowTextDanger}>Block User</Text>
+          </Pressable>
+        </BottomSheetView>
+      </BottomSheet>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // Bottom-anchored at an explicit viewport height, so the sheet rises from
+  // the screen edge whatever the parent's content height is.
+  viewport: { position: "absolute", left: 0, right: 0, bottom: 0 },
   sheetBackground: {
     backgroundColor: "#1a1a1a",
   },
