@@ -27,7 +27,8 @@
     "test:lynk-session": "node --test packages/app/features/sneaky-lynk/session/machine.test.ts packages/ui/src/video/RoomTimer.countdown.test.ts packages/ui/src/video/ConnectionBanner.phase.test.ts packages/app/lib/user-label.test.ts packages/app/features/sneaky-lynk/ui/hand-queue.test.ts packages/app/lib/video/host-mute.test.ts packages/app/features/sneaky-lynk/session/moq-transport.test.ts packages/app/features/sneaky-lynk/ui/grid-layout.test.ts",
     "verify:functions": "node scripts/verify-edge-functions.mjs",
     "verify:functions:live": "node scripts/verify-edge-functions.mjs --live --project-ref npfjanxturvmjyevoyfo",
-    "check:bundle": "node scripts/check-bundle-budget.mjs"
+    "check:bundle": "node scripts/check-bundle-budget.mjs",
+    "test:tickets": "node --test packages/app/lib/tickets/ticket-identity.test.ts packages/app/lib/tickets/ticket-library.test.ts packages/app/lib/tickets/checkout-outcome.test.ts packages/app/lib/tickets/pricing.test.ts packages/app/features/navigation/drawer-destinations.test.ts"
   },
   "keywords": [],
   "author": "",

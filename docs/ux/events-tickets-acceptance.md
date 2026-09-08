@@ -54,3 +54,40 @@ documents. The client works either way.
 need it — it resolves identity against the account-scoped list, which is
 correct against the currently deployed function — but it would cut the payload
 for a single-pass deep link.
+
+## Found while working: 17 test files that cannot load
+
+`packages/app/lib/tickets/pricing.test.ts` imported `"./pricing"` with no
+extension, which Node 26's type-stripping runner cannot resolve — it threw
+`ERR_MODULE_NOT_FOUND` before running a single assertion. It is not in
+`test:calls`, so nothing noticed. Adding `.ts` recovered 17 passing assertions
+about add-on gating, stock, and sub-allocations.
+
+The same one-character break exists in 16 more files, all currently unrunnable:
+
+```
+features/events/ui/host-events-route.test.ts
+features/gpu/reactions/engine.test.ts
+features/services/callkeep/answer-call.test.ts
+features/watch/contracts/v2.test.ts
+features/watch/watch-active-call.test.ts
+features/watch/watch-call-directory.test.ts
+features/watch/watch-door-payload.test.ts
+features/watch/watch-event-payload.test.ts
+features/watch/watch-event-weather.test.ts
+features/watch/watch-rendition.test.ts
+features/watch/watch-venue-actions.test.ts
+features/watch/watch-venue-forecast.test.ts
+lib/events/event-time.test.ts
+lib/media/resolve-renderable.test.ts
+lib/outbox/outbox.test.ts
+lib/secure-capture/useSecureCaptureGuard.test.ts
+```
+
+Not swept here — they belong to watch, GPU, CallKeep, outbox and media, and
+some may fail for real reasons once they can load, which is a different
+conversation from a resolution fix. `packages/app/tsconfig.json` already sets
+`allowImportingTsExtensions` for exactly this.
+
+`pnpm test:tickets` now runs this brief's 47 assertions so they cannot rot the
+same way.

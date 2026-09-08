@@ -26,7 +26,7 @@ import {
   addonIsPurchasable,
   addonSatisfiesTierGate,
   filterEligibleAddons,
-} from "./pricing";
+} from "./pricing.ts";
 
 const T = (ms: string) => Date.parse(ms);
 const NOW = T("2026-06-13T12:00:00Z");
