@@ -41,6 +41,7 @@ import {
 } from "@dvnt/app/lib/hooks/use-promotions";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import { slugify } from "@dvnt/app/lib/slug";
+import { EVENT_CARD_ASPECT } from "@dvnt/app/components/event/feed-event-card-shape";
 import {
   resolvePosterUrl,
   resolveRenderableMedia,
@@ -565,19 +566,17 @@ function LargeEventCard({
       onKeyDown={(ev) => {
         if (ev.key === "Enter" || ev.key === " ") onOpen(e.title);
       }}
-      // A DVNT flyer is authored 3:5 PORTRAIT (see BuiltEventMedia.flyerImageUrl).
-      // This card was `aspect-video`, so `object-cover` threw away roughly
-      // two thirds of every flyer and kept a letterbox strip out of the middle
-      // — the "squished" look. No event app crops a flyer to landscape: DICE,
-      // corner, Posh and Spotify Live Events all present them portrait.
+      // Shape comes from EVENT_CARD_ASPECT, the same constant the native
+      // Events tab and the web home feed already use. This card kept its own
+      // 4:5 instead, so one event rendered portrait here and landscape two
+      // routes away — the mismatch that reads as "web doesn't match mobile".
       //
-      // 4:5 rather than the full 3:5: it honours the artwork while still
-      // letting more than one card exist on a screen, and it is the ratio the
-      // references settle on for a feed. The max-w-md cap now only binds in the
-      // single-column phone case — on a desktop the grid column is narrower
-      // than the cap, which is what stopped this being one centred card with
-      // ~290px of dead gutter either side.
-      className="relative mx-auto w-full max-w-md rounded-2xl overflow-hidden aspect-4/5 text-left bg-white/[0.04] cursor-pointer"
+      // Keeping the trade-off on record, because it is the reason the local
+      // value existed: a DVNT flyer is authored 3:5 portrait, so a landscape
+      // card crops it. Change the shared constant if that becomes the wrong
+      // call — but change it in ONE place, for both platforms at once.
+      className="relative mx-auto w-full max-w-md rounded-2xl overflow-hidden text-left bg-white/[0.04] cursor-pointer"
+      style={{ aspectRatio: String(EVENT_CARD_ASPECT) }}
     >
       {videoUrl ? (
         <video
@@ -673,11 +672,12 @@ function EventCard({
   const img = flyerFor(e).posterUrl;
   return (
     <button onClick={() => onOpen(e.title)} className="text-left w-full">
-      {/* Portrait, for the same reason as the card above: a square crop of a
-          3:5 flyer loses its top and bottom, which is usually the lineup and
-          the date. Posh and Spotify Live Events both use a portrait thumb in
-          exactly this row position. */}
-      <div className="relative rounded-xl overflow-hidden aspect-3/4 bg-white/[0.06]">
+      {/* Same shared shape as the grid card below it — a trending thumb and
+          the card it links to were different ratios for the same event. */}
+      <div
+        className="relative rounded-xl overflow-hidden bg-white/[0.06]"
+        style={{ aspectRatio: String(EVENT_CARD_ASPECT) }}
+      >
         {img ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={img} alt={e.title} className="w-full h-full object-cover" />
