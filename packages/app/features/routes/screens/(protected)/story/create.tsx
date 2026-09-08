@@ -31,10 +31,6 @@ import {
   useLocalSearchParams,
 } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
-import {
-  DVNTLiquidGlass,
-  DVNTLiquidGlassIconButton,
-} from "@dvnt/app/components/media/DVNTLiquidGlass";
 import { Motion } from "@legendapp/motion";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useCreateStoryStore } from "@dvnt/app/lib/stores/create-story-store";
@@ -63,13 +59,6 @@ import type { StoryAnimatedGifOverlay, StoryOverlay } from "@dvnt/app/lib/types"
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import { DVNTGifView } from "@dvnt/app/components/media/DVNTGifView";
 import { getImageStickerSourceById } from "@dvnt/app/features/stories-editor/constants";
-
-/**
- * The back button's radius: `DVNTLiquidGlassIconButton` derives it as
- * `size / 4`, and every header wears that button at size 40. Anything that
- * sits beside it in a header uses this so the shapes match.
- */
-const GLASS_BUTTON_RADIUS = 40 / 4;
 
 /**
  * The bottom rail and the visibility pill sit OVER the user's photo, so they
@@ -918,20 +907,20 @@ function CreateStoryScreenContent() {
       fontWeight: "600",
       fontSize: 18,
     },
-    // Same object as `DetailBackButton` — glass disc, 40pt, 20pt icon in #fff.
-    // A bare chevron and a bare X on adjacent screens read as two different
-    // apps; the X stays because this closes the composer rather than going back.
+    // BARE icon, no glass wrapper. iOS 26 draws its own glass backing behind
+    // native header bar items, so wrapping this in DVNTLiquidGlassIconButton
+    // put our capsule on top of the system's — the two overlapping shapes on
+    // the story header. The system backing is the one to keep: it matches every
+    // other native header in the OS and tracks the platform.
     headerLeft: () => (
       <Pressable
         onPress={handleClose}
         hitSlop={12}
-        className="ml-2"
+        className="ml-2 w-11 h-11 items-center justify-center"
         accessibilityRole="button"
         accessibilityLabel="Close"
       >
-        <DVNTLiquidGlassIconButton size={40}>
-          <X size={20} color="#fff" strokeWidth={2.5} />
-        </DVNTLiquidGlassIconButton>
+        <X size={22} color="#fff" strokeWidth={2.5} />
       </Pressable>
     ),
     headerRight: () => (
@@ -944,16 +933,13 @@ function CreateStoryScreenContent() {
         accessibilityLabel="Share story"
         accessibilityState={{ disabled: isSharing || !isValid }}
       >
-        {/* GLASS_BUTTON_RADIUS keeps this the same shape as the close button
-            beside it, which gets its radius from `size / 4` inside
-            DVNTLiquidGlassIconButton. */}
-        <DVNTLiquidGlass radius={GLASS_BUTTON_RADIUS} paddingH={14} paddingV={9}>
-          <Text
-            className={`text-sm font-semibold ${isValid && !isSharing ? "text-primary" : "text-muted-foreground"}`}
-          >
-            {isSharing ? "Sharing..." : "Share"}
-          </Text>
-        </DVNTLiquidGlass>
+        {/* Bare label, same reason as the close button above: the system
+            already provides the header item's glass. */}
+        <Text
+          className={`text-base font-semibold ${isValid && !isSharing ? "text-primary" : "text-muted-foreground"}`}
+        >
+          {isSharing ? "Sharing..." : "Share"}
+        </Text>
       </Pressable>
     ),
   }, [handleClose, handleShare, isSharing, isValid]);
