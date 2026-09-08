@@ -95,6 +95,34 @@ const fullScreenModalConfig = {
  */
 const TAB_HEADER_ROW_HEIGHT = 44;
 
+/**
+ * How far the header row sits above the safe-area line.
+ *
+ * `paddingTop: insets.top` parks the mark at the very bottom of the safe area,
+ * which on a notched phone leaves a visible gap under the clock. The notch
+ * inset (~59pt) is much taller than the status bar text needs, so there is real
+ * slack to take back.
+ *
+ * Only the slack is taken: on a device whose inset IS the status bar (20pt,
+ * no notch) the lift resolves to 0 and nothing moves under the clock.
+ */
+const HEADER_LIFT = 10;
+const STATUS_BAR_CLEARANCE = 24;
+
+/**
+ * The menu button sits lower than the mark beside it.
+ *
+ * The row lifts as a unit (HEADER_LIFT), which is right for the wordmark but
+ * puts the 44pt tap target close to the status bar. This drops the button back
+ * down so it stays comfortably thumb-reachable and optically centred against
+ * the mark, which has more visual mass above its baseline than below.
+ */
+const MENU_BUTTON_DROP = 6;
+
+function headerLift(insetTop: number): number {
+  return Math.min(HEADER_LIFT, Math.max(0, insetTop - STATUS_BAR_CLEARANCE));
+}
+
 function TabsHeader() {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
@@ -126,10 +154,11 @@ function TabsHeader() {
       <View
         style={{
           backgroundColor: "#000",
-          paddingTop: insets.top,
+          paddingTop: insets.top - headerLift(insets.top),
           paddingHorizontal: 16,
           paddingBottom: 8,
-          height: insets.top + TAB_HEADER_ROW_HEIGHT + 8,
+          height:
+            insets.top - headerLift(insets.top) + TAB_HEADER_ROW_HEIGHT + 8,
           flexDirection: "row",
           alignItems: "center",
         }}
@@ -192,10 +221,11 @@ function TabsHeader() {
     <View
       style={{
         backgroundColor: "#000",
-        paddingTop: insets.top,
+        paddingTop: insets.top - headerLift(insets.top),
         paddingHorizontal: 16,
         paddingBottom: 8,
-        height: insets.top + TAB_HEADER_ROW_HEIGHT + 8,
+        height:
+          insets.top - headerLift(insets.top) + TAB_HEADER_ROW_HEIGHT + 8,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",
@@ -212,7 +242,9 @@ function TabsHeader() {
           gap: 4,
         }}
       >
-        <DrawerTrigger badge={attentionCount} />
+        <View style={{ marginTop: MENU_BUTTON_DROP }}>
+          <DrawerTrigger badge={attentionCount} />
+        </View>
         <TabHeaderLogo />
       </View>
       {/* Your own profile names itself in the title slot, the same way another

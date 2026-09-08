@@ -19,9 +19,20 @@ export type DrawerRowId =
   | "settings"
   | "help";
 
+/** Matches the web rail, which leads every row with a 24pt lucide icon. */
+export type DrawerRowIcon =
+  | "ticket"
+  | "receipt"
+  | "lock"
+  | "gauge"
+  | "crown"
+  | "settings"
+  | "help";
+
 export interface DrawerRow {
   id: DrawerRowId;
   label: string;
+  icon: DrawerRowIcon;
   href: string;
   /** Shown under the label when there is something true to say. */
   detail?: string;
@@ -74,6 +85,7 @@ export function buildDrawerSections(
         {
           id: "my-tickets",
           label: "My Tickets",
+          icon: "ticket",
           href: "/(protected)/events/my-tickets",
           // Events and passes are counted separately: "3" alone could mean
           // either, and they are different answers to "how many do I have".
@@ -83,11 +95,13 @@ export function buildDrawerSections(
         {
           id: "orders",
           label: "Orders & receipts",
+          icon: "receipt",
           href: "/settings/purchases",
         },
         {
           id: "sneaky-lynk",
           label: "Sneaky Lynk",
+          icon: "lock",
           href: "/(protected)/sneaky-lynk",
           detail: "Private rooms",
         },
@@ -103,6 +117,7 @@ export function buildDrawerSections(
         {
           id: "host-dashboard",
           label: "Host dashboard",
+          icon: "gauge",
           href: "/(protected)/events/host",
           detail: "Guests, check-in, payouts",
         },
@@ -114,9 +129,19 @@ export function buildDrawerSections(
     id: "account",
     title: "Account",
     rows: [
-      { id: "membership", label: "Membership", href: "/settings/membership" },
-      { id: "settings", label: "Settings & privacy", href: "/settings" },
-      { id: "help", label: "Help & support", href: "/settings/faq" },
+      {
+        id: "membership",
+        label: "Membership",
+        icon: "crown",
+        href: "/settings/membership",
+      },
+      {
+        id: "settings",
+        label: "Settings & privacy",
+        icon: "settings",
+        href: "/settings",
+      },
+      { id: "help", label: "Help & support", icon: "help", href: "/settings/faq" },
     ],
   });
 

@@ -1,9 +1,15 @@
 /**
- * The drawer panel.
+ * The drawer panel — the phone's version of the web side rail.
  *
- * Identity at the top, then the destinations that are genuinely product
- * surfaces, then account. My Tickets sits first because reaching a pass fast is
- * the thing this menu exists to make possible.
+ * Same material and the same row metrics as `components/app-shell.web.tsx`:
+ * liquid glass over near-black, the DVNT mark at the top, 24pt icon plus label
+ * rows, and a leading accent bar on the active row rather than a filled pill.
+ * The values live in `drawer-theme.ts` so the two menus cannot drift apart.
+ *
+ * What it does NOT carry is the rail's Home / Events / Search / Activity /
+ * Messages / Profile list. Those are tabs on a phone, one thumb-reach away —
+ * repeating them here would give every destination two homes. The drawer holds
+ * what the tab bar has no room for.
  *
  * Rows come from `drawer-destinations.ts`, which only ever emits routes that
  * exist. Rows the brief asked for that have no destination are recorded there
@@ -11,12 +17,25 @@
  */
 
 import { useCallback, useMemo } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
-import { ChevronRight, Ticket } from "lucide-react-native";
+import {
+  ChevronRight,
+  CircleHelp,
+  Crown,
+  Gauge,
+  Lock,
+  Receipt,
+  Settings,
+  Ticket,
+  type LucideIcon,
+} from "lucide-react-native";
+import Logo from "@dvnt/app/components/logo";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useDrawerStore } from "@dvnt/app/lib/stores/drawer-store";
 import { useMyTickets } from "@dvnt/app/lib/hooks/use-tickets";
@@ -27,11 +46,19 @@ import {
 } from "@dvnt/app/lib/tickets/ticket-library";
 import { ticketPath } from "@dvnt/app/lib/tickets/ticket-identity";
 import { getHostDashboard } from "@dvnt/app/lib/api/privileged";
-import { color, radius } from "@dvnt/app/lib/theme";
-import {
-  buildDrawerSections,
-  type DrawerRow,
-} from "./drawer-destinations";
+import { color, radius, space } from "@dvnt/app/lib/theme";
+import { buildDrawerSections, type DrawerRow } from "./drawer-destinations";
+import { drawerTheme } from "./drawer-theme";
+
+const ICONS: Record<DrawerRow["icon"], LucideIcon> = {
+  ticket: Ticket,
+  receipt: Receipt,
+  lock: Lock,
+  gauge: Gauge,
+  crown: Crown,
+  settings: Settings,
+  help: CircleHelp,
+};
 
 function DrawerRowView({
   row,
@@ -40,35 +67,68 @@ function DrawerRowView({
   row: DrawerRow;
   onPress: (row: DrawerRow) => void;
 }) {
+  const Icon = ICONS[row.icon];
+  const { row: r } = drawerTheme;
+  // The rail marks the current destination. On a phone the drawer is never the
+  // current destination — you are always somewhere else when you open it — so
+  // the accent is reserved for the row that has something waiting on you.
+  const flagged = !!row.badge;
+
   return (
     <Pressable
       onPress={() => onPress(row)}
       accessibilityRole="link"
-      accessibilityLabel={
-        row.detail ? `${row.label}. ${row.detail}` : row.label
-      }
+      accessibilityLabel={row.detail ? `${row.label}. ${row.detail}` : row.label}
       style={({ pressed }) => ({
-        minHeight: 52,
+        minHeight: r.minHeight,
         flexDirection: "row",
         alignItems: "center",
-        gap: 12,
-        paddingHorizontal: 16,
-        borderRadius: radius.md,
+        gap: r.gap,
+        paddingHorizontal: r.paddingHorizontal,
+        borderRadius: r.borderRadius,
         borderCurve: "continuous",
-        backgroundColor: pressed ? color.surface2 : "transparent",
+        overflow: "hidden",
+        backgroundColor: pressed
+          ? r.pressedBackground
+          : flagged
+            ? r.activeBackground
+            : "transparent",
       })}
     >
+      {/* Leading accent bar, the rail's `inset 2px 0 0 ACCENT`. */}
+      {flagged ? (
+        <View
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: r.activeBarWidth,
+            backgroundColor: r.activeBarColor,
+          }}
+        />
+      ) : null}
+      <Icon
+        size={r.iconSize}
+        strokeWidth={flagged ? 2.4 : 2}
+        color={flagged ? r.activeIcon : r.inactiveIcon}
+      />
       <View style={{ flex: 1 }}>
         <Text
-          style={{ color: color.text, fontSize: 16, fontWeight: "600" }}
           numberOfLines={1}
+          style={{
+            color: flagged ? r.activeLabel : r.inactiveLabel,
+            fontSize: r.fontSize,
+            fontWeight: flagged ? "700" : "600",
+            letterSpacing: r.letterSpacing,
+          }}
         >
           {row.label}
         </Text>
         {row.detail ? (
           <Text
-            style={{ color: color.textDim, fontSize: 12, marginTop: 2 }}
             numberOfLines={1}
+            style={{ color: color.textDim, fontSize: 12, marginTop: 2 }}
           >
             {row.detail}
           </Text>
@@ -83,15 +143,23 @@ function DrawerRowView({
             borderRadius: radius.full,
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: color.violet,
+            backgroundColor: color.cyan,
           }}
         >
-          <Text style={{ color: color.text, fontSize: 11, fontWeight: "800" }}>
+          <Text
+            style={{
+              color: color.inkDeep,
+              fontSize: 11,
+              fontWeight: "800",
+              fontVariant: ["tabular-nums"],
+            }}
+          >
             {row.badge > 99 ? "99+" : row.badge}
           </Text>
         </View>
-      ) : null}
-      <ChevronRight size={18} color={color.textFaint} />
+      ) : (
+        <ChevronRight size={18} color={color.textFaint} />
+      )}
     </Pressable>
   );
 }
@@ -156,59 +224,118 @@ export function AppDrawerContent() {
     );
   }, [go, shortcut]);
 
+  const { surface, logo, section } = drawerTheme;
+
   return (
     <View style={{ flex: 1, backgroundColor: color.ink }}>
+      {/* Liquid glass, matching the rail. Blur on native; the translucent base
+          alone on web, where the host already composites a backdrop filter. */}
+      {Platform.OS !== "web" ? (
+        <BlurView
+          intensity={surface.blurIntensity}
+          tint="dark"
+          style={{ position: "absolute", inset: 0 }}
+        />
+      ) : null}
+      <View
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundColor: surface.base,
+        }}
+      />
+      {/* Top-light sheen — the one gradient here, and it is the glass material
+          rather than decoration: it is what stops the panel reading as a flat
+          slab against the feed behind it. */}
+      <LinearGradient
+        colors={[...surface.sheen] as [string, string, string]}
+        locations={[...surface.sheenLocations] as [number, number, number]}
+        style={{ position: "absolute", left: 0, right: 0, top: 0, height: 320 }}
+        pointerEvents="none"
+      />
+      {/* Trailing hairline — the rail's `borderRight`. */}
+      <View
+        style={{
+          position: "absolute",
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 1,
+          backgroundColor: surface.edge,
+        }}
+      />
+
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top + 12,
-          paddingBottom: insets.bottom + 24,
-          paddingHorizontal: 8,
-          gap: 4,
+          paddingTop: insets.top + space.px12,
+          paddingBottom: insets.bottom + space.px24,
+          paddingHorizontal: space.px8,
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Identity */}
+        {/* The mark leads the panel, as it leads the rail. */}
+        <Pressable
+          onPress={() => go("/(protected)/(tabs)")}
+          accessibilityRole="link"
+          accessibilityLabel="DVNT home"
+          style={{
+            alignSelf: "flex-start",
+            paddingTop: logo.paddingTop,
+            paddingHorizontal: logo.paddingHorizontal,
+            paddingBottom: logo.paddingBottom,
+          }}
+        >
+          <Logo width={logo.width} height={logo.height} />
+        </Pressable>
+
+        {/* Identity sits under the mark — on a phone the drawer is also the
+            account surface, which the desktop rail does not have to be. */}
         <Pressable
           onPress={() => go("/(protected)/(tabs)/profile")}
           accessibilityRole="link"
           accessibilityLabel={`Your profile, ${user?.username ?? "signed in"}`}
-          style={{
+          style={({ pressed }) => ({
             flexDirection: "row",
             alignItems: "center",
-            gap: 12,
-            paddingHorizontal: 12,
-            paddingVertical: 12,
-            minHeight: 64,
-          }}
+            gap: space.px12,
+            paddingHorizontal: space.px12,
+            paddingVertical: space.px8,
+            minHeight: 56,
+            borderRadius: radius.md,
+            borderCurve: "continuous",
+            backgroundColor: pressed
+              ? drawerTheme.row.pressedBackground
+              : "transparent",
+          })}
         >
           {user?.avatar ? (
             <Image
               source={{ uri: user.avatar }}
-              style={{ width: 48, height: 48, borderRadius: radius.lg }}
+              style={{ width: 40, height: 40, borderRadius: radius.md }}
               contentFit="cover"
               accessible={false}
             />
           ) : (
             <View
               style={{
-                width: 48,
-                height: 48,
-                borderRadius: radius.lg,
+                width: 40,
+                height: 40,
+                borderRadius: radius.md,
                 backgroundColor: color.surface2,
               }}
             />
           )}
           <View style={{ flex: 1 }}>
             <Text
-              style={{ color: color.text, fontSize: 16, fontWeight: "800" }}
               numberOfLines={1}
+              style={{ color: color.text, fontSize: 15, fontWeight: "700" }}
             >
               {user?.name || user?.username || "Your account"}
             </Text>
             {user?.username ? (
               <Text
-                style={{ color: color.textDim, fontSize: 13 }}
                 numberOfLines={1}
+                style={{ color: color.textDim, fontSize: 13 }}
               >
                 @{user.username}
               </Text>
@@ -225,13 +352,12 @@ export function AppDrawerContent() {
             accessibilityRole="link"
             accessibilityLabel={`Open your pass for ${nextEvent.eventTitle}`}
             style={({ pressed }) => ({
-              marginHorizontal: 8,
-              marginTop: 4,
-              marginBottom: 8,
-              padding: 12,
+              marginTop: space.px12,
+              marginHorizontal: space.px4,
+              padding: space.px12,
               flexDirection: "row",
               alignItems: "center",
-              gap: 10,
+              gap: space.px8,
               borderRadius: radius.lg,
               borderCurve: "continuous",
               borderWidth: 1,
@@ -242,13 +368,18 @@ export function AppDrawerContent() {
             <Ticket size={18} color={color.cyan} />
             <View style={{ flex: 1 }}>
               <Text
-                style={{ color: color.textDim, fontSize: 11, fontWeight: "700" }}
+                style={{
+                  color: color.textDim,
+                  fontSize: 11,
+                  fontWeight: "700",
+                  letterSpacing: 1,
+                }}
               >
                 NEXT EVENT
               </Text>
               <Text
-                style={{ color: color.text, fontSize: 14, fontWeight: "700" }}
                 numberOfLines={1}
+                style={{ color: color.text, fontSize: 14, fontWeight: "700" }}
               >
                 {nextEvent.eventTitle}
               </Text>
@@ -257,25 +388,32 @@ export function AppDrawerContent() {
           </Pressable>
         ) : null}
 
-        {sections.map((section) => (
-          <View key={section.id} style={{ marginTop: section.title ? 16 : 0 }}>
-            {section.title ? (
+        {sections.map((s, i) => (
+          <View
+            key={s.id}
+            style={{
+              marginTop:
+                i === 0 ? logo.gapToRows - logo.paddingBottom : section.marginTop,
+              gap: drawerTheme.row.spacing,
+            }}
+          >
+            {s.title ? (
               <Text
                 accessibilityRole="header"
                 style={{
-                  color: color.textFaint,
-                  fontSize: 11,
+                  color: section.labelColor,
+                  fontSize: section.labelSize,
                   fontWeight: "800",
-                  letterSpacing: 1.2,
-                  paddingHorizontal: 16,
-                  paddingBottom: 6,
+                  letterSpacing: section.labelLetterSpacing,
+                  paddingHorizontal: drawerTheme.row.paddingHorizontal,
+                  marginBottom: section.marginBottom - drawerTheme.row.spacing,
                   textTransform: "uppercase",
                 }}
               >
-                {section.title}
+                {s.title}
               </Text>
             ) : null}
-            {section.rows.map((row) => (
+            {s.rows.map((row) => (
               <DrawerRowView key={row.id} row={row} onPress={handleRow} />
             ))}
           </View>

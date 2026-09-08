@@ -22,6 +22,7 @@ test("every row points at a route, and My Tickets is the first thing offered", (
   for (const row of rows) {
     assert.ok(row.href.startsWith("/"), `${row.id} has no route`);
     assert.ok(row.label.length > 0, `${row.id} has no label`);
+    assert.ok(row.icon, `${row.id} has no icon`);
   }
 });
 
