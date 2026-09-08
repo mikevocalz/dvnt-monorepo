@@ -84,6 +84,7 @@
     },
     "production": {
       "channel": "production",
+      "developmentClient": false,
       "autoIncrement": true,
       "ios": {
         "image": "latest"
