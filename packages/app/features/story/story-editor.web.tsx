@@ -124,6 +124,7 @@ import {
   getItemPreviewUri,
   klipySearch,
   type KlipyItem,
+  type KlipyTab,
 } from "@dvnt/app/features/stickers";
 import { SHEET_BOTTOM_INSET } from "@dvnt/app/lib/ui/sheet-metrics";
 import type {
@@ -1512,7 +1513,13 @@ export function DrawingPanel() {
 
 // ---- Sticker panel (tabs + search) ----
 
-type StickerTab = "dvnt-native" | "emoji" | "gif" | "clip" | string; // string = image pack id
+type StickerTab =
+  | "dvnt-native"
+  | "emoji"
+  | "gif"
+  | "clip"
+  | "cutout"
+  | string; // string = image pack id
 
 const WS4_STICKERS: {
   id: string;
@@ -1581,6 +1588,7 @@ export function StickerPanel() {
     { id: "emoji", label: "Emoji" },
     { id: "gif", label: "GIFs" },
     { id: "clip", label: "Clips" },
+    { id: "cutout", label: "Cutouts" },
   ];
 
   const q = query.trim().toLowerCase();
@@ -1588,20 +1596,28 @@ export function StickerPanel() {
   const emojis = EMOJI_STICKERS;
   const isGifTab = activeTab === "gif";
   const isClipTab = activeTab === "clip";
-  // Klipy serves clips as animated webp, so they render as an image and reuse
-  // the GIF grid and the animated-overlay path unchanged.
-  const isKlipyTab = isGifTab || isClipTab;
+  // Klipy's own sticker catalogue: transparent die-cut art. "Cutouts" so it does
+  // not collide with the panel's own "Stickers" title.
+  const isCutoutTab = activeTab === "cutout";
+  // Every Klipy catalogue resolves to an image (webp/png), never video, so all
+  // three reuse the same grid and the animated-overlay path unchanged.
+  const isKlipyTab = isGifTab || isClipTab || isCutoutTab;
+  const klipyCatalogue: KlipyTab = isCutoutTab
+    ? "stickers"
+    : isClipTab
+      ? "clips"
+      : "gifs";
 
   const gifQuery = useQuery({
     queryKey: [
       "story-editor-web",
       "stickers",
       "klipy",
-      isClipTab ? "clips" : "gifs",
+      klipyCatalogue,
       q,
     ],
     queryFn: ({ signal }) =>
-      klipySearch(isClipTab ? "clips" : "gifs", query, { signal }),
+      klipySearch(klipyCatalogue, query, { signal }),
     enabled: isKlipyTab,
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 10,
@@ -1629,8 +1645,10 @@ export function StickerPanel() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={
-                isClipTab
-                  ? "Search clips…"
+                isCutoutTab
+                  ? "Search cutouts…"
+                  : isClipTab
+                    ? "Search clips…"
                   : isGifTab
                     ? "Search GIFs…"
                     : "Search stickers…"
@@ -1741,14 +1759,14 @@ export function StickerPanel() {
           ) : (
             <div className="grid grid-cols-4 gap-2">
               {gifItems.map((item, i) => {
-                const preview = getItemPreviewUri(item, isClipTab ? "clips" : "gifs");
+                const preview = getItemPreviewUri(item, klipyCatalogue);
                 const title =
                   item.title || item.content_description || "GIF";
                 return (
                   <button
                     key={`${item.id}-${i}`}
                     onClick={() => {
-                      const url = getItemImageUri(item, isClipTab ? "clips" : "gifs");
+                      const url = getItemImageUri(item, klipyCatalogue);
                       if (url) addSticker(url, { category: "gif" });
                     }}
                     className="rounded-xl overflow-hidden text-left"

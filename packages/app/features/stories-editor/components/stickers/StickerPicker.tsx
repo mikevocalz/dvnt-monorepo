@@ -41,7 +41,14 @@ interface StickerPickerProps {
 }
 
 type PackKey = keyof typeof stickerPacks;
-type StickerTab = "dvnt" | "ballroom" | PackKey | "all" | "gif" | "clip";
+type StickerTab =
+  | "dvnt"
+  | "ballroom"
+  | PackKey
+  | "all"
+  | "gif"
+  | "clip"
+  | "cutout";
 
 const TWEMOJI_TABS: { id: StickerTab; label: string; icon: string }[] = [
   { id: "all", label: "All", icon: "✨" },
@@ -83,14 +90,23 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
     ...TWEMOJI_TABS,
     { id: "gif", label: "GIFs", icon: "🎞️" },
     { id: "clip", label: "Clips", icon: "🎬" },
+    { id: "cutout", label: "Cutouts", icon: "🪄" },
   ];
 
   const activeImagePack = IMAGE_STICKER_PACKS.find((p) => p.id === activeTab);
   const isGifTab = activeTab === "gif";
   const isClipTab = activeTab === "clip";
-  // Clips reuse the GIF grid and the animated-overlay path — Klipy serves them
-  // as animated webp, so they are an image to every renderer here.
-  const isKlipyTab = isGifTab || isClipTab;
+  // Klipy's own sticker catalogue: transparent die-cut art. Named "Cutouts" so
+  // it does not collide with the sheet's own title or the bundled packs.
+  const isCutoutTab = activeTab === "cutout";
+  // All three Klipy catalogues reuse the same grid and the animated-overlay
+  // path — every one of them resolves to an image (webp/png), never video.
+  const isKlipyTab = isGifTab || isClipTab || isCutoutTab;
+  const klipyCatalogue: KlipyTab = isCutoutTab
+    ? "stickers"
+    : isClipTab
+      ? "clips"
+      : "gifs";
   const activeImageStickers = useMemo(() => {
     if (!activeImagePack) return [];
     if (!searchQuery.trim()) return activeImagePack.stickers;
@@ -116,11 +132,11 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
       "story-editor",
       "stickers",
       "klipy",
-      isClipTab ? "clips" : "gifs",
+      klipyCatalogue,
       searchQuery.trim().toLowerCase(),
     ],
     queryFn: ({ signal }) =>
-      klipySearch(isClipTab ? "clips" : "gifs", searchQuery, { signal }),
+      klipySearch(klipyCatalogue, searchQuery, { signal }),
     enabled: isKlipyTab,
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 10,
@@ -246,8 +262,10 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder={
-              isClipTab
-                ? "Search clips..."
+              isCutoutTab
+                ? "Search cutouts..."
+                : isClipTab
+                  ? "Search clips..."
                 : isGifTab
                   ? "Search GIFs..."
                   : "Search stickers..."
@@ -441,7 +459,7 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
         />
       ) : (
         <LegendList
-          key={isClipTab ? "clip" : "gif"}
+          key={klipyCatalogue}
           style={{ flex: 1 }}
           data={
             gifQuery.isLoading && gifItems.length === 0
@@ -461,10 +479,10 @@ export const StickerPicker: React.FC<StickerPickerProps> = ({
               <GifGridItem
                 item={item}
                 width={imageStickerSize}
-                tab={isClipTab ? "clips" : "gifs"}
+                tab={klipyCatalogue}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  const uri = getItemImageUri(item, isClipTab ? "clips" : "gifs");
+                  const uri = getItemImageUri(item, klipyCatalogue);
                   if (uri) {
                     onSelectSticker(uri, { category: "gif" });
                   }
