@@ -29,6 +29,10 @@ import { useEvents } from "@dvnt/app/lib/hooks/use-events";
 // screen only ever fetched posts. Same builder the native masonry uses.
 import { EVENT_INTERVAL } from "@dvnt/app/components/feed/feed-sections";
 import {
+  packMasonry,
+  type PackTile,
+} from "@dvnt/app/components/feed/masonry-pack";
+import {
   FeedEventCard,
   CARD_ASPECT as EVENT_CARD_ASPECT,
   type FeedEventCardData,
@@ -197,8 +201,9 @@ export function HomeScreen() {
   // race. (The previous TanStack `lanes` + measureElement masonry mis-stacked /
   // overlapped columns when the feed was left and reopened, because lane packing
   // recomputed from a mix of estimated and freshly-measured heights.) Each
-  // column is a normal vertical flex stack, so the browser wraps the images at
-  // their real natural heights.
+  // column is a normal vertical flex stack; each tile renders at exactly the
+  // height the packer reserved for it, which is what lets a two-column card be
+  // positioned from the packer's arithmetic at all.
   // ONE masonry over the whole feed, with event cards packed in as tiles.
   //
   // The first attempt chunked posts into a separate masonry per run with the
@@ -207,18 +212,11 @@ export function HomeScreen() {
   // gaps — measured on production — because every chunk restarted the column
   // packing. Treating an event as just another tile keeps the columns tall and
   // balanced, which is what a masonry is for.
-  type Tile =
-    | { kind: "post"; key: string; post: Post }
-    | { kind: "event"; key: string; event: Event; span?: 2 }
-    // Reserves the neighbouring column's height under a two-column event so the
-    // masonry stays level instead of sliding a post under the banner.
-    | { kind: "spacer"; key: string; height: number };
-
   const columns = useMemo(() => {
     const events = feedEvents ?? [];
     // Interleave into a single ordered list first, so events are spread through
     // the feed rather than clustered at the end.
-    const tiles: Tile[] = [];
+    const tiles: PackTile<Post, Event>[] = [];
     let e = 0;
     posts.forEach((post, i) => {
       tiles.push({ kind: "post", key: `p-${post.id}`, post });
@@ -228,62 +226,18 @@ export function HomeScreen() {
       }
     });
 
-    const cols = Array.from({ length: numColumns }, () => ({
-      items: [] as Tile[],
-      h: 0,
-    }));
-    // An event spans TWO columns wherever there are two to span, so it reads as
-    // the wide banner it is on mobile instead of another portrait tile.
-    //
-    // Spanning inside the packer rather than breaking the masonry into
-    // full-width rows: a full-width break restarts the column packing, which is
-    // what produced sixteen ragged stacks on desktop last time. Here the
-    // shorter neighbour takes a spacer of the same height, so the columns stay
-    // level and the run continues.
-    const eventSpan = numColumns >= 2 ? 2 : 1;
-    for (const tile of tiles) {
-      if (tile.kind === "event" && eventSpan === 2) {
-        // Cheapest adjacent PAIR, so the banner never straddles a tall column.
-        let pair = 0;
-        for (let c = 1; c + 1 < numColumns + 1 && c + 1 <= numColumns - 1; c++) {
-          if (
-            Math.max(cols[c].h, cols[c + 1].h) <
-            Math.max(cols[pair].h, cols[pair + 1].h)
-          ) {
-            pair = c;
-          }
-        }
-        const top = Math.max(cols[pair].h, cols[pair + 1].h);
-        const spanW = columnWidth * 2 + GAP;
-        const eventH = spanW / EVENT_CARD_ASPECT + 24 + GAP;
-        cols[pair].items.push({ ...tile, span: 2 });
-        cols[pair + 1].items.push({
-          kind: "spacer",
-          key: `${tile.key}-spacer`,
-          height: eventH,
-        });
-        cols[pair].h = top + eventH;
-        cols[pair + 1].h = top + eventH;
-        continue;
-      }
-      let min = 0;
-      for (let c = 1; c < numColumns; c++) {
-        if (cols[c].h < cols[min].h) min = c;
-      }
-      cols[min].items.push(tile);
-      // A post is measured from its own aspect ratio; the event card is a
-      // landscape rectangle plus its own 12px vertical padding. The ratio is
-      // IMPORTED rather than repeated: when the packer and the card disagree,
-      // the column below reserves the wrong height and either overlaps the
-      // card or leaves a void.
-      cols[min].h +=
-        tile.kind === "event"
-          ? columnWidth / EVENT_CARD_ASPECT + 24 + GAP
-          : tile.kind === "spacer"
-            ? tile.height
-            : estimateRatio(tile.post) * columnWidth + GAP;
-    }
-    return cols.map((c) => c.items);
+    return packMasonry<Post, Event>({
+      tiles,
+      numColumns,
+      columnWidth,
+      gap: GAP,
+      postHeight: cellHeight,
+      // The card's own 12px vertical padding, on top of its aspect box. The
+      // ratio is IMPORTED rather than repeated: when the packer and the card
+      // disagree, the column reserves the wrong height and the card either
+      // overlaps its neighbour or leaves a void.
+      eventHeight: (width) => width / EVENT_CARD_ASPECT + 24,
+    }).columns;
   }, [posts, feedEvents, numColumns, columnWidth]);
 
   // Infinite scroll — observe a sentinel near the end of the list inside the
@@ -473,18 +427,24 @@ function MasonryCell({
           muted
           loop
           playsInline
-          className="block w-full h-auto"
+          className="block w-full object-cover"
+          style={{ height: fallbackHeight }}
         />
       ) : cover ? (
-        // Natural aspect ratio → true varied masonry. The image flows at its
-        // real height inside its column; column placement is decided up-front
-        // from the estimated height, so layout is stable across remounts.
+        // Rendered at the height the packer RESERVED, not the image's natural
+        // one. `h-auto` let every photo flow to its true aspect while the
+        // packer placed it using a hash heuristic (estimateRatio), so the
+        // column heights it computed were fiction and the DOM's were real. A
+        // card spanning two columns is positioned from that arithmetic, so it
+        // landed on top of a post. The staggered rhythm is unchanged — it comes
+        // from the same heuristic either way, and it is what mobile uses too.
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={cover}
           alt={post.caption ?? ""}
           loading="lazy"
-          className="block w-full h-auto"
+          className="block w-full object-cover"
+          style={{ height: fallbackHeight }}
         />
       ) : (
         <div style={{ height: fallbackHeight }} className="bg-white/6" />
