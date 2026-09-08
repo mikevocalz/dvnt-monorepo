@@ -53,7 +53,11 @@ export function packMasonry<Post, Event>(
   const spanWidth = columnWidth * 2 + gap;
   const canSpan = n >= 2;
 
-  for (const tile of tiles) {
+  const consumed = new Set<number>();
+
+  for (let ti = 0; ti < tiles.length; ti++) {
+    if (consumed.has(ti)) continue;
+    const tile = tiles[ti];
     if (tile.kind === "event" && tile.event !== undefined && canSpan) {
       // Cheapest adjacent pair, so the banner never straddles a tall column.
       let pair = 0;
@@ -75,22 +79,32 @@ export function packMasonry<Post, Event>(
        * the card went into its column at that column's own content bottom. When
        * that column was the shorter of the pair, a card two columns wide began
        * ABOVE the neighbour's content and was painted straight over it.
+       *
+       * The shortfall is filled with posts pulled forward from later in the
+       * feed wherever one fits, and only the remainder becomes blank space. A
+       * bare spacer of the full deficit reads as a hole in the masonry — which
+       * is what levelling looked like before this.
        */
-      if (cols[pair].h < top) {
-        cols[pair].items.push({
-          kind: "spacer",
-          key: `${tile.key}-level-a`,
-          height: top - cols[pair].h,
-        });
-        cols[pair].h = top;
-      }
-      if (cols[pair + 1].h < top) {
-        cols[pair + 1].items.push({
-          kind: "spacer",
-          key: `${tile.key}-level-b`,
-          height: top - cols[pair + 1].h,
-        });
-        cols[pair + 1].h = top;
+      for (const c of [pair, pair + 1] as const) {
+        let deficit = top - cols[c].h;
+        while (deficit > 0) {
+          const next = nextFittingPost(ti + 1, deficit);
+          if (next === -1) break;
+          const post = tiles[next].post as Post;
+          consumed.add(next);
+          cols[c].items.push({ kind: "post", key: tiles[next].key, post });
+          const used = postHeight(post) + gap;
+          cols[c].h += used;
+          deficit -= used;
+        }
+        if (deficit > 0) {
+          cols[c].items.push({
+            kind: "spacer",
+            key: `${tile.key}-level-${c}`,
+            height: deficit,
+          });
+          cols[c].h = top;
+        }
       }
 
       const h = eventHeight(spanWidth) + gap;
@@ -125,6 +139,17 @@ export function packMasonry<Post, Event>(
   }
 
   return { columns: cols.map((c) => c.items), heights: cols.map((c) => c.h) };
+
+  /** The next unconsumed post from `from` that fits inside `budget`. */
+  function nextFittingPost(from: number, budget: number): number {
+    for (let i = from; i < tiles.length; i++) {
+      if (consumed.has(i)) continue;
+      const candidate = tiles[i];
+      if (candidate.kind !== "post" || candidate.post === undefined) continue;
+      if (postHeight(candidate.post) + gap <= budget) return i;
+    }
+    return -1;
+  }
 }
 
 /**

@@ -142,3 +142,35 @@ test("levelling never reorders the tiles already in a column", () => {
     assert.deepEqual(posts, sorted, "posts kept their feed order in-column");
   }
 });
+
+test("levelling fills the short column with real posts before leaving blank space", () => {
+  // Column A is 600 tall, column B is 100. Levelling B costs 500pt, and there
+  // are later 120pt posts that fit — those should be pulled forward rather than
+  // the gap rendering as a hole.
+  const heights = [600, 100, 120, 120, 120, 120, 120, 120, 120, 120];
+  const result = packMasonry({
+    tiles: tiles(heights, [6]),
+    numColumns: 2,
+    ...opts,
+  });
+  const blank = result.columns
+    .flat()
+    .filter((t) => t.kind === "spacer" && t.key.includes("-level-"))
+    .reduce((sum, t) => sum + (t as { height: number }).height, 0);
+  const filled = result.columns
+    .flat()
+    .filter((t) => t.kind === "post").length;
+
+  assert.ok(blank < 130, `levelling left ${blank}pt blank; a 120pt post fitted`);
+  assert.equal(filled, heights.length, "every post is still placed exactly once");
+  assert.deepEqual(overlaps(result), [], "and still no overlap");
+});
+
+test("a gap too small for any post still becomes a spacer rather than an overlap", () => {
+  const result = packMasonry({
+    tiles: tiles([600, 580, 400, 400, 400, 400, 400], [6]),
+    numColumns: 2,
+    ...opts,
+  });
+  assert.deepEqual(overlaps(result), []);
+});
