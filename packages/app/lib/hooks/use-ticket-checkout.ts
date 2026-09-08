@@ -44,6 +44,13 @@ export function useTicketCheckout() {
   const checkout = useCallback(
     async (params: CheckoutParams): Promise<CheckoutResult> => {
       const { eventId, ticketTypeId, quantity, promoCode } = params;
+      // Same guard as the mixed-cart path: the flag existed and was exposed as
+      // `isLoading`, but nothing here read it, so de-duplication rested
+      // entirely on every caller remembering to disable its button.
+      if (checkoutLoading) {
+        return { success: false, error: "Checkout already in progress" };
+      }
+
       setCheckoutLoading(true);
 
       try {

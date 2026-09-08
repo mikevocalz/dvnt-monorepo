@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
+import { initStripe } from "@stripe/stripe-react-native";
 import { useStripeSafe as useStripe } from "@dvnt/app/lib/safe-native-modules";
 import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
 import { cartApi } from "@dvnt/app/lib/api/cart";
@@ -28,6 +29,14 @@ export function useMixedCartCheckout() {
   const setPaymentIntent = useCartStore((state) => state.setPaymentIntent);
 
   const checkout = useCallback(async (): Promise<MixedCartCheckoutResult> => {
+    // A second press while the first is in flight would create a second hold
+    // and a second payment intent. The flag was already written here and read
+    // by callers to disable a button; nothing enforced it at the money path
+    // itself, so any caller that forgot could charge twice.
+    if (checkoutLoading) {
+      return { success: false, error: "Checkout already in progress" };
+    }
+
     if (!cart || cart.lineItems.length === 0) {
       toast.error("Your cart is empty");
       return { success: false, error: "Cart is empty" };
@@ -82,6 +91,23 @@ export function useMixedCartCheckout() {
         paymentIntentId: payment.paymentIntentId,
       });
 
+      // Re-init with the server's key and the Apple Pay merchant id, the same
+      // way the single-ticket path does. Without it this path never set a
+      // merchantIdentifier, so Apple Pay could not appear on it at all.
+      if (payment.publishableKey) {
+        try {
+          await initStripe({
+            publishableKey: payment.publishableKey,
+            merchantIdentifier: "merchant.com.dvnt.app",
+          });
+        } catch (e) {
+          console.warn(
+            "[useMixedCartCheckout] initStripe re-init failed (continuing):",
+            e,
+          );
+        }
+      }
+
       const { error: initError } = await initPaymentSheet({
         merchantDisplayName: "DVNT",
         customerId: payment.customer,
@@ -89,6 +115,17 @@ export function useMixedCartCheckout() {
         paymentIntentClientSecret: payment.clientSecret,
         allowsDelayedPaymentMethods: false,
         defaultBillingDetails: { name: "" },
+        // Wallets, matching the single-ticket path. This path had NEITHER, so
+        // a member buying an admission ticket was offered Apple Pay and the
+        // same member buying that ticket plus a coat check was not. Stripe's
+        // sheet hides a wallet the device or account cannot use, so passing
+        // the config is safe regardless of availability.
+        applePay: { merchantCountryCode: "US" },
+        googlePay: {
+          merchantCountryCode: "US",
+          currencyCode: "USD",
+          testEnv: !!payment.publishableKey?.startsWith("pk_test_"),
+        },
         appearance: {
           colors: {
             primary: "#8A40CF",

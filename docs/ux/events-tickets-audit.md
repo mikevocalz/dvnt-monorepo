@@ -163,12 +163,42 @@ being the server-cache owner. Replaced with `usePendingTransfers()`.
 
 ---
 
+### H6 — The two checkout paths offered different wallets · CONFIRMED · fixed
+
+`use-ticket-checkout.ts:135-142` passes `applePay` and `googlePay` and re-runs
+`initStripe` with `merchantIdentifier: "merchant.com.dvnt.app"` (`:110-122`).
+`use-mixed-cart-checkout.ts:85-108` passed **neither**, and never called
+`initStripe` at all — so it had no merchant identifier and could not surface
+Apple Pay under any circumstances.
+
+The effect: buying an admission ticket offered Apple Pay; buying that same
+ticket together with a coat check did not. `publishableKey` was already in the
+cart checkout response (`contracts/dto.ts:179`) and simply unused.
+
+Wallet *availability* detection is absent from both, and that is correct —
+Stripe's PaymentSheet hides a wallet the device or account cannot use, which
+the ticket hook's own comment records. No change made there.
+
+### H7 — Neither money path guarded a double submission · CONFIRMED · fixed
+
+Both hooks wrote `checkoutLoading` and exposed it as `isLoading`, and neither
+read it. A second press while the first was in flight would create a second
+hold and a second payment intent; de-duplication rested entirely on every
+caller remembering to disable its button. Both now refuse re-entry.
+
 ## Not reproduced this pass
 
-The web-parity, discovery/detail-hierarchy, checkout-hook-parity, and
-host/scanner sections of the brief were delegated to parallel audit agents that
-failed with API errors before returning. They are **not** reported as verified
-here. What was changed on web was changed because the compiler pointed at it
+The discovery/detail-hierarchy and host/scanner sections of the brief were
+delegated to audit agents that failed with API errors before returning. They
+are **not** reported as verified here. Checkout-hook parity did return and is
+recorded above as H6/H7.
+
+One web finding was reproduced directly rather than delegated:
+`features/events/my-tickets.web.tsx:107-117` renders each ticket card as a
+`div` with `onClick`, `role="button"` and `tabIndex={0}` but **no `onKeyDown`**.
+It takes focus, announces itself as a button, and cannot be activated from the
+keyboard at all — WCAG 2.1.1. `events-list.web.tsx:562` has the same shape but
+does handle Enter and Space. Not yet fixed. What was changed on web was changed because the compiler pointed at it
 while the ticket-identity contract moved — see the navigation map.
 
 Device-measured performance numbers (warm/cold pass access, checkout-to-issuance
