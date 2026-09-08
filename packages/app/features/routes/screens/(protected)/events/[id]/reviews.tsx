@@ -18,12 +18,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, Star as StarIcon } from "lucide-react-native";
+import { Star as StarIcon } from "lucide-react-native";
 import { StarRatingDisplay } from "react-native-star-rating-widget";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { useQuery } from "@tanstack/react-query";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 interface Review {
   id: string | number;
@@ -85,9 +86,7 @@ function EventReviewsContent() {
       style={{ flex: 1, backgroundColor: colors.background }}
     >
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={24} color={colors.foreground} />
-        </Pressable>
+        <DetailBackButton />
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>
           Reviews
         </Text>
@@ -276,6 +275,9 @@ export default function EventReviewsScreen() {
 
 const styles = StyleSheet.create({
   header: {
+    // Full-bleed: this style carries the border and background, so a maxWidth
+    // here stops the BAR short of the screen edge, not just its contents. These
+    // screens do not cap their body either, so the bar matches what is below it.
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,

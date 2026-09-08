@@ -29,7 +29,6 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { LegendList } from "@dvnt/app/components/list";
 import {
-  ArrowLeft,
   Search,
   CheckCircle2,
   Circle,
@@ -52,6 +51,7 @@ import * as Sharing from "expo-sharing";
 import { BroadcastModal } from "@dvnt/app/features/events";
 import { CompTicketsModal } from "@dvnt/app/features/events";
 import { RefundConfirmModal } from "@dvnt/app/features/events";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 type StatusFilter =
   | "all"
@@ -320,9 +320,7 @@ export default function EventAttendeesScreen() {
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={22} color="#fff" />
-        </Pressable>
+        <DetailBackButton />
         <View style={styles.headerBody}>
           <Text style={styles.headerTitle}>Attendees</Text>
           {total != null && (
@@ -535,6 +533,9 @@ export default function EventAttendeesScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   header: {
+    // Full-bleed: this style carries the border and background, so a maxWidth
+    // here stops the BAR short of the screen edge, not just its contents. These
+    // screens do not cap their body either, so the bar matches what is below it.
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,

@@ -27,7 +27,6 @@ import {
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
-  ArrowLeft,
   Share2,
   Heart,
   MapPin,
@@ -140,6 +139,8 @@ import {
 } from "@dvnt/app/lib/hooks/use-event-waitlist";
 import { ensureOnlineOrToast } from "@dvnt/app/lib/connectivity/guard";
 import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
+import { CONTENT_MAX_WIDTH } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 /**
  * Fallback only. `StyleSheet.create` runs at module scope, so the image-grid
@@ -678,8 +679,14 @@ function EventDetailScreenContent() {
   const realAttendees = useMemo(() => {
     const avatars = safeEvent?.attendeeAvatars;
     if (Array.isArray(avatars) && avatars.length > 0) {
-      return avatars.map((a: any) => ({
-        id: String(a.id || ""),
+      return avatars.map((a: any, i: number) => ({
+        // NEVER "" — an attendee row arriving without an id used to collapse to
+        // the empty string, and two of them made React see duplicate keys
+        // ("Encountered two children with the same key, ``"), which lets it
+        // reuse the wrong row's state. Fall through id -> username -> position
+        // so the key is stable across renders and still unique when the payload
+        // is incomplete.
+        id: String(a.id || a.username || `attendee-${i}`),
         avatar: a.avatar || "",
         username: a.username || "",
         color: "#3b82f6",
@@ -1723,10 +1730,10 @@ function EventDetailScreenContent() {
   }, [isPast, hasTicket, isHostUser]);
 
   // Gallery cells follow the window, not the width the app launched with.
-  // MUST stay above the loading/error guards below. It used to sit after them,
-  // so the skeleton render called one fewer hook than the loaded render, and
+  // MUST stay above the loading/error guards below: it used to sit after them,
+  // so the skeleton render called one fewer hook than the loaded render and
   // React threw "Rendered more hooks than during the previous render" the
-  // moment the event data arrived — the EventDetail error screen in 1.0.347.
+  // moment the event data arrived.
   const { width: liveScreenWidth } = useWindowDimensions();
 
   // ── Loading state ───────────────────────────────────────────────────
@@ -1756,7 +1763,11 @@ function EventDetailScreenContent() {
   }
 
   const event = safeEvent;
-  const imageCellSize = (liveScreenWidth - 40 - 8) / 2;
+  // Two-up off the CONTENT column, not the window. `s.root` caps this screen at
+  // CONTENT_MAX_WIDTH, so dividing the 1024pt window gave two 488pt cells that
+  // could not both fit in a 768pt column — they wrapped to one photo per row.
+  const imageCellSize =
+    (Math.min(liveScreenWidth, CONTENT_MAX_WIDTH) - 40 - 8) / 2;
   const host = event.host;
 
   /**
@@ -1810,14 +1821,21 @@ function EventDetailScreenContent() {
 
   // ── Render ──────────────────────────────────────────────────────────
   return (
-    <View style={s.root}>
+    <View style={s.screen}>
       <StatusBar barStyle="light-content" />
 
+      {/* Capped reading column. The header below is deliberately OUTSIDE it. */}
+      <View style={s.root}>
       <Animated.ScrollView
         style={s.scroll}
         showsVerticalScrollIndicator={false}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
+        // Required by the App Store zoom: without it iOS insets the scroll for
+        // the nav bar, so the hero does NOT sit under the transparent header —
+        // the content shifts by the header's height as the transition lands and
+        // again on the way back, which is the jump on both directions.
+        contentInsetAdjustmentBehavior="never"
         contentContainerStyle={{ paddingBottom: 120 }}
       >
         {/* ── 1. HERO SECTION ──────────────────────────────────── */}
@@ -2730,8 +2748,11 @@ function EventDetailScreenContent() {
           ) : null}
         </View>
       </Animated.ScrollView>
+      </View>
 
-      {/* ── Floating Header (rendered AFTER scroll so it's on top for touches) */}
+      {/* ── Floating Header — full-bleed, so it reaches the screen corners it is
+           anchored to. Its INNER row still caps to the content column, so the
+           back button stays beside the content rather than at the far edge. */}
       <View
         style={[s.headerContainer, { paddingTop: insets.top }]}
         pointerEvents="box-none"
@@ -2741,18 +2762,16 @@ function EventDetailScreenContent() {
           pointerEvents="none"
         />
         <View style={s.headerInner} pointerEvents="box-none">
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <DVNTLiquidGlassIconButton size={40}>
-              <ArrowLeft size={20} color="#fff" />
-            </DVNTLiquidGlassIconButton>
-          </Pressable>
+          <View style={s.headerSide}>
+            <DetailBackButton />
+          </View>
           <Animated.Text
             style={[s.headerTitle, headerTitleStyle]}
             numberOfLines={1}
           >
             {event.title}
           </Animated.Text>
-          <View style={s.headerActions}>
+          <View style={[s.headerSide, s.headerActions]}>
             {/*
               Header buttons collapsed into a single overflow menu. Heart
               stays inline for one-tap like/unlike since it's the highest-
@@ -2925,10 +2944,17 @@ function EventDetailScreenContent() {
 // ── Styles ──────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
+  // Full-bleed. Only the HEADER lives at this level, so it reaches the screen
+  // edges; the scrolling content sits in `root` below and stays capped.
+  screen: {
+    flex: 1,
+    backgroundColor: "#000",
+    width: "100%",
+  },
   root: {
     flex: 1,
     backgroundColor: "#000",
-    maxWidth: 768,
+    maxWidth: CONTENT_MAX_WIDTH,
     width: "100%",
     alignSelf: "center",
   },
@@ -2952,6 +2978,17 @@ const s = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 10,
+    // Full width, contents included — back in the screen's top-left corner,
+    // actions in the top-right. The body below stays capped; chrome and content
+    // follow different rules.
+    width: "100%",
+  },
+  // Equal-weight side slots, so the title is centred on the BAR rather than on
+  // whatever the actions happen to measure.
+  headerSide: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
   },
   headerButton: {
     width: 40,
@@ -2964,15 +3001,20 @@ const s = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.08)",
   },
   headerTitle: {
-    flex: 1,
+    // No `flex: 1` — that made the title a left-aligned column that grew into
+    // the space instead of a centred label.
+    flexShrink: 1,
+    maxWidth: "55%",
     marginHorizontal: 12,
     fontSize: 17,
     fontWeight: "700",
     color: "#fff",
+    textAlign: "center",
   },
   headerActions: {
     flexDirection: "row",
     gap: 8,
+    justifyContent: "flex-end",
   },
 
   // Scroll

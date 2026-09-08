@@ -20,7 +20,7 @@ import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useLayoutEffect } from "react";
 import { Image } from "expo-image";
-import { ArrowLeft, Send, MessageCircle } from "lucide-react-native";
+import { Send, MessageCircle } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
@@ -32,6 +32,7 @@ import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeHeader } from "@dvnt/app/lib/hooks/use-safe-header";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 function EventCommentsScreenContent() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -68,13 +69,7 @@ function EventCommentsScreenContent() {
       fontSize: 18,
     },
     headerLeft: () => (
-      <Pressable
-        onPress={() => router.back()}
-        hitSlop={12}
-        style={{ marginLeft: 8 }}
-      >
-        <ArrowLeft size={24} color={colors.foreground} />
-      </Pressable>
+      <DetailBackButton />
     ),
   });
 

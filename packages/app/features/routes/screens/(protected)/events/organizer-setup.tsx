@@ -24,7 +24,6 @@ import Animated, {
   Easing,
 } from "react-native-reanimated";
 import {
-  ArrowLeft,
   CreditCard,
   CheckCircle,
   ExternalLink,
@@ -46,6 +45,8 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 const REQ_LABELS: Record<string, string> = {
   "individual.address.city": "city",
   "individual.address.line1": "street",
@@ -273,17 +274,14 @@ function OrganizerSetupContent() {
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <View className="flex-row items-center px-4 py-3 gap-3">
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          accessibilityLabel="Back"
-        >
-          <ArrowLeft size={22} color="#fff" />
-        </Pressable>
+      <View className="w-full py-3">
+        {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+        <View className="flex-row items-center px-4 gap-3" style={DETAIL_HEADER_ROW}>
+        <DetailBackButton />
         <Text className="text-lg font-sans-bold text-foreground flex-1">
           Organizer Setup
         </Text>
+      </View>
       </View>
 
       {isLoading ? (

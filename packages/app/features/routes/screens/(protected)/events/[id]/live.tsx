@@ -37,10 +37,11 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ArrowLeft, Radio, ScanLine } from "lucide-react-native";
+import { Radio, ScanLine } from "lucide-react-native";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 const BUCKET_COUNT = 30; // 30 minutes
 
@@ -296,9 +297,7 @@ export default function EventLiveScreen() {
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={22} color="#fff" />
-        </Pressable>
+        <DetailBackButton />
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {eventTitle || "Live"}
@@ -428,6 +427,9 @@ function StatTile({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   header: {
+    // Full-bleed: this style carries the border and background, so a maxWidth
+    // here stops the BAR short of the screen edge, not just its contents. These
+    // screens do not cap their body either, so the bar matches what is below it.
     flexDirection: "row",
     alignItems: "center",
     gap: 12,

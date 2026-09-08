@@ -988,7 +988,7 @@ export function TicketDetailScreen() {
       {isActive ? (
         <div
           className="fixed inset-x-0 bottom-0 z-20 border-t border-white/8 bg-[#06070d]/96 backdrop-blur"
-          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 12px)" }}
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 12px + var(--dvnt-tabbar-clearance))" }}
         >
           <div className="mx-auto flex w-full max-w-xl gap-2.5 px-4 pt-3">
             {/* Calendar */}

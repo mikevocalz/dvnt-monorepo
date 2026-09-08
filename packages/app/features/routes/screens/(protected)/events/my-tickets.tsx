@@ -12,7 +12,6 @@ import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import {
-  ArrowLeft,
   Ticket,
   QrCode,
   Calendar,
@@ -29,6 +28,11 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useState, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@dvnt/app/components/ui/skeleton";
+import {
+  DETAIL_HEADER_ROW,
+  CONTENT_MAX_WIDTH,
+} from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 const STATUS_COLORS: Record<
   string,
@@ -352,13 +356,14 @@ function MyTicketsContent() {
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       {/* Header */}
-      <View className="flex-row items-center px-4 py-3 gap-3">
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={22} color="#fff" />
-        </Pressable>
+      <View className="w-full py-3">
+        {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+        <View className="flex-row items-center px-4 gap-3" style={DETAIL_HEADER_ROW}>
+        <DetailBackButton />
         <Text className="text-lg font-sans-bold text-foreground flex-1">
           My Tickets
         </Text>
+      </View>
       </View>
 
       {isLoading && (
@@ -421,9 +426,13 @@ function MyTicketsContent() {
             )
           }
           estimatedItemSize={110}
+          // Content column; the header above stays full width.
           contentContainerStyle={{
             paddingTop: 8,
             paddingBottom: insets.bottom + 20,
+            width: "100%",
+            maxWidth: CONTENT_MAX_WIDTH,
+            alignSelf: "center",
           }}
           onRefresh={() => {
             refetch();

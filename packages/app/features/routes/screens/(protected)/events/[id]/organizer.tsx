@@ -26,7 +26,6 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  ArrowLeft,
   User,
   Settings,
   WifiOff,
@@ -42,6 +41,7 @@ import { tickets } from "@dvnt/app/lib/api/tickets";
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 interface Ticket {
   id: string;
@@ -239,9 +239,7 @@ function EventOrganizerScreenContent() {
           borderBottomColor: colors.border,
         }}
       >
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={24} color={colors.foreground} />
-        </Pressable>
+        <DetailBackButton />
         <Text
           style={{
             flex: 1,

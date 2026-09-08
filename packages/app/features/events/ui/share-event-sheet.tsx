@@ -28,6 +28,10 @@ import { usersApi } from "@dvnt/app/lib/api/users";
 import { useDebounce } from "@dvnt/app/lib/hooks/use-debounce";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { LegendList } from "@dvnt/app/components/list";
+import {
+  useDetachedSheetMetrics,
+  SHEET_BOTTOM_INSET,
+} from "@dvnt/app/lib/ui/sheet-metrics";
 
 interface ShareEventSheetProps {
   visible: boolean;
@@ -59,7 +63,10 @@ export function ShareEventSheet({
   const router = useRouter();
   const showToast = useUIStore((s) => s.showToast);
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ["60%", "90%"], []);
+  const sheet = useDetachedSheetMetrics();
+  // Numeric, not "%": the shared metrics own the max-w-3xl cap and the 3:4
+  // portrait ratio, clamped to clear the detached inset.
+  const snapPoints = useMemo(() => [sheet.height], [sheet.height]);
 
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounce(query, 300);
@@ -161,6 +168,10 @@ export function ShareEventSheet({
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheet}
       handleIndicatorStyle={styles.handle}
+      enableDynamicSizing={false}
+      detached
+      bottomInset={SHEET_BOTTOM_INSET}
+      style={{ marginHorizontal: sheet.marginHorizontal }}
     >
       <BottomSheetView style={styles.container}>
         {/* Header */}
@@ -236,8 +247,9 @@ export function ShareEventSheet({
 const styles = StyleSheet.create({
   sheet: {
     backgroundColor: "#111114",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    // All four corners: detached floats as a card, so a top-only radius
+    // leaves square bottom corners hanging over the inset.
+    borderRadius: 24,
   },
   handle: {
     backgroundColor: "rgba(255,255,255,0.18)",

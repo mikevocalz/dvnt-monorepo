@@ -13,10 +13,16 @@
  * context.
  *
  * Follows the house sheet contract: inline `BottomSheet` (never the modal
- * portal), `SHEET_SNAPS_ACTION`, and `GlassSheetBackground`.
+ * portal), the shared detached metrics, and `GlassSheetBackground`.
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { View, Text, Pressable, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+} from "react-native";
 import BottomSheet, {
   BottomSheetView,
   BottomSheetBackdrop,
@@ -25,7 +31,10 @@ import type { BottomSheetBackdropProps } from "@gorhom/bottom-sheet";
 import { ChevronRight, X } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
-import { SHEET_SNAPS_ACTION } from "@dvnt/app/lib/constants/sheets";
+import {
+  useDetachedSheetMetrics,
+  SHEET_BOTTOM_INSET,
+} from "@dvnt/app/lib/ui/sheet-metrics";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
 
 export interface HostEntry {
@@ -51,7 +60,11 @@ export function HostEventsPickerSheet({
   onSelect,
 }: HostEventsPickerSheetProps) {
   const sheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => [...SHEET_SNAPS_ACTION], []);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheet = useDetachedSheetMetrics();
+  // Numeric, not "%": this sheet mounts inside the event page's scroll content,
+  // where a percentage resolves against content height, not the viewport.
+  const snapPoints = useMemo(() => [sheet.height], [sheet.height]);
 
   useEffect(() => {
     if (visible) sheetRef.current?.expand();
@@ -91,65 +104,79 @@ export function HostEventsPickerSheet({
   if (!visible) return null;
 
   return (
-    <BottomSheet
-      ref={sheetRef}
-      index={0}
-      snapPoints={snapPoints}
-      enablePanDownToClose
-      enableOverDrag={false}
-      onChange={handleSheetChange}
-      backdropComponent={renderBackdrop}
-      backgroundComponent={GlassSheetBackground}
-      handleIndicatorStyle={s.handle}
+    // OrganizerCard lives inside the event page's ScrollView, so the sheet's
+    // own `absoluteFill` host would measure that content, not the screen.
+    <View
+      pointerEvents="box-none"
+      style={[s.viewport, { height: windowHeight }]}
     >
-      <BottomSheetView style={s.content}>
-        <View style={s.header}>
-          <Text style={s.title}>Whose events?</Text>
-          <Pressable
-            onPress={onClose}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel="Close"
-            style={s.close}
-          >
-            <X size={18} color="rgba(255,255,255,0.7)" />
-          </Pressable>
-        </View>
-        <Text style={s.subtitle}>
-          This event is hosted by more than one person.
-        </Text>
+      <BottomSheet
+        ref={sheetRef}
+        index={0}
+        snapPoints={snapPoints}
+        enablePanDownToClose
+        enableOverDrag={false}
+        onChange={handleSheetChange}
+        backdropComponent={renderBackdrop}
+        backgroundComponent={GlassSheetBackground}
+        handleIndicatorStyle={s.handle}
+        enableDynamicSizing={false}
+        detached
+        bottomInset={SHEET_BOTTOM_INSET}
+        style={{ marginHorizontal: sheet.marginHorizontal }}
+      >
+        <BottomSheetView style={s.content}>
+          <View style={s.header}>
+            <Text style={s.title}>Whose events?</Text>
+            <Pressable
+              onPress={onClose}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              style={s.close}
+            >
+              <X size={18} color="rgba(255,255,255,0.7)" />
+            </Pressable>
+          </View>
+          <Text style={s.subtitle}>
+            This event is hosted by more than one person.
+          </Text>
 
-        {hosts.map((host) => (
-          <Pressable
-            key={host.username}
-            onPress={() => handleSelect(host.username)}
-            style={({ pressed }) => [s.row, pressed && s.rowPressed]}
-            accessibilityRole="button"
-            accessibilityLabel={`${host.name}, ${host.role}. See their events`}
-          >
-            <Avatar uri={host.avatar} username={host.username} size={44} />
-            <View style={s.rowText}>
-              <Text style={s.rowName} numberOfLines={1}>
-                {host.name}
-              </Text>
-              <Text style={s.rowHandle} numberOfLines={1}>
-                @{host.username}
-              </Text>
-            </View>
-            <View style={s.rolePill}>
-              <Text style={s.roleText}>{host.role}</Text>
-            </View>
-            <ChevronRight size={18} color="rgba(255,255,255,0.4)" />
-          </Pressable>
-        ))}
-      </BottomSheetView>
-    </BottomSheet>
+          {hosts.map((host) => (
+            <Pressable
+              key={host.username}
+              onPress={() => handleSelect(host.username)}
+              style={({ pressed }) => [s.row, pressed && s.rowPressed]}
+              accessibilityRole="button"
+              accessibilityLabel={`${host.name}, ${host.role}. See their events`}
+            >
+              <Avatar uri={host.avatar} username={host.username} size={44} />
+              <View style={s.rowText}>
+                <Text style={s.rowName} numberOfLines={1}>
+                  {host.name}
+                </Text>
+                <Text style={s.rowHandle} numberOfLines={1}>
+                  @{host.username}
+                </Text>
+              </View>
+              <View style={s.rolePill}>
+                <Text style={s.roleText}>{host.role}</Text>
+              </View>
+              <ChevronRight size={18} color="rgba(255,255,255,0.4)" />
+            </Pressable>
+          ))}
+        </BottomSheetView>
+      </BottomSheet>
+    </View>
   );
 }
 
 const ACCENT = "#3FDCFF";
 
 const s = StyleSheet.create({
+  // Bottom-anchored with an explicit viewport height, so the sheet rises from
+  // the screen edge instead of the bottom of the scrolled page.
+  viewport: { position: "absolute", left: 0, right: 0, bottom: 0 },
   handle: { backgroundColor: "rgba(255,255,255,0.25)", width: 40 },
   content: { paddingHorizontal: 18, paddingBottom: 28, gap: 4 },
   header: {

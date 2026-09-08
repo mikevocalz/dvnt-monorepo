@@ -26,7 +26,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import {
-  ArrowLeft,
   ChevronRight,
   ChevronDown,
   Calendar,
@@ -38,6 +37,7 @@ import {
   type HostDashboardEvent,
 } from "@dvnt/app/lib/api/privileged";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 function formatMoney(cents: number): string {
   if (!Number.isFinite(cents)) return "$0";
@@ -234,9 +234,7 @@ export default function HostDashboardScreen() {
     return (
       <SafeAreaView edges={["top"]} style={styles.container}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ArrowLeft size={22} color="#fff" />
-          </Pressable>
+          <DetailBackButton />
           <Text style={styles.headerTitle}>Host Dashboard</Text>
         </View>
         <View style={styles.loadingWrap}>
@@ -250,9 +248,7 @@ export default function HostDashboardScreen() {
     return (
       <SafeAreaView edges={["top"]} style={styles.container}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ArrowLeft size={22} color="#fff" />
-          </Pressable>
+          <DetailBackButton />
           <Text style={styles.headerTitle}>Host Dashboard</Text>
         </View>
         <ScrollView
@@ -284,9 +280,7 @@ export default function HostDashboardScreen() {
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={22} color="#fff" />
-        </Pressable>
+        <DetailBackButton />
         <Text style={styles.headerTitle}>Host Dashboard</Text>
       </View>
 
@@ -391,6 +385,9 @@ export default function HostDashboardScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   header: {
+    // Full-bleed: this style carries the border and background, so a maxWidth
+    // here stops the BAR short of the screen edge, not just its contents. These
+    // screens do not cap their body either, so the bar matches what is below it.
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,

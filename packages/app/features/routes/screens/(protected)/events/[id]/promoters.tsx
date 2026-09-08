@@ -28,7 +28,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
 import {
-  ArrowLeft,
   Link2,
   Megaphone,
   Pause,
@@ -44,6 +43,7 @@ import {
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 const ACCENT = "#8A40CF"; // promoter violet
 const ACCENT_TEXT = "#C084FC";
@@ -203,9 +203,7 @@ export default function EventPromotersScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={22} color="#fff" />
-        </Pressable>
+        <DetailBackButton />
         <Text style={styles.headerTitle}>Promoters</Text>
         {canManage ? (
           <Pressable onPress={toggleAdd} hitSlop={12} style={styles.headerAction}>
@@ -431,6 +429,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
   },
   header: {
+    // Full-bleed: this style carries the border and background, so a maxWidth
+    // here stops the BAR short of the screen edge, not just its contents. These
+    // screens do not cap their body either, so the bar matches what is below it.
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,

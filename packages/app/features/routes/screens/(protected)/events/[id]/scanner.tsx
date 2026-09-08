@@ -28,7 +28,6 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import {
-  ArrowLeft,
   ScanLine,
   CheckCircle2,
   XCircle,
@@ -43,6 +42,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/auth/identity";
 import * as Haptics from "expo-haptics";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 // Lazy-load VisionCamera to prevent crashes if not installed
 let Camera: any = null;
@@ -821,13 +821,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
           backgroundColor: "rgba(0,0,0,0.5)",
         }}
       >
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          className="w-10 h-10 items-center justify-center rounded-full bg-white/10"
-        >
-          <ArrowLeft size={20} color="#fff" />
-        </Pressable>
+        <DetailBackButton />
 
         <Animated.View entering={FadeInDown.duration(300)}>
           <Text className="text-white font-sans-bold text-lg">

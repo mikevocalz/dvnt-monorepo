@@ -22,7 +22,7 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, UserPlus, Shield, ShieldCheck, ScanLine, X } from "lucide-react-native";
+import { UserPlus, Shield, ShieldCheck, ScanLine, X } from "lucide-react-native";
 import {
   getEventStaff,
   inviteCoOrganizer,
@@ -32,6 +32,7 @@ import {
 } from "@dvnt/app/lib/api/privileged";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 const ROLE_OPTIONS: { value: CoOrgRole; label: string; description: string }[] = [
   {
@@ -165,9 +166,7 @@ export default function EventStaffScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={22} color="#fff" />
-        </Pressable>
+        <DetailBackButton />
         <Text style={styles.headerTitle}>Staff</Text>
         {canManage ? (
           <Pressable
@@ -370,6 +369,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
   },
   header: {
+    // Full-bleed: this style carries the border and background, so a maxWidth
+    // here stops the BAR short of the screen edge, not just its contents. These
+    // screens do not cap their body either, so the bar matches what is below it.
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,

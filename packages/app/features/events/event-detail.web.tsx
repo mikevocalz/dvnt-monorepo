@@ -1309,8 +1309,19 @@ export function EventDetailScreen() {
           {/* Video — React YouTube facade (loads the player on click). */}
           {yt ? (
             <Section title="Video">
-              <div className="rounded-xl overflow-hidden bg-black">
-                <LiteYouTubeEmbed id={yt} title="Event video" />
+              {/* The box owns the 16:9, so the player scales with the column
+                  instead of sitting at whatever height the library's own
+                  padding trick resolved to. `dvnt-yt` makes the embed fill this
+                  box and cancels that padding — see globals.css. */}
+              <div
+                className="rounded-xl overflow-hidden bg-black"
+                style={{ aspectRatio: "16 / 9" }}
+              >
+                <LiteYouTubeEmbed
+                  id={yt}
+                  title="Event video"
+                  wrapperClass="yt-lite dvnt-yt"
+                />
               </div>
             </Section>
           ) : null}

@@ -18,7 +18,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   DollarSign,
   Ticket,
   CheckCircle2,
@@ -33,6 +32,7 @@ import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 import {
   eventAnalyticsApi,
   attendeesToCsv,
@@ -212,9 +212,7 @@ function EventAnalyticsContent() {
         style={{ flex: 1, backgroundColor: colors.background }}
       >
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ArrowLeft size={24} color={colors.foreground} />
-          </Pressable>
+          <DetailBackButton />
           <Text style={[styles.headerTitle, { color: colors.foreground }]}>
             Analytics
           </Text>
@@ -267,9 +265,7 @@ function EventAnalyticsContent() {
     >
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={24} color={colors.foreground} />
-        </Pressable>
+        <DetailBackButton />
         <Text
           style={[styles.headerTitle, { color: colors.foreground }]}
           numberOfLines={1}
@@ -622,6 +618,9 @@ export default function EventAnalyticsScreen() {
 
 const styles = StyleSheet.create({
   header: {
+    // Full-bleed: this style carries the border and background, so a maxWidth
+    // here stops the BAR short of the screen edge, not just its contents. These
+    // screens do not cap their body either, so the bar matches what is below it.
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,

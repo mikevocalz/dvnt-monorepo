@@ -24,7 +24,6 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  ArrowLeft,
   Plus,
   Tag,
   Trash2,
@@ -36,6 +35,7 @@ import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 interface PromoCode {
   id: string;
@@ -211,9 +211,7 @@ function PromoCodesScreenContent() {
           borderBottomColor: colors.border,
         }}
       >
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={24} color={colors.foreground} />
-        </Pressable>
+        <DetailBackButton />
         <Text
           style={{
             flex: 1,

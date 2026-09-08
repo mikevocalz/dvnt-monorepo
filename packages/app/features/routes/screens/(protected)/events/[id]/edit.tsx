@@ -27,7 +27,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 
 import {
-  ArrowLeft,
   Check,
   Calendar,
   Clock,
@@ -56,6 +55,8 @@ import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { useQueryClient } from "@tanstack/react-query";
 import { eventKeys, useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 import {
   LocationAutocompleteInstagram,
   type LocationData,
@@ -839,10 +840,10 @@ function EditEventScreenContent() {
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
       {/* Header */}
-      <View className="flex-row items-center justify-between border-b border-border px-4 py-3">
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={24} color={colors.foreground} />
-        </Pressable>
+      <View className="w-full border-b border-border py-3">
+        {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+        <View className="flex-row items-center justify-between px-4" style={DETAIL_HEADER_ROW}>
+        <DetailBackButton />
         <Text className="text-lg font-semibold text-foreground">
           Edit Event
         </Text>
@@ -861,6 +862,7 @@ function EditEventScreenContent() {
             />
           )}
         </Pressable>
+      </View>
       </View>
 
       <KeyboardAwareScrollView

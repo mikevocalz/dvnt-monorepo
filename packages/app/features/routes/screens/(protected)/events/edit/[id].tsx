@@ -18,11 +18,13 @@ import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { DvntMap } from "@dvnt/app/components/map";
 
-import { ArrowLeft, Loader2, Calendar, Clock } from "lucide-react-native";
+import { Loader2, Calendar, Clock } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useState, useEffect } from "react";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { eventsApi } from "@dvnt/app/lib/api/events";
+import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
+import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 function EditEventScreenContent() {
   const router = useRouter();
@@ -227,14 +229,10 @@ function EditEventScreenContent() {
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
-      <View className="flex-row items-center justify-between border-b border-border bg-background px-4 py-3">
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={16}
-          style={{ padding: 8, margin: -8, marginRight: 8 }}
-        >
-          <ArrowLeft size={24} color={colors.foreground} />
-        </Pressable>
+      <View className="w-full border-b border-border bg-background py-3">
+        {/* Bar is full-bleed; only its CONTENTS cap to the content column. */}
+        <View className="flex-row items-center justify-between px-4" style={DETAIL_HEADER_ROW}>
+        <DetailBackButton />
         <Text className="flex-1 text-lg font-semibold text-foreground">
           Edit Event
         </Text>
@@ -253,6 +251,7 @@ function EditEventScreenContent() {
             <Text className="font-semibold text-primary-foreground">Save</Text>
           )}
         </Pressable>
+      </View>
       </View>
 
       <KeyboardAwareScrollView

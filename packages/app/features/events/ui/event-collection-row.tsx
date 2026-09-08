@@ -7,6 +7,7 @@ import { View, Text, Pressable, ScrollView } from "react-native";
 import { Image } from "expo-image";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import { useRouter } from "expo-router";
+import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { MapPin, Calendar } from "lucide-react-native";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
@@ -47,15 +48,16 @@ export function EventCollectionRow({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
       >
+        {/* ZoomCard, not router.push — these rail cards open the same event
+            detail as the grid below them, so they get the same App Store zoom.
+            `router.push` gets no zoom at all; the router threads it through the
+            href, which is why this has to be a Link. */}
         {items.map((event) => (
-          <Pressable
-            key={event.id}
-            onPress={() =>
-              router.push(`/(protected)/events/${event.id}` as any)
-            }
-            style={{ width: CARD_WIDTH }}
-            className="bg-card rounded-2xl overflow-hidden border border-border"
-          >
+          <ZoomCard key={event.id} href={`/(protected)/events/${event.id}` as never}>
+            <View
+              style={{ width: CARD_WIDTH }}
+              className="bg-card rounded-2xl overflow-hidden border border-border"
+            >
             {event.flyerVideoUrl ? (
               <DVNTAnimatedVideoView
                 uri={event.flyerVideoUrl}
@@ -103,7 +105,8 @@ export function EventCollectionRow({
                 </Text>
               )}
             </View>
-          </Pressable>
+            </View>
+          </ZoomCard>
         ))}
       </ScrollView>
     </View>
