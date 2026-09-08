@@ -85,14 +85,27 @@ TaskManager.defineTask(BG_TASK_SCAN_FLUSH, async () => {
 // whitelist (lib/query-persistence.ts) — added alongside this job.
 TaskManager.defineTask(BG_TASK_TICKET_PREFETCH, async () => {
   try {
-    const [{ QueryClient }, persistClientMod, { queryPersister, persistOptions }, { ticketKeys }, { ticketsApi }] =
-      await Promise.all([
-        import("@tanstack/react-query"),
-        import("@tanstack/react-query-persist-client"),
-        import("@dvnt/app/lib/query-persistence"),
-        import("@dvnt/app/lib/hooks/use-tickets"),
-        import("@dvnt/app/lib/api/tickets"),
-      ]);
+    const [
+      { QueryClient },
+      persistClientMod,
+      { queryPersister, persistOptions },
+      { qk },
+      { ticketsApi },
+      { useAuthStore },
+    ] = await Promise.all([
+      import("@tanstack/react-query"),
+      import("@tanstack/react-query-persist-client"),
+      import("@dvnt/app/lib/query-persistence"),
+      import("@dvnt/app/lib/query/keys"),
+      import("@dvnt/app/lib/api/tickets"),
+      import("@dvnt/app/lib/stores/auth-store"),
+    ]);
+
+    // Ticket caches are account-scoped. Warming the wrong account's key would
+    // leave a signed-in member reading a bucket nothing ever writes to, so a
+    // window with no resolved viewer is a no-op rather than a guess.
+    const viewerId = useAuthStore.getState().user?.id;
+    if (!viewerId) return Success;
     const { persistQueryClientRestore, persistQueryClientSave } = persistClientMod;
 
     const client = new QueryClient();
@@ -104,7 +117,7 @@ TaskManager.defineTask(BG_TASK_TICKET_PREFETCH, async () => {
       buster: persistOptions.buster,
     });
     await client.prefetchQuery({
-      queryKey: ticketKeys.myTickets(),
+      queryKey: qk.tickets.mine(viewerId),
       queryFn: () => ticketsApi.getMyTickets(),
     });
     await persistQueryClientSave({

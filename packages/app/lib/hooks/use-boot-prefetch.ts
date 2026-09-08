@@ -231,7 +231,8 @@ export function useBootPrefetch() {
           queryFn: () => postsApi.getProfilePosts(userId),
         }),
         queryClient.prefetchQuery({
-          queryKey: bookmarkKeys.list(),
+          // Account-scoped, matching what `useBookmarks` reads.
+          queryKey: bookmarkKeys.list(userId),
           queryFn: () => bookmarksApi.getBookmarks(),
         }),
         queryClient.prefetchQuery({

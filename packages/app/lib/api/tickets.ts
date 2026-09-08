@@ -99,6 +99,29 @@ export interface ScanTicketResponse {
   perks?: PerkKey[];
 }
 
+/**
+ * A ticket read failed. Distinct from "this account holds no tickets" — the
+ * screens must never render one as the other.
+ */
+export class TicketsUnavailableError extends Error {
+  readonly status?: number;
+  /**
+   * The cold-start 401/403: the poll fired before the session token was in
+   * hand. Worth retrying quietly rather than showing the member an error.
+   */
+  readonly authRace: boolean;
+
+  constructor(
+    message: string,
+    opts: { status?: number; authRace?: boolean } = {},
+  ) {
+    super(message);
+    this.name = "TicketsUnavailableError";
+    this.status = opts.status;
+    this.authRace = opts.authRace ?? false;
+  }
+}
+
 export const ticketsApi = {
   /**
    * Get all tickets for an event via the get-event-tickets edge fn.
@@ -212,6 +235,11 @@ export const ticketsApi = {
    * Get the current user's tickets across all events via the
    * get-my-tickets edge function. Legacy integer-user-id rows are
    * picked up server-side.
+   *
+   * THROWS on failure. It used to `return []`, which rendered a request
+   * failure as the "No tickets yet" empty state — a member standing at a door
+   * with a dead connection was told they had never bought anything. The caller
+   * distinguishes empty from failed; only the server decides empty.
    */
   async getMyTickets(): Promise<TicketRecord[]> {
     const { data, error } = await invokeEdge<{
@@ -229,9 +257,53 @@ export const ticketsApi = {
       if (!authRace) {
         console.error("[Tickets] getMyTickets error:", error.message);
       }
+      throw new TicketsUnavailableError(
+        error.message || "Could not load tickets",
+        { status: error.status, authRace },
+      );
+    }
+    if (!data?.ok) {
+      throw new TicketsUnavailableError("Could not load tickets");
+    }
+    return data.tickets ?? [];
+  },
+
+  /**
+   * Every pass this account holds for one event, newest row first as the
+   * server returns them.
+   *
+   * Replaces `getMyTicketForEvent`, which returned `tickets[0]`. With an
+   * admission ticket and a coat-check claim on the same event, "the first
+   * matching row" is whichever the server happened to order first, so the
+   * pass on screen could change identity on any refetch.
+   */
+  async getMyTicketsForEvent(eventId: string): Promise<TicketRecord[]> {
+    const eventIdInt = parseInt(eventId, 10);
+    if (!Number.isFinite(eventIdInt)) {
+      console.warn("[Tickets] getMyTicketsForEvent: invalid eventId", eventId);
       return [];
     }
-    return data?.ok ? (data.tickets ?? []) : [];
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      tickets: TicketRecord[];
+    }>("get-my-tickets", { event_id: eventIdInt });
+    if (error) {
+      const authRace =
+        error.status === 401 ||
+        error.status === 403 ||
+        /not authenticated/i.test(error.message ?? "");
+      if (!authRace) {
+        console.error("[Tickets] getMyTicketsForEvent error:", error.message);
+      }
+      throw new TicketsUnavailableError(
+        error.message || "Could not load tickets",
+        { status: error.status, authRace },
+      );
+    }
+    if (!data?.ok) {
+      throw new TicketsUnavailableError("Could not load tickets");
+    }
+    return data.tickets ?? [];
   },
 
   /**
@@ -513,31 +585,6 @@ export const ticketsApi = {
     }
   },
 
-  /**
-   * Get the current user's ticket for a specific event — routed
-   * through the get-my-tickets edge function with an `event_id`
-   * filter, returns the most recent matching row.
-   */
-  async getMyTicketForEvent(eventId: string): Promise<TicketRecord | null> {
-    const eventIdInt = parseInt(eventId, 10);
-    if (!Number.isFinite(eventIdInt)) {
-      console.warn("[Tickets] getMyTicketForEvent: invalid eventId", eventId);
-      return null;
-    }
-    const { data, error } = await invokeEdge<{
-      ok: boolean;
-      tickets: TicketRecord[];
-    }>("get-my-tickets", { event_id: eventIdInt });
-    if (error) {
-      // "Not authenticated" is expected for logged-out viewers on public event
-      // pages — they simply have no ticket. Don't log it as an error.
-      if (!/not authenticated/i.test(error.message ?? "")) {
-        console.error("[Tickets] getMyTicketForEvent error:", error.message);
-      }
-      return null;
-    }
-    return data?.ok ? (data.tickets?.[0] ?? null) : null;
-  },
 
   // ── Ticket Transfers ──────────────────────────────────────────
 

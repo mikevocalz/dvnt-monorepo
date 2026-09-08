@@ -10,7 +10,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Linking } from "react-native";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
-import { ticketKeys } from "./use-tickets";
+import { useTicketViewerId } from "./use-tickets";
+import { qk } from "@dvnt/app/lib/query/keys";
 import type { TicketRecord } from "@dvnt/app/lib/api/tickets";
 import type { TicketTypeRecord } from "@dvnt/app/lib/api/ticket-types";
 
@@ -65,6 +66,7 @@ interface InitiateUpgradeResult {
  */
 export function useInitiateUpgrade(eventId: string) {
   const queryClient = useQueryClient();
+  const viewerId = useTicketViewerId();
 
   return useMutation({
     mutationFn: async ({ ticketId, newTicketTypeId }: InitiateUpgradeParams): Promise<InitiateUpgradeResult> => {
@@ -88,9 +90,11 @@ export function useInitiateUpgrade(eventId: string) {
     },
     onSettled: () => {
       // Refresh ticket data after upgrade attempt (webhook may have completed)
-      queryClient.invalidateQueries({ queryKey: ticketKeys.myTickets() });
-      queryClient.invalidateQueries({ queryKey: ticketKeys.myTicketForEvent(eventId) });
-      queryClient.invalidateQueries({ queryKey: ticketKeys.ticketTypes(eventId) });
+      queryClient.invalidateQueries({ queryKey: qk.tickets.mine(viewerId) });
+      queryClient.invalidateQueries({
+        queryKey: qk.tickets.forEvent(viewerId, eventId),
+      });
+      queryClient.invalidateQueries({ queryKey: qk.tickets.types(eventId) });
     },
   });
 }

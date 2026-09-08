@@ -18,7 +18,9 @@ import { StoriesBar } from "@dvnt/app/features/stories";
 import { ProfileMasonryGrid } from "@dvnt/app/features/profile";
 import { useFeedPosts, postKeys } from "@dvnt/app/lib/hooks/use-posts";
 import { useEvents, eventKeys, type Event } from "@dvnt/app/lib/hooks/use-events";
-import { ticketKeys, useMyTickets } from "@dvnt/app/lib/hooks/use-tickets";
+import { useMyTickets, useTicketViewerId } from "@dvnt/app/lib/hooks/use-tickets";
+import { qk } from "@dvnt/app/lib/query/keys";
+import { ticketPath } from "@dvnt/app/lib/tickets/ticket-identity";
 import { commentKeys } from "@dvnt/app/lib/hooks/use-comments";
 import { storyKeys } from "@dvnt/app/lib/hooks/use-stories";
 import { motionTags } from "@dvnt/app/lib/navigation/transition-tags";
@@ -274,12 +276,12 @@ function TicketPreviewCard({
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const viewerId = useTicketViewerId();
   const eventId = String(ticket.event_id);
 
   const handlePress = () => {
-    queryClient.setQueryData(ticketKeys.myTicketForEvent(eventId), ticket);
-    queryClient.setQueryData(ticketKeys.myTickets(), [ticket]);
-    router.push(`/(protected)/ticket/${eventId}` as any);
+    queryClient.setQueryData(qk.tickets.mine(viewerId), [ticket]);
+    router.push(ticketPath(ticket.id) as never);
   };
 
   return (
@@ -356,6 +358,7 @@ export default function TransitionDebugScreen() {
   const feedPostsQuery = useFeedPosts();
   const eventsQuery = useEvents();
   const ticketsQuery = useMyTickets();
+  const viewerId = useTicketViewerId();
 
   useEffect(() => {
     if (!__DEV__) return;
@@ -368,12 +371,13 @@ export default function TransitionDebugScreen() {
       [],
     );
     queryClient.setQueryData(eventKeys.detail(DEMO_EVENT_ID), DEMO_EVENT_DETAIL);
-    queryClient.setQueryData(ticketKeys.myTicketForEvent(DEMO_TICKET_EVENT_ID), DEMO_TICKET);
-    queryClient.setQueryData(ticketKeys.myTickets(), (current: TicketRecord[] | undefined) =>
-      current && current.length > 0 ? current : [DEMO_TICKET],
+    queryClient.setQueryData(
+      qk.tickets.mine(viewerId),
+      (current: TicketRecord[] | undefined) =>
+        current && current.length > 0 ? current : [DEMO_TICKET],
     );
     queryClient.setQueryData(storyKeys.list(), DEMO_STORIES);
-  }, [queryClient]);
+  }, [queryClient, viewerId]);
 
   const feedPosts = useMemo(
     () => (feedPostsQuery.data && feedPostsQuery.data.length > 0

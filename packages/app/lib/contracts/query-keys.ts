@@ -12,4 +12,8 @@ export const ticketQueryKeys = {
   mine: qk.tickets.mine,
   forEvent: qk.tickets.forEvent,
   byEventAndCategory: qk.tickets.byEventAndCategory,
+  roster: qk.tickets.roster,
+  types: qk.tickets.types,
+  financials: qk.tickets.financials,
+  transfers: qk.tickets.transfers,
 };

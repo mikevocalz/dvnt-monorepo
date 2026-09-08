@@ -133,15 +133,10 @@ export function CheckoutSuccessScreen() {
 
   const handleTicketPress = useCallback(
     (ticket: MixedTicket) => {
-      if (!ticket.event_id) return;
-      // Prime the detail cache exactly like native before navigating.
-      queryClient.setQueryData(
-        qk.tickets.forEvent(String(ticket.event_id)),
-        ticket,
-      );
-      router.push(`/feed/ticket/${ticket.event_id}`);
+      // By ticket id, matching native.
+      router.push(`/feed/ticket/${ticket.id}`);
     },
-    [queryClient, router],
+    [router],
   );
 
   return (

@@ -38,7 +38,7 @@ import { initStripe } from "@stripe/stripe-react-native";
 import { useStripeSafe as useStripe } from "@dvnt/app/lib/safe-native-modules";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
-import { useMyTicketForEvent } from "@dvnt/app/lib/hooks/use-tickets";
+import { useTicketRoute } from "@dvnt/app/lib/hooks/use-tickets";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { ticketTypesApi, type TicketTypeRecord } from "@dvnt/app/lib/api/ticket-types";
 import { supabase } from "@dvnt/app/lib/supabase/client";
@@ -123,8 +123,17 @@ function ViewTicketUpgradeScreenContent() {
   const showToast = useUIStore((s) => s.showToast);
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
-  const eventId = Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
-  const { data: dbTicket, isLoading, refetch } = useMyTicketForEvent(eventId);
+  /**
+   * An upgrade is a charge against ONE ticket, so it resolves the same way the
+   * pass screen does. Taking "the first ticket for this event" here could sell
+   * an upgrade on a different pass than the one on screen.
+   */
+  const route = useTicketRoute(id);
+  const eventId = route.eventId ?? "";
+  const isLoading = route.isLoading;
+  const refetch = route.refetch;
+  const dbTicket =
+    route.resolution.kind === "ticket" ? route.resolution.ticket : undefined;
 
   const [allTiers, setAllTiers] = React.useState<TicketTypeRecord[] | null>(null);
   const [selectedTierId, setSelectedTierId] = React.useState<string | null>(null);

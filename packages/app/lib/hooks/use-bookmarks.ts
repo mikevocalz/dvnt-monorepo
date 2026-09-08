@@ -26,7 +26,11 @@ export function useBookmarks() {
   const viewerId = user?.id;
 
   return useQuery({
-    queryKey: bookmarkKeys.list(),
+    // Was `bookmarkKeys.list()` — no argument, so this read sat on the
+    // `__no_user__` key while every mutation below wrote and invalidated
+    // `list(viewerId)`. Optimistic bookmark toggles never reached the query the
+    // Saved tab renders, and the invalidation cleared a key nothing read.
+    queryKey: bookmarkKeys.list(viewerId),
     queryFn: () => bookmarksApi.getBookmarks(),
     staleTime: STALE_TIMES.bookmarks,
     gcTime: GC_TIMES.standard,

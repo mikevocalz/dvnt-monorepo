@@ -53,8 +53,8 @@ import {
 } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
 import {
-  ticketKeys,
-  useMyTicketForEvent,
+  useTicketRoute,
+  useTicketViewerId,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
@@ -66,6 +66,7 @@ import type {
 } from "@dvnt/app/lib/stores/ticket-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useSearchUsers } from "@dvnt/app/lib/hooks/use-search";
+import { qk } from "@dvnt/app/lib/query/keys";
 import { useEventRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useTicketDetailUIStore } from "@dvnt/app/lib/stores/ticket-detail-ui-store";
 
@@ -165,8 +166,17 @@ export function TicketDetailScreen() {
   // the holder is staring at, no manual refresh.
   useEventRealtime(eventId);
 
-  // ── Ticket data — EXACT native hook + Zustand fallback ──
-  const { data: dbTicket, isLoading } = useMyTicketForEvent(eventId);
+  const viewerId = useTicketViewerId();
+  /**
+   * Same identity rule as native: a uuid names one credential, an integer is an
+   * event id that resolves to the group. `useMyTicketForEvent` returned
+   * `tickets[0]`, so with two passes on one event the pass on screen could
+   * change on any refetch.
+   */
+  const route = useTicketRoute(rawId);
+  const isLoading = route.isLoading;
+  const dbTicket =
+    route.resolution.kind === "ticket" ? route.resolution.ticket : undefined;
   const storeTicket = useTicketStore((s) => s.getTicketByEventId(eventId));
   const ticket: Ticket | undefined = dbTicket
     ? dbToTicket(dbTicket)
@@ -285,7 +295,7 @@ export function TicketDetailScreen() {
       }
       showToast("success", "Transfer canceled", "Your ticket is back to you.");
       await queryClient.invalidateQueries({
-        queryKey: ticketKeys.myTicketForEvent(eventId),
+        queryKey: qk.tickets.forEvent(viewerId, eventId),
       });
       await queryClient.invalidateQueries({
         queryKey: ["ticket-transfers", "outgoing"],
@@ -337,9 +347,9 @@ export function TicketDetailScreen() {
       refundMessage || "Refund processed successfully",
     );
     await queryClient.invalidateQueries({
-      queryKey: ticketKeys.myTicketForEvent(eventId),
+      queryKey: qk.tickets.forEvent(viewerId, eventId),
     });
-    await queryClient.invalidateQueries({ queryKey: ticketKeys.myTickets() });
+    await queryClient.invalidateQueries({ queryKey: qk.tickets.mine(viewerId) });
     setRefundStep("idle");
     router.back();
   }, [
@@ -441,7 +451,7 @@ export function TicketDetailScreen() {
           `Waiting for @${recipientUsername} to accept (expires in 24h)`,
         );
         await queryClient.invalidateQueries({
-          queryKey: ticketKeys.myTicketForEvent(eventId),
+          queryKey: qk.tickets.forEvent(viewerId, eventId),
         });
         setTimeout(() => setTransferState("idle"), 3000);
       }

@@ -27,11 +27,14 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { Motion } from "@legendapp/motion";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
 import { useEventRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import type { Ticket, TicketTierLevel } from "@dvnt/app/lib/stores/ticket-store";
-import { useMyTicketForEvent } from "@dvnt/app/lib/hooks/use-tickets";
-import { ticketKeys } from "@dvnt/app/lib/hooks/use-tickets";
+import {
+  useTicketRoute,
+  useTicketViewerId,
+} from "@dvnt/app/lib/hooks/use-tickets";
+import { qk } from "@dvnt/app/lib/query/keys";
+import { ticketPath } from "@dvnt/app/lib/tickets/ticket-identity";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import {
   TicketHeroCard,
@@ -90,7 +93,15 @@ function dbToTicket(rec: TicketRecord): Ticket {
     eventDate: rec.event_date || "",
     eventLocation: rec.event_location || "",
     eventImage: rec.event_image || "",
-    transferable: true, // Default to transferable for all tickets
+    /**
+     * Mirrors the server's actual rule rather than asserting a default. The
+     * `transfer-ticket` function rejects anything that is not `active`
+     * (`supabase/functions/transfer-ticket/index.ts:166`), so hardcoding
+     * `true` offered a Transfer button the server was always going to refuse.
+     * The server stays the authority; this only stops the UI from promising
+     * something on its behalf.
+     */
+    transferable: rec.status === "active",
   };
 }
 
@@ -98,9 +109,21 @@ function ViewTicketScreenContent() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const viewerId = useTicketViewerId();
 
-  const eventId = Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
-  const { data: dbTicket, isLoading, isError } = useMyTicketForEvent(eventId);
+  /**
+   * `:id` is a ticket uuid, or an event integer for the links already in the
+   * wild (watch actions, calendar entries, older pushes). An event id resolves
+   * to that event's GROUP and only opens a pass when the group holds exactly
+   * one — it never picks one for the member. See `lib/tickets/ticket-identity`.
+   */
+  const route = useTicketRoute(id);
+  const { resolution, isLoading, isError } = route;
+  const eventId = route.eventId ?? "";
+  const dbTicket =
+    resolution.kind === "ticket" ? resolution.ticket : undefined;
+  const passGroup = resolution.kind === "ticket" ? resolution.group : [];
+  const passIndex = resolution.kind === "ticket" ? resolution.index : 0;
 
   // Live updates: if the host edits the event (date, location, image)
   // while a ticket holder is staring at this screen, refetch the event
@@ -115,11 +138,15 @@ function ViewTicketScreenContent() {
   const weatherLat = activeCity?.lat ?? deviceLat ?? undefined;
   const weatherLng = activeCity?.lng ?? deviceLng ?? undefined;
 
-  // Also check Zustand store as fallback (for recently RSVPed tickets not yet in DB)
-  const storeTicket = useTicketStore((s) => s.getTicketByEventId(eventId));
-  const ticket: Ticket | undefined = dbTicket
-    ? dbToTicket(dbTicket)
-    : storeTicket;
+  /**
+   * Only a server-issued row becomes a pass.
+   *
+   * This used to fall back to a Zustand record written by the RSVP handler,
+   * whose `qrToken` was `btoa(JSON.stringify({eid, uid}))` when issuance
+   * returned nothing — a locally manufactured credential rendered as a valid
+   * QR. A pass the server has not issued is not a pass.
+   */
+  const ticket: Ticket | undefined = dbTicket ? dbToTicket(dbTicket) : undefined;
   const showToast = useUIStore((s) => s.showToast);
   const [walletState, setWalletState] = React.useState<
     "idle" | "loading" | "success"
@@ -186,7 +213,7 @@ function ViewTicketScreenContent() {
       }
       showToast("success", "Transfer canceled", "Your ticket is back to you.");
       await queryClient.invalidateQueries({
-        queryKey: ticketKeys.myTicketForEvent(eventId),
+        queryKey: qk.tickets.mine(viewerId),
       });
       await queryClient.invalidateQueries({
         queryKey: ["ticket-transfers", "outgoing"],
@@ -237,10 +264,10 @@ function ViewTicketScreenContent() {
       refundMessage || "Refund processed successfully",
     );
     await queryClient.invalidateQueries({
-      queryKey: ticketKeys.myTicketForEvent(eventId),
+      queryKey: qk.tickets.forEvent(viewerId, eventId),
     });
     await queryClient.invalidateQueries({
-      queryKey: ticketKeys.myTickets(),
+      queryKey: qk.tickets.mine(viewerId),
     });
     router.back();
   }, [
@@ -317,6 +344,63 @@ function ViewTicketScreenContent() {
     return <ScreenSkeleton variant="detail" rows={6} />;
   }
 
+  /**
+   * An event id with several passes. The member chooses; we do not. Returning
+   * "the first matching ticket" here is exactly the swap this screen was
+   * fixing — a coat-check claim opening where an admission ticket was meant.
+   */
+  if (resolution.kind === "group") {
+    return (
+      <View style={[styles.screen, { paddingTop: insets.top }]}>
+        <View style={[styles.backButton, { top: insets.top + 8 }]}>
+          <DetailBackButton />
+        </View>
+        <View style={{ paddingTop: 72, paddingHorizontal: 20 }}>
+          <Text accessibilityRole="header" style={styles.groupTitle}>
+            {resolution.group[0].event_title || "Your passes"}
+          </Text>
+          <Text style={styles.groupSubtitle}>
+            You have {resolution.group.length} passes for this event. Choose the
+            one to show at the door.
+          </Text>
+          <View style={{ marginTop: 20, gap: 10 }}>
+            {resolution.group.map((pass) => (
+              <Pressable
+                key={pass.id}
+                onPress={() => router.replace(ticketPath(pass.id) as never)}
+                accessibilityRole="button"
+                accessibilityLabel={`${
+                  pass.category === "coat_check"
+                    ? "Coat check"
+                    : pass.ticket_type_name || "Admission"
+                } pass`}
+                style={styles.groupRow}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.groupRowTitle}>
+                    {pass.category === "coat_check"
+                      ? "Coat check"
+                      : pass.ticket_type_name || "Admission"}
+                  </Text>
+                  <Text style={styles.groupRowMeta}>
+                    {pass.status === "active"
+                      ? "Ready to scan"
+                      : pass.status === "scanned"
+                        ? "Already used"
+                        : pass.status === "transfer_pending"
+                          ? "Transfer pending"
+                          : pass.status}
+                  </Text>
+                </View>
+                <ChevronRight size={18} color="rgba(255,255,255,0.5)" />
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   // ── Not found / error state ──
   if (!ticket) {
     return (
@@ -329,17 +413,28 @@ function ViewTicketScreenContent() {
 
         <View style={styles.emptyContainer}>
           <TicketX size={56} color="rgba(255,255,255,0.2)" />
-          <Text style={styles.emptyTitle}>Ticket Not Found</Text>
+          {/* A read that failed is not a ticket that does not exist. Telling a
+              member their pass is gone when the network dropped is the worse
+              of the two lies. */}
+          <Text accessibilityRole="header" style={styles.emptyTitle}>
+            {isError ? "We could not load this pass" : "Ticket not found"}
+          </Text>
           <Text style={styles.emptySubtitle}>
-            This ticket may have been removed or is no longer available.
+            {isError
+              ? "Your pass is safe. This is a connection problem."
+              : "This ticket may have been transferred, refunded, or removed."}
           </Text>
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => (isError ? route.refetch() : router.back())}
             hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={isError ? "Try again" : "Go back"}
             style={styles.retryButton}
           >
             <RefreshCw size={16} color="#fff" />
-            <Text style={styles.retryText}>Go Back</Text>
+            <Text style={styles.retryText}>
+              {isError ? "Try again" : "Go back"}
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -368,6 +463,51 @@ function ViewTicketScreenContent() {
           { paddingBottom: bottomActionsPadding },
         ]}
       >
+        {/* Which of this event's passes is on screen. Without it, a member
+            holding two passes cannot tell them apart or reach the other one. */}
+        {passGroup.length > 1 ? (
+          <View style={styles.passSwitcher}>
+            <Text style={styles.passSwitcherLabel}>
+              Ticket {passIndex + 1} of {passGroup.length}
+            </Text>
+            <View style={styles.passSwitcherRow}>
+              {passGroup.map((pass, i) => {
+                const selected = pass.id === ticket.id;
+                return (
+                  <Pressable
+                    key={pass.id}
+                    onPress={() =>
+                      selected
+                        ? undefined
+                        : router.replace(ticketPath(pass.id) as never)
+                    }
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`Ticket ${i + 1} of ${passGroup.length}, ${
+                      pass.category === "coat_check"
+                        ? "coat check"
+                        : pass.ticket_type_name || "admission"
+                    }`}
+                    style={[
+                      styles.passChip,
+                      selected && { backgroundColor: `${accent}33`, borderColor: accent },
+                    ]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.passChipText, selected && { color: "#fff" }]}
+                    >
+                      {pass.category === "coat_check"
+                        ? "Coat check"
+                        : pass.ticket_type_name || "Admission"}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
         {/* ── 1. TICKET HERO ── */}
         <View style={styles.heroWrap}>
           <TicketHeroCard ticket={ticket} />
@@ -1072,6 +1212,70 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 40,
     gap: 12,
+  },
+  groupTitle: {
+    color: "#F8FAFC",
+    fontSize: 24,
+    fontWeight: "800",
+  },
+  groupSubtitle: {
+    color: "rgba(255,255,255,0.62)",
+    fontSize: 14,
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  groupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    minHeight: 60,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+  },
+  groupRowTitle: {
+    color: "#F8FAFC",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  groupRowMeta: {
+    color: "rgba(255,255,255,0.62)",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  passSwitcher: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+    gap: 8,
+  },
+  passSwitcherLabel: {
+    color: "rgba(255,255,255,0.62)",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  passSwitcherRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  passChip: {
+    minHeight: 36,
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+  },
+  passChipText: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 13,
+    fontWeight: "700",
   },
   emptyTitle: {
     color: "#fff",

@@ -62,7 +62,7 @@ import { WeatherStrip } from "./ui/weather-strip.web";
 import { OrganizerCard } from "./ui/OrganizerCard.web";
 import {
   useTicketTypes,
-  useMyTicketForEvent,
+  useMyTicketStatusForEvent,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
 import {
@@ -435,7 +435,8 @@ export function EventDetailScreen() {
 
   // ── 1. TICKETS — live ticket types + checkout + my-ticket + upgrade ──
   const { data: liveTicketTypes = [] } = useTicketTypes(eventId);
-  const { data: myTicketData } = useMyTicketForEvent(eventId);
+  // Display only — drives the CTA, never opens a pass.
+  const { primary: myTicketData } = useMyTicketStatusForEvent(eventId);
   const { checkout, isLoading: isCheckingOut } = useTicketCheckout();
   // Authed RSVP for free, tier-less events (no checkout sheet to open).
   const rsvpMutation = useRsvpEvent();

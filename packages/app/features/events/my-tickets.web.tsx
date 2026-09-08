@@ -316,13 +316,12 @@ export function MyTicketsScreen() {
 
   const handleTicketPress = useCallback(
     (ticket: TicketRecord) => {
-      const eventId = String(ticket.event_id || "");
-      if (!eventId) return;
-      // Prime the detail cache exactly like native before navigating.
-      queryClient.setQueryData(ticketKeys.myTicketForEvent(eventId), ticket);
-      router.push(`/feed/ticket/${eventId}`);
+      // By ticket id, matching native. Navigating by `event_id` and seeding an
+      // event-keyed cache meant a member holding an admission ticket and a
+      // coat-check claim could be shown either one.
+      router.push(`/feed/ticket/${ticket.id}`);
     },
-    [queryClient, router],
+    [router],
   );
 
   const { upcoming, past } = useMemo(() => {

@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner-native";
 import {
   CalendarPlus,
   CheckCircle2,
   ChevronRight,
+  Clock,
+  Info,
   QrCode,
   Shirt,
   Ticket,
@@ -22,6 +24,13 @@ import { qk } from "@dvnt/app/lib/query/keys";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
+import {
+  checkoutCopy,
+  resolveCheckoutOutcome,
+  shouldPollCheckout,
+  type CartStatus,
+} from "@dvnt/app/lib/tickets/checkout-outcome";
+import { ticketPath } from "@dvnt/app/lib/tickets/ticket-identity";
 
 function ticketLabel(ticket: MixedTicket): string {
   if (ticket.category === "coat_check") return "Coat Check";
@@ -76,7 +85,6 @@ function IssuedTicketRow({
 export default function CheckoutSuccessScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const queryClient = useQueryClient();
   const rawParams = useLocalSearchParams<{ cartId?: string }>();
   const { cartId } = useMemo(
     () => normalizeRouteParams(rawParams),
@@ -87,13 +95,47 @@ export default function CheckoutSuccessScreen() {
   const viewerId = useAuthStore((state) => state.user?.id || "unknown");
   const effectiveCartId = cartId || storeCart?.cartId || "";
 
+  // When this screen started waiting. Drives the grace window after which an
+  // unanswered cart becomes a stated outcome instead of an endless spinner.
+  const startedAt = useRef(Date.now());
+  const [elapsedMs, setElapsedMs] = useState(0);
+
   const statusQuery = useQuery({
     queryKey: qk.cart.status(viewerId, effectiveCartId),
     queryFn: () => cartApi.getStatus(effectiveCartId),
     enabled: !!effectiveCartId,
     staleTime: 0,
-    refetchInterval: (query) => (query.state.data?.completed ? false : 3000),
+    refetchInterval: (query) => {
+      const next = resolveCheckoutOutcome({
+        status: query.state.data?.cart?.status as CartStatus | undefined,
+        tickets: query.state.data?.tickets,
+        isLoading: !query.state.data,
+        isError: query.state.status === "error",
+        elapsedMs: Date.now() - startedAt.current,
+      });
+      return shouldPollCheckout(next) ? 3000 : false;
+    },
   });
+
+  const outcome = resolveCheckoutOutcome({
+    status: statusQuery.data?.cart?.status as CartStatus | undefined,
+    tickets: statusQuery.data?.tickets,
+    isLoading: statusQuery.isLoading,
+    isError: statusQuery.isError,
+    elapsedMs,
+  });
+  const copy = checkoutCopy(outcome);
+
+  // Tick only while an answer is still pending, so the grace window can expire
+  // on a screen nobody is touching.
+  useEffect(() => {
+    if (!shouldPollCheckout(outcome)) return;
+    const timer = setInterval(
+      () => setElapsedMs(Date.now() - startedAt.current),
+      1000,
+    );
+    return () => clearInterval(timer);
+  }, [outcome]);
 
   useEffect(() => {
     if (statusQuery.data?.completed) {
@@ -102,23 +144,16 @@ export default function CheckoutSuccessScreen() {
   }, [markCompleted, statusQuery.data?.completed]);
 
   const tickets = statusQuery.data?.tickets ?? [];
-  const admissionCount = tickets.filter(
-    (ticket) => ticket.category !== "coat_check",
-  ).length;
-  const coatCheckCount = tickets.filter(
-    (ticket) => ticket.category === "coat_check",
-  ).length;
 
   const handleTicketPress = useCallback(
     (ticket: MixedTicket) => {
-      if (!ticket.event_id) return;
-      queryClient.setQueryData(
-        qk.tickets.forEvent(String(ticket.event_id)),
-        ticket,
-      );
-      router.push(`/(protected)/ticket/${ticket.event_id}` as any);
+      // By ticket id. Pushing `event_id` here sent a member holding an
+      // admission ticket and a coat-check claim to whichever row the server
+      // returned first, and seeding an event-keyed cache with one of them made
+      // that swap stick.
+      router.push(ticketPath(ticket.id) as never);
     },
-    [queryClient, router],
+    [router],
   );
 
   const handleAddToCalendar = useCallback(() => {
@@ -159,31 +194,44 @@ export default function CheckoutSuccessScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
+      {/* The green check belongs to exactly one outcome. It used to render
+          unconditionally, over copy that said issuance was still processing. */}
       <View style={styles.hero}>
-        <View style={styles.successIcon}>
-          <CheckCircle2 size={42} color="#22C55E" />
+        <View
+          style={[
+            styles.successIcon,
+            copy.tone === "working" && styles.workingIcon,
+            copy.tone === "attention" && styles.attentionIcon,
+          ]}
+        >
+          {copy.tone === "success" ? (
+            <CheckCircle2 size={42} color="#22C55E" />
+          ) : copy.tone === "working" ? (
+            <Clock size={38} color="#93C5FD" />
+          ) : (
+            <Info size={38} color="#FCD34D" />
+          )}
         </View>
-        <Text style={styles.title}>Tickets Ready</Text>
-        <Text style={styles.subtitle}>
-          {admissionCount} admission · {coatCheckCount} coat check
+        <Text accessibilityRole="header" style={styles.title}>
+          {copy.title}
         </Text>
+        {copy.body ? <Text style={styles.subtitle}>{copy.body}</Text> : null}
       </View>
 
-      {statusQuery.isLoading ? (
+      {tickets.length === 0 ? (
         <View style={styles.centerState}>
-          <Text style={styles.centerText}>Loading tickets...</Text>
-        </View>
-      ) : tickets.length === 0 ? (
-        <View style={styles.centerState}>
-          <Text style={styles.centerText}>
-            Ticket issuance is still processing.
-          </Text>
+          {outcome.kind === "unresolved" || outcome.kind === "issued-empty" ? (
+            <Text style={styles.orderRef}>
+              Order reference {effectiveCartId.slice(0, 8).toUpperCase()}
+            </Text>
+          ) : null}
           <Pressable
             onPress={() => statusQuery.refetch()}
             accessibilityRole="button"
+            accessibilityLabel="Check again"
             style={styles.secondaryButton}
           >
-            <Text style={styles.secondaryButtonText}>Refresh</Text>
+            <Text style={styles.secondaryButtonText}>Check again</Text>
           </Pressable>
         </View>
       ) : (
@@ -240,6 +288,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(34,197,94,0.12)",
     marginBottom: 16,
+  },
+  workingIcon: {
+    backgroundColor: "rgba(147,197,253,0.12)",
+  },
+  attentionIcon: {
+    backgroundColor: "rgba(252,211,77,0.12)",
+  },
+  orderRef: {
+    color: "#CBD5E1",
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 1,
   },
   title: {
     color: "#F8FAFC",

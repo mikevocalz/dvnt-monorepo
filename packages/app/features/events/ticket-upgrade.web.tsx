@@ -40,8 +40,7 @@ import {
   Zap,
 } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
-import { useMyTicketForEvent } from "@dvnt/app/lib/hooks/use-tickets";
-import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
+import { useTicketRoute } from "@dvnt/app/lib/hooks/use-tickets";
 import {
   ticketTypesApi,
   type TicketTypeRecord,
@@ -230,8 +229,15 @@ export function TicketUpgradeScreen() {
   const upgradeState = useTicketUpgradeUIStore((s) => s.upgradeState);
   const setUpgradeState = useTicketUpgradeUIStore((s) => s.setUpgradeState);
 
-  const { data: dbTicket, isLoading, refetch } = useMyTicketForEvent(eventId);
-  const setTicketInStore = useTicketStore((s) => s.setTicket);
+  /**
+   * An upgrade is a charge against ONE ticket, so it resolves the same way the
+   * pass screen does — never "the first ticket for this event".
+   */
+  const route = useTicketRoute(eventId);
+  const isLoading = route.isLoading;
+  const refetch = route.refetch;
+  const dbTicket =
+    route.resolution.kind === "ticket" ? route.resolution.ticket : undefined;
 
   // Tiers for this event — loaded from the same source native uses.
   const [allTiers, setAllTiers] = useState<TicketTypeRecord[] | null>(null);
@@ -384,9 +390,9 @@ export function TicketUpgradeScreen() {
 
       setShowConfirm(false);
       setUpgradeState("success");
-      // Reflect the upgraded tier in the shared optimistic ticket store (same
-      // store native updates) so other screens see it before the refetch lands.
-      if (dbTicket) setTicketInStore(eventId, dbTicket as any);
+      // The refetch is the update. Writing the PRE-upgrade record into a
+      // parallel store as if it were the new tier told other screens something
+      // that was not true yet, and the store had no way to correct itself.
       await refetch();
     } catch (err: any) {
       showToast("error", "Error", err?.message || "Could not start upgrade");

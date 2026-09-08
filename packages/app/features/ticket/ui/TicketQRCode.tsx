@@ -1,25 +1,20 @@
 /**
- * TicketQRCode — High-contrast scannable QR zone
- * Animated pulse ring, dark quiet zone, check-in status
+ * TicketQRCode — the credential itself.
+ *
+ * Still, high-contrast, uncropped quiet zone, no logo cutout, nothing layered
+ * over it. Everything here is in service of one scan working first time in a
+ * dark room, so anything decorative that competes with that has been removed.
  */
 
 import React, { memo } from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { Motion } from "@legendapp/motion";
-import { CheckCircle, Lock, XCircle } from "lucide-react-native";
+import { CheckCircle, Clock, Lock, XCircle } from "lucide-react-native";
 import QRCode from "@dvnt/app/components/qr-code";
-import type { Ticket, TicketTierLevel } from "@dvnt/app/lib/stores/ticket-store";
+import type { Ticket } from "@dvnt/app/lib/stores/ticket-store";
 
 interface TicketQRCodeProps {
   ticket: Ticket;
 }
-
-const TIER_ACCENT: Record<TicketTierLevel, string> = {
-  free: "#3FDCFF",
-  ga: "#34A2DF",
-  vip: "#8A40CF",
-  table: "#FF5BFC",
-};
 
 function formatCheckedInTime(dateString: string) {
   const date = new Date(dateString);
@@ -32,60 +27,66 @@ function formatCheckedInTime(dateString: string) {
 export const TicketQRCode = memo(function TicketQRCode({
   ticket,
 }: TicketQRCodeProps) {
-  const tier = ticket.tier || "ga";
-  const accent = TIER_ACCENT[tier];
   const isBlocked =
     ticket.status === "revoked" ||
     ticket.status === "expired" ||
     ticket.status === "checked_in";
-  const showPulse = ticket.status === "valid";
+
+  /**
+   * A credential exists only when the server issued a token. Rendering
+   * `ticket.qrToken || ""` drew a valid-looking QR encoding the empty string —
+   * a code that scans, fails, and leaves the holder arguing at the door.
+   */
+  const hasCredential = !!ticket.qrToken;
+
+  if (!hasCredential) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.sectionLabel}>PRESENT AT DOOR</Text>
+        <View style={styles.qrOuter}>
+          <View style={[styles.qrBackground, styles.pendingBox]}>
+            <Clock size={30} color="rgba(255,255,255,0.75)" />
+            <Text style={styles.pendingTitle}>Issuing your pass</Text>
+            <Text style={styles.pendingBody}>
+              Your place is confirmed. The scannable code appears here as soon
+              as DVNT issues it — usually within a minute.
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.ticketId}>
+          {ticket.id.slice(0, 12).toUpperCase()}
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       {/* Section label */}
       <Text style={styles.sectionLabel}>PRESENT AT DOOR</Text>
 
-      {/* QR zone */}
+      {/* QR zone. Deliberately still: the code is being pointed at a scanner,
+          and continuous motion beside it costs battery and reads as an error
+          state to no purpose. The pulse rings that used to loop here ran
+          `repeatCount: Infinity` regardless of Reduce Motion. */}
       <View style={styles.qrOuter}>
-        {/* Animated pulse ring */}
-        {showPulse && (
-          <>
-            <Motion.View
-              initial={{ opacity: 0.6, scale: 1 }}
-              animate={{ opacity: 0, scale: 1.15 }}
-              transition={{
-                type: "timing",
-                duration: 2000,
-                repeatCount: Infinity,
-              }}
-              style={[styles.pulseRing, { borderColor: accent }]}
-            />
-            <Motion.View
-              initial={{ opacity: 0.4, scale: 1 }}
-              animate={{ opacity: 0, scale: 1.1 }}
-              transition={{
-                type: "timing",
-                duration: 2000,
-                delay: 600,
-                repeatCount: Infinity,
-              }}
-              style={[styles.pulseRing, { borderColor: accent }]}
-            />
-          </>
-        )}
-
         {/* Dark quiet zone */}
         <View style={styles.qrBackground}>
           {/* QR code */}
-          <View style={styles.qrInner}>
+          <View
+            style={styles.qrInner}
+            accessible
+            accessibilityRole="image"
+            accessibilityLabel="Your entry code. Show this screen to door staff."
+          >
+            {/* No logo overlay: nothing here has been scan-tested with one, and
+                a centre cutout eats error-correction budget on a code that has
+                to work first time in bad light. */}
             <QRCode
-              value={ticket.qrToken || ""}
+              value={ticket.qrToken}
               size={220}
               backgroundColor="#FFFFFF"
               foregroundColor="#000000"
-              logo={true}
-              logoSize={48}
-              logoBackgroundColor="#000"
             />
           </View>
 
@@ -152,12 +153,24 @@ const styles = StyleSheet.create({
     width: 268,
     height: 268,
   },
-  pulseRing: {
-    position: "absolute",
+  pendingBox: {
     width: 268,
     height: 268,
-    borderRadius: 24,
-    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingHorizontal: 28,
+  },
+  pendingTitle: {
+    color: "#F8FAFC",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  pendingBody: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: "center",
   },
   qrBackground: {
     backgroundColor: "#0a0a0a",

@@ -46,6 +46,13 @@ import {
   dvntTicketTransition,
 } from "@dvnt/app/lib/navigation/transition-options";
 import { useMotionTier } from "@dvnt/app/lib/navigation/use-motion-tier";
+import { AppDrawerHost } from "@dvnt/app/features/navigation/app-drawer-host";
+import { DrawerTrigger } from "@dvnt/app/components/drawer-trigger";
+import { useMyTickets } from "@dvnt/app/lib/hooks/use-tickets";
+import {
+  buildTicketLibrary,
+  libraryCounts,
+} from "@dvnt/app/lib/tickets/ticket-library";
 
 const screenTransitionConfig = Platform.select({
   ios: {
@@ -98,6 +105,13 @@ function TabsHeader() {
     pathname === "/create" || pathname === "/(protected)/(tabs)/create";
   const username = useAuthStore((st) => st.user?.username);
   const router = useRouter();
+
+  // The drawer's dot reflects the one thing in there that is genuinely waiting
+  // on the member: a transfer to accept, or issuance that has not landed.
+  const tickets = useMyTickets();
+  const attentionCount = libraryCounts(
+    buildTicketLibrary(tickets.data ?? []),
+  ).needsAttention;
 
   // Create's actions are screen state, so the screen publishes them here and
   // this slot draws them. It used to draw its own bar inside the screen, which
@@ -187,11 +201,18 @@ function TabsHeader() {
         justifyContent: "space-between",
       }}
     >
-      {/* Logo keeps the left slot on every tab, profile included. Equal-weight
-          side slots so the title lands in the true middle — with
-          `space-between` alone it sat left of centre, because the logo is far
-          wider than the settings glyph opposite it. */}
-      <View style={{ flex: 1, alignItems: "flex-start" }}>
+      {/* Menu then mark. The trigger is visible on every top-level surface —
+          a drawer you can only find by guessing at an edge swipe is a drawer
+          most people never find. The mark keeps its scroll-to-top behaviour. */}
+      <View
+        style={{
+          flex: 1,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        <DrawerTrigger badge={attentionCount} />
         <TabHeaderLogo />
       </View>
       {/* Your own profile names itself in the title slot, the same way another
@@ -347,6 +368,10 @@ export default function ProtectedLayout() {
     <>
       {/* CRITICAL: NotificationListener handles incoming call push notifications */}
       <NotificationListener />
+      {/* The drawer wraps the Stack as a plain controlled component, so the
+          Stack's element identity is stable across open/close. Opening the
+          menu cannot remount the feed, reset scroll, or interrupt a call. */}
+      <AppDrawerHost>
       <Stack
         screenOptions={{
           headerShown: false,
@@ -452,6 +477,7 @@ export default function ProtectedLayout() {
           options={{ ...fullScreenModalConfig, animation: "fade" }}
         />
       </Stack>
+      </AppDrawerHost>
       {/* PERSISTENT: Weather overlay — renders ON TOP of screens.
           pointerEvents="none" — touches pass through to content below. */}
       <WeatherReanimatedOverlay />

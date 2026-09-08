@@ -85,11 +85,21 @@ export const qk = {
   },
 
   // ── Tickets ───────────────────────────────────────────────────
+  // Every ticket key carries `viewerId`. A credential cache that is not
+  // account-scoped survives a logout or an account switch and hands the next
+  // signed-in member the previous one's passes.
   tickets: {
-    mine: () => ["tickets", "mine"] as const,
-    forEvent: (eventId: string) => ["tickets", "event", eventId] as const,
-    byEventAndCategory: (eventId: string, category: string) =>
-      ["tickets", "event", eventId, "category", category] as const,
+    all: () => ["tickets"] as const,
+    mine: (viewerId: string) => ["tickets", viewerId, "mine"] as const,
+    forEvent: (viewerId: string, eventId: string) =>
+      ["tickets", viewerId, "event", eventId] as const,
+    byEventAndCategory: (viewerId: string, eventId: string, category: string) =>
+      ["tickets", viewerId, "event", eventId, "category", category] as const,
+    /** Organizer roster — not the caller's own passes. */
+    roster: (eventId: string) => ["tickets", "roster", eventId] as const,
+    types: (eventId: string) => ["tickets", "types", eventId] as const,
+    financials: (eventId: string) => ["tickets", "financials", eventId] as const,
+    transfers: (viewerId: string) => ["tickets", viewerId, "transfers"] as const,
   },
 
   // ── Cart ──────────────────────────────────────────────────────

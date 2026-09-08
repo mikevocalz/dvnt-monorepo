@@ -79,8 +79,9 @@ import {
   normalizeEvent,
   normalizeArray,
 } from "@dvnt/app/lib/normalization/safe-entity";
-import { ticketsApi } from "@dvnt/app/lib/api/tickets";
-import { ticketKeys } from "@dvnt/app/lib/hooks/use-tickets";
+import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { useTicketViewerId } from "@dvnt/app/lib/hooks/use-tickets";
+import { qk } from "@dvnt/app/lib/query/keys";
 import * as WebBrowser from "expo-web-browser";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
 import { useCreateEventReview } from "@dvnt/app/lib/hooks/use-event-reviews";
@@ -130,7 +131,7 @@ import {
   useInitiateUpgrade,
   type UpgradeTierOption,
 } from "@dvnt/app/lib/hooks/use-ticket-upgrade";
-import { useMyTicketForEvent } from "@dvnt/app/lib/hooks/use-tickets";
+import { useMyTicketStatusForEvent } from "@dvnt/app/lib/hooks/use-tickets";
 import { useTicketTypes } from "@dvnt/app/lib/hooks/use-tickets";
 import {
   useEventWaitlistStatus,
@@ -365,7 +366,8 @@ function EventDetailScreenContent() {
   const deviceLng = useEventsLocationStore(
     (s) => s.activeCity?.lng ?? s.deviceLng,
   );
-  const { hasValidTicket, setTicket, clearTicket } = useTicketStore();
+  const { hasValidTicket, clearTicket } = useTicketStore();
+  const viewerId = useTicketViewerId();
   const showToast = useUIStore((s) => s.showToast);
   const isSubscribedToSale = useSaleNotifyStore((s) => s.isSubscribed);
   const toggleSaleSubscription = useSaleNotifyStore((s) => s.toggle);
@@ -435,7 +437,8 @@ function EventDetailScreenContent() {
     (s) => s.setShowActionSheet,
   );
 
-  const { data: myTicketData } = useMyTicketForEvent(eventId);
+  // Display only — drives the CTA, never opens a pass.
+  const { primary: myTicketData } = useMyTicketStatusForEvent(eventId);
   const { data: liveTicketTypes = [] } = useTicketTypes(eventId);
   // upgradeOptions computed after upgradeSourceTiers is defined below
   const { mutate: initiateUpgrade, isPending: isUpgradePending } =
@@ -697,12 +700,12 @@ function EventDetailScreenContent() {
 
   const handleAttendeePress = useCallback(
     (attendee: EventAttendee) => {
-      const viewerId = String(getCurrentUserIdSync() ?? "");
+      const profileViewerId = String(getCurrentUserIdSync() ?? "");
       routeToProfile({
         targetUserId: attendee.id,
         targetUsername: attendee.username,
         targetAvatar: attendee.avatar,
-        viewerId,
+        viewerId: profileViewerId,
         router,
         queryClient,
       });
@@ -920,25 +923,15 @@ function EventDetailScreenContent() {
 
         // Free ticket — issued server-side, store locally
         if (result.free && result.tickets?.length) {
-          const t = result.tickets[0];
           const qty = result.tickets.length;
-          setTicket(eventId, {
-            id: t.id,
-            eventId,
-            userId: user?.id || "",
-            paid: false,
-            status: "valid",
-            qrToken: t.qr_token,
-            tier: selectedTier?.tier || "ga",
-            tierName: selectedTier?.name || undefined,
-            transferable: false,
-            eventTitle: eventData.title,
-            eventDate: eventData.fullDate || eventData.date,
-            eventEndDate: eventData.endDate,
-            eventLocation: eventData.location,
-            eventImage: eventData.image,
+          // The server issued these; the tickets query is the one place they
+          // live. Mirroring them into Zustand as well gave the app two answers
+          // to "what is my pass", and the local copy had no way to learn about
+          // a later scan, transfer, or refund.
+          queryClient.invalidateQueries({ queryKey: qk.tickets.mine(viewerId) });
+          queryClient.invalidateQueries({
+            queryKey: qk.tickets.forEvent(viewerId, eventId),
           });
-          queryClient.invalidateQueries({ queryKey: ticketKeys.myTickets() });
           toggleRsvp(eventId);
           queryClient.setQueryData(eventKeys.detail(eventId), (old: any) =>
             old ? { ...old, attendees: (old.attendees || 0) + qty } : old,
@@ -973,7 +966,15 @@ function EventDetailScreenContent() {
           let newTicket: any = null;
           for (let attempt = 0; attempt < 5; attempt++) {
             await new Promise((r) => setTimeout(r, 1500));
-            const myTickets = await ticketsApi.getMyTickets();
+            // A read that fails mid-poll is not a failed purchase. Swallow it
+            // and try the next attempt — the payment already succeeded, and
+            // throwing here would drop the caller into the error branch.
+            let myTickets: TicketRecord[] = [];
+            try {
+              myTickets = await ticketsApi.getMyTickets();
+            } catch {
+              continue;
+            }
             newTicket = myTickets.find(
               (t) =>
                 String(t.event_id) === String(eventId) && t.status === "active",
@@ -982,23 +983,12 @@ function EventDetailScreenContent() {
           }
 
           if (newTicket) {
-            setTicket(eventId, {
-              id: newTicket.id,
-              eventId,
-              userId: user?.id || "",
-              paid: true,
-              status: "valid",
-              qrToken: newTicket.qr_token,
-              tier: selectedTier?.tier || "ga",
-              tierName: newTicket.ticket_type_name || selectedTier?.name,
-              transferable: false,
-              eventTitle: eventData.title,
-              eventDate: eventData.fullDate || eventData.date,
-              eventEndDate: eventData.endDate,
-              eventLocation: eventData.location,
-              eventImage: eventData.image,
+            queryClient.invalidateQueries({
+              queryKey: qk.tickets.mine(viewerId),
             });
-            queryClient.invalidateQueries({ queryKey: ticketKeys.myTickets() });
+            queryClient.invalidateQueries({
+              queryKey: qk.tickets.forEvent(viewerId, eventId),
+            });
             toggleRsvp(eventId);
             queryClient.setQueryData(eventKeys.detail(eventId), (old: any) =>
               old ? { ...old, attendees: (old.attendees || 0) + 1 } : old,
@@ -1071,8 +1061,7 @@ function EventDetailScreenContent() {
     // Invalidate event queries so lists refresh
     queryClient.invalidateQueries({ queryKey: eventKeys.all });
 
-    // Issue a real ticket with crypto-random token via server RPC
-    const tierLevel = selectedTier?.tier || "ga";
+    // Ask the server to issue a ticket with a crypto-random token.
     const resolvedAuthId =
       (await getCurrentUserAuthId()) || user?.authId || user?.id || "";
     const rsvpTicket = await ticketsApi.issueRsvpTicket({
@@ -1080,31 +1069,31 @@ function EventDetailScreenContent() {
       userId: resolvedAuthId,
     });
 
-    setTicket(eventId, {
-      id: rsvpTicket?.id ? String(rsvpTicket.id) : `tkt_${Date.now()}`,
-      eventId,
-      userId: user?.id || "",
-      paid: false,
-      status: "valid",
-      qrToken:
-        rsvpTicket?.qr_token ||
-        btoa(JSON.stringify({ eid: eventId, uid: user?.id })),
-      tier: tierLevel,
-      tierName: selectedTier?.name || undefined,
-      transferable: tierLevel === "vip" || tierLevel === "table",
-      eventTitle: eventData.title,
-      eventDate: eventData.fullDate || eventData.date,
-      eventEndDate: eventData.endDate,
-      eventLocation: eventData.location,
-      eventImage: eventData.image,
-      dressCode: eventData.dressCode,
-      doorPolicy: eventData.doorPolicy,
-      entryWindow: eventData.entryWindow,
-      perks: selectedTier?.perks || eventData.perks,
+    /**
+     * An RSVP and an issued credential are two different facts, and this is
+     * the seam where they used to be conflated.
+     *
+     * The old code wrote a local ticket whenever issuance returned nothing:
+     * `id: \`tkt_${Date.now()}\``, `qrToken: btoa(JSON.stringify({eid, uid}))`,
+     * `status: "valid"`. That record then fed the pass screen's placeholder and
+     * the My Tickets merge, so a manufactured code rendered as a valid pass and
+     * failed at the door. A credential comes from the server or it does not
+     * exist yet; the poll on the tickets query picks the real one up.
+     */
+    queryClient.invalidateQueries({ queryKey: qk.tickets.mine(viewerId) });
+    queryClient.invalidateQueries({
+      queryKey: qk.tickets.forEvent(viewerId, eventId),
     });
-    queryClient.invalidateQueries({ queryKey: ticketKeys.myTickets() });
 
-    showToast("success", "Confirmed", `You're going to ${eventData.title}!`);
+    if (rsvpTicket?.id && rsvpTicket?.qr_token) {
+      showToast("success", "You're in", `See you at ${eventData.title}`);
+    } else {
+      showToast(
+        "info",
+        "You're in",
+        "Your pass is being issued — it will appear in My Tickets shortly.",
+      );
+    }
   }, [
     eventId,
     eventData,
@@ -1112,18 +1101,20 @@ function EventDetailScreenContent() {
     user?.id,
     isCheckingOut,
     toggleRsvp,
-    setTicket,
     showToast,
     queryClient,
+    viewerId,
   ]);
 
   const handleViewTicket = useCallback(() => {
+    // Prefetch the account's library so the pass screen can resolve which
+    // credential this event's link means without a cold round trip.
     queryClient.prefetchQuery({
-      queryKey: ticketKeys.myTicketForEvent(eventId),
-      queryFn: () => ticketsApi.getMyTicketForEvent(eventId),
+      queryKey: qk.tickets.mine(viewerId),
+      queryFn: () => ticketsApi.getMyTickets(),
     });
-    router.push(`/ticket/${eventId}` as any);
-  }, [eventId, queryClient, router]);
+    router.push(`/(protected)/ticket/${eventId}` as any);
+  }, [eventId, queryClient, router, viewerId]);
 
   const isHost = useMemo(() => {
     if (!user?.id || !eventData?.host?.id) return false;
