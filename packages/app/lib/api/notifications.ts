@@ -430,7 +430,12 @@ export const notificationsApi = {
   async getNotifications(limit: number = 50) {
     try {
       const userId = getCurrentUserIdSync();
-      if (!userId) return { docs: [], totalDocs: 0 };
+      // Throw, never return an empty page. The activity query is keyed on the
+      // auth store's id while this reads the identity module's, so on a cold
+      // start one can be ready a tick before the other. Returning `[]` there
+      // let TanStack cache "no notifications" into MMKV and the list rendered
+      // its empty state over rows that exist.
+      if (!userId) throw new Error("notifications: no authenticated user yet");
 
       const { data, error, count } = await supabase
         .from("notifications")
@@ -463,7 +468,10 @@ export const notificationsApi = {
           error.details,
           error.hint,
         );
-        return { docs: [], totalDocs: 0 };
+        // A failed read is not an empty inbox — surface it so the query
+        // retries and keeps the previous page instead of showing the calm
+        // "No notifications yet" state over a network error.
+        throw new Error(error.message || "notifications: fetch failed");
       }
 
       console.log(
@@ -743,7 +751,9 @@ export const notificationsApi = {
       return { docs, totalDocs: count || 0 };
     } catch (error) {
       console.error("[Notifications] getNotifications error:", error);
-      return { docs: [], totalDocs: 0 };
+      // Rethrow for the same reason as above — the caller decides how to show
+      // a failure, and "empty" is the one answer that is never right here.
+      throw error;
     }
   },
 

@@ -51,30 +51,16 @@ registerPrefetch("activity", (qc, userId) => {
   qc.prefetchQuery({
     queryKey: activityKeys.list(userId),
     queryFn: async () => {
+      // One transform for this cache key. This used to keep its own inline
+      // copy that dropped `payload` and blanked `timeAgo`; whichever writer
+      // landed last won, so a broadcast could render with no title.
+      const { notificationToActivity } = await import(
+        "@dvnt/app/lib/hooks/use-activities-query"
+      );
       const result = await nApi.getNotifications(50);
       return (result.docs || [])
-        .map((n: any) => ({
-          id: String(n.id),
-          type: n.type || "like",
-          user: {
-            id: n.sender?.id || "",
-            username: n.sender?.username || "user",
-            avatar: n.sender?.avatar || "",
-          },
-          entityType: n.entityType,
-          entityId: n.entityId,
-          post: n.post
-            ? { id: String(n.post.id || ""), thumbnail: n.post.thumbnail || "" }
-            : undefined,
-          event: n.event
-            ? { id: String(n.event.id || ""), title: n.event.title }
-            : undefined,
-          comment: n.content,
-          timeAgo: "",
-          isRead: !!n.readAt,
-          createdAt: n.createdAt || new Date().toISOString(),
-        }))
-        .filter((a: any) => a.id);
+        .map(notificationToActivity)
+        .filter(Boolean);
     },
     staleTime: STALE_TIMES.activities,
   });

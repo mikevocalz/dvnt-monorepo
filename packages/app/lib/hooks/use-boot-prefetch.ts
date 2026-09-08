@@ -202,35 +202,18 @@ export function useBootPrefetch() {
         queryClient.prefetchQuery({
           queryKey: activityKeys.list(userId),
           queryFn: async () => {
-            const { notificationsApiClient: nApi } =
-              await import("@dvnt/app/lib/api/notifications");
+            // Shared transform — see tab-prefetches. An inline copy here
+            // dropped `payload`, which is the only place a broadcast's copy
+            // lives, so a boot prefetch could blank an announcement.
+            const [{ notificationsApiClient: nApi }, { notificationToActivity }] =
+              await Promise.all([
+                import("@dvnt/app/lib/api/notifications"),
+                import("@dvnt/app/lib/hooks/use-activities-query"),
+              ]);
             const result = await nApi.getNotifications(50);
             return (result.docs || [])
-              .map((n: any) => ({
-                id: String(n.id),
-                type: n.type || "like",
-                user: {
-                  id: n.sender?.id || "",
-                  username: n.sender?.username || "user",
-                  avatar: n.sender?.avatar || "",
-                },
-                entityType: n.entityType,
-                entityId: n.entityId,
-                post: n.post
-                  ? {
-                      id: String(n.post.id || ""),
-                      thumbnail: n.post.thumbnail || "",
-                    }
-                  : undefined,
-                event: n.event
-                  ? { id: String(n.event.id || ""), title: n.event.title }
-                  : undefined,
-                comment: n.content,
-                timeAgo: "",
-                isRead: !!n.readAt,
-                createdAt: n.createdAt || new Date().toISOString(),
-              }))
-              .filter((a: any) => a.id);
+              .map(notificationToActivity)
+              .filter(Boolean);
           },
         }),
         queryClient.prefetchQuery({

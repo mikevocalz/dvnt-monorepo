@@ -112,7 +112,7 @@ export interface LikedActivity {
  * Transform a backend Notification into an Activity.
  * DEFENSIVE: never crash on malformed data.
  */
-function notificationToActivity(notif: Notification): Activity | null {
+export function notificationToActivity(notif: Notification): Activity | null {
   try {
     if (!notif || !notif.id) return null;
 

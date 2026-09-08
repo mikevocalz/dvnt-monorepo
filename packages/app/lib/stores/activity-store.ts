@@ -143,6 +143,9 @@ function notificationToActivity(notif: Notification): Activity | null {
       ),
       isRead: !!notif.readAt,
       createdAt: notif.createdAt || new Date().toISOString(),
+      // A broadcast's only copy lives here — dropping it left the realtime
+      // path handing back a titleless announcement.
+      payload: notif.payload || null,
     };
   } catch (error) {
     console.error(
