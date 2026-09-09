@@ -567,18 +567,24 @@ function CreateStoryScreenContent() {
         };
         handleMediaSelected([media]);
 
-        // Auto-open editor for images (skip the redundant canvas-tap step)
-        if (result.type === "image") {
-          setTimeout(() => {
-            router.push({
-              pathname: "/(protected)/story/editor",
-              params: {
-                uri: encodeURIComponent(result.uri),
-                type: result.type,
-              },
-            });
-          }, 300);
-        }
+        // Auto-open the editor for whatever was just captured — video too.
+        //
+        // This was `if (result.type === "image")`, so a story recorded with the
+        // in-app camera never reached the editor and could not be given text,
+        // stickers, emoji or GIFs at all. Picking the same video from the
+        // library did open it (`handleEditAsset` passes `type: asset.type`),
+        // which is why it looked like stickers "work on photos but not video".
+        // The editor has supported video overlays all along — the flow state
+        // machine even has an EDIT_VIDEO state for it.
+        setTimeout(() => {
+          router.push({
+            pathname: "/(protected)/story/editor",
+            params: {
+              uri: encodeURIComponent(result.uri),
+              type: result.type,
+            },
+          });
+        }, 300);
       }
     }, [consumeCameraResult, handleMediaSelected, router]),
   );
