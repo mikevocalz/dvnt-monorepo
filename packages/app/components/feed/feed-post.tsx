@@ -182,6 +182,236 @@ function CarouselDots({ count, current }: { count: number; current: number }) {
   );
 }
 
+/**
+ * Isolated video player — only mounts for posts that actually carry a video.
+ *
+ * expo-video's useVideoPlayer builds a native VideoPlayer (an AVPlayer) on
+ * every call whether or not there is a source, and that constructor opens the
+ * asset from a main-actor Task, so AVURLAsset's XPC round-trip to mediaserverd
+ * lands on thread 0. Called from FeedPost itself it did that once per row — a
+ * feed of text and image posts paid for N idle AVPlayers, and video rows stalled
+ * the main thread long enough for the watchdog (DVNT-MOBILE-5/6/3).
+ *
+ * The surface, the seek bar and the fullscreen modal all read the player, so
+ * all three live here. Modal presents from its own native root, so hosting it
+ * inside the media block does not change where it appears.
+ */
+function FeedPostVideo({
+  id,
+  videoUrl,
+  isMuted,
+  isFocused,
+  isActivePost,
+  isFullscreen,
+  currentTime,
+  duration,
+  barWidth,
+  lifecycle,
+  setVideoState,
+  onPress,
+  onPressIn,
+  onPressOut,
+  onToggleMute,
+  onToggleFullscreen,
+}: {
+  id: string;
+  videoUrl: string;
+  isMuted: boolean;
+  isFocused: boolean;
+  isActivePost: boolean;
+  isFullscreen: boolean;
+  currentTime: number;
+  duration: number;
+  barWidth: number;
+  /** Owned by FeedPost so its handlers keep the same mount guard as the player. */
+  lifecycle: ReturnType<typeof useVideoLifecycle>;
+  setVideoState: (
+    postId: string,
+    state: { currentTime: number; duration: number },
+  ) => void;
+  onPress: () => void;
+  onPressIn: () => void;
+  onPressOut: () => void;
+  onToggleMute: () => void;
+  onToggleFullscreen: () => void;
+}) {
+  const { isMountedRef, safeInterval, clearSafeInterval, isSafeToOperate } =
+    lifecycle;
+  const videoViewRef = useRef<ElementRef<typeof VideoView>>(null);
+
+  const player = useVideoPlayer(videoUrl, (p) => {
+    if (p && isMountedRef.current) {
+      try {
+        p.loop = false;
+        p.muted = isMuted;
+        // Never preempt background audio from feed scrolling. Muted
+        // videos: always mixWithOthers. Unmuted (user tapped to
+        // hear it): duck other audio (lower their Spotify) rather
+        // than stopping it entirely — matches the user contract
+        // "audio should only stop when a story plays".
+        p.audioMixingMode = isMuted ? "mixWithOthers" : "duckOthers";
+        logVideoHealth("FeedPost", "player configured", { id });
+      } catch (error) {
+        logVideoHealth("FeedPost", "config error", { error: String(error) });
+      }
+    }
+  });
+
+  // Mute sync — also re-assigns audioMixingMode so toggling the speaker
+  // in the feed switches between "don't touch background audio" (muted)
+  // and "duck it while video plays" (unmuted). Without this the mode
+  // stays whatever it was on first render.
+  useEffect(() => {
+    if (!player) return;
+    safeMute(player, isMountedRef, isMuted, "FeedPost");
+    try {
+      player.audioMixingMode = isMuted ? "mixWithOthers" : "duckOthers";
+    } catch {}
+  }, [player, isMuted, isMountedRef]);
+
+  // Play/pause based on focus + active + not fullscreen
+  useEffect(() => {
+    if (!player) return;
+    if (isSafeToOperate()) {
+      if (isFocused && isActivePost) {
+        safePlay(player, isMountedRef, "FeedPost");
+      } else {
+        safePause(player, isMountedRef, "FeedPost");
+      }
+    }
+    return () => {
+      if (player) cleanupPlayer(player, "FeedPost");
+    };
+  }, [isFocused, player, isActivePost, id, isMountedRef, isSafeToOperate]);
+
+  // Poll seek bar progress
+  useEffect(() => {
+    if (!player) return;
+    const interval = safeInterval(() => {
+      if (!isSafeToOperate()) return;
+      const ct = safeGetCurrentTime(player, isMountedRef, "FeedPost");
+      const dur = safeGetDuration(player, isMountedRef, "FeedPost");
+      setVideoState(id, { currentTime: ct, duration: dur });
+    }, 250);
+    return () => clearSafeInterval(interval);
+  }, [
+    player,
+    id,
+    setVideoState,
+    safeInterval,
+    clearSafeInterval,
+    isMountedRef,
+    isSafeToOperate,
+  ]);
+
+  const handleVideoSeek = useCallback(
+    (time: number) => safeSeek(player, isMountedRef, time, "FeedPost"),
+    [player, isMountedRef],
+  );
+
+  const handleSeekEnd = useCallback(() => {
+    if (isFocused && isActivePost) {
+      safePlay(player, isMountedRef, "FeedPost");
+    }
+  }, [isFocused, isActivePost, player, isMountedRef]);
+
+  return (
+    <>
+      <Pressable
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        style={{ width: "100%", height: "100%" }}
+      >
+        <View pointerEvents="none" style={{ width: "100%", height: "100%" }}>
+          <VideoView
+            ref={videoViewRef}
+            player={player}
+            style={{ width: "100%", height: "100%" }}
+            contentFit="cover"
+            nativeControls={false}
+          />
+        </View>
+      </Pressable>
+
+      {/* SEEK BAR — always visible for video, 4px from bottom. It moves up the
+          media block's child list with the player; zIndex 100 still paints it
+          over the zIndex-50 overlays that now follow it. */}
+      <DVNTSeekBar
+        currentTime={currentTime}
+        duration={duration}
+        onSeek={handleVideoSeek}
+        onSeekEnd={handleSeekEnd}
+        barWidth={barWidth}
+      />
+
+      {/* Custom fullscreen modal for video */}
+      {isFullscreen && (
+        <Modal
+          visible
+          animationType="fade"
+          supportedOrientations={["portrait", "landscape"]}
+          statusBarTranslucent
+          onRequestClose={onToggleFullscreen}
+        >
+          <StatusBar hidden />
+          <View style={{ flex: 1, backgroundColor: "#000" }}>
+            <Pressable onPress={onPress} style={{ flex: 1 }}>
+              <VideoView
+                player={player}
+                style={{ flex: 1 }}
+                contentFit="cover"
+                nativeControls={false}
+              />
+            </Pressable>
+            {/* Seek bar — 20px from bottom */}
+            <View
+              style={{
+                position: "absolute",
+                bottom: 16,
+                left: 0,
+                right: 0,
+                height: 28,
+              }}
+            >
+              <DVNTSeekBar
+                currentTime={currentTime}
+                duration={duration}
+                onSeek={handleVideoSeek}
+                onSeekEnd={handleSeekEnd}
+              />
+            </View>
+            {/* Minimize — bottom right, above seek bar */}
+            <Pressable
+              onPress={onToggleFullscreen}
+              style={{ position: "absolute", bottom: 56, right: 20 }}
+              hitSlop={16}
+            >
+              <DVNTLiquidGlassIconButton size={42}>
+                <Minimize2 size={20} color="#fff" />
+              </DVNTLiquidGlassIconButton>
+            </Pressable>
+            {/* Mute */}
+            <Pressable
+              onPress={onToggleMute}
+              style={{ position: "absolute", top: 52, left: 20 }}
+              hitSlop={16}
+            >
+              <DVNTLiquidGlassIconButton size={42}>
+                {isMuted ? (
+                  <VolumeX size={16} color="#fff" />
+                ) : (
+                  <Volume2 size={16} color="#fff" />
+                )}
+              </DVNTLiquidGlassIconButton>
+            </Pressable>
+          </View>
+        </Modal>
+      )}
+    </>
+  );
+}
+
 // ─────────────────────────────── component ──────────────────────────────────
 
 function FeedPostComponent({
@@ -262,7 +492,6 @@ function FeedPostComponent({
 
   // Card inner width (for seek bar)
   const cardInnerWidthRef = useRef(mediaSize);
-  const videoViewRef = useRef<ElementRef<typeof VideoView>>(null);
 
   const isTextPost = kind === "text";
   const initialTextPresentation = useMemo(
@@ -341,8 +570,10 @@ function FeedPostComponent({
 
   const isFocused = useIsFocused();
 
-  const { isMountedRef, safeInterval, clearSafeInterval, isSafeToOperate } =
-    useVideoLifecycle("FeedPost", id);
+  // Kept whole so it can be handed to <FeedPostVideo/>: the player's guards and
+  // this component's handlers must share one mount flag, or a teardown races.
+  const lifecycle = useVideoLifecycle("FeedPost", id);
+  const { isSafeToOperate } = lifecycle;
 
   const videoUrl = useMemo(() => {
     if (isVideo && media[0]?.url) {
@@ -355,87 +586,11 @@ function FeedPostComponent({
   }, [isVideo, media]);
   const hasPlayableVideo = Boolean(isVideo && videoUrl);
 
-  const player = useVideoPlayer(videoUrl, (p) => {
-    if (p && hasPlayableVideo && isMountedRef.current) {
-      try {
-        p.loop = false;
-        p.muted = isMuted;
-        // Never preempt background audio from feed scrolling. Muted
-        // videos: always mixWithOthers. Unmuted (user tapped to
-        // hear it): duck other audio (lower their Spotify) rather
-        // than stopping it entirely — matches the user contract
-        // "audio should only stop when a story plays".
-        p.audioMixingMode = isMuted ? "mixWithOthers" : "duckOthers";
-        logVideoHealth("FeedPost", "player configured", { id });
-      } catch (error) {
-        logVideoHealth("FeedPost", "config error", { error: String(error) });
-      }
-    }
-  });
-
-  // Mute sync — also re-assigns audioMixingMode so toggling the speaker
-  // in the feed switches between "don't touch background audio" (muted)
-  // and "duck it while video plays" (unmuted). Without this the mode
-  // stays whatever it was on first render.
-  useEffect(() => {
-    if (hasPlayableVideo && player) {
-      safeMute(player, isMountedRef, isMuted, "FeedPost");
-      try {
-        player.audioMixingMode = isMuted ? "mixWithOthers" : "duckOthers";
-      } catch {}
-    }
-  }, [hasPlayableVideo, player, isMuted, isMountedRef]);
-
-  // Play/pause based on focus + active + not fullscreen
-  useEffect(() => {
-    if (!hasPlayableVideo || !player) return;
-    if (isSafeToOperate()) {
-      if (isFocused && isActivePost) {
-        safePlay(player, isMountedRef, "FeedPost");
-      } else {
-        safePause(player, isMountedRef, "FeedPost");
-      }
-    }
-    return () => {
-      if (hasPlayableVideo && player) cleanupPlayer(player, "FeedPost");
-    };
-  }, [
-    isFocused,
-    hasPlayableVideo,
-    player,
-    isActivePost,
-    id,
-    isMountedRef,
-    isSafeToOperate,
-  ]);
-
-  // Poll seek bar progress
-  useEffect(() => {
-    if (!hasPlayableVideo || !player) return;
-    const interval = safeInterval(() => {
-      if (!isSafeToOperate()) return;
-      const ct = safeGetCurrentTime(player, isMountedRef, "FeedPost");
-      const dur = safeGetDuration(player, isMountedRef, "FeedPost");
-      setVideoState(id, { currentTime: ct, duration: dur });
-    }, 250);
-    return () => clearSafeInterval(interval);
-  }, [
-    hasPlayableVideo,
-    player,
-    id,
-    setVideoState,
-    safeInterval,
-    clearSafeInterval,
-    isMountedRef,
-    isSafeToOperate,
-  ]);
+  // The player, its effects and everything that reads it live in
+  // <FeedPostVideo/> below, which only mounts when there is a video. See that
+  // component's header for why keeping them here was expensive.
 
   // ── handlers ──
-
-  const handleVideoSeek = useCallback(
-    (time: number) => safeSeek(player, isMountedRef, time, "FeedPost"),
-    [player, isMountedRef],
-  );
 
   const openGuestGate = useCallback(
     (reason: PublicGateReason) => {
@@ -899,25 +1054,24 @@ function FeedPostComponent({
             {/* ── Media content ── */}
             {isVideo ? (
               hasPlayableVideo ? (
-                <Pressable
+                <FeedPostVideo
+                  id={id}
+                  videoUrl={videoUrl as string}
+                  isMuted={isMuted}
+                  isFocused={isFocused}
+                  isActivePost={isActivePost}
+                  isFullscreen={isFullscreen}
+                  currentTime={videoCurrentTime}
+                  duration={videoDuration}
+                  barWidth={cardInnerWidthRef.current - 32}
+                  lifecycle={lifecycle}
+                  setVideoState={setVideoState}
                   onPress={handleVideoPress}
                   onPressIn={handlePressIn}
                   onPressOut={handlePressOut}
-                  style={{ width: "100%", height: "100%" }}
-                >
-                  <View
-                    pointerEvents="none"
-                    style={{ width: "100%", height: "100%" }}
-                  >
-                    <VideoView
-                      ref={videoViewRef}
-                      player={player}
-                      style={{ width: "100%", height: "100%" }}
-                      contentFit="cover"
-                      nativeControls={false}
-                    />
-                  </View>
-                </Pressable>
+                  onToggleMute={toggleMute}
+                  onToggleFullscreen={handleFullscreenToggle}
+                />
               ) : (
                 <Pressable
                   onPress={handlePostPress}
@@ -1294,93 +1448,18 @@ function FeedPostComponent({
               </Pressable>
             )}
 
-            {/* SEEK BAR — always visible for video, 4px from bottom */}
-            {hasPlayableVideo && (
-              <DVNTSeekBar
-                currentTime={videoCurrentTime}
-                duration={videoDuration}
-                onSeek={handleVideoSeek}
-                onSeekEnd={() => {
-                  if (isFocused && isActivePost) {
-                    safePlay(player, isMountedRef, "FeedPost");
-                  }
-                }}
-                barWidth={cardInnerWidthRef.current - 32}
-              />
-            )}
+            {/* The seek bar renders inside <FeedPostVideo/> above — it needs
+                the player, and the player now lives with it. zIndex 100 keeps
+                it over these zIndex-50 overlays despite coming first. */}
           </View>
         ) : null}
       </Article>
 
       {/* Sheets (CommentsSheet, PostActionSheet, ShareToInboxSheet) rendered at Feed level */}
 
-      {/* Custom fullscreen modal for video */}
-      {hasPlayableVideo && isFullscreen && (
-        <Modal
-          visible
-          animationType="fade"
-          supportedOrientations={["portrait", "landscape"]}
-          statusBarTranslucent
-          onRequestClose={handleFullscreenToggle}
-        >
-          <StatusBar hidden />
-          <View style={{ flex: 1, backgroundColor: "#000" }}>
-            <Pressable onPress={handleVideoPress} style={{ flex: 1 }}>
-              <VideoView
-                player={player}
-                style={{ flex: 1 }}
-                contentFit="cover"
-                nativeControls={false}
-              />
-            </Pressable>
-            {/* Seek bar — 20px from bottom */}
-            <View
-              style={{
-                position: "absolute",
-                bottom: 16,
-                left: 0,
-                right: 0,
-                height: 28,
-              }}
-            >
-              <DVNTSeekBar
-                currentTime={videoCurrentTime}
-                duration={videoDuration}
-                onSeek={handleVideoSeek}
-                onSeekEnd={() => {
-                  if (isFocused && isActivePost) {
-                    safePlay(player, isMountedRef, "FeedPost");
-                  }
-                }}
-              />
-            </View>
-            {/* Minimize — bottom right, above seek bar */}
-            <Pressable
-              onPress={handleFullscreenToggle}
-              style={{ position: "absolute", bottom: 56, right: 20 }}
-              hitSlop={16}
-            >
-              <DVNTLiquidGlassIconButton size={42}>
-                <Minimize2 size={20} color="#fff" />
-              </DVNTLiquidGlassIconButton>
-            </Pressable>
-            {/* Mute */}
-            <Pressable
-              onPress={toggleMute}
-              style={{ position: "absolute", top: 52, left: 20 }}
-              hitSlop={16}
-            >
-              <DVNTLiquidGlassIconButton size={42}>
-                {isMuted ? (
-                  <VolumeX size={16} color="#fff" />
-                ) : (
-                  <Volume2 size={16} color="#fff" />
-                )}
-              </DVNTLiquidGlassIconButton>
-            </Pressable>
-          </View>
-        </Modal>
-      )}
+      {/* The fullscreen modal renders inside <FeedPostVideo/> — it needs the
+          same player as the inline surface. Modal presents from its own
+          native root, so hosting it there does not change where it appears. */}
     </View>
   );
 }
