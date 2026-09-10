@@ -89,6 +89,34 @@ limit 20;
 `metadata.kind` is `js`, `native`, or `expo-updates-recovery`.
 `metadata.reason` is the thing to read first.
 
+## The capture path was sound — only the transport was dead
+
+Audited 2026-09-09, and this is the reason the fix above is expected to work
+rather than hoped to:
+
+- `lib/global-error-handler.ts:177` installs `ErrorUtils.setGlobalHandler` at
+  module scope, reached from `_layout.tsx:18` → `lib/native-exception-log.ts` →
+  its static import. That is early enough for a t=2.85s fatal.
+- Its handler calls `persist()` (a synchronous MMKV write to
+  `DVNT_LAST_JS_ERROR`) **before** delegating to the previous handler, so the
+  record is on disk before RN reports the fatal natively and expo-updates
+  aborts.
+- `features/services/calls/callTrace.ts:233` installs a *second*
+  `setGlobalHandler`. It is not a conflict: both capture `getGlobalHandler()`
+  first and call it, so whichever installs second wraps the first and neither
+  drops the error.
+- Every hook in `RootLayout` (`_layout.tsx:215-565`) is unconditional and sits
+  above the `if (showAnimatedSplash)` early return, so no hook-order fatal is
+  possible there.
+- Module scope in `_layout.tsx` follows `try { … } catch { console.warn }`
+  throughout. The three bare calls — `checkAndClearCacheOnOTAUpdate()`,
+  `enforceListPolicy()`, `SplashScreen.preventAutoHideAsync()` — are each
+  internally guarded.
+
+So the error was always being caught and written to MMKV. It then reached
+`reportToSentry()`, which returned at `if (!Sentry?.captureMessage)`. Nothing
+was broken about the capture; the pipe at the end of it had been cut.
+
 ## Still open
 
 The specific JS fatal is **not identified**. Nothing in the crash reports, the
@@ -104,12 +132,24 @@ one of them a watchdog kill, none yet fixed:
   inherits the main actor.
 - `DVNT-MOBILE-6` 4.8–5.6s hang, `VideoPlayerItem.init`.
 - `DVNT-MOBILE-3` 3.2–4.0s hang, `main`.
-- `DVNT-MOBILE-4` invalid hook call in the story editor (`useVideo` →
-  `useVideoLoading` → `useState`), caught by an error boundary. An uncaught one
-  of these is an `RCTFatal`, which is this crash.
+- `DVNT-MOBILE-4` invalid hook call in the story editor — **already fixed**, in
+  `a01b978` (2026-09-07). `EditorCanvas.tsx` used to call `useVideo` inside a
+  ternary, so hook index 6 was a `useMemo` on image renders and
+  `useVideoLoading`'s `useState` on video renders; swapping an image for a clip
+  re-rendered the same fiber and threw "Should have a queue". The call is
+  unconditional now, with the condition pushed into the argument
+  (`source: string | null` is `useVideo`'s documented contract). The Sentry
+  event is from 1.0.343, which predates the fix. `rules-of-hooks` across
+  `features/stories-editor/` is clean.
 
-`components/feed/feed-post.tsx:358` constructs an expo-video player for every
-post including text and image ones — the bug
-`post/[id].tsx:396` documents and avoids by isolating the player in a child.
-Left alone here: the extraction touches a 1388-line render tree, and its effect
-on the hang is unproven without a device.
+`components/media-preview-modal.tsx` built a player on every render including
+image previews and `media === null`; isolated into a child (295947f).
+
+`components/feed/feed-post.tsx:358` still constructs an expo-video player for
+every post including text and image ones — the bug `post/[id].tsx:396`
+documents and avoids. **Not fixed.** A draft extraction exists at
+`scratchpad/feed-post.halfdone.tsx`: the child component is written and covers
+the surface, seek bar and fullscreen modal, but the parent's hooks were never
+removed, so both were live — worse than the original bug. Finishing a
+1618-line render-tree refactor of the main feed with no device to check it
+against is not a trade worth making blind. Do it with a simulator open.
