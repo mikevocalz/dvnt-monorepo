@@ -46,7 +46,26 @@ function warn(msg: string): void {
 
 // ── 1. Git status — detect changed files ─────────────────────────────────────
 
-function getChangedFiles(base: string = "HEAD~1"): string[] {
+/**
+ * The commit the installed build was made from — the only baseline that answers
+ * "can an OTA reach the people already running this app?".
+ *
+ * The default used to be `HEAD~1`, which answers a different and much weaker
+ * question: "did the LAST COMMIT touch anything native?". On 2026-09-09 that
+ * reported OTA SAFE while `react-native-google-mobile-ads` — a native module
+ * added six commits earlier in 18bebe0 — had already moved the production
+ * fingerprint off every installed build. An update published on that verdict
+ * would have reported "Published!" and reached nobody.
+ *
+ * Pass `--base=<sha>` with the commit of the newest finished build on the
+ * channel (`eas build:list --platform ios --limit 1`). Without it this falls
+ * back to HEAD~1 and the verdict is downgraded to advisory, because a one-commit
+ * window cannot see a native change that landed before it.
+ */
+const baseArg = process.argv.find((a) => a.startsWith("--base="))?.split("=")[1];
+const baselineIsTrustworthy = Boolean(baseArg);
+
+function getChangedFiles(base: string = baseArg ?? "HEAD~1"): string[] {
   try {
     const diff = execSync(`git diff --name-only ${base} HEAD 2>/dev/null`, {
       cwd: ROOT,
@@ -98,8 +117,23 @@ const KNOWN_NATIVE_PACKAGES = [
   "expo-share-intent", "@config-plugins/react-native-webrtc",
 ];
 
+/**
+ * Repo-root-relative path of the package.json this check is about.
+ *
+ * ROOT is apps/mobile, but `git diff --name-only` and `git show <rev>:<path>`
+ * both resolve from the REPOSITORY root no matter what cwd they are handed. So
+ * `changedFiles.includes("package.json")` matched the workspace root file — the
+ * one with zero dependencies — while `safeReadJson(ROOT/package.json)` read
+ * apps/mobile's 151. Every native dependency therefore looked newly ADDED on
+ * any run where the root package.json happened to change.
+ *
+ * This is the same root-vs-app drift 0866208 fixed in NATIVE_PATTERNS; it
+ * survived here because this check builds its own paths.
+ */
+const MOBILE_PKG_PATH = "apps/mobile/package.json";
+
 function checkPackageJsonChanges(changedFiles: string[]): void {
-  if (!changedFiles.includes("package.json")) return;
+  if (!changedFiles.includes(MOBILE_PKG_PATH)) return;
 
   // Read current and baseline package.json
   const current = safeReadJson(path.join(ROOT, "package.json"));
@@ -108,7 +142,7 @@ function checkPackageJsonChanges(changedFiles: string[]): void {
   // Try to read baseline from git
   let baseline: any = null;
   try {
-    const raw = execSync("git show HEAD~1:package.json", {
+    const raw = execSync(`git show ${baseArg ?? "HEAD~1"}:${MOBILE_PKG_PATH}`, {
       cwd: ROOT,
       encoding: "utf-8",
     });
@@ -278,9 +312,31 @@ function main(): void {
     process.exit(1);
   }
 
+  if (!baselineIsTrustworthy) {
+    console.log("╔══════════════════════════════════════════════════════╗");
+    console.log("║  ⚠️  INCONCLUSIVE — no --base given                   ║");
+    console.log("╚══════════════════════════════════════════════════════╝");
+    console.log("\nNothing native changed between HEAD~1 and HEAD, which is NOT");
+    console.log("the same as 'an OTA will reach installed builds'. A native");
+    console.log("dependency added any earlier is invisible from a one-commit");
+    console.log("window — that is how 18bebe0 (react-native-google-mobile-ads)");
+    console.log("passed this check on 2026-09-09 while having already moved the");
+    console.log("production fingerprint off every installed build.\n");
+    console.log("Re-run against the commit the installed build was made from:");
+    console.log("  npx eas-cli build:list --platform ios --limit 1   # note its commit");
+    console.log("  npx tsx apps/mobile/scripts/release/preflight-ota-safety.ts --base=<sha>\n");
+    console.log("And confirm with the authoritative check — the fingerprint:");
+    console.log("  APP_ENV=production npx eas-cli fingerprint:compare <build-runtimeVersion> --environment production\n");
+    process.exit(1);
+  }
+
   console.log("╔══════════════════════════════════════════════════════╗");
   console.log("║  ✅ OTA SAFE — proceed with eas update                 ║");
   console.log("╚══════════════════════════════════════════════════════╝");
+  console.log(`\nBaseline: ${baseArg}`);
+  console.log("\nA clean file diff is necessary, not sufficient. The fingerprint");
+  console.log("is what decides delivery — confirm it matches the installed build:");
+  console.log("  APP_ENV=production npx eas-cli fingerprint:compare <build-runtimeVersion> --environment production");
   console.log("\nPublish commands:");
   console.log(`  # Preview OTA:`);
   console.log(`  EAS_SKIP_AUTO_FINGERPRINT=1 npx eas-cli update --branch preview --message "<desc>" --platform ios --environment preview`);
