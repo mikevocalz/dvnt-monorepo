@@ -31,6 +31,20 @@ module.exports = {
     '../../node_modules/@react-native-masked-view/masked-view/**',
     '../../node_modules/react-native-audio-api',
     '../../node_modules/react-native-audio-api/**',
+    // expo-modules-core joined the same list on 2026-09-10, and the evidence is
+    // unusually clean: after a from-scratch node_modules reinstall the EAS
+    // fingerprint diff went from 37 differing directories down to exactly one,
+    // and this was it. The other 36 were local pollution — postinstall patch
+    // scripts re-applied across many installs — which a fresh `pnpm install`
+    // cleared. This one survives a clean install because it is not pollution:
+    // it is the phase-order gap described above. CocoaPods writes into this
+    // package, EAS hashes it after INSTALL_PODS, eas-cli hashes it before.
+    //
+    // Dropping it costs no native-contract signal for the same reason as the
+    // entries above — the resolved pod version is in ios/Podfile.lock, which is
+    // still fingerprinted.
+    '../../node_modules/expo-modules-core',
+    '../../node_modules/expo-modules-core/**',
     // Workspace packages are FIRST-PARTY native modules, so their source is
     // real native contract and must stay fingerprinted — only their build
     // output is dropped. These paths are gitignored, so they exist on this
