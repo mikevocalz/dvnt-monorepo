@@ -67,8 +67,17 @@ function safeGet<T>(fn: () => T, fallback: T): T {
     // This survives across launches (persisted to disk). If present it means the PREVIOUS
     // launch triggered error recovery — log the reason so it's visible in this session's logs.
     // readLogEntriesAsync is async, so fire-and-forget to keep the IIFE synchronous.
+    //
+    // The window was 120_000 (2 minutes), which is shorter than the gap between
+    // a crash and the relaunch that reads it. Someone whose app aborts at
+    // 21:12 and who reopens it the next morning fell outside it every time, so
+    // this reader found nothing on exactly the launches it was written for.
+    // 24h costs one extra filter pass over a log expo-updates already caps.
+    const PRIOR_SESSION_LOG_WINDOW_MS = 24 * 60 * 60 * 1000;
     const readPromise: Promise<unknown> = safeGet(
-      () => Updates.readLogEntriesAsync?.(120_000) ?? Promise.resolve([]),
+      () =>
+        Updates.readLogEntriesAsync?.(PRIOR_SESSION_LOG_WINDOW_MS) ??
+        Promise.resolve([]),
       Promise.resolve([]),
     );
     readPromise.then((logEntries: unknown) => {
@@ -85,6 +94,24 @@ function safeGet<T>(fn: () => T, fallback: T): T {
           console.error("╚══════════════════════════════════════════════════╝");
           recoveryEntries.forEach((e: { message?: string; timestamp?: number }) => {
             console.error("[OTA-BOOT] PRIOR CRASH LOG:", e?.message, "ts:", e?.timestamp);
+          });
+
+          // The serialized error expo-updates re-raised is in `message`, and
+          // this is the only place it exists — the .crash file records the
+          // re-raise, not the reason. Printing it to a console nobody can read
+          // on a TestFlight device is how builds 1.0.343-1.0.349 stayed
+          // unexplained. Reported here, once per distinct signature.
+          //
+          // Required lazily: this runs inside a .then(), long after both
+          // modules have evaluated, so it cannot re-enter the boot import
+          // order that ota-bootstrap-log is deliberately first in.
+          const first = recoveryEntries[0] as { message?: string };
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { reportPriorCrash } = require("@dvnt/app/lib/native-exception-log");
+          reportPriorCrash("expo-updates-recovery", {
+            name: "ErrorRecovery",
+            message: first?.message ?? "(no message)",
+            entries: recoveryEntries.slice(0, 5),
           });
         }
       } catch {

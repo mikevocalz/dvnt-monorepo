@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { epochSeconds, validateSendCommand } from "./v2";
-import { watchAttachments } from "../watch-media";
-import { toWatchDM, dmSignature } from "../watch-dm-payload";
+import { epochSeconds, validateSendCommand } from "./v2.ts";
+import { watchAttachments } from "../watch-media.ts";
+import { toWatchDM, dmSignature } from "../watch-dm-payload.ts";
 import type { Conversation } from "@dvnt/app/lib/api/messages";
 
 test("canonical time accepts seconds, milliseconds and ISO; rejects display time", () => {

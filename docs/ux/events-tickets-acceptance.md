@@ -91,3 +91,33 @@ conversation from a resolution fix. `packages/app/tsconfig.json` already sets
 
 `pnpm test:tickets` now runs this brief's 47 assertions so they cannot rot the
 same way.
+
+### Swept — 2026-09-09
+
+All 16 now load and pass: **89 assertions, 0 failures**. None failed for a real
+reason; the break was resolution only. Four source modules had the same
+extensionless import and had to be fixed for the tests to reach them —
+`features/watch/watch-media.ts`, `watch-event-payload.ts`, `watch-dm-payload.ts`,
+`watch-event-moments.ts`, and `lib/outbox/drain.ts`.
+
+The list of 16 was itself incomplete. Discovery over `packages/**/*.test.ts`
+found **11 more** unrunnable files that no list mentioned:
+`watch-event-moments`, `watch-event-pages`, `lib/contracts/event-edit-fields`,
+`lib/stores/profile-completion`, `lib/subscription/entitlements`,
+`lib/subscription/plans`, and the five `packages/observability/src/__tests__/*`.
+The observability five are **vitest**, not `node --test` — a different runner
+that no root script invoked, so its 83 passing assertions were also invisible.
+
+Enumerating test files by hand is what let all of this rot, so `pnpm test` no
+longer enumerates:
+
+```
+test                 = test:node && test:observability
+test:node            = node --test "packages/app/**/*.test.ts" "packages/ui/**/*.test.ts"
+test:observability   = pnpm --filter @dvnt/observability test
+```
+
+`pnpm test` went from **58 assertions to 515** (432 node + 83 vitest), all
+green, without a single new test being written. The per-area scripts
+(`test:tickets`, `test:ads`, …) stay for fast focused runs; they are no longer
+the thing standing between a broken file and CI.

@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hostEventsHref, resolveHosts, needsHostPicker } from "./host-events-route";
+import { hostEventsHref, resolveHosts, needsHostPicker } from "./host-events-route.ts";
 
 test("the link lands on the events tab, not the profile root", () => {
   assert.equal(

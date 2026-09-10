@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadEventRelationPages, eventWindowPage } from "./watch-event-pages";
+import { loadEventRelationPages, eventWindowPage } from "./watch-event-pages.ts";
 test("old relationships remain available after several full pages", async () => {
   const rows = Array.from({length: 451}, (_, id) => ({id}));
   const ranges: number[][] = [];

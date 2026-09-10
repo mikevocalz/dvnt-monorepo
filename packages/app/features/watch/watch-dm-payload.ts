@@ -1,8 +1,8 @@
 import type { Conversation } from "@dvnt/app/lib/api/messages";
-import { epochSeconds } from "./contracts/v2";
-import { watchAttachments } from "./watch-media";
-import type { WatchAttachment } from "./contracts/v2";
-import { watchRendition, WATCH_RENDITION } from "./watch-rendition";
+import { epochSeconds } from "./contracts/v2.ts";
+import { watchAttachments } from "./watch-media.ts";
+import type { WatchAttachment } from "./contracts/v2.ts";
+import { watchRendition, WATCH_RENDITION } from "./watch-rendition.ts";
 
 export interface WatchDMDTO {
   /** Conversation id (string form; the send path parses it back to an int). */

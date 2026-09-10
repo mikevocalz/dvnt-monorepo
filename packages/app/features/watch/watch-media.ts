@@ -1,5 +1,5 @@
-import { watchRendition } from "./watch-rendition";
-import type { WatchAttachment } from "./contracts/v2";
+import { watchRendition } from "./watch-rendition.ts";
+import type { WatchAttachment } from "./contracts/v2.ts";
 
 function httpsURL(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;

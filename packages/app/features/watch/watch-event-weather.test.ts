@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWatchVenueWeatherLoader } from "./watch-event-weather";
-import type { WatchEvent } from "./watch-event-payload";
-import type { LiveSurfacePayload } from "../live-surface/types";
+import { createWatchVenueWeatherLoader } from "./watch-event-weather.ts";
+import type { WatchEvent } from "./watch-event-payload.ts";
+import type { LiveSurfacePayload } from "../live-surface/types.ts";
 const event: WatchEvent = { id:"1", title:"Published venue", startAt:"2026-09-06T20:00:00Z", latitude:40, longitude:-74, isOnline:false, status:"active", ticketingEnabled:false, saved:false, host:false, waitlist:[], canJoinWaitlist:false };
 const payload = { generatedAt:"2026-09-05T12:00:00Z", weather:{tempF:74,label:"Clear",precipPct:10} } as LiveSurfacePayload;
 const now = Date.parse("2026-09-05T12:00:00Z");

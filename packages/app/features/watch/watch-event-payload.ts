@@ -1,5 +1,5 @@
-import type { WatchEventMoment } from "./watch-event-moments";
-import { watchRendition } from "./watch-rendition";
+import type { WatchEventMoment } from "./watch-event-moments.ts";
+import { watchRendition } from "./watch-rendition.ts";
 
 export type WatchEventAction = "going" | "interested" | "not_going" | "waitlist_join" | "waitlist_leave" | "open_on_phone" | "archive_more" | "archive_previous" | "load_moments";
 export type WatchEventSection = "tonight" | "invitations" | "going" | "interested" | "waitlist" | "saved" | "hosting" | "past";

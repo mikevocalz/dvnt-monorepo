@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { executeVenueCommand, validateVenueCommand, type VenueOperation, type WatchVenueCommand } from "./watch-venue-actions";
-import { presenceExpiry } from "../../../../apps/mobile/supabase/functions/_shared/presence-expiry";
+import { executeVenueCommand, validateVenueCommand, type VenueOperation, type WatchVenueCommand } from "./watch-venue-actions.ts";
+import { presenceExpiry } from "../../../../apps/mobile/supabase/functions/_shared/presence-expiry.ts";
 const command: WatchVenueCommand = { protocol: 2, accountGen: "A", operationId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", type: "venueAction", eventId: "1", action: "notice", body: "Doors open", audience: "all", issuedAt: 100, expiresAt: 160 };
 test("venue limits, scope, expiry and state words", () => {
   assert.ok(validateVenueCommand(command, "A", 101));

@@ -15,9 +15,9 @@
  * ───────────────────────────────────────────────────────────────────────
  */
 
-import type { OutboxExecutor } from "./types";
-import { isTerminalOutboxError } from "./types";
-import type { OutboxStore } from "./store";
+import type { OutboxExecutor } from "./types.ts";
+import { isTerminalOutboxError } from "./types.ts";
+import type { OutboxStore } from "./store.ts";
 
 // ─── Executor registry ──────────────────────────────────────────────────────
 // Feature code registers `mutationType → executor`. The outbox module has

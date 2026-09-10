@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { answerIncomingCall } from "./answer-call";
+import { answerIncomingCall } from "./answer-call.ts";
 import type { CallSignal } from "@dvnt/app/lib/api/call-signals";
 const signal = (): CallSignal => ({id:1,room_id:"room",caller_id:"1",callee_id:"2",caller_username:"Caller",caller_avatar:null,status:"ringing",is_group:false,call_type:"audio",created_at:new Date().toISOString()});
 test("missing stale foreign unsupported signals never claim or permit navigation", async () => {

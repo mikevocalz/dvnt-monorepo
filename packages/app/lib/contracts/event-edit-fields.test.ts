@@ -4,7 +4,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { EVENT_EDIT_FIELDS, uncoveredEditFields, fieldKey } from "./event-edit-fields";
+import { EVENT_EDIT_FIELDS, uncoveredEditFields, fieldKey } from "./event-edit-fields.ts";
 
 test("registry has unique (table, field) keys — no dupes", () => {
   const keys = EVENT_EDIT_FIELDS.map(fieldKey);

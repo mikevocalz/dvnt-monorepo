@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { selectVenueForecast } from "../../../../apps/mobile/supabase/functions/_shared/venue-forecast";
+import { selectVenueForecast } from "../../../../apps/mobile/supabase/functions/_shared/venue-forecast.ts";
 const now = Date.parse("2026-09-05T12:00:00Z");
 const hourly = { time:["2026-09-06T00:00", "2026-09-06T01:00"], temperature_2m:[20,25], weather_code:[0,61], precipitation_probability:[10,80] };
 test("uses UTC doors hour, not the device date or current weather", () => {

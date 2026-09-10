@@ -14,8 +14,8 @@ import {
   canAccessProducedEvent,
   appliesPartnerDiscount,
   FREE_ENTITLEMENTS,
-} from "./entitlements";
-import type { SubscriptionRecord } from "./types";
+} from "./entitlements.ts";
+import type { SubscriptionRecord } from "./types.ts";
 
 const NOW = new Date("2026-06-11T00:00:00Z");
 const future = "2026-12-01T00:00:00Z";

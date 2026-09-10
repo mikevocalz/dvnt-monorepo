@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateCallDirectoryCommand } from "./watch-call-directory";
+import { validateCallDirectoryCommand } from "./watch-call-directory.ts";
 const base = { protocol: 2, accountGen: "A", operationId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", type: "callDirectoryAction", action: "start_on_phone", participantIds: ["1"], callType: "audio", issuedAt: 100, expiresAt: 130 };
 test("one to three recipients, independent from conversation group size", () => {
   for (const count of [1,2,3]) assert.ok(validateCallDirectoryCommand({ ...base, participantIds: Array.from({length:count}, (_,i) => String(i+1)) }, "A", 101));

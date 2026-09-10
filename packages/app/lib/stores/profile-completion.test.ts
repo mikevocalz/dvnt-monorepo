@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeProfileCompletion } from "./profile-completion";
+import { computeProfileCompletion } from "./profile-completion.ts";
 
 const complete = {
   avatar: "https://cdn/a.jpg",

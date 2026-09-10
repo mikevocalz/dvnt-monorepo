@@ -11,15 +11,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { StateStorage } from "zustand/middleware";
-import { createOutboxStore } from "./store";
+import { createOutboxStore } from "./store.ts";
 import {
   drainOutbox,
   registerOutboxExecutor,
   unregisterOutboxExecutor,
   backoffMs,
   MONEY_DENYLIST,
-} from "./drain";
-import { OutboxTerminalError, type OutboxEntry } from "./types";
+} from "./drain.ts";
+import { OutboxTerminalError, type OutboxEntry } from "./types.ts";
 
 /** In-memory StateStorage that survives store re-creation (simulated restart). */
 function memoryStorage(): StateStorage & { dump: () => Map<string, string> } {

@@ -20,7 +20,7 @@
  *   1. On import, tries to read <Documents>/dvnt-uncaught-exception.json
  *   2. If present, NSLogs it again so the current session's logs show
  *      what killed the prior session (visible in TestFlight feedback
- *      attached devicelogs, Sentry breadcrumb if wired)
+ *      attached devicelogs) and reports it to `analytics_events`
  *   3. Deletes the file so the same crash isn't reported twice
  *
  * Safe to call on every boot — defensive against missing / corrupted
@@ -47,7 +47,7 @@ interface NativeExceptionPayload {
 
 let _hasReportedThisSession = false;
 
-/** Signatures already sent to Sentry, newest last. */
+/** Signatures already reported, newest last. */
 const REPORTED_SIGNATURES_KEY = "DVNT_REPORTED_CRASH_SIGS";
 /** Bounded so a stream of distinct signatures cannot grow the record forever. */
 const MAX_TRACKED_SIGNATURES = 20;
@@ -142,46 +142,74 @@ function logToConsole(report: NativeExceptionPayload): void {
 }
 
 /**
- * Ship a prior-session crash record to Sentry as a real EVENT before the
- * persisted copy is cleared. console.error alone is only a breadcrumb — it
- * attaches to no event and vanishes with the deleted file, which is exactly
- * how the 1.0.316 background-crash loop left an empty Sentry dashboard: the
- * record was read, printed, deleted, and lost. Never throws.
+ * Ship a prior-session crash record off the device before the persisted copy
+ * is cleared. console.error alone is only a breadcrumb — it attaches to no
+ * event and vanishes with the deleted file, which is exactly how the 1.0.316
+ * background-crash loop left an empty dashboard: the record was read,
+ * printed, deleted, and lost.
+ *
+ * This function used to send to Sentry. The mobile SDK was removed in d00827b
+ * and `sentry-boot.native.ts` now exports `Sentry = undefined`, so the
+ * `if (!Sentry?.captureMessage) return` guard below it turned every crash
+ * report into a no-op — reintroducing the precise bug described above, one day
+ * before builds 1.0.343-1.0.349 started aborting in
+ * `EXUpdates/ErrorRecovery.crash()`. The `.crash` files carry only the
+ * re-raise; the reason string lives in these records and nowhere else.
+ *
+ * `analytics_events` is the sink the Sentry removal named as the replacement.
+ * Same table, same insert-only RLS, one row per distinct crash.
+ * Never throws, never blocks boot.
  */
-function reportToSentry(kind: string, payload: Record<string, unknown>): void {
+export function reportPriorCrash(kind: string, payload: Record<string, unknown>): void {
   try {
     const signature = crashSignature(kind, payload);
     if (!claimCrashSignature(signature)) {
       // Console only — a relaunch loop is still visible in device logs, and
       // costs nothing. ponytail: no local repeat counter; if loop *frequency*
-      // ever needs to reach Sentry, send one summary event on the Nth repeat.
+      // ever needs to be reported, send one summary row on the Nth repeat.
       console.error("[prior-session-crash] repeat, not re-sent:", signature);
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { Sentry } = require("@dvnt/app/lib/sentry-boot");
-    if (!Sentry?.captureMessage) return; // web fork / not booted
     // 2.8: the full callStackSymbols array rode along on every event. The
     // throwing frame is at the top; the tail is dispatch plumbing identical
     // across crashes. Keep the head, drop the payload weight.
     const stack = payload.callStackSymbols;
-    const extra = Array.isArray(stack)
+    const detail = Array.isArray(stack)
       ? {
           ...payload,
           callStackSymbols: stack.slice(0, STACK_FRAMES_ON_EVENT),
-          callStackSymbolsTruncated: stack.length > STACK_FRAMES_ON_EVENT
-            ? stack.length - STACK_FRAMES_ON_EVENT
-            : 0,
+          callStackSymbolsTruncated:
+            stack.length > STACK_FRAMES_ON_EVENT
+              ? stack.length - STACK_FRAMES_ON_EVENT
+              : 0,
         }
       : payload;
-    Sentry.captureMessage(
-      `[prior-session-crash] ${kind}: ${String(payload.name ?? "")}: ${String(payload.message ?? payload.reason ?? "")}`.slice(0, 500),
-      {
-        level: "fatal",
-        tags: { priorSessionCrash: kind },
-        extra,
-      },
-    );
+
+    // Fire-and-forget: a crash row is worth less than the launch it would
+    // delay, and this runs before auth settles.
+    void (async () => {
+      try {
+        // Required lazily — a boot-path import of the Supabase client is one
+        // more module that has to evaluate before the reporter can report.
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { supabase } = require("@dvnt/app/lib/supabase/client");
+        await supabase.from("analytics_events").insert({
+          event: "prior_session_crash",
+          feature_area: "stability",
+          platform: Platform.OS,
+          metadata: {
+            kind,
+            signature,
+            name: payload.name ?? null,
+            reason: payload.message ?? payload.reason ?? null,
+            detail,
+          },
+        });
+      } catch {
+        // Swallowed on purpose — analytics that can break the app it measures
+        // is worse than no analytics.
+      }
+    })();
   } catch {
     /* never throw from boot path */
   }
@@ -204,7 +232,7 @@ function readPriorNativeCrashReport(): void {
   try {
     const jsReport = readAndClearLastJSError();
     if (jsReport) {
-      reportToSentry("js", jsReport as unknown as Record<string, unknown>);
+      reportPriorCrash("js", jsReport as unknown as Record<string, unknown>);
       console.error("╔══════════════════════════════════════════════════════════════╗");
       console.error("║  [PRIOR-JS-CRASH] Prior session ended with uncaught JS    ║");
       console.error("╚══════════════════════════════════════════════════════════════╝");
@@ -231,7 +259,7 @@ function readPriorNativeCrashReport(): void {
   readAndClearAsync()
     .then((report) => {
       if (!report) return;
-      reportToSentry("native", report as unknown as Record<string, unknown>);
+      reportPriorCrash("native", report as unknown as Record<string, unknown>);
       logToConsole(report);
     })
     .catch(() => {

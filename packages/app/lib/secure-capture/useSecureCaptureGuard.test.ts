@@ -19,8 +19,8 @@ import {
   type SecureCaptureAttemptKind,
   type SecureCaptureBlackoutReason,
   type SecureCaptureEnvironment,
-} from "./useSecureCaptureGuard";
-import type { SecureCaptureEventName } from "./SecureCaptureProvider";
+} from "./useSecureCaptureGuard.ts";
+import type { SecureCaptureEventName } from "./SecureCaptureProvider.tsx";
 
 function keyEvent(
   patch: Partial<Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "shiftKey">>,

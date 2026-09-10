@@ -22,7 +22,7 @@ import {
   SHADER,
   writeInstance,
   REACTION_CAPACITY,
-} from "./engine";
+} from "./engine.ts";
 
 test("stride matches the TypeGPU schema", () => {
   assert.equal(INSTANCE_STRIDE, d.sizeOf(ReactionInstance));

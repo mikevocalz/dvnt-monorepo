@@ -11,8 +11,8 @@ import {
   PLAN_FAMILY,
   RC_PRODUCT_TO_PLAN_KEY,
   planKeyFromRCProductId,
-} from "./plans";
-import type { PlanKey } from "./types";
+} from "./plans.ts";
+import type { PlanKey } from "./types.ts";
 
 const PAID_MEMBERSHIP_KEYS: PlanKey[] = [
   "dvnt_core",

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildWatchEvents, validateEventCommand, type WatchEventRelations, type WatchEventRow } from "./watch-event-payload";
+import { buildWatchEvents, validateEventCommand, type WatchEventRelations, type WatchEventRow } from "./watch-event-payload.ts";
 const now = Date.parse("2026-09-05T20:00:00Z");
 const row: WatchEventRow = { id: 1, title: "Tonight", start_date: "2026-09-05T22:00:00Z", end_date: "2026-09-06T05:00:00Z", event_tz: "America/New_York", status: "active", ticketing_enabled: false };
 const relations: WatchEventRelations = { authId: "auth", rsvps: [], invitations: [], likes: [], waitlist: [], tiers: [] };

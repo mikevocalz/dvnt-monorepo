@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { microphoneMatches, activeCallPhase, validateActiveCallCommand } from "./watch-active-call";
+import { microphoneMatches, activeCallPhase, validateActiveCallCommand } from "./watch-active-call.ts";
 test("connected requires actual peer transport and remote participant, never signaling alone", () => {
   assert.equal(activeCallPhase(false, "connecting", "connected", 1), "connecting");
   assert.equal(activeCallPhase(false, "connected", "connected", 0), "connecting");

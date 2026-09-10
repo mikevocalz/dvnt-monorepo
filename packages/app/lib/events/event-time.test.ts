@@ -11,7 +11,7 @@ import {
   doorsOpen,
   isLive,
   isPast,
-} from "./event-time";
+} from "./event-time.ts";
 
 // LA event: absolute instant 04:00Z, venue zone America/Los_Angeles (summer → PDT).
 const LA_SUMMER = "2026-07-08T04:00:00Z";

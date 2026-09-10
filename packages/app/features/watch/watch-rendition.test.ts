@@ -10,7 +10,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { watchRendition, WATCH_RENDITION } from "./watch-rendition";
+import { watchRendition, WATCH_RENDITION } from "./watch-rendition.ts";
 
 const CDN = "https://dvnt.b-cdn.net/avatar/u/2026/02/a.png";
 

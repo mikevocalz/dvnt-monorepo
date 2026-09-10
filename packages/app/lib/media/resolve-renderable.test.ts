@@ -14,7 +14,7 @@ import {
   needsPlaceholder,
   resolvePosterUrl,
   resolveRenderableMedia,
-} from "./resolve-renderable";
+} from "./resolve-renderable.ts";
 
 const CDN = "https://dvnt.b-cdn.net";
 

@@ -1,4 +1,4 @@
-import { watchRendition } from "./watch-rendition";
+import { watchRendition } from "./watch-rendition.ts";
 export interface WatchEventMoment { id: string; imageURL: string; expiresAt: string; visibleUntil: string }
 export interface EventMomentRow { id: number | string; user_id: number | string; media_url: string; media_type: string; expires_at: string; is_flagged: boolean }
 /** Existing published-moment visibility plus bilateral blocks. No identity/social inference. */

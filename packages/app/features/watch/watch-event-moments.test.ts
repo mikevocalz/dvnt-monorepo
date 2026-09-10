@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { projectWatchMoments, type EventMomentRow } from "./watch-event-moments";
+import { projectWatchMoments, type EventMomentRow } from "./watch-event-moments.ts";
 const now = Date.parse("2026-09-05T12:00:00Z");
 const row: EventMomentRow = {id:1,user_id:7,media_type:"photo",media_url:"https://dvnt.b-cdn.net/moment.jpg",is_flagged:false,expires_at:"2026-09-06T12:00:00Z"};
 test("only six permitted photos, bounded rendition and offline permission lease",()=>{
