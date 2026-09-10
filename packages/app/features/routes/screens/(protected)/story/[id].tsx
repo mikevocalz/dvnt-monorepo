@@ -953,7 +953,13 @@ function StoryViewerScreenContent() {
   const hasAnimatedContent =
     currentItem?.type === "gif" || animatedGifOverlays.length > 0;
 
-  // Validate video URL - must be valid HTTP/HTTPS URL
+  // Validate video URL - must be valid HTTP/HTTPS URL.
+  //
+  // null, not "", for a non-video item: expo-video builds a native VideoPlayer
+  // on every useVideoPlayer call, and only a nil source makes the native side
+  // take the clearCurrentItem path for certain. An empty string relies on iOS
+  // refusing to parse it into a URL, which is not a guarantee worth resting an
+  // AVURLAsset construction on.
   const videoUrl = useMemo(() => {
     if (isVideo && currentItem?.url) {
       const url = currentItem.url;
@@ -962,7 +968,7 @@ function StoryViewerScreenContent() {
         return url;
       }
     }
-    return "";
+    return null;
   }, [isVideo, currentItem?.url]);
 
   useEffect(() => {

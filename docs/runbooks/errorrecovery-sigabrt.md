@@ -142,14 +142,25 @@ one of them a watchdog kill, none yet fixed:
   event is from 1.0.343, which predates the fix. `rules-of-hooks` across
   `features/stories-editor/` is clean.
 
-`components/media-preview-modal.tsx` built a player on every render including
-image previews and `media === null`; isolated into a child (295947f).
+### expo-video call sites, swept
 
-`components/feed/feed-post.tsx:358` still constructs an expo-video player for
-every post including text and image ones — the bug `post/[id].tsx:396`
-documents and avoids. **Not fixed.** A draft extraction exists at
-`scratchpad/feed-post.halfdone.tsx`: the child component is written and covers
-the surface, seek bar and fullscreen modal, but the parent's hooks were never
-removed, so both were live — worse than the original bug. Finishing a
-1618-line render-tree refactor of the main feed with no device to check it
-against is not a trade worth making blind. Do it with a simulator open.
+Every `useVideoPlayer` in the app, and what it is now:
+
+| Site | State |
+|---|---|
+| `components/feed/feed-post.tsx` | **Fixed** (9832b50) — player moved into `<FeedPostVideo/>`, mounts only for video posts. Was one AVPlayer per row. |
+| `components/media-preview-modal.tsx` | **Fixed** (295947f) — was building one for image previews and `media === null`. |
+| `features/routes/screens/(protected)/story/[id].tsx` | **Fixed** — the non-video fallback was `""`; now `null`, the only source the native side provably routes to `clearCurrentItem`. |
+| `features/routes/screens/(protected)/post/[id].tsx` | Already correct — `PostVideoPlayer`, the pattern the others copy. |
+| `features/routes/screens/(protected)/story/create.tsx` | Correct — `StoryVideoPreview({ uri: string })` is already isolated. |
+| `features/events/ui/WhoAllOverThere.tsx` (`ViewerVideo`) | Correct — isolated child, `uri` required. |
+| `components/media/DVNTAnimatedVideoView.tsx` | Correct — `uri: string` required, the component is the player. |
+| `features/routes/screens/(auth)/login.tsx`, `features/camera/CameraScreen.tsx`, `features/screens/landing/sections/Hero.native.tsx` | Left alone — local bundled assets and local recording URIs. No network XPC, so not the hang. |
+| `components/media/DVNTVideoPlayer.tsx` | Not applicable — imports `react-native-video`, not expo-video. Its `mixAudioMode` is that library's correct API. |
+
+**Left alone deliberately:** `WhoAllOverThere.tsx`'s `VideoFrameThumb` renders a
+real video player per moment, as a fallback when `thumbnail_url` is null, inside
+a non-virtualised `ScrollView` `.map` (`:558`). If the thumbnail backfill ever
+falls behind, that is N players at once. The comment above it explains the
+choice — `expo-video-thumbnails` failed silently on legacy remote videos — so
+the fix is server-side thumbnail coverage, not a client swap.
