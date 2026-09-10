@@ -15,6 +15,7 @@ import React, { Component, ErrorInfo, ReactNode } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { AlertTriangle, RefreshCw, Home, ArrowLeft } from "lucide-react-native";
 import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
+import { reportIssue } from "@dvnt/app/lib/analytics/report-issue";
 
 interface Props {
   children: ReactNode;
@@ -107,22 +108,27 @@ export class ErrorBoundary extends Component<Props, State> {
       this.props.onError(error, errorInfo);
     }
 
-    // Send to Sentry (best-effort, non-blocking)
-    try {
-      const Sentry = require("@sentry/react-native");
-      Sentry.withScope((scope: any) => {
-        scope.setTag("screen", screenName);
-        if (debugContext.routeParams) {
-          scope.setContext("routeParams", debugContext.routeParams);
-        }
-        if (debugContext.userId) {
-          scope.setUser({ id: debugContext.userId });
-        }
-        Sentry.captureException(error);
-      });
-    } catch {
-      // Sentry not available — no-op
-    }
+    // Report off-device (best-effort, non-blocking).
+    //
+    // This was `Sentry.captureException`. The mobile SDK went away in d00827b
+    // but the `require("@sentry/react-native")` still resolved, so this block
+    // kept calling a never-`init()`ed SDK and reporting nothing, without ever
+    // throwing to say so. Every caught screen error since has been invisible.
+    //
+    // The recent AppTrace ring buffer rides along because breadcrumbs were the
+    // other half of what Sentry provided here, and a breadcrumb is only worth
+    // keeping when something is attached to carry it.
+    reportIssue("error-boundary", {
+      screen: screenName,
+      name: error.name,
+      message: error.message,
+      stack: error.stack?.slice(0, 2000) ?? null,
+      componentStack: errorInfo.componentStack?.trim().slice(0, 2000) ?? null,
+      userId: debugContext.userId ?? null,
+      routeParams: debugContext.routeParams ?? null,
+      queryKeys: debugContext.queryKeys ?? null,
+      recentTrace: AppTrace.dump().slice(-25),
+    });
   }
 
   handleRetry = () => {

@@ -34,6 +34,7 @@ import { Platform } from "react-native";
 import { readAndClearLastJSError } from "@dvnt/app/lib/global-error-handler";
 import { mmkv } from "@dvnt/app/lib/mmkv-zustand";
 import { crashSignature } from "@dvnt/observability/capture";
+import { reportIssue } from "@dvnt/app/lib/analytics/report-issue";
 
 interface NativeExceptionPayload {
   timestamp: string;
@@ -185,31 +186,13 @@ export function reportPriorCrash(kind: string, payload: Record<string, unknown>)
         }
       : payload;
 
-    // Fire-and-forget: a crash row is worth less than the launch it would
-    // delay, and this runs before auth settles.
-    void (async () => {
-      try {
-        // Required lazily — a boot-path import of the Supabase client is one
-        // more module that has to evaluate before the reporter can report.
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { supabase } = require("@dvnt/app/lib/supabase/client");
-        await supabase.from("analytics_events").insert({
-          event: "prior_session_crash",
-          feature_area: "stability",
-          platform: Platform.OS,
-          metadata: {
-            kind,
-            signature,
-            name: payload.name ?? null,
-            reason: payload.message ?? payload.reason ?? null,
-            detail,
-          },
-        });
-      } catch {
-        // Swallowed on purpose — analytics that can break the app it measures
-        // is worse than no analytics.
-      }
-    })();
+    reportIssue("crash", {
+      kind,
+      signature,
+      name: payload.name ?? null,
+      reason: payload.message ?? payload.reason ?? null,
+      detail,
+    });
   } catch {
     /* never throw from boot path */
   }

@@ -87,18 +87,12 @@ function logTap(
   if (__DEV__) {
     console.log(`[LikesSheet] ${event}`, { postId, ts, ...extra });
   }
-  // Sentry breadcrumb (non-blocking, best-effort)
-  try {
-    const Sentry = require("@sentry/react-native");
-    Sentry.addBreadcrumb({
-      category: "likes-sheet",
-      message: event,
-      data: { postId, ts, ...extra },
-      level: "info",
-    });
-  } catch {
-    // Sentry not available — no-op
-  }
+  // A Sentry breadcrumb per tap used to go here. It stopped reporting when
+  // d00827b removed the mobile SDK, and even before that a breadcrumb on a
+  // healthy tap shipped nowhere — breadcrumbs only travel attached to a
+  // captured error. The __DEV__ log above is the signal that was doing the
+  // work. The dead-tap detector below is what actually catches the bug this
+  // instrumentation exists for.
   return ts;
 }
 

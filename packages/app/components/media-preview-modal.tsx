@@ -31,6 +31,66 @@ interface MediaPreviewModalProps {
   } | null;
 }
 
+/**
+ * The player lives in its own component so it is only ever constructed for an
+ * actual video. `useVideoPlayer` builds a native AVPlayer on EVERY render pass
+ * of its host, so keeping it in MediaPreviewModal meant every image preview —
+ * and every `media === null` render — paid for one.
+ *
+ * The old placeholder source was `""`. Whether that reaches AVURLAsset is moot
+ * — `VideoPlayer.replaceCurrentItem` bails on a nil `uri`, so the empty string
+ * most likely cost only the AVPlayer and not the asset. The AVPlayer is reason
+ * enough: one per image preview, per null render, for a component that is
+ * mounted app-wide.
+ */
+function MediaPreviewVideo({
+  uri,
+  shouldPlay,
+}: {
+  uri: string;
+  shouldPlay: boolean;
+}) {
+  // CRITICAL: Video lifecycle management to prevent crashes
+  const { isMountedRef, isSafeToOperate } = useVideoLifecycle(
+    "MediaPreviewModal",
+    uri,
+  );
+
+  const player = useVideoPlayer(uri, (p) => {
+    if (isMountedRef.current) {
+      p.loop = true;
+      // Duck background audio (Spotify etc.) while the preview plays
+      // instead of preempting it.
+      p.audioMixingMode = "duckOthers";
+      logVideoHealth("MediaPreviewModal", "player configured");
+    }
+  });
+
+  useEffect(() => {
+    if (!player || !isSafeToOperate()) return;
+    if (shouldPlay) {
+      safePlay(player, isMountedRef, "MediaPreviewModal");
+    } else {
+      safePause(player, isMountedRef, "MediaPreviewModal");
+    }
+  }, [shouldPlay, player, isSafeToOperate, isMountedRef]);
+
+  useEffect(() => {
+    return () => {
+      cleanupPlayer(player, "MediaPreviewModal");
+    };
+  }, [player]);
+
+  return (
+    <VideoView
+      player={player}
+      style={styles.media}
+      contentFit="contain"
+      nativeControls
+    />
+  );
+}
+
 export function MediaPreviewModal({
   visible,
   onClose,
@@ -68,43 +128,6 @@ export function MediaPreviewModal({
     [],
   );
 
-  // CRITICAL: Video lifecycle management to prevent crashes
-  const { isMountedRef, isSafeToOperate } = useVideoLifecycle(
-    "MediaPreviewModal",
-    media?.uri,
-  );
-
-  const player = useVideoPlayer(
-    media?.type === "video" ? media.uri : "",
-    (p) => {
-      if (isMountedRef.current) {
-        p.loop = true;
-        // Duck background audio (Spotify etc.) while the preview plays
-        // instead of preempting it.
-        p.audioMixingMode = "duckOthers";
-        logVideoHealth("MediaPreviewModal", "player configured");
-      }
-    },
-  );
-
-  useEffect(() => {
-    if (visible && media?.type === "video" && player && isSafeToOperate()) {
-      safePlay(player, isMountedRef, "MediaPreviewModal");
-    }
-    return () => {
-      if (player) {
-        cleanupPlayer(player, "MediaPreviewModal");
-      }
-    };
-  }, [visible, media, player, isSafeToOperate, isMountedRef]);
-
-  const handleClose = useCallback(() => {
-    if (player && isSafeToOperate()) {
-      safePause(player, isMountedRef, "MediaPreviewModal");
-    }
-    onClose();
-  }, [player, onClose, isSafeToOperate, isMountedRef]);
-
   if (!media) return null;
 
   return (
@@ -121,7 +144,7 @@ export function MediaPreviewModal({
       <BottomSheetView style={styles.container}>
         <Pressable
           style={[styles.closeButton, { top: 8 }]}
-          onPress={handleClose}
+          onPress={onClose}
           hitSlop={16}
         >
           <View style={styles.closeIconContainer}>
@@ -139,12 +162,7 @@ export function MediaPreviewModal({
               contentFit="contain"
             />
           ) : (
-            <VideoView
-              player={player}
-              style={styles.media}
-              contentFit="contain"
-              nativeControls
-            />
+            <MediaPreviewVideo uri={media.uri} shouldPlay={visible} />
           )}
         </View>
       </BottomSheetView>

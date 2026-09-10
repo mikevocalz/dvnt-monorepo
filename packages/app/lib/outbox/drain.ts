@@ -52,7 +52,7 @@ export function registerOutboxExecutor(
       `See MONEY LAW in lib/outbox/drain.ts.`;
     if (IS_DEV) throw new Error(msg);
     console.error(msg);
-    sentryBreadcrumb("outbox.money_denylist", msg, { mutationType }, "error");
+    reportFailure("outbox.money_denylist", msg, { mutationType });
     return;
   }
   executors.set(mutationType, executor);
@@ -78,20 +78,30 @@ export function backoffMs(
   return exp + Math.floor(random() * BACKOFF_JITTER_MS);
 }
 
-// ─── Sentry breadcrumb (same defensive pattern as diagnostics/app-trace.ts) ─
+// ─── Failure reporting ──────────────────────────────────────────────────────
+//
+// Was a Sentry BREADCRUMB, which only ever shipped attached to a separate
+// captured error — and after d00827b removed the mobile SDK it shipped nothing
+// at all, silently, because `require("@sentry/react-native")` still resolved
+// and calling a never-`init()`ed SDK throws nothing. A terminal outbox failure
+// is a mutation the user believes succeeded and which never will; that is a
+// report in its own right, not a footnote on someone else's.
+//
+// Lazily required to keep this module pure — the header's contract is that the
+// drain loop runs under `node --test` with no react-native imports, and a
+// static import of the reporter would pull in the Supabase client.
 
-function sentryBreadcrumb(
+function reportFailure(
   category: string,
   message: string,
   data: Record<string, string | number | boolean | null>,
-  level: "warning" | "error",
 ): void {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const Sentry = require("@sentry/react-native");
-    Sentry.addBreadcrumb({ category, message, data, level });
+    const { reportIssue } = require("@dvnt/app/lib/analytics/report-issue");
+    reportIssue("outbox", { category, message, ...data });
   } catch {
-    // Sentry is optional in this app.
+    // Reporting is best-effort and must never fail a drain pass.
   }
 }
 
@@ -182,10 +192,10 @@ export async function drainOutbox(
         const message = err instanceof Error ? err.message : String(err);
         if (isTerminalOutboxError(err)) {
           // 4xx/validation → parked, retained, NEVER silently dropped and
-          // NEVER retried. Breadcrumb includes queue age per WS-12 spec.
+          // NEVER retried. Report includes queue age per WS-12 spec.
           store.getState().markTerminal(next.idempotencyKey, message);
           result.terminal += 1;
-          sentryBreadcrumb(
+          reportFailure(
             "outbox.terminal_failure",
             `Outbox entry failed terminally: ${next.mutationType}`,
             {
@@ -197,7 +207,6 @@ export async function drainOutbox(
               queueAgeMs: now() - next.createdAt,
               error: message,
             },
-            "error",
           );
         } else {
           // Retryable → exponential backoff + jitter, back to 'queued'.

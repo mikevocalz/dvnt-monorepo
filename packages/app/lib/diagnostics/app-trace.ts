@@ -93,12 +93,6 @@ function loadPersisted(): AppTraceEvent[] {
   }
 }
 
-function toBreadcrumbLevel(level: TraceLevel): "info" | "warning" | "error" {
-  if (level === "error") return "error";
-  if (level === "warn") return "warning";
-  return "info";
-}
-
 function formatEntry(entry: AppTraceEvent): string {
   const ctx = Object.entries(entry.ctx)
     .map(([key, value]) => `${key}=${String(value)}`)
@@ -124,17 +118,14 @@ function push(entry: AppTraceEvent): void {
     method(formatEntry(entry));
   }
 
-  try {
-    const Sentry = require("@sentry/react-native");
-    Sentry.addBreadcrumb({
-      category: `app-trace:${entry.tag.toLowerCase()}`,
-      message: entry.event,
-      data: entry.ctx,
-      level: toBreadcrumbLevel(entry.level),
-    });
-  } catch {
-    // Sentry is optional in this app.
-  }
+  // A Sentry breadcrumb per entry used to be written here. It reported nothing
+  // after d00827b removed the mobile SDK — and even before that, a breadcrumb
+  // only ever shipped attached to a separately captured error, so this buffer
+  // was doing the work twice and getting credit for neither.
+  //
+  // `buffer` is now the trail: components/error-boundary.tsx attaches the last
+  // 25 entries to the row it writes for a caught error, which is the moment
+  // the history is worth anything.
 }
 
 buffer = loadPersisted();
