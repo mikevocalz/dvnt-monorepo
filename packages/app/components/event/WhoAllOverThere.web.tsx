@@ -18,7 +18,8 @@ import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 
 const THUMB = 80;
-const MAX_VIDEO_SECONDS = 30;
+// Matches the media-upload edge fn's MAX_VIDEO_DURATION_SEC — keep in sync.
+const MAX_VIDEO_SECONDS = 60;
 
 interface Moment {
   id: number;
