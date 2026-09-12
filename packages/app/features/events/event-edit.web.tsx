@@ -235,17 +235,26 @@ export function EventEditScreen() {
       // column, and `videoFlyerUrl` was never written at all — so an event's
       // video flyer could not be changed or removed, and the two columns
       // could end up describing different flyers.
-      const uploadIfLocal = async (url: string | null | undefined) => {
+      const uploadIfLocal = async (
+        url: string | null | undefined,
+        timeoutMs = 30000,
+      ) => {
         if (!url) return undefined;
         if (!/^(blob:|data:|file:)/.test(url)) return url;
-        const up = await withTimeout(uploadToServer(url, "events"), 30000, "upload-flyer");
+        const up = await withTimeout(uploadToServer(url, "events"), timeoutMs, "upload-flyer");
         if (!up.success || !up.url) {
           throw new Error(up.error || "Couldn't upload the flyer. Re-select it and try again.");
         }
         return up.url;
       };
 
-      const primaryUrl = await uploadIfLocal(s.flyerImage);
+      // A flyer VIDEO (up to 60s / 50MB) routinely needs more than 30s on
+      // cellular — the still-image timeout aborted every video save with
+      // "stalled at: upload-flyer (30s)".
+      const primaryUrl = await uploadIfLocal(
+        s.flyerImage,
+        s.flyerMediaType === "video" ? 180000 : 30000,
+      );
       const posterUrl = await uploadIfLocal(s.flyerFallbackImage);
 
       // Video ALWAYS takes the hero; the still is its poster and the fallback
@@ -490,8 +499,19 @@ export function EventEditScreen() {
   const onFlyerPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
     const isVideo = file.type.startsWith("video/");
+    // Server caps event-video at 50MB (media-upload SIZE_LIMITS) — reject at
+    // pick time instead of after a full multi-minute upload.
+    if (isVideo && file.size > 50 * 1024 * 1024) {
+      showToast(
+        "error",
+        "Video too large",
+        `That video is ${Math.round(file.size / (1024 * 1024))}MB — the limit is 50MB. Pick a shorter clip.`,
+      );
+      e.currentTarget.value = "";
+      return;
+    }
+    const url = URL.createObjectURL(file);
     if (isVideo) {
       if (s.flyerImage && s.flyerMediaType === "image" && !s.flyerFallbackImage) {
         s.setFlyerFallbackImage(s.flyerImage);

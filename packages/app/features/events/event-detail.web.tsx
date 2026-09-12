@@ -1455,17 +1455,25 @@ export function EventDetailScreen() {
             <Section title="Tickets">
               <div className="flex flex-col gap-2">
                 {buyerVisibleTiers.map((t, i) => {
-                  const price =
-                    t.price != null
-                      ? t.price
-                      : t.priceCents != null
-                        ? t.priceCents / 100
-                        : 0;
                   const tperks: string[] = Array.isArray(t.perks) ? t.perks : [];
                   // Resolve the live tier so we get sold-out + the real id.
                   const live = (liveTicketTypes as TicketTypeRecord[]).find(
                     (lt) => String(lt.id) === String(t.id),
                   );
+                  // Payload tiers are raw RPC rows in snake_case
+                  // (`price_cents`) — reading `t.price`/`t.priceCents` made
+                  // every paid tier render "Free". Live ticket_types rows win
+                  // when present.
+                  const priceCents =
+                    Number(
+                      live?.price_cents ??
+                        t.price_cents ??
+                        t.priceCents ??
+                        (t.price != null
+                          ? Math.round(Number(t.price) * 100)
+                          : 0),
+                    ) || 0;
+                  const price = priceCents / 100;
                   const tierId = String(live?.id ?? t.id ?? i);
                   const soldOut = live
                     ? live.quantity_total - live.quantity_sold <= 0
@@ -1507,7 +1515,11 @@ export function EventDetailScreen() {
                       <div className="flex items-center justify-between">
                         <span className="font-bold">{t.name || t.title || "Ticket"}</span>
                         <span className="text-[#379ED8] font-bold">
-                          {soldOut ? "Sold out" : price ? `$${price}` : "Free"}
+                          {soldOut
+                            ? "Sold out"
+                            : priceCents
+                              ? `$${price % 1 ? price.toFixed(2) : price}`
+                              : "Free"}
                         </span>
                       </div>
                       {t.description ? (
