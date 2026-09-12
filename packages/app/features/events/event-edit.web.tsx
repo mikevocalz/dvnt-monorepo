@@ -281,8 +281,16 @@ export function EventEditScreen() {
         ...(videoFlyerUrl !== undefined ? { videoFlyerUrl } : {}),
       };
       if (allImages.length > 0) {
-        updateData.coverImage = allImages[0];
-        updateData.images = allImages.slice(1).map((url) => ({ url }));
+        // Cover + gallery go through the same upload as the flyer. This used
+        // to write picker blob: URLs verbatim — cover_image_url ended up as a
+        // dead blob:https://… string in the DB, a broken image for everyone.
+        const hostedImages: string[] = [];
+        for (const url of allImages) {
+          const hosted = await uploadIfLocal(url);
+          if (hosted) hostedImages.push(hosted);
+        }
+        updateData.coverImage = hostedImages[0];
+        updateData.images = hostedImages.slice(1).map((url) => ({ url }));
       }
 
       // 1. Event row update — must finish before navigation

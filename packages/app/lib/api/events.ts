@@ -915,6 +915,13 @@ export const eventsApi = {
         .eq(DB.events.id, parseInt(eventId))
         .maybeSingle();
 
+      // Same media guard as the create-event edge fn: only hosted http(s)
+      // URLs may persist. blob:/data:/file: URLs are device-local — dead for
+      // every other viewer — and one already reached cover_image_url via the
+      // web editor before it uploaded covers.
+      const hosted = (u: unknown): u is string =>
+        typeof u === "string" && /^https?:\/\//i.test(u);
+
       const updateData: any = {};
       if (updates.title) updateData[DB.events.title] = updates.title;
       if (updates.description !== undefined)
@@ -923,7 +930,7 @@ export const eventsApi = {
         updateData[DB.events.startDate] = updates.startDate || updates.date;
       if (updates.location !== undefined)
         updateData[DB.events.location] = updates.location;
-      if (updates.coverImage)
+      if (hosted(updates.coverImage))
         updateData[DB.events.coverImageUrl] = updates.coverImage;
       if (updates.price !== undefined)
         updateData[DB.events.price] = updates.price;
@@ -960,16 +967,23 @@ export const eventsApi = {
       if (updates.isOnline !== undefined)
         updateData[DB.events.isOnline] = updates.isOnline;
       if (updates.flyerImageUrl !== undefined)
-        updateData[DB.events.flyerImageUrl] = updates.flyerImageUrl || null;
+        updateData[DB.events.flyerImageUrl] = hosted(updates.flyerImageUrl)
+          ? updates.flyerImageUrl
+          : null;
       // The VIDEO flyer was not writable here at all, so the editor could only
       // ever change the still — and a video picked in the editor was written
       // into the still column. Video takes precedence over the still
       // everywhere it renders, so it has to be editable where the still is.
       if (updates.videoFlyerUrl !== undefined)
-        updateData[DB.events.videoFlyerUrl] = updates.videoFlyerUrl || null;
+        updateData[DB.events.videoFlyerUrl] = hosted(updates.videoFlyerUrl)
+          ? updates.videoFlyerUrl
+          : null;
       // Gallery images — the editor sends `images` (jsonb array of {url}); it was
       // previously dropped here, so edits to the gallery never saved.
-      if (updates.images !== undefined) updateData.images = updates.images;
+      if (updates.images !== undefined)
+        updateData.images = Array.isArray(updates.images)
+          ? updates.images.filter((m: any) => hosted(m?.url))
+          : updates.images;
 
       // Ensure the Supabase JWT bridge is attached so PostgREST sees
       // us as `authenticated` (not `anon`) — RLS on events_update_own
