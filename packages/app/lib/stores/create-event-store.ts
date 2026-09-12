@@ -442,6 +442,28 @@ export const useCreateEventStore = create<CreateEventState>()(
     {
       name: "create-event-draft",
       storage: mmkvStorage,
+      // A `blob:` URL is scoped to the document that created it, so any one
+      // found during rehydration is dead by definition (the page reloaded).
+      // iOS Safari reloads the tab whenever the user app-switches away, so a
+      // draft with picked-but-unpublished media used to rehydrate with dead
+      // blob: URLs that LOOKED like images but failed every publish with
+      // "Failed to fetch". Drop them so the composer shows the truth and the
+      // user re-picks. Native never produces blob: URLs (file:// copies
+      // persist), so the scrub is a no-op there.
+      merge: (persisted, current) => {
+        const p = { ...(persisted as Partial<CreateEventState>) };
+        const dead = (u: unknown) =>
+          typeof u === "string" && u.startsWith("blob:");
+        if (dead(p.flyerImage)) {
+          p.flyerImage = null;
+          p.flyerMediaType = "image";
+        }
+        if (dead(p.flyerFallbackImage)) p.flyerFallbackImage = null;
+        if (Array.isArray(p.eventImages)) {
+          p.eventImages = p.eventImages.filter((u) => !dead(u));
+        }
+        return { ...current, ...p };
+      },
       partialize: (state) => ({
         title: state.title,
         description: state.description,

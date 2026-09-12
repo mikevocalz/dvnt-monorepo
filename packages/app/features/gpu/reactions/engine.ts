@@ -207,7 +207,9 @@ export function createReactionEngine(
   });
   device.queue.writeTexture(
     { texture },
-    atlas.pixels,
+    // TS 5.9 types TypedArrays generically; Skia's readPixels output is
+    // ArrayBuffer-backed, never a SharedArrayBuffer view.
+    atlas.pixels as Uint8Array<ArrayBuffer>,
     { bytesPerRow: atlas.size * 4, rowsPerImage: atlas.size },
     { width: atlas.size, height: atlas.size },
   );

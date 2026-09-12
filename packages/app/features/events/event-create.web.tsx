@@ -247,9 +247,15 @@ export function CreateEventScreen() {
       };
 
       const primaryUrl = await uploadIfLocal(s.flyerImage);
+      // Write the hosted URL back into the draft the moment it exists: if a
+      // later step fails (or iOS Safari kills the tab mid-publish), the retry
+      // reuses the CDN URL instead of re-fetching a blob: that may be dead.
+      if (primaryUrl && primaryUrl !== s.flyerImage) s.setFlyerImage(primaryUrl);
       // Fallback (poster) image: present when the primary is a video AND
       // the user uploaded a separate still. Stored in flyerFallbackImage.
       const posterUrl = await uploadIfLocal(s.flyerFallbackImage);
+      if (posterUrl && posterUrl !== s.flyerFallbackImage)
+        s.setFlyerFallbackImage(posterUrl);
 
       // Map the two-slot store into the persistence fields. Video flyer
       // wins for display; the still flyer IS the poster for static
@@ -274,6 +280,8 @@ export function CreateEventScreen() {
             );
           }
           galleryUrls.push(up.url);
+          // Same write-back as the flyer: a retry must not re-upload.
+          s.setEventImages((prev) => prev.map((u) => (u === url ? up.url : u)));
         } else {
           galleryUrls.push(url);
         }

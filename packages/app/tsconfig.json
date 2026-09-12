@@ -5,7 +5,7 @@
     "jsx": "react-jsx",
     "moduleResolution": "bundler",
     "skipLibCheck": true,
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "baseUrl": ".",
     "paths": {
       "@dvnt/app/*": ["./*"],
