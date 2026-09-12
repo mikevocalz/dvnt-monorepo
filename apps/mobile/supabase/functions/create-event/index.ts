@@ -211,6 +211,13 @@ Deno.serve(async (req) => {
       insertPayload.age_restriction = ageRestriction;
     }
     if (text(body.endDate)) insertPayload.end_date = text(body.endDate);
+    // Venue timezone (IANA name). The client always sends it; physical events
+    // render start/end in this zone (event-time.ts) — dropping it made every
+    // event display in the viewer's local zone instead of the venue's.
+    const eventTz = text(body.eventTz);
+    if (eventTz && /^[A-Za-z_+-]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(eventTz) && eventTz.length <= 64) {
+      insertPayload.event_tz = eventTz;
+    }
     if (typeof body.ticketingEnabled === "boolean") {
       insertPayload.ticketing_enabled = body.ticketingEnabled;
     }
