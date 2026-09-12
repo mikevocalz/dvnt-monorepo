@@ -109,19 +109,6 @@ const TAB_HEADER_ROW_HEIGHT = 44;
 const HEADER_LIFT = 10;
 const STATUS_BAR_CLEARANCE = 24;
 
-/**
- * The menu button sits lower than the mark beside it.
- *
- * The row lifts as a unit (HEADER_LIFT), which is right for the wordmark but
- * puts the 44pt tap target close to the status bar. This drops the button back
- * down so it stays comfortably thumb-reachable and optically centred against
- * the mark, which has more visual mass above its baseline than below.
- *
- * Applied as `marginTop: DROP` with `marginBottom: -DROP`, so the button moves
- * without adding height to the row — otherwise every other slot re-centres in
- * a taller band and the mark loses the lift.
- */
-const MENU_BUTTON_DROP = 14;
 
 function headerLift(insetTop: number): number {
   return Math.min(HEADER_LIFT, Math.max(0, insetTop - STATUS_BAR_CLEARANCE));
@@ -237,7 +224,9 @@ function TabsHeader() {
     >
       {/* Menu then mark. The trigger is visible on every top-level surface —
           a drawer you can only find by guessing at an edge swipe is a drawer
-          most people never find. The mark keeps its scroll-to-top behaviour. */}
+          most people never find. The mark keeps its scroll-to-top behaviour.
+          On Profile the mark yields: the username is the title there, and the
+          100pt wordmark left it colliding with its own slot. */}
       <View
         style={{
           flex: 1,
@@ -246,18 +235,8 @@ function TabsHeader() {
           gap: 4,
         }}
       >
-        {/* The negative bottom margin cancels the drop in LAYOUT, so the
-            button moves down without growing the row — the mark and the
-            right-hand slot hold the positions the lift gave them. */}
-        <View
-          style={{
-            marginTop: MENU_BUTTON_DROP,
-            marginBottom: -MENU_BUTTON_DROP,
-          }}
-        >
-          <DrawerTrigger badge={attentionCount} />
-        </View>
-        <TabHeaderLogo />
+        <DrawerTrigger badge={attentionCount} />
+        {isProfile ? null : <TabHeaderLogo />}
       </View>
       {/* Your own profile names itself in the title slot, the same way another
           member's profile does — otherwise the two screens show the same thing
