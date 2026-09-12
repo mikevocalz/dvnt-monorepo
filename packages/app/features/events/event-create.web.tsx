@@ -240,7 +240,11 @@ export function CreateEventScreen() {
       ) => {
         if (!url) return undefined;
         if (!/^(blob:|data:|file:)/i.test(url)) return url;
-        const up = await withTimeout(uploadToServer(url, "events"), timeoutMs, "upload-flyer");
+        const up = await withTimeout(
+          uploadToServer(url, "events", (p) => s.setUploadProgress(p.percentage)),
+          timeoutMs,
+          "upload-flyer",
+        );
         if (!up.success || !up.url) {
           throw new Error(
             up.error || "Couldn't upload an image. Re-select it and try again.",
@@ -475,6 +479,7 @@ export function CreateEventScreen() {
       );
     } finally {
       setBusy(false);
+      s.setUploadProgress(0);
     }
   };
 
@@ -538,7 +543,11 @@ export function CreateEventScreen() {
             disabled={publishing}
             className="h-10 px-5 rounded-full bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-40"
           >
-            {publishing ? "Publishing…" : "Publish"}
+            {publishing && s.uploadProgress > 0 && s.uploadProgress < 100
+              ? `Uploading ${s.uploadProgress}%`
+              : publishing
+                ? "Publishing…"
+                : "Publish"}
           </button>
         </div>
         <p className="text-sm text-white/40 mt-1">

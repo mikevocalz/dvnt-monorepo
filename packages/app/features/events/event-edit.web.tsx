@@ -102,6 +102,9 @@ export function EventEditScreen() {
   const s = useEventEditStore();
   const flyerRef = useRef<HTMLInputElement>(null);
   const [tierLoadFailed, setTierLoadFailed] = useState(false);
+  // A flyer video upload can run for minutes; a bare "Saving…" for that long
+  // reads as a hung app, which is what "it won't let me upload" looks like.
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
   const coverRef = useRef<HTMLInputElement>(null);
 
   // ── Prefill from the fetched event (mirrors native fetchEvent) ──
@@ -224,7 +227,7 @@ export function EventEditScreen() {
 
   // ── Save (mirrors native handleSave: event row + tier CRUD diff) ──
   const handleSave = async () => {
-    if (!id || updateEventMutation.isPending) return;
+    if (!id || updateEventMutation.isPending || uploadPct != null) return;
     if (!s.title.trim()) {
       showToast("error", "Error", "Title is required");
       return;
@@ -251,7 +254,11 @@ export function EventEditScreen() {
       ) => {
         if (!url) return undefined;
         if (!/^(blob:|data:|file:)/.test(url)) return url;
-        const up = await withTimeout(uploadToServer(url, "events"), timeoutMs, "upload-flyer");
+        const up = await withTimeout(
+          uploadToServer(url, "events", (p) => setUploadPct(p.percentage)),
+          timeoutMs,
+          "upload-flyer",
+        );
         if (!up.success || !up.url) {
           throw new Error(up.error || "Couldn't upload the flyer. Re-select it and try again.");
         }
@@ -486,6 +493,8 @@ export function EventEditScreen() {
     } catch (error: any) {
       console.error("[EditEvent] Save error:", error);
       showToast("error", "Error", error?.message || "Failed to save changes");
+    } finally {
+      setUploadPct(null);
     }
   };
 
@@ -581,10 +590,16 @@ export function EventEditScreen() {
         <h1 className="text-[17px] font-semibold">Edit Event</h1>
         <button
           onClick={handleSave}
-          disabled={updateEventMutation.isPending}
+          // Uploads run BEFORE the mutation starts, so isPending alone left
+          // Done tappable for the whole upload — a second tap re-uploads.
+          disabled={updateEventMutation.isPending || uploadPct != null}
           className="text-[16px] font-semibold text-[#3FDCFF] disabled:text-white/40"
         >
-          {updateEventMutation.isPending ? "Saving…" : "Done"}
+          {uploadPct != null && uploadPct < 100
+            ? `Uploading ${uploadPct}%`
+            : updateEventMutation.isPending
+              ? "Saving…"
+              : "Done"}
         </button>
       </div>
 
