@@ -26,6 +26,7 @@ import {
   addonIsPurchasable,
   addonSatisfiesTierGate,
   filterEligibleAddons,
+  tierDisplayPriceCents,
 } from "./pricing.ts";
 
 const T = (ms: string) => Date.parse(ms);
@@ -272,5 +273,34 @@ test("filterEligibleAddons: on-sale, in-stock, gate-satisfied; host order preser
   assert.deepEqual(
     filterEligibleAddons(addons, undefined, new Set(["vip"])).map((a) => a.id),
     ["coat", "mg", "tee"], // owned VIP ticket unlocks the gated add-on post-purchase
+  );
+});
+
+test("tierDisplayPriceCents reads the RPC payload's snake_case price_cents", () => {
+  // The regression: a $25 tier from the event-detail RPC rendered "Free"
+  // because the caller read `price` / `priceCents`, neither of which the
+  // payload rows carry.
+  assert.equal(tierDisplayPriceCents(null, { price_cents: 2500 }), 2500);
+  assert.equal(tierDisplayPriceCents(undefined, { priceCents: 2500 }), 2500);
+  assert.equal(tierDisplayPriceCents(null, { price: 25 }), 2500);
+  assert.equal(tierDisplayPriceCents(null, { price_cents: 0 }), 0);
+  assert.equal(tierDisplayPriceCents(null, {}), 0);
+  assert.equal(tierDisplayPriceCents(null, null), 0);
+});
+
+test("tierDisplayPriceCents prefers the live row and its scheduled price", () => {
+  const live = { price_cents: 2500, quantity_total: 100, quantity_sold: 0 };
+  assert.equal(tierDisplayPriceCents(live, { price_cents: 999 }), 2500);
+
+  // Early-bird schedule already in effect beats the base price.
+  const scheduled = {
+    price_cents: 2500,
+    quantity_total: 100,
+    quantity_sold: 0,
+    price_schedule: [{ effective_at: "2026-01-01T00:00:00Z", price_cents: 1500 }],
+  };
+  assert.equal(
+    tierDisplayPriceCents(scheduled, null, Date.parse("2026-06-01T00:00:00Z")),
+    1500,
   );
 });

@@ -13,7 +13,7 @@
  */
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import {
@@ -101,6 +101,7 @@ export function EventEditScreen() {
   const currentUser = useAuthStore((state) => state.user);
   const s = useEventEditStore();
   const flyerRef = useRef<HTMLInputElement>(null);
+  const [tierLoadFailed, setTierLoadFailed] = useState(false);
   const coverRef = useRef<HTMLInputElement>(null);
 
   // ── Prefill from the fetched event (mirrors native fetchEvent) ──
@@ -197,6 +198,13 @@ export function EventEditScreen() {
         ticketTiers: tiers,
         originalTierIds: activeTiers.map((t: any) => t.id),
       });
+    }).catch((err) => {
+      // An unhandled rejection here left the editor showing ZERO tiers for an
+      // event that has them — so the obvious move (re-add the tier) writes a
+      // duplicate row at the default $0 instead of editing the priced one.
+      // Say it failed and keep the section empty-but-explained.
+      console.error("[EditEvent] Ticket tier load failed:", err);
+      setTierLoadFailed(true);
     });
 
     // Load the add-on catalog (WS-3) — working copy + diff baseline.
@@ -205,6 +213,8 @@ export function EventEditScreen() {
         addons: dbAddons.map((a) => addonRecordToDraft(a)),
         originalAddonIds: dbAddons.map((a) => a.id),
       });
+    }).catch((err) => {
+      console.error("[EditEvent] Add-on load failed:", err);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [event, id]);
@@ -872,9 +882,17 @@ export function EventEditScreen() {
               </div>
 
               {s.ticketTiers.length === 0 ? (
-                <p className="text-center text-[13px] text-white/50 py-4">
-                  No ticket tiers yet. Tap "Add Tier" to create one.
-                </p>
+                tierLoadFailed ? (
+                  <p className="text-center text-[13px] text-[#f59e0b] py-4">
+                    Couldn&apos;t load this event&apos;s existing tiers. Reload
+                    before editing them — adding a tier now would create a
+                    duplicate.
+                  </p>
+                ) : (
+                  <p className="text-center text-[13px] text-white/50 py-4">
+                    No ticket tiers yet. Tap &quot;Add Tier&quot; to create one.
+                  </p>
+                )
               ) : null}
 
               {s.ticketTiers.map((tier, idx) => (

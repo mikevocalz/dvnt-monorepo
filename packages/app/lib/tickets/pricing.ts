@@ -113,6 +113,32 @@ export function resolveCurrentPriceCents(t: TierInventory, nowMs: number = Date.
   return t.price_cents;
 }
 
+/**
+ * Display price (cents) for a tier that may arrive in either shape: a live
+ * `ticket_types` row (snake_case, carries the schedule/bands) or the
+ * event-detail RPC payload's tier copy. The live row wins when present.
+ *
+ * Exists because the web event page read `tier.price` / `tier.priceCents` off
+ * payload rows that only ever carry `price_cents` — so every paid tier
+ * rendered as "Free". Anything showing a tier price goes through here.
+ */
+export function tierDisplayPriceCents(
+  live: TierInventory | null | undefined,
+  payload?: Record<string, unknown> | null,
+  nowMs: number = Date.now(),
+): number {
+  if (live && live.price_cents != null) {
+    return Math.max(0, Math.round(resolveCurrentPriceCents(live, nowMs)));
+  }
+  const p = payload ?? {};
+  const cents =
+    p.price_cents ??
+    p.priceCents ??
+    (p.price != null ? Number(p.price) * 100 : 0);
+  const n = Math.round(Number(cents));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 /** Effective add-on unit price: variant override (if non-null) else add-on base. */
 export function effectiveAddonUnitPriceCents(
   addonPriceCents: number,

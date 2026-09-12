@@ -108,6 +108,7 @@ import {
   tierIsHiddenFromBuyers,
   tierIsLockedForBuyer,
   effectiveAddonUnitPriceCents,
+  tierDisplayPriceCents,
 } from "@dvnt/app/lib/tickets/pricing";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
 import {
@@ -1460,19 +1461,7 @@ export function EventDetailScreen() {
                   const live = (liveTicketTypes as TicketTypeRecord[]).find(
                     (lt) => String(lt.id) === String(t.id),
                   );
-                  // Payload tiers are raw RPC rows in snake_case
-                  // (`price_cents`) — reading `t.price`/`t.priceCents` made
-                  // every paid tier render "Free". Live ticket_types rows win
-                  // when present.
-                  const priceCents =
-                    Number(
-                      live?.price_cents ??
-                        t.price_cents ??
-                        t.priceCents ??
-                        (t.price != null
-                          ? Math.round(Number(t.price) * 100)
-                          : 0),
-                    ) || 0;
+                  const priceCents = tierDisplayPriceCents(live, t);
                   const price = priceCents / 100;
                   const tierId = String(live?.id ?? t.id ?? i);
                   const soldOut = live
