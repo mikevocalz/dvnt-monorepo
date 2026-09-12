@@ -39,6 +39,21 @@ STATIC_FRAMEWORK_PODS = [
   # target, so as its own dynamic framework every av_* symbol is undefined at
   # its own Ld step. Verified: MACH_O_TYPE=staticlib in Debug and Release.
   'RNAudioAPI',
+  # AdMob, added with react-native-google-mobile-ads in 18bebe0. Both SDKs
+  # ship prebuilt STATIC xcframeworks, which CocoaPods refuses to place in a
+  # dynamic target at all rather than failing later at link:
+  #
+  #   [!] The 'Pods-DVNT' target has transitive dependencies that include
+  #       statically linked binaries:
+  #       (.../GoogleUserMessagingPlatform/.../UserMessagingPlatform.xcframework)
+  #
+  # That killed build 1.0.351 (d19fb07a) in Install pods — the first build
+  # attempted since AdMob landed, so nothing had exercised this yet.
+  # Same class as the three above: a pod whose vendored binaries are static
+  # cannot itself be a dynamic framework.
+  'GoogleUserMessagingPlatform',
+  'Google-Mobile-Ads-SDK',
+  'RNGoogleMobileAds',
 ]
 pre_install do |installer|
   installer.pod_targets.each do |pod|
