@@ -235,7 +235,15 @@ function TabsHeader() {
           gap: 4,
         }}
       >
-        <DrawerTrigger badge={attentionCount} />
+        {/* Optical correction, not layout: the wordmark's letterforms sit low
+            in their 36pt box (only the V's slash reaches the top), so a
+            row-centred icon reads high beside it. 6pt settles the menu on the
+            mark's visual line; the old 14pt read as sunken below the row. The
+            negative bottom margin cancels the drop in layout so the row
+            doesn't grow. */}
+        <View style={{ marginTop: 6, marginBottom: -6 }}>
+          <DrawerTrigger badge={attentionCount} />
+        </View>
         {isProfile ? null : <TabHeaderLogo />}
       </View>
       {/* Your own profile names itself in the title slot, the same way another
