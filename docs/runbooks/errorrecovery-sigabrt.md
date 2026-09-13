@@ -81,13 +81,20 @@ the launches it existed for.
 ```sql
 select created_at, metadata
 from analytics_events
-where event = 'prior_session_crash'
+where event = 'app_issue' and feature_area = 'crash'
 order by created_at desc
 limit 20;
 ```
 
+That is the shape `reportIssue` actually inserts (`lib/analytics/report-issue.ts`
+— `event` is the constant `'app_issue'` and the caller's bucket lands in
+`feature_area`). An earlier draft of this runbook said
+`where event = 'prior_session_crash'`, which matches no row.
+
 `metadata.kind` is `js`, `native`, or `expo-updates-recovery`.
-`metadata.reason` is the thing to read first.
+`metadata.reason` is the thing to read first. For `kind = 'native'`,
+`metadata.detail.thread` and `detail.isMainThread` say which thread threw,
+which is how to tell a background-task session from a foreground one.
 
 ## The capture path was sound — only the transport was dead
 
@@ -117,11 +124,149 @@ So the error was always being caught and written to MMKV. It then reached
 `reportToSentry()`, which returned at `if (!Sentry?.captureMessage)`. Nothing
 was broken about the capture; the pipe at the end of it had been cut.
 
+## The reader was broken too — audited 2026-09-13
+
+The transport was not the only cut pipe. The **native** leg of the capture table
+above never ran either, on any build, for a reason nothing in the source
+comments predicted.
+
+`lib/native-exception-log.ts` resolved the report file as
+`require("expo-file-system").documentDirectory`. In expo-file-system **57**
+(installed here; `node_modules/expo-file-system/package.json`) the package root
+no longer exports that. `src/index.ts` re-exports `Paths`, `File`, `Directory`,
+the network tasks, the types, and `legacyWarnings` — and `documentDirectory` is
+not among them. `getInfoAsync`, `readAsStringAsync` and `deleteAsync` do still
+resolve, but only as the stubs in `src/legacyWarnings.ts:18-40`, which
+`console.warn` and then `throw`.
+
+So `docs` was `undefined` and the function returned at
+`if (!docs) return null` on every boot. `dvnt-uncaught-exception.json` was
+written by the `NSSetUncaughtExceptionHandler` block in `AppDelegate.swift` on
+every one of these crashes, read by nobody, and — because the old code never
+reached its own `deleteAsync` — never deleted.
+
+That file is the best copy of the original error there is.
+`ErrorRecovery.crash()` builds the NSException it re-raises out of the initial
+error: `name` becomes `"RCTFatalException: <localizedDescription>"` and `reason`
+becomes `RCTFormatError(localizedDescription, userInfo[RCTJSStackTraceKey], 175)`
+(`ErrorRecovery.swift:258-267`), with the untruncated copy under
+`RCTUntruncatedMessageKey`. The AppDelegate handler persists `name`, `reason`,
+`userInfo` and `callStackSymbols` before `abort`. The JS message and the JS
+stack are in there.
+
+Fixed by reading through `new File(Paths.document, …)` with
+`expo-file-system/legacy` as the fallback for a pre-SDK-54 binary. Pure JS over
+the native module already in the binary, so it ships over OTA. A missing
+filesystem API now `console.warn`s instead of returning `null` quietly.
+
+Because the delete never ran, the payload from the most recent crash should
+still be on the two affected devices. The first launch on a bundle carrying this
+fix ships it to `analytics_events` and to Sentry via
+`lib/analytics/sentry-envelope.ts`.
+
+## What the launch actually was
+
+Read off the Sentry copies of the same crash (`DVNT-MOBILE-2`, 14 events, 2
+users, 1.0.343). Three events sampled across both devices and three days —
+`0951774b` iPhone18,1 09-07, `435cde2e` iPhone18,1 09-05, `260c69d8` iPad8,7
+09-05 — agree on all of this:
+
+- `app.is_active` is **false** in every one. The process never became active.
+- `app_start_time` to abort is **1-3 seconds**: 01:47:39→01:47:40,
+  20:15:58→20:15:59, 04:56:25→04:56:28.
+- The event timestamps cluster in ~30-minute pairs, several of them to the
+  second: 14:02:46 and 14:32:46; 01:17:01 and 01:47:40; 11:20:57, 11:51:40,
+  12:21:51. That is a scheduler, not a person opening an app.
+
+`lib/background-tasks/index.ts:57` registers four TaskManager jobs at
+`minimumInterval: 15` minutes, multiplexed under the one permitted identifier
+`com.expo.modules.backgroundtask.processing`
+(`ios/DVNT/Info.plist`). `UIBackgroundModes` is
+`voip, fetch, remote-notification, processing, audio`, so the OS has five ways
+to start this process without a user.
+
+That matters for the abort, not just for triage. `handleContentDidAppear`
+(`ErrorRecovery.swift:306-323`) is the only thing that ever calls
+`unsetRCTErrorHandlers`, and it fires off `RCTContentDidAppear`. A launch where
+no root view renders never fires it, so the fatal handlers stay armed for the
+whole life of that process. A JS error that a foreground session would have
+shown as a red box or swallowed becomes `RCTFatal` → `startPipeline` → SIGABRT.
+
+**Not yet proven:** that the crashing sessions are specifically the BGTask ones
+rather than some other non-active launch. `is_active: false` and a 30-minute
+cadence are consistent with it and with nothing else obvious, but no log ties an
+abort to a task run. The `analytics_events` row from the reader fix will say —
+the persisted `thread` field distinguishes a background worker from the main
+thread.
+
+## Disproven: no expo-updates setting avoids this
+
+Checked against the installed `expo-updates@57.0.12` source, not the docs.
+
+`apps/mobile/ios/DVNT/Supporting/Expo.plist` is what actually configures the
+native side (`app.config.js`'s `updates` block is only its input; `Info.plist`
+carries none of it):
+
+```
+EXUpdatesEnabled = true
+EXUpdatesCheckOnLaunch = ALWAYS
+EXUpdatesLaunchWaitMs = 0
+EXUpdatesRuntimeVersion = file:fingerprint
+EXUpdatesURL = https://u.expo.dev/5c0d13a3-…
+```
+
+The pipeline is built once, in the initializer, and tasks are only ever removed
+from it (`ErrorRecovery.swift:109-115`). `.crash` is the last element and
+nothing removes it. So:
+
+- `checkOnLaunch: ALWAYS` (from `checkAutomatically: "ON_LOAD"`) sends
+  `waitForRemoteLoaderToFinish` down the `isWaitingForRemoteUpdate = true`
+  branch at `:199-214`. The load is already in flight from launch, so `notify`
+  lands within a second and `runNextTask` reaches `.crash`. That is the observed
+  stack and the observed 1s.
+- `ERROR_RECOVERY_ONLY` and `WIFI_ONLY` take the same branch — `:199` only
+  tests `!= .Never`.
+- `NEVER` takes the `else` at `:215-219`, which removes `.launchNew` and calls
+  `runNextTask()` **immediately**. Same abort, sooner.
+- `launchWaitMs` and the runtime-version policy are not read anywhere in
+  `ErrorRecovery`.
+
+The only setting that removes the abort is `EXUpdatesEnabled = false`, which
+turns off OTA. There is no configuration fix here. Whatever throws has to stop
+throwing.
+
+## Unrelated bug found in the same sweep
+
+`plugins/with-app-controller-init.js` has never inserted
+`AppController.initializeWithoutStarting()` into the committed
+`AppDelegate.swift`. Its anchor required `let delegate` to follow `) -> Bool {`
+directly, which only holds on a clean prebuild; on an incremental one
+`with-uncaught-exception-handler`'s block sits between them. The regex missed,
+`modified` was set from `!content.includes(...)` rather than from the replace,
+and the plugin wrote the file back unchanged and reported success. The committed
+file shows both halves of that: it has the `internal import EXUpdates` the
+plugin adds, and no init call.
+
+Re-anchored on `let delegate = ReactNativeDelegate()`, which is the last
+statement before `factory.startReactNative(...)`, and a failed insertion now
+warns. `initializeWithoutStarting()` is idempotent
+(`AppController.swift:212-215` returns early when `_sharedInstance != nil`), so
+this cannot double-initialize.
+
+**This is not the SIGABRT.** The abort runs through `ErrorRecovery`, which
+requires a started `AppController`, so the missing call is demonstrably not
+blocking anything at launch. It also needs a native rebuild to take effect.
+
 ## Still open
 
-The specific JS fatal is **not identified**. Nothing in the crash reports, the
-five Sentry issues from 1.0.343 (the last build with a reporter), or the source
-names it. The next build makes it nameable; it does not fix it.
+The specific JS fatal is **not identified**. Neither sink has a record of it:
+`analytics_events` holds zero `app_issue` rows, and the five Sentry issues from
+1.0.343 do not include a fatal JS event. The one JS error there,
+`DVNT-MOBILE-4`, is tagged `handled: yes, level: error, mechanism: generic` —
+caught, 74s into an active session — so it is not the initial error either.
+
+What changed is that the record now gets read. The reader fix does not stop the
+crash; it is the last blocker between the crash and its reason string.
 
 Adjacent and confirmed, from the 1.0.343 Sentry window — all main-thread stalls,
 one of them a watchdog kill, none yet fixed:

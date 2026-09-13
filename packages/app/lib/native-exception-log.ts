@@ -79,47 +79,132 @@ function claimCrashSignature(signature: string): boolean {
   }
 }
 
-async function readAndClearAsync(): Promise<NativeExceptionPayload | null> {
-  if (Platform.OS !== "ios") return null;
+/** Written by the `NSSetUncaughtExceptionHandler` block in AppDelegate.swift
+ *  (installed by plugins/with-uncaught-exception-handler.js) into
+ *  `FileManager.default.urls(for: .documentDirectory, …)` — i.e. `<Documents>/`,
+ *  which is what both readers below resolve to. */
+const REPORT_FILENAME = "dvnt-uncaught-exception.json";
 
+/** The three operations this module needs, behind whichever expo-file-system
+ *  API the running binary actually has. */
+interface ReportFile {
+  exists(): Promise<boolean>;
+  read(): Promise<string>;
+  remove(): Promise<void>;
+}
+
+/**
+ * Resolve `<Documents>/dvnt-uncaught-exception.json`.
+ *
+ * WHY THIS IS NOT `FS.documentDirectory` ANY MORE — this is the whole reason
+ * the SIGABRT in `EXUpdates/ErrorRecovery.crash()` went five builds without a
+ * reason string attached to it:
+ *
+ * expo-file-system 57 dropped the legacy function API from the package root.
+ * `documentDirectory` is no longer exported at all (its `src/index.ts` re-exports
+ * only `Paths`, `File`, `Directory`, `UploadTask`/`DownloadTask`, types, and
+ * `legacyWarnings`), and `getInfoAsync` / `readAsStringAsync` / `deleteAsync`
+ * survive only as stubs in `src/legacyWarnings.ts` that `console.warn` and then
+ * `throw`.
+ *
+ * So the previous implementation read `FS.documentDirectory`, got `undefined`,
+ * and bailed at `if (!docs) return null` on **every** boot. The one artifact
+ * that carries the ORIGINAL exception — `ErrorRecovery.crash()` builds its
+ * NSException out of the initial error's `localizedDescription` plus
+ * `RCTFormatError(…, RCTJSStackTraceKey)`, so `reason` holds the JS message and
+ * the JS stack — was written to disk on every crash, read by nobody, and never
+ * even deleted. The `.crash` file records the re-raise; this file records the
+ * throw. Nothing else does.
+ *
+ * Consequence worth knowing: because the old reader never got as far as the
+ * delete, the payload from the most recent crash is still on disk on affected
+ * devices. The first launch on a bundle with this fix ships it.
+ *
+ * New API first. `expo-file-system/legacy` second, so a binary older than the
+ * SDK 54 filesystem rewrite still works — the package still exports that
+ * subpath. Both paths are pure JS over the same native module, so this ships
+ * over OTA; neither may throw.
+ */
+function openReportFile(): ReportFile | null {
   try {
-    // Dynamic require so a missing expo-file-system in the binary
-    // (shouldn't happen but defensive) can't take down boot.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const FS = require("expo-file-system");
-    const docs: string | null | undefined = FS?.documentDirectory;
-    if (!docs) return null;
-
-    const filePath = `${docs}dvnt-uncaught-exception.json`;
-    const info = await FS.getInfoAsync(filePath);
-    if (!info?.exists) return null;
-
-    const raw = await FS.readAsStringAsync(filePath);
-    let parsed: NativeExceptionPayload | null = null;
-    try {
-      parsed = JSON.parse(raw) as NativeExceptionPayload;
-    } catch {
-      // Corrupted file — clear it so we don't keep tripping on it.
-      try {
-        await FS.deleteAsync(filePath, { idempotent: true });
-      } catch {
-        /* ignore */
-      }
-      return null;
+    if (typeof FS?.File === "function" && FS?.Paths?.document) {
+      const file = new FS.File(FS.Paths.document, REPORT_FILENAME);
+      return {
+        // `exists` is a native getter, not a cached field — re-read each call.
+        exists: async () => Boolean(file.exists),
+        read: async () => await file.text(),
+        remove: async () => {
+          file.delete();
+        },
+      };
     }
+  } catch {
+    // Fall through to the legacy reader.
+  }
 
-    // Always clear AFTER successful parse so we don't double-report
-    // the same crash across sessions.
-    try {
-      await FS.deleteAsync(filePath, { idempotent: true });
-    } catch {
-      /* ignore */
-    }
-
-    return parsed;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Legacy = require("expo-file-system/legacy");
+    const docs: string | null | undefined = Legacy?.documentDirectory;
+    if (!docs || typeof Legacy?.getInfoAsync !== "function") return null;
+    const filePath = `${docs}${REPORT_FILENAME}`;
+    return {
+      exists: async () => Boolean((await Legacy.getInfoAsync(filePath))?.exists),
+      read: async () => await Legacy.readAsStringAsync(filePath),
+      remove: async () => {
+        await Legacy.deleteAsync(filePath, { idempotent: true });
+      },
+    };
   } catch {
     return null;
   }
+}
+
+async function readAndClearAsync(): Promise<NativeExceptionPayload | null> {
+  if (Platform.OS !== "ios") return null;
+
+  const file = openReportFile();
+  if (!file) {
+    // Loud on purpose. A silent `return null` here is exactly how this path
+    // stayed dead through builds 1.0.343-1.0.349.
+    console.warn(
+      "[NATIVE-CRASH] no usable expo-file-system API — prior-session NSException reports cannot be read",
+    );
+    return null;
+  }
+
+  let raw: string;
+  try {
+    if (!(await file.exists())) return null;
+    raw = await file.read();
+  } catch {
+    return null;
+  }
+
+  let parsed: NativeExceptionPayload | null = null;
+  try {
+    parsed = JSON.parse(raw) as NativeExceptionPayload;
+  } catch {
+    // Corrupted file — clear it so we don't keep tripping on it.
+    try {
+      await file.remove();
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  // Always clear AFTER successful parse so we don't double-report
+  // the same crash across sessions.
+  try {
+    await file.remove();
+  } catch {
+    /* ignore */
+  }
+
+  return parsed;
 }
 
 function logToConsole(report: NativeExceptionPayload): void {
