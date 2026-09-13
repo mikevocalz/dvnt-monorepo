@@ -464,7 +464,18 @@ export const eventsApi = {
       const { data, error } = await query;
       if (error) throw error;
 
-      const mapped = (data || []).map((event: any) => {
+      // Cancelled events must NOT stay in MY EVENTS. Cancelling is the only
+      // exit a host has for an event with ticket tiers, and this list had no
+      // status filter — so a cancelled event sat on the profile permanently
+      // with no way to clear it, which reads as "it won't let me delete this".
+      // Filtered in JS, not with .neq(): `status <> 'cancelled'` is NULL for
+      // the older rows whose status is NULL, and PostgREST would drop those
+      // too — hiding most of the list.
+      const visible = (data || []).filter(
+        (event: any) => event.status !== "cancelled",
+      );
+
+      const mapped = visible.map((event: any) => {
         const dateParts = formatEventDate(event[DB.events.startDate]);
         return {
           id: String(event[DB.events.id]),
@@ -506,7 +517,12 @@ export const eventsApi = {
         .limit(limit);
       if (error) throw error;
 
-      const mapped = (data || []).map((event: any) => {
+      // Same cancelled-event filter as getMyEvents — a cancelled event must
+      // not advertise itself on the host's public profile either. JS-side for
+      // the same NULL-status reason.
+      const mapped = (data || [])
+        .filter((event: any) => event.status !== "cancelled")
+        .map((event: any) => {
         const dateParts = formatEventDate(event[DB.events.startDate]);
         return {
           id: String(event[DB.events.id]),
