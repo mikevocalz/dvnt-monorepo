@@ -141,6 +141,28 @@ const FN_SAME_ORIGIN =
   typeof window !== "undefined";
 const FN_PREFIX = `${supabaseUrl}/functions/v1/`;
 
+/**
+ * Functions that must NOT go through the same-origin /api/fn proxy.
+ *
+ * The proxy is a Next rewrite, so the whole request body passes through the
+ * Next server — and a large body there dies with a bare "500 Internal Server
+ * Error" (no JSON, nothing the client can explain to the user). Verified
+ * 2026-09-13: a 19.8MB event-video POST to /api/fn/media-upload returned 500,
+ * while the identical body + token + anon key sent straight to
+ * supabase.co/functions/v1/media-upload returned 200 and stored the file.
+ * Vercel also caps serverless request bodies at 4.5MB, so in production this
+ * blocks EVERY video (they are always bigger) while letting small images
+ * through — which is exactly the reported symptom: image flyers upload, video
+ * flyers never do.
+ *
+ * media-upload is exempt so uploads go cross-origin. That is safe here: the
+ * function answers OPTIONS with 204 and allows Authorization/apikey/Content-
+ * Type/x-* in Access-Control-Allow-Headers, so the preflight passes. The
+ * privacy-extension fragility the proxy exists to avoid costs us a retry at
+ * worst; the proxy costs us the whole feature.
+ */
+const FN_PROXY_EXEMPT = ["media-upload"];
+
 const proxiedFetch: typeof fetch = (input, init) => {
   if (FN_SAME_ORIGIN) {
     const url =
@@ -149,7 +171,10 @@ const proxiedFetch: typeof fetch = (input, init) => {
         : input instanceof URL
           ? input.href
           : input.url;
-    if (url.startsWith(FN_PREFIX)) {
+    const isExempt = FN_PROXY_EXEMPT.some((fn) =>
+      url.startsWith(`${FN_PREFIX}${fn}`),
+    );
+    if (url.startsWith(FN_PREFIX) && !isExempt) {
       const proxied = `${window.location.origin}/api/fn/${url.slice(FN_PREFIX.length)}`;
       if (typeof input === "object" && !(input instanceof URL)) {
         return fetch(new Request(proxied, input as Request), init);

@@ -143,13 +143,27 @@ function errorResponse(message: string): Response {
 Deno.serve(async (req) => {
   // CORS preflight
   if (req.method === "OPTIONS") {
+    // Reflect whatever the browser asks for rather than maintaining a list.
+    //
+    // A hardcoded list kept failing this preflight one header at a time:
+    // supabase-js injects `x-client-info`, and Sentry's tracing injects
+    // `baggage` + `sentry-trace` into every outgoing fetch. Each omission
+    // reads identically to the client — net::ERR_FAILED with no server log —
+    // and any future SDK header would break it again. Reflection is safe
+    // here: the function authorizes every request from the Better Auth
+    // session token in the Authorization header, so allowing a header to be
+    // SENT grants nothing on its own, and Allow-Origin:* means the browser
+    // never attaches cookies.
+    const requested = req.headers.get("Access-Control-Request-Headers");
     return new Response(null, {
       status: 204,
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, DELETE, OPTIONS",
         "Access-Control-Allow-Headers":
-          "Authorization, apikey, Content-Type, x-file-name, x-mime, x-kind, x-duration-sec, x-width, x-height, x-keys, x-blurhash",
+          requested ??
+          "Authorization, apikey, Content-Type, x-client-info, x-supabase-api-version, x-file-name, x-mime, x-kind, x-duration-sec, x-width, x-height, x-keys, x-blurhash",
+        "Access-Control-Max-Age": "86400",
       },
     });
   }

@@ -99,6 +99,56 @@ function folderToKind(folder: string, mime?: string): string {
 }
 
 /**
+ * Per-kind byte ceilings — MUST mirror SIZE_LIMITS in the media-upload edge
+ * function (apps/mobile/supabase/functions/media-upload/index.ts). Keep in sync.
+ *
+ * Checked CLIENT-SIDE so an over-cap file is refused instantly instead of
+ * after minutes of doomed upload. The server does reject it correctly — a
+ * 52.4MB event-video returns "File too large for event-video: 52.44MB
+ * exceeds 50.0MB limit" (verified against production 2026-09-13, alongside
+ * successful uploads at 8/18/31/47MB) — but only AFTER the whole file has
+ * been sent. On a phone that is minutes of waiting, and on iOS Safari the
+ * tab can die building a multi-hundred-MB body before the request is even
+ * made, which surfaces as nothing at all.
+ *
+ * Real 60s iPhone footage is 60-400MB, so this ceiling is reached constantly.
+ * The paired fix is `videoQuality` on the library picker
+ * (lib/hooks/use-media-picker.ts) — without it iOS hands back the
+ * uncompressed original and nothing fits.
+ */
+const KIND_SIZE_LIMITS: Record<string, number> = {
+  "event-video": 50 * 1024 * 1024,
+  "event-moment-video": 50 * 1024 * 1024,
+  "post-video": 50 * 1024 * 1024,
+  "story-video": 50 * 1024 * 1024,
+  "message-video": 50 * 1024 * 1024,
+};
+
+/** Default ceiling for kinds not listed above (images). */
+const DEFAULT_SIZE_LIMIT = 25 * 1024 * 1024;
+
+function sizeLimitForKind(kind: string): number {
+  return KIND_SIZE_LIMITS[kind] ?? DEFAULT_SIZE_LIMIT;
+}
+
+/** Human-readable MB, no trailing ".0". */
+function mb(bytes: number): string {
+  const v = bytes / (1024 * 1024);
+  return v >= 10 ? String(Math.round(v)) : v.toFixed(1).replace(/\.0$/, "");
+}
+
+/**
+ * Shared over-cap message. Names the real numbers — "too large" with no
+ * figures leaves the user re-picking the same doomed file.
+ */
+function tooLargeError(bytes: number, kind: string, isVideo: boolean): string {
+  const limit = sizeLimitForKind(kind);
+  return isVideo
+    ? `That video is ${mb(bytes)}MB — the limit is ${mb(limit)}MB. Trim it shorter or pick a lower-resolution clip.`
+    : `That file is ${mb(bytes)}MB — the limit is ${mb(limit)}MB.`;
+}
+
+/**
  * Get mime type from file extension
  */
 function getMimeFromUri(uri: string): string {
@@ -237,6 +287,16 @@ async function uploadToServerImpl(
         const blob = await resp.blob();
         const mime = blob.type || getMimeFromUri(uri);
         const kind = folderToKind(folder, mime);
+        // Refuse over-cap BEFORE sending — see KIND_SIZE_LIMITS.
+        if (blob.size > sizeLimitForKind(kind)) {
+          return {
+            success: false,
+            url: "",
+            path: "",
+            filename: "",
+            error: tooLargeError(blob.size, kind, mime.startsWith("video/")),
+          };
+        }
         const filename = `upload_${Date.now()}.${getExtension(uri, mime)}`;
         onProgress?.({ loaded: 10, total: 100, percentage: 10 });
         const form = new FormData();
@@ -254,7 +314,28 @@ async function uploadToServerImpl(
             body: form,
             headers: { Authorization: `Bearer ${authToken}` },
           });
-        if (invokeErr) throw invokeErr;
+        // supabase-js collapses any non-2xx into "Edge Function returned a
+        // non-2xx status code" and hides the response on `.context`. The
+        // function's own validation failures come back as HTTP 200 + ok:false,
+        // so a non-2xx here means the function itself errored or the worker
+        // died — exactly the case where the real status/body is the only clue.
+        if (invokeErr) {
+          const ctx = (invokeErr as { context?: unknown }).context;
+          let detail = "";
+          if (ctx && typeof ctx === "object" && "status" in ctx) {
+            const resp = ctx as Response;
+            const text = await resp.text().catch(() => "");
+            detail = ` (HTTP ${resp.status}${text ? `: ${text.slice(0, 200)}` : ""})`;
+          }
+          console.error("[ServerUpload] invoke failed:", invokeErr.message, detail);
+          return {
+            success: false,
+            url: "",
+            path: "",
+            filename: "",
+            error: `${invokeErr.message}${detail}`,
+          };
+        }
         if (body?.ok) {
           onProgress?.({ loaded: 100, total: 100, percentage: 100 });
           return {
@@ -294,6 +375,19 @@ async function uploadToServerImpl(
       );
     }
     const kind = folderToKind(folder, mime);
+    // Refuse over-cap BEFORE sending — see KIND_SIZE_LIMITS. `size` is present
+    // on the info object whenever the file exists, which the check above
+    // already established.
+    const localSize = (accessibleInfo as { size?: number }).size;
+    if (typeof localSize === "number" && localSize > sizeLimitForKind(kind)) {
+      return {
+        success: false,
+        url: "",
+        path: "",
+        filename: "",
+        error: tooLargeError(localSize, kind, mime.startsWith("video/")),
+      };
+    }
     const filename = accessibleUri.split("/").pop() || "upload";
 
     onProgress?.({ loaded: 0, total: 100, percentage: 10 });

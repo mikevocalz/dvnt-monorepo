@@ -85,6 +85,12 @@ export function useMediaPicker() {
         allowsMultipleSelection: allowMultiple,
         quality: 1,
         videoMaxDuration: 60,
+        // Without this, videoExportPreset defaults to Passthrough — iOS hands
+        // back the ORIGINAL file. 60s of iPhone footage is 60-400MB, and
+        // media-upload caps event/post video at 50MB, so every video picked
+        // here (event flyer included) was doomed before it left the device.
+        // Every other picker in this file already sets Medium.
+        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
         selectionLimit: options?.maxSelection ?? 10,
       });
 
