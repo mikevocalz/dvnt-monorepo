@@ -71,6 +71,13 @@ class AppDelegate: ExpoAppDelegate {
       // continue. The runtime is unwound; recovery is undefined.
     }
 
+    // CRITICAL: Initialize AppController before React starts. Otherwise ExpoUpdatesReactDelegateHandler
+    // (and others) access AppController.sharedInstance during bundleURL() → assertion crash.
+    // See: https://github.com/expo/expo/issues/32650
+    // NOTE: Do NOT call controller.start() here — ExpoUpdatesReactDelegateHandler.createReactRootView()
+    // already calls start(), and calling it twice triggers a precondition crash (SIGTRAP).
+    AppController.initializeWithoutStarting()
+
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()

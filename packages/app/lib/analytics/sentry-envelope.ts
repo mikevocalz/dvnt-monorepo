@@ -43,6 +43,19 @@ export function parseDsn(dsn: string | undefined | null): DsnParts | null {
   };
 }
 
+let _warnedMissingDsn = false;
+/** Once per session — this is called from error paths, which can be hot. */
+function warnMissingDsnOnce(): void {
+  if (_warnedMissingDsn) return;
+  _warnedMissingDsn = true;
+  console.warn(
+    "[Sentry] EXPO_PUBLIC_SENTRY_DSN is missing or malformed — crash reports " +
+      "are NOT reaching Sentry. Set it as an EAS environment variable for the " +
+      "build's environment (it is gitignored in apps/mobile/.env and absent " +
+      "from eas.json's env block).",
+  );
+}
+
 /** 32 lowercase hex chars, the event_id shape Sentry requires. */
 function eventId(): string {
   let out = "";
@@ -109,9 +122,16 @@ export function sendToSentry(
 ): void {
   try {
     const parts = parseDsn(dsn);
-    // No DSN configured (web, tests, a fork without one) — stay silent rather
-    // than logging on every error.
-    if (!parts) return;
+    if (!parts) {
+      // Say it once. `EXPO_PUBLIC_SENTRY_DSN` lives in apps/mobile/.env, which
+      // is gitignored, so an EAS build only has it because it is also set as an
+      // EAS environment variable — and eas.json's `env` block does NOT list
+      // it. If that var is ever dropped, this function becomes a no-op and
+      // crash reporting dies silently, which is the exact five-build blind
+      // spot this file was written to end. Warn rather than return quietly.
+      warnMissingDsnOnce();
+      return;
+    }
 
     const id = eventId();
     const nowSec = Date.now() / 1000;
