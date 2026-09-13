@@ -68,6 +68,39 @@ export function reportIssue(
         // module (lib/outbox/drain.ts, and this module's own test) does not
         // drag in react-native or the Supabase client.
         const { Platform } = await import("react-native");
+
+        // Sentry FIRST, and independently of the row insert.
+        //
+        // `analytics_events` is write-only by RLS, so nothing in the app can
+        // read a crash back — diagnosing one means opening the SQL editor, and
+        // a reporter you have to run a query against is a reporter nobody
+        // checks. This puts the same error in dvnt-mobile where it groups,
+        // dedupes and alerts. Sent with fetch rather than the native SDK so it
+        // ships OTA; see lib/analytics/sentry-envelope.ts for why.
+        try {
+          const { sendToSentry } = await import(
+            "@dvnt/app/lib/analytics/sentry-envelope"
+          );
+          const reason =
+            (detail.reason as string | undefined) ??
+            (detail.message as string | undefined) ??
+            (detail.error as string | undefined) ??
+            featureArea;
+          sendToSentry(
+            {
+              name: (detail.name as string | undefined) ?? null,
+              message: String(reason),
+              stack: (detail.stack as string | undefined) ?? null,
+              featureArea,
+              platform: Platform.OS,
+              extra: metadata,
+            },
+            process.env.EXPO_PUBLIC_SENTRY_DSN,
+          );
+        } catch {
+          // Never let the Sentry sink stop the row insert below.
+        }
+
         const { supabase } = await import("@dvnt/app/lib/supabase/client");
         await supabase.from("analytics_events").insert({
           event: "app_issue",
