@@ -5,7 +5,7 @@
  */
 import { View, ViewStyle } from "react-native";
 import { VideoView, useVideoPlayer } from "expo-video";
-import { useEffect, useRef, type ComponentProps } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 
 interface DVNTAnimatedVideoViewProps {
   uri: string;
@@ -36,7 +36,24 @@ export function DVNTAnimatedVideoView({
     };
   }, []);
 
-  const player = useVideoPlayer(uri, (p) => {
+  // Don't build the asset until this view is actually meant to play.
+  //
+  // `useVideoPlayer` constructs an AVPlayer and an AVURLAsset, and
+  // `AVURLAsset initWithURL:` blocks the calling thread on a synchronous XPC
+  // round trip to the media server — for a remote URL that includes fetching
+  // the moov atom. One is fine; a list of them on the main thread is Sentry
+  // DVNT-MOBILE-5 (watchdog kill after 5000ms in `VideoAsset.init`) and
+  // DVNT-MOBILE-6 / -3. Passing `null` as the source defers that entirely, and
+  // expo-video treats a nil source as "no item" rather than an empty URL.
+  //
+  // Latched, not mirrored: once a card has been visible we keep its player so
+  // scrolling back and forth doesn't re-fetch and re-decode on every pass.
+  const [shouldLoad, setShouldLoad] = useState(isPlaying);
+  useEffect(() => {
+    if (isPlaying) setShouldLoad(true);
+  }, [isPlaying]);
+
+  const player = useVideoPlayer(shouldLoad ? uri : null, (p) => {
     p.loop = true;
     p.muted = muted;
     // CRITICAL: mix with other audio sessions so a muted feed loop

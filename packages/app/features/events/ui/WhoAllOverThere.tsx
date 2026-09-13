@@ -262,27 +262,29 @@ const MomentViewer = memo(function MomentViewer({
   );
 });
 
-// Paused-frame video thumb. Reliable across iOS + Android because we
-// just hand the URL to expo-video and let it render the first frame.
-// expo-video-thumbnails would silently fail on a chunk of legacy
-// remote videos — this avoids that whole class of bug.
-const VideoFrameThumb = memo(function VideoFrameThumb({ uri }: { uri: string }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = false;
-    p.muted = true;
-    p.pause();
-  });
-  // Wrapper View takes the pointerEvents prop so taps pass through to
-  // the outer Pressable. VideoView itself doesn't forward pointerEvents
-  // reliably across platforms.
+/**
+ * Placeholder tile for a video with no stored thumbnail.
+ *
+ * This used to mount a real `useVideoPlayer` per tile to render frame 0. Each
+ * one builds an AVPlayer and an AVURLAsset, and `AVURLAsset initWithURL:`
+ * blocks the calling thread on a synchronous XPC round trip to the media
+ * server — which for a remote URL includes fetching the moov atom. The tray is
+ * a plain `ScrollView` + `.map()` over up to 30 moments, so opening an event
+ * could fire 30 of those on the main thread at once. That is Sentry
+ * DVNT-MOBILE-5 (fatal, watchdog killed the app after 5000ms in
+ * `VideoAsset.init` -> `xpc_connection_send_message_with_reply_sync`) plus
+ * DVNT-MOBILE-6 and DVNT-MOBILE-3 (4.8-5.6s and 3.2-4.0s hangs).
+ *
+ * A video player is the wrong tool for an 80pt tile that already carries a
+ * play badge and a duration badge. New uploads get a real poster — the picker
+ * generates one with VideoThumbnails from the LOCAL file and stores it in
+ * `thumbnail_url` — so this only shows for legacy moments and for the rare
+ * upload whose thumbnail step failed.
+ */
+const VideoPlaceholderThumb = memo(function VideoPlaceholderThumb() {
   return (
-    <View pointerEvents="none" style={trayStyles.thumbImg}>
-      <VideoView
-        player={player}
-        style={StyleSheet.absoluteFill}
-        contentFit="cover"
-        nativeControls={false}
-      />
+    <View pointerEvents="none" style={trayStyles.videoFallback}>
+      <Play size={20} color="rgba(255,255,255,0.8)" fill="rgba(255,255,255,0.8)" />
     </View>
   );
 });
@@ -322,7 +324,7 @@ const MomentThumb = memo(function MomentThumb({
           transition={120}
         />
       ) : (
-        <VideoFrameThumb uri={moment.media_url} />
+        <VideoPlaceholderThumb />
       )}
       {isVideo && (
         <View style={trayStyles.playBadge}>
