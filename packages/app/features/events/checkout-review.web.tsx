@@ -28,6 +28,12 @@ import { create } from "zustand";
 import { useQuery } from "@tanstack/react-query";
 import { loadStripe } from "@stripe/stripe-js";
 import {
+  Elements,
+  PaymentElement,
+  useElements,
+  useStripe,
+} from "@stripe/react-stripe-js";
+import {
   ArrowLeft,
   CreditCard,
   Minus,
@@ -88,6 +94,124 @@ const usePromoStore = create<PromoState>((set) => ({
   promoApplying: false,
   setPromoApplying: (promoApplying) => set({ promoApplying }),
 }));
+
+/**
+ * The PaymentIntent, once cart-checkout has minted one. Holding it in state is
+ * what lets the card form exist at all: `confirmCardPayment(clientSecret)` used
+ * to be called here with no Elements mounted and no payment_method attached to
+ * the intent (cart-checkout attaches none — see its automatic_payment_methods
+ * branch), so it could never charge anyone. Web paid checkout now mounts
+ * <Elements> against this secret and confirms with the card the buyer enters.
+ */
+type PendingPayment = {
+  clientSecret: string;
+  publishableKey: string;
+  paymentIntentId: string;
+};
+interface PaymentState {
+  payment: PendingPayment | null;
+  setPayment: (p: PendingPayment | null) => void;
+}
+const usePendingPaymentStore = create<PaymentState>((set) => ({
+  payment: null,
+  setPayment: (payment) => set({ payment }),
+}));
+
+/** Memoised per publishable key — loadStripe must not run on every render. */
+const stripePromiseCache = new Map<string, ReturnType<typeof loadStripe>>();
+function stripePromiseFor(publishableKey: string) {
+  let p = stripePromiseCache.get(publishableKey);
+  if (!p) {
+    p = loadStripe(publishableKey);
+    stripePromiseCache.set(publishableKey, p);
+  }
+  return p;
+}
+
+/**
+ * Card entry — rendered inside <Elements>, which is the only place Stripe will
+ * hand us a mounted PaymentElement. Mirrors the shipped add-card form in
+ * settings/payment-methods.web.tsx so checkout and settings collect a card the
+ * same way.
+ */
+function CartPayForm({
+  totalLabel,
+  onPaid,
+}: {
+  totalLabel: string;
+  onPaid: (paymentIntentId: string) => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const payment = usePendingPaymentStore((s) => s.payment);
+  const setPayment = usePendingPaymentStore((s) => s.setPayment);
+  const showToast = useUIStore((s) => s.showToast);
+  const isLoading = usePaymentsStore((s) => s.checkoutLoading);
+  const setCheckoutLoading = usePaymentsStore((s) => s.setCheckoutLoading);
+
+  const handlePay = useCallback(async () => {
+    if (!stripe || !elements || !payment) return;
+    setCheckoutLoading(true);
+    try {
+      const { error: submitError } = await elements.submit();
+      if (submitError) {
+        showToast(
+          "error",
+          "Check your card",
+          submitError.message || "Those card details didn't work.",
+        );
+        return;
+      }
+      const { error } = await stripe.confirmPayment({
+        elements,
+        redirect: "if_required",
+      });
+      if (error) {
+        AppTrace.error("CART", "mixed_cart_payment_sheet_failed", {
+          paymentIntentId: payment.paymentIntentId,
+          error: error.message,
+        });
+        showToast(
+          "error",
+          "Payment failed",
+          error.message || "Your card was not charged.",
+        );
+        return;
+      }
+      AppTrace.trace("CART", "mixed_cart_payment_sheet_succeeded", {
+        paymentIntentId: payment.paymentIntentId,
+      });
+      setPayment(null);
+      onPaid(payment.paymentIntentId);
+    } finally {
+      setCheckoutLoading(false);
+    }
+  }, [
+    stripe,
+    elements,
+    payment,
+    setPayment,
+    setCheckoutLoading,
+    showToast,
+    onPaid,
+  ]);
+
+  return (
+    <div className="mt-4">
+      <div className="rounded-xl border border-white/10 bg-white/6 p-4">
+        <PaymentElement />
+      </div>
+      <button
+        type="button"
+        disabled={isLoading || !stripe || !elements}
+        onClick={handlePay}
+        className="mt-4 h-12 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] font-bold text-white disabled:opacity-50"
+      >
+        {isLoading ? "Paying…" : `Pay ${totalLabel}`}
+      </button>
+    </div>
+  );
+}
 
 const CATEGORY_LABELS: Record<LineItemCategory, string> = {
   admission: "Admission",
@@ -355,6 +479,18 @@ export function CheckoutReviewScreen() {
   const clearCart = useCartStore((state) => state.clearCart);
   const setHold = useCartStore((state) => state.setHold);
   const setPaymentIntent = useCartStore((state) => state.setPaymentIntent);
+  const pendingPayment = usePendingPaymentStore((s) => s.payment);
+  const setPendingPayment = usePendingPaymentStore((s) => s.setPayment);
+
+  // Leaving the screen must not strand a half-finished payment on the next
+  // visit — the client secret belongs to a hold that has already expired by
+  // then, and Stripe would render a dead form against it.
+  useEffect(() => () => setPendingPayment(null), [setPendingPayment]);
+
+  const handlePaid = useCallback(() => {
+    showToast("success", "Payment received");
+    router.replace("/feed/checkout/success");
+  }, [router, showToast]);
 
   const isLoading = usePaymentsStore((state) => state.checkoutLoading);
   const setCheckoutLoading = usePaymentsStore(
@@ -547,35 +683,26 @@ export function CheckoutReviewScreen() {
         );
       }
 
-      const stripe = await loadStripe(payment.publishableKey);
-      if (!stripe) throw new Error("Failed to initialize payment");
-
-      const { error: confirmError } = await stripe.confirmCardPayment(
-        payment.clientSecret,
-      );
-      if (confirmError) {
-        AppTrace.error("CART", "mixed_cart_payment_sheet_failed", {
-          cartId: cart.cartId,
-          paymentIntentId: payment.paymentIntentId,
-          error: confirmError.message,
-        });
-        throw new Error(confirmError.message || "Payment failed");
+      if (!payment.publishableKey || !payment.clientSecret) {
+        throw new Error("Could not start payment. Please try again.");
       }
 
-      AppTrace.trace("CART", "mixed_cart_payment_sheet_succeeded", {
-        cartId: cart.cartId,
+      // Hand off to <CartPayForm> below. The card itself is collected there;
+      // confirming here is impossible — there is no card to confirm with yet.
+      setPendingPayment({
+        clientSecret: payment.clientSecret,
+        publishableKey: payment.publishableKey,
         paymentIntentId: payment.paymentIntentId,
       });
-      showToast("success", "Payment received");
-      router.replace("/feed/checkout/success");
+      return;
     } catch (error: unknown) {
       const message =
         error instanceof Error ? error.message : "Checkout failed";
       AppTrace.error("CART", "mixed_cart_checkout_failed", {
-        cartId: cart.cartId,
+        cartId: cart?.cartId,
         error: message,
       });
-      showToast("error", message);
+      showToast("error", "Checkout failed", message);
     } finally {
       setCheckoutLoading(false);
     }
@@ -584,12 +711,13 @@ export function CheckoutReviewScreen() {
     lineItems.length,
     fees.customer_charge_amount,
     appliedPromo,
-    router,
     setCheckoutLoading,
     setHold,
     setPaymentIntent,
+    setPendingPayment,
     showToast,
   ]);
+
 
   const holdLabel =
     cart?.holdExpiresAt && cart.holdExpiresAt > Date.now()
@@ -753,18 +881,35 @@ export function CheckoutReviewScreen() {
                 </span>
               </div>
 
-              {/* Place order */}
-              <button
-                type="button"
-                onClick={handlePlaceOrder}
-                disabled={isEmpty || isLoading}
-                className="mt-4 flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-[#3FDCFF] text-[#06070d] active:scale-[0.99] disabled:opacity-45"
-              >
-                <CreditCard size={18} className="text-[#06070d]" />
-                <span className="text-[15px] font-extrabold">
-                  {isLoading ? "Processing…" : "Pay"}
-                </span>
-              </button>
+              {/* Place order → card entry. Two steps because the
+                  PaymentIntent has to exist before Stripe will mount a
+                  PaymentElement against its client secret. */}
+              {pendingPayment ? (
+                <Elements
+                  stripe={stripePromiseFor(pendingPayment.publishableKey)}
+                  options={{
+                    clientSecret: pendingPayment.clientSecret,
+                    appearance: { theme: "night", labels: "floating" },
+                  }}
+                >
+                  <CartPayForm
+                    totalLabel={formatCents(fees.customer_charge_amount)}
+                    onPaid={handlePaid}
+                  />
+                </Elements>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handlePlaceOrder}
+                  disabled={isEmpty || isLoading}
+                  className="mt-4 flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-[#3FDCFF] text-[#06070d] active:scale-[0.99] disabled:opacity-45"
+                >
+                  <CreditCard size={18} className="text-[#06070d]" />
+                  <span className="text-[15px] font-extrabold">
+                    {isLoading ? "Processing…" : "Continue to payment"}
+                  </span>
+                </button>
+              )}
 
               {/* Terms */}
               <p className="mt-3 text-center text-xs leading-5 text-white/45">
