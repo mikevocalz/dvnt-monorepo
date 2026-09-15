@@ -204,6 +204,19 @@ const nextConfig: NextConfig = {
         destination: '/feed/sneaky-lynk/:path*',
         permanent: false,
       },
+      // Same deal for tickets: native routes the pass at /(protected)/ticket/[id],
+      // and shared "View ticket" links go out with that bare path. Without this
+      // they land on the Next 404.
+      {
+        source: '/ticket/:path*',
+        destination: '/feed/ticket/:path*',
+        permanent: false,
+      },
+      {
+        source: '/events/my-tickets',
+        destination: '/feed/events/my-tickets',
+        permanent: false,
+      },
     ];
   },
   webpack: (config, { webpack }) => {

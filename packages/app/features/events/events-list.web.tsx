@@ -250,7 +250,7 @@ export function EventsListScreen() {
                 hide it entirely (PROMPT 13 §4: gate member affordances). */}
             {isAuthenticated ? (
               <button
-                onClick={() => router.push("/events/my-tickets")}
+                onClick={() => router.push("/feed/events/my-tickets")}
                 className="h-10 px-3.5 rounded-xl border border-white/12 bg-white/[0.06] flex items-center gap-1.5 text-sm font-semibold"
               >
                 <Ticket size={16} color="#379ED8" />

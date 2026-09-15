@@ -77,7 +77,7 @@ export function DebugTransitionsScreen() {
       title: "Ticket Preview → Detail",
       subtitle: "Compact ticket preview transitioning into the luxury pass detail.",
       source: `ticket event #${DEMO_TICKET_EVENT_ID}`,
-      webRoute: `/ticket/${DEMO_TICKET_EVENT_ID}`,
+      webRoute: `/feed/ticket/${DEMO_TICKET_EVENT_ID}`,
     },
   ];
 

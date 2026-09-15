@@ -91,7 +91,7 @@ export function AccountScreen() {
       );
       setShowDeleteConfirm(false);
       logout();
-      router.replace("/login");
+      router.replace("/auth/login");
     } catch (err: any) {
       showToast("error", "Failed to delete account", err?.message || "Something went wrong");
     } finally {

@@ -50,7 +50,7 @@ function BlockedUserRow({
 
   return (
     <div
-      onClick={() => router.push(`/user/${user.username}`)}
+      onClick={() => router.push(`/profile/${user.username}`)}
       role="button"
       className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/4 p-3 cursor-pointer active:bg-white/6"
     >

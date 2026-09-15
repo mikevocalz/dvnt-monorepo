@@ -1170,7 +1170,7 @@ export function EventDetailScreen() {
             if (hasTicket) {
               return (
                 <button
-                  onClick={() => router.push(`/ticket/${eventId}`)}
+                  onClick={() => router.push(`/feed/ticket/${eventId}`)}
                   className="w-full mt-4 h-12 rounded-xl bg-white/10 text-white font-bold flex items-center justify-center gap-2"
                 >
                   <Ticket size={18} color="#379ED8" /> View ticket

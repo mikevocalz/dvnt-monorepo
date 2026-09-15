@@ -98,7 +98,7 @@ export function SettingsHomeScreen() {
 
   const handleLogout = async () => {
     await logout();
-    router.replace("/login");
+    router.replace("/auth/login");
   };
 
   const go = (path: string) => () => router.push(path);
