@@ -691,8 +691,11 @@ function EventDetailScreenContent() {
         // so the key is stable across renders and still unique when the payload
         // is incomplete.
         id: String(a.id || a.username || `attendee-${i}`),
-        avatar: a.avatar || "",
+        // get_event_attendee_avatars has shipped both `avatar` and `image`
+        // for the URL depending on version — accept either plus `url`.
+        avatar: a.avatar || a.image || a.url || "",
         username: a.username || "",
+        initials: a.initials || "",
         color: "#3b82f6",
       }));
     }
