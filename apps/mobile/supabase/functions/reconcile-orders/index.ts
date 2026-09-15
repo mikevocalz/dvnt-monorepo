@@ -14,6 +14,8 @@ import { withSentry } from "../_shared/sentry.ts";
 import { withHeartbeat, tryClaimJob, releaseJob } from "../_shared/heartbeat.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
+import { handleCartPaymentIntentSucceeded } from "../_shared/cart-issuance.ts";
+import { issueTicketsForCheckoutSession } from "../_shared/session-issuance.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -87,9 +89,10 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
     const cutoff = new Date(
       Date.now() - hoursBack * 60 * 60 * 1000,
     ).toISOString();
-    // needs_attention: paid at Stripe, no tickets, and this job cannot issue
-    // for that rail. Non-zero means a buyer has paid and is waiting — the
-    // signal that used to be swallowed entirely.
+    // needs_attention: paid at Stripe, no tickets, and no rail could issue
+    // (no cart metadata, no session metadata, no hold). Non-zero means a
+    // buyer has paid and is waiting — the signal that used to be swallowed
+    // entirely.
     const stats = {
       reconciled: 0,
       expired_holds: 0,
@@ -133,6 +136,10 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
         // it to 'paid' with zero tickets and never selecting it again.
         let resolvedPaymentIntentId: string | null =
           order.stripe_payment_intent_id ?? null;
+        // deno-lint-ignore no-explicit-any
+        let checkoutSession: any = null;
+        // deno-lint-ignore no-explicit-any
+        let paymentIntentObj: any = null;
 
         // Check PaymentIntent status
         if (order.stripe_payment_intent_id) {
@@ -141,7 +148,18 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
             { headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` } },
           );
           const pi = await piRes.json();
+          paymentIntentObj = pi;
           piStatus = pi.status || "unknown";
+
+          // Orders stamped with a PI by an earlier sweep also carry the
+          // session id — fetch it so the session rail below can issue.
+          if (order.stripe_checkout_session_id) {
+            const csRes = await fetch(
+              `https://api.stripe.com/v1/checkout/sessions/${order.stripe_checkout_session_id}`,
+              { headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` } },
+            );
+            checkoutSession = await csRes.json();
+          }
         }
         // Check Checkout Session status
         else if (order.stripe_checkout_session_id) {
@@ -150,6 +168,7 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
             { headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` } },
           );
           const cs = await csRes.json();
+          checkoutSession = cs;
           piStatus = cs.payment_status || "unknown";
           if (typeof cs.payment_intent === "string" && cs.payment_intent) {
             resolvedPaymentIntentId = cs.payment_intent;
@@ -201,10 +220,96 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
                 .eq("stripe_payment_intent_id", resolvedPaymentIntentId)
             : { count: 0 };
 
-          // The cart rail's issuance is the webhook's cart_complete_issuance
-          // path; replaying it here would risk double-issuing, which is worse
-          // than waiting. Same for guest tickets, which need the lookup token
-          // and confirmation email the webhook sends.
+          if ((alreadyIssued || 0) === 0 && orderRow.cart_id) {
+            // Cart rail: cart_complete_issuance is idempotent
+            // (duplicate:true on replay) and flips the order to paid itself.
+            if (!paymentIntentObj && resolvedPaymentIntentId) {
+              const r = await fetch(
+                `https://api.stripe.com/v1/payment_intents/${resolvedPaymentIntentId}`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+                  },
+                },
+              );
+              paymentIntentObj = await r.json();
+            }
+            if (!paymentIntentObj?.metadata?.cart_id) {
+              stats.needs_attention = (stats.needs_attention ?? 0) + 1;
+              console.error(
+                `[reconcile] PAID BUT UNISSUED order=${order.id} pi=${resolvedPaymentIntentId} cart=${orderRow.cart_id} — PaymentIntent is missing cart metadata; not claiming`,
+              );
+              await supabase.from("order_timeline").insert({
+                order_id: order.id,
+                type: "reconcile_blocked",
+                label: "Paid, tickets not issued yet",
+                detail:
+                  "Payment confirmed at Stripe but the PaymentIntent has no cart metadata, so this job cannot replay cart issuance. Left pending; retried each run.",
+              });
+              continue;
+            }
+            await handleCartPaymentIntentSucceeded(supabase, paymentIntentObj);
+            // The handler returns true for success, duplicate AND the
+            // allocation-failure path (refund + payment_failed) — re-read
+            // the order status to tell them apart.
+            const { data: postCartOrder } = await supabase
+              .from("orders")
+              .select("status")
+              .eq("id", order.id)
+              .single();
+            if (postCartOrder?.status === "paid") {
+              await supabase.from("order_timeline").insert({
+                order_id: order.id,
+                type: "reconciled",
+                label: "Payment reconciled",
+                detail:
+                  "Cart issuance replayed by reconciliation job — webhook was missed",
+              });
+              stats.reconciled++;
+              console.log(
+                `[reconcile] Order ${order.id} cart-issued → paid`,
+              );
+            } else {
+              stats.failed++;
+              console.error(
+                `[reconcile] Order ${order.id} cart issuance did not complete (status=${postCartOrder?.status})`,
+              );
+            }
+            continue;
+          }
+
+          if (
+            (alreadyIssued || 0) === 0 &&
+            checkoutSession?.metadata?.type === "event_ticket"
+          ) {
+            // Session rail (guest + authed hosted checkout). Idempotent via
+            // the (session_id, order_index) unique index; flips the order to
+            // paid itself.
+            const result = await issueTicketsForCheckoutSession(
+              supabase,
+              checkoutSession,
+              {
+                eventCreatedAt: new Date().toISOString(),
+                logPrefix: "[reconcile]",
+              },
+            );
+            await supabase.from("order_timeline").insert({
+              order_id: order.id,
+              type: "reconciled",
+              label: "Payment reconciled",
+              detail: result.alreadyIssued
+                ? "Tickets already existed; order state repaired by reconciliation job"
+                : `${result.issued} ticket(s) issued by reconciliation job — webhook was missed`,
+            });
+            stats.reconciled++;
+            console.log(
+              `[reconcile] Order ${order.id} session-issued → paid`,
+            );
+            continue;
+          }
+
+          // PaymentSheet rail only: carts and session orders were dispatched
+          // above; anything else without a hold to issue from stays pending.
           const canIssueHere =
             !orderRow.cart_id &&
             !orderRow.guest_email &&
