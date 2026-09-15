@@ -230,21 +230,15 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── Check availability (including existing holds) ────────
+    // ── Availability ─────────────────────────────────────────
+    // The real check is now the atomic one at the hold below
+    // (ticket_hold_create_atomic: locks the tier, sums BOTH cart_holds and
+    // ticket_holds by seat). This early read stays only so an obviously
+    // sold-out tier fails before we bother Stripe — it is advisory, and
+    // deliberately NOT the thing inventory correctness rests on.
     const remaining =
-      (ticketType.quantity_total || Infinity) - (ticketType.quantity_sold || 0);
-
-    // Count active holds for this ticket type (not expired, not converted)
-    const { count: activeHolds } = await supabase
-      .from("ticket_holds")
-      .select("*", { count: "exact", head: true })
-      .eq("ticket_type_id", ticket_type_id)
-      .eq("status", "active")
-      .gt("expires_at", new Date().toISOString());
-
-    const effectiveRemaining = remaining - (activeHolds || 0);
-
-    if (quantity > effectiveRemaining) {
+      (ticketType.quantity_total ?? Infinity) - (ticketType.quantity_sold || 0);
+    if (quantity > remaining) {
       return json({ error: "Not enough tickets available" }, 400);
     }
 
@@ -492,19 +486,52 @@ Deno.serve(async (req: Request) => {
     );
     const ephemeralKey = await ephemeralRes.json();
 
-    // ── Create inventory hold ───────────────────────────
+    // ── Create inventory hold (ATOMIC) ──────────────────
+    // Locks the tier row and sums BOTH cart_holds and ticket_holds by seat,
+    // so the last seat can only be claimed once. The plain INSERT this
+    // replaces trusted a count read before the Stripe round trip above, which
+    // let two simultaneous buyers hold the same seat — and never looked at
+    // cart_holds at all, so the cart rail's reservations were invisible.
     const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    await supabase.from("ticket_holds").insert({
-      user_id,
-      ticket_type_id,
-      event_id: parseInt(event_id),
-      quantity,
-      payment_intent_id: pi.id,
-      status: "active",
-      expires_at: holdExpiresAt,
-    });
+    const { data: holdResult, error: holdRpcError } = await supabase.rpc(
+      "ticket_hold_create_atomic",
+      {
+        p_ticket_type_id: ticket_type_id,
+        p_quantity: quantity,
+        p_payment_intent_id: pi.id,
+        p_user_id: user_id,
+        p_hold_seconds: 600,
+      },
+    );
 
-    // ── Increment promo usage (before order, to prevent race) ──
+    if (holdRpcError || !holdResult?.ok) {
+      // Someone took the seat while Stripe was minting the intent. Cancel the
+      // PaymentIntent so the buyer is never left holding an uncancelled
+      // intent for inventory they cannot have.
+      try {
+        await stripeRequest(`/payment_intents/${pi.id}/cancel`, {});
+      } catch (e) {
+        console.error(
+          "[create-payment-intent] hold failed AND PI cancel failed",
+          pi.id,
+          e,
+        );
+      }
+      const available = holdResult?.available;
+      return json(
+        {
+          error:
+            typeof available === "number" && available > 0
+              ? `Only ${available} left — reduce your quantity and try again.`
+              : "Those tickets just sold out.",
+        },
+        409,
+      );
+    }
+
+    // ── Increment promo usage ───────────────────────────
+    // Only after the hold is secured. Still ahead of payment — see the
+    // note in stripe-webhook's payment_intent.succeeded handler.
     if (promoResult) {
       await incrementPromoUsage(supabase, promoResult.promo_code_id);
     }

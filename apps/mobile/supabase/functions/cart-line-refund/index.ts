@@ -283,6 +283,14 @@ Deno.serve(async (req: Request) => {
         payment_intent: cartRow.stripe_pi_id,
         amount: String(refundAmountCents),
         reason: "requested_by_customer",
+        // The cart PI is a destination charge (cart-checkout sets
+        // transfer_data[destination] + application_fee_amount). Without these
+        // two, Stripe debits the PLATFORM balance and leaves the organizer's
+        // transfer and our app fee intact — so DVNT paid the whole refund and
+        // the organizer kept their cut. Matches bulk-refund-tickets,
+        // organizer-refund and event-cancel, which all set both.
+        refund_application_fee: "true",
+        reverse_transfer: "true",
         "metadata[cart_id]": body.cartId,
         "metadata[line_item_id]": body.lineItemId,
         "metadata[cart_line_item_id]": body.lineItemId,

@@ -258,6 +258,11 @@ async function refundPaymentIntentForAllocationFailure(
     body: new URLSearchParams({
       payment_intent: paymentIntentId,
       reason: "requested_by_customer",
+      // Full refund of a destination charge: reverse the organizer transfer
+      // and our application fee too, or DVNT covers the whole amount out of
+      // its own balance for a failure that is ours, not theirs.
+      refund_application_fee: "true",
+      reverse_transfer: "true",
       "metadata[cart_id]": cartId,
       "metadata[reason]": "system_allocation_failure",
     }).toString(),
@@ -1631,18 +1636,41 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           } else {
             // Pull tickets BEFORE flipping them so we keep event_id +
             // ticket_type_id to decrement inventory and notify waitlisters.
-            const { data: legacyToRefund } = await supabase
+            //
+            // Scope to metadata[ticket_id] when the refund names one.
+            // ticket-refund and bulk-refund-tickets both refund a SINGLE
+            // ticket, and several tickets can share one PaymentIntent — so
+            // refunding 1 of a buyer's 3 passes used to flip all 3 to
+            // 'refunded' (and decrement quantity_sold by 3) while returning
+            // money for only one of them.
+            const refundedTicketIds = Array.from(
+              new Set(
+                refundObjects
+                  .map((refund: any) => refund?.metadata?.ticket_id)
+                  .filter(Boolean),
+              ),
+            );
+
+            let legacyQuery = supabase
               .from("tickets")
               .select("id, event_id, ticket_type_id")
               .eq("stripe_payment_intent_id", paymentIntent)
               .eq("status", "active");
+            if (refundedTicketIds.length > 0) {
+              legacyQuery = legacyQuery.in("id", refundedTicketIds);
+            }
+            const { data: legacyToRefund } = await legacyQuery;
             toRefund = legacyToRefund || [];
 
-            const { error: refundError } = await supabase
+            let updateQuery = supabase
               .from("tickets")
               .update({ status: "refunded" })
               .eq("stripe_payment_intent_id", paymentIntent)
               .eq("status", "active");
+            if (refundedTicketIds.length > 0) {
+              updateQuery = updateQuery.in("id", refundedTicketIds);
+            }
+            const { error: refundError } = await updateQuery;
 
             if (refundError) {
               console.error(
@@ -1690,7 +1718,16 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             }
           }
 
-          // Void wallet passes for refunded tickets
+          // Void wallet passes for refunded tickets. Same scoping rule as the
+          // status flip above — a partial refund must not kill the passes for
+          // the tickets that were NOT refunded.
+          const walletTicketIds = Array.from(
+            new Set(
+              refundObjects
+                .map((refund: any) => refund?.metadata?.ticket_id)
+                .filter(Boolean),
+            ),
+          );
           let refundedTicketsQuery = supabase
             .from("tickets")
             .select("id")
@@ -1700,6 +1737,11 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             refundedTicketsQuery = refundedTicketsQuery.in(
               "cart_line_item_id",
               refundedLineItemIds,
+            );
+          } else if (walletTicketIds.length > 0) {
+            refundedTicketsQuery = refundedTicketsQuery.in(
+              "id",
+              walletTicketIds,
             );
           }
           const { data: refundedTickets } = await refundedTicketsQuery;

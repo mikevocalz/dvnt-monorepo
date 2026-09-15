@@ -88,7 +88,7 @@ Deno.serve(async (req: Request) => {
     // Fetch ticket with event info
     const { data: ticket, error: ticketErr } = await supabase
       .from("tickets")
-      .select("id, event_id, user_id, status, purchase_amount_cents, payment_intent_id, ticket_type_id, checked_in_at")
+      .select("id, event_id, user_id, status, purchase_amount_cents, stripe_payment_intent_id, ticket_type_id, checked_in_at")
       .eq("id", ticket_id)
       .single();
 
@@ -136,36 +136,67 @@ Deno.serve(async (req: Request) => {
     }
     // policy === "always" → no time gate.
 
-    // Void the ticket immediately for fast UI; also mark refunded for paid tickets
-    await supabase
-      .from("tickets")
-      .update({ status: "void" })
-      .eq("id", ticket_id);
+    // Money first, status second. This used to write status='void' BEFORE
+    // calling Stripe, which broke two things at once: charge.refunded filters
+    // on status='active', so the webhook then matched nothing (no wallet void,
+    // no waitlist promotion, ticket stuck 'void' instead of 'refunded'), and a
+    // paid ticket with no PaymentIntent was voided with no refund at all while
+    // the response said "cancelled successfully".
+    const paidCents = ticket.purchase_amount_cents ?? 0;
+    const isPaid = paidCents > 0;
 
-    // Decrement quantity_sold on ticket_type
-    await supabase.rpc("decrement_ticket_quantity_sold", {
-      p_ticket_type_id: ticket.ticket_type_id,
-    }).catch(() => {}); // best-effort — trigger handles total_attendees
+    if (isPaid && !ticket.stripe_payment_intent_id) {
+      // Refuse rather than hand back a voided ticket and no money.
+      return json(
+        {
+          error:
+            "This ticket can't be refunded automatically. Contact the organizer.",
+        },
+        409,
+      );
+    }
 
-    // If paid ticket, issue Stripe refund
     let stripeRefundId: string | null = null;
-    if (ticket.payment_intent_id && ticket.purchase_amount_cents && ticket.purchase_amount_cents > 0) {
+    if (isPaid) {
       const refund = await stripeRefund({
-        payment_intent: ticket.payment_intent_id,
-        amount: String(ticket.purchase_amount_cents),
+        payment_intent: ticket.stripe_payment_intent_id,
+        amount: String(paidCents),
         reason: "requested_by_customer",
+        // Destination charge: without these the platform eats the refund and
+        // the organizer keeps their transfer. Every other refund path in this
+        // repo sets both (bulk-refund-tickets, organizer-refund, event-cancel).
+        refund_application_fee: "true",
+        reverse_transfer: "true",
         "metadata[ticket_id]": String(ticket_id),
         "metadata[refund_initiator]": "buyer",
       });
       if (refund.error) {
-        // Roll back status to active if Stripe fails
-        await supabase
-          .from("tickets")
-          .update({ status: "active" })
-          .eq("id", ticket_id);
+        // Nothing to roll back — status was never touched.
         return json({ error: `Stripe refund failed: ${refund.error.message}` }, 502);
       }
       stripeRefundId = refund.id;
+    }
+
+    // Paid: charge.refunded carries metadata[ticket_id], so the webhook flips
+    // active → refunded for THIS ticket and handles the wallet pass + waitlist.
+    // Write it here too so the UI is right even if the webhook is slow; the
+    // webhook's .eq("status","active") makes the second write a no-op.
+    // Free: no Stripe event is coming, so this is the only writer.
+    await supabase
+      .from("tickets")
+      .update({ status: "refunded" })
+      .eq("id", ticket_id)
+      .eq("status", "active");
+
+    // Decrement quantity_sold on ticket_type. Best-effort — the trigger
+    // handles total_attendees. (The builder is thenable but has no .catch,
+    // so the old `.catch(() => {})` was a type error, not a guard.)
+    try {
+      await supabase.rpc("decrement_ticket_quantity_sold", {
+        p_ticket_type_id: ticket.ticket_type_id,
+      });
+    } catch (e) {
+      console.warn("[ticket-refund] decrement failed (non-fatal):", e);
     }
 
     return json({

@@ -143,18 +143,14 @@ Deno.serve(async (req) => {
     if (tier.sale_end && new Date(tier.sale_end).getTime() < now)
       return err("sale_ended", "Sales have ended.");
 
-    // Availability = total − sold − active(unexpired) holds. Mirrors
-    // create-payment-intent so guest + authed checkouts share one inventory view
-    // and concurrent guests can't oversell during the Stripe redirect window.
+    // Advisory pre-check only — fails an obviously sold-out tier before we
+    // create a Stripe session. The binding check is ticket_hold_create_atomic
+    // below, which locks the tier and counts BOTH hold tables by seat. The
+    // count-based arithmetic that used to live here counted hold ROWS (a hold
+    // for 5 seats counted as 1) and never saw cart_holds at all.
     if (tier.quantity_total != null) {
-      const { count: activeHolds } = await supabase
-        .from("ticket_holds")
-        .select("*", { count: "exact", head: true })
-        .eq("ticket_type_id", ticketTypeId)
-        .eq("status", "active")
-        .gt("expires_at", new Date().toISOString());
       const available =
-        (tier.quantity_total ?? 0) - (tier.quantity_sold ?? 0) - (activeHolds ?? 0);
+        (tier.quantity_total ?? 0) - (tier.quantity_sold ?? 0);
       if (available < quantity) return err("sold_out", `Only ${Math.max(0, available)} left.`);
     }
 
@@ -255,15 +251,39 @@ Deno.serve(async (req) => {
     // this hold (status → converted) by payment_intent_id = session.id on
     // payment; if abandoned, it just expires (the availability count ignores
     // expired holds). Keyed to the Checkout Session id like the webhook expects.
-    await supabase.from("ticket_holds").insert({
-      user_id: null,
-      ticket_type_id: ticketTypeId,
-      event_id: eventId,
-      quantity,
-      payment_intent_id: session.id,
-      status: "active",
-      expires_at: new Date(Date.now() + 31 * 60 * 1000).toISOString(),
-    });
+    // Atomic hold — see create-payment-intent for the full rationale. 31 min
+    // covers the hosted-Checkout redirect window.
+    const { data: guestHold, error: guestHoldErr } = await supabase.rpc(
+      "ticket_hold_create_atomic",
+      {
+        p_ticket_type_id: ticketTypeId,
+        p_quantity: quantity,
+        p_payment_intent_id: session.id,
+        p_guest_email: guestEmail,
+        p_hold_seconds: 31 * 60,
+      },
+    );
+
+    if (guestHoldErr || !guestHold?.ok) {
+      // Expire the hosted session so the guest cannot pay for inventory that
+      // is no longer theirs.
+      try {
+        await stripePost(`/checkout/sessions/${session.id}/expire`, {});
+      } catch (e) {
+        console.error(
+          "[guest-checkout] hold failed AND session expire failed",
+          session.id,
+          e,
+        );
+      }
+      const available = guestHold?.available;
+      return err(
+        "sold_out",
+        typeof available === "number" && available > 0
+          ? `Only ${available} left.`
+          : "Those tickets just sold out.",
+      );
+    }
 
     // Create the order row in payment_pending, keyed to the Checkout
     // Session — mirrors ticket-checkout. Previously this rail created no

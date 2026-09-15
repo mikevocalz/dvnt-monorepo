@@ -87,7 +87,15 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
     const cutoff = new Date(
       Date.now() - hoursBack * 60 * 60 * 1000,
     ).toISOString();
-    const stats = { reconciled: 0, expired_holds: 0, failed: 0 };
+    // needs_attention: paid at Stripe, no tickets, and this job cannot issue
+    // for that rail. Non-zero means a buyer has paid and is waiting — the
+    // signal that used to be swallowed entirely.
+    const stats = {
+      reconciled: 0,
+      expired_holds: 0,
+      failed: 0,
+      needs_attention: 0,
+    };
 
     // ── 1. Expire stale ticket holds ─────────────────────────
     const { data: staleHolds, error: holdsError } = await supabase
@@ -119,6 +127,12 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
     for (const order of pendingOrders || []) {
       try {
         let piStatus = "unknown";
+        // Session-keyed orders (guest rail) carry no PaymentIntent id of their
+        // own. Resolve it from the session so the issuance branch below is not
+        // blind to them — it used to skip every guest order outright, flipping
+        // it to 'paid' with zero tickets and never selecting it again.
+        let resolvedPaymentIntentId: string | null =
+          order.stripe_payment_intent_id ?? null;
 
         // Check PaymentIntent status
         if (order.stripe_payment_intent_id) {
@@ -137,6 +151,20 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
           );
           const cs = await csRes.json();
           piStatus = cs.payment_status || "unknown";
+          if (typeof cs.payment_intent === "string" && cs.payment_intent) {
+            resolvedPaymentIntentId = cs.payment_intent;
+          } else if (cs.payment_intent?.id) {
+            resolvedPaymentIntentId = cs.payment_intent.id;
+          }
+          if (resolvedPaymentIntentId && !order.stripe_payment_intent_id) {
+            // Persist it so later runs, refunds and the webhook's
+            // orders-by-PI lookups can all find this order.
+            await supabase
+              .from("orders")
+              .update({ stripe_payment_intent_id: resolvedPaymentIntentId })
+              .eq("id", order.id)
+              .is("stripe_payment_intent_id", null);
+          }
           // Async settlement (ACH / bank transfer): a COMPLETE session
           // can stay payment_status='unpaid' for days while funds are in
           // flight. That is NOT a failure — leave the order pending; the
@@ -149,8 +177,58 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
 
         // Reconcile based on status
         if (piStatus === "succeeded" || piStatus === "paid") {
-          // Payment actually succeeded — webhook was missed
-          // Atomic CAS: only update if still payment_pending
+          // Payment succeeded — the webhook was missed.
+          //
+          // Decide whether we can actually ISSUE before claiming the order.
+          // Flipping to 'paid' first was the bug: the status change took the
+          // order out of the payment_pending queue this job selects, so any
+          // order it could not issue for (guest rail, cart rail, missing
+          // hold) was charged, marked paid, given zero tickets, and never
+          // looked at again — with no alert.
+          const { data: orderRow } = await supabase
+            .from("orders")
+            .select("id, user_id, event_id, quantity, cart_id, guest_email")
+            .eq("id", order.id)
+            .eq("status", "payment_pending")
+            .single();
+
+          if (!orderRow) continue; // already handled by a webhook or another run
+
+          const { count: alreadyIssued } = resolvedPaymentIntentId
+            ? await supabase
+                .from("tickets")
+                .select("*", { count: "exact", head: true })
+                .eq("stripe_payment_intent_id", resolvedPaymentIntentId)
+            : { count: 0 };
+
+          // The cart rail's issuance is the webhook's cart_complete_issuance
+          // path; replaying it here would risk double-issuing, which is worse
+          // than waiting. Same for guest tickets, which need the lookup token
+          // and confirmation email the webhook sends.
+          const canIssueHere =
+            !orderRow.cart_id &&
+            !orderRow.guest_email &&
+            !!orderRow.event_id &&
+            !!resolvedPaymentIntentId;
+
+          if ((alreadyIssued || 0) === 0 && !canIssueHere) {
+            // Leave it payment_pending so this job keeps retrying and the
+            // order stays visible, and make the situation loud.
+            stats.needs_attention = (stats.needs_attention ?? 0) + 1;
+            console.error(
+              `[reconcile] PAID BUT UNISSUED order=${order.id} pi=${resolvedPaymentIntentId} cart=${orderRow.cart_id} guest=${!!orderRow.guest_email} — webhook has not issued; not claiming`,
+            );
+            await supabase.from("order_timeline").insert({
+              order_id: order.id,
+              type: "reconcile_blocked",
+              label: "Paid, tickets not issued yet",
+              detail:
+                "Payment confirmed at Stripe but no tickets exist and this job cannot issue for this rail. Left pending for the webhook; retried each run.",
+            });
+            continue;
+          }
+
+          // Safe to claim: either tickets already exist, or we can issue below.
           const { data: claimedOrder, error: claimErr } = await supabase
             .from("orders")
             .update({
@@ -242,14 +320,17 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
           piStatus === "expired" ||
           piStatus === "unpaid"
         ) {
-          // Payment failed/expired — mark order accordingly
+          // Payment failed/expired — mark order accordingly.
+          // CAS on payment_pending, same as the paid path: without it a
+          // webhook that lands mid-run could be stomped back to failed.
           await supabase
             .from("orders")
             .update({
               status: "payment_failed",
               updated_at: new Date().toISOString(),
             })
-            .eq("id", order.id);
+            .eq("id", order.id)
+            .eq("status", "payment_pending");
 
           stats.failed++;
           console.log(
