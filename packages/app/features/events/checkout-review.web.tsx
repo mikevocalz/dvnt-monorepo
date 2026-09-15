@@ -422,6 +422,14 @@ export function CheckoutReviewScreen() {
     [quantity, effectiveSubtotal],
   );
 
+  // Seed the field from ?promo= — the code the buyer typed in the event's
+  // checkout sheet before being routed here. Runs once, and never clobbers
+  // something they have already typed on this screen.
+  useEffect(() => {
+    const seeded = new URLSearchParams(window.location.search).get("promo");
+    if (seeded && !usePromoStore.getState().promoCode) setPromoCode(seeded);
+  }, [setPromoCode]);
+
   // Drop a validated promo when the buyer edits the code away from it.
   useEffect(() => {
     if (

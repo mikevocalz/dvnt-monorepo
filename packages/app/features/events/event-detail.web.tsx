@@ -1859,12 +1859,25 @@ export function EventDetailScreen() {
 
           // Add-ons selected → the MIXED-CART rail (cart store →
           // cart-create-hold → cart_create_hold RPC holds tier + add-on
-          // inventory atomically; cart-checkout prices server-side). The
-          // single-tier fast path below stays untouched when no add-ons.
+          // inventory atomically; cart-checkout prices server-side).
+          //
+          // ANY PAID tier takes this rail too, on web. The fast path below
+          // is useTicketCheckout, whose PaymentSheet is native-only; the web
+          // shim for it (apps/web/src/platform/stripe-react-native.web.tsx)
+          // answers presentPaymentSheet by navigating to
+          // /feed/checkout/review?clientSecret=… — a screen that reads the
+          // CART, ignores that query param, and so rendered "Your cart is
+          // empty" to a buyer who had just been charged a PaymentIntent.
+          // The cart rail is the only web path that actually collects a
+          // card (checkout-review confirms with @stripe/stripe-js).
+          //
+          // FREE tiers keep the fast path: create-payment-intent issues the
+          // ticket server-side and returns before any Stripe sheet exists.
           const upsell = useAddonUpsellStore.getState();
           const selections =
             upsell.eventId === eventId ? upsell.selectionList() : [];
-          if (selections.length > 0) {
+          const tierIsPaid = (tier.price_cents ?? 0) > 0;
+          if (selections.length > 0 || tierIsPaid) {
             const cartStore = useCartStore.getState();
             cartStore.startCart(eventId);
             cartStore.addLineItem(eventId, {
@@ -1906,9 +1919,16 @@ export function EventDetailScreen() {
             }
             resetAddonSelections();
             setCheckoutOpen(false);
-            // Promo codes re-apply on the review screen (cart-checkout
-            // validates them server-side there).
-            router.push("/feed/checkout/review");
+            // Carry any code the buyer already typed here, so they don't
+            // silently pay full price after re-entering it was their job.
+            // cart-checkout still validates it server-side on that screen.
+            const code = promoCode.trim();
+            router.push(
+              code
+                ? `/feed/checkout/review?promo=${encodeURIComponent(code)}`
+                : "/feed/checkout/review",
+            );
+            setPromoCode("");
             return;
           }
 

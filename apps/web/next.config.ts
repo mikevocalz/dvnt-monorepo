@@ -217,6 +217,80 @@ const nextConfig: NextConfig = {
         destination: '/feed/events/my-tickets',
         permanent: false,
       },
+      // ── Short share links ───────────────────────────────────────────
+      // packages/app/lib/deep-linking/share-link.ts mints these for every
+      // share sheet in the app, and ROUTE_REGISTRY resolves them on native.
+      // On web they had no route at all: verified against production, /e/,
+      // /u/, /story/, /chat/, /sl/ and /comments/ all returned 404, so every
+      // link a user texted a friend was dead unless they had the app. /p/:id
+      // was fixed this way already (see app/(frontend)/p/[id]/page.tsx —
+      // "Was a 404 — every shared post link was dead on web"); the rest never
+      // got the same treatment.
+      //
+      // /e/ and /u/ target the PUBLIC screens on purpose, mirroring
+      // resolveGuestPublicTarget in lib/deep-linking/link-engine.ts: a shared
+      // event link must let a signed-out recipient see the event and buy a
+      // ticket without an account. Sending that traffic to /feed would put a
+      // login wall at the top of the ticket funnel.
+      {
+        source: '/e/:id',
+        destination: '/public/events/:id',
+        permanent: false,
+      },
+      {
+        source: '/u/:username',
+        destination: '/public/profile/:username',
+        permanent: false,
+      },
+      {
+        source: '/tickets/guest/:token',
+        destination: '/public/tickets/guest/:token',
+        permanent: false,
+      },
+      // Stripe/native return paths — a buyer bounced here should land on the
+      // pass they just bought, not a 404.
+      {
+        source: '/tickets/success',
+        destination: '/feed/events/my-tickets',
+        permanent: false,
+      },
+      {
+        source: '/tickets/cancel',
+        destination: '/feed/events',
+        permanent: false,
+      },
+      {
+        source: '/my-tickets',
+        destination: '/feed/events/my-tickets',
+        permanent: false,
+      },
+      // More specific first: /comments/replies/:id must not be eaten by
+      // /comments/:postId.
+      {
+        source: '/comments/replies/:commentId',
+        destination: '/feed/comments/replies/:commentId',
+        permanent: false,
+      },
+      {
+        source: '/comments/:postId',
+        destination: '/feed/comments/:postId',
+        permanent: false,
+      },
+      {
+        source: '/story/:id',
+        destination: '/feed/story/:id',
+        permanent: false,
+      },
+      {
+        source: '/chat/:id',
+        destination: '/feed/chat/:id',
+        permanent: false,
+      },
+      {
+        source: '/sl/:id',
+        destination: '/feed/sneaky-lynk/room/:id',
+        permanent: false,
+      },
     ];
   },
   webpack: (config, { webpack }) => {
