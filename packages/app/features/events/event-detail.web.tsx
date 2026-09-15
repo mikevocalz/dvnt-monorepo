@@ -58,6 +58,7 @@ import { useEventDominantColor } from "@dvnt/app/lib/color/useEventDominantColor
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { computePromoDiscountCents, promoLabel } from "@dvnt/app/lib/payments/promo-discount";
 import { WhoAllOverThere } from "@dvnt/app/components/event/WhoAllOverThere.web";
+import { GoingAccordion } from "@dvnt/app/components/event/GoingAccordion.web";
 import { WeatherStrip } from "./ui/weather-strip.web";
 import { OrganizerCard } from "./ui/OrganizerCard.web";
 import {
@@ -690,6 +691,15 @@ export function EventDetailScreen() {
   const attendeeAvatars: any[] = Array.isArray(e.attendeeAvatars)
     ? e.attendeeAvatars
     : [];
+  // Normalized for GoingAccordion — the RPC has shipped the photo URL under
+  // `avatar`, `image`, and `url` depending on version; accept all three.
+  const goingAttendees = attendeeAvatars.map((a: any, i: number) => ({
+    id: String(a.id || a.username || `attendee-${i}`),
+    username: a.username || "",
+    avatar: a.avatar || a.image || a.url || "",
+    initials: a.initials || "",
+    color: "#3b82f6",
+  }));
   const going = e.totalAttendees ?? (typeof e.attendees === "number" ? e.attendees : 0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const reviews: any[] = Array.isArray(e.topReviews) ? e.topReviews : [];
@@ -1598,50 +1608,32 @@ export function EventDetailScreen() {
               had this hole: GoingAccordion renders unconditionally and says
               "0 going". */}
           <Section title="Who's going" Icon={Users}>
-              <MembersOnly
-                locked={!isAuthenticated}
-                label="Sign in to see who's going."
-                onSignIn={() => router.push(loginPathWithReturn(pathname))}
-              >
-                {going > 0 || attendeeAvatars.length > 0 ? (
-                  <div className="flex items-center gap-2">
-                    <div className="flex -space-x-2">
-                      {attendeeAvatars.slice(0, 6).map((a, i) => {
-                        const src = a.image || a.avatar || a.url;
-                        return src ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            key={i}
-                            src={src}
-                            alt=""
-                            className="w-8 h-8 rounded-xl object-cover bg-white/10 ring-2 ring-[#02030A]"
-                          />
-                        ) : (
-                          <div
-                            key={i}
-                            className="w-8 h-8 rounded-xl bg-white/10 ring-2 ring-[#02030A] flex items-center justify-center text-[10px] font-bold text-white/70"
-                          >
-                            {a.initials || "??"}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <span className="text-white/60 text-sm">
-                      {going} going
-                      {remaining > 0 ? ` · ${remaining} spots left` : ""}
-                    </span>
-                  </div>
-                ) : !isAuthenticated ? (
-                  <TeaserRows kind="avatar" />
-                ) : (
-                  // Honest, not a blurred teaser: a signed-in member is not
-                  // being kept from anything here — there is genuinely nobody
-                  // yet. Teaser rows would imply hidden people.
-                  <p className="text-white/60 text-sm">
-                    No one&apos;s going yet. Be the first to RSVP.
-                  </p>
-                )}
-              </MembersOnly>
+              {going > 0 || goingAttendees.length > 0 || !isAuthenticated ? (
+                // Same accordion as native: face pile + "N going", tap expands
+                // to the full attendee grid. Logged-out gets the blurred
+                // teaser + sign-in nudge from inside the component.
+                <GoingAccordion
+                  id={eventId}
+                  attendees={goingAttendees}
+                  totalCount={going}
+                  isLoggedIn={isAuthenticated}
+                  onRequireAuth={() =>
+                    router.push(loginPathWithReturn(pathname))
+                  }
+                  onAttendeePress={(a) =>
+                    a.username
+                      ? router.push(`/profile/${a.username}`)
+                      : undefined
+                  }
+                />
+              ) : (
+                // Honest, not a blurred teaser: a signed-in member is not
+                // being kept from anything here — there is genuinely nobody
+                // yet. Teaser rows would imply hidden people.
+                <p className="text-white/60 text-sm">
+                  No one&apos;s going yet. Be the first to RSVP.
+                </p>
+              )}
             </Section>
 
           {/* Who All Over There — ephemeral event moments (ticket holders + host) */}
