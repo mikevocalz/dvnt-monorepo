@@ -98,6 +98,8 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
       expired_holds: 0,
       failed: 0,
       needs_attention: 0,
+      abandoned: 0,
+      by_status: {} as Record<string, number>,
     };
 
     // ── 1. Expire stale ticket holds ─────────────────────────
@@ -149,7 +151,14 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
           );
           const pi = await piRes.json();
           paymentIntentObj = pi;
-          piStatus = pi.status || "unknown";
+          if (pi.error) {
+            console.error(
+              `[reconcile] Order ${order.id} Stripe error:`,
+              pi.error,
+            );
+          }
+          piStatus = pi.status ||
+            (pi.error ? `error:${pi.error.code || pi.error.type}` : "unknown");
 
           // Orders stamped with a PI by an earlier sweep also carry the
           // session id — fetch it so the session rail below can issue.
@@ -169,7 +178,14 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
           );
           const cs = await csRes.json();
           checkoutSession = cs;
-          piStatus = cs.payment_status || "unknown";
+          if (cs.error) {
+            console.error(
+              `[reconcile] Order ${order.id} Stripe error:`,
+              cs.error,
+            );
+          }
+          piStatus = cs.payment_status ||
+            (cs.error ? `error:${cs.error.code || cs.error.type}` : "unknown");
           if (typeof cs.payment_intent === "string" && cs.payment_intent) {
             resolvedPaymentIntentId = cs.payment_intent;
           } else if (cs.payment_intent?.id) {
@@ -193,6 +209,8 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
             piStatus = "processing";
           }
         }
+
+        stats.by_status[piStatus] = (stats.by_status[piStatus] ?? 0) + 1;
 
         // Reconcile based on status
         if (piStatus === "succeeded" || piStatus === "paid") {
@@ -425,6 +443,33 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
           piStatus === "expired" ||
           piStatus === "unpaid"
         ) {
+          // Hosted Checkout stays open ~24h: an "open" session whose
+          // payment_status resolved to unpaid is an abandoned checkout, not
+          // a failed payment. Expire it at Stripe first so no stale client
+          // can still complete it, then fail the order. If the expire call
+          // doesn't land (e.g. it just completed), leave it pending — the
+          // webhook or the next run resolves it.
+          if (checkoutSession?.status === "open") {
+            const expireRes = await fetch(
+              `https://api.stripe.com/v1/checkout/sessions/${order.stripe_checkout_session_id}/expire`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+                  "Content-Type": "application/x-www-form-urlencoded",
+                },
+              },
+            );
+            const expired = await expireRes.json();
+            if (expired.status !== "expired") {
+              console.error(
+                `[reconcile] Order ${order.id} session expire did not land:`,
+                expired?.error?.message ?? expired?.status,
+              );
+              continue;
+            }
+          }
+
           // Payment failed/expired — mark order accordingly.
           // CAS on payment_pending, same as the paid path: without it a
           // webhook that lands mid-run could be stomped back to failed.
@@ -440,6 +485,92 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
           stats.failed++;
           console.log(
             `[reconcile] Order ${order.id} → payment_failed (${piStatus})`,
+          );
+        } else if (
+          ["requires_payment_method", "requires_confirmation", "requires_action"]
+            .includes(piStatus) &&
+          order.stripe_payment_intent_id
+        ) {
+          // Abandoned PaymentSheet: the intent was minted but never confirmed,
+          // and this order is already past the cutoff (default 2h) while its
+          // hold was 10 min. If a hold is somehow still active the buyer is
+          // inside the window — leave it. Otherwise cancel at Stripe FIRST so
+          // a stale client cannot confirm against inventory it no longer
+          // holds, then fail the order.
+          const { count: liveHolds } = await supabase
+            .from("ticket_holds")
+            .select("*", { count: "exact", head: true })
+            .eq("payment_intent_id", order.stripe_payment_intent_id)
+            .eq("status", "active");
+          if ((liveHolds || 0) > 0) {
+            console.log(
+              `[reconcile] Order ${order.id} ${piStatus} but hold still active — leaving`,
+            );
+          } else {
+            const cancelRes = await fetch(
+              `https://api.stripe.com/v1/payment_intents/${order.stripe_payment_intent_id}/cancel`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+                  "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: "cancellation_reason=abandoned",
+              },
+            );
+            const cancelled = await cancelRes.json();
+            if (cancelled.status === "canceled") {
+              await supabase
+                .from("orders")
+                .update({
+                  status: "payment_failed",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", order.id)
+                .eq("status", "payment_pending");
+              await supabase.from("order_timeline").insert({
+                order_id: order.id,
+                type: "payment_failed",
+                label: "Checkout abandoned",
+                detail:
+                  `PaymentIntent was ${piStatus} past the reconciliation cutoff; cancelled at Stripe by reconciliation job`,
+              });
+              stats.abandoned++;
+              console.log(
+                `[reconcile] Order ${order.id} → payment_failed (abandoned, PI cancelled)`,
+              );
+            } else {
+              // Race: it may have just been confirmed. Leave it; next run
+              // sees the new status.
+              console.error(
+                `[reconcile] Order ${order.id} PI cancel did not land:`,
+                cancelled?.error?.message ?? cancelled?.status,
+              );
+            }
+          }
+        } else if (piStatus === "error:resource_missing") {
+          // The PaymentIntent / Session does not exist under this Stripe
+          // key — minted under a test key or a previous account. No money
+          // can ever be collected against it here, so the order cannot
+          // become paid. Fail it.
+          await supabase
+            .from("orders")
+            .update({
+              status: "payment_failed",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", order.id)
+            .eq("status", "payment_pending");
+          await supabase.from("order_timeline").insert({
+            order_id: order.id,
+            type: "payment_failed",
+            label: "Payment reference not found",
+            detail:
+              "Stripe has no record of this order's PaymentIntent/Session under the live key; closed by reconciliation job",
+          });
+          stats.failed++;
+          console.log(
+            `[reconcile] Order ${order.id} → payment_failed (stripe resource_missing)`,
           );
         }
         // else: still processing, leave as-is
