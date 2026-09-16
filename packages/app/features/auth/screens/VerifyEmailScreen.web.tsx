@@ -23,7 +23,11 @@ export function VerifyEmailScreen() {
         const onVerified = () => {
           setStatus('success');
           toast.success('Email verified', { description: 'Your email has been confirmed' });
-          setTimeout(() => navigate({ to: '/story' }), 2000);
+          // '/story' is not a route. Bare /story 404s — next.config only
+          // redirects /story/:id to /feed/story/:id — so confirming an email
+          // dropped the member on a dead page at the exact moment they had
+          // just done what we asked. The authenticated web app is /feed.
+          setTimeout(() => navigate({ to: '/feed' }), 2000);
         };
         // Token-based verification (cookie-independent) — same reason as reset.
         try {
