@@ -326,17 +326,6 @@ async function getAuth() {
         enabled: true,
         minPasswordLength: 8,
         maxPasswordLength: 128,
-        // Every new account is sent a verification link at signup. Before this,
-        // sendVerificationEmail existed but nothing ever called it, which is how
-        // 1113 of 1137 accounts ended up unverified.
-        sendOnSignUp: true,
-        // Deliberately still false. Better Auth applies this flag globally and
-        // blocks sign-in on it, so flipping it locks out every one of those
-        // existing accounts at once. Verification is enforced at the
-        // participation layer instead, through verified_admission_policy, which
-        // carries a cohort cutoff and a grace deadline and can be ratcheted.
-        // Flip this only when the unverified population is small enough that
-        // locking the remainder out is a decision rather than an accident.
         requireEmailVerification: false,
         sendResetPassword: async ({
           user,
@@ -353,6 +342,18 @@ async function getAuth() {
           const { subject, html } = resetPasswordEmail(resetUrl);
           await sendEmail(user.email, subject, html);
         },
+      },
+      // Better Auth registers verification from a TOP-LEVEL emailVerification
+      // block. This lived inside emailAndPassword, where the option is simply
+      // ignored, so /send-verification-email answered
+      // VERIFICATION_EMAIL_NOT_ENABLED and not one verification email was ever
+      // sent — which is why 1113 of 1137 accounts are unverified. sendResetPassword
+      // genuinely does belong under emailAndPassword, which is what made the
+      // mistake look right.
+      emailVerification: {
+        sendOnSignUp: true,
+        autoSignInAfterVerification: true,
+        expiresIn: 60 * 60 * 24,
         sendVerificationEmail: async ({
           user,
           url,
