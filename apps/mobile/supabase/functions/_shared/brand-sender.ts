@@ -70,3 +70,37 @@ export function brandSendGate(): BrandSendGate {
 export function brandUnsubscribeUrl(): string | null {
   return env("DVNT_BRAND_UNSUBSCRIBE_URL") || null;
 }
+
+/**
+ * Prove the configured pair is one real account before sending anything.
+ *
+ * `brandSendGate()` only checks that the two ids are present and well-formed.
+ * A typo in either would still be well-formed, and the worker would then send
+ * as whatever account that id happens to name. This app has already shipped one
+ * incident where content landed under the wrong account because an identity was
+ * taken on trust, so the pair is verified against the row rather than assumed.
+ *
+ * Returns the sender when `users.id` and `users.auth_id` agree, otherwise the
+ * reason. Callers treat a failure exactly like an unset variable: send nothing.
+ */
+export async function verifyBrandSender(
+  db: { from: (t: string) => any },
+  sender: BrandSender,
+): Promise<BrandSendGate> {
+  const { data, error } = await db
+    .from("users")
+    .select("id, auth_id, username")
+    .eq("id", sender.userId)
+    .maybeSingle();
+  if (error) return { ok: false, reason: "Could not read the brand account" };
+  if (!data) return { ok: false, reason: `No account with users.id ${sender.userId}` };
+  if (String(data.auth_id) !== sender.authId) {
+    // Do not log the configured auth id next to the real one; say only that
+    // they disagree, and let the operator compare against their own config.
+    return {
+      ok: false,
+      reason: `DVNT_BRAND_AUTH_ID does not belong to users.id ${sender.userId}`,
+    };
+  }
+  return { ok: true, sender };
+}

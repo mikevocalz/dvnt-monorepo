@@ -23,7 +23,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { brandSendGate, brandUnsubscribeUrl } from "../_shared/brand-sender.ts";
+import { brandSendGate, brandUnsubscribeUrl, verifyBrandSender } from "../_shared/brand-sender.ts";
 import { campaignMessage, transition } from "../_shared/brand-outbox.ts";
 import {
   ensureDirectConversation,
@@ -90,7 +90,13 @@ Deno.serve(async (req: Request) => {
       console.error("[brand-outbox-worker] enqueue failed:", enqueueError);
     }
 
-    const gate = brandSendGate();
+    const configured = brandSendGate();
+    // Well-formed is not the same as correct: a typo in either id would pass
+    // brandSendGate and then send as whatever account that id names. Prove the
+    // pair is one real row before anything leaves.
+    const gate = configured.ok
+      ? await verifyBrandSender(supabase, configured.sender)
+      : configured;
     if (!gate.ok) {
       console.warn(
         `[brand-outbox-worker] sending disabled: ${gate.reason}. Rows stay queued.`,

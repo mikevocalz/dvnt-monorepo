@@ -134,7 +134,11 @@ Two pre-existing defects surfaced while auditing the discovery path and were fix
 
 ### Operator prerequisites
 
-Brand automation needs `DVNT_BRAND_USER_ID`, `DVNT_BRAND_AUTH_ID` and `DVNT_BRAND_OUTBOX_ENABLED=true`, all three together, plus `CRON_SECRET`; the email channel additionally needs `DVNT_BRAND_UNSUBSCRIBE_URL` or its rows are suppressed rather than sent. There is deliberately no cron entry, so the worker runs only when invoked. The real `@DeviantEvents` account ID is still outstanding.
+Brand automation needs `DVNT_BRAND_USER_ID`, `DVNT_BRAND_AUTH_ID` and `DVNT_BRAND_OUTBOX_ENABLED=true`, all three together, plus `CRON_SECRET`; the email channel additionally needs `DVNT_BRAND_UNSUBSCRIBE_URL` or its rows are suppressed rather than sent. There is deliberately no cron entry, so the worker runs only when invoked.
+
+The canonical sender has been resolved against production: `deviantevents` is `public.users.id = 613`, Better Auth `user.id = ZcInhog357kU8uGba7ziQ4DX75WkamyW`, `devianteventsdc@gmail.com`, created 12 September 2026, and it hosts events 79, 80, 82, 83, 84, 85, 86 and 88. Set `DVNT_BRAND_USER_ID=613` and `DVNT_BRAND_AUTH_ID=ZcInhog357kU8uGba7ziQ4DX75WkamyW` in server-only configuration. They are deliberately not committed: the sender is configuration, not code, so a clone of this repository cannot send as the brand.
+
+Two things to settle before enabling it. The account has `verified = false`, while the proposed DM copy describes itself as coming from the verified Deviant account — either verify the account or drop that claim. And the account was created on 12 September 2026, after most of the membership, so an unbounded first send would reach people who predate it; scope the first campaign's audience deliberately rather than letting it default to everyone.
 
 Verified-only admission stays off until `verified_admission_policy` is updated. Set `cohort_created_after` and `grace_deadline` together: a NULL deadline means grace never ends and the member sees a prompt rather than a refusal. Rollback is `enforce = false`. The runbook, including a count of who the next stage would refuse, is in the migration footer.
 

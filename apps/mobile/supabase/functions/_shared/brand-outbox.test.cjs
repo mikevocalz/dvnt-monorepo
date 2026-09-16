@@ -135,3 +135,53 @@ test('brand copy is labelled automated and an unknown campaign version sends not
   assert.ok(withLink.body.includes('Stop these messages: https://dvntapp.live/u/x'));
   assert.equal(outbox.campaignMessage('welcome_dm_v9'), null);
 });
+
+// ── verifyBrandSender ───────────────────────────────────────────────────────
+// The configured pair must name one real account. A well-formed id is not a
+// correct id, and this app has already had content land under the wrong
+// account once because an identity was taken on trust.
+const BRAND = { userId: 613, authId: "ZcInhog357kU8uGba7ziQ4DX75WkamyW" };
+const { verifyBrandSender } = sender(CONFIGURED);
+
+function fakeDb(row) {
+  return {
+    from: () => ({
+      select: () => ({
+        eq: () => ({ maybeSingle: async () => row }),
+      }),
+    }),
+  };
+}
+
+test("the configured pair is accepted when it names one real account", async () => {
+  const db = fakeDb({
+    data: { id: 613, auth_id: "ZcInhog357kU8uGba7ziQ4DX75WkamyW", username: "deviantevents" },
+  });
+  const got = await verifyBrandSender(db, BRAND);
+  assert.equal(got.ok, true);
+  assert.equal(got.sender.userId, 613);
+});
+
+test("an auth id belonging to another account is refused, not sent as", async () => {
+  // users.id 613 exists, but its auth_id is somebody else's — the exact shape
+  // of the incident this guard exists for.
+  const db = fakeDb({
+    data: { id: 613, auth_id: "WU20JUKEdnFxlntkWdMVnKsKdaoiydV8", username: "deviantevents" },
+  });
+  const got = await verifyBrandSender(db, BRAND);
+  assert.equal(got.ok, false);
+  assert.match(got.reason, /does not belong to/);
+  // The real auth id must not be echoed back into logs beside the configured one.
+  assert.ok(!got.reason.includes("WU20JUKEdnFxlntkWdMVnKsKdaoiydV8"));
+});
+
+test("a missing account fails closed rather than defaulting to anyone", async () => {
+  const got = await verifyBrandSender(fakeDb({ data: null }), BRAND);
+  assert.equal(got.ok, false);
+  assert.match(got.reason, /No account with users\.id 613/);
+});
+
+test("an unreadable users table sends nothing", async () => {
+  const got = await verifyBrandSender(fakeDb({ error: new Error("boom") }), BRAND);
+  assert.equal(got.ok, false);
+});
