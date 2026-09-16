@@ -23,6 +23,7 @@ import {
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { activityKeys } from "@dvnt/app/lib/hooks/use-activities-query";
 import { eventKeys } from "@dvnt/app/lib/query-keys";
 export { eventKeys };
@@ -715,6 +716,13 @@ export function useRsvpEvent() {
       if (err.message === "DUPLICATE_RSVP_MUTATION") {
         return;
       }
+      // A failed RSVP used to roll the cache back and say nothing, so the
+      // button read as dead. It is the only feedback a member gets here.
+      useUIStore.getState().showToast(
+        "error",
+        "RSVP didn't go through",
+        (err as any)?.message || "Try again in a moment.",
+      );
       if (context?.previousDetail) {
         queryClient.setQueryData(
           eventKeys.detail(eventId),
