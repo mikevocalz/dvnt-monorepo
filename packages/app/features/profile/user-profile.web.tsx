@@ -8,8 +8,12 @@
  * `useParams`, then calls the EXACT hooks native uses — `useUser`,
  * `useProfilePosts`, `useFollow`, `useAppStore` (nsfw), `useAuthStore`,
  * `useUIStore`, plus the followers/following prefetch and the
- * conversation-resolution prefetch for the Message button. Redirects to the own
- * profile route when the viewer opens their own username (matches native).
+ * conversation-resolution prefetch for the Message button, plus `useBadgeTier`
+ * (the PUBLIC `user_badge_tiers` view — never `useEntitlements`, which is
+ * own-rows-only billing state). Redirects to the own profile route when the
+ * viewer opens their own username, handing `?tab=events` to `useProfileStore`
+ * on the way out so "More events" does not land you on your posts — same
+ * handoff native does.
  *
  * Law 3 (raw web): NativeWind interop off — Tailwind className only on raw DOM
  * tags. Header bg #06070d with back + more (action sheet). Rounded-square avatar
@@ -20,7 +24,6 @@
 
 import { followButtonLabel } from "@dvnt/app/lib/profile/follow-relationship";
 import { useCallback, useEffect, useMemo } from "react";
-import { useWindowDimensions } from "react-native";
 import { useParams, useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, MoreHorizontal, Share2, Grid, X, CalendarDays } from "lucide-react";
@@ -33,6 +36,10 @@ import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useReportSheetStore } from "@dvnt/app/lib/stores/report-sheet-store";
 import { useProfileScreenUIStore } from "@dvnt/app/lib/stores/profile-screen-ui-store";
+import { useProfileStore } from "@dvnt/app/lib/stores/profile-store";
+import { useBadgeTier } from "@dvnt/app/lib/subscription/use-badge-tier";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
+import { TierBadge } from "@dvnt/app/components/membership/TierBadge";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { shareProfile } from "@dvnt/app/lib/utils/sharing";
 import { resolveAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
@@ -66,8 +73,13 @@ export function UserProfileScreen() {
   const params = useParams();
   const username = String((params as { username?: string })?.username ?? "");
 
-  const { width: winW } = useWindowDimensions();
   const queryClient = useQueryClient();
+  // The own-profile screen owns its tab in this store; the redirect below hands
+  // the requested tab over to it, same as native.
+  const setOwnProfileTab = useProfileStore((s) => s.setActiveTab);
+  // Someone else's tier, from the public `user_badge_tiers` view — never from
+  // `useEntitlements`, which is own-rows-only billing state.
+  const { planKey: badgeTier } = useBadgeTier(username);
   const nsfwEnabled = useAppStore((s) => s.nsfwEnabled);
   const currentUser = useAuthStore((s) => s.user);
   const showToast = useUIStore((s) => s.showToast);
@@ -149,8 +161,14 @@ export function UserProfileScreen() {
 
   // Redirect to own profile when viewing yourself (matches native).
   useEffect(() => {
-    if (isOwnProfile) router.replace("/feed/profile");
-  }, [isOwnProfile, router]);
+    if (!isOwnProfile) return;
+    // Carry `?tab=events` across the hop. Without it, opening "More events" on
+    // your own event dropped you on your posts and read as a dead link — the
+    // native screen hands the tab to the own-profile store before replacing,
+    // and the web route did not.
+    if (requestedTab === "events") setOwnProfileTab("events");
+    router.replace("/feed/profile");
+  }, [isOwnProfile, router, requestedTab, setOwnProfileTab]);
 
   const user = userData as any;
   const isFollowing = user?.isFollowing === true;
@@ -298,6 +316,10 @@ export function UserProfileScreen() {
         <div className="mt-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold">{displayName}</span>
+            {/* Mark only — no tier name. Someone else's plan is not yours to
+                read; the colour says "member", the label would say "paying for
+                the VIP tier". Free renders nothing. */}
+            <TierBadge plan={badgeTier} size={14} />
             <ProfilePronounsPill pronouns={user?.pronouns} inline />
           </div>
           {user?.bio ? (
@@ -414,7 +436,7 @@ export function UserProfileScreen() {
           /* Posts grid */
           <div className="pt-2">
             {isLoading || isLoadingPosts ? (
-              <GridSkeleton winW={winW} />
+              <GridSkeleton />
             ) : (
               <ProfileMasonryGrid
                 data={userPosts}
@@ -540,8 +562,17 @@ function Stat({
   );
 }
 
-function GridSkeleton({ winW }: { winW: number }) {
-  const columns = winW > 0 && winW < 360 ? 2 : 3;
+function GridSkeleton() {
+  // Same column maths as the grid it stands in for, so the placeholder does
+  // not re-flow into a different shape the moment the posts land.
+  const { columns } = useResponsiveGrid({
+    minCellWidth: 170,
+    gap: 6,
+    horizontalPadding: 0,
+    // 7 is what the grid itself resolves to once its container hits MAX_W
+    // (1320) — capping here keeps placeholder and content the same shape.
+    maxColumns: 7,
+  });
   return (
     <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}>
       {Array.from({ length: 6 }).map((_, i) => (

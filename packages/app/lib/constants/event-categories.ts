@@ -38,11 +38,13 @@ export const EVENT_CATEGORIES: EventCategory[] = [
   { value: "other", label: "Other", emoji: "✨" },
 ];
 
-export const EVENT_VISIBILITY_OPTIONS = [
-  { value: "public", label: "Public", description: "Anyone can find and join" },
-  { value: "private", label: "Private", description: "Invite only" },
-  { value: "link_only", label: "Link Only", description: "Anyone with the link" },
-] as const;
+// Visibility labels and helper text live in one module so the native and web
+// create/edit screens cannot drift. Re-exported here for older import paths.
+export {
+  EVENT_VISIBILITY_COPY,
+  EVENT_VISIBILITY_OPTIONS,
+  eventVisibilityCopy,
+} from "../events/event-visibility-copy";
 
 export const AGE_RESTRICTION_OPTIONS = [
   { value: "none", label: "All Ages" },

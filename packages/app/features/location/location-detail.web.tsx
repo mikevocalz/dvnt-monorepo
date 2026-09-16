@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { isVideoKind } from "@dvnt/app/lib/media/types";
-import { useWindowDimensions } from "react-native";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid.web";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useParams, useRouter, useSearchParams } from "solito/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -29,6 +29,8 @@ import { create } from "zustand";
 
 const GAP = 8;
 const MAX_W = 935;
+/** Smallest tile still worth showing — columns fall out of this, as on native. */
+const MIN_TILE = 220;
 
 // ----- location-matching helpers (verbatim from the native screen) -----
 function normalizeLocationTerm(value?: string | string[] | null) {
@@ -105,11 +107,6 @@ function coverFor(post: Post): string {
   return "";
 }
 
-function columnsFor(width: number): number {
-  if (width >= 900) return 4;
-  if (width >= 640) return 3;
-  return 2;
-}
 
 export function LocationDetailScreen() {
   const router = useRouter();
@@ -209,12 +206,21 @@ export function LocationDetailScreen() {
   };
 
   // ----- masonry grid (TanStack Virtual lanes) -----
-  const { width: winW } = useWindowDimensions();
-  const containerWidth = Math.min(winW - 16, MAX_W);
-  const numColumns = columnsFor(winW);
-  const columnWidth = Math.floor(
-    (containerWidth - (numColumns - 1) * GAP) / numColumns,
-  );
+  // Same hook, same maths as native (`resolveResponsiveGrid`): columns fall out
+  // of how many readable tiles fit the content column, so a 1440px window fills
+  // the grid instead of stranding the extra width in three fixed breakpoints.
+  const { columns: numColumns, cellWidth } = useResponsiveGrid({
+    minCellWidth: MIN_TILE,
+    gap: GAP,
+    horizontalPadding: 16,
+    maxColumns: 4,
+  });
+  // The content column is capped at MAX_W, so a tile never grows past its share
+  // of that cap however wide the window gets (`ponytail:` no container-query
+  // measurement — the cap is a constant, so clamping the cell is the whole job).
+  const maxColumnWidth = (MAX_W - (numColumns - 1) * GAP) / numColumns;
+  const columnWidth = Math.floor(Math.min(cellWidth, maxColumnWidth));
+  const containerWidth = numColumns * columnWidth + (numColumns - 1) * GAP;
   const cellHeight = (post: Post) =>
     Math.round(estimateRatio(post) * columnWidth);
 

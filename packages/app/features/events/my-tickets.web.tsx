@@ -3,21 +3,32 @@
 /**
  * My Tickets — web (port of native `app/(protected)/events/my-tickets.tsx`).
  *
- * Law 1 (data wiring is sacred): the list comes from the EXACT native hook
- * `useMyTickets()`, pending transfers from `ticketsApi.getPendingTransfers()`,
- * accept/decline via `ticketsApi.acceptTransfer/declineTransfer`, and ticket tap
- * primes the detail cache with `queryClient.setQueryData(ticketKeys.myTicketForEvent(...))`
- * exactly like native before navigating.
+ * Law 1 (data wiring is sacred): the list comes from the EXACT native hooks —
+ * `useMyTickets()`, `usePendingTransfers()`, `useTicketViewerId()` — with
+ * accept/decline via `ticketsApi.acceptTransfer/declineTransfer` and both
+ * viewer-keyed caches invalidated afterwards, exactly like native.
  * Law 3: raw semantic HTML + Tailwind only (NativeWind interop off). No View/Text.
  * Lists = TanStack Virtual (never FlatList/FlashList). Avatars/thumbs are rounded
  * squares, never pills. Active upcoming/past tab lives in a tiny Zustand store.
  *
  * Native renders a QR via react-native-qrcode-svg (native-only). On web there is
  * no QR lib present, so the ticket card surfaces the ticket code; the full QR
- * lives on the ticket detail route.
+ * lives on the ticket detail route. Either way the credential only renders when
+ * `resolveTicketAccess()` says the viewer holds the pass and the pass is not
+ * mid-transfer — it fails closed on an unknown viewer, an unowned row, or a
+ * status this build does not recognise.
+ *
+ * `useMotionTier()` resolves to "lite" under `prefers-reduced-motion: reduce`
+ * (see its `.web.ts` twin) and the skeleton stops pulsing, mirroring native's
+ * entrance-animation downgrade.
+ *
+ * ponytail: incoming transfers only. A transfer the member *started* can be
+ * cancelled on native but not here — `getPendingTransfers()` returns `outgoing`
+ * and this screen drops it, so the web ceiling is "your pass shows Transfer
+ * Pending with no code"; cancelling still needs the app.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { CardLink } from "@dvnt/app/components/ui/card-link.web";
 import { useRouter } from "solito/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,7 +43,18 @@ import {
   Sparkles,
   Ticket,
 } from "lucide-react";
-import { ticketKeys, useMyTickets } from "@dvnt/app/lib/hooks/use-tickets";
+import {
+  ticketKeys,
+  useMyTickets,
+  usePendingTransfers,
+  useTicketViewerId,
+} from "@dvnt/app/lib/hooks/use-tickets";
+import { qk } from "@dvnt/app/lib/query/keys";
+import { useMotionTier } from "@dvnt/app/lib/navigation/use-motion-tier";
+import {
+  pendingTransferTicketIds,
+  resolveTicketAccess,
+} from "@dvnt/app/lib/tickets/ticket-access";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { addonsApi, type OrderAddonRecord } from "@dvnt/app/lib/api/addons";
 import {
@@ -94,12 +116,25 @@ function isUpcoming(ticket: TicketRecord): boolean {
 function TicketCard({
   ticket,
   addonCount = 0,
+  viewerId,
+  transferringTicketIds,
 }: {
   ticket: TicketRecord;
   /** Owned add-ons for this event (order_addons) — WS-3 wallet badge. */
   addonCount?: number;
+  /** `useTicketViewerId()` — "anon" when signed out. */
+  viewerId: string;
+  transferringTicketIds: ReadonlySet<string>;
 }) {
-  const status = STATUS_COLORS[ticket.status] || STATUS_COLORS.void;
+  const access = resolveTicketAccess({
+    ticket,
+    viewerId,
+    transferringTicketIds,
+  });
+  const status =
+    access.denial === "mid-transfer"
+      ? STATUS_COLORS.transfer_pending
+      : STATUS_COLORS[ticket.status] || STATUS_COLORS.void;
   const isCoatCheck = ticket.category === "coat_check";
   const imageUrl = resolveImageUrl(ticket.event_image);
 
@@ -177,7 +212,10 @@ function TicketCard({
         >
           {status.label}
         </span>
-        {ticket.status === "active" ? (
+        {/* Credential gate. `canShowCredential` is false for a signed-out read,
+            a row that is not this viewer's, a pass mid-transfer, and any status
+            this build does not recognise — see lib/tickets/ticket-access.ts. */}
+        {access.canShowCredential ? (
           isCoatCheck ? (
             <Shirt size={18} color="#A78BFA" />
           ) : (
@@ -190,6 +228,12 @@ function TicketCard({
               ) : null}
             </div>
           )
+        ) : access.denial === "mid-transfer" ? (
+          // The badge above already says "Transfer Pending". This line only has
+          // to answer the question the missing QR raises.
+          <span className="text-center text-[9px] leading-tight text-white/40">
+            Code hidden
+          </span>
         ) : null}
       </div>
     </CardLink>
@@ -273,6 +317,8 @@ const TABS: { key: TicketsTab; label: string }[] = [
 export function MyTicketsScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const viewerId = useTicketViewerId();
+  const motionTier = useMotionTier();
   const { data: tickets, isLoading, isError, refetch } = useMyTickets();
 
   const activeTab = useMyTicketsTabStore((s) => s.activeTab);
@@ -294,25 +340,23 @@ export function MyTicketsScreen() {
     return map;
   }, [myAddons]);
 
-  const [pendingTransfers, setPendingTransfers] = useState<any[]>([]);
+  // Native hook, not a local fetch: it is auth-gated, viewer-keyed and
+  // invalidatable, so a logout cannot leave the previous member's incoming
+  // transfers on screen.
+  const transfers = usePendingTransfers();
+  const pendingTransfers = transfers.data ?? [];
 
-  const loadTransfers = useCallback(async () => {
-    try {
-      const { incoming } = await ticketsApi.getPendingTransfers();
-      setPendingTransfers(incoming ?? []);
-    } catch (e) {
-      console.warn("[MyTickets] loadTransfers failed:", e);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadTransfers();
-  }, [loadTransfers]);
+  /** Ids frozen by a transfer in flight — see `lib/tickets/ticket-access.ts`. */
+  const transferringTicketIds = useMemo(
+    () => pendingTransferTicketIds(pendingTransfers),
+    [pendingTransfers],
+  );
 
   const handleTransferAction = useCallback(() => {
-    loadTransfers();
+    queryClient.invalidateQueries({ queryKey: qk.tickets.transfers(viewerId) });
+    queryClient.invalidateQueries({ queryKey: qk.tickets.mine(viewerId) });
     refetch();
-  }, [loadTransfers, refetch]);
+  }, [queryClient, refetch, viewerId]);
 
 
   const { upcoming, past } = useMemo(() => {
@@ -395,7 +439,13 @@ export function MyTicketsScreen() {
             {Array.from({ length: 4 }).map((_, i) => (
               <div
                 key={i}
-                className="h-[110px] animate-pulse rounded-2xl border border-white/8 bg-white/4"
+                // Native drops entrance motion at the "lite" tier; on web the
+                // same tier means `prefers-reduced-motion: reduce`, so the
+                // skeleton stops pulsing rather than breathing at someone who
+                // asked the OS for stillness.
+                className={`h-[110px] rounded-2xl border border-white/8 bg-white/4 ${
+                  motionTier === "lite" ? "" : "animate-pulse"
+                }`}
               />
             ))}
           </div>
@@ -469,6 +519,8 @@ export function MyTicketsScreen() {
                     ) : (
                       <TicketCard
                         ticket={row.ticket}
+                        viewerId={viewerId}
+                        transferringTicketIds={transferringTicketIds}
                         addonCount={
                           addonCountByEvent.get(String(row.ticket.event_id)) ??
                           0

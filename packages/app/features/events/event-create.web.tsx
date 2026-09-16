@@ -62,6 +62,10 @@ import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import {
+  EVENT_VISIBILITY_OPTIONS,
+  eventVisibilityCopy,
+} from "@dvnt/app/lib/events/event-visibility-copy";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import {
@@ -981,23 +985,39 @@ export function CreateEventScreen() {
             <Section title="Visibility & audience">
               <Field label="Who can see this">
                 <div className="flex gap-2" role="radiogroup" aria-label="Who can see this">
-                  {(["public", "private", "link_only"] as const).map((v) => (
+                  {EVENT_VISIBILITY_OPTIONS.map((o) => (
                     <button
-                      key={v}
+                      key={o.value}
                       type="button"
                       role="radio"
-                      aria-checked={s.visibility === v}
-                      onClick={() => s.setVisibility(v)}
-                      className={`flex-1 h-9 rounded-xl text-sm font-medium capitalize ${
-                        s.visibility === v
+                      aria-checked={s.visibility === o.value}
+                      aria-label={`${o.label}. ${o.summary}.`}
+                      aria-describedby={
+                        s.visibility === o.value
+                          ? "event-visibility-help"
+                          : undefined
+                      }
+                      onClick={() => s.setVisibility(o.value)}
+                      className={`flex-1 h-9 rounded-xl text-sm font-medium ${
+                        s.visibility === o.value
                           ? "bg-white text-black"
                           : "bg-white/8 text-white/70"
                       }`}
                     >
-                      {v.replace("_", " ")}
+                      {o.label}
                     </button>
                   ))}
                 </div>
+                <p
+                  id="event-visibility-help"
+                  aria-live="polite"
+                  className="mt-2 text-[12px] leading-[17px] text-white/55 rounded-xl bg-white/[0.04] border border-white/[0.06] p-3"
+                >
+                  <strong className="text-white">
+                    {eventVisibilityCopy(s.visibility).label} ·{" "}
+                  </strong>
+                  {eventVisibilityCopy(s.visibility).helper}
+                </p>
               </Field>
               <Field label="Age restriction">
                 <div className="flex gap-2" role="radiogroup" aria-label="Age restriction">

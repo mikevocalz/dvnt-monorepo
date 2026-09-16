@@ -25,7 +25,7 @@
  * bg #06070d, accent cyan #3FDCFF, unread rows highlighted.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
 import { useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -42,6 +42,10 @@ import {
   Radio,
   Plus,
 } from "lucide-react";
+import { Dialog } from "@dvnt/ui";
+import { useMessagesSheetsStore } from "@dvnt/app/lib/stores/messages-sheets-store";
+import { NewMessageScreen } from "./new-message.web";
+import { NewGroupScreen } from "./new-group.web";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { useQuery } from "@tanstack/react-query";
 
@@ -478,6 +482,35 @@ export function MessagesScreen() {
   const deletingId = useMessagesTabStore((s) => s.deletingId);
   const setDeletingId = useMessagesTabStore((s) => s.setDeletingId);
 
+  // Composer visibility — the SAME store the native sheets use, so "which
+  // composer is open" has one answer on both platforms (Zustand, never
+  // useState). `resetNewMessage` on close is what makes the composer open
+  // empty next time instead of showing the last search you typed.
+  const newMessageOpen = useMessagesSheetsStore((s) => s.newMessageOpen);
+  const setNewMessageOpen = useMessagesSheetsStore((s) => s.setNewMessageOpen);
+  const newGroupOpen = useMessagesSheetsStore((s) => s.newGroupOpen);
+  const setNewGroupOpen = useMessagesSheetsStore((s) => s.setNewGroupOpen);
+  const resetNewMessage = useMessagesSheetsStore((s) => s.resetNewMessage);
+  const closeNewMessage = useCallback(() => {
+    setNewMessageOpen(false);
+    resetNewMessage();
+  }, [setNewMessageOpen, resetNewMessage]);
+  const closeNewGroup = useCallback(
+    () => setNewGroupOpen(false),
+    [setNewGroupOpen],
+  );
+  // Picking someone navigates to the chat and unmounts the inbox; without this
+  // the flag would still be true and the composer would be sitting there open
+  // when you came back to the inbox.
+  useEffect(() => {
+    const store = useMessagesSheetsStore.getState();
+    return () => {
+      store.setNewMessageOpen(false);
+      store.setNewGroupOpen(false);
+      store.resetNewMessage();
+    };
+  }, []);
+
   // SACRED data hooks — identical to native.
   const { data: inboxUnreadCount = 0, spamCount: spamUnreadCount = 0 } =
     useUnreadMessageCount();
@@ -716,7 +749,7 @@ export function MessagesScreen() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => router.push("/feed/messages/new-group")}
+            onClick={() => setNewGroupOpen(true)}
             aria-label="New group"
             title="New group"
             className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 active:scale-95"
@@ -725,7 +758,7 @@ export function MessagesScreen() {
           </button>
           <button
             type="button"
-            onClick={() => router.push("/feed/messages/new")}
+            onClick={() => setNewMessageOpen(true)}
             aria-label="New message"
             title="New message"
             className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#3FDCFF] active:scale-95"
@@ -840,7 +873,7 @@ export function MessagesScreen() {
             {!search.trim() ? (
               <button
                 type="button"
-                onClick={() => router.push("/feed/messages/new")}
+                onClick={() => setNewMessageOpen(true)}
                 className="mt-5 flex items-center gap-2 rounded-xl bg-[#3FDCFF] px-4 py-2.5 text-sm font-bold text-[#06070d] active:scale-95"
               >
                 <MessageSquare size={16} color="#06070d" />
@@ -890,6 +923,24 @@ export function MessagesScreen() {
           </div>
         )}
       </main>
+
+      {/* ponytail: the dialog reuses the whole /messages/new page instead of a
+          web-only sheet component — no drag handle, no snap points, one code
+          path for both entries.
+          Native opens these as bottom sheets; on web the same two composers open
+          in the kit Dialog — the inbox stays behind them, so starting a message
+          is never a page you have to come back from. Same store drives both. */}
+      <Dialog
+        open={newMessageOpen}
+        onClose={closeNewMessage}
+        maxWidth={640}
+        hideClose
+      >
+        <NewMessageScreen onClose={closeNewMessage} />
+      </Dialog>
+      <Dialog open={newGroupOpen} onClose={closeNewGroup} maxWidth={640} hideClose>
+        <NewGroupScreen onClose={closeNewGroup} />
+      </Dialog>
     </div>
   );
 }

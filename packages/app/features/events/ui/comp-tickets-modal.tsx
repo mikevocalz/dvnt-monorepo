@@ -26,6 +26,10 @@ import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 import { bulkCompTickets, type CompResult } from "@dvnt/app/lib/api/privileged";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
+import {
+  canSubmitComp,
+  parseCompRecipients,
+} from "@dvnt/app/lib/tickets/comp-recipients";
 
 interface Tier {
   id: string;
@@ -85,25 +89,16 @@ export function CompTicketsModal({
     })();
   }, [visible, eventId]);
 
-  const parsed = useMemo(() => {
-    return recipientsRaw
-      .split(/[,;\n]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }, [recipientsRaw]);
-
   // Split preview. A username has to be an existing member or the server skips
   // it; an email may already have an account, so it is counted as an email
-  // rather than promised as a guest.
-  const preview = useMemo(() => {
-    let members = 0;
-    let emails = 0;
-    for (const entry of parsed) {
-      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry)) emails += 1;
-      else members += 1;
-    }
-    return { members, emails };
-  }, [parsed]);
+  // rather than promised as a guest. Shared with web so the two platforms
+  // cannot disagree about what a typed list means.
+  const preview = useMemo(
+    () => parseCompRecipients(recipientsRaw),
+    [recipientsRaw],
+  );
+  const parsed = preview.entries;
+  const canSend = canSubmitComp({ tierId, preview, sending });
 
   const handleClose = useCallback(() => {
     if (sending) return;
@@ -111,10 +106,10 @@ export function CompTicketsModal({
   }, [sending, onClose]);
 
   const handleSend = useCallback(async () => {
-    if (sending || !tierId || parsed.length === 0 || parsed.length > 100) return;
+    if (!canSend) return;
     setSending(true);
     try {
-      const res = await bulkCompTickets(eventId, tierId, parsed, note.trim() || undefined);
+      const res = await bulkCompTickets(eventId, tierId!, parsed, note.trim() || undefined);
       setResult(res);
       onSuccess?.(res);
       const guestIssued = res.guest_issued ?? 0;
@@ -147,7 +142,7 @@ export function CompTicketsModal({
     } finally {
       setSending(false);
     }
-  }, [sending, tierId, parsed, eventId, note, onSuccess, showToast]);
+  }, [canSend, tierId, parsed, eventId, note, onSuccess, showToast]);
 
   const noTiers = tiers != null && tiers.length === 0;
 
@@ -368,10 +363,10 @@ export function CompTicketsModal({
           <View style={styles.footer}>
             <Pressable
               onPress={handleSend}
-              disabled={sending || !tierId || parsed.length === 0 || parsed.length > 100}
+              disabled={!canSend}
               style={[
                 styles.sendBtn,
-                (sending || !tierId || parsed.length === 0 || parsed.length > 100) && { opacity: 0.4 },
+                !canSend && { opacity: 0.4 },
               ]}
             >
               {sending ? (

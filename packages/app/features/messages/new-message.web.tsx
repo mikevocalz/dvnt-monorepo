@@ -144,8 +144,13 @@ function UserRows({
   );
 }
 
-export function NewMessageScreen() {
+export function NewMessageScreen({ onClose }: { onClose?: () => void }) {
   const router = useRouter();
+  // Rendered as a route on its own, and inside the inbox's composer dialog.
+  // `onClose` is what tells the two apart: dismissing a dialog is not going
+  // back a page, and a dialog must not be 100dvh tall inside its own panel.
+  const inDialog = typeof onClose === "function";
+  const dismiss = () => (onClose ? onClose() : router.back());
 
   // SACRED STORE — never useState for the query.
   const searchQuery = useNewMessageStore((s) => s.searchQuery);
@@ -227,7 +232,7 @@ export function NewMessageScreen() {
   );
 
   return (
-    <div className="min-h-[100dvh] bg-[#06070d] text-white">
+    <div className={inDialog ? "bg-[#06070d] text-white" : "min-h-[100dvh] bg-[#06070d] text-white"}>
       {/* Sticky header */}
       <div
         className="sticky top-0 z-20 flex items-center gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 py-3 backdrop-blur"
@@ -235,8 +240,8 @@ export function NewMessageScreen() {
       >
         <button
           type="button"
-          onClick={() => router.back()}
-          aria-label="Back"
+          onClick={dismiss}
+          aria-label={inDialog ? "Close" : "Back"}
           className="shrink-0 active:scale-95"
         >
           <ArrowLeft size={24} color="#fff" />

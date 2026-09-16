@@ -11,6 +11,7 @@ import {
   getCurrentUserAuthId,
 } from "./auth-helper";
 import { invokeEdge } from "./invoke-edge";
+import { filterDiscoverableEvents } from "../events/event-discovery";
 import type { TicketTypeCategory } from "./ticket-types";
 import type { TierType, TierVisibility } from "../tickets/pricing";
 import type { DraftAddon } from "../../features/events/create/addon-form";
@@ -287,7 +288,11 @@ export const eventsApi = {
       if (error) throw error;
 
       // RPC returns JSON array — map to client shape
-      const mapped = ((data as any[]) || []).map((event: any) => {
+      // Discovery lists never carry a cancelled event. The RPCs filter it
+      // server-side too (20260916190000_exclude_cancelled_events_from_discovery)
+      // — this is the client-side half, so the list is correct on a build that
+      // reaches a database where that migration has not run yet.
+      const mapped = filterDiscoverableEvents((data as any[]) || []).map((event: any) => {
         const dateParts = formatEventDate(event.start_date);
         const avatars = Array.isArray(event.attendee_avatars)
           ? event.attendee_avatars
@@ -378,7 +383,11 @@ export const eventsApi = {
         return this.getEvents(limit);
       }
 
-      const mapped = ((data as any[]) || []).map((event: any) => {
+      // Discovery lists never carry a cancelled event. The RPCs filter it
+      // server-side too (20260916190000_exclude_cancelled_events_from_discovery)
+      // — this is the client-side half, so the list is correct on a build that
+      // reaches a database where that migration has not run yet.
+      const mapped = filterDiscoverableEvents((data as any[]) || []).map((event: any) => {
         const dateParts = formatEventDate(event.start_date);
         const avatars = Array.isArray(event.attendee_avatars)
           ? event.attendee_avatars
@@ -472,6 +481,9 @@ export const eventsApi = {
       // Filtered in JS, not with .neq(): `status <> 'cancelled'` is NULL for
       // the older rows whose status is NULL, and PostgREST would drop those
       // too — hiding most of the list.
+      // Deliberately the cancelled check alone, NOT filterDiscoverableEvents:
+      // this is an ownership surface, and a host must still see their own
+      // suspended or draft event here.
       const visible = (data || []).filter(
         (event: any) => event.status !== "cancelled",
       );
@@ -518,11 +530,11 @@ export const eventsApi = {
         .limit(limit);
       if (error) throw error;
 
-      // Same cancelled-event filter as getMyEvents — a cancelled event must
-      // not advertise itself on the host's public profile either. JS-side for
-      // the same NULL-status reason.
-      const mapped = (data || [])
-        .filter((event: any) => event.status !== "cancelled")
+      // Public discovery surface (the host's profile), so it takes the full
+      // discovery gate, not just the cancelled check: a cancelled, suspended or
+      // draft event must not advertise itself on a profile anyone can open.
+      // JS-side for the same NULL-status reason as getMyEvents.
+      const mapped = filterDiscoverableEvents(data || [])
         .map((event: any) => {
         const dateParts = formatEventDate(event[DB.events.startDate]);
         return {
@@ -561,10 +573,16 @@ export const eventsApi = {
 
       if (error) throw error;
 
+      // Same discovery gate as every other list — a cancelled event does not
+      // reappear once its date passes. JS-side, not `.neq()`: `status <>
+      // 'cancelled'` is NULL for the legacy rows whose status is NULL and
+      // PostgREST would drop those too.
+      const rows = filterDiscoverableEvents(data || []);
+
       // Fetch host data separately
       const hostIds = [
         ...new Set(
-          (data || []).map((e: any) => e[DB.events.hostId]).filter(Boolean),
+          rows.map((e: any) => e[DB.events.hostId]).filter(Boolean),
         ),
       ];
       let hostsMap = new Map();
@@ -582,7 +600,7 @@ export const eventsApi = {
         );
       }
 
-      const mapped = (data || []).map((event: any) => {
+      const mapped = rows.map((event: any) => {
         const host = hostsMap.get(event[DB.events.hostId]);
         const dateParts = formatEventDate(event[DB.events.startDate]);
         return {

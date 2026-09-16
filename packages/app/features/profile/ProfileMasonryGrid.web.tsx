@@ -29,6 +29,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useRouter } from "solito/navigation";
 import { Play, Grid3x3 } from "lucide-react";
 import { type SafeGridTile } from "@dvnt/app/lib/utils/safe-profile-mappers";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import {
   resolveTextPostPresentation,
   TEXT_POST_THEMES,
@@ -54,11 +55,14 @@ function estimateRatio(tile: SafeGridTile): number {
   return base + (hashId(tile.id) * 2 - 1) * 0.3;
 }
 
-function columnsFor(width: number): number {
-  // Profile masonry is a fixed 3-column grid (Instagram-style), matching
-  // native; only the narrowest phones fall back to 2 to avoid cramping.
-  return width > 0 && width < 360 ? 2 : 3;
-}
+/**
+ * Smallest profile tile still worth showing. Native's profile grid asks for
+ * 180pt against the whole window; 170 against this (narrower, padding-free)
+ * container lands on the same counts — 2 up on a phone, 3 in the capped
+ * content column, 7 at MAX_W — which is what the two platforms agreeing means
+ * here.
+ */
+const MIN_TILE = 170;
 
 /**
  * Reactive width of `ref`'s element, measured with a ResizeObserver (no
@@ -108,11 +112,19 @@ export function ProfileMasonryGrid({
   // window — sizing off the window overflowed the column (3rd column clipped).
   const measured = useContainerWidth(parentRef);
   const containerWidth = Math.min(measured, MAX_W);
-  const numColumns = columnsFor(containerWidth);
-  const columnWidth =
-    containerWidth > 0
-      ? Math.floor((containerWidth - (numColumns - 1) * GAP) / numColumns)
-      : 0;
+  // Same hook, same maths as native (`use-responsive-grid`) — the web build
+  // resolves the `.web` variant, which reads the viewport from `resize`
+  // instead of react-native. `containerWidth` is why the hook takes one: this
+  // grid lays out inside the capped profile column, not the window, and
+  // sizing off the window clipped the last lane.
+  const { columns: numColumns, cellWidth } = useResponsiveGrid({
+    minCellWidth: MIN_TILE,
+    gap: GAP,
+    horizontalPadding: 0,
+    maxColumns: 8,
+    containerWidth,
+  });
+  const columnWidth = containerWidth > 0 ? Math.floor(cellWidth) : 0;
   const cellHeight = (tile: SafeGridTile) =>
     Math.round(estimateRatio(tile) * columnWidth);
 

@@ -53,6 +53,10 @@ import { useColorScheme, useMediaPicker } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
+import {
+  EVENT_VISIBILITY_OPTIONS,
+  eventVisibilityCopy,
+} from "@dvnt/app/lib/events/event-visibility-copy";
 // Popover removed — inline expanding pickers used instead
 import { DvntMap } from "@dvnt/app/components/map";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
@@ -1369,19 +1373,16 @@ function CreateEventScreenContent() {
                   </Text>
                 </View>
                 <View className="flex-row gap-2">
-                  {(
-                    ["public", "private", "link_only"] as VisibilityOption[]
-                  ).map((opt) => {
-                    const labels: Record<VisibilityOption, string> = {
-                      public: "Public",
-                      private: "Private",
-                      link_only: "Link Only",
-                    };
-                    const isActive = visibility === opt;
+                  {EVENT_VISIBILITY_OPTIONS.map((opt) => {
+                    const isActive = visibility === opt.value;
                     return (
                       <Pressable
-                        key={opt}
-                        onPress={() => setVisibility(opt)}
+                        key={opt.value}
+                        onPress={() => setVisibility(opt.value)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: isActive }}
+                        accessibilityLabel={`${opt.label}. ${opt.summary}.`}
+                        accessibilityHint={opt.helper}
                         className="flex-1 py-2.5 rounded-xl items-center"
                         style={{
                           backgroundColor: isActive
@@ -1399,7 +1400,7 @@ function CreateEventScreenContent() {
                             color: isActive ? "#fff" : colors.mutedForeground,
                           }}
                         >
-                          {labels[opt]}
+                          {opt.label}
                         </Text>
                       </Pressable>
                     );
@@ -1421,44 +1422,10 @@ function CreateEventScreenContent() {
                     className="text-[12px] leading-[17px]"
                     style={{ color: colors.mutedForeground }}
                   >
-                    {visibility === "public" && (
-                      <>
-                        <Text
-                          className="font-bold"
-                          style={{ color: colors.foreground }}
-                        >
-                          Public ·{" "}
-                        </Text>
-                        Appears in the Home feed, For You, and Search. Anyone
-                        can see and buy a ticket. Best for events you want to
-                        fill.
-                      </>
-                    )}
-                    {visibility === "link_only" && (
-                      <>
-                        <Text
-                          className="font-bold"
-                          style={{ color: colors.foreground }}
-                        >
-                          Link Only ·{" "}
-                        </Text>
-                        Hidden from the public feed and Search. Anyone with the
-                        share link can see and buy. Best for soft-launch events
-                        you promote on Instagram, group chats, or email.
-                      </>
-                    )}
-                    {visibility === "private" && (
-                      <>
-                        <Text
-                          className="font-bold"
-                          style={{ color: colors.foreground }}
-                        >
-                          Private ·{" "}
-                        </Text>
-                        Hidden from the public feed and from people without the
-                        link. Intended for invite-only guest lists.
-                      </>
-                    )}
+                    <Text className="font-bold" style={{ color: colors.foreground }}>
+                      {eventVisibilityCopy(visibility).label} ·{" "}
+                    </Text>
+                    {eventVisibilityCopy(visibility).helper}
                   </Text>
                 </View>
               </View>

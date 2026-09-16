@@ -29,6 +29,10 @@ import {
 import { FormField, StickySaveBar, useDirtyGuard } from "@dvnt/ui";
 import { useEvent, useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import {
+  EVENT_VISIBILITY_OPTIONS,
+  eventVisibilityCopy,
+} from "@dvnt/app/lib/events/event-visibility-copy";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
   ticketTypesApi,
@@ -817,48 +821,40 @@ export function EventEditScreen() {
             </div>
           </FormField>
           <FormField label="Visibility">
-            <div className="flex gap-2">
-              {(["public", "private", "link_only"] as const).map((v) => {
-                const label =
-                  v === "link_only"
-                    ? "Link Only"
-                    : v === "public"
-                      ? "Public"
-                      : "Private";
+            <div className="flex gap-2" role="radiogroup" aria-label="Visibility">
+              {EVENT_VISIBILITY_OPTIONS.map((o) => {
+                const selected = s.visibility === o.value;
                 return (
                   <button
-                    key={v}
-                    onClick={() => s.setVisibility(v)}
+                    key={o.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    aria-label={`${o.label}. ${o.summary}.`}
+                    aria-describedby={
+                      selected ? "event-visibility-help" : undefined
+                    }
+                    onClick={() => s.setVisibility(o.value)}
                     className={`flex-1 h-9 rounded-xl text-sm font-medium ${
-                      s.visibility === v
+                      selected
                         ? "bg-[#3FDCFF] text-black"
                         : "bg-white/8 text-white/70"
                     }`}
                   >
-                    {label}
+                    {o.label}
                   </button>
                 );
               })}
             </div>
-            <p className="mt-2 text-[12px] leading-[17px] text-white/55 rounded-xl bg-white/[0.04] border border-white/[0.06] p-3">
-              {s.visibility === "public" ? (
-                <>
-                  <strong className="text-white">Public · </strong>Appears in the
-                  Home feed, For You, and Search. Anyone can see and buy a ticket.
-                </>
-              ) : s.visibility === "link_only" ? (
-                <>
-                  <strong className="text-white">Link Only · </strong>Hidden from
-                  the public feed and Search. Anyone with the share link can see
-                  and buy.
-                </>
-              ) : (
-                <>
-                  <strong className="text-white">Private · </strong>Hidden from
-                  the public feed and from people without the link. Invite-only
-                  guest lists.
-                </>
-              )}
+            <p
+              id="event-visibility-help"
+              aria-live="polite"
+              className="mt-2 text-[12px] leading-[17px] text-white/55 rounded-xl bg-white/[0.04] border border-white/[0.06] p-3"
+            >
+              <strong className="text-white">
+                {eventVisibilityCopy(s.visibility).label} ·{" "}
+              </strong>
+              {eventVisibilityCopy(s.visibility).helper}
             </p>
           </FormField>
         </Section>

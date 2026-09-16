@@ -10,14 +10,37 @@
  * service-worker path — this covers the foreground/in-tab case.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { create } from "zustand";
 import { createPortal } from "react-dom";
 import { useRouter } from "solito/navigation";
 import { Phone, PhoneOff, Video } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { color } from "@dvnt/app/lib/theme";
 import { callSignalsApi, type CallSignal } from "@dvnt/app/lib/api/call-signals";
+import { useWatchSessionStore } from "@dvnt/app/features/watch/watch-session-store";
+import { useVideoRoomStore } from "@dvnt/app/features/video";
+import {
+  EMPTY_INCOMING_CALL,
+  reduceIncomingCall,
+  type IncomingCallEvent,
+  type IncomingCallState,
+} from "@dvnt/app/features/call/incoming-call-lifecycle";
 import { useWebRingtone } from "./use-web-ringtone";
+
+/**
+ * Ringing state, in a store rather than `useState` — the same shape the native
+ * overlay keeps. It is read from realtime callbacks and timers that outlive a
+ * render, so `getState()` has to be able to answer "is THIS still the call on
+ * screen?" without a stale closure, and the answer must survive this component
+ * re-mounting under a route change mid-ring.
+ */
+const useIncomingCallState = create<
+  IncomingCallState & { dispatch: (event: IncomingCallEvent) => void }
+>((set) => ({
+  ...EMPTY_INCOMING_CALL,
+  dispatch: (event) => set((state) => reduceIncomingCall(state, event)),
+}));
 
 const RING_TIMEOUT_MS = 30000;
 
@@ -25,7 +48,16 @@ export function IncomingCallOverlay() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const [incomingCall, setIncomingCall] = useState<CallSignal | null>(null);
+  const incomingCall = useIncomingCallState((s) => s.call) as CallSignal | null;
+  const dispatch = useIncomingCallState((s) => s.dispatch);
+  // Account generation, the same guard native uses: a ring that arrived for the
+  // account you just switched away from is not yours to answer.
+  const accountGen = useWatchSessionStore((s) => s.accountGen);
+  // The call state machine every call screen writes to. Reading it here is what
+  // stops a second ring from covering the call you are on — and, more
+  // importantly, what takes the overlay down the moment a call starts or ends,
+  // whichever surface ended it.
+  const callPhase = useVideoRoomStore((s) => s.callPhase);
   // Destructured: the hook returns a fresh object each render, so depending
   // on it would restart the ring on every render. start/stop are stable.
   const { start: startRing, stop: stopRing } = useWebRingtone();
@@ -78,12 +110,16 @@ export function IncomingCallOverlay() {
     const unsubscribe = callSignalsApi.subscribeToIncomingCalls(
       userId,
       (signal) => {
-        setIncomingCall(signal);
+        dispatch({
+          type: "ring",
+          signal,
+          viewerId: userId,
+          accountGen: useWatchSessionStore.getState().accountGen,
+          callPhase: useVideoRoomStore.getState().callPhase,
+        });
         const timer = setTimeout(() => {
           timers.delete(timer);
-          setIncomingCall((current) =>
-            current?.id === signal.id ? null : current,
-          );
+          dispatch({ type: "timeout", id: signal.id });
         }, RING_TIMEOUT_MS);
         timers.add(timer);
       },
@@ -91,11 +127,7 @@ export function IncomingCallOverlay() {
       // UPDATE handling at all — both native consumers keep their own channel
       // for it — so a cancelled call kept ringing here for the full 30 seconds
       // no matter what the caller did.
-      (signal) => {
-        setIncomingCall((current) =>
-          current?.id === signal.id ? null : current,
-        );
-      },
+      (signal) => dispatch({ type: "signal_ended", id: signal.id }),
     );
 
     return () => {
@@ -103,7 +135,25 @@ export function IncomingCallOverlay() {
       // Ring timers outlived the effect and could clear a LATER call's UI.
       for (const timer of timers) clearTimeout(timer);
     };
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, user?.id, dispatch]);
+
+  // THE property this surface lives or dies on: the overlay comes down when the
+  // call does. Rather than trusting each handler to remember, every phase the
+  // call machine reaches — answered in this tab, answered on the phone, hung
+  // up, failed — is pushed through the same reducer, which clears the ring for
+  // anything that is not "idle". A stuck ring is worse than no overlay.
+  useEffect(() => {
+    dispatch({ type: "call_phase", callPhase });
+  }, [callPhase, dispatch]);
+
+  // Switching account mid-ring drops it: it was never this account's call.
+  useEffect(() => {
+    dispatch({
+      type: "account_changed",
+      viewerId: user?.id ?? null,
+      accountGen,
+    });
+  }, [user?.id, accountGen, dispatch]);
 
   const handleAccept = useCallback(
     async (audioOnly = false) => {
@@ -112,7 +162,7 @@ export function IncomingCallOverlay() {
       try {
         await callSignalsApi.updateSignalStatus(incomingCall.id, "accepted");
       } catch {}
-      setIncomingCall(null);
+      dispatch({ type: "answered" });
       // Carry the call type into the room. Previously this always dropped it,
       // so `call.web.tsx` fell back to its `video` default — an audio call was
       // answered with the camera on, and there was no way to answer a video
@@ -121,7 +171,7 @@ export function IncomingCallOverlay() {
       const asAudio = audioOnly || incomingCall.call_type === "audio";
       router.push(`/feed/call/${roomId}${asAudio ? "?callType=audio" : ""}`);
     },
-    [incomingCall, router],
+    [incomingCall, router, dispatch],
   );
 
   const handleDecline = useCallback(async () => {
@@ -129,8 +179,8 @@ export function IncomingCallOverlay() {
     try {
       await callSignalsApi.updateSignalStatus(incomingCall.id, "declined");
     } catch {}
-    setIncomingCall(null);
-  }, [incomingCall]);
+    dispatch({ type: "declined" });
+  }, [incomingCall, dispatch]);
 
   if (!incomingCall || typeof document === "undefined") return null;
 

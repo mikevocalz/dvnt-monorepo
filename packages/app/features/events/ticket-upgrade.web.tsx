@@ -57,14 +57,24 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useTicketUpgradeUIStore } from "@dvnt/app/lib/stores/ticket-upgrade-ui-store";
+import {
+  useTicketStore,
+  type TicketTierLevel,
+} from "@dvnt/app/lib/stores/ticket-store";
+import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
 
-type TierLevel = "free" | "ga" | "vip" | "table";
+/**
+ * One vocabulary for tiers across native and web. This file used to declare its
+ * own copy of the union and its own hex map, so a fifth tier — or a palette
+ * change — would have landed everywhere except here.
+ */
+type TierLevel = TicketTierLevel;
 
 const TIER_ACCENT: Record<TierLevel, string> = {
-  free: "#3FDCFF",
-  ga: "#34A2DF",
-  vip: "#8A40CF",
-  table: "#FF5BFC",
+  free: tierAccent("free"),
+  ga: tierAccent("ga"),
+  vip: tierAccent("vip"),
+  table: tierAccent("table"),
 };
 
 const TIER_LABEL: Record<TierLevel, string> = {
@@ -228,6 +238,8 @@ export function TicketUpgradeScreen() {
   const setIsConfirming = useTicketUpgradeUIStore((s) => s.setIsConfirming);
   const upgradeState = useTicketUpgradeUIStore((s) => s.upgradeState);
   const setUpgradeState = useTicketUpgradeUIStore((s) => s.setUpgradeState);
+  /** Shared ticket cache the detail screen falls back to — see `handleConfirm`. */
+  const clearTicket = useTicketStore((s) => s.clearTicket);
 
   /**
    * An upgrade is a charge against ONE ticket, so it resolves the same way the
@@ -393,6 +405,12 @@ export function TicketUpgradeScreen() {
       // The refetch is the update. Writing the PRE-upgrade record into a
       // parallel store as if it were the new tier told other screens something
       // that was not true yet, and the store had no way to correct itself.
+      //
+      // Dropping the entry is the half that was missing: `ticket-detail.web`
+      // falls back to `useTicketStore.getTicketByEventId()` for a pass that was
+      // just bought, and that copy still carries the tier the member paid to
+      // leave. Evicting it makes the detail screen read the server instead.
+      clearTicket(String(dbTicket.event_id ?? eventId));
       await refetch();
     } catch (err: any) {
       showToast("error", "Error", err?.message || "Could not start upgrade");
@@ -403,6 +421,8 @@ export function TicketUpgradeScreen() {
   }, [
     selectedTier,
     dbTicket,
+    eventId,
+    clearTicket,
     showToast,
     refetch,
     setIsConfirming,

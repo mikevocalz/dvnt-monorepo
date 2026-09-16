@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner-native";
 import {
   CalendarPlus,
@@ -94,6 +94,7 @@ export default function CheckoutSuccessScreen() {
   const storeCart = useCartStore((state) => state.cart);
   const markCompleted = useCartStore((state) => state.markCompleted);
   const viewerId = useAuthStore((state) => state.user?.id || "unknown");
+  const queryClient = useQueryClient();
   const effectiveCartId = cartId || storeCart?.cartId || "";
 
   // When this screen started waiting. Drives the grace window after which an
@@ -139,10 +140,18 @@ export default function CheckoutSuccessScreen() {
   }, [outcome]);
 
   useEffect(() => {
-    if (statusQuery.data?.completed) {
-      markCompleted();
-    }
-  }, [markCompleted, statusQuery.data?.completed]);
+    if (!statusQuery.data?.completed) return;
+    markCompleted();
+    // Every ticket surface is now wrong: My Tickets, the event's own "you're
+    // going" state and the per-event pass list all still describe a cart that
+    // had not been paid for. One invalidate of the `tickets` root covers them.
+    //
+    // This is the query-client wiring the original screen had. It is NOT the
+    // original's `setQueryData(qk.tickets.forEvent(event_id), ticket)` — that
+    // seeded an event-keyed cache with whichever of the member's passes the
+    // server happened to return first, which is the bug cfbf8cb removed.
+    queryClient.invalidateQueries({ queryKey: qk.tickets.all() });
+  }, [markCompleted, queryClient, statusQuery.data?.completed]);
 
   const tickets = statusQuery.data?.tickets ?? [];
 

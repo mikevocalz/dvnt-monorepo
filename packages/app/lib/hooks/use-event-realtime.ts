@@ -17,6 +17,7 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
 import { formatEventDate } from "@dvnt/app/lib/api/events";
+import { isDiscoverableEvent } from "@dvnt/app/lib/events/event-discovery";
 
 const TICKET_TYPES_KEY = (id: string) => ["tickets", "types", id] as const;
 
@@ -178,12 +179,15 @@ export function useEventsFeedRealtime(enabled = true): void {
           const dateParts = next.start_date
             ? formatEventDate(next.start_date)
             : null;
-          // Hard-deleted status → yank from every list. (Soft "cancelled"
-          // events stay visible with a Cancelled badge — see card UI —
-          // because attendees with tickets need to see the cancellation
-          // in context. The cancel-event edge function notifies them
-          // server-side; this just keeps the row visible.)
-          if (next.status === "deleted") {
+          // A status that leaves the discovery gate — "deleted", and now
+          // "cancelled" too — yanks the row from every list cache, so a host
+          // cancelling mid-session removes the card from lists already on
+          // screen instead of leaving it there behind a Cancelled badge.
+          // The detail query is invalidated rather than dropped: a ticket
+          // holder with the event open must still see it, now as the
+          // cancelled-event takeover. The cancel-event edge function notifies
+          // attendees server-side; this only changes what discovery shows.
+          if (!isDiscoverableEvent(next as { status?: string | null })) {
             queryClient.setQueriesData<any[]>(
               { queryKey: eventKeys.all },
               (old) => {

@@ -35,6 +35,7 @@ import { useBookmarkStore } from "@dvnt/app/lib/stores/bookmark-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
 import { useCarouselStore } from "@dvnt/app/lib/stores/carousel-store";
+import { useMediaFrameStore } from "@dvnt/app/lib/stores/media-frame-store";
 import { usePostTagsUIStore } from "@dvnt/app/lib/stores/post-tags-store";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
@@ -587,6 +588,12 @@ function MediaCarousel({
   const index = useCarouselStore((s) => s.index);
   const setIndex = useCarouselStore((s) => s.setIndex);
   const openAt = useLightboxStore((s) => s.openAt);
+  // Natural aspect per URL, cached in the shared store exactly as native does:
+  // the shape belongs to the picture, not to this mount, so reopening a post
+  // draws the right frame on the FIRST paint instead of re-measuring. (Zustand,
+  // never useState — the cache is shared with the native screen's store.)
+  const aspectByUrl = useMediaFrameStore((s) => s.aspectByUrl);
+  const setAspect = useMediaFrameStore((s) => s.setAspect);
   const multiple = media.length > 1;
   const items = media.map((m) => ({
     type: m.type,
@@ -631,7 +638,28 @@ function MediaCarousel({
                 <img
                   src={m.thumbnail || m.url}
                   alt={caption}
-                  className="w-full max-h-[78vh] object-contain bg-black"
+                  // ponytail: measured from the image the browser already
+                  // decoded (`onLoad`), not a second probe request — so the
+                  // first paint of a cold post is still 4:5 for one frame.
+                  onLoad={(e) => {
+                    const { naturalWidth: w, naturalHeight: h } =
+                      e.currentTarget;
+                    if (h > 0) setAspect(m.thumbnail || m.url, w / h);
+                  }}
+                  className={
+                    multiple
+                      ? "w-full max-h-[78vh] object-contain bg-black"
+                      : "mx-auto block h-auto w-auto max-w-full max-h-[62vh] object-contain bg-black"
+                  }
+                  style={
+                    multiple
+                      ? undefined
+                      : {
+                          aspectRatio: String(
+                            aspectByUrl[m.thumbnail || m.url] ?? 4 / 5,
+                          ),
+                        }
+                  }
                 />
               )}
             </button>

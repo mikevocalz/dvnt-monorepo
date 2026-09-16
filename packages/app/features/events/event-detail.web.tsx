@@ -65,7 +65,9 @@ import { OrganizerCard } from "./ui/OrganizerCard.web";
 import {
   useTicketTypes,
   useMyTicketStatusForEvent,
+  useTicketViewerId,
 } from "@dvnt/app/lib/hooks/use-tickets";
+import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
 import {
   useTicketUpgradeOptions,
@@ -121,7 +123,10 @@ import { useAddonUpsellStore } from "@dvnt/app/lib/stores/addon-upsell-store";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
 import "react-lite-youtube-embed/dist/LiteYouTubeEmbed.css";
-import { matchBySlug } from "@dvnt/app/lib/slug";
+import {
+  resolveEventBySlug,
+  slugResolvesOnlyToHiddenEvent,
+} from "@dvnt/app/lib/events/event-discovery";
 import {
   resolvePosterUrl,
   resolveRenderableMedia,
@@ -255,24 +260,33 @@ export function EventDetailScreen() {
   const idParam = String((params as any)?.id ?? "");
   const directId = /^\d+$/.test(idParam) ? Number(idParam) : undefined;
   const { data: events, isLoading } = useEvents();
-  const listEvent = matchBySlug(events, slug);
+  const listEvent = resolveEventBySlug(events ?? [], slug);
   // The cached list is filtered (upcoming only), so it can't resolve past events.
-  // A lightweight {id,title} index over ALL events resolves any slug.
-  const { data: slugIndex } = useQuery<Array<{ id: number; title?: string }>>({
+  // A lightweight {id,title,status,created_at} index over ALL events resolves
+  // any slug. status + created_at are what resolveEventBySlug needs to skip a
+  // cancelled row and break a same-title tie toward the newest event — without
+  // them, /events/dc-dick-strict lands on whichever row PostgREST returns first.
+  const { data: slugIndex } = useQuery<
+    Array<{ id: number; title?: string; status?: string | null; created_at?: string | null }>
+  >({
     queryKey: ["events", "slug-index"],
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
       const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
       if (!url || !key) return [];
-      const res = await fetch(`${url}/rest/v1/events?select=id,title`, {
-        headers: { apikey: key, Authorization: `Bearer ${key}` },
-      });
+      const res = await fetch(
+        `${url}/rest/v1/events?select=id,title,status,created_at`,
+        { headers: { apikey: key, Authorization: `Bearer ${key}` } },
+      );
       return res.ok ? res.json() : [];
     },
   });
+  // directId first: /feed/events/[id] is the ownership path. A ticket holder,
+  // host or staff member opening a cancelled event by id still resolves here —
+  // only the slug lane applies the discovery gate.
   const resolvedId =
-    directId ?? listEvent?.id ?? matchBySlug(slugIndex, slug)?.id;
+    directId ?? listEvent?.id ?? resolveEventBySlug(slugIndex ?? [], slug)?.id;
   const { data: full } = useEvent(resolvedId ? String(resolvedId) : "");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const e = (full ?? listEvent) as any;
@@ -445,9 +459,22 @@ export function EventDetailScreen() {
   // Authed RSVP for free, tier-less events (no checkout sheet to open).
   const rsvpMutation = useRsvpEvent();
   const { setTicket } = useTicketStore();
-  const hasTicket =
-    !!myTicketData &&
-    (myTicketData.status === "active" || myTicketData.status === "scanned");
+  // Who is reading this page, per the auth store — `"anon"` when signed out.
+  // Native's `(protected)/events/[id]/index.tsx` holds the same value.
+  const viewerId = useTicketViewerId();
+  // The CTA below routes to `/feed/ticket/:id`, which renders a QR credential,
+  // so "do they hold a pass" is an authorization question, not a status string.
+  // `status === "active" || "scanned"` answered it without ever asking WHOSE
+  // row it was: a `useMyTicketsForEvent` cache that outlived a logout or an
+  // account switch put another member's "View ticket" in front of this viewer.
+  // `resolveTicketAccess` is the one fail-closed answer both platforms use —
+  // it re-checks `ticket.user_id` against the viewer, refuses a signed-out
+  // read, and freezes a pass that is mid-transfer or spent.
+  const ticketAccess = resolveTicketAccess({
+    ticket: myTicketData ?? null,
+    viewerId,
+  });
+  const hasTicket = ticketAccess.canShowCredential;
 
   // Upgrade options derived from live tiers + the user's current ticket.
   const upgradeOptions = useTicketUpgradeOptions(
@@ -650,7 +677,30 @@ export function EventDetailScreen() {
   }, [e?.lynkRoomId, e?.title, e?.description, eventId, isHost, router]);
 
   if (!e && resolving) return <Centered>Loading…</Centered>;
-  if (!e) return <Centered>Event not found</Centered>;
+  if (!e) {
+    // A cancelled event is deliberately unreachable by slug now, but "not
+    // found" is the wrong answer for the person most likely to arrive here —
+    // someone who bookmarked the link or holds a ticket. Name what happened,
+    // and give them a way onward instead of a dead end.
+    return (
+      <Centered>
+        <span className="flex flex-col items-center gap-3 text-center">
+          <span>
+            {slugResolvesOnlyToHiddenEvent(slugIndex ?? [], slug)
+              ? "This event has been cancelled. If you bought a ticket, it's still in your tickets."
+              : "Event not found"}
+          </span>
+          <button
+            type="button"
+            onClick={() => router.push("/events")}
+            className="text-white/80 underline underline-offset-4"
+          >
+            Browse events
+          </button>
+        </span>
+      </Centered>
+    );
+  }
 
 
   const { videoUrl: coverVideoUrl, posterUrl: coverPosterUrl } = coverFor(e);

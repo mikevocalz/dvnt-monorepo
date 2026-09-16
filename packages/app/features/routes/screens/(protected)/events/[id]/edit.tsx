@@ -49,6 +49,10 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useColorScheme, useMediaPicker } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import {
+  EVENT_VISIBILITY_OPTIONS,
+  eventVisibilityCopy,
+} from "@dvnt/app/lib/events/event-visibility-copy";
 import { Progress } from "@dvnt/app/components/ui/progress";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { eventsApi, formatEventDate } from "@dvnt/app/lib/api/events";
@@ -1361,34 +1365,32 @@ function EditEventScreenContent() {
             {/* Values MUST match the DB CHECK constraint
                 ('public','private','link_only'). The previous value
                 "unlisted" wasn't in that list and would fail to save. */}
-            {(["public", "private", "link_only"] as const).map((v) => {
-              const label =
-                v === "link_only"
-                  ? "Link Only"
-                  : v === "public"
-                    ? "Public"
-                    : "Private";
+            {EVENT_VISIBILITY_OPTIONS.map((o) => {
+              const selected = visibility === o.value;
               return (
                 <Pressable
-                  key={v}
-                  onPress={() => setVisibility(v)}
+                  key={o.value}
+                  onPress={() => setVisibility(o.value)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected }}
+                  accessibilityLabel={`${o.label}. ${o.summary}.`}
+                  accessibilityHint={o.helper}
                   style={{
                     flex: 1,
                     paddingVertical: 12,
                     borderRadius: 12,
                     alignItems: "center",
-                    backgroundColor:
-                      visibility === v ? colors.primary : colors.card,
+                    backgroundColor: selected ? colors.primary : colors.card,
                   }}
                 >
                   <Text
                     style={{
-                      color: visibility === v ? "#fff" : colors.foreground,
+                      color: selected ? "#fff" : colors.foreground,
                       fontSize: 13,
-                      fontWeight: visibility === v ? "600" : "400",
+                      fontWeight: selected ? "600" : "400",
                     }}
                   >
-                    {label}
+                    {o.label}
                   </Text>
                 </Pressable>
               );
@@ -1409,43 +1411,10 @@ function EditEventScreenContent() {
               className="text-[12px] leading-[17px]"
               style={{ color: colors.mutedForeground }}
             >
-              {visibility === "public" && (
-                <>
-                  <Text
-                    className="font-bold"
-                    style={{ color: colors.foreground }}
-                  >
-                    Public ·{" "}
-                  </Text>
-                  Appears in the Home feed, For You, and Search. Anyone can see
-                  and buy a ticket. Best for events you want to fill.
-                </>
-              )}
-              {visibility === "link_only" && (
-                <>
-                  <Text
-                    className="font-bold"
-                    style={{ color: colors.foreground }}
-                  >
-                    Link Only ·{" "}
-                  </Text>
-                  Hidden from the public feed and Search. Anyone with the share
-                  link can see and buy. Best for soft-launch events you promote
-                  on Instagram, group chats, or email.
-                </>
-              )}
-              {visibility === "private" && (
-                <>
-                  <Text
-                    className="font-bold"
-                    style={{ color: colors.foreground }}
-                  >
-                    Private ·{" "}
-                  </Text>
-                  Hidden from the public feed and from people without the link.
-                  Intended for invite-only guest lists.
-                </>
-              )}
+              <Text className="font-bold" style={{ color: colors.foreground }}>
+                {eventVisibilityCopy(visibility).label} ·{" "}
+              </Text>
+              {eventVisibilityCopy(visibility).helper}
             </Text>
           </View>
         </View>

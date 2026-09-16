@@ -3,10 +3,12 @@
 /**
  * Create Post — web port of `(protected)/(tabs)/create.tsx`.
  *
- * Law 1 (data wiring is sacred): imports/calls the EXACT portable hooks the
- * native screen uses — `useCreatePostStore` (Zustand form state), `useCreatePost`
- * (mutation), `useMediaUpload` (CDN upload), `useAuthStore`, `useUIStore`. Caption,
- * location, tags, text-slides, spicy toggle and publish all flow through them.
+ * Law 1 (data wiring is sacred): calls the EXACT portable hooks the native
+ * screen calls — `useCreatePostStore` (Zustand form state), `usePublishPost`
+ * (the resumable publish queue, which itself holds `useCreatePost`,
+ * `useMediaUpload` and `useAuthStore`), `useUIStore`, and `useResponsiveGrid`
+ * for the preview tiles. Caption, location, tags, text-slides, spicy toggle and
+ * publish all flow through them.
  *
  * Law 3 (web idioms): raw semantic HTML + Tailwind className on DOM tags only,
  * NativeWind interop OFF. Media intake is a `<input type=file multiple>` (object-URL
@@ -40,11 +42,23 @@ import {
   TEXT_POST_MAX_SLIDES,
 } from "@dvnt/app/lib/posts/text-post";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
+// Resolves to `use-responsive-grid.web.ts` (webpack `.web.ts` extension order):
+// a `resize` listener instead of react-native's `useWindowDimensions`, feeding
+// the same `resolveResponsiveGrid` the native composer calls.
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import type { MediaKind, TextPostThemeKey } from "@dvnt/app/lib/types";
 import { useCreatePostUIStore } from "./create-post-ui-store";
 
 const MAX_PHOTOS = 10;
 const MAX_ANIMATED_VIDEO_DURATION = 15; // seconds
+
+// Same three numbers `(tabs)/create.tsx` passes, so a tablet browser and a
+// tablet lay the preview tiles out identically. `maxContainerWidth` is the
+// composer's own `max-w-2xl` (Tailwind 2xl = 42rem) — without it the grid would
+// size tiles for the whole monitor while they sit in a 672px column.
+const MIN_MEDIA_PREVIEW = 150;
+const MEDIA_GRID_GAP = 16;
+const COMPOSER_MAX_WIDTH = 672;
 
 const inputCls =
   "w-full h-11 px-3 rounded-xl bg-white/6 border border-white/10 text-[15px] text-white placeholder:text-white/35 outline-none focus:border-cyan-500/60";
@@ -52,6 +66,17 @@ const inputCls =
 export function CreatePostScreen() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Preview tiles scale with the window instead of being frozen at two across —
+  // the same call the native composer makes, so the two surfaces show the same
+  // number of tiles at the same width.
+  const { columns: mediaColumns } = useResponsiveGrid({
+    minCellWidth: MIN_MEDIA_PREVIEW,
+    gap: MEDIA_GRID_GAP,
+    horizontalPadding: 48,
+    maxColumns: 4,
+    maxContainerWidth: COMPOSER_MAX_WIDTH,
+  });
 
   const {
     selectedMedia,
@@ -467,7 +492,13 @@ export function CreatePostScreen() {
 
         {/* Media previews — rounded square tiles, reorderable */}
         {!isTextPost && selectedMedia.length > 0 ? (
-          <div className="mt-4 grid grid-cols-2 gap-3">
+          <div
+            className="mt-4 grid"
+            style={{
+              gridTemplateColumns: `repeat(${mediaColumns}, minmax(0, 1fr))`,
+              gap: MEDIA_GRID_GAP,
+            }}
+          >
             {selectedMedia.map((media, index) => (
               <div
                 key={media.id}
