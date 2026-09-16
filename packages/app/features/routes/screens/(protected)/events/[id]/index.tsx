@@ -1362,13 +1362,19 @@ function EventDetailScreenContent() {
 
   const handleShare = useCallback(async () => {
     try {
-      await shareEvent(eventId, eventData?.title || "Event");
+      // visibility + shareSlug decide the URL: a link_only event is shared by
+      // its random token, because after 20260917100000 that token is the only
+      // thing that opens it.
+      await shareEvent(eventId, eventData?.title || "Event", {
+        visibility: eventData?.visibility,
+        shareSlug: eventData?.shareSlug,
+      });
       showToast("success", "Link Shared", "Event link has been shared!");
     } catch (error) {
       console.error("[EventDetail] Share error:", error);
       showToast("error", "Share Failed", "Unable to share event link.");
     }
-  }, [eventId, eventData?.title, showToast]);
+  }, [eventId, eventData?.title, eventData?.visibility, eventData?.shareSlug, showToast]);
 
   const handleAddToCalendar = useCallback(async () => {
     if (!eventData) return;

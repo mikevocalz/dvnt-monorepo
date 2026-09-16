@@ -57,6 +57,8 @@ function formatCount(n: number): string {
 }
 
 // Mirror of event-create's slugifyTitle so /events/[slug] resolves the target.
+// link_only events are exempt: their title slug deliberately resolves to
+// nothing, so they link by their share token instead (see eventSharePath).
 function eventSlug(title: string): string {
   return String(title || "")
     .toLowerCase()
@@ -405,7 +407,15 @@ export function UserProfileScreen() {
                 {hostEvents.map((ev: any) => (
                   <button
                     key={ev.id}
-                    onClick={() => router.push(`/events/${eventSlug(ev.title)}`)}
+                    onClick={() =>
+                      router.push(
+                        `/events/${
+                          ev.visibility === "link_only" && ev.shareSlug
+                            ? ev.shareSlug
+                            : eventSlug(ev.title)
+                        }`,
+                      )
+                    }
                     className="text-left rounded-xl overflow-hidden border border-white/10 bg-white/[0.03] hover:border-white/25 transition-colors"
                   >
                     <div className="aspect-[4/5] bg-white/5">

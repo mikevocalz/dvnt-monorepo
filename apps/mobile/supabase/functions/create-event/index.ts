@@ -204,6 +204,12 @@ Deno.serve(async (req) => {
       price: price != null && price >= 0 ? price : 0,
       is_online: body.isOnline === true,
       visibility: normalizeVisibility(body.visibility),
+      // The link in "anyone with the link can open it". Without it a link_only
+      // event's only URL is slugify(title) — guessable from the title alone.
+      // 32 hex chars, matching the events.share_slug column default
+      // (replace(gen_random_uuid()::text, '-', '')) so both insert paths mint
+      // the same shape. The client never chooses this value.
+      share_slug: crypto.randomUUID().replace(/-/g, ""),
       status: "active",
     };
 

@@ -7,6 +7,7 @@
 import { Share } from "react-native";
 import * as Haptics from "expo-haptics";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
+import { eventSharePath } from "@dvnt/app/lib/events/event-discovery";
 
 const PRODUCTION_DOMAIN = "https://dvntapp.live";
 
@@ -69,8 +70,9 @@ export async function sharePost(
 export async function shareEvent(
   eventId: string,
   eventName?: string,
+  event?: { visibility?: string | null; shareSlug?: string | null },
 ): Promise<ShareResult> {
-  const url = shareUrls.event(eventId);
+  const url = `${PRODUCTION_DOMAIN}${eventSharePath({ id: eventId, ...event })}`;
   return shareUrl(url, {
     title: eventName || "Event on DVNT",
     message: eventName ? `${eventName}\n${url}` : url,

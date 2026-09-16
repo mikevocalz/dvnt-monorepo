@@ -56,6 +56,11 @@ interface CoOrganizer {
   authId?: string;
   username: string;
   avatar: string;
+  /** Display name from the user search, so a staged chip can read "Micah
+   *  Marquez" rather than only "@micah_marquez". Optional: drafts persisted
+   *  before this field existed rehydrate without it, and the chip falls back
+   *  to the handle. */
+  name?: string;
 }
 
 /**

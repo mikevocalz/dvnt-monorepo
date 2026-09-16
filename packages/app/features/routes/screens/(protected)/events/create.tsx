@@ -1522,7 +1522,7 @@ function CreateEventScreenContent() {
                         >
                           <Avatar uri={g.avatar} username={g.username} size={20} />
                           <Text className="text-sm text-foreground">
-                            @{g.username}
+                            {g.name || `@${g.username}`}
                           </Text>
                           <Pressable
                             onPress={() => removeGuest(g.id)}
@@ -1539,7 +1539,7 @@ function CreateEventScreenContent() {
 
                   <TextInput
                     className="py-2.5 text-base text-foreground"
-                    placeholder="Search by username..."
+                    placeholder="Search by name or username..."
                     placeholderTextColor={colors.mutedForeground}
                     value={guestSearch}
                     onChangeText={setGuestSearch}
@@ -1563,6 +1563,7 @@ function CreateEventScreenContent() {
                                 authId: user.authId,
                                 username: user.username,
                                 avatar: user.avatar,
+                                name: user.name,
                               });
                               setGuestSearch("");
                               setGuestResults([]);
@@ -2083,7 +2084,7 @@ function CreateEventScreenContent() {
                           size={20}
                         />
                         <Text className="text-sm text-foreground">
-                          @{org.username}
+                          {org.name || `@${org.username}`}
                         </Text>
                         <Pressable
                           onPress={() => removeCoOrganizer(org.id)}
@@ -2099,7 +2100,7 @@ function CreateEventScreenContent() {
                 {/* Search input */}
                 <TextInput
                   className="py-2.5 text-base text-foreground"
-                  placeholder="Search by username..."
+                  placeholder="Search by name or username..."
                   placeholderTextColor={colors.mutedForeground}
                   value={coOrganizerSearch}
                   onChangeText={setCoOrganizerSearch}
@@ -2124,6 +2125,7 @@ function CreateEventScreenContent() {
                               authId: user.authId,
                               username: user.username,
                               avatar: user.avatar,
+                              name: user.name,
                             });
                             setCoOrganizerSearch("");
                             setCoOrganizerResults([]);

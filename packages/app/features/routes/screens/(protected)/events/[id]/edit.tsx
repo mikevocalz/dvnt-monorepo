@@ -2180,6 +2180,11 @@ function GuestListSection({ eventId }: { eventId: number }) {
       ) : guests.length > 0 ? (
         <View className="flex-row flex-wrap gap-2 mb-3">
           {guests.map((g) => {
+            // ponytail: handle, not name. An already-invited guest comes back
+            // from `event-invite-guests` list, which resolves only username
+            // and avatar — a name here needs that edge function to select it
+            // too, and a deploy. The search rows below do show names, which
+            // is where someone is choosing between people.
             const label = g.username ? `@${g.username}` : (g.email ?? "Guest");
             return (
               <View
@@ -2205,7 +2210,7 @@ function GuestListSection({ eventId }: { eventId: number }) {
 
       <TextInput
         className="py-2.5 text-base text-foreground"
-        placeholder="Search by username..."
+        placeholder="Search by name or username..."
         placeholderTextColor={colors.mutedForeground}
         value={search}
         onChangeText={setSearch}

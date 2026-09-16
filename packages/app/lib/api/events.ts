@@ -549,6 +549,10 @@ export const eventsApi = {
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           status: event.status || undefined,
           cancelledAt: event.cancelled_at || undefined,
+          // The profile grid links to /events/[slug]. A link_only event is no
+          // longer resolvable by its title slug, so it has to carry its token.
+          visibility: event.visibility || undefined,
+          shareSlug: event.share_slug || undefined,
         };
       });
       return enrichEventsWithTierPrices(mapped);

@@ -124,7 +124,8 @@ import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
 import "react-lite-youtube-embed/dist/LiteYouTubeEmbed.css";
 import {
-  resolveEventBySlug,
+  isEventShareToken,
+  resolveEventByPathSegment,
   slugResolvesOnlyToHiddenEvent,
 } from "@dvnt/app/lib/events/event-discovery";
 import {
@@ -260,23 +261,58 @@ export function EventDetailScreen() {
   const idParam = String((params as any)?.id ?? "");
   const directId = /^\d+$/.test(idParam) ? Number(idParam) : undefined;
   const { data: events, isLoading } = useEvents();
-  const listEvent = resolveEventBySlug(events ?? [], slug);
+  const listEvent = resolveEventByPathSegment(events ?? [], slug);
+  // Token lane. A link_only event is invisible to the anon REST list below —
+  // that is the point of the tightened events_select_anon policy — so the only
+  // way in is the SECURITY DEFINER RPC keyed on the 32-hex share token.
+  const { data: tokenEvent } = useQuery<{ id: number } | null>({
+    queryKey: ["events", "share-token", slug],
+    enabled: isEventShareToken(slug),
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+      if (!url || !key) return null;
+      const res = await fetch(`${url}/rest/v1/rpc/get_event_by_share_token?select=id`, {
+        method: "POST",
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ p_token: slug }),
+      });
+      if (!res.ok) return null;
+      const rows = (await res.json()) as Array<{ id: number }>;
+      return rows?.[0] ?? null;
+    },
+  });
   // The cached list is filtered (upcoming only), so it can't resolve past events.
   // A lightweight {id,title,status,created_at} index over ALL events resolves
   // any slug. status + created_at are what resolveEventBySlug needs to skip a
   // cancelled row and break a same-title tie toward the newest event — without
   // them, /events/dc-dick-strict lands on whichever row PostgREST returns first.
+  // visibility rides along so the title lane stays public-only: a signed-in
+  // member can still list link_only rows, and slugify(title) must not be a
+  // second door into one.
   const { data: slugIndex } = useQuery<
-    Array<{ id: number; title?: string; status?: string | null; created_at?: string | null }>
+    Array<{
+      id: number;
+      title?: string;
+      status?: string | null;
+      created_at?: string | null;
+      visibility?: string | null;
+    }>
   >({
     queryKey: ["events", "slug-index"],
+    enabled: !isEventShareToken(slug),
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
       const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
       if (!url || !key) return [];
       const res = await fetch(
-        `${url}/rest/v1/events?select=id,title,status,created_at`,
+        `${url}/rest/v1/events?select=id,title,status,created_at,visibility`,
         { headers: { apikey: key, Authorization: `Bearer ${key}` } },
       );
       return res.ok ? res.json() : [];
@@ -286,7 +322,10 @@ export function EventDetailScreen() {
   // host or staff member opening a cancelled event by id still resolves here —
   // only the slug lane applies the discovery gate.
   const resolvedId =
-    directId ?? listEvent?.id ?? resolveEventBySlug(slugIndex ?? [], slug)?.id;
+    directId ??
+    tokenEvent?.id ??
+    listEvent?.id ??
+    resolveEventByPathSegment(slugIndex ?? [], slug)?.id;
   const { data: full } = useEvent(resolvedId ? String(resolvedId) : "");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const e = (full ?? listEvent) as any;

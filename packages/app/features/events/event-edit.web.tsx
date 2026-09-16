@@ -1416,8 +1416,8 @@ function GuestListField({ eventId }: { eventId: number }) {
           <input
             className="flex-1 bg-transparent text-[15px] text-white placeholder:text-white/40 outline-none"
             value={search}
-            placeholder="Search by username"
-            aria-label="Search for a guest by username"
+            placeholder="Search by name or username"
+            aria-label="Search for a guest by name or username"
             onChange={(e) => setSearch(e.target.value)}
           />
           {search.length > 0 ? (
@@ -1456,7 +1456,14 @@ function GuestListField({ eventId }: { eventId: number }) {
                   ) : (
                     <div className="h-7 w-7 rounded-full bg-white/10" />
                   )}
-                  <span className="flex-1 text-sm text-white">@{u.username}</span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm text-white">
+                      {u.name || u.username}
+                    </span>
+                    <span className="truncate text-xs text-white/50">
+                      @{u.username}
+                    </span>
+                  </span>
                   {pending === u.username ? (
                     <span className="text-xs text-white/50">Adding…</span>
                   ) : (
@@ -1480,6 +1487,11 @@ function GuestListField({ eventId }: { eventId: number }) {
         <>
           <div className="flex flex-wrap gap-2">
             {guests.map((g) => {
+              // ponytail: handle, not name. An already-invited guest comes
+              // back from `event-invite-guests` list, which resolves only
+              // username and avatar — a name here needs that edge function to
+              // select it too, and a deploy. The search rows above do show
+              // names, which is where someone is choosing between people.
               const label = g.username ? `@${g.username}` : (g.email ?? "Guest");
               return (
                 <span

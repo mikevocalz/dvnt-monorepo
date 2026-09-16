@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import {
   isDiscoverableEvent,
+  isEventShareToken,
   resolveEventBySlug,
 } from "@dvnt/app/lib/events/event-discovery";
 
@@ -60,6 +61,7 @@ export type ShareEvent = {
   location: string | null;
   location_name: string | null;
   visibility: string | null;
+  share_slug: string | null;
   status: string | null;
   image: string | null;
   cover_image_url: string | null;
@@ -72,7 +74,9 @@ export type ShareEvent = {
 
 const EVENT_SELECT =
   "id,title,description,start_date,end_date,location,location_name," +
-  "visibility,status,image,cover_image_url,flyer_image_url,event_tz," +
+  // visibility gates the title-slug lane to public events; share_slug is the
+  // token a link_only event is shared by.
+  "visibility,share_slug,status,image,cover_image_url,flyer_image_url,event_tz," +
   // created_at is the slug-collision tie-breaker in resolveEventBySlug.
   "is_online,updated_at,created_at";
 
@@ -102,20 +106,53 @@ export async function fetchShareEvent(id: string): Promise<ShareEvent | null> {
 }
 
 /**
- * Resolve a title-derived slug to an event — the same mechanism the client
- * detail screen uses (events have no populated slug column). Cancelled and
- * other non-discoverable rows are dropped before matching, and a remaining
- * collision resolves to the most recently created event; both rules live in
- * `resolveEventBySlug` so the web route and the client screen agree.
+ * Resolve `/events/<segment>` to an event. Two lanes:
+ *
+ *   - A 32-hex share token goes through `get_event_by_share_token`, a
+ *     SECURITY DEFINER RPC. It has to: anon RLS no longer returns link_only
+ *     rows, so the list below cannot see the event this token names. The RPC
+ *     refuses private and hidden-status rows.
+ *   - Anything else is a title-derived slug over the anon list, which now
+ *     contains public events only. Cancelled and other non-discoverable rows
+ *     are dropped, a remaining collision resolves to the most recently created
+ *     event, and link_only rows are excluded even if a caller can see them —
+ *     all in `resolveEventBySlug`, so this route and the client screen agree.
  */
 export async function fetchShareEventBySlug(
   slug: string,
 ): Promise<ShareEvent | null> {
+  if (isEventShareToken(slug)) return fetchShareEventByToken(slug);
   const rows = await restGet(
     `select=${EVENT_SELECT}&order=start_date.desc.nullslast&limit=500`,
   );
   if (!rows) return null;
   return resolveEventBySlug(rows, slug) ?? null;
+}
+
+/** Token lane. Returns null on any failure — same contract as `restGet`. */
+async function fetchShareEventByToken(
+  token: string,
+): Promise<ShareEvent | null> {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/rpc/get_event_by_share_token?select=${EVENT_SELECT}`,
+      {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ p_token: token }),
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return null;
+    const rows = (await res.json()) as ShareEvent[];
+    return Array.isArray(rows) ? (rows[0] ?? null) : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

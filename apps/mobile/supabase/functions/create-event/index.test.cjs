@@ -23,7 +23,8 @@ function harness() {
   }};
   const source = ts.transpileModule(fs.readFileSync(`${__dirname}/index.ts`, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }}).outputText;
   vm.runInNewContext(source, {
-    exports: {}, console: { log() {}, error() {} }, Response,
+    // crypto is a global in Deno (share_slug token) but not inside a bare vm context.
+    exports: {}, console: { log() {}, error() {} }, Response, crypto,
     Deno: { env: { get: () => 'test' }, serve: fn => { handler = fn; } },
     require: name => name.includes('supabase-js') ? { createClient: () => client }
       : name.includes('verify-session') ? { verifySession: async (_db, req) => req.headers.get('x-test-actor'), corsHeaders: () => ({}), optionsResponse: () => new Response(null, { status: 204 }) }

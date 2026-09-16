@@ -5,6 +5,10 @@ import { updateProfilePrivileged } from "../supabase/privileged";
 import { requireBetterAuthToken, getCurrentUserRow } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
 import { resolveFollowRelationship } from "../profile/follow-relationship";
+import {
+  buildUserSearchFilters,
+  userDisplayName,
+} from "./user-search-query";
 
 /**
  * Did PostgREST reject our credentials (as opposed to failing for a real
@@ -646,7 +650,13 @@ export const usersApi = {
     try {
       if (!query || query.length < 1) return { docs: [], totalDocs: 0 };
 
-      const { data, error, count } = await supabase
+      // One `or=` group per whitespace-separated token; PostgREST ANDs
+      // repeated filters, so every token must match some name column and
+      // "micah marquez" finds a row no single column contains.
+      const filters = buildUserSearchFilters(query);
+      if (filters.length === 0) return { docs: [], totalDocs: 0 };
+
+      let builder = supabase
         .from(DB.users.table)
         .select(
           `
@@ -660,11 +670,11 @@ export const usersApi = {
           avatar:${DB.users.avatarId}(url)
         `,
           { count: "exact" },
-        )
-        .or(
-          `${DB.users.username}.ilike.%${query}%,${DB.users.firstName}.ilike.%${query}%`,
-        )
-        .limit(limit);
+        );
+
+      for (const filter of filters) builder = builder.or(filter);
+
+      const { data, error, count } = await builder.limit(limit);
 
       if (error) throw error;
 
@@ -672,7 +682,11 @@ export const usersApi = {
         id: String(user[DB.users.id]),
         authId: user[DB.users.authId] || "",
         username: user[DB.users.username] || "unknown",
-        name: user[DB.users.firstName] || user[DB.users.username] || "Unknown",
+        name: userDisplayName(
+          user[DB.users.firstName],
+          user[DB.users.lastName],
+          user[DB.users.username],
+        ),
         firstName: user[DB.users.firstName],
         lastName: user[DB.users.lastName],
         avatar: user.avatar?.url || "",

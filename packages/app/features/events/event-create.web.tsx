@@ -1749,7 +1749,8 @@ function CoOrganizersField() {
           <input
             className="flex-1 bg-transparent text-sm text-white placeholder:text-white/40 outline-none"
             value={search}
-            placeholder="Search by username"
+            placeholder="Search by name or username"
+            aria-label="Search for a co-organizer by name or username"
             onChange={(e) => setSearch(e.target.value)}
           />
           {search.length > 0 ? (
@@ -1780,6 +1781,7 @@ function CoOrganizersField() {
                       authId: u.authId,
                       username: u.username,
                       avatar: u.avatar,
+                      name: u.name,
                     });
                     setSearch("");
                     setResults([]);
@@ -1796,7 +1798,14 @@ function CoOrganizersField() {
                   ) : (
                     <div className="h-7 w-7 rounded-full bg-white/10" />
                   )}
-                  <span className="text-sm text-white">@{u.username}</span>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate text-sm text-white">
+                      {u.name || u.username}
+                    </span>
+                    <span className="truncate text-xs text-white/50">
+                      @{u.username}
+                    </span>
+                  </span>
                 </button>
               ))}
           </div>
@@ -1807,9 +1816,10 @@ function CoOrganizersField() {
           {coOrganizers.map((c) => (
             <span
               key={c.id}
+              title={`@${c.username}`}
               className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-white"
             >
-              @{c.username}
+              {c.name || `@${c.username}`}
               <button
                 type="button"
                 onClick={() => removeCoOrganizer(c.id)}
@@ -1823,8 +1833,8 @@ function CoOrganizersField() {
         </div>
       ) : (
         <p className="text-xs text-white/45">
-          Type a username to search. Co-organizers can edit this event and view
-          its dashboard.
+          Type a name or username to search. Co-organizers can edit this event
+          and view its dashboard.
         </p>
       )}
     </div>
@@ -1890,8 +1900,8 @@ function GuestsField() {
           <input
             className="flex-1 bg-transparent text-sm text-white placeholder:text-white/40 outline-none"
             value={search}
-            placeholder="Search by username"
-            aria-label="Search for a guest by username"
+            placeholder="Search by name or username"
+            aria-label="Search for a guest by name or username"
             onChange={(e) => setSearch(e.target.value)}
           />
           {search.length > 0 ? (
@@ -1922,6 +1932,7 @@ function GuestsField() {
                       authId: u.authId,
                       username: u.username,
                       avatar: u.avatar,
+                      name: u.name,
                     });
                     setSearch("");
                     setResults([]);
@@ -1938,7 +1949,14 @@ function GuestsField() {
                   ) : (
                     <div className="h-7 w-7 rounded-full bg-white/10" />
                   )}
-                  <span className="text-sm text-white">@{u.username}</span>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate text-sm text-white">
+                      {u.name || u.username}
+                    </span>
+                    <span className="truncate text-xs text-white/50">
+                      @{u.username}
+                    </span>
+                  </span>
                 </button>
               ))}
           </div>
@@ -1950,6 +1968,7 @@ function GuestsField() {
             {guests.map((g) => (
               <span
                 key={g.id}
+                title={`@${g.username}`}
                 className="inline-flex items-center gap-1.5 rounded-full bg-white/10 py-1 pl-1 pr-2.5 text-xs font-medium text-white"
               >
                 {g.avatar ? (
@@ -1962,7 +1981,7 @@ function GuestsField() {
                 ) : (
                   <span className="h-5 w-5 rounded-full bg-white/15" />
                 )}
-                @{g.username}
+                {g.name || `@${g.username}`}
                 <button
                   type="button"
                   onClick={() => removeGuest(g.id)}

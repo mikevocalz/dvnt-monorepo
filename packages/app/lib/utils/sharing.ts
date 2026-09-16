@@ -1,4 +1,5 @@
 import { Alert, Platform, Share } from "react-native";
+import { eventSharePath } from "@dvnt/app/lib/events/event-discovery";
 
 const APP_SCHEME = "dvnt";
 const WEB_BASE_URL = "https://dvntapp.live";
@@ -6,12 +7,15 @@ const WEB_BASE_URL = "https://dvntapp.live";
 export interface ShareableContent {
   type: "post" | "profile" | "event" | "story";
   id: string;
+  /** Explicit path when the id is not the right handle — see eventSharePath. */
+  path?: string;
   title?: string;
   message?: string;
 }
 
 export function generateDeepLink(content: ShareableContent): string {
-  const { type, id } = content;
+  const { type, id, path } = content;
+  if (path) return `${WEB_BASE_URL}${path}`;
 
   switch (type) {
     case "post":
@@ -158,10 +162,13 @@ export async function shareProfile(
 export async function shareEvent(
   eventId: string,
   eventName?: string,
+  event?: { visibility?: string | null; shareSlug?: string | null },
 ): Promise<void> {
   await shareContent({
     type: "event",
     id: eventId,
+    // A link_only event is shared by its token, never by an enumerable id.
+    path: eventSharePath({ id: eventId, ...event }),
     title: eventName || "Share Event",
     message: eventName ? `Check out ${eventName}!` : "Check out this event!",
   });
