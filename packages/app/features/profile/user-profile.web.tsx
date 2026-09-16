@@ -18,6 +18,7 @@
  * Local UI state (menu, avatar lightbox) lives in Zustand, never useState.
  */
 
+import { followButtonLabel } from "@dvnt/app/lib/profile/follow-relationship";
 import { useCallback, useEffect, useMemo } from "react";
 import { useWindowDimensions } from "react-native";
 import { useParams, useRouter } from "solito/navigation";
@@ -317,9 +318,7 @@ export function UserProfileScreen() {
               ? followVars?.action === "follow"
                 ? "Now Following"
                 : "Unfollowing..."
-              : isFollowing
-                ? "Following"
-                : "Follow"}
+              : followButtonLabel({ isFollowing, followsYou: user?.followsYou })}
           </button>
           <button
             onClick={handleMessagePress}

@@ -4,6 +4,7 @@ import { getCurrentUserId, getCurrentUserIdSync } from "./auth-helper";
 import { updateProfilePrivileged } from "../supabase/privileged";
 import { requireBetterAuthToken, getCurrentUserRow } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
+import { resolveFollowRelationship } from "../profile/follow-relationship";
 
 /**
  * Did PostgREST reject our credentials (as opposed to failing for a real
@@ -51,6 +52,19 @@ async function getViewerIdForRelationshipChecks(): Promise<number | null> {
 
   const viewerRow = await getCurrentUserRow();
   return viewerRow?.id ?? null;
+}
+
+async function getFollowRelationship(viewerId: number | null, targetId: number) {
+  if (!viewerId || !targetId || String(viewerId) === String(targetId)) {
+    return { isFollowing: false, followsYou: false };
+  }
+  const { data, error } = await supabase
+    .from(DB.follows.table)
+    .select("follower_id, following_id")
+    .in(DB.follows.followerId, [viewerId, targetId])
+    .in(DB.follows.followingId, [viewerId, targetId]);
+  if (error) console.error("[Users] relationship lookup failed:", error);
+  return resolveFollowRelationship(data ?? [], viewerId, targetId);
 }
 
 type BetterAuthUserRow = {
@@ -178,25 +192,15 @@ export const usersApi = {
         const authId = data[DB.users.authId];
         const dbAvatar =
           (data.avatar as any)?.url || (data.avatar as any)?.[0]?.url || "";
-        const [betterAuthUser, liveCounts] = await Promise.all([
+        const [betterAuthUser, liveCounts, { isFollowing, followsYou }] = await Promise.all([
           !dbAvatar && authId ? getBetterAuthUserById(authId) : null,
           getLiveProfileCounts(targetUserId),
+          getFollowRelationship(currentUserId, targetUserId),
         ]);
         const displayNameParts = buildDisplayNameParts(betterAuthUser?.name);
         const resolvedUsername =
           data[DB.users.username] || betterAuthUser?.username || username;
 
-        // Follow check fires only when we have both IDs and they differ
-        let isFollowing = false;
-        if (currentUserId && targetUserId && currentUserId !== targetUserId) {
-          const { data: followData } = await supabase
-            .from(DB.follows.table)
-            .select("id")
-            .eq(DB.follows.followerId, currentUserId)
-            .eq(DB.follows.followingId, targetUserId)
-            .maybeSingle();
-          isFollowing = !!followData;
-        }
 
         return {
           id: String(targetUserId),
@@ -229,6 +233,7 @@ export const usersApi = {
             (liveCounts?.postsCount ?? Number(data[DB.users.postsCount])) || 0,
           isPrivate: data[DB.users.isPrivate] || false,
           isFollowing,
+          followsYou,
           createdAt: data[DB.users.createdAt],
         };
       }
@@ -313,27 +318,14 @@ export const usersApi = {
       const authId = data[DB.users.authId];
       const dbAvatar =
         (data.avatar as any)?.url || (data.avatar as any)?.[0]?.url || "";
-      const [betterAuthUser, liveCounts] = await Promise.all([
+      const [betterAuthUser, liveCounts, { isFollowing, followsYou }] = await Promise.all([
         !dbAvatar && authId ? getBetterAuthUserById(authId) : null,
         getLiveProfileCounts(data[DB.users.id]),
+        getFollowRelationship(currentUserId, data[DB.users.id]),
       ]);
       const displayNameParts = buildDisplayNameParts(betterAuthUser?.name);
       const resolvedUsername =
         data[DB.users.username] || betterAuthUser?.username || "";
-      let isFollowing = false;
-      if (
-        currentUserId &&
-        data[DB.users.id] &&
-        currentUserId !== data[DB.users.id]
-      ) {
-        const { data: followData } = await supabase
-          .from(DB.follows.table)
-          .select("id")
-          .eq(DB.follows.followerId, currentUserId)
-          .eq(DB.follows.followingId, data[DB.users.id])
-          .maybeSingle();
-        isFollowing = !!followData;
-      }
 
       return {
         id: String(data[DB.users.id]),
@@ -366,6 +358,7 @@ export const usersApi = {
           (liveCounts?.postsCount ?? Number(data[DB.users.postsCount])) || 0,
         isPrivate: data[DB.users.isPrivate] || false,
         isFollowing,
+        followsYou,
         createdAt: data[DB.users.createdAt],
       };
     } catch (error) {
@@ -419,25 +412,16 @@ export const usersApi = {
           (profile.avatar as any)?.url ||
           (profile.avatar as any)?.[0]?.url ||
           "";
-        const [betterAuthUser, liveCounts] = await Promise.all([
+        const [betterAuthUser, liveCounts, { isFollowing, followsYou }] = await Promise.all([
           (!dbAvatar || !profile[DB.users.firstName]) && resolvedAuthId
             ? getBetterAuthUserById(resolvedAuthId)
             : null,
           getLiveProfileCounts(targetUserId),
+          getFollowRelationship(currentUserId, targetUserId),
         ]);
         const displayNameParts = buildDisplayNameParts(betterAuthUser?.name);
         const resolvedUsername =
           profile[DB.users.username] || betterAuthUser?.username || authId;
-        let isFollowing = false;
-        if (currentUserId && targetUserId && currentUserId !== targetUserId) {
-          const { data: followData } = await supabase
-            .from(DB.follows.table)
-            .select("id")
-            .eq(DB.follows.followerId, currentUserId)
-            .eq(DB.follows.followingId, targetUserId)
-            .maybeSingle();
-          isFollowing = !!followData;
-        }
 
         return {
           id: String(profile[DB.users.id]),
@@ -471,6 +455,7 @@ export const usersApi = {
             0,
           isPrivate: profile[DB.users.isPrivate] || false,
           isFollowing,
+          followsYou,
           createdAt: profile[DB.users.createdAt],
         };
       }
@@ -509,6 +494,7 @@ export const usersApi = {
         postsCount: 0,
         isPrivate: false,
         isFollowing: false,
+        followsYou: false,
         createdAt: authUser.createdAt,
       };
     } catch (error) {

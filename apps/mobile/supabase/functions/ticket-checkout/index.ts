@@ -1,3 +1,4 @@
+import { canAccessEvent } from "../_shared/event-access.ts";
 /**
  * Ticket Checkout Edge Function
  *
@@ -191,6 +192,12 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Invalid quantity" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!await canAccessEvent(supabase, Number(event_id), user_id)) {
+      return new Response(JSON.stringify({ error: "Event not found or invitation required" }), {
+        status: 404, headers: { "Content-Type": "application/json" },
       });
     }
 

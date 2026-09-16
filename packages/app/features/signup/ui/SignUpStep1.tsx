@@ -17,7 +17,7 @@ import { DB } from "@dvnt/app/lib/supabase/db-map";
 import { CheckCircle2, XCircle, ShieldAlert } from "lucide-react-native";
 import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
 
-const UNDERAGE_ERROR_MESSAGE = "You must be 18 or older to use this app.";
+import { validateDateOfBirth, UNDERAGE_ERROR_MESSAGE } from "@dvnt/app/lib/utils/age-verification";
 
 // Parse date string (YYYY-MM-DD) to Date object, avoiding timezone issues
 function parseDateString(dateStr: string | undefined): Date {
@@ -64,28 +64,6 @@ function getMaximumBirthDate(): Date {
   const date = new Date();
   date.setFullYear(date.getFullYear() - 18);
   return date;
-}
-
-function validateDateOfBirth(dateString: string): {
-  isValid: boolean;
-  isOver18: boolean;
-} {
-  if (!dateString) return { isValid: false, isOver18: false };
-
-  const birthDate = new Date(dateString);
-  const today = new Date();
-  const age = today.getFullYear() - birthDate.getFullYear();
-  const monthDiff = today.getMonth() - birthDate.getMonth();
-
-  let actualAge = age;
-  if (
-    monthDiff < 0 ||
-    (monthDiff === 0 && today.getDate() < birthDate.getDate())
-  ) {
-    actualAge--;
-  }
-
-  return { isValid: true, isOver18: actualAge >= 18 };
 }
 
 // Separate component for DateOfBirth field to properly use hooks
@@ -388,7 +366,7 @@ export function SignUpStep1() {
         return; // BLOCK - require DOB
       }
 
-      // CRITICAL: Server-side age verification before proceeding
+      // Client validation mirrors the server signup gate; this is not identity verification.
       const ageCheck = validateDateOfBirth(value.dateOfBirth);
       if (!ageCheck.isValid || ageCheck.isOver18 === false) {
         setIsUserUnderage(true);

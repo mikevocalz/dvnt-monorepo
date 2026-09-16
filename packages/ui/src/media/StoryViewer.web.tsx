@@ -1,6 +1,7 @@
 "use client";
 
 import Stories from "react-insta-stories";
+import { useState } from "react";
 import type { Story } from "react-insta-stories/dist/interfaces";
 
 export interface StoryItem {
@@ -23,6 +24,7 @@ export interface StoryViewerProps {
   onAllStoriesEnd?: () => void;
   /** Fires on each story change with the new index. */
   onStoryChange?: (index: number) => void;
+  onProfilePress?: () => void;
   /** Viewport width / height (px or %). Defaults fill the container. */
   width?: number | string;
   height?: number | string;
@@ -82,10 +84,13 @@ export function StoryViewer({
   currentIndex = 0,
   onAllStoriesEnd,
   onStoryChange,
+  onProfilePress,
   width = "100%",
   height = "100%",
   loop = false,
 }: StoryViewerProps) {
+  const [activeIndex, setActiveIndex] = useState(currentIndex);
+  const activeHeader = stories[activeIndex]?.header;
   const mapped: Story[] = stories.map((s) => ({
     url: s.url,
     type: s.type ?? (VIDEO_RE.test(s.url) ? "video" : "image"),
@@ -108,7 +113,7 @@ export function StoryViewer({
           why only video left a cutout). Force that wrapper + the video to fill
           and cover. :has() is supported in all current browsers. */}
       <style>{`
-        .dvnt-story-viewer > div { width: 100%; height: 100%; }
+        .dvnt-story-viewer > div:not(.dvnt-story-header) { width: 100%; height: 100%; }
         /* The video sits under several wrapper divs (videoContainer →
            withSeeMore → withHeader), NONE of which set a height — so the
            video's height:100% collapses. Size the WHOLE ancestor chain by
@@ -124,15 +129,33 @@ export function StoryViewer({
         currentIndex={currentIndex}
         loop={loop}
         keyboardNavigation
-        header={(h: { heading?: string; subheading?: string; profileImage?: string }) => StoryHeader(h)}
+        header={() => <></>}
         onAllStoriesEnd={() => onAllStoriesEnd?.()}
-        onStoryStart={(i: number) => onStoryChange?.(i)}
+        onStoryStart={(i: number) => {
+          setActiveIndex(i);
+          onStoryChange?.(i);
+        }}
         storyContainerStyles={{ background: "#000", borderRadius: 0 }}
         // Force BOTH image and video to fill the viewport (cover) — the library
         // default is width:"auto" which renders media at intrinsic size, leaving
         // a black "cutout". Cover = Instagram-style full-bleed, no gap.
         storyStyles={{ width: "100%", height: "100%", objectFit: "cover" }}
       />
+      {activeHeader ? (
+        <div className="dvnt-story-header" style={{ position: "absolute", top: 8, left: 0, right: 52, zIndex: 1001, pointerEvents: "none" }}>
+          {onProfilePress ? (
+            <button
+              type="button"
+              aria-label={`View ${activeHeader.heading}'s profile`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); onProfilePress(); }}
+              style={{ pointerEvents: "auto", cursor: "pointer", padding: 0, border: 0, background: "transparent", textAlign: "left" }}
+            >
+              <StoryHeader {...activeHeader} />
+            </button>
+          ) : <StoryHeader {...activeHeader} />}
+        </div>
+      ) : null}
     </div>
   );
 }

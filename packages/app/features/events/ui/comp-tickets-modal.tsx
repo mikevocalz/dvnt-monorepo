@@ -62,6 +62,8 @@ export function CompTicketsModal({
   useEffect(() => {
     if (!visible) return;
     setResult(null);
+    setTiers(null);
+    setTierId(null);
     setRecipientsRaw("");
     setNote("");
     (async () => {
@@ -92,7 +94,7 @@ export function CompTicketsModal({
   }, [sending, onClose]);
 
   const handleSend = useCallback(async () => {
-    if (sending || !tierId || parsed.length === 0) return;
+    if (sending || !tierId || parsed.length === 0 || parsed.length > 100) return;
     setSending(true);
     try {
       const res = await bulkCompTickets(eventId, tierId, parsed, note.trim() || undefined);
@@ -269,7 +271,7 @@ export function CompTicketsModal({
                 </Text>
               </View>
               <Text style={styles.helper}>
-                Separate by comma, semicolon, or new line. Up to 100 per batch.
+                Use an existing DVNT username or account email. Tickets arrive in their wallet and activity; this does not send email or SMS. Ask guests without an account to sign up first. Separate entries by comma, semicolon, or new line. Up to 100 per batch.
               </Text>
 
               <Text style={styles.sectionLabel}>NOTE (optional)</Text>
@@ -292,10 +294,10 @@ export function CompTicketsModal({
           <View style={styles.footer}>
             <Pressable
               onPress={handleSend}
-              disabled={sending || !tierId || parsed.length === 0}
+              disabled={sending || !tierId || parsed.length === 0 || parsed.length > 100}
               style={[
                 styles.sendBtn,
-                (sending || !tierId || parsed.length === 0) && { opacity: 0.4 },
+                (sending || !tierId || parsed.length === 0 || parsed.length > 100) && { opacity: 0.4 },
               ]}
             >
               {sending ? (

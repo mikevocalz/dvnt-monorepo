@@ -16,6 +16,7 @@ import {
   PRIVACY_POLICY_MD,
 } from '../../../lib/legal/content.generated';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
+import { validateDateOfBirth } from '../../../lib/utils/age-verification';
 
 /** Tiny markdown-to-DOM renderer for the legal popovers (headings/bullets/bold). */
 function LegalDocBody({ md }: { md: string }) {
@@ -35,6 +36,10 @@ function LegalDocBody({ md }: { md: string }) {
 }
 
 const STEPS = ['User Info', 'Terms', 'Verification'] as const;
+const signupBirthDateError = (value: string) =>
+  !/^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? 'Enter your date of birth in YYYY-MM-DD format.'
+    : validateDateOfBirth(value).errorMessage;
 
 export function SignupScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -47,8 +52,14 @@ export function SignupScreen() {
   const navigate = ({ to }: { to: string }) => router.push(to);
 
   const form = useForm({
-    defaultValues: { email: '', username: '', password: '' },
+    defaultValues: { email: '', username: '', password: '', dateOfBirth: '' },
     onSubmit: async ({ value }) => {
+      const birthDateError = signupBirthDateError(value.dateOfBirth);
+      if (birthDateError) {
+        toast.error('DVNT is for adults 18 and older', { description: birthDateError });
+        setActiveStep(0);
+        return;
+      }
       if (activeStep === 0) { setActiveStep(1); return; }
       if (activeStep === 1) {
         if (!agreedToTerms) { toast.error('Please accept the terms to continue'); return; }
@@ -62,7 +73,7 @@ export function SignupScreen() {
         // move the stepper to show work is happening.
         setIsSubmitting(true);
         try {
-          const { data, error } = await signUp.email({ email: value.email, password: value.password, name: value.username });
+          const { data, error } = await signUp.email({ email: value.email, password: value.password, name: value.username, dateOfBirth: value.dateOfBirth } as any);
           if (error) throw Object.assign(new Error((error as any).message || 'Signup failed'), { code: (error as any).code });
           if (!data?.user) throw new Error('Could not create account — no user was returned.');
           if (data?.user) {
@@ -117,6 +128,8 @@ export function SignupScreen() {
             <FormInput form={form} name="email" label="Email" placeholder="you@example.com" autoCapitalize="none" validators={{ onChange: ({ value }: any) => (!value ? 'Email is required' : !value.includes('@') ? 'Valid email required' : undefined) }} />
             <FormInput form={form} name="username" label="Username" placeholder="yourname" autoCapitalize="none" validators={{ onChange: ({ value }: any) => (!value ? 'Username is required' : undefined) }} />
             <FormInput form={form} name="password" label="Password" placeholder="Create a password" secureTextEntry validators={{ onChange: ({ value }: any) => (!value ? 'Password is required' : value.length < 8 ? 'At least 8 characters' : undefined) }} />
+            <FormInput form={form} name="dateOfBirth" label="Date of birth" placeholder="YYYY-MM-DD" autoCapitalize="none" validators={{ onChange: ({ value }: any) => signupBirthDateError(value) || undefined }} />
+            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, lineHeight: 18 }}>DVNT is for adults 18 and older. Your date of birth is not shown on your profile.</Text>
           </View>
         )}
         {activeStep === 1 && (

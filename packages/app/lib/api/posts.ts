@@ -227,6 +227,7 @@ export function transformPost(
         url: m[DB.postsMedia.url] || "",
         mimeType,
         livePhotoVideoUrl,
+        thumbnail: m[DB.postsMedia.thumbnail] || undefined,
         sortOrder,
       };
     })
@@ -249,7 +250,7 @@ export function transformPost(
   const isVideoKind = type === "video" || type === "animated_video";
   const thumbnail =
     isVideoKind
-      ? thumbnailEntry?.url || undefined
+      ? firstMedia?.thumbnail || thumbnailEntry?.url || undefined
       : firstMedia?.url || undefined;
   const hasMultipleImages = media.length > 1;
 
@@ -339,7 +340,8 @@ export const postsApi = {
             ${DB.postsMedia.url},
             ${DB.postsMedia.order},
             ${DB.postsMedia.mimeType},
-            ${DB.postsMedia.livePhotoVideoUrl}
+            ${DB.postsMedia.livePhotoVideoUrl},
+            ${DB.postsMedia.thumbnail}
           )
         `,
           { count: "exact" },
@@ -452,7 +454,8 @@ export const postsApi = {
             ${DB.postsMedia.url},
             ${DB.postsMedia.order},
             ${DB.postsMedia.mimeType},
-            ${DB.postsMedia.livePhotoVideoUrl}
+            ${DB.postsMedia.livePhotoVideoUrl},
+            ${DB.postsMedia.thumbnail}
           )
         `,
         )
@@ -527,7 +530,8 @@ export const postsApi = {
               ${DB.postsMedia.url},
               ${DB.postsMedia.order},
               ${DB.postsMedia.mimeType},
-              ${DB.postsMedia.livePhotoVideoUrl}
+              ${DB.postsMedia.livePhotoVideoUrl},
+            ${DB.postsMedia.thumbnail}
             )
           `,
           )
@@ -560,7 +564,8 @@ export const postsApi = {
               ${DB.postsMedia.url},
               ${DB.postsMedia.order},
               ${DB.postsMedia.mimeType},
-              ${DB.postsMedia.livePhotoVideoUrl}
+              ${DB.postsMedia.livePhotoVideoUrl},
+            ${DB.postsMedia.thumbnail}
             )
           `,
           )
@@ -587,7 +592,8 @@ export const postsApi = {
               ${DB.postsMedia.url},
               ${DB.postsMedia.order},
               ${DB.postsMedia.mimeType},
-              ${DB.postsMedia.livePhotoVideoUrl}
+              ${DB.postsMedia.livePhotoVideoUrl},
+            ${DB.postsMedia.thumbnail}
             )
           `,
           )
@@ -658,7 +664,8 @@ export const postsApi = {
             ${DB.postsMedia.url},
             ${DB.postsMedia.order},
             ${DB.postsMedia.mimeType},
-            ${DB.postsMedia.livePhotoVideoUrl}
+            ${DB.postsMedia.livePhotoVideoUrl},
+            ${DB.postsMedia.thumbnail}
           )
         `,
         )
@@ -738,6 +745,8 @@ export const postsApi = {
    * Create new post via Edge Function
    */
   async createPost(data: {
+    operationId?: string;
+    expectedAuthorId?: string;
     content?: string;
     kind?: "media" | "text";
     textTheme?: import("@dvnt/app/lib/types").TextPostThemeKey;
@@ -786,6 +795,8 @@ export const postsApi = {
       const { data: response, error } =
         await supabase.functions.invoke<CreatePostResponse>("create-post", {
           body: {
+            operationId: data.operationId,
+            expectedAuthorId: data.expectedAuthorId,
             content: data.content,
             kind: postKind,
             textTheme: data.textTheme,
@@ -795,6 +806,7 @@ export const postsApi = {
             isNSFW: data.isNSFW,
           },
           headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(60_000),
         });
 
       if (error) {
@@ -846,7 +858,7 @@ export const postsApi = {
         isNSFW: data.isNSFW || false,
         thumbnail:
           postKind === "media" && data.media?.[0]?.type === "video"
-            ? (data.media[0] as any).thumbnail || data.media[0].url
+            ? (data.media[0] as any).thumbnail || undefined
             : data.media?.[0]?.url || "",
         type:
           postKind === "media"

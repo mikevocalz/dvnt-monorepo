@@ -40,7 +40,8 @@ Deno.serve(async (req: Request) => {
   const t0 = Date.now();
 
   try {
-    const { limit = 20 } = await req.json();
+    const { limit: requestedLimit = 20 } = await req.json();
+    const limit = Math.max(1, Math.min(100, Number.isSafeInteger(requestedLimit) ? requestedLimit : 20));
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -51,6 +52,9 @@ Deno.serve(async (req: Request) => {
     const { data: events, error: eventsErr } = await supabase
       .from("events")
       .select("*")
+      .eq("visibility", "public")
+      .eq("status", "active")
+      .gte("start_date", new Date().toISOString())
       .not("start_date", "is", null)
       .order("start_date", { ascending: true })
       .limit(limit);

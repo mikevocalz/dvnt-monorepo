@@ -12,7 +12,7 @@
  * Owner or accepted admin only. Issues free tickets (status=active,
  * purchase_amount_cents=0) to every resolved recipient. Skips silently
  * if a recipient already has an active/transfer_pending ticket on
- * this event (no duplicates). Enforces tier capacity — if the comp
+ * this tier (no duplicates). Enforces tier capacity — if the comp
  * batch would exceed quantity_total, returns 409 with a "would_exceed"
  * indicator and issues NOTHING.
  *
@@ -31,6 +31,7 @@ import {
   corsHeaders,
   optionsResponse,
 } from "../_shared/verify-session.ts";
+import { normalizeCompRecipient as normRecipient, dedupeCompAccounts } from "../_shared/comp-recipients.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -51,27 +52,6 @@ function err(message: string, status: number, req: Request, extras?: any) {
     status,
     req,
   );
-}
-
-function normRecipient(raw: string): {
-  kind: "email" | "username";
-  value: string;
-} | null {
-  const s = (raw || "").trim().replace(/^@/, "");
-  if (!s) return null;
-  if (s.includes("@") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) {
-    return { kind: "email", value: s.toLowerCase() };
-  }
-  if (/^[A-Za-z0-9._-]{2,40}$/.test(s)) {
-    return { kind: "username", value: s.toLowerCase() };
-  }
-  return null;
-}
-
-function rndHex(n: number): string {
-  const bytes = new Uint8Array(n);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 Deno.serve(async (req: Request) => {
@@ -184,7 +164,7 @@ Deno.serve(async (req: Request) => {
     const seen = new Set<string>();
     const parsed: { raw: string; norm: ReturnType<typeof normRecipient> }[] = [];
     for (const r of recipientsRaw) {
-      const norm = normRecipient(String(r));
+      const norm = normRecipient(r);
       if (!norm) {
         parsed.push({ raw: String(r), norm: null });
         continue;
@@ -198,7 +178,7 @@ Deno.serve(async (req: Request) => {
     const skipped: { recipient: string; reason: string }[] = [];
     const validParsed = parsed.filter((p) => {
       if (!p.norm) {
-        skipped.push({ recipient: p.raw, reason: "Invalid username or email" });
+        skipped.push({ recipient: p.raw, reason: "Use a DVNT username or account email; phone delivery is not available" });
         return false;
       }
       return true;
@@ -222,10 +202,11 @@ Deno.serve(async (req: Request) => {
     >();
 
     if (usernames.length > 0) {
-      const { data: rows } = await supabase
+      const { data: rows, error: lookupError } = await supabase
         .from("users")
         .select("id, username, auth_id")
         .in("username", usernames);
+      if (lookupError) throw new Error("Could not resolve recipients. Try again.");
       for (const r of rows || []) {
         userByUsername.set(String((r as any).username).toLowerCase(), {
           authId: (r as any).auth_id,
@@ -234,18 +215,21 @@ Deno.serve(async (req: Request) => {
       }
     }
     if (emails.length > 0) {
-      const { data: rows } = await supabase
+      const { data: rows, error: lookupError } = await supabase
         .from("user")
         .select("id, email")
         .in("email", emails);
+      if (lookupError) throw new Error("Could not resolve recipients. Try again.");
       for (const r of rows || []) {
         // also enrich int id
         const authId2 = (r as any).id;
-        const { data: appUser } = await supabase
+        const { data: appUser, error: appUserError } = await supabase
           .from("users")
           .select("id")
           .eq("auth_id", authId2)
           .maybeSingle();
+        if (appUserError) throw new Error("Could not resolve recipient account");
+        if (!appUser) continue;
         userByEmail.set(String((r as any).email).toLowerCase(), {
           authId: authId2,
           intId: appUser?.id ?? null,
@@ -266,8 +250,8 @@ Deno.serve(async (req: Request) => {
         n.kind === "username"
           ? userByUsername.get(n.value)
           : userByEmail.get(n.value);
-      if (!u) {
-        skipped.push({ recipient: p.raw, reason: "User not found" });
+      if (!u?.authId) {
+        skipped.push({ recipient: p.raw, reason: "No DVNT account found; ask the guest to sign up, then comp their account" });
         continue;
       }
       resolved.push({ raw: p.raw, authId: u.authId, intId: u.intId });
@@ -281,78 +265,32 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Capacity check (ticket_types.quantity_total can be null = unlimited).
-    if (tier.quantity_total != null) {
-      const remaining =
-        Number(tier.quantity_total) - Number(tier.quantity_sold || 0);
-      if (resolved.length > remaining) {
-        return err(
-          `Tier capacity would be exceeded. ${remaining} remaining, batch is ${resolved.length}.`,
-          409,
-          req,
-          { would_exceed: true, remaining },
-        );
-      }
-    }
-
-    // Skip duplicates: recipients who already hold an active ticket on this event.
-    const recipAuthIds = resolved.map((r) => r.authId);
-    const { data: existing } = await supabase
-      .from("tickets")
-      .select("user_id")
-      .eq("event_id", eventId)
-      .in("user_id", recipAuthIds)
-      .in("status", ["active", "transfer_pending", "scanned"]);
-    const alreadyHas = new Set(
-      (existing || []).map((r: any) => String(r.user_id)),
-    );
-
-    const toIssue = resolved.filter((r) => {
-      if (alreadyHas.has(r.authId)) {
-        skipped.push({
-          recipient: r.raw,
-          reason: "Already holds a ticket to this event",
-        });
-        return false;
-      }
-      return true;
+    // Dedupe identities after resolution: @name and name@email may be one user.
+    const accounts = dedupeCompAccounts(resolved);
+    skipped.push(...accounts.skipped);
+    const { data: issuance, error: issueError } = await supabase.rpc("issue_comp_tickets_atomic", {
+      p_event_id: eventId,
+      p_tier_id: tierId,
+      p_actor_id: authId,
+      p_user_ids: accounts.unique.map((recipient) => recipient.authId),
     });
-
-    if (toIssue.length === 0) {
-      return json(
-        { ok: true, data: { issued: 0, skipped } },
-        200,
-        req,
-      );
+    if (issueError) {
+      console.error("[bulk-comp-tickets] atomic issuance failed:", issueError);
+      return err("Could not issue tickets. Try again.", 500, req);
     }
-
-    // Bulk insert
-    const rows = toIssue.map((r) => ({
-      event_id: eventId,
-      ticket_type_id: tierId,
-      user_id: r.authId,
-      status: "active",
-      qr_token: rndHex(32),
-      purchase_amount_cents: 0,
-      category: tier.category || "admission",
-    }));
-    const { data: inserted, error: insErr } = await supabase
-      .from("tickets")
-      .insert(rows)
-      .select("id, user_id");
-    if (insErr) {
-      console.error("[bulk-comp-tickets] insert error:", insErr);
-      return err("Could not issue tickets", 500, req);
+    if (!issuance?.ok) {
+      return err(issuance?.error || "Could not issue tickets", 409, req, {
+        would_exceed: issuance?.would_exceed === true,
+        remaining: issuance?.remaining,
+      });
     }
-
-    // Bump quantity_sold to keep tier capacity tracking honest.
-    if (tier.quantity_total != null) {
-      await supabase
-        .from("ticket_types")
-        .update({
-          quantity_sold: Number(tier.quantity_sold || 0) + (inserted?.length || 0),
-        })
-        .eq("id", tierId);
+    const inserted = (issuance.tickets || []) as { id: string; user_id: string }[];
+    const issuedIds = new Set(inserted.map((ticket) => ticket.user_id));
+    const toIssue = accounts.unique.filter((recipient) => issuedIds.has(recipient.authId));
+    for (const recipient of accounts.unique) {
+      if (!issuedIds.has(recipient.authId)) skipped.push({
+        recipient: recipient.raw, reason: "Already holds a ticket in this tier",
+      });
     }
 
     // In-app notifications

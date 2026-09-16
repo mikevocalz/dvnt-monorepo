@@ -1,3 +1,4 @@
+import { canAccessEvent } from "../_shared/event-access.ts";
 /**
  * cart-checkout Edge Function
  *
@@ -214,6 +215,10 @@ Deno.serve(async (req: Request) => {
     }
     if (!cart || cart.user_id !== authId) {
       return errorResponse("Cart not found", 404);
+    }
+
+    if (!await canAccessEvent(supabase, Number(cart.event_id), authId)) {
+      return errorResponse("Event not found or invitation required", 404);
     }
 
     const cartReadyError = requireCartReady(cart as CartRow);

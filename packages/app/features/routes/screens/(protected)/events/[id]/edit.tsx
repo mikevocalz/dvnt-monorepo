@@ -9,7 +9,7 @@ import { SafeAreaView } from "@dvnt/app/components/ui/html";
  * Route: /(protected)/events/[id]/edit
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import {
   View,
@@ -49,6 +49,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useColorScheme, useMediaPicker } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { Progress } from "@dvnt/app/components/ui/progress";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { eventsApi, formatEventDate } from "@dvnt/app/lib/api/events";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
@@ -97,7 +98,7 @@ function EditEventScreenContent() {
   const showToast = useUIStore((s) => s.showToast);
   const currentUser = useAuthStore((state) => state.user);
   const { pickFromLibrary, requestPermissions } = useMediaPicker();
-  const { uploadMultiple, isUploading } = useMediaUpload({ folder: "events" });
+  const { uploadMultiple, isUploading, progress: uploadProgress } = useMediaUpload({ folder: "events" });
 
   // Form state
   const [title, setTitle] = useState("");
@@ -143,6 +144,12 @@ function EditEventScreenContent() {
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const saveLock = useRef(false);
+  const screenMounted = useRef(true);
+  useEffect(() => {
+    screenMounted.current = true;
+    return () => { screenMounted.current = false; };
+  }, []);
   const [hasChanges, setHasChanges] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [originalData, setOriginalData] = useState<any>(null);
@@ -323,7 +330,7 @@ function EditEventScreenContent() {
       lineup !== (od.lineup || "") ||
       youtubeVideoUrl !== (od.youtubeVideoUrl || "") ||
       ticketingEnabled !== !!od.ticketingEnabled ||
-      flyerImage !== ((od as any).flyerImageUrl || null);
+      flyerImage !== ((od as any).flyerVideoUrl || (od as any).videoFlyerUrl || (od as any).flyerImageUrl || null);
 
     setHasChanges(changed);
   }, [
@@ -437,51 +444,52 @@ function EditEventScreenContent() {
   };
 
   const handleSave = useCallback(async () => {
-    if (!id || isSaving) return;
+    if (!id || saveLock.current || isSaving) return;
 
     if (!title.trim()) {
       showToast("error", "Error", "Title is required");
       return;
     }
 
-    // MANDATORY STRIPE CONNECT CHECK — match the create flow. If the
-    // organizer enabled paid ticketing here (or flipped tiers from
-    // free → paid on an existing event), they must complete Stripe
-    // onboarding before save, otherwise buyers hit "Organizer has
-    // not completed payment setup" at checkout.
-    const hasPaidTier =
-      ticketingEnabled &&
-      ticketTiers.some((t) => parseFloat(t.priceDollars || "0") > 0);
-
-    if (hasPaidTier) {
-      try {
-        const status = await organizerApi.getStatus();
-        const ready =
-          status.connected &&
-          status.charges_enabled === true &&
-          status.payouts_enabled === true;
-        if (!ready) {
-          showToast(
-            "error",
-            "Connect your bank first",
-            "Paid events need a Stripe payout account. Let's finish that now.",
-          );
-          router.push("/(protected)/events/organizer-setup" as any);
-          return;
-        }
-      } catch (err) {
-        console.error("[EditEvent] Stripe status check failed:", err);
-        showToast(
-          "error",
-          "Couldn't verify payout setup",
-          "We couldn't confirm your Stripe account status. Please try again.",
-        );
-        return;
-      }
-    }
-
+    saveLock.current = true;
     setIsSaving(true);
     try {
+      // MANDATORY STRIPE CONNECT CHECK — match the create flow. If the
+      // organizer enabled paid ticketing here (or flipped tiers from
+      // free → paid on an existing event), they must complete Stripe
+      // onboarding before save, otherwise buyers hit "Organizer has
+      // not completed payment setup" at checkout.
+      const hasPaidTier =
+        ticketingEnabled &&
+        ticketTiers.some((t) => parseFloat(t.priceDollars || "0") > 0);
+
+      if (hasPaidTier) {
+        try {
+          const status = await organizerApi.getStatus();
+          const ready =
+            status.connected &&
+            status.charges_enabled === true &&
+            status.payouts_enabled === true;
+          if (!ready) {
+            showToast(
+              "error",
+              "Connect your bank first",
+              "Paid events need a Stripe payout account. Let's finish that now.",
+            );
+            router.push("/(protected)/events/organizer-setup" as any);
+            return;
+          }
+        } catch (err) {
+          console.error("[EditEvent] Stripe status check failed:", err);
+          showToast(
+            "error",
+            "Couldn't verify payout setup",
+            "We couldn't confirm your Stripe account status. Please try again.",
+          );
+          return;
+        }
+      }
+
       // Upload new images if any are local URIs
       const uploadedImages: string[] = [];
       const normalizedImages = await Promise.all(
@@ -512,7 +520,7 @@ function EditEventScreenContent() {
           .map((r) => r.url!);
 
         if (successfulUploads.length !== localImages.length) {
-          showToast("warning", "Warning", "Some images failed to upload");
+          throw new Error(uploadResults.find((result) => !result.success)?.error || "An image could not be uploaded. Please try again.");
         }
         uploadedImages.push(...successfulUploads);
       }
@@ -521,7 +529,7 @@ function EditEventScreenContent() {
 
       // Upload flyer if changed
       let flyerImageUrl: string | null | undefined = undefined; // undefined = no change
-      const originalFlyerUrl = (originalData as any)?.flyerImageUrl || null;
+      const originalFlyerUrl = (originalData as any)?.flyerVideoUrl || (originalData as any)?.videoFlyerUrl || (originalData as any)?.flyerImageUrl || null;
       if (flyerImage !== originalFlyerUrl) {
         if (!flyerImage) {
           flyerImageUrl = null;
@@ -543,9 +551,11 @@ function EditEventScreenContent() {
                 type: flyerMediaType as "image" | "video",
               },
             ]);
-            flyerImageUrl = flyerResults[0]?.success
-              ? flyerResults[0].url
-              : originalFlyerUrl;
+            if (!flyerResults[0]?.success || !flyerResults[0].url) {
+              throw new Error(flyerResults[0]?.error || "Flyer upload failed. Please try again.");
+            }
+            flyerImageUrl = flyerResults[0].url;
+            setFlyerImage(flyerImageUrl);
           }
         }
       }
@@ -788,11 +798,14 @@ function EditEventScreenContent() {
       // link and from the host menu, so "Saved" could be followed by landing
       // somewhere else entirely — or nowhere. The event you just edited is
       // the only correct destination.
-      router.replace(`/events/${id}`);
+      if (screenMounted.current) router.replace(`/events/${id}`);
       return;
     } catch (error: any) {
       console.error("[EditEvent] Save error:", error);
       showToast("error", "Error", error?.message || "Failed to save changes");
+      setIsSaving(false);
+    } finally {
+      saveLock.current = false;
       setIsSaving(false);
     }
   }, [
@@ -818,6 +831,7 @@ function EditEventScreenContent() {
     originalTierIds,
     flyerImage,
     flyerMediaType,
+    flyerPosterImage,
     originalData,
     isSaving,
     uploadMultiple,
@@ -864,6 +878,13 @@ function EditEventScreenContent() {
         </Pressable>
       </View>
       </View>
+
+      {isUploading && (
+        <View accessibilityLiveRegion="polite" className="px-4 py-3 bg-card border-b border-border">
+          <Text className="text-sm text-muted-foreground mb-2">Uploading event media…</Text>
+          <Progress value={uploadProgress} />
+        </View>
+      )}
 
       <KeyboardAwareScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: 100 }}

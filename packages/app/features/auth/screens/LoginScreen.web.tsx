@@ -197,10 +197,12 @@ export function LoginScreen() {
             <Pressable
               onPress={async () => {
                 try {
-                  await (signIn as any).social({
+                  const result = await (signIn as any).social({
                     provider: 'google',
                     callbackURL: '/auth/social-callback',
+                    errorCallbackURL: '/auth/login',
                   });
+                  if (result.error) throw new Error(result.error.message || 'Google sign-in failed');
                 } catch (err: any) {
                   toast.error('Google sign-in failed', {
                     description: err?.message || 'Please try again or use email.',
@@ -212,6 +214,9 @@ export function LoginScreen() {
             >
               <Text style={styles.googleButtonText}>Continue with Google</Text>
             </Pressable>
+            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, lineHeight: 18 }}>
+              New to DVNT? Create your 18+ account with your date of birth first, then sign in or link Google or Apple.
+            </Text>
 
             {/* B1/B4: passwordless entry — BetterAuth mints/verifies the link,
                 the social-callback page completes the session + welcome flow. */}

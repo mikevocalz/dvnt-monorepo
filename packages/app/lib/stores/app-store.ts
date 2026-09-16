@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { mmkv } from "@dvnt/app/lib/mmkv-zustand";
+import { readFeedMode, type FeedMode } from "./feed-layout-preference";
 
 const NSFW_STORAGE_KEY = "app_nsfw_enabled";
 const FEED_MODE_KEY = "app_feed_mode";
@@ -7,7 +8,7 @@ const FEED_MODE_KEY = "app_feed_mode";
 // Module-level flag to ensure splash NEVER replays within app process lifetime
 let splashHasFinishedEver = false;
 
-export type FeedMode = "classic" | "masonry";
+export type { FeedMode } from "./feed-layout-preference";
 export interface PendingAppRoute {
   pathname: string;
   params?: Record<string, string>;
@@ -63,13 +64,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   nsfwLoaded: true,
   feedMode: ((): FeedMode => {
     try {
-      const stored = mmkv.getString(FEED_MODE_KEY) as FeedMode | undefined;
-      // Default to masonry — clear any stale "classic" persisted value
-      if (!stored || stored === "classic") {
-        mmkv.set(FEED_MODE_KEY, "masonry");
-        return "masonry";
-      }
-      return stored;
+      return readFeedMode(mmkv.getString(FEED_MODE_KEY));
     } catch {
       return "masonry";
     }

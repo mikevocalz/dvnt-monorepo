@@ -20,6 +20,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 // PINNED — see lynk-moq-token for what a floating specifier cost us. The
 // three calls below (createRoom / createLivestreamStreamerToken /
@@ -112,6 +113,16 @@ Deno.serve(async (req) => {
       .single();
     if (!room) return err("not_found", "Room not found");
     if (room.status !== "open") return err("conflict", "Room is no longer open");
+    // Every media transport enforces current admission and schedule before tokens.
+    const eventAccess = await resolveEventRoomAccess(supabase, room, userId);
+    if (!eventAccess.ok) {
+      return err(eventAccess.code, eventAccess.message, eventAccess.detail);
+    }
+    room.ends_at = eventAccess.endsAt;
+    if (room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
+      return err("conflict", "This Lynk's session has ended", { reason: "session_expired" });
+    }
+
     const internalRoomId = room.id;
 
     // 4. Ban + membership
@@ -136,7 +147,7 @@ Deno.serve(async (req) => {
       existingMember?.role === "co-host";
 
     // 5. Private gate (verbatim from video_join_room)
-    if (!room.is_public) {
+    if (!room.is_public && !eventAccess.linked) {
       const hasPriorAccess =
         !!existingMember &&
         existingMember.status !== "banned" &&

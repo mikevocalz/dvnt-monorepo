@@ -5,6 +5,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
@@ -42,7 +43,7 @@ function jsonResponse<T>(data: ApiResponse<T>, status = 200): Response {
   });
 }
 
-function errorResponse(code: ErrorCode, message: string): Response {
+function errorResponse(code: ErrorCode, message: string, _status?: number): Response {
   return jsonResponse({ ok: false, error: { code, message } }, 200);
 }
 
@@ -147,6 +148,12 @@ Deno.serve(async (req) => {
       return errorResponse("conflict", "Room is no longer open");
     }
 
+    const eventAccess = await resolveEventRoomAccess(supabase, room, userId);
+    if (!eventAccess.ok) return errorResponse(eventAccess.code, eventAccess.message);
+    if (eventAccess.endsAt && Date.parse(eventAccess.endsAt) <= Date.now()) {
+      return errorResponse("conflict", "This Lynk's session has ended");
+    }
+
     // Check membership is active
     const { data: member } = await supabase
       .from("video_room_members")
@@ -175,14 +182,15 @@ Deno.serve(async (req) => {
 
     // If currentJti provided, check it's not revoked
     if (currentJti) {
-      const { data: existingToken } = await supabase
+      const { data: existingToken, error: tokenLookupError } = await supabase
         .from("video_room_tokens")
         .select("*")
+        .eq("room_id", internalRoomId)
         .eq("token_jti", currentJti)
         .eq("user_id", userId)
         .single();
 
-      if (existingToken?.revoked_at) {
+      if (tokenLookupError || !existingToken || existingToken.revoked === true || existingToken.revoked_at) {
         return errorResponse("forbidden", "Your session has been revoked");
       }
     }
@@ -205,7 +213,7 @@ Deno.serve(async (req) => {
         .select("*")
         .eq("room_id", internalRoomId)
         .eq("user_id", userId)
-        .is("revoked_at", null)
+        .eq("revoked", false)
         .order("issued_at", { ascending: false })
         .limit(1)
         .single();
@@ -225,10 +233,10 @@ Deno.serve(async (req) => {
     // Revoke old tokens
     await supabase
       .from("video_room_tokens")
-      .update({ revoked_at: new Date().toISOString() })
+      .update({ revoked: true })
       .eq("room_id", internalRoomId)
       .eq("user_id", userId)
-      .is("revoked_at", null);
+      .eq("revoked", false);
 
     // Create new peer token in Fishjam
     const jti = generateJti();

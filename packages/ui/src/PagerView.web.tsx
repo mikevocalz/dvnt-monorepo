@@ -57,7 +57,7 @@ export function PagerView({
   testID,
 }: PagerViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const idleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idleTimeoutRef = useRef<number | null>(null);
   const selectedPageRef = useRef(initialPage);
   const [isReady, setIsReady] = useState(false);
   const pages = useMemo(() => Children.toArray(children), [children]);

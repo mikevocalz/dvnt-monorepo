@@ -419,10 +419,7 @@ export function useCreatePost() {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: postKeys.all });
 
-      // Snapshot previous data
-      const previousData = queryClient.getQueriesData({
-        queryKey: postKeys.all,
-      });
+      const optimisticId = `temp-${newPostData.operationId || Date.now()}`;
 
       const optimisticTextPresentation =
         newPostData.kind === "text"
@@ -439,13 +436,13 @@ export function useCreatePost() {
           : { textSlides: [], caption: "", previewText: "" };
 
       // Optimistically add the new post to infinite feed
-      queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), (old: any) => {
+      queryClient.setQueryData(postKeys.feedInfinite(Boolean(newPostData.isNSFW)), (old: any) => {
         if (!old || !old.pages || old.pages.length === 0) return old;
         // Add to first page
         const firstPage = old.pages[0];
         if (firstPage && firstPage.data) {
           const optimisticPost: Post = {
-            id: `temp-${Date.now()}`,
+            id: optimisticId,
             author: {
               username: "You",
               avatar: "",
@@ -506,9 +503,10 @@ export function useCreatePost() {
 
       // Also update legacy feed query if it exists
       queryClient.setQueryData<Post[]>(postKeys.feed(), (old) => {
-        if (!old) return old;
+        // Legacy feed is the safe feed. A spicy post must never enter it.
+        if (!old || newPostData.isNSFW) return old;
         const optimisticPost: Post = {
-          id: `temp-${Date.now()}`,
+          id: optimisticId,
           author: {
             username: "You",
             avatar: "",
@@ -567,7 +565,7 @@ export function useCreatePost() {
           (old) => {
             if (!old) return old;
             const optimisticPost: Post = {
-              id: `temp-${Date.now()}`,
+              id: optimisticId,
               author: {
                 id: userId,
                 username: user?.username || "You",
@@ -622,17 +620,23 @@ export function useCreatePost() {
         );
       }
 
-      return { previousData };
+      return { optimisticId };
     },
     onError: (_err, _variables, context) => {
-      // Rollback on error
-      if (context?.previousData) {
-        context.previousData.forEach(([queryKey, data]) => {
-          queryClient.setQueryData(queryKey, data);
-        });
-      }
+      if (!context?.optimisticId) return;
+      // Remove only this job's optimistic item. Never restore a stale whole feed
+      // over posts/likes received while publishing, including after account switch.
+      const remove = (posts: Post[]) => posts.filter((post) => post.id !== context.optimisticId);
+      queryClient.setQueriesData({ queryKey: postKeys.feedInfiniteAll() }, (old: any) =>
+        old?.pages ? { ...old, pages: old.pages.map((page: any) => ({ ...page, data: remove(page.data || []) })) } : old,
+      );
+      queryClient.setQueryData<Post[]>(postKeys.feed(), (old) => old ? remove(old) : old);
+      queryClient.setQueriesData<Post[]>({ queryKey: ["profilePosts"] }, (old) => old ? remove(old) : old);
     },
-    onSuccess: (newPost) => {
+    onSuccess: (newPost, _variables, context) => {
+      // A response from the previous account must not populate the new account feed.
+      const currentViewer = useAuthStore.getState().user;
+      if (![currentViewer?.id, currentViewer?.authId].some((id) => id && (id === user?.id || id === user?.authId))) return;
       if (__DEV__)
         console.log("[useCreatePost] Post created successfully:", newPost?.id);
 
@@ -640,14 +644,14 @@ export function useCreatePost() {
       // This prevents double posts from appearing
       if (newPost?.id) {
         // Update infinite feed - replace temp post with real one
-        queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), (old: any) => {
+        queryClient.setQueryData(postKeys.feedInfinite(Boolean(newPost.isNSFW)), (old: any) => {
           if (!old?.pages) return old;
           const filteredPages = old.pages.map((page: any) => {
             if (!page?.data) return page;
             return {
               ...page,
               data: page.data.filter(
-                (p: Post) => !p.id.startsWith("temp-") && p.id !== newPost.id,
+                (p: Post) => p.id !== context?.optimisticId && p.id !== newPost.id,
               ),
             };
           });
@@ -669,9 +673,9 @@ export function useCreatePost() {
         queryClient.setQueryData<Post[]>(postKeys.feed(), (old) => {
           if (!old) return old;
           const filteredData = old.filter(
-            (p) => !p.id.startsWith("temp-") && p.id !== newPost.id,
+            (p) => p.id !== context?.optimisticId && p.id !== newPost.id,
           );
-          return [newPost, ...filteredData];
+          return newPost.isNSFW ? filteredData : [newPost, ...filteredData];
         });
 
         // Replace temp post in profile posts cache with real post
@@ -682,7 +686,7 @@ export function useCreatePost() {
             (old) => {
               if (!old) return old;
               const filtered = old.filter(
-                (p) => !p.id.startsWith("temp-") && p.id !== newPost.id,
+                (p) => p.id !== context?.optimisticId && p.id !== newPost.id,
               );
               return [newPost, ...filtered];
             },

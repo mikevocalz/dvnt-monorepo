@@ -5,6 +5,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { provisionCallMedia } from "../_shared/call-media.ts";
+import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
@@ -216,6 +217,16 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Every media transport enforces current admission and schedule before tokens.
+    const eventAccess = await resolveEventRoomAccess(supabase, room, userId);
+    if (!eventAccess.ok) {
+      return errorResponse(eventAccess.code, eventAccess.message, eventAccess.detail);
+    }
+    room.ends_at = eventAccess.endsAt;
+    if (room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
+      return errorResponse("conflict", "This Lynk's session has ended", { reason: "session_expired" });
+    }
+
     const internalRoomId = room.id;
 
     let memberRole = "participant";
@@ -302,7 +313,7 @@ Deno.serve(async (req) => {
         return errorResponse("forbidden", "You are banned from this room");
       }
 
-      if (!room.is_public) {
+      if (!room.is_public && !eventAccess.linked) {
         const isHostOrCoHost = userId === room.created_by ||
           existingMember?.role === "host" ||
           existingMember?.role === "co-host";

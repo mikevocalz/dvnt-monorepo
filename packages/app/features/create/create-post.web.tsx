@@ -30,15 +30,12 @@ import {
   ArrowDown,
 } from "lucide-react";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
-import { useCreatePost } from "@dvnt/app/lib/hooks/use-posts";
-import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
-import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { usePublishPost } from "@dvnt/app/lib/hooks/use-publish-post";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
   TEXT_POST_THEMES,
   TEXT_POST_MAX_LENGTH,
   TEXT_POST_MAX_SLIDES,
-  serializeTextSlidesForMutation,
 } from "@dvnt/app/lib/posts/text-post";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
 import type { MediaKind, TextPostThemeKey } from "@dvnt/app/lib/types";
@@ -80,17 +77,9 @@ export function CreatePostScreen() {
   } = useCreatePostStore();
 
   const ui = useCreatePostUIStore();
-  const { user } = useAuthStore();
   const showToast = useUIStore((s) => s.showToast);
-  const { mutate: createPost, isPending: isCreating } = useCreatePost();
-  const {
-    uploadMultiple,
-    isUploading,
-    isCompressing,
-    progress: uploadProgress,
-    compressionProgress,
-    statusMessage,
-  } = useMediaUpload({ folder: "posts", userId: user?.id });
+  const publishPost = usePublishPost();
+  const submittingRef = useRef(false);
 
   const isTextPost = postKind === "text";
   const activeTextSlide = textSlides[activeTextSlideIndex] ?? textSlides[0];
@@ -104,7 +93,7 @@ export function CreatePostScreen() {
         slide.content.trim().length <= TEXT_POST_MAX_LENGTH,
     );
   const isValid = isTextPost ? areTextSlidesValid : selectedMedia.length > 0;
-  const busy = isCreating || isUploading || ui.isSubmitLocked;
+  const busy = ui.isSubmitLocked;
 
   // ---- Media intake (file input → object-URL MediaAssets) ----
 
@@ -179,138 +168,22 @@ export function CreatePostScreen() {
 
   // ---- Publish (same upload + mutation path as native) ----
 
-  const handlePost = async () => {
-    const {
-      selectedMedia: currentSelectedMedia,
-      caption: currentCaption,
-      textSlides: currentTextSlides,
-      location: currentLocation,
-      isNSFW: currentIsNSFW,
-      tags: currentTags,
-      postKind: currentPostKind,
-      textTheme: currentTextTheme,
-    } = useCreatePostStore.getState();
-
-    const isTextSubmission = currentPostKind === "text";
-    const normalizedTextSlides = currentTextSlides.map((slide) => slide.content.trim());
-
-    if (busy) return;
-
-    if (!isTextSubmission && currentSelectedMedia.length === 0) {
-      showToast("error", "No Photos", "Please select at least one photo.");
-      return;
-    }
-    if (isTextSubmission && normalizedTextSlides.some((slide) => slide.length === 0)) {
-      showToast("error", "Empty Slide", "Each slide needs text before you can post.");
-      return;
-    }
-    if (isTextSubmission && normalizedTextSlides.some((slide) => slide.length > TEXT_POST_MAX_LENGTH)) {
-      showToast("error", "Too Long", `Text posts are limited to ${TEXT_POST_MAX_LENGTH} characters.`);
-      return;
-    }
-
+  const handlePost = () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     ui.setIsSubmitLocked(true);
-
     try {
-      const tagsString =
-        currentTags.length > 0 ? "\n" + currentTags.map((t) => `#${t}`).join(" ") : "";
-      const fullContent = currentCaption + tagsString;
-      const textSlidesWithTags = isTextSubmission
-        ? normalizedTextSlides.map((slide, index) =>
-            index === normalizedTextSlides.length - 1 ? `${slide}${tagsString}`.trim() : slide,
-          )
-        : [];
-
-      let postMedia: Array<{
-        type: string;
-        url: string;
-        thumbnail?: string;
-        mimeType?: string;
-        livePhotoVideoUrl?: string;
-      }> = [];
-
-      if (!isTextSubmission) {
-        const mediaFiles = currentSelectedMedia.map((m) => ({
-          uri: m.editorOpened && m.editedUri ? m.editedUri : m.uri,
-          type: m.type as "image" | "video",
-          kind: m.kind,
-          mimeType: m.mimeType,
-          pairedVideoUri: m.pairedVideoUri,
-        }));
-
-        let uploadResults;
-        try {
-          uploadResults = await uploadMultiple(mediaFiles);
-        } catch {
-          showToast("error", "Upload Failed", "Could not upload media. Please try again.");
-          ui.setIsSubmitLocked(false);
-          return;
-        }
-
-        const failedUploads = uploadResults.filter((r) => !r.success);
-        if (failedUploads.length > 0) {
-          showToast(
-            "error",
-            "Upload Error",
-            `${failedUploads.length} file(s) failed to upload. Please try again.`,
-          );
-          ui.setIsSubmitLocked(false);
-          return;
-        }
-
-        postMedia = uploadResults.map((r) => ({
-          type: r.kind === "animated_video" || r.kind === "video" ? "video" : "image",
-          url: r.url,
-          mimeType:
-            r.kind === "gif"
-              ? "image/gif"
-              : r.kind === "animated_video"
-                ? "video/mp4+animated"
-                : (r.mimeType ?? undefined),
-          ...(r.thumbnail && { thumbnail: r.thumbnail }),
-          ...(r.livePhotoVideoUrl && { livePhotoVideoUrl: r.livePhotoVideoUrl }),
-        }));
-      }
-
-      createPost(
-        {
-          kind: isTextSubmission ? "text" : "media",
-          textTheme: currentTextTheme,
-          content: isTextSubmission ? textSlidesWithTags[0] : fullContent,
-          slides: isTextSubmission
-            ? serializeTextSlidesForMutation(
-                textSlidesWithTags.map((content, order) => ({
-                  id: `draft-${order}`,
-                  order,
-                  content,
-                })),
-              )
-            : undefined,
-          location: currentLocation,
-          media: postMedia,
-          isNSFW: isTextSubmission ? false : currentIsNSFW,
-        },
-        {
-          onSuccess: () => {
-            reset();
-            router.push("/feed");
-          },
-          onError: (error: any) => {
-            ui.setIsSubmitLocked(false);
-            showToast(
-              "error",
-              "Error",
-              error?.message || error?.error?.message || "Failed to create post. Please try again.",
-            );
-          },
-        },
-      );
-    } catch (error: any) {
+      publishPost(useCreatePostStore.getState());
+      reset();
+      ui.setTagInput("");
+      router.push("/feed");
+    } catch (error) {
+      showToast("error", "Could not share", error instanceof Error ? error.message : "Please try again.");
+    } finally {
+      submittingRef.current = false;
       ui.setIsSubmitLocked(false);
-      showToast("error", "Error", error?.message || "Something went wrong. Please try again.");
     }
   };
-
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -673,25 +546,7 @@ export function CreatePostScreen() {
         onChange={onPickFiles}
       />
 
-      {/* Upload / posting overlay */}
-      {isUploading ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
-          <div className="flex min-w-[280px] flex-col items-center gap-4 rounded-3xl bg-[#0E1320] p-8">
-            <div className="h-2 w-48 overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-full bg-cyan-500 transition-[width]"
-                style={{ width: `${isCompressing ? compressionProgress : uploadProgress}%` }}
-              />
-            </div>
-            <p className="text-lg font-semibold text-white">
-              {isCompressing ? "Compressing Video…" : statusMessage || "Posting…"}
-            </p>
-            <p className="text-sm text-white/60">
-              {isCompressing ? compressionProgress : uploadProgress}% complete
-            </p>
-          </div>
-        </div>
-      ) : null}
+
     </div>
   );
 }

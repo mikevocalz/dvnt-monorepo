@@ -27,6 +27,7 @@ import {
   type ReactElement,
 } from "react";
 import { useRouter } from "solito/navigation";
+import { getAuthIdFromStore } from "@dvnt/app/lib/auth/identity";
 import {
   Calendar,
   MapPin,
@@ -146,11 +147,17 @@ function Field({
 
 export function CreateEventScreen() {
   const router = useRouter();
+  const screenMounted = useRef(true);
+  useEffect(() => {
+    screenMounted.current = true;
+    return () => { screenMounted.current = false; };
+  }, []);
   const s = useCreateEventStore();
   const createEvent = useCreateEvent();
   const showToast = useUIStore((st) => st.showToast);
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
+  const publishLock = useRef(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const places = usePlacesAutocomplete({
@@ -196,38 +203,39 @@ export function CreateEventScreen() {
       showToast("error", "Almost there", first || "Check the highlighted fields.");
       return;
     }
-    if (busy || createEvent.isPending) return;
+    if (publishLock.current || busy || createEvent.isPending) return;
+    publishLock.current = true;
+    const publishingAuthId = getAuthIdFromStore();
+    setBusy(true);
+    try {
 
-    // Paid events need a connected Stripe payout account (same gate as mobile).
-    if (hasPaidTier(s)) {
-      try {
-        const status = await withTimeout(organizerApi.getStatus(), 15000, "payout-status");
-        const ready =
-          status.connected &&
-          status.charges_enabled === true &&
-          status.payouts_enabled === true;
-        if (!ready) {
+      // Paid events need a connected Stripe payout account (same gate as mobile).
+      if (hasPaidTier(s)) {
+        try {
+          const status = await withTimeout(organizerApi.getStatus(), 15000, "payout-status");
+          const ready =
+            status.connected &&
+            status.charges_enabled === true &&
+            status.payouts_enabled === true;
+          if (!ready) {
+            showToast(
+              "error",
+              "Connect payouts first",
+              "Paid events need a Stripe payout account so you can get paid.",
+            );
+            router.push("/feed/events/organizer-setup");
+            return;
+          }
+        } catch {
           showToast(
             "error",
-            "Connect payouts first",
-            "Paid events need a Stripe payout account so you can get paid.",
+            "Couldn't verify payouts",
+            "We couldn't confirm your Stripe status. Please try again.",
           );
-          router.push("/feed/events/organizer-setup");
           return;
         }
-      } catch {
-        showToast(
-          "error",
-          "Couldn't verify payouts",
-          "We couldn't confirm your Stripe status. Please try again.",
-        );
-        return;
       }
-    }
 
-    setBusy(true);
-    const slug = slugifyTitle(s.title);
-    try {
       // Upload the cover to the CDN. The draft holds a blob:/data: URL from the
       // file picker — fetchable in-session — which uploadToServer turns into a
       // real media-upload URL. (Previously the blob URL was sent verbatim and
@@ -236,15 +244,10 @@ export function CreateEventScreen() {
       // URLs pass through; blob:/data:/file: URLs are uploaded fresh.
       const uploadIfLocal = async (
         url: string | null | undefined,
-        timeoutMs = 30000,
       ) => {
         if (!url) return undefined;
         if (!/^(blob:|data:|file:)/i.test(url)) return url;
-        const up = await withTimeout(
-          uploadToServer(url, "events", (p) => s.setUploadProgress(p.percentage)),
-          timeoutMs,
-          "upload-flyer",
-        );
+        const up = await uploadToServer(url, "events", (p) => s.setUploadProgress(p.percentage));
         if (!up.success || !up.url) {
           throw new Error(
             up.error || "Couldn't upload an image. Re-select it and try again.",
@@ -253,13 +256,8 @@ export function CreateEventScreen() {
         return up.url;
       };
 
-      // A flyer VIDEO (up to 60s / 50MB) routinely needs more than 30s on
-      // cellular — the still-image timeout aborted every video publish with
-      // "stalled at: upload-flyer (30s)".
-      const primaryUrl = await uploadIfLocal(
-        s.flyerImage,
-        s.flyerMediaType === "video" ? 180000 : 30000,
-      );
+      // Upload owns real progress, cancellation and a bounded network timeout.
+      const primaryUrl = await uploadIfLocal(s.flyerImage);
       // Write the hosted URL back into the draft the moment it exists: if a
       // later step fails (or iOS Safari kills the tab mid-publish), the retry
       // reuses the CDN URL instead of re-fetching a blob: that may be dead.
@@ -286,7 +284,7 @@ export function CreateEventScreen() {
       const galleryUrls: string[] = [];
       for (const url of s.eventImages) {
         if (/^(blob:|data:|file:)/i.test(url)) {
-          const up = await withTimeout(uploadToServer(url, "events"), 30000, "upload-gallery");
+          const up = await uploadToServer(url, "events");
           if (!up.success || !up.url) {
             throw new Error(
               up.error || "Couldn't upload an additional image. Re-select it and try again.",
@@ -348,12 +346,21 @@ export function CreateEventScreen() {
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const created = await withTimeout(
-        createEvent.mutateAsync(payload as any),
+        createEvent.mutateAsync({ ...payload, clientRequestId: s.getPublishRequestId(), expectedAuthId: publishingAuthId } as any),
         20000,
         "create-event-insert",
       );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const id = (created as any)?.id;
+      if (created?.replayed && id) {
+        // A previous attempt already created this row. Setup may have partly
+        // completed before the app closed; never duplicate ticket inventory.
+        s.resetDraft();
+        showToast("warning", "Event already published", "Review tickets and add-ons in Edit before sharing it.");
+        if (screenMounted.current) router.push(`/feed/events/${id}/edit`);
+        return;
+      }
+
 
       // Every event gets at least one ticket type so it's attendable and the
       // host sees a ticket. Explicit tiers win; otherwise a single default —
@@ -470,7 +477,7 @@ export function CreateEventScreen() {
       } else {
         showToast("success", "Published", "Your event is live.");
       }
-      router.push(id ? `/events/${slug || id}` : "/events");
+      if (screenMounted.current) router.push(id ? `/events/${id}` : "/events");
     } catch (e) {
       showToast(
         "error",
@@ -478,8 +485,9 @@ export function CreateEventScreen() {
         e instanceof Error ? e.message : "Please try again.",
       );
     } finally {
-      setBusy(false);
       s.setUploadProgress(0);
+      publishLock.current = false;
+      setBusy(false);
     }
   };
 
@@ -543,13 +551,15 @@ export function CreateEventScreen() {
             disabled={publishing}
             className="h-10 px-5 rounded-full bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-40"
           >
-            {publishing && s.uploadProgress > 0 && s.uploadProgress < 100
-              ? `Uploading ${s.uploadProgress}%`
-              : publishing
-                ? "Publishing…"
-                : "Publish"}
+            {publishing ? "Publishing…" : "Publish"}
           </button>
         </div>
+        {publishing && (
+          <div role="status" className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
+            {s.uploadProgress > 0 && s.uploadProgress < 100 ? "Uploading event media…" : "Publishing event…"}
+            <progress aria-label="Event media upload" value={s.uploadProgress || undefined} max={100} className="mt-2 block h-1 w-full accent-[#3FDCFF]" />
+          </div>
+        )}
         <p className="text-sm text-white/40 mt-1">
           Title, type, date and a location are all you need to publish — the rest
           is optional.

@@ -1,3 +1,4 @@
+import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 /**
  * Event detail — WEB (@dvnt/app/features/events/event-detail). URL /events/{slug}.
  * Resolves the slug to an event id from the list, then loads the FULL event via
@@ -353,6 +354,7 @@ export function EventDetailScreen() {
   const hostActionBusy = useEventDetailUiStore((s) => s.hostActionBusy);
   const setHostActionBusy = useEventDetailUiStore((s) => s.setHostActionBusy);
   const queryClient = useQueryClient();
+  const deleteEventMutation = useDeleteEvent();
 
   // Reset transient flags when leaving the screen.
   useEffect(() => () => resetUi(), [resetUi]);
@@ -908,16 +910,7 @@ export function EventDetailScreen() {
     if (hostActionBusy) return;
     setHostActionBusy(true);
     try {
-      await eventsApi.deleteEvent(eventId);
-      queryClient.setQueriesData<unknown>(
-        { queryKey: eventKeys.all },
-        (old: unknown) =>
-          Array.isArray(old)
-            ? old.filter((ev: any) => String(ev?.id) !== String(eventId))
-            : old,
-      );
-      queryClient.removeQueries({ queryKey: eventKeys.detail(eventId) });
-      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      await deleteEventMutation.mutateAsync(eventId);
       setHostAction(null);
       showToast("success", "Event deleted", "");
       router.back();

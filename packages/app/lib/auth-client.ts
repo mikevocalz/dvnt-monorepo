@@ -10,16 +10,31 @@ import { QueryClient } from "@tanstack/react-query";
 import { logAuth, type SignOutReason } from "@dvnt/app/lib/auth/auth-logger";
 // The Better Auth client now lives in @dvnt/auth (PROMPT 0 §3). The app-level
 // auth plumbing below (recovery, sign-out, token cache) stays here and imports it.
+import { authClient as baseAuthClient } from "@dvnt/auth";
+import { useAuthStore } from "./stores/auth-store";
 import {
-  authClient,
-  signIn,
-  signUp,
-  signOut,
-  useSession,
-  getSession,
-} from "@dvnt/auth";
+  createAccountTokenCache,
+  withAccountTokenInvalidation,
+} from "./auth/account-token-cache";
 
-export { authClient, signIn, signUp, signOut, useSession, getSession };
+// Subscribe lazily: auth-store imports this module during its own creation.
+let observingTokenOwner = false;
+const tokenCache = createAccountTokenCache({
+  getIdentity: () => {
+    if (!observingTokenOwner) {
+      observingTokenOwner = true;
+      useAuthStore.subscribe(() => tokenCache.observeIdentity());
+    }
+    return useAuthStore.getState().user;
+  },
+  getSession: () => baseAuthClient.getSession(),
+  onError: (error) => logAuth("AUTH_REFRESH_FAIL", { error: String(error) }),
+  retryDelayMs: 500,
+});
+
+// Both named methods and authClient.signIn.* pass through the same boundary.
+export const authClient = withAccountTokenInvalidation(baseAuthClient, tokenCache);
+export const { signIn, signUp, signOut, useSession, getSession } = authClient;
 
 type BetterAuthRecoveryClient = typeof authClient & {
   // Newer Better Auth renamed forget-password -> request-password-reset; the
@@ -261,65 +276,19 @@ export async function handleSignOut(reason: SignOutReason = "USER_REQUESTED") {
   }
 }
 
-// ── Single-flight getSession mutex ──────────────────────────────────
-// Prevents concurrent getSession() calls from racing (e.g. 5 API calls
-// firing simultaneously each trigger their own refresh). Only ONE network
-// call is in-flight; all callers share the same promise.
-let _sessionFlight: Promise<{ data: any; error: any }> | null = null;
-let _cachedToken: string | null = null;
-let _cachedTokenExpiry = 0;
-
-async function getSessionSingleFlight(): Promise<{ data: any; error: any }> {
-  if (_sessionFlight) return _sessionFlight;
-  _sessionFlight = authClient
-    .getSession()
-    .then((result: any) => result)
-    .catch((err: any) => ({ data: null, error: String(err) }))
-    .finally(() => {
-      _sessionFlight = null;
-    });
-  return _sessionFlight;
+// Account-scoped single-flight + expiry cache. Invalidated promises cannot
+// return a token, refill the cache, or clear a newer account's in-flight fetch.
+export function getAuthToken(): Promise<string | null> {
+  return tokenCache.getToken();
 }
 
-// Get auth token for API requests — cached + single-flight + retry
-export async function getAuthToken(): Promise<string | null> {
-  // Fast path: return cached token if still valid (30s buffer before expiry)
-  if (_cachedToken && Date.now() < _cachedTokenExpiry) {
-    return _cachedToken;
-  }
-
-  try {
-    const { data: session, error } = await getSessionSingleFlight();
-    if (error) {
-      logAuth("AUTH_REFRESH_FAIL", { error: String(error) });
-      // Retry once after a brief pause — edge function cold starts
-      await new Promise((r) => setTimeout(r, 500));
-      const retry = await authClient.getSession();
-      const retryToken = retry?.data?.session?.token || null;
-      if (retryToken) {
-        _cachedToken = retryToken;
-        _cachedTokenExpiry = Date.now() + 4 * 60 * 1000; // cache 4min
-        logAuth("AUTH_REFRESH_OK", { reason: "retry_succeeded" });
-        return retryToken;
-      }
-      return null;
-    }
-    const token = session?.session?.token || null;
-    if (token) {
-      _cachedToken = token;
-      _cachedTokenExpiry = Date.now() + 4 * 60 * 1000; // cache 4min
-    }
-    return token;
-  } catch (error) {
-    logAuth("AUTH_REFRESH_FAIL", { error: String(error) });
-    return null;
-  }
-}
-
-/** Invalidate cached token — call after signOut or identity change */
 export function invalidateTokenCache() {
-  _cachedToken = null;
-  _cachedTokenExpiry = 0;
+  tokenCache.invalidate();
+}
+
+/** Reconcile a completed external sign-in before syncing its app profile. */
+export function resumeAuthSession(): Promise<boolean> {
+  return tokenCache.resumeSession();
 }
 
 // App user type for compatibility

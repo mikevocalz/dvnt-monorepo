@@ -1,3 +1,4 @@
+import { storyProfilePath } from "@dvnt/app/lib/profile/story-profile-path";
 import {
   View,
   Text,
@@ -1872,16 +1873,15 @@ function StoryViewerScreenContent() {
                   try {
                     player?.pause();
                   } catch {}
-                  if (
-                    story.username.toLowerCase() ===
-                    currentUser?.username?.toLowerCase()
-                  ) {
-                    router.push("/(protected)/(tabs)/profile");
-                  } else {
-                    screenPrefetch.profile(queryClient, story.username);
-                    router.push(`/(protected)/profile/${story.username}`);
-                  }
+                  const path = storyProfilePath(story, currentUser, "native");
+                  if (!path) return;
+                  screenPrefetch.profile(queryClient, story.username);
+                  // Close the full-screen story instead of pushing a card behind it.
+                  markExiting();
+                  router.replace(path as any);
                 }}
+                accessibilityRole="link"
+                accessibilityLabel={`View ${story.username}'s profile`}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Image

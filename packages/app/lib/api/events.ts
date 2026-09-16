@@ -2,6 +2,7 @@ import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import {
   requireBetterAuthToken,
+  getAuthIdFromStore,
   getCurrentUserId as getIntUserIdAsync,
 } from "../auth/identity";
 import {
@@ -852,9 +853,13 @@ export const eventsApi = {
 
       const result = await invokeEdge<{
         ok: boolean;
-        data?: { event?: Record<string, any> };
+        data?: { event?: Record<string, any>; replayed?: boolean };
         error?: { code: string; message: string };
-      }>("create-event", { ...eventData, eventTz });
+      }>("create-event", {
+        ...eventData,
+        eventTz,
+        expectedAuthId: eventData.expectedAuthId || getAuthIdFromStore(),
+      });
 
       if (result.error) throw new Error(result.error.message);
       if (!result.data?.ok || !result.data.data?.event) {
@@ -880,6 +885,7 @@ export const eventsApi = {
       // Return formatted event data for optimistic updates
       const dateParts = formatEventDate(data[DB.events.startDate]);
       return {
+        replayed: result.data.data.replayed === true,
         id: String(data[DB.events.id]),
         title: data[DB.events.title],
         description: data[DB.events.description],
@@ -1118,168 +1124,23 @@ export const eventsApi = {
 
   /**
    * Delete event (only host can delete)
-   * Also cleans up associated images from Bunny CDN
+   * Server verifies ownership and all commerce history in one transaction.
+   * Media is retained: duplicated events may still reference the same files.
    */
   async deleteEvent(eventId: string) {
-    try {
-      console.log("[Events] deleteEvent:", eventId);
-
-      const eventIdInt = parseInt(eventId);
-
-      // Resolve all possible user identifiers for ownership check
-      const authId = await getCurrentUserAuthId();
-      const userIdInt = getCurrentUserIdSync();
-      const userId = getCurrentUserId();
-      console.log(
-        "[Events] deleteEvent identifiers — authId:",
-        authId,
-        "userIdInt:",
-        userIdInt,
-        "userId:",
-        userId,
-      );
-
-      if (!authId && !userIdInt && !userId)
-        throw new Error("Not authenticated");
-
-      // 1. Fetch event by ID only (no host filter — we verify ownership in code)
-      const { data: event, error: fetchError } = await supabase
-        .from(DB.events.table)
-        .select("*")
-        .eq(DB.events.id, eventIdInt)
-        .maybeSingle();
-
-      if (fetchError || !event) {
-        console.error("[Events] deleteEvent fetch error:", fetchError);
-        throw new Error("Event not found");
-      }
-
-      // Verify ownership: host_id could be authId (string) or userId (integer as string)
-      const hostId = String(event[DB.events.hostId]);
-      console.log("[Events] deleteEvent hostId from DB:", hostId);
-      const isOwner =
-        (authId && hostId === authId) ||
-        (userId && hostId === userId) ||
-        (userIdInt != null && hostId === String(userIdInt));
-
-      if (!isOwner) {
-        console.error(
-          "[Events] deleteEvent ownership mismatch — hostId:",
-          hostId,
-          "authId:",
-          authId,
-          "userId:",
-          userId,
-        );
-        throw new Error("You are not the host of this event");
-      }
-
-      // WS-9 guard — FIRST step of the cascade: never hard-delete an
-      // event that has taken money that wasn't returned. Any
-      // non-terminal ticket carrying a Stripe payment intent means the
-      // host must Cancel instead (event-cancel edge fn refunds every
-      // paid order + notifies attendees). Server-side delete-event has
-      // the same 409 guard; this stops the client-cascade path too.
-      // Fail CLOSED: if the count can't be read, refuse the delete.
-      const { count: paidCount, error: paidErr } = await supabase
-        .from("tickets")
-        .select("id", { count: "exact", head: true })
-        .eq("event_id", eventIdInt)
-        .in("status", ["active", "transfer_pending", "scanned"])
-        .not("stripe_payment_intent_id", "is", null);
-      if (paidErr) {
-        console.error("[Events] deleteEvent paid-ticket check failed:", paidErr);
-        throw new Error(
-          "Couldn't verify ticket sales for this event. Try again in a moment.",
-        );
-      }
-      if ((paidCount ?? 0) > 0) {
-        throw new Error(
-          "This event has paid tickets. Cancel the event instead — attendees are refunded and notified automatically.",
-        );
-      }
-
-      // Collect all image URLs for CDN cleanup
-      const imageUrls: string[] = [];
-      const coverImage = event[DB.events.coverImageUrl] || event["image"];
-      if (coverImage) imageUrls.push(coverImage);
-      const extraImages = parseJsonbArray(event[DB.events.images]);
-      for (const img of extraImages) {
-        const url = typeof img === "string" ? img : img?.url;
-        if (url) imageUrls.push(url);
-      }
-
-      // 2. Delete related records (in case FK cascade is missing)
-      const relatedDeletes = [
-        supabase
-          .from(DB.eventRsvps.table)
-          .delete()
-          .eq(DB.eventRsvps.eventId, eventIdInt),
-        supabase
-          .from(DB.eventLikes.table)
-          .delete()
-          .eq(DB.eventLikes.eventId, eventIdInt),
-        supabase.from("event_comments").delete().eq("event_id", eventIdInt),
-        supabase.from("event_reviews").delete().eq("event_id", eventIdInt),
-      ];
-
-      const results = await Promise.allSettled(relatedDeletes);
-      results.forEach((r, i) => {
-        if (r.status === "rejected") {
-          console.warn(
-            `[Events] deleteEvent related delete ${i} failed:`,
-            r.reason,
-          );
-        } else if (r.status === "fulfilled" && r.value?.error) {
-          console.warn(
-            `[Events] deleteEvent related delete ${i} DB error:`,
-            r.value.error,
-          );
-        }
-      });
-
-      // 3. Delete the event itself using the actual host_id from the DB row
-      const { error, count } = await supabase
-        .from(DB.events.table)
-        .delete()
-        .eq(DB.events.id, eventIdInt)
-        .eq(DB.events.hostId, hostId);
-
-      if (error) {
-        console.error("[Events] deleteEvent DB error:", error);
-        throw error;
-      }
-
-      console.log("[Events] deleteEvent success, deleted count:", count);
-
-      // 4. Clean up images from Bunny CDN via server (best-effort, don't block)
-      if (imageUrls.length > 0) {
-        const { deleteFromServer } = await import("../server-upload");
-        const CDN_URL =
-          process.env.EXPO_PUBLIC_BUNNY_CDN_URL || "https://dvnt.b-cdn.net";
-        const keys = imageUrls
-          .map((url) =>
-            url.startsWith(CDN_URL) ? url.slice(CDN_URL.length + 1) : null,
-          )
-          .filter((k): k is string => !!k);
-
-        if (keys.length > 0) {
-          deleteFromServer(keys).then((result) => {
-            console.log(
-              "[Events] CDN cleanup:",
-              result.ok,
-              result.results?.length,
-              "keys",
-            );
-          });
-        }
-      }
-
-      return { success: true };
-    } catch (error: any) {
-      console.error("[Events] deleteEvent error:", error?.message || error);
-      throw error;
+    const id = Number(eventId);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Invalid event ID");
+    const result = await invokeEdge<{
+      ok: boolean;
+      data?: { eventId: string };
+      error?: { code: string; message: string };
+    }>("delete-event", { eventId: id });
+    if (result.error) throw new Error(result.error.message);
+    if (!result.data?.ok || String(result.data.data?.eventId) !== String(id)) {
+      throw new Error(result.data?.error?.message || "Event deletion was not confirmed");
     }
+    return { success: true };
+
   },
 
   /**

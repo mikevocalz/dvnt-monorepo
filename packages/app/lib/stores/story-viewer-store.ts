@@ -19,6 +19,7 @@ export interface StoryViewerSegment {
 export interface StoryViewerGroup {
   id: string;
   username: string;
+  userId?: string;
   avatar: string;
   segments: StoryViewerSegment[];
 }
@@ -28,8 +29,11 @@ interface StoryViewerState {
   groups: StoryViewerGroup[];
   /** Index of the user-group currently playing. */
   groupIndex: number;
+  /** Suppress the direct-link route's fallback when closing to open a profile/sticker. */
+  navigationClose: boolean;
   openAt: (groups: StoryViewerGroup[], groupIndex: number) => void;
   close: () => void;
+  closeForNavigation: () => void;
   /** Advance to the next user-group; closes after the last. */
   nextGroup: () => void;
 }
@@ -38,8 +42,10 @@ export const useStoryViewerStore = create<StoryViewerState>((set, get) => ({
   open: false,
   groups: [],
   groupIndex: 0,
-  openAt: (groups, groupIndex) => set({ open: true, groups, groupIndex }),
-  close: () => set({ open: false, groups: [], groupIndex: 0 }),
+  navigationClose: false,
+  openAt: (groups, groupIndex) => set({ open: true, groups, groupIndex, navigationClose: false }),
+  close: () => set({ open: false, groups: [], groupIndex: 0, navigationClose: false }),
+  closeForNavigation: () => set({ open: false, groups: [], groupIndex: 0, navigationClose: true }),
   nextGroup: () => {
     const { groupIndex, groups } = get();
     if (groupIndex + 1 >= groups.length) set({ open: false, groups: [], groupIndex: 0 });

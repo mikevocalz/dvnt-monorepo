@@ -8,8 +8,8 @@
  * Contract — VERIFIED against Didit's webhook docs (docs.didit.me/integration/webhooks):
  *
  *   SIGNATURE — Didit sends every scheme on every delivery. We verify a
- *   BODY-authenticating one (V2 or raw) and only fall back to "simple" when
- *   neither is present — "simple" covers just the envelope, not the decision.
+ *   BODY-authenticating one (V2 or raw). Envelope-only signatures cannot
+ *   authenticate the DOB or user binding and are insufficient for approval.
  *     x-signature-v2     : HMAC-SHA256(secret, canonical JSON = keys sorted,
  *                          compact separators, Unicode preserved). Survives
  *                          proxy re-encoding. Recommended.
@@ -31,6 +31,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { parseBirthDate, verificationAgeDecision } from "../_shared/age-policy.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -153,12 +154,9 @@ Deno.serve(async (req) => {
     return new Response("Stale event", { status: 400 });
   }
 
-  // I4 — signature verify, fail closed. Prefer a BODY-authenticating scheme
-  // (v2 canonical, then raw bytes); "simple" only authenticates the envelope so
-  // it is a last resort when no body-sig header is present.
+  // Require a signature covering the DOB and vendor_data user binding.
   const sigV2 = req.headers.get("x-signature-v2");
   const sigRaw = req.headers.get("x-signature");
-  const sigSimple = req.headers.get("x-signature-simple");
   let okSig = false;
   if (sigV2) {
     okSig = timingSafeEqualHex(
@@ -170,18 +168,6 @@ Deno.serve(async (req) => {
     okSig = timingSafeEqualHex(
       await hmacHex(DIDIT_WEBHOOK_SECRET, rawBody),
       sigRaw.toLowerCase(),
-    );
-  }
-  if (!okSig && !sigV2 && !sigRaw && sigSimple) {
-    const canonical = [
-      String(eventTs),
-      String(ev.session_id ?? ""),
-      String(ev.status ?? ""),
-      String(ev.webhook_type ?? ""),
-    ].join(":");
-    okSig = timingSafeEqualHex(
-      await hmacHex(DIDIT_WEBHOOK_SECRET, canonical),
-      sigSimple.toLowerCase(),
     );
   }
   if (!okSig) {
@@ -237,7 +223,7 @@ Deno.serve(async (req) => {
 
   const idv =
     ev.decision?.id_verification ?? ev.decision?.id_verifications?.[0] ?? null;
-  const dob = idv?.date_of_birth ?? null;
+  const dob = parseBirthDate(idv?.date_of_birth);
   const country = idv?.issuing_country ?? null;
 
   // One-account-per-person: the same document (normalized name + DOB) may not
@@ -253,10 +239,11 @@ Deno.serve(async (req) => {
     .replace(/[^a-z\s]/g, "")
     .replace(/\s+/g, " ");
   let identityHash: string | null = null;
-  let finalStatus = nextStatus;
-  let failureCode: string | null = null;
-  let failureMessage: string | null = null;
-  if (nextStatus === "passed" && dob && docName) {
+  const ageDecision = verificationAgeDecision(nextStatus, dob);
+  let finalStatus = ageDecision.status;
+  let failureCode: string | null = ageDecision.failureCode;
+  let failureMessage: string | null = ageDecision.failureMessage;
+  if (finalStatus === "passed" && dob && docName) {
     const digest = await crypto.subtle.digest(
       "SHA-256",
       new TextEncoder().encode(`${docName}|${dob}`),

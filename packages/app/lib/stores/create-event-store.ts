@@ -90,6 +90,7 @@ interface TicketTier {
 
 // Fields that persist as a draft
 interface DraftFields {
+  clientRequestId: string | null;
   title: string;
   description: string;
   location: string;
@@ -153,6 +154,7 @@ interface UIFields {
 }
 
 interface CreateEventActions {
+  getPublishRequestId: () => string;
   // Draft field setters
   setTitle: (v: string) => void;
   setDescription: (v: string) => void;
@@ -229,6 +231,7 @@ interface CreateEventActions {
 type CreateEventState = DraftFields & UIFields & CreateEventActions;
 
 const DRAFT_DEFAULTS: DraftFields = {
+  clientRequestId: null,
   title: "",
   description: "",
   location: "",
@@ -322,6 +325,14 @@ export const useCreateEventStore = create<CreateEventState>()(
       setEventType: (v) => set({ eventType: v }),
       setDisclaimers: (v) => set({ disclaimers: v }),
       setIsNsfw: (v) => set({ isNsfw: v }),
+
+      getPublishRequestId: () => {
+        const existing = get().clientRequestId;
+        if (existing) return existing;
+        const id = `event-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+        set({ clientRequestId: id });
+        return id;
+      },
 
       // UI-only setters
       setShowDatePicker: (v) => set({ showDatePicker: v }),
@@ -465,6 +476,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         return { ...current, ...p };
       },
       partialize: (state) => ({
+        clientRequestId: state.clientRequestId,
         title: state.title,
         description: state.description,
         location: state.location,

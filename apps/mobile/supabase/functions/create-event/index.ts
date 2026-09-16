@@ -141,9 +141,25 @@ Deno.serve(async (req) => {
       return errorResponse(req, "validation_error", "Invalid JSON body", 400);
     }
 
+    const expectedAuthId = text(body.expectedAuthId);
+    if (expectedAuthId && expectedAuthId !== authUserId) {
+      return errorResponse(req, "account_changed", "Your account changed. Sign in to the intended host account and try again.");
+    }
+    const clientRequestId = text(body.clientRequestId);
+    if (clientRequestId && !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) {
+      return errorResponse(req, "validation_error", "Invalid publish request ID");
+    }
+    // Network timeouts are ambiguous: return the first successful publish.
+    if (clientRequestId) {
+      const existing = await supabaseAdmin.from("events").select("*")
+        .eq("host_id", authUserId).eq("client_request_id", clientRequestId).maybeSingle();
+      if (existing.error) return errorResponse(req, "internal_error", "Could not verify the previous publish attempt", 500);
+      if (existing.data) return jsonResponse(req, { ok: true, data: { event: existing.data, replayed: true } });
+    }
+
     const title = text(body.title);
     const startDate = text(body.date) || text(body.startDate);
-    const location = text(body.location);
+    const location = text(body.location) || (body.isOnline === true ? "Online" : null);
     if (!title) return errorResponse(req, "validation_error", "Title is required");
     if (!startDate || Number.isNaN(new Date(startDate).getTime())) {
       return errorResponse(req, "validation_error", "Valid start date is required");
@@ -162,6 +178,7 @@ Deno.serve(async (req) => {
 
     const insertPayload: Record<string, unknown> = {
       host_id: authUserId,
+      ...(clientRequestId ? { client_request_id: clientRequestId } : {}),
       title,
       description: text(body.description) || "",
       start_date: startDate,
@@ -236,6 +253,12 @@ Deno.serve(async (req) => {
       .select()
       .single();
 
+    // The unique (host, request) index resolves concurrent retries atomically.
+    if (error?.code === "23505" && clientRequestId) {
+      const existing = await supabaseAdmin.from("events").select("*")
+        .eq("host_id", authUserId).eq("client_request_id", clientRequestId).maybeSingle();
+      if (!existing.error && existing.data) return jsonResponse(req, { ok: true, data: { event: existing.data, replayed: true } });
+    }
     if (error || !event) {
       console.error("[Edge:create-event] insert error:", error);
       return errorResponse(

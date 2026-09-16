@@ -91,6 +91,11 @@ function Section({
 export function EventEditScreen() {
   const params = useParams();
   const router = useRouter();
+  const screenMounted = useRef(true);
+  useEffect(() => {
+    screenMounted.current = true;
+    return () => { screenMounted.current = false; };
+  }, []);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const id = String((params as any)?.id ?? "");
 
@@ -226,13 +231,16 @@ export function EventEditScreen() {
   useDirtyGuard(isDirty);
 
   // ── Save (mirrors native handleSave: event row + tier CRUD diff) ──
+  const saveLock = useRef(false);
   const handleSave = async () => {
-    if (!id || updateEventMutation.isPending || uploadPct != null) return;
+    if (!id || saveLock.current || updateEventMutation.isPending || uploadPct != null) return;
     if (!s.title.trim()) {
       showToast("error", "Error", "Title is required");
       return;
     }
 
+    saveLock.current = true;
+    setUploadPct(0);
     try {
       const allImages = s.eventImages;
 
@@ -250,28 +258,18 @@ export function EventEditScreen() {
       // could end up describing different flyers.
       const uploadIfLocal = async (
         url: string | null | undefined,
-        timeoutMs = 30000,
       ) => {
         if (!url) return undefined;
         if (!/^(blob:|data:|file:)/.test(url)) return url;
-        const up = await withTimeout(
-          uploadToServer(url, "events", (p) => setUploadPct(p.percentage)),
-          timeoutMs,
-          "upload-flyer",
-        );
+        const up = await uploadToServer(url, "events", (p) => setUploadPct(p.percentage));
         if (!up.success || !up.url) {
           throw new Error(up.error || "Couldn't upload the flyer. Re-select it and try again.");
         }
         return up.url;
       };
 
-      // A flyer VIDEO (up to 60s / 50MB) routinely needs more than 30s on
-      // cellular — the still-image timeout aborted every video save with
-      // "stalled at: upload-flyer (30s)".
-      const primaryUrl = await uploadIfLocal(
-        s.flyerImage,
-        s.flyerMediaType === "video" ? 180000 : 30000,
-      );
+      // Upload owns real progress, cancellation and a bounded network timeout.
+      const primaryUrl = await uploadIfLocal(s.flyerImage);
       const posterUrl = await uploadIfLocal(s.flyerFallbackImage);
 
       // Video ALWAYS takes the hero; the still is its poster and the fallback
@@ -489,11 +487,12 @@ export function EventEditScreen() {
       // and this screen is reachable by direct URL and from the host menu — so
       // saving could land you on about:blank, having just been told the save
       // worked. The event you edited is the only correct destination.
-      router.push(`/feed/events/${id}`);
+      if (screenMounted.current) router.push(`/feed/events/${id}`);
     } catch (error: any) {
       console.error("[EditEvent] Save error:", error);
       showToast("error", "Error", error?.message || "Failed to save changes");
     } finally {
+      saveLock.current = false;
       setUploadPct(null);
     }
   };
@@ -595,15 +594,17 @@ export function EventEditScreen() {
           disabled={updateEventMutation.isPending || uploadPct != null}
           className="text-[16px] font-semibold text-[#3FDCFF] disabled:text-white/40"
         >
-          {uploadPct != null && uploadPct < 100
-            ? `Uploading ${uploadPct}%`
-            : updateEventMutation.isPending
-              ? "Saving…"
-              : "Done"}
+          {uploadPct != null || updateEventMutation.isPending ? "Saving…" : "Done"}
         </button>
       </div>
 
       <div className="mx-auto w-full max-w-2xl px-4 pb-32 pt-4 flex flex-col gap-4">
+        {uploadPct != null && (
+          <div role="status" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
+            Uploading event media…
+            <progress aria-label="Event media upload" value={uploadPct || undefined} max={100} className="mt-2 block h-1 w-full accent-[#3FDCFF]" />
+          </div>
+        )}
         {/* Cover / images — rounded square */}
         <Section title="Event Images">
           <div className="flex flex-wrap gap-3">

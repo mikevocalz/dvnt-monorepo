@@ -320,6 +320,8 @@ export function EventEditSheet({
           type: "image" as const,
         }));
         const uploadResults = await uploadMultiple(mediaFiles);
+        const failedUpload = uploadResults.find((result) => !result.success || !result.url);
+        if (failedUpload) throw new Error(failedUpload.error || "An image could not be uploaded. Please try again.");
         uploadedImages = uploadResults
           .filter((r) => r.success && r.url)
           .map((r) => r.url!);

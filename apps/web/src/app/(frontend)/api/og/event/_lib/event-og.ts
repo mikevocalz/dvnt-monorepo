@@ -78,7 +78,8 @@ async function restGet(query: string): Promise<ShareEvent[] | null> {
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
       },
-      next: { revalidate: 300 },
+      // Deleted events must stop appearing on freshly opened share links.
+      cache: "no-store",
     });
     if (!res.ok) return null;
     const rows = (await res.json()) as ShareEvent[];

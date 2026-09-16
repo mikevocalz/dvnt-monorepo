@@ -1,3 +1,4 @@
+import { PostUploadStatus } from "@dvnt/app/components/feed/post-upload-status.web";
 /**
  * Home / Feed screen — WEB variant (@dvnt/app/features/home/screen). MATCHES the
  * mobile masonry design (packages/app/components/feed/masonry-feed) but is a
@@ -45,6 +46,7 @@ import { useToggleBookmark } from "@dvnt/app/lib/hooks/use-bookmarks";
 import { useBookmarkStore } from "@dvnt/app/lib/stores/bookmark-store";
 import { useStories } from "@dvnt/app/lib/hooks/use-stories";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
+import { feedColumnCount } from "@dvnt/app/lib/stores/feed-layout-preference";
 import {
   useStoryViewerStore,
   type StoryViewerGroup,
@@ -147,14 +149,9 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-function columnsFor(width: number): number {
-  if (width >= 1000) return 4;
-  if (width >= 680) return 3;
-  return 2;
-}
-
 export function HomeScreen() {
   const { width: winW } = useWindowDimensions();
+  const feedMode = useAppStore((s) => s.feedMode);
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
     useInfiniteFeedPosts();
   // Live feed: refetch when other users post/delete (web has no pull-to-refresh).
@@ -188,8 +185,8 @@ export function HomeScreen() {
   }, []);
   const availW = measuredW || winW;
 
-  const containerWidth = Math.min(availW - 16, MAX_W);
-  const numColumns = columnsFor(availW);
+  const containerWidth = Math.max(1, Math.min(availW - 16, feedMode === "classic" ? 640 : MAX_W));
+  const numColumns = feedColumnCount(feedMode, availW);
   const columnWidth = Math.floor(
     (containerWidth - (numColumns - 1) * GAP) / numColumns,
   );
@@ -295,6 +292,7 @@ export function HomeScreen() {
         className="mx-auto w-full"
         style={{ maxWidth: MAX_W, paddingTop: headerOffset }}
       >
+        <PostUploadStatus />
         <div className="flex items-center gap-2 pr-3">
           <div className="flex-1 min-w-0">
             <StoriesRow />
@@ -312,7 +310,7 @@ export function HomeScreen() {
           <section
             className="mx-auto pb-28"
             style={{ width: containerWidth }}
-            aria-label="Feed"
+            aria-label={feedMode === "classic" ? "Feed list" : "Feed grid"}
           >
             <div className="flex" style={{ gap: GAP }}>
               {columns.map((col, ci) => (
@@ -528,7 +526,7 @@ function toViewerGroup(s: any): StoryViewerGroup {
       storyOverlays: it.storyOverlays,
       animatedGifOverlays: it.animatedGifOverlays,
     }));
-  return { id: String(s.id ?? s.username), username: s.username, avatar: s.avatar, segments };
+  return { id: String(s.id ?? s.username), userId: s.userId == null ? undefined : String(s.userId), username: s.username, avatar: s.avatar, segments };
 }
 
 /* The tile shows the STORY'S media (first frame), not the avatar —

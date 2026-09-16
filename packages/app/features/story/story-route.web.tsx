@@ -20,7 +20,7 @@ function toViewerGroup(s: any): StoryViewerGroup {
       storyOverlays: it.storyOverlays,
       animatedGifOverlays: it.animatedGifOverlays,
     }));
-  return { id: String(s.id ?? s.username), username: s.username, avatar: s.avatar, segments };
+  return { id: String(s.id ?? s.username), userId: s.userId == null ? undefined : String(s.userId), username: s.username, avatar: s.avatar, segments };
 }
 
 /**
@@ -34,6 +34,7 @@ export function StoryRouteScreen() {
   const router = useRouter();
   const { data: stories } = useStories();
   const open = useStoryViewerStore((s) => s.open);
+  const navigationClose = useStoryViewerStore((s) => s.navigationClose);
   const openAt = useStoryViewerStore((s) => s.openAt);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,9 +60,12 @@ export function StoryRouteScreen() {
 
   // Only after we opened it: when the overlay closes (open→false), go to feed.
   useEffect(() => {
-    if (openedRef.current && !open) router.replace("/feed");
+    // Opening above updates the store before React re-renders; do not mistake
+    // this effect's stale `open=false` closure for a user closing the viewer.
+    const state = useStoryViewerStore.getState();
+    if (openedRef.current && !state.open && !state.navigationClose) router.replace("/feed");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, navigationClose]);
 
   return (
     <div className="min-h-[100dvh] bg-black">

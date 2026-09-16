@@ -22,6 +22,7 @@ import {
 } from "../_shared/email/templates.ts";
 import { brandEmailWrapper } from "../_shared/email/wrapper.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
+import { checkAdultBirthDate, checkAccountCreationAdmission } from "../_shared/age-policy.ts";
 
 // ─── Env ────────────────────────────────────────────────────────────────────
 const DATABASE_URL = Deno.env.get("DATABASE_URL") || "";
@@ -181,6 +182,7 @@ async function getAuth() {
 
     // Import Better Auth + plugins
     const { betterAuth } = await import("npm:better-auth@1.6.26");
+    const { APIError } = await import("npm:better-auth@1.6.26/api");
     const { expo } = await import("npm:@better-auth/expo@1.6.26");
     const { username, magicLink } = await import("npm:better-auth@1.6.26/plugins");
     // Import npm:pg — Deno supports Node built-ins (node:net, node:tls) needed by pg
@@ -280,6 +282,10 @@ async function getAuth() {
         ...(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET
           ? {
               google: {
+                // Existing sign-in/link is supported; new accounts must first
+                // complete our email + DOB registration (not requestSignUp).
+                disableSignUp: true,
+                disableImplicitSignUp: true,
                 clientId: GOOGLE_CLIENT_ID,
                 clientSecret: GOOGLE_CLIENT_SECRET,
                 // Web-first: the callback must land on the WEB origin (proxied
@@ -297,6 +303,8 @@ async function getAuth() {
         ...(APPLE_CLIENT_ID && APPLE_CLIENT_SECRET
           ? {
               apple: {
+                disableSignUp: true,
+                disableImplicitSignUp: true,
                 clientId: APPLE_CLIENT_ID,
                 clientSecret: APPLE_CLIENT_SECRET,
                 // Native iOS Sign in with Apple sends an identityToken whose
@@ -352,24 +360,21 @@ async function getAuth() {
       databaseHooks: {
         user: {
           create: {
-            // BETA GATE REMOVED 2026-08-09 at Mike's request — signup is now
-            // OPEN to any email. The gate lived here as a `before` hook that
-            // rejected addresses missing from public.allowlisted_emails with
-            // 403 BETA_ONLY, for every signup method (email/password AND OAuth).
-            //
-            // Nothing else was deleted: the allowlisted_emails table and the
-            // is_allowlisted() / hook_restrict_signup_beta() functions are all
-            // still in the database, so re-gating means restoring this block
-            // (git history: the commit that removed it) and redeploying — no
-            // migration needed.
-            //
-            // Client-side BETA_ONLY handling is also still in place
-            // (SignupScreen.web.tsx, SignUpStep2.tsx); it simply never fires now.
-            // CANONICAL welcome trigger. Fires server-side for EVERY signup
-            // method (email/password AND Apple/Google OAuth), so it's the one
-            // place welcome is sent. The legacy POST /auth/send-welcome endpoint
-            // (still called by SignUpStep2) is neutered to a no-op to avoid a
-            // duplicate welcome — see that handler below.
+            before: async (user: any, context: any) => {
+              // Defense in depth for aliases, new plugins and server APIs.
+              // Better Auth 1.6.26 retains custom signup body fields in the
+              // hook context; parseUserInput omits DOB from the stored user.
+              const admission = checkAccountCreationAdmission(context?.path, context?.body, user?.email);
+              if (!admission.allowed) {
+                throw new APIError("FORBIDDEN", {
+                  code: admission.code || "AGE_REGISTRATION_REQUIRED",
+                  message: admission.message || "Complete 18+ registration before creating an account.",
+                });
+              }
+              return { data: user };
+            },
+            // Canonical welcome trigger after successful age-gated creation.
+            // The legacy /auth/send-welcome route stays a no-op to avoid duplicates.
             after: async (user: any) => {
               console.log(
                 `[Auth] New user created: ${user.email}, sending welcome email`,
@@ -512,6 +517,27 @@ Deno.serve(async (req: Request) => {
 
   const url = new URL(req.url);
   const path = url.pathname;
+
+  // Validate the original request before Better Auth strips undeclared fields
+  // or inserts a user. This applies to direct API requests as well as our UI.
+  // New provider users must register here first; existing provider sign-ins
+  // and login-only magic links do not create a user and remain usable.
+  if (req.method === "POST" && /\/api\/auth\/sign-up\/email\/?$/.test(path)) {
+    let body: Record<string, unknown>;
+    try {
+      body = await req.clone().json();
+    } catch {
+      return new Response(JSON.stringify({ code: "INVALID_BODY", message: "Invalid signup request." }), {
+        status: 400, headers: { ...corsFor(req), "Content-Type": "application/json" },
+      });
+    }
+    const age = checkAdultBirthDate(body?.dateOfBirth);
+    if (!age.allowed) {
+      return new Response(JSON.stringify({ code: age.code, message: age.message }), {
+        status: 400, headers: { ...corsFor(req), "Content-Type": "application/json" },
+      });
+    }
+  }
 
   // Health check (lightweight, no DB init)
   if (path === "/auth" || path === "/auth/health") {
