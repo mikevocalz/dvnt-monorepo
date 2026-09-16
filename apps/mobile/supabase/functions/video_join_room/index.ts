@@ -7,6 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { provisionCallMedia } from "../_shared/call-media.ts";
 import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
@@ -134,6 +135,13 @@ Deno.serve(async (req) => {
     }
 
     const userId = sessionResult.userId;
+
+    // Verified-only admission. A client that skips the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabase, userId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return errorResponse("forbidden", refusal.message, { reason: refusal.reason });
+    }
 
     // Parse input
     let body: unknown;

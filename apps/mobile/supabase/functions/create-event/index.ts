@@ -10,6 +10,7 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { checkRateLimit, WRITE_LIMIT } from "../_shared/rate-limit.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 
 interface ApiResponse<T = unknown> {
   ok: boolean;
@@ -123,6 +124,13 @@ Deno.serve(async (req) => {
     const authUserId = await verifySession(supabaseAdmin, req);
     if (!authUserId) {
       return errorResponse(req, "unauthorized", "Invalid or expired session", 401);
+    }
+
+    // Verified-only admission. A client that skips the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabaseAdmin, authUserId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return errorResponse(req, refusal.code, refusal.message, 403);
     }
 
     const rl = checkRateLimit(authUserId, "create-event", WRITE_LIMIT);

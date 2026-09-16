@@ -1,4 +1,5 @@
 import { PostUploadStatus } from "@dvnt/app/components/feed/post-upload-status";
+import { VerifiedAdmissionBanner } from "@dvnt/app/components/verified-admission-banner";
 import { View, Text } from "react-native";
 import { Main } from "@dvnt/app/components/ui/html";
 import { Feed } from "@dvnt/app/components/feed/feed";
@@ -103,6 +104,7 @@ export default function HomeScreen() {
       }
     >
       <PostUploadStatus />
+      <VerifiedAdmissionBanner />
       {/* Header row — spicy toggle right-aligned, matches events header style */}
       <View
         style={{

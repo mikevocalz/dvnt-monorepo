@@ -7,6 +7,15 @@ import {
   useUpdatePrivacySettings,
   type PrivacySettings,
 } from "@dvnt/app/lib/hooks/use-user-settings";
+import {
+  useEventsLocationStore,
+  useActiveCityVisibility,
+} from "@dvnt/app/lib/stores/events-location-store";
+import {
+  CITY_VISIBILITY_COPY as COPY,
+  formatVisibilityExpiry,
+  VISIBILITY_DURATIONS,
+} from "@dvnt/app/lib/stores/city-discovery-visibility";
 
 type ToggleRow = {
   key: keyof PrivacySettings;
@@ -41,10 +50,12 @@ function Switch({
   checked,
   onChange,
   label,
+  disabled,
 }: {
   checked: boolean;
   onChange: (value: boolean) => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -52,16 +63,109 @@ function Switch({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative w-12 h-7 rounded-full shrink-0 transition-colors ${
         checked ? "bg-[#3FDCFF]" : "bg-white/15"
-      }`}
+      } ${disabled ? "opacity-40" : ""}`}
     >
       <span
         className="absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white transition-transform"
         style={{ transform: checked ? "translateX(20px)" : "translateX(0px)" }}
       />
     </button>
+  );
+}
+
+/**
+ * City discovery visibility — web sibling of `settings/ui/CityVisibilityCard`.
+ * Same store, same copy constants, same rules: off by default, bounded by a
+ * duration the member picks, revocable in one click, and carrying a city name
+ * rather than coordinates, an event or a ticket.
+ */
+function CityVisibilitySection() {
+  const activeCity = useEventsLocationStore((s) => s.activeCity);
+  const durationId = useEventsLocationStore((s) => s.visibilityDurationId);
+  const setDuration = useEventsLocationStore((s) => s.setVisibilityDuration);
+  const showMeInCity = useEventsLocationStore((s) => s.showMeInCity);
+  const hideMeInCity = useEventsLocationStore((s) => s.hideMeInCity);
+  const grant = useActiveCityVisibility();
+
+  const onToggle = (next: boolean) => {
+    if (!next) return hideMeInCity();
+    if (activeCity) showMeInCity(activeCity);
+  };
+
+  return (
+    <>
+      <h2 className="mt-8 mb-2 px-1 text-sm font-semibold uppercase text-white/50">
+        {COPY.sectionTitle}
+      </h2>
+      <div className="rounded-2xl bg-white/4 border border-white/10 px-4">
+        <div className="flex items-center justify-between py-3.5 border-b border-white/8">
+          <div className="flex-1 pr-4">
+            <p className="font-semibold text-white">{COPY.toggleLabel}</p>
+            <p className="mt-1 text-sm text-white/60">
+              {COPY.toggleDescription}
+            </p>
+          </div>
+          <Switch
+            label={COPY.toggleLabel}
+            checked={grant != null}
+            disabled={!activeCity && grant == null}
+            onChange={onToggle}
+          />
+        </div>
+
+        <div className="py-4">
+          <p className="text-sm font-medium text-white">
+            {COPY.durationLabel}
+          </p>
+          <div className="mt-3 flex gap-2" role="radiogroup">
+            {VISIBILITY_DURATIONS.map((d) => {
+              const selected = d.id === durationId;
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => setDuration(d.id)}
+                  className={`rounded-full border px-4 py-2 text-sm ${
+                    selected
+                      ? "border-[#3FDCFF] bg-[#3FDCFF]/10 text-[#3FDCFF]"
+                      : "border-white/15 text-white/60"
+                  }`}
+                >
+                  {d.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {grant ? (
+            <div className="mt-4">
+              <p className="text-sm text-white/60">
+                Members can see you are in {grant.cityName} until{" "}
+                {formatVisibilityExpiry(grant.expiresAt, Date.now())}. It turns
+                itself off then.
+              </p>
+              <button
+                type="button"
+                onClick={hideMeInCity}
+                className="mt-3 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white"
+              >
+                {COPY.revoke}
+              </button>
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-white/60">
+              {activeCity ? COPY.offNote : COPY.noCity}
+            </p>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -122,6 +226,8 @@ export function PrivacyScreen() {
               </div>
             ))}
           </div>
+
+          <CityVisibilitySection />
 
           <div className="mt-4 rounded-2xl border border-[#3FDCFF]/20 bg-[#3FDCFF]/5 p-4">
             <p className="text-sm text-white/60">

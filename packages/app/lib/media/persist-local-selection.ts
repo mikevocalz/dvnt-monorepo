@@ -42,6 +42,22 @@ export function isLocalMediaUri(uri: string): boolean {
   return LOCAL_MEDIA_URI_PATTERN.test(uri);
 }
 
+/** Scope used for media a queued post owns until it publishes. */
+export const POST_MEDIA_SCOPE = "post-drafts/media";
+
+/**
+ * Delete a copy made by persistLocalMediaSelection. Anything outside app
+ * storage (a picker URI, a remote URL) is left alone.
+ */
+export async function deletePersistedMediaSelection(uri: string): Promise<void> {
+  const rootDirectory = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
+  if (!uri || !rootDirectory || !uri.startsWith(rootDirectory)) return;
+
+  await FileSystem.deleteAsync(uri, { idempotent: true }).catch((error) => {
+    console.warn("[persistLocalMediaSelection] Cleanup failed:", error);
+  });
+}
+
 export interface PersistLocalMediaSelectionOptions {
   scope?: string;
   fileName?: string;

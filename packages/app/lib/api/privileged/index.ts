@@ -416,15 +416,30 @@ export async function exportEventAttendeesCsv(eventId: number): Promise<{
 
 export type BroadcastAudience = "all" | "scanned" | "unscanned";
 
+export interface CompDeliveryResult {
+  recipient: string;
+  status: "delivered" | "failed";
+  error?: string;
+}
+
 export interface CompResult {
+  /** Tickets issued into an existing DVNT account's wallet. */
   issued: number;
+  /**
+   * Guest tickets minted for emails with no account. Issued is not delivered:
+   * read `delivery` for whether the claim email actually went out. Optional
+   * because a deployed older edge fn doesn't send these fields.
+   */
+  guest_issued?: number;
+  delivery?: CompDeliveryResult[];
   skipped: { recipient: string; reason: string }[];
   tier?: string;
 }
 
 /**
  * Bulk-issue free tickets to a list of usernames/emails. Owner or
- * admin only. Server enforces tier capacity + skips dupes.
+ * admin only. Server enforces tier capacity + skips dupes. An email
+ * with no account gets a guest ticket emailed as a claim link.
  */
 export async function bulkCompTickets(
   eventId: number,

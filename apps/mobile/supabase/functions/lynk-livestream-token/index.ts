@@ -22,6 +22,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 // PINNED — see lynk-moq-token for what a floating specifier cost us. The
 // three calls below (createRoom / createLivestreamStreamerToken /
 // createLivestreamViewerToken) all still exist in 0.30.0, so this one was
@@ -93,6 +94,13 @@ Deno.serve(async (req) => {
       return err("unauthorized", "Invalid or expired session");
     }
     const userId = sessionResult.userId as string;
+
+    // Verified-only admission. A client that skips the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabase, userId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return err("forbidden", refusal.message, { reason: refusal.reason });
+    }
 
     // 2. Input
     let body: unknown;

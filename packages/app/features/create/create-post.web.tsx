@@ -31,6 +31,8 @@ import {
 } from "lucide-react";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { usePublishPost } from "@dvnt/app/lib/hooks/use-publish-post";
+import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
+import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
   TEXT_POST_THEMES,
@@ -168,12 +170,15 @@ export function CreatePostScreen() {
 
   // ---- Publish (same upload + mutation path as native) ----
 
-  const handlePost = () => {
+  const handlePost = async () => {
     if (submittingRef.current) return;
     submittingRef.current = true;
     ui.setIsSubmitLocked(true);
     try {
+      // Same publication-time visibility recheck as native.
+      await assertFirstPostPublishable();
       publishPost(useCreatePostStore.getState());
+      useFirstPostOfferStore.getState().clearPending();
       reset();
       ui.setTagInput("");
       router.push("/feed");

@@ -1,4 +1,5 @@
 import { PostUploadStatus } from "@dvnt/app/components/feed/post-upload-status.web";
+import { VerifiedAdmissionBanner } from "@dvnt/app/components/verified-admission-banner.web";
 /**
  * Home / Feed screen — WEB variant (@dvnt/app/features/home/screen). MATCHES the
  * mobile masonry design (packages/app/components/feed/masonry-feed) but is a
@@ -293,6 +294,7 @@ export function HomeScreen() {
         style={{ maxWidth: MAX_W, paddingTop: headerOffset }}
       >
         <PostUploadStatus />
+        <VerifiedAdmissionBanner />
         <div className="flex items-center gap-2 pr-3">
           <div className="flex-1 min-w-0">
             <StoriesRow />

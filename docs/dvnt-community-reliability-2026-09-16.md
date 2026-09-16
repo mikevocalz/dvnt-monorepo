@@ -6,7 +6,7 @@ Repository inspected at `8fbb569e90a5071133ebaafa3cb24f4f559efbf5` on 16 Septemb
 
 Implemented in code: a foreground post queue above the feed; retry-safe post/event creation; account-switch token protection; upload timeout/progress/size handling; video type/poster fixes; confirmed event deletion and cache cleanup; private event and scheduled room permission checks; atomic comps for existing accounts; story profile links; Follow Back; device-local layout persistence; DOB admission and stricter document-age verification; revised welcome email copy.
 
-Still open: guest email/SMS comp delivery; branded welcome DM/broadcast automation; first-ticket draft UI; opt-in nearby discovery; verified-only admission for the whole existing membership; pre-registration document verification; durable app-kill/resumable uploads; a complete live-room countdown/deep-link experience; and live advertising playback validation. These are documented requirements, not shipped features. The Micah → Deviant DC transfer has a read-only preflight and detailed runbook, but has not been executed.
+Still open: SMS comp delivery; pre-registration document verification; OS-level background upload transfer (app-kill resume now works, transfer while the process is dead does not); a complete live-room countdown/deep-link experience; and live advertising playback validation. A second implementation pass on 17 September 2026 closed guest email comp delivery, branded welcome DM/broadcast automation, the first-ticket draft UI, opt-in city discovery, verified-only admission for the existing membership, and resume-after-app-kill for post uploads. Those six ship disabled or inert by default where they touch live members: brand sending fails closed without its canonical sender configuration, and verified-only admission ships `enforce = false`.
 
 Media limits remain explicit: post video 25 MiB and event video 50 MiB after native compression. Browser video is validated and passed through, not transcoded. A larger supported upload architecture needs resumable storage/provider integration; removing a fake progress percentage does not remove the server byte limit. Event uploads now use inline progress but remain owned by the form; post jobs survive navigation only while the app's JavaScript process stays alive.
 
@@ -112,6 +112,42 @@ Required staging matrix, using test users and the deployed client/edge/schema co
 
 Local evidence: six age/admission behavioral tests, twelve token-race tests and three real Better Auth 1.6.26 memory-adapter integration tests pass. Integration checks exercise the actual client signup payload, hook context, direct-server rejection, and new versus existing Google/Apple users with mocked provider identity transport; no real provider account is contacted. The token helper passed a targeted strict TypeScript check. These checks do not replace the staging auth/provider/database flows above.
 
+## Second implementation pass, 17 September 2026
+
+Six items from the "still open" list were implemented. Every one that can reach a live member is inert until an operator turns it on. Unit checks rose from 144 to 189; `@dvnt/app` and `@dvnt/ui` type checks, `verify-edge-functions` (149 functions, 0 unpinned, 0 floating) and `verify-web-routes` (135 routes) pass. No migration was applied and no function was deployed.
+
+| Item | What shipped | Default state |
+| --- | --- | --- |
+| Guest comp delivery | `issue_guest_comp_tickets_atomic` takes the same event advisory lock and capacity math as the member RPC. An email with no account gets a guest ticket and the existing `/public/tickets/guest/<token>` claim link. `qr_token` never leaves the function. | Active once the migration is applied. |
+| Welcome DM / broadcast | Outbox keyed `(campaign_version, recipient_id, channel)` as a database `UNIQUE` constraint. Canonical sender resolved by immutable `(users.id, users.auth_id)` from server-only config. DMs use the real conversation path. | Sends nothing. Three brand env vars plus `CRON_SECRET`, and no cron schedule exists. |
+| First-ticket draft | Pure eligibility module: only `visibility = 'public'` qualifies, only the first admission line, no ticket/order/QR/address field can reach the draft. Visibility is rechecked at publication. | Active. Offer only; publishing needs an explicit tap. |
+| City discovery | Finding events and being visible to others are now separate settings. A visibility grant carries a city and an end time, nothing else, and expiry is enforced on read. | Visibility off. Grant is device-local; nothing publishes it yet. |
+| Verified-only admission | `verified_admission_policy` drives one server-owned verdict (`allowed` / `grace` / `blocked`), enforced in eight edge functions before any write, with RESTRICTIVE RLS as defence in depth. | `enforce = false`. Turning it on is one `UPDATE` with a cohort cutoff and grace deadline. |
+| Resumable uploads | The publish queue persists a serializable descriptor, durable media paths and banked upload results, so a resume replays the same `operationId` and reconciles instead of double-posting. `ownerId` is checked before upload and again before publish. | Active on native. |
+
+Two pre-existing defects surfaced while auditing the discovery path and were fixed:
+
+- `getEventById` fetched `get_event_attendee_avatars` for every event. That RPC takes no viewer id, so a leaked link to a `private` or `link_only` event also handed over the attendee faces. Now gated to public events through `normalizeVisibility`, which catches the legacy `unlisted` value.
+- `useBootLocation` called `requestForegroundPermissionsAsync()` at launch, putting the OS dialog on screen with no explanation next to it and contradicting its own docblock. It is read-only now; the ask stays in the welcome step and the Near Me filter.
+
+`normalizeVisibility` treats a NULL `events.visibility` as public, which is the existing convention throughout that file. Confirm `select count(*) from events where visibility is null` before release: any legacy private event carrying NULL rather than `'private'` still lists attendees.
+
+### Operator prerequisites
+
+Brand automation needs `DVNT_BRAND_USER_ID`, `DVNT_BRAND_AUTH_ID` and `DVNT_BRAND_OUTBOX_ENABLED=true`, all three together, plus `CRON_SECRET`; the email channel additionally needs `DVNT_BRAND_UNSUBSCRIBE_URL` or its rows are suppressed rather than sent. There is deliberately no cron entry, so the worker runs only when invoked. The real `@DeviantEvents` account ID is still outstanding.
+
+Verified-only admission stays off until `verified_admission_policy` is updated. Set `cohort_created_after` and `grace_deadline` together: a NULL deadline means grace never ends and the member sees a prompt rather than a refusal. Rollback is `enforce = false`. The runbook, including a count of who the next stage would refuse, is in the migration footer.
+
+### Known ceilings
+
+Guest comps issue members and guests through two serialized RPC calls. Both take the same event lock so a tier cannot oversell, but a guest half that hits the cap leaves the member half issued. Delivery state is one `guest_email_sent_at` timestamp with no retry queue or bounce tracking.
+
+DM idempotency rides in `messages.metadata` rather than a unique index, so a crash between the message insert and `complete_brand_message` re-sends one DM. Unsubscribe is a single static URL, not a per-recipient token; the in-app `growthMessages` setting is the opt-out that exists today. `first_post_reminder` has copy and a stop condition but no enqueue path.
+
+"First admission purchase" is device-local, so a reinstall or a second device can offer the draft once more. No endpoint exposes whether a member has ever bought admission.
+
+Upload resume covers app termination and relaunch, not transfer while the process is dead; that needs iOS URLSession background configuration and Android WorkManager. Web skips persistence entirely, because a restored job would hold dead `blob:` URLs.
+
 ## Live operations still needed
 
 - Exact source event link/ID for Micah's event and destination Deviant DC event link/ID, plus the ticket-tier mapping. Read-only reconciliation comes first; no transfer was performed in this work.
@@ -129,6 +165,9 @@ Apply these migrations to staging in timestamp order, inspect the actual deploye
 3. `20260916122000_atomic_comp_ticket_issuance.sql`
 4. `20260916123000_event_lifecycle_integrity.sql`
 5. `20260916150000_verified_adult_age_gate.sql`
+6. `20260916160000_guest_comp_ticket_issuance.sql`
+7. `20260916170000_verified_only_admission.sql`
+8. `20260916180000_brand_message_outbox.sql`
 
 The corresponding changed edge functions are `auth`, `bootstrap-events`, `bulk-comp-tickets`, `cart-checkout`, `cart-create-hold`, `create-event`, `create-payment-intent`, `create-post`, `create-verification-session`, `delete-event`, `didit-webhook`, `lynk-livestream-token`, `lynk-moq-token`, `media-upload`, `persona-webhook`, `rsvp-issue-ticket`, `ticket-checkout`, `video_join_room`, and `video_refresh_token`. The new delete function's gateway configuration is included in `supabase/config.toml` and verifies the Better Auth session itself.
 

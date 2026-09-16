@@ -36,7 +36,7 @@
     "test:feed": "node --test packages/app/components/feed/feed-sections.test.ts packages/app/components/feed/feed-slots.test.ts packages/app/components/feed/masonry-pack.test.ts",
     "test:events": "node --test packages/app/lib/events/event-role.test.ts",
     "test:profile": "node --test packages/app/lib/profile/patch-user-in-cache.test.ts packages/app/lib/profile/same-user.test.ts",
-    "test:community": "node --test packages/app/lib/auth/account-token-cache.test.ts packages/app/lib/auth/age-admission.integration.test.ts packages/app/lib/events/*.test.ts packages/app/lib/profile/*.test.ts packages/app/lib/tickets/*.test.ts packages/app/lib/posts/publish-queue.test.ts packages/app/lib/media/upload-policy.test.ts packages/app/lib/stores/feed-layout-preference.test.ts packages/app/lib/utils/age-verification.test.ts packages/app/components/feed/masonry-pack.test.ts apps/mobile/supabase/functions/create-event/index.test.cjs apps/mobile/supabase/functions/delete-event/index.test.cjs"
+    "test:community": "node --test packages/app/lib/auth/account-token-cache.test.ts packages/app/lib/auth/age-admission.integration.test.ts packages/app/lib/events/*.test.ts packages/app/lib/profile/*.test.ts packages/app/lib/tickets/*.test.ts packages/app/lib/posts/publish-queue.test.ts packages/app/lib/media/upload-policy.test.ts packages/app/lib/stores/feed-layout-preference.test.ts packages/app/lib/utils/age-verification.test.ts packages/app/components/feed/masonry-pack.test.ts apps/mobile/supabase/functions/create-event/index.test.cjs apps/mobile/supabase/functions/delete-event/index.test.cjs packages/app/lib/auth/verified-admission.test.ts packages/app/lib/posts/first-post-draft.test.ts packages/app/lib/stores/city-discovery-visibility.test.ts apps/mobile/supabase/functions/_shared/comp-recipients.test.cjs apps/mobile/supabase/functions/_shared/brand-outbox.test.cjs"
   },
   "keywords": [],
   "author": "",
@@ -71,5 +71,9 @@
       "sharp",
       "unrs-resolver"
     ]
-  }
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
 }

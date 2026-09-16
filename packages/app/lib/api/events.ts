@@ -642,10 +642,22 @@ export const eventsApi = {
       // Attendee avatars aren't in the detail RPC (it returns only the count) —
       // fetch the same top-5 "going" avatars the feed uses so "Who's going"
       // shows faces, not an empty row.
-      const { data: avatarsJson } = await supabase.rpc(
-        "get_event_attendee_avatars",
-        { p_event_id: parseInt(id) },
-      );
+      //
+      // Public events only. The avatar row is the one place a member's ticket
+      // turns into something other members can see, so for a private or
+      // link-only event it is not fetched at all: holding a ticket to an event
+      // nobody can list must not become a discovery signal, and a link that
+      // leaks must not also hand over the guest list. `get_event_attendee_avatars`
+      // takes no viewer id, so the client is where this has to be decided.
+      // Routed through normalizeVisibility so "unlisted" collapses to
+      // link_only here exactly as it does everywhere else, rather than slipping
+      // through an === "private" check that never heard of it.
+      const canListAttendees = normalizeVisibility(ev.visibility) === "public";
+      const { data: avatarsJson } = canListAttendees
+        ? await supabase.rpc("get_event_attendee_avatars", {
+            p_event_id: parseInt(id),
+          })
+        : { data: null };
       const attendeeAvatars = Array.isArray(avatarsJson) ? avatarsJson : [];
 
       return {

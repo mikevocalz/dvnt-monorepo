@@ -37,6 +37,8 @@ import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { useCreateHeaderStore } from "@dvnt/app/lib/stores/create-header-store";
 import { useTabBarTopInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { usePublishPost } from "@dvnt/app/lib/hooks/use-publish-post";
+import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
+import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
 import {
   TagPeopleSheet,
   type TagCandidate,
@@ -285,12 +287,16 @@ function CreateScreenContent() {
     ],
   );
 
-  const handlePost = useCallback(() => {
+  const handlePost = useCallback(async () => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     setIsSubmitLocked(true);
     try {
+      // An event-linked draft can sit here for days. Its visibility is checked
+      // again against the server now, not trusted from when it was written.
+      await assertFirstPostPublishable();
       publishPost(useCreatePostStore.getState());
+      useFirstPostOfferStore.getState().clearPending();
       reset();
       setSelectedTagUsers([]);
       setTagInput("");

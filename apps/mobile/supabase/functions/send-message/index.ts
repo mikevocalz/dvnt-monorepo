@@ -9,6 +9,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { checkRateLimit, MESSAGE_LIMIT } from "../_shared/rate-limit.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -74,6 +75,13 @@ Deno.serve(async (req) => {
     }
 
     const authUserId = sessionResult.userId;
+
+    // Verified-only admission. A client that skips the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabaseAdmin, authUserId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return errorResponse(refusal.code, refusal.message, 403);
+    }
 
     // Rate limit check
     const rl = checkRateLimit(authUserId, "send-message", MESSAGE_LIMIT);

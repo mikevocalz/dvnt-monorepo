@@ -28,6 +28,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 // PINNED. This import used to be bare `npm:@fishjam-cloud/js-server-sdk`, so
 // Deno resolved whatever was latest at deploy time. 0.30.0 renamed
 // `createMoqToken` to `createMoqAccess`, the call below started throwing
@@ -137,6 +138,13 @@ Deno.serve(async (req) => {
       return errorResponse("unauthorized", "Invalid or expired session");
     }
     const userId = sessionResult.userId as string;
+
+    // Verified-only admission. A client that skips the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabase, userId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return errorResponse("forbidden", refusal.message, { reason: refusal.reason });
+    }
 
     // 2. Validate input
     let body: unknown;

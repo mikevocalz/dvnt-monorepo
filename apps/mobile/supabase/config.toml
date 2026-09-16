@@ -368,6 +368,9 @@ verify_jwt = false
 [functions.event-analytics]
 verify_jwt = false
 
+[functions.brand-outbox-worker]
+verify_jwt = false
+
 [functions.event-broadcast-message]
 verify_jwt = false
 

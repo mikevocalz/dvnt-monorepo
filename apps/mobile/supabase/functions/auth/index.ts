@@ -382,6 +382,24 @@ async function getAuth() {
               const name = user.name || user.email.split("@")[0];
               const { subject, html } = welcomeEmail(name);
               await sendEmail(user.email, subject, html);
+
+              // Queue the welcome DM for the brand outbox. Insert only — the
+              // worker decides whether anything sends, and it stays silent
+              // until the canonical sender is configured and enabled. The
+              // unique key (campaign_version, recipient_id, channel) makes a
+              // repeat call a no-op, and a missing users row is skipped
+              // because the worker's backlog sweep picks it up later.
+              // Best-effort: a queue failure must never block signup.
+              try {
+                await pool.query("select public.enqueue_brand_welcome($1)", [
+                  user.id,
+                ]);
+              } catch (err) {
+                console.error(
+                  "[Auth] welcome DM enqueue failed (non-blocking):",
+                  err,
+                );
+              }
             },
           },
         },

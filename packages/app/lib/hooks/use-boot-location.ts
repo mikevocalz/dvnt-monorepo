@@ -24,16 +24,13 @@ export function useBootLocation() {
 
     (async () => {
       try {
-        let permission = await Location.getForegroundPermissionsAsync();
-
-        if (
-          permission.status !== "granted" &&
-          permission.canAskAgain &&
-          permission.status === "undetermined"
-        ) {
-          console.log("[BootLocation] Requesting location permission on boot");
-          permission = await Location.requestForegroundPermissionsAsync();
-        }
+        // Read-only. This used to call requestForegroundPermissionsAsync() when
+        // the status was undetermined, which put the OS dialog on screen at app
+        // launch with nothing next to it explaining why — and contradicted this
+        // file's own contract two lines up. The ask belongs to the welcome
+        // step ("See what's near you") and the Near Me filter, both of which
+        // state the reason first.
+        const permission = await Location.getForegroundPermissionsAsync();
 
         if (permission.status !== "granted") {
           console.log("[BootLocation] No location permission available — skipping");

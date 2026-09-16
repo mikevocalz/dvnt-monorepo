@@ -27,6 +27,7 @@ function harness() {
     Deno: { env: { get: () => 'test' }, serve: fn => { handler = fn; } },
     require: name => name.includes('supabase-js') ? { createClient: () => client }
       : name.includes('verify-session') ? { verifySession: async (_db, req) => req.headers.get('x-test-actor'), corsHeaders: () => ({}), optionsResponse: () => new Response(null, { status: 204 }) }
+      : name.includes('verified-admission') ? { resolveVerifiedAdmission: async () => ({ state: 'allowed', reason: 'not_enforced', deadline: null, message: null }), admissionRefusal: verdict => ({ code: 'verification_required', reason: verdict.reason, message: verdict.message }) }
       : { checkRateLimit: () => ({ allowed: true }), WRITE_LIMIT: {} },
   });
   const publish = async (body, actor = 'deviant') => {

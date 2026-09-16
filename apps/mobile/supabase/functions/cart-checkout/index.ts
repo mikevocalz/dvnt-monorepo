@@ -1,4 +1,5 @@
 import { canAccessEvent } from "../_shared/event-access.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 /**
  * cart-checkout Edge Function
  *
@@ -166,6 +167,12 @@ Deno.serve(async (req: Request) => {
 
     const authId = await verifySession(supabase, req);
     if (!authId) return errorResponse("Unauthorized", 401);
+
+    // Verified-only admission. A client that skips the banner is still refused.
+    const cartAdmission = await resolveVerifiedAdmission(supabase, authId);
+    if (cartAdmission.state === "blocked") {
+      return errorResponse(admissionRefusal(cartAdmission).message, 403);
+    }
 
     let parsed: unknown;
     try {
