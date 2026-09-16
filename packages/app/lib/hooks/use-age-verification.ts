@@ -45,13 +45,35 @@ export function useAgeVerificationStatus() {
   });
 }
 
-/** True when the event needs verification and the viewer doesn't have it. */
+/**
+ * True when the event needs verification AND this viewer is actually in scope
+ * for it.
+ *
+ * `inScope` is the missing half. Without it this asked only "is the event
+ * restricted and is this person unverified", which is true for every existing
+ * member on every 18+ event, so the entire membership was prompted to scan an
+ * ID — on a platform where not one person has ever been verified, and where the
+ * capture session currently cannot even be created. A dead-end demand shown to
+ * everyone.
+ *
+ * Who is in scope is not this function's decision. It belongs to
+ * verified_admission_policy, which already carries the enforce switch, the
+ * cohort cutoff and the grace deadline. Pass the verdict from
+ * useVerifiedAdmission(); while enforcement is off, nobody is in scope and the
+ * interstitial never opens. Set a cohort and only accounts created after it are
+ * asked.
+ *
+ * ponytail: `inScope` is optional and defaults to NOT in scope. A caller that
+ * forgets it shows no prompt rather than prompting everyone — wrong in the
+ * direction that does not harass the membership.
+ */
 export function needsAgeVerification(
   ageRestriction: string | undefined | null,
   status: AgeVerificationStatus | undefined,
+  inScope: boolean = false,
 ): boolean {
   const restricted = ageRestriction === "18+" || ageRestriction === "21+";
-  return restricted && status !== "passed";
+  return restricted && status !== "passed" && inScope;
 }
 
 /** Starts (or resumes) a Didit session; returns the hosted capture URL. */
