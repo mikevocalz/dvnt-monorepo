@@ -17,15 +17,22 @@ async function exists(query: any): Promise<boolean> {
 
 export async function eventRelationships(db: any, event: EventAccessRow, userId: string | null) {
   if (!userId) return { organizer: false, ticket: false, invited: false };
-  const [organizer, ticket, invited] = await Promise.all([
+  const [organizer, ticket, guestInvite, staffInvite] = await Promise.all([
     userId === event.host_id ? Promise.resolve(true) : exists(db.from("event_co_organizers")
       .select("id").eq("event_id", event.id).eq("user_id", userId).eq("accepted", true)),
     exists(db.from("tickets").select("id").eq("event_id", event.id).eq("user_id", userId)
       .in("status", ["active", "scanned"]).eq("category", "admission")),
     exists(db.from("event_invites").select("id").eq("event_id", event.id)
       .eq("invited_user_id", userId).in("status", ["pending", "accepted"])),
+    // A staff invite the host has sent but the invitee has not accepted yet is
+    // still an invitation. event_co_organizers has no INSERT policy, so the row
+    // can only come from the host's invite-co-organizer call — nobody can
+    // self-invite. It lands in `invited`, never in `organizer`: being invited
+    // must open the event, not hand over host privileges before accepting.
+    exists(db.from("event_co_organizers").select("id")
+      .eq("event_id", event.id).eq("user_id", userId)),
   ]);
-  return { organizer, ticket, invited };
+  return { organizer, ticket, invited: guestInvite || staffInvite };
 }
 
 /** Apply before inventory reservations, zero-cost issuance, or Stripe calls. */

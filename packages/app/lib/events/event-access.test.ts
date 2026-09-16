@@ -79,7 +79,9 @@ test("active admission allows access, refunded/product tickets do not", async ()
 test("pending event invite and accepted staff can view private checkout", async () => {
   assert.equal(await canAccessEvent(database({ events: [event], event_invites: [{ event_id: 12, invited_user_id: "buyer", status: "pending" }] }), 12, "buyer"), true);
   assert.equal(await canAccessEvent(database({ events: [event], event_co_organizers: [{ event_id: 12, user_id: "staff", accepted: true }] }), 12, "staff"), true);
-  assert.equal(await canAccessEvent(database({ events: [event], event_co_organizers: [{ event_id: 12, user_id: "staff", accepted: false }] }), 12, "staff"), false);
+  // A sent-but-unaccepted staff invite opens the event; it does not confer
+  // organizer privileges (see private-event-invite-view.test.ts).
+  assert.equal(await canAccessEvent(database({ events: [event], event_co_organizers: [{ event_id: 12, user_id: "staff", accepted: false }] }), 12, "staff"), true);
 });
 test("lookup failure never becomes public event access", async () => {
   await assert.rejects(canAccessEvent(database({ events: [event] }, "events"), 12, "buyer"));

@@ -10,11 +10,19 @@ AS $$
       OR COALESCE(e.visibility, 'public') <> 'private'
       OR (auth.jwt()->>'sub' IS NOT NULL AND (
         e.host_id = auth.jwt()->>'sub'
+        -- Viewing is not acting. A staff invite is an invitation from the moment
+        -- the host sends it, and event_co_organizers has no INSERT policy, so a
+        -- pending row is always host-authored and never self-granted. Requiring
+        -- accepted = true here would 404 the one screen an invitee has to open
+        -- in order to accept. Privileges still require accepted = true; they are
+        -- checked where they are used, not here.
         OR EXISTS (SELECT 1 FROM public.event_co_organizers c
-          WHERE c.event_id = e.id AND c.user_id = auth.jwt()->>'sub' AND c.accepted = true)
+          WHERE c.event_id = e.id AND c.user_id = auth.jwt()->>'sub')
+        -- status is nullable with default 'pending'; a NULL must read as pending
+        -- rather than silently dropping the invitee out of their own guest list.
         OR EXISTS (SELECT 1 FROM public.event_invites i
           WHERE i.event_id = e.id AND i.invited_user_id = auth.jwt()->>'sub'
-            AND i.status IN ('pending', 'accepted'))
+            AND COALESCE(i.status, 'pending') IN ('pending', 'accepted'))
         OR EXISTS (SELECT 1 FROM public.tickets t
           WHERE t.event_id = e.id AND t.user_id = auth.jwt()->>'sub'
             AND t.category = 'admission' AND t.status IN ('active', 'scanned'))
