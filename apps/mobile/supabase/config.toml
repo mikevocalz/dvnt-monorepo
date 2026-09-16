@@ -478,3 +478,8 @@ verify_jwt = false
 
 [functions.event-presence]
 verify_jwt = false
+
+# The body checks x-cron-secret against CRON_SECRET and fails closed when the
+# secret is unset, so verify_jwt = false does not make this reachable by anon.
+[functions.backfill-verification-emails]
+verify_jwt = false
