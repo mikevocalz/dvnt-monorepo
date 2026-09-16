@@ -1,0 +1,13 @@
+{
+  "known": [
+    "apps/mobile/docs/BETTER_AUTH_USER_ID_FIX.md:pKa8v6mo",
+    "apps/mobile/docs/FULL_STACK_AUDIT.md:pKa8v6mo",
+    "apps/mobile/lib/api/auth-helper.ts:akTmS2gZ",
+    "apps/mobile/supabase/migrations/20260399_fix_ticket_user_ids.sql:pKa8v6mo",
+    "docs/e2e/bugs.md:lUrDhlfP",
+    "packages/app/components/dev/DeviceTestBridge.tsx:Ubd4uPLC",
+    "packages/app/components/dev/DeviceTestBridge.tsx:pKa8v6mo",
+    "packages/app/features/watch/watch-notification-actions.test.cjs:consumeW",
+    "packages/app/lib/api/auth-helper.ts:akTmS2gZ"
+  ]
+}

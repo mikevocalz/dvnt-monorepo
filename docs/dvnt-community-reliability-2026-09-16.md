@@ -136,7 +136,14 @@ Two pre-existing defects surfaced while auditing the discovery path and were fix
 
 Brand automation needs `DVNT_BRAND_USER_ID`, `DVNT_BRAND_AUTH_ID` and `DVNT_BRAND_OUTBOX_ENABLED=true`, all three together, plus `CRON_SECRET`; the email channel additionally needs `DVNT_BRAND_UNSUBSCRIBE_URL` or its rows are suppressed rather than sent. There is deliberately no cron entry, so the worker runs only when invoked.
 
-The canonical sender has been resolved against production: `deviantevents` is `public.users.id = 613`, Better Auth `user.id = ZcInhog357kU8uGba7ziQ4DX75WkamyW`, `devianteventsdc@gmail.com`, created 12 September 2026, and it hosts events 79, 80, 82, 83, 84, 85, 86 and 88. Set `DVNT_BRAND_USER_ID=613` and `DVNT_BRAND_AUTH_ID=ZcInhog357kU8uGba7ziQ4DX75WkamyW` in server-only configuration. They are deliberately not committed: the sender is configuration, not code, so a clone of this repository cannot send as the brand.
+The canonical sender has been resolved against production. The account is `deviantevents` (`devianteventsdc@gmail.com`, created 12 September 2026), which hosts events 79, 80, 82, 83, 84, 85, 86 and 88. Its `public.users.id` and Better Auth `user.id` are deliberately NOT written down here: they are server-only configuration, and committing them once already tripped secret scanning. Read them straight from the database when setting the variables:
+
+```sql
+select id as dvnt_brand_user_id, auth_id as dvnt_brand_auth_id
+from public.users where lower(username) = 'deviantevents';
+```
+
+Set `DVNT_BRAND_USER_ID` and `DVNT_BRAND_AUTH_ID` from that result in server-only configuration. `verifyBrandSender` re-checks the pair against the row at send time, so a mistyped value disables sending rather than sending as the wrong account.
 
 Two things to settle before enabling it. The account has `verified = false`, while the proposed DM copy describes itself as coming from the verified Deviant account — either verify the account or drop that claim. And the account was created on 12 September 2026, after most of the membership, so an unbounded first send would reach people who predate it; scope the first campaign's audience deliberately rather than letting it default to everyone.
 

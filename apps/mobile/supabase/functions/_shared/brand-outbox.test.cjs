@@ -140,7 +140,7 @@ test('brand copy is labelled automated and an unknown campaign version sends not
 // The configured pair must name one real account. A well-formed id is not a
 // correct id, and this app has already had content land under the wrong
 // account once because an identity was taken on trust.
-const BRAND = { userId: 613, authId: "ZcInhog357kU8uGba7ziQ4DX75WkamyW" };
+const BRAND = { userId: 613, authId: "brand-auth-id-fixture" };
 const { verifyBrandSender } = sender(CONFIGURED);
 
 function fakeDb(row) {
@@ -155,7 +155,7 @@ function fakeDb(row) {
 
 test("the configured pair is accepted when it names one real account", async () => {
   const db = fakeDb({
-    data: { id: 613, auth_id: "ZcInhog357kU8uGba7ziQ4DX75WkamyW", username: "deviantevents" },
+    data: { id: 613, auth_id: "brand-auth-id-fixture", username: "deviantevents" },
   });
   const got = await verifyBrandSender(db, BRAND);
   assert.equal(got.ok, true);
@@ -166,13 +166,13 @@ test("an auth id belonging to another account is refused, not sent as", async ()
   // users.id 613 exists, but its auth_id is somebody else's — the exact shape
   // of the incident this guard exists for.
   const db = fakeDb({
-    data: { id: 613, auth_id: "WU20JUKEdnFxlntkWdMVnKsKdaoiydV8", username: "deviantevents" },
+    data: { id: 613, auth_id: "someone-elses-auth-id-fixture", username: "deviantevents" },
   });
   const got = await verifyBrandSender(db, BRAND);
   assert.equal(got.ok, false);
   assert.match(got.reason, /does not belong to/);
   // The real auth id must not be echoed back into logs beside the configured one.
-  assert.ok(!got.reason.includes("WU20JUKEdnFxlntkWdMVnKsKdaoiydV8"));
+  assert.ok(!got.reason.includes("someone-elses-auth-id-fixture"));
 });
 
 test("a missing account fails closed rather than defaulting to anyone", async () => {
