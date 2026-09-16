@@ -144,6 +144,21 @@ const NATIVE_ONLY_WIRING = new Set([
   // useSafeAreaInsets for a detached tab bar that only exists on native. Web
   // has no such element and no inset to clear.
   "use-tab-bar-inset", "useTabBarInset",
+  // Same module, same reason, other end of the screen: useTabBarTopInset pads
+  // the TOP by TAB_BAR_TOP_CLEARANCE because iPadOS renders NativeTabs as a
+  // bar floating over the content instead of at the bottom. It is already
+  // `Platform.OS === "ios" && Platform.isPad ? 52 : 0` — zero on every other
+  // target, web included, where there is no such bar to clear.
+  "useTabBarTopInset",
+  // create-header-store only exists to carry the composer's Close/Post handlers
+  // ACROSS a native layout boundary: NativeTabs draws the Create tab's header in
+  // the Stack header slot in `(protected)/_layout.tsx`, a different component
+  // tree from the screen that owns `canPost`. The web composer has no tab bar
+  // over its content and no layout header slot — its own sticky <header> sits in
+  // the same component as the state, so the store would be a Zustand round-trip
+  // between two adjacent lines of JSX. Same reasoning as camera-result-store and
+  // story-flow-store above: no cross-screen handoff to preserve.
+  "create-header-store", "useCreateHeaderStore",
   // react-native-reanimated's useReducedMotion. Web honours the same intent
   // through `@media (prefers-reduced-motion: reduce)` — scanner.web.tsx does.
   "useReducedMotion",
@@ -328,6 +343,43 @@ for (const rel of deviantRoutes) {
 }
 
 // ── 2/3. Data-wiring + export parity per present screen ────────────────────
+// Composition-aware, exactly as §4 already is for web screens: a ported screen
+// may hold the original's wiring one import away instead of inline. The Create
+// tab is the case this exists for — `(tabs)/create.tsx` stopped calling
+// `useCreatePost` + `useMediaUpload` + `useAuthStore` itself when the resumable
+// publish queue landed, and calls `usePublishPost` instead; that hook holds all
+// three. The wiring is delegated, not dropped, and a file-local diff cannot
+// tell the two apart. So: resolve the port's own first-party `lib/hooks/*` and
+// `lib/stores/*` imports ONE level deep and union their wiring in. Non-existent
+// modules are skipped, so this can only ever clear a false positive — a screen
+// that genuinely drops wiring still has nowhere for it to hide.
+const LIB_DIR = join(ROOT, "packages/app/lib");
+function resolveLibImport(spec) {
+  const m = spec.match(/^@dvnt\/app\/lib\/((?:hooks|stores)\/[\w./-]+)$/);
+  if (!m) return null;
+  for (const ext of [".ts", ".tsx", ".native.ts", "/index.ts"]) {
+    const p = join(LIB_DIR, m[1] + ext);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+function extractWiringWithDelegates(src) {
+  const w = extractWiring(src);
+  for (const m of stripComments(src).matchAll(/from\s+["']([^"']+)["']/g)) {
+    const p = resolveLibImport(m[1]);
+    if (!p) continue;
+    try {
+      const cw = extractWiring(readFileSync(p, "utf8"));
+      cw.stores.forEach((x) => w.stores.add(x));
+      cw.hooks.forEach((x) => w.hooks.add(x));
+      cw.domainHooks.forEach((x) => w.domainHooks.add(x));
+      cw.usedHooks.forEach((x) => w.usedHooks.add(x));
+    } catch {
+      /* unreadable delegate — treat as contributing nothing */
+    }
+  }
+  return w;
+}
 const wiringDiffs = [];
 for (const rel of present) {
   let orig, port;
@@ -338,7 +390,7 @@ for (const rel of present) {
     continue;
   }
   const o = extractWiring(orig);
-  const p = extractWiring(port);
+  const p = extractWiringWithDelegates(port);
   const missStores = setDiff(o.stores, p.stores);
   const missHooks = setDiff(o.hooks, p.hooks);
   const missNamed = setDiff(o.named, p.named);

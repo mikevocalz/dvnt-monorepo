@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from "react";
+import React, { memo, useCallback, useEffect } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Image } from "expo-image";
 import { BlurView } from "expo-blur";
@@ -11,17 +11,29 @@ import Animated, {
   useAnimatedProps,
 } from "react-native-reanimated";
 import { useEventDetailScreenStore } from "@dvnt/app/lib/stores/event-detail-screen-store";
+import {
+  useEventAttendeesStore,
+  selectAttendees,
+} from "@dvnt/app/lib/stores/event-attendees-store";
+import { hasMoreAttendees } from "@dvnt/app/lib/events/attendee-page";
+import { LegendList } from "@dvnt/app/components/list";
 import type { EventAttendee } from "../types";
 
 const AVATAR_SIZE = 44;
 const AVATAR_RADIUS = 10;
 const COLS = 5;
+/** Four rows of tiles. Bounded so the list scrolls instead of clipping. */
+const GRID_HEIGHT = 300;
 
 interface GoingAccordionProps {
   attendees: EventAttendee[];
   totalCount: number;
   isLoggedIn?: boolean;
   onAttendeePress?: (attendee: EventAttendee) => void;
+  /** Enables paging past the 20 the detail RPC ships. Omit → static list. */
+  eventId?: string;
+  /** Gate: only a public event's list is fetched. */
+  visibility?: unknown;
 }
 
 const AvatarTile = memo(function AvatarTile({
@@ -79,10 +91,32 @@ export const GoingAccordion = memo(function GoingAccordion({
   totalCount,
   isLoggedIn = true,
   onAttendeePress,
+  eventId,
+  visibility,
 }: GoingAccordionProps) {
   const expanded = useEventDetailScreenStore((s) => s.attendeesExpanded);
   const setExpanded = useEventDetailScreenStore((s) => s.setAttendeesExpanded);
   const progress = useSharedValue(0);
+
+  // Paged rows live in the store; `attendees` is only the first screenful the
+  // detail RPC shipped. Without an eventId (design demos) the prop stands alone.
+  const paged = useEventAttendeesStore(selectAttendees(eventId ?? ""));
+  const seed = useEventAttendeesStore((s) => s.seed);
+  const loadMore = useEventAttendeesStore((s) => s.loadMore);
+  useEffect(() => {
+    if (eventId && attendees.length > 0) seed(eventId, attendees);
+  }, [eventId, attendees, seed]);
+  const rows = eventId ? paged.rows : attendees;
+  const canLoadMore =
+    !!eventId &&
+    hasMoreAttendees({
+      loaded: rows.length,
+      totalCount,
+      lastPageSize: paged.lastPageSize,
+    });
+  const onEndReached = useCallback(() => {
+    if (eventId && canLoadMore && !paged.loading) loadMore(eventId, visibility);
+  }, [eventId, canLoadMore, paged.loading, loadMore, visibility]);
 
   const toggle = useCallback(() => {
     const next = !expanded;
@@ -90,9 +124,12 @@ export const GoingAccordion = memo(function GoingAccordion({
     progress.value = withTiming(next ? 1 : 0, { duration: 280 });
   }, [expanded, setExpanded, progress]);
 
+  // The panel animates open to a FIXED height and the list scrolls inside it.
+  // It used to animate maxHeight 0 -> 600 with overflow hidden and no scroller,
+  // so anything past ~33 tiles was unreachable: clipped, with nothing to drag.
   const gridStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
-    maxHeight: interpolate(progress.value, [0, 1], [0, 600]),
+    height: interpolate(progress.value, [0, 1], [0, GRID_HEIGHT]),
     overflow: "hidden",
   }));
 
@@ -100,7 +137,7 @@ export const GoingAccordion = memo(function GoingAccordion({
     transform: [{ rotate: `${interpolate(progress.value, [0, 1], [0, 180])}deg` }],
   }));
 
-  const previewAvatars = attendees.slice(0, 4);
+  const previewAvatars = rows.slice(0, 4);
 
   if (!isLoggedIn) {
     return (
@@ -166,15 +203,29 @@ export const GoingAccordion = memo(function GoingAccordion({
         </Animated.View>
       </Pressable>
 
-      {/* Expandable grid */}
+      {/* Expandable grid — scrolls inside the panel, pages as it reaches the end */}
       <Animated.View style={gridStyle}>
-        <View style={styles.grid}>
-          {attendees.map((a) => (
-            <View key={a.id} style={styles.gridCell}>
-              <AvatarTile attendee={a} onPress={onAttendeePress} />
+        <LegendList
+          data={rows}
+          numColumns={COLS}
+          keyExtractor={(item: EventAttendee) => item.id}
+          estimatedItemSize={72}
+          nestedScrollEnabled
+          showsVerticalScrollIndicator
+          contentContainerStyle={styles.grid}
+          onEndReached={onEndReached}
+          onEndReachedThreshold={0.5}
+          renderItem={({ item }: { item: EventAttendee }) => (
+            <View style={styles.gridCell}>
+              <AvatarTile attendee={item} onPress={onAttendeePress} />
             </View>
-          ))}
-        </View>
+          )}
+          ListFooterComponent={
+            paged.loading ? (
+              <Text style={styles.footerText}>Loading more…</Text>
+            ) : null
+          }
+        />
       </Animated.View>
     </View>
   );
@@ -232,5 +283,11 @@ const styles = StyleSheet.create({
   gridCell: {
     width: `${100 / COLS}%`,
     alignItems: "center",
+  },
+  footerText: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 12,
+    textAlign: "center",
+    paddingVertical: 12,
   },
 });

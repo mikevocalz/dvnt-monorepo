@@ -460,23 +460,30 @@ export function payoutStatement(opts: {
 export function welcome(name?: string | null): EmailContent {
   const who = name ? esc(name) : "there";
   return {
-    subject: `Welcome to ${BRAND.name}!`,
+    subject: `Welcome to the cookout — ${BRAND.name}`,
     html: brandEmailWrapper(
       [
-        heading(`Welcome to ${BRAND.name} 🎉`),
+        heading("Welcome to the cookout!"),
         paragraph(`Hey ${who},`),
         paragraph(
-          "Your account is live. You're now part of the community where nightlife meets culture.",
+          "The Black Queer cookout. DVNT is an 18+ community connecting Black, Brown and Queer people through culture, expression and events — online and in person.",
+        ),
+        paragraph(
+          "Start with your profile, and complete age and identity verification to unlock verified spaces. Your chosen name is how the community knows you; your verification details stay private.",
         ),
         card(
           paragraph(
             [
-              "• Discover events happening near you<br/>",
-              "• Share stories and connect with your crew<br/>",
-              "• Get exclusive access to VIP experiences",
+              "• Add a photo and a little about yourself<br/>",
+              "• Discover your next event and connect with your crew<br/>",
+              "• Make your first post when you're ready",
             ].join(""),
             { size: 15, color: COLORS.textBody, margin: "0" },
           ),
+        ),
+        paragraph(
+          "Be kind. Be considerate. No hate, harassment, body-shaming or slut-shaming. Our community standards protect our people, expression and culture.",
+          { size: 14, color: COLORS.textMuted },
         ),
         // MUST be an https universal link, never the bare `dvnt://` scheme.
         //
@@ -500,7 +507,7 @@ export function welcome(name?: string | null): EmailContent {
         // without the app installed.
         button(`${SITE_URL}/feed`, `Open ${BRAND.name}`, { gradient: "brand" }),
       ].join(""),
-      { preheader: `Welcome to ${BRAND.name} — your account is live` },
+      { preheader: "Your people. Your culture. Your next connection." },
     ),
   };
 }

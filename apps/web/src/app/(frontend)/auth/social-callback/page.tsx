@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { syncAuthUser } from '@dvnt/app/lib/api/privileged';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
+import { resumeAuthSession } from '@dvnt/app/lib/auth-client';
 
 /**
  * OAuth landing (Google → Better Auth → here). The session cookie is already
@@ -19,10 +20,17 @@ export default function SocialCallbackPage() {
     ran.current = true;
     (async () => {
       try {
+        const params = new URLSearchParams(window.location.search);
+        // Failed OAuth may leave the previous account's cookie intact.
+        if (params.has('error') || params.has('error_description') || params.has('error_code')) {
+          throw new Error('External sign-in was not completed');
+        }
+        if (!(await resumeAuthSession())) throw new Error('No new sign-in session');
         const profile: any = await syncAuthUser();
         if (!profile) throw new Error('no profile');
         useAuthStore.getState().setUser({
           id: profile.id,
+          authId: profile.authId,
           email: profile.email,
           username: profile.username,
           name: profile.name,

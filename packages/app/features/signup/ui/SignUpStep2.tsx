@@ -146,6 +146,12 @@ export function SignUpStep2() {
 
   // Create account after verification succeeds
   const createAccount = async () => {
+    const age = validateDateOfBirth(formData.dateOfBirth);
+    if (!age.isValid || !age.isOver18) {
+      toast.error("Date of birth required", { description: age.errorMessage || UNDERAGE_ERROR_MESSAGE });
+      setActiveStep(0);
+      return;
+    }
     setIsSubmitting(true);
     const startedAt = Date.now();
     AppTrace.trace("SIGNUP", "account_create_started", {
@@ -167,6 +173,7 @@ export function SignUpStep2() {
           username: formData.username,
           firstName: formData.firstName,
           lastName: formData.lastName,
+          dateOfBirth: formData.dateOfBirth,
         } as any),
         25000,
         "Account creation",

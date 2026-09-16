@@ -152,7 +152,7 @@ export const StoryHeaderText: RenderCustomText = ({ profileName, item }) => {
     } else {
       router.push(`/(protected)/profile/${customData.username}` as any);
     }
-  }, [customData?.username, currentUser?.username, router]);
+  }, [customData?.username, customData?.appUserId, currentUser, router]);
 
   const isCFStory =
     customData?.visibility === "close_friends" || customData?.isCloseFriends;

@@ -1,3 +1,4 @@
+import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 import {
   View,
   Text,
@@ -375,6 +376,7 @@ function EventDetailScreenContent() {
   const notifyOnSaleOpen = isSubscribedToSale(eventId);
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
+  const deleteEventMutation = useDeleteEvent();
   const offlineCheckin = useOfflineCheckinStore();
   const offlineTokenCount = (offlineCheckin.tokensByEvent[eventId] || [])
     .length;
@@ -1255,6 +1257,7 @@ function EventDetailScreenContent() {
   }, [eventId, queryClient, showToast]);
 
   const handleDeleteEvent = useCallback(() => {
+    if (deleteEventMutation.isPending) return;
     Alert.alert(
       "Delete Event",
       "This permanently removes the event. Events with paid tickets can't be deleted — cancel instead, which refunds every attendee.",
@@ -1265,20 +1268,7 @@ function EventDetailScreenContent() {
           style: "destructive",
           onPress: async () => {
             try {
-              await eventsApi.deleteEvent(eventId);
-              queryClient.setQueriesData<any[]>(
-                { queryKey: eventKeys.all },
-                (old) => {
-                  if (!old || !Array.isArray(old)) return old;
-                  return old.filter(
-                    (e: any) => String(e?.id) !== String(eventId),
-                  );
-                },
-              );
-              queryClient.removeQueries({
-                queryKey: eventKeys.detail(eventId),
-              });
-              queryClient.invalidateQueries({ queryKey: eventKeys.all });
+              await deleteEventMutation.mutateAsync(eventId);
               showToast("success", "Event deleted", "");
               router.back();
             } catch (err: any) {
@@ -1311,7 +1301,7 @@ function EventDetailScreenContent() {
         },
       ],
     );
-  }, [eventId, queryClient, showToast, router, handleCancelEvent]);
+  }, [eventId, deleteEventMutation, showToast, router, handleCancelEvent]);
 
   const handleDuplicateEvent = useCallback(() => {
     if (!eventData) return;

@@ -7,6 +7,8 @@ import { X } from "lucide-react";
 import { StoryViewer } from "@dvnt/ui";
 import { useStoryViewerStore } from "@dvnt/app/lib/stores/story-viewer-store";
 import { StoryOverlaysLayer } from "@dvnt/app/components/story-overlays-layer.web";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { storyProfilePath } from "@dvnt/app/lib/profile/story-profile-path";
 
 /**
  * Full-screen story viewer overlay (web) — pops over the ENTIRE app at the top
@@ -26,6 +28,8 @@ export function StoryViewerOverlay() {
   const groups = useStoryViewerStore((s) => s.groups);
   const groupIndex = useStoryViewerStore((s) => s.groupIndex);
   const close = useStoryViewerStore((s) => s.close);
+  const closeForNavigation = useStoryViewerStore((s) => s.closeForNavigation);
+  const viewer = useAuthStore((s) => s.user);
   const nextGroup = useStoryViewerStore((s) => s.nextGroup);
 
   // Portal target only exists on the client; gate the portal until mounted.
@@ -143,6 +147,12 @@ export function StoryViewerOverlay() {
           }))}
           onAllStoriesEnd={nextGroup}
           onStoryChange={setStoryIndex}
+          onProfilePress={() => {
+            const path = storyProfilePath(group, viewer, "web");
+            if (!path) return;
+            closeForNavigation();
+            router.push(path);
+          }}
           width={size.w}
           height={size.h}
         />
@@ -156,7 +166,7 @@ export function StoryViewerOverlay() {
             animatedGifOverlays={segment.animatedGifOverlays}
             interactive
             onNavigate={(path) => {
-              close();
+              closeForNavigation();
               router.push(path);
             }}
           />

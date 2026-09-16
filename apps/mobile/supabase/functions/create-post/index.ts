@@ -6,6 +6,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,6 +42,8 @@ interface MediaItem {
 }
 
 interface CreatePostBody {
+  operationId?: string;
+  expectedAuthorId?: string;
   content?: string;
   kind?: "media" | "text";
   textTheme?: "graphite" | "cobalt" | "ember" | "sage";
@@ -99,6 +102,13 @@ Deno.serve(async (req) => {
     }
 
     const authUserId = sessionResult.userId;
+
+    // Verified-only admission. A client that skips the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabaseAdmin, authUserId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return errorResponse(refusal.code, refusal.message, 403);
+    }
 
     let body: CreatePostBody;
     try {
@@ -200,12 +210,38 @@ Deno.serve(async (req) => {
     if (!userData) return errorResponse("not_found", "User not found");
 
     const userId = userData.id;
+    if (body.expectedAuthorId && String(body.expectedAuthorId) !== String(userId) && String(body.expectedAuthorId) !== String(authUserId)) {
+      return errorResponse("account_changed", "Your account changed. Sign in to the account that started this post.", 409);
+    }
+    if (body.operationId && !/^[a-zA-Z0-9_-]{8,120}$/.test(body.operationId)) {
+      return errorResponse("validation_error", "Invalid publish operation ID", 400);
+    }
     console.log("[Edge:create-post] User:", userId);
     const normalizedContent =
       postKind === "text" ? normalizedSlides[0] || "" : content?.trim() || "";
     let post: any = null;
 
-    if (postKind === "text") {
+    if (body.operationId) {
+      const { data: savedPost, error: saveError } = await supabaseAdmin.rpc("create_post_idempotent", {
+        p_author_id: userId,
+        p_operation_id: body.operationId,
+        p_payload: {
+          content: normalizedContent,
+          post_kind: postKind,
+          text_theme: normalizedTheme,
+          location: normalizedLocationValue,
+          is_nsfw: normalizedIsNsfw,
+          visibility: normalizedVisibility,
+          slides: normalizedSlides,
+          media: media || [],
+        },
+      });
+      if (saveError || !savedPost?.id) {
+        console.error("[Edge:create-post] Atomic publish failed:", saveError);
+        return errorResponse("publish_failed", "Could not publish this post. Please retry or dismiss it.");
+      }
+      post = savedPost;
+    } else if (postKind === "text") {
       const { data: createPostRows, error: createPostError } =
         await supabaseAdmin.rpc("create_post_with_dedupe", {
           p_author_id: userId,
@@ -278,17 +314,10 @@ Deno.serve(async (req) => {
             id: `${post.id}_${index}`,
             mime_type: m.mimeType ?? null,
             live_photo_video_url: m.livePhotoVideoUrl ?? null,
+            thumbnail: m.thumbnail ?? null,
           });
 
-          if (m.type === "video" && m.thumbnail) {
-            mediaInserts.push({
-              _parent_id: post.id,
-              type: "thumbnail",
-              url: m.thumbnail,
-              _order: index,
-              id: `${post.id}_thumb_${index}`,
-            });
-          }
+
         });
 
         const { error: mediaError } = await supabaseAdmin
@@ -297,6 +326,8 @@ Deno.serve(async (req) => {
 
         if (mediaError) {
           console.error("[Edge:create-post] Media insert error:", mediaError);
+          await supabaseAdmin.from("posts").delete().eq("id", post.id);
+          return errorResponse("internal_error", "Failed to save post media. Please retry.");
         }
       }
 

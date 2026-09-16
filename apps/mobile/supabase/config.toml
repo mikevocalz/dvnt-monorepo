@@ -218,6 +218,9 @@ verify_jwt = false
 [functions.event-cancel]
 verify_jwt = false
 
+[functions.event-invite-guests]
+verify_jwt = false
+
 [functions.event-postpone]
 verify_jwt = false
 
@@ -350,6 +353,9 @@ verify_jwt = false
 [functions.create-event]
 verify_jwt = false
 
+[functions.delete-event]
+verify_jwt = false
+
 [functions.create-event-moment]
 verify_jwt = false
 
@@ -363,6 +369,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.event-analytics]
+verify_jwt = false
+
+[functions.brand-outbox-worker]
 verify_jwt = false
 
 [functions.event-broadcast-message]
@@ -468,4 +477,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.event-presence]
+verify_jwt = false
+
+# The body checks x-cron-secret against CRON_SECRET and fails closed when the
+# secret is unset, so verify_jwt = false does not make this reachable by anon.
+[functions.backfill-verification-emails]
 verify_jwt = false

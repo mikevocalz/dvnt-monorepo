@@ -2,6 +2,10 @@
  * CompTicketsModal — host comps free tickets to a list of usernames
  * or emails. Tier picker + textarea. Server enforces capacity, dupes,
  * permission. Skipped recipients surface in a result row.
+ *
+ * An email with no DVNT account gets a guest ticket emailed as a claim
+ * link. Issuing and emailing are separate outcomes, so the result shows
+ * both: how many tickets exist, and who the email actually reached.
  */
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
@@ -22,6 +26,10 @@ import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 import { bulkCompTickets, type CompResult } from "@dvnt/app/lib/api/privileged";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
+import {
+  canSubmitComp,
+  parseCompRecipients,
+} from "@dvnt/app/lib/tickets/comp-recipients";
 
 interface Tier {
   id: string;
@@ -62,6 +70,8 @@ export function CompTicketsModal({
   useEffect(() => {
     if (!visible) return;
     setResult(null);
+    setTiers(null);
+    setTierId(null);
     setRecipientsRaw("");
     setNote("");
     (async () => {
@@ -79,12 +89,16 @@ export function CompTicketsModal({
     })();
   }, [visible, eventId]);
 
-  const parsed = useMemo(() => {
-    return recipientsRaw
-      .split(/[,;\n]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }, [recipientsRaw]);
+  // Split preview. A username has to be an existing member or the server skips
+  // it; an email may already have an account, so it is counted as an email
+  // rather than promised as a guest. Shared with web so the two platforms
+  // cannot disagree about what a typed list means.
+  const preview = useMemo(
+    () => parseCompRecipients(recipientsRaw),
+    [recipientsRaw],
+  );
+  const parsed = preview.entries;
+  const canSend = canSubmitComp({ tierId, preview, sending });
 
   const handleClose = useCallback(() => {
     if (sending) return;
@@ -92,17 +106,28 @@ export function CompTicketsModal({
   }, [sending, onClose]);
 
   const handleSend = useCallback(async () => {
-    if (sending || !tierId || parsed.length === 0) return;
+    if (!canSend) return;
     setSending(true);
     try {
-      const res = await bulkCompTickets(eventId, tierId, parsed, note.trim() || undefined);
+      const res = await bulkCompTickets(eventId, tierId!, parsed, note.trim() || undefined);
       setResult(res);
       onSuccess?.(res);
-      if (res.issued > 0) {
+      const guestIssued = res.guest_issued ?? 0;
+      const undelivered = (res.delivery ?? []).filter(
+        (d) => d.status !== "delivered",
+      ).length;
+      if (res.issued + guestIssued > 0) {
         showToast(
-          "success",
+          undelivered > 0 ? "warning" : "success",
           "Tickets comped",
-          `${res.issued} issued${res.skipped.length ? `, ${res.skipped.length} skipped` : ""}.`,
+          [
+            `${res.issued + guestIssued} issued`,
+            guestIssued ? `${guestIssued} by email` : "",
+            undelivered ? `${undelivered} email${undelivered === 1 ? "" : "s"} failed` : "",
+            res.skipped.length ? `${res.skipped.length} skipped` : "",
+          ]
+            .filter(Boolean)
+            .join(", ") + ".",
         );
       } else if (res.skipped.length > 0) {
         showToast(
@@ -117,7 +142,7 @@ export function CompTicketsModal({
     } finally {
       setSending(false);
     }
-  }, [sending, tierId, parsed, eventId, note, onSuccess, showToast]);
+  }, [canSend, tierId, parsed, eventId, note, onSuccess, showToast]);
 
   const noTiers = tiers != null && tiers.length === 0;
 
@@ -167,9 +192,45 @@ export function CompTicketsModal({
                   <Text style={{ color: "#22C55E", fontWeight: "700" }}>
                     {result.issued}
                   </Text>{" "}
-                  issued
+                  issued to accounts
                   {result.tier ? ` (${result.tier})` : ""}
                 </Text>
+                {(result.guest_issued ?? 0) > 0 && (
+                  <Text style={[styles.resultLine, { marginTop: 4 }]}>
+                    <Text style={{ color: "#3FDCFF", fontWeight: "700" }}>
+                      {result.guest_issued}
+                    </Text>{" "}
+                    guest ticket
+                    {result.guest_issued === 1 ? "" : "s"} created
+                  </Text>
+                )}
+                {(result.delivery?.length ?? 0) > 0 && (
+                  <>
+                    <Text style={[styles.resultLine, { marginTop: 8 }]}>
+                      Email delivery
+                    </Text>
+                    {result.delivery!.map((d, i) => (
+                      <Text
+                        key={i}
+                        style={[
+                          styles.skipLine,
+                          d.status === "failed" && { color: "#F87171" },
+                        ]}
+                      >
+                        • {d.recipient} —{" "}
+                        {d.status === "delivered"
+                          ? "emailed"
+                          : d.error || "not delivered"}
+                      </Text>
+                    ))}
+                    {result.delivery!.some((d) => d.status === "failed") && (
+                      <Text style={[styles.skipLine, { marginTop: 6 }]}>
+                        Those tickets exist and stay valid. Send the link again
+                        or check the address.
+                      </Text>
+                    )}
+                  </>
+                )}
                 {result.skipped.length > 0 && (
                   <>
                     <Text
@@ -252,6 +313,7 @@ export function CompTicketsModal({
               <Text style={styles.sectionLabel}>
                 RECIPIENTS · usernames or emails
               </Text>
+
               <View style={styles.inputWrap}>
                 <TextInput
                   value={recipientsRaw}
@@ -268,8 +330,17 @@ export function CompTicketsModal({
                   {parsed.length} parsed
                 </Text>
               </View>
+              {parsed.length > 0 && (
+                <Text style={styles.preview}>
+                  {preview.members} member{preview.members === 1 ? "" : "s"} ·{" "}
+                  {preview.emails} email{preview.emails === 1 ? "" : "s"}
+                  {preview.emails > 0
+                    ? " — emails without an account become guest tickets"
+                    : ""}
+                </Text>
+              )}
               <Text style={styles.helper}>
-                Separate by comma, semicolon, or new line. Up to 100 per batch.
+                A DVNT username lands in that member's wallet and activity. An email with no account gets a guest ticket emailed as a claim link — no sign-up needed to get in. Phone numbers aren't supported. Separate entries by comma, semicolon, or new line. Up to 100 per batch.
               </Text>
 
               <Text style={styles.sectionLabel}>NOTE (optional)</Text>
@@ -292,10 +363,10 @@ export function CompTicketsModal({
           <View style={styles.footer}>
             <Pressable
               onPress={handleSend}
-              disabled={sending || !tierId || parsed.length === 0}
+              disabled={!canSend}
               style={[
                 styles.sendBtn,
-                (sending || !tierId || parsed.length === 0) && { opacity: 0.4 },
+                !canSend && { opacity: 0.4 },
               ]}
             >
               {sending ? (
@@ -399,6 +470,13 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.45)",
     fontSize: 11,
     textAlign: "right",
+  },
+  preview: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 12,
+    fontWeight: "600",
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
   helper: {
     color: "rgba(255,255,255,0.4)",

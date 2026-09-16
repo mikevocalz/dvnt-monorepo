@@ -26,7 +26,9 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 // PINNED. This import used to be bare `npm:@fishjam-cloud/js-server-sdk`, so
 // Deno resolved whatever was latest at deploy time. 0.30.0 renamed
 // `createMoqToken` to `createMoqAccess`, the call below started throwing
@@ -137,6 +139,13 @@ Deno.serve(async (req) => {
     }
     const userId = sessionResult.userId as string;
 
+    // Verified-only admission. A client that skips the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabase, userId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return errorResponse("forbidden", refusal.message, { reason: refusal.reason });
+    }
+
     // 2. Validate input
     let body: unknown;
     try {
@@ -160,6 +169,16 @@ Deno.serve(async (req) => {
     if (room.status !== "open") {
       return errorResponse("conflict", "Room is no longer open");
     }
+    // Every media transport enforces current admission and schedule before tokens.
+    const eventAccess = await resolveEventRoomAccess(supabase, room, userId);
+    if (!eventAccess.ok) {
+      return errorResponse(eventAccess.code, eventAccess.message, eventAccess.detail);
+    }
+    room.ends_at = eventAccess.endsAt;
+    if (room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
+      return errorResponse("conflict", "This Lynk's session has ended", { reason: "session_expired" });
+    }
+
     const internalRoomId = room.id;
 
     // 4. Ban check
@@ -189,7 +208,7 @@ Deno.serve(async (req) => {
       existingMember?.role === "co-host";
 
     // 6. Private-room access gate (verbatim from video_join_room)
-    if (!room.is_public) {
+    if (!room.is_public && !eventAccess.linked) {
       const hasPriorAccess =
         !!existingMember &&
         existingMember.status !== "banned" &&

@@ -115,6 +115,34 @@ Deno.serve(async (req) => {
         ...body.settings,
       };
 
+      // Growth-message opt-out. Only brand campaigns in brand_message_outbox
+      // read this; ticket email, receipts and order mail never route through
+      // that outbox, so turning it off cannot stop somebody's ticket.
+      if (typeof (body.settings as any).growthMessages === "boolean") {
+        const { data: row } = await supabaseAdmin
+          .from("users")
+          .select("id")
+          .eq("auth_id", authId)
+          .maybeSingle();
+        if (row?.id) {
+          const { error: optOutError } = await supabaseAdmin.rpc(
+            "set_brand_message_opt_out",
+            {
+              p_recipient_id: row.id,
+              p_opted_out: !(body.settings as any).growthMessages,
+              p_reason: "member_setting",
+            },
+          );
+          if (optOutError) {
+            console.error("[user-settings] opt-out failed:", optOutError);
+            return errorResponse(
+              "internal_error",
+              "Could not save your message preference",
+            );
+          }
+        }
+      }
+
       // Upsert
       const { data, error } = await supabaseAdmin
         .from("user_settings")

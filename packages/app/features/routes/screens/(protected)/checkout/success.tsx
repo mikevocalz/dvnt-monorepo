@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner-native";
 import {
   CalendarPlus,
@@ -31,6 +31,7 @@ import {
   type CartStatus,
 } from "@dvnt/app/lib/tickets/checkout-outcome";
 import { ticketPath } from "@dvnt/app/lib/tickets/ticket-identity";
+import { useFirstPostOffer } from "@dvnt/app/lib/hooks/use-first-post-offer";
 
 function ticketLabel(ticket: MixedTicket): string {
   if (ticket.category === "coat_check") return "Coat Check";
@@ -93,6 +94,7 @@ export default function CheckoutSuccessScreen() {
   const storeCart = useCartStore((state) => state.cart);
   const markCompleted = useCartStore((state) => state.markCompleted);
   const viewerId = useAuthStore((state) => state.user?.id || "unknown");
+  const queryClient = useQueryClient();
   const effectiveCartId = cartId || storeCart?.cartId || "";
 
   // When this screen started waiting. Drives the grace window after which an
@@ -138,10 +140,18 @@ export default function CheckoutSuccessScreen() {
   }, [outcome]);
 
   useEffect(() => {
-    if (statusQuery.data?.completed) {
-      markCompleted();
-    }
-  }, [markCompleted, statusQuery.data?.completed]);
+    if (!statusQuery.data?.completed) return;
+    markCompleted();
+    // Every ticket surface is now wrong: My Tickets, the event's own "you're
+    // going" state and the per-event pass list all still describe a cart that
+    // had not been paid for. One invalidate of the `tickets` root covers them.
+    //
+    // This is the query-client wiring the original screen had. It is NOT the
+    // original's `setQueryData(qk.tickets.forEvent(event_id), ticket)` — that
+    // seeded an event-keyed cache with whichever of the member's passes the
+    // server happened to return first, which is the bug cfbf8cb removed.
+    queryClient.invalidateQueries({ queryKey: qk.tickets.all() });
+  }, [markCompleted, queryClient, statusQuery.data?.completed]);
 
   const tickets = statusQuery.data?.tickets ?? [];
 
@@ -185,12 +195,55 @@ export default function CheckoutSuccessScreen() {
     });
   }, [effectiveCartId, tickets]);
 
+  // Optional, and only for a first admission purchase to a public event. Null
+  // the rest of the time, including whenever the event's visibility cannot be
+  // confirmed. Nothing is posted from here — accepting fills the composer.
+  const firstPost = useFirstPostOffer(effectiveCartId, tickets);
+
+  const handleMakeFirstPost = useCallback(() => {
+    if (!firstPost.draft) return;
+    if (firstPost.accept(firstPost.draft) === "kept-existing") {
+      toast.info("You already have a post in progress. We kept it.");
+      return;
+    }
+    router.push("/(protected)/(tabs)/create" as never);
+  }, [firstPost, router]);
+
   const renderTicket = useCallback(
     ({ item }: LegendListRenderItemProps<MixedTicket>) => (
       <IssuedTicketRow ticket={item} onPress={handleTicketPress} />
     ),
     [handleTicketPress],
   );
+
+  const firstPostCard = firstPost.draft ? (
+    <View style={styles.firstPostCard}>
+      <Text style={styles.firstPostTitle}>Make this your first post</Text>
+      <Text style={styles.firstPostBody}>
+        We can start a text post about this event for you to edit. It goes to
+        your DVNT feed, where anyone can see it, and only when you tap Post.
+      </Text>
+      <Text style={styles.firstPostPreview} numberOfLines={4}>
+        {firstPost.draft.content}
+      </Text>
+      <View style={styles.firstPostActions}>
+        <Pressable
+          onPress={firstPost.skip}
+          accessibilityRole="button"
+          style={[styles.secondaryButton, styles.firstPostAction]}
+        >
+          <Text style={styles.secondaryButtonText}>Skip</Text>
+        </Pressable>
+        <Pressable
+          onPress={handleMakeFirstPost}
+          accessibilityRole="button"
+          style={[styles.primaryButton, styles.firstPostAction]}
+        >
+          <Text style={styles.primaryButtonText}>Edit my first post</Text>
+        </Pressable>
+      </View>
+    </View>
+  ) : null;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -241,6 +294,7 @@ export default function CheckoutSuccessScreen() {
           keyExtractor={(ticket) => ticket.id}
           estimatedItemSize={82}
           contentContainerStyle={styles.listContent}
+          ListFooterComponent={firstPostCard}
         />
       )}
 
@@ -385,6 +439,41 @@ const styles = StyleSheet.create({
     backgroundColor: "#0A0A0B",
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(255,255,255,0.12)",
+  },
+  firstPostCard: {
+    marginTop: 16,
+    gap: 10,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(167,139,250,0.28)",
+    backgroundColor: "rgba(138,64,207,0.10)",
+  },
+  firstPostTitle: {
+    color: "#F8FAFC",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  firstPostBody: {
+    color: "#CBD5E1",
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  firstPostPreview: {
+    color: "#E2E8F0",
+    fontSize: 13,
+    lineHeight: 19,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.35)",
+  },
+  firstPostActions: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  firstPostAction: {
+    flex: 1,
+    height: 46,
   },
   primaryButton: {
     height: 52,

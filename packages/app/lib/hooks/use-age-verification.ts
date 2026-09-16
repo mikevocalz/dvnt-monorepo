@@ -3,6 +3,7 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { onboardingCheckpoint, onboardingFailure } from "@dvnt/observability/flows";
+import { validateDateOfBirth } from "@dvnt/app/lib/utils/age-verification";
 
 /**
  * B3 deferred ID verification (Didit). Status vocabulary mirrors the
@@ -27,14 +28,18 @@ export const ageVerificationKeys = {
 export function useAgeVerificationStatus() {
   const authId = useAuthStore((s) => s.user?.authId);
   return useQuery({
-    queryKey: ageVerificationKeys.status,
+    queryKey: [...ageVerificationKeys.status, authId],
     enabled: !!authId,
     staleTime: 30_000,
     queryFn: async (): Promise<AgeVerificationStatus> => {
       const { data } = await supabase
         .from("identity_verifications")
-        .select("status")
+        .select("status, date_of_birth")
+        .eq("user_id", authId!)
         .maybeSingle();
+      if (data?.status === "passed" && !validateDateOfBirth(data.date_of_birth).isValid) {
+        return "review";
+      }
       return (data?.status as AgeVerificationStatus) ?? "none";
     },
   });
@@ -52,6 +57,7 @@ export function needsAgeVerification(
 /** Starts (or resumes) a Didit session; returns the hosted capture URL. */
 export function useStartVerification() {
   const queryClient = useQueryClient();
+  const authId = useAuthStore((s) => s.user?.authId);
   return useMutation({
     mutationFn: async (opts?: { returnUrl?: string }) => {
       onboardingCheckpoint("verification.capture_start");
@@ -73,7 +79,7 @@ export function useStartVerification() {
     onSuccess: (data) => {
       if (data.status === "passed") {
         onboardingCheckpoint("verification.verified");
-        queryClient.setQueryData(ageVerificationKeys.status, "passed");
+        queryClient.setQueryData([...ageVerificationKeys.status, authId], "passed");
       }
     },
     onError: (error) => {

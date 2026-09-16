@@ -54,6 +54,7 @@ export const DB = {
     order: "_order",
     mimeType: "mime_type",
     livePhotoVideoUrl: "live_photo_video_url",
+    thumbnail: "thumbnail",
   },
   postTextSlides: {
     table: "post_text_slides",

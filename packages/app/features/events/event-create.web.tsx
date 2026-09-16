@@ -27,6 +27,7 @@ import {
   type ReactElement,
 } from "react";
 import { useRouter } from "solito/navigation";
+import { getAuthIdFromStore } from "@dvnt/app/lib/auth/identity";
 import {
   Calendar,
   MapPin,
@@ -61,6 +62,12 @@ import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import {
+  EVENT_VISIBILITY_OPTIONS,
+  eventVisibilityCopy,
+  showsGuestList,
+} from "@dvnt/app/lib/events/event-visibility-copy";
+import { inviteEventGuests } from "@dvnt/app/lib/api/privileged";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import {
@@ -146,11 +153,17 @@ function Field({
 
 export function CreateEventScreen() {
   const router = useRouter();
+  const screenMounted = useRef(true);
+  useEffect(() => {
+    screenMounted.current = true;
+    return () => { screenMounted.current = false; };
+  }, []);
   const s = useCreateEventStore();
   const createEvent = useCreateEvent();
   const showToast = useUIStore((st) => st.showToast);
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
+  const publishLock = useRef(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const places = usePlacesAutocomplete({
@@ -196,38 +209,39 @@ export function CreateEventScreen() {
       showToast("error", "Almost there", first || "Check the highlighted fields.");
       return;
     }
-    if (busy || createEvent.isPending) return;
+    if (publishLock.current || busy || createEvent.isPending) return;
+    publishLock.current = true;
+    const publishingAuthId = getAuthIdFromStore();
+    setBusy(true);
+    try {
 
-    // Paid events need a connected Stripe payout account (same gate as mobile).
-    if (hasPaidTier(s)) {
-      try {
-        const status = await withTimeout(organizerApi.getStatus(), 15000, "payout-status");
-        const ready =
-          status.connected &&
-          status.charges_enabled === true &&
-          status.payouts_enabled === true;
-        if (!ready) {
+      // Paid events need a connected Stripe payout account (same gate as mobile).
+      if (hasPaidTier(s)) {
+        try {
+          const status = await withTimeout(organizerApi.getStatus(), 15000, "payout-status");
+          const ready =
+            status.connected &&
+            status.charges_enabled === true &&
+            status.payouts_enabled === true;
+          if (!ready) {
+            showToast(
+              "error",
+              "Connect payouts first",
+              "Paid events need a Stripe payout account so you can get paid.",
+            );
+            router.push("/feed/events/organizer-setup");
+            return;
+          }
+        } catch {
           showToast(
             "error",
-            "Connect payouts first",
-            "Paid events need a Stripe payout account so you can get paid.",
+            "Couldn't verify payouts",
+            "We couldn't confirm your Stripe status. Please try again.",
           );
-          router.push("/feed/events/organizer-setup");
           return;
         }
-      } catch {
-        showToast(
-          "error",
-          "Couldn't verify payouts",
-          "We couldn't confirm your Stripe status. Please try again.",
-        );
-        return;
       }
-    }
 
-    setBusy(true);
-    const slug = slugifyTitle(s.title);
-    try {
       // Upload the cover to the CDN. The draft holds a blob:/data: URL from the
       // file picker — fetchable in-session — which uploadToServer turns into a
       // real media-upload URL. (Previously the blob URL was sent verbatim and
@@ -236,15 +250,10 @@ export function CreateEventScreen() {
       // URLs pass through; blob:/data:/file: URLs are uploaded fresh.
       const uploadIfLocal = async (
         url: string | null | undefined,
-        timeoutMs = 30000,
       ) => {
         if (!url) return undefined;
         if (!/^(blob:|data:|file:)/i.test(url)) return url;
-        const up = await withTimeout(
-          uploadToServer(url, "events", (p) => s.setUploadProgress(p.percentage)),
-          timeoutMs,
-          "upload-flyer",
-        );
+        const up = await uploadToServer(url, "events", (p) => s.setUploadProgress(p.percentage));
         if (!up.success || !up.url) {
           throw new Error(
             up.error || "Couldn't upload an image. Re-select it and try again.",
@@ -253,13 +262,8 @@ export function CreateEventScreen() {
         return up.url;
       };
 
-      // A flyer VIDEO (up to 60s / 50MB) routinely needs more than 30s on
-      // cellular — the still-image timeout aborted every video publish with
-      // "stalled at: upload-flyer (30s)".
-      const primaryUrl = await uploadIfLocal(
-        s.flyerImage,
-        s.flyerMediaType === "video" ? 180000 : 30000,
-      );
+      // Upload owns real progress, cancellation and a bounded network timeout.
+      const primaryUrl = await uploadIfLocal(s.flyerImage);
       // Write the hosted URL back into the draft the moment it exists: if a
       // later step fails (or iOS Safari kills the tab mid-publish), the retry
       // reuses the CDN URL instead of re-fetching a blob: that may be dead.
@@ -286,7 +290,7 @@ export function CreateEventScreen() {
       const galleryUrls: string[] = [];
       for (const url of s.eventImages) {
         if (/^(blob:|data:|file:)/i.test(url)) {
-          const up = await withTimeout(uploadToServer(url, "events"), 30000, "upload-gallery");
+          const up = await uploadToServer(url, "events");
           if (!up.success || !up.url) {
             throw new Error(
               up.error || "Couldn't upload an additional image. Re-select it and try again.",
@@ -348,12 +352,21 @@ export function CreateEventScreen() {
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const created = await withTimeout(
-        createEvent.mutateAsync(payload as any),
+        createEvent.mutateAsync({ ...payload, clientRequestId: s.getPublishRequestId(), expectedAuthId: publishingAuthId } as any),
         20000,
         "create-event-insert",
       );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const id = (created as any)?.id;
+      if (created?.replayed && id) {
+        // A previous attempt already created this row. Setup may have partly
+        // completed before the app closed; never duplicate ticket inventory.
+        s.resetDraft();
+        showToast("warning", "Event already published", "Review tickets and add-ons in Edit before sharing it.");
+        if (screenMounted.current) router.push(`/feed/events/${id}/edit`);
+        return;
+      }
+
 
       // Every event gets at least one ticket type so it's attendable and the
       // host sees a ticket. Explicit tiers win; otherwise a single default —
@@ -460,6 +473,34 @@ export function CreateEventScreen() {
         }
       }
 
+      // Guest list. Same shape as the co-organizer write-back and for the same
+      // reason: there was no event id to attach an invite to until now. One
+      // batched call, and a guest who can't be added never rolls back a
+      // published event — the host retries from Edit.
+      if (id && s.guests.length > 0 && s.visibility === "private") {
+        try {
+          const res = await inviteEventGuests(
+            Number(id),
+            s.guests.map((g) => g.username).filter(Boolean),
+          );
+          const refused = res?.skipped ?? [];
+          if (refused.length > 0) {
+            showToast(
+              "warning",
+              "Some guests weren't added",
+              `Add them from Edit: ${refused.map((r) => r.recipient).join(", ")}.`,
+            );
+          }
+        } catch (guestErr) {
+          console.warn("[create-event] guest invites failed", guestErr);
+          showToast(
+            "warning",
+            "Guest list not saved",
+            "Your event is live. Add guests from Edit.",
+          );
+        }
+      }
+
       s.resetDraft();
       if (ticketSetupFailed) {
         showToast(
@@ -470,7 +511,7 @@ export function CreateEventScreen() {
       } else {
         showToast("success", "Published", "Your event is live.");
       }
-      router.push(id ? `/events/${slug || id}` : "/events");
+      if (screenMounted.current) router.push(id ? `/events/${id}` : "/events");
     } catch (e) {
       showToast(
         "error",
@@ -478,8 +519,9 @@ export function CreateEventScreen() {
         e instanceof Error ? e.message : "Please try again.",
       );
     } finally {
-      setBusy(false);
       s.setUploadProgress(0);
+      publishLock.current = false;
+      setBusy(false);
     }
   };
 
@@ -543,13 +585,15 @@ export function CreateEventScreen() {
             disabled={publishing}
             className="h-10 px-5 rounded-full bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-40"
           >
-            {publishing && s.uploadProgress > 0 && s.uploadProgress < 100
-              ? `Uploading ${s.uploadProgress}%`
-              : publishing
-                ? "Publishing…"
-                : "Publish"}
+            {publishing ? "Publishing…" : "Publish"}
           </button>
         </div>
+        {publishing && (
+          <div role="status" className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
+            {s.uploadProgress > 0 && s.uploadProgress < 100 ? "Uploading event media…" : "Publishing event…"}
+            <progress aria-label="Event media upload" value={s.uploadProgress || undefined} max={100} className="mt-2 block h-1 w-full accent-[#3FDCFF]" />
+          </div>
+        )}
         <p className="text-sm text-white/40 mt-1">
           Title, type, date and a location are all you need to publish — the rest
           is optional.
@@ -971,24 +1015,48 @@ export function CreateEventScreen() {
             <Section title="Visibility & audience">
               <Field label="Who can see this">
                 <div className="flex gap-2" role="radiogroup" aria-label="Who can see this">
-                  {(["public", "private", "link_only"] as const).map((v) => (
+                  {EVENT_VISIBILITY_OPTIONS.map((o) => (
                     <button
-                      key={v}
+                      key={o.value}
                       type="button"
                       role="radio"
-                      aria-checked={s.visibility === v}
-                      onClick={() => s.setVisibility(v)}
-                      className={`flex-1 h-9 rounded-xl text-sm font-medium capitalize ${
-                        s.visibility === v
+                      aria-checked={s.visibility === o.value}
+                      aria-label={`${o.label}. ${o.summary}.`}
+                      aria-describedby={
+                        s.visibility === o.value
+                          ? "event-visibility-help"
+                          : undefined
+                      }
+                      onClick={() => s.setVisibility(o.value)}
+                      className={`flex-1 h-9 rounded-xl text-sm font-medium ${
+                        s.visibility === o.value
                           ? "bg-white text-black"
                           : "bg-white/8 text-white/70"
                       }`}
                     >
-                      {v.replace("_", " ")}
+                      {o.label}
                     </button>
                   ))}
                 </div>
+                <p
+                  id="event-visibility-help"
+                  aria-live="polite"
+                  className="mt-2 text-[12px] leading-[17px] text-white/55 rounded-xl bg-white/[0.04] border border-white/[0.06] p-3"
+                >
+                  <strong className="text-white">
+                    {eventVisibilityCopy(s.visibility).label} ·{" "}
+                  </strong>
+                  {eventVisibilityCopy(s.visibility).helper}
+                </p>
               </Field>
+              {/* Private only. A link-only event lets anyone holding the URL in,
+                  so a guest list there would grant a permission everyone
+                  already has while implying a restriction. */}
+              {showsGuestList(s.visibility) ? (
+                <Field label="Guest list">
+                  <GuestsField />
+                </Field>
+              ) : null}
               <Field label="Age restriction">
                 <div className="flex gap-2" role="radiogroup" aria-label="Age restriction">
                   {(["none", "18+", "21+"] as const).map((a) => (
@@ -1757,6 +1825,166 @@ function CoOrganizersField() {
         <p className="text-xs text-white/45">
           Type a username to search. Co-organizers can edit this event and view
           its dashboard.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── GuestsField ─────────────────────────────────────────────────────────────
+// The guest list of a private event. Same search-and-chip shape as
+// CoOrganizersField on purpose — one component shape, one behaviour — but the
+// two grant different things, and the copy under each says which.
+//
+// Staged here and written after publish, because at create time there is no
+// event id to hang an invite on. See the write-back in handleSubmit.
+//
+// ponytail: usernames only. Inviting an email address is a real path in
+// `event-invite-guests`, and `can_view_event` honours it once an account
+// verifies that address — but it needs a claim screen the invitee lands on
+// after signup, which does not exist yet. Shipping the field without that
+// screen would send mail nobody could act on.
+function GuestsField() {
+  const guests = useCreateEventStore((st) => st.guests);
+  const addGuest = useCreateEventStore((st) => st.addGuest);
+  const removeGuest = useCreateEventStore((st) => st.removeGuest);
+  const search = useCreateEventStore((st) => st.guestSearch);
+  const setSearch = useCreateEventStore((st) => st.setGuestSearch);
+  const results = useCreateEventStore((st) => st.guestResults);
+  const setResults = useCreateEventStore((st) => st.setGuestResults);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (search.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const { docs } = await usersApi.searchUsers(search.trim(), 6);
+        setResults(
+          (docs || []).map((u: any) => ({
+            id: u.id,
+            authId: u.authId,
+            username: u.username,
+            avatar: u.avatar,
+            name: u.name ?? "",
+          })),
+        );
+      } catch {
+        setResults([]);
+      }
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [search, setResults]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="relative">
+        <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-[#111] px-3 h-11">
+          <Search size={16} className="text-white/40" />
+          <input
+            className="flex-1 bg-transparent text-sm text-white placeholder:text-white/40 outline-none"
+            value={search}
+            placeholder="Search by username"
+            aria-label="Search for a guest by username"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setResults([]);
+              }}
+              className="text-white/40 hover:text-white/80"
+              aria-label="Clear"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+        </div>
+        {results.length > 0 ? (
+          <div className="absolute left-0 right-0 mt-1 z-10 max-h-56 overflow-auto rounded-2xl border border-white/10 bg-[#0E1320] shadow-xl">
+            {results
+              .filter((u) => !guests.some((g) => g.id === u.id))
+              .map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  onClick={() => {
+                    addGuest({
+                      id: u.id,
+                      authId: u.authId,
+                      username: u.username,
+                      avatar: u.avatar,
+                    });
+                    setSearch("");
+                    setResults([]);
+                  }}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-white/5"
+                >
+                  {u.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={u.avatar}
+                      alt=""
+                      className="h-7 w-7 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="h-7 w-7 rounded-full bg-white/10" />
+                  )}
+                  <span className="text-sm text-white">@{u.username}</span>
+                </button>
+              ))}
+          </div>
+        ) : null}
+      </div>
+      {guests.length > 0 ? (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {guests.map((g) => (
+              <span
+                key={g.id}
+                className="inline-flex items-center gap-1.5 rounded-full bg-white/10 py-1 pl-1 pr-2.5 text-xs font-medium text-white"
+              >
+                {g.avatar ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={g.avatar}
+                    alt=""
+                    className="h-5 w-5 rounded-full object-cover"
+                  />
+                ) : (
+                  <span className="h-5 w-5 rounded-full bg-white/15" />
+                )}
+                @{g.username}
+                <button
+                  type="button"
+                  onClick={() => removeGuest(g.id)}
+                  aria-label={`Remove ${g.username} from the guest list`}
+                  className="text-white/60 hover:text-white"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+          <p className="text-xs text-white/45">
+            {guests.length} {guests.length === 1 ? "guest" : "guests"} · they get
+            a notification when you publish. Guests can see and attend this
+            event. They can&apos;t edit it — that&apos;s a co-organizer.
+          </p>
+        </>
+      ) : (
+        <p className="text-xs text-white/45">
+          Nobody can find a private event, so add the people you want there.
+          Guests can see and attend it; they can&apos;t edit it or see the
+          dashboard.
         </p>
       )}
     </div>

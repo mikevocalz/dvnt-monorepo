@@ -1,8 +1,14 @@
 "use client";
 
+import { useCallback, useEffect } from "react";
 import { create } from "zustand";
 import { Lock, ChevronDown } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import {
+  selectAttendees,
+  useEventAttendeesStore,
+} from "@dvnt/app/lib/stores/event-attendees-store";
+import { hasMoreAttendees } from "@dvnt/app/lib/events/attendee-page";
 
 /**
  * Web port of `../deviant/src/events/ui/GoingAccordion.tsx` — the existing
@@ -39,6 +45,10 @@ export interface GoingAccordionProps {
   restricted?: boolean;
   onAttendeePress?: (a: EventAttendee) => void;
   onRequireAuth?: () => void;
+  /** Enables paging past the 20 the detail RPC ships. Omit -> static list. */
+  eventId?: string;
+  /** Gate: only a public event's list is fetched. */
+  visibility?: unknown;
 }
 
 function Tile({ a, size }: { a: EventAttendee; size: number }) {
@@ -58,12 +68,36 @@ function Tile({ a, size }: { a: EventAttendee; size: number }) {
   );
 }
 
-export function GoingAccordion({ id, attendees, totalCount, isLoggedIn, restricted, onAttendeePress, onRequireAuth }: GoingAccordionProps) {
+export function GoingAccordion({ id, attendees, totalCount, isLoggedIn, restricted, onAttendeePress, onRequireAuth, eventId, visibility }: GoingAccordionProps) {
   const authed = useAuthStore((s) => s.isAuthenticated);
   const loggedIn = (isLoggedIn ?? authed) && !restricted;
   const expanded = useExpandStore((s) => !!s.open[id]);
   const toggle = useExpandStore((s) => s.toggle);
   const preview = attendees.slice(0, 4);
+
+  // Same store the native accordion pages through, so both platforms reach the
+  // same end of the same list. `attendees` is only the first screenful the
+  // detail RPC ships; without an eventId the prop stands alone.
+  const paged = useEventAttendeesStore(selectAttendees(eventId ?? ""));
+  const seed = useEventAttendeesStore((s) => s.seed);
+  const loadMore = useEventAttendeesStore((s) => s.loadMore);
+  useEffect(() => {
+    if (eventId && attendees.length > 0) seed(eventId, attendees);
+  }, [eventId, attendees, seed]);
+  const rows = eventId ? paged.rows : attendees;
+  const canLoadMore =
+    !!eventId &&
+    hasMoreAttendees({ loaded: rows.length, totalCount, lastPageSize: paged.lastPageSize });
+  const onScroll = useCallback(
+    (ev: React.UIEvent<HTMLDivElement>) => {
+      if (!eventId || !canLoadMore || paged.loading) return;
+      const el = ev.currentTarget;
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
+        void loadMore(eventId, visibility);
+      }
+    },
+    [eventId, canLoadMore, paged.loading, loadMore, visibility],
+  );
 
   const container: React.CSSProperties = {
     background: "rgba(138,64,207,0.08)",
@@ -126,16 +160,23 @@ export function GoingAccordion({ id, attendees, totalCount, isLoggedIn, restrict
       </button>
 
       <div
+        onScroll={onScroll}
         style={{
           maxHeight: expanded ? 600 : 0,
           opacity: expanded ? 1 : 0,
-          overflow: "hidden",
+          // Collapsed clips for the animation; expanded scrolls. It used to be
+          // overflow:hidden in both states, so past ~600px of grid the rest of
+          // the list was simply unreachable.
+          overflowY: expanded ? "auto" : "hidden",
+          overflowX: "hidden",
+          // Don't hand the scroll to the page when this list bottoms out.
+          overscrollBehavior: "contain",
           transition: "max-height 280ms cubic-bezier(0.22,1,0.36,1), opacity 280ms",
           marginTop: expanded ? 14 : 0,
         }}
       >
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          {attendees.map((a) => (
+          {rows.map((a) => (
             <button
               key={a.id}
               onClick={() => onAttendeePress?.(a)}
@@ -146,6 +187,11 @@ export function GoingAccordion({ id, attendees, totalCount, isLoggedIn, restrict
             </button>
           ))}
         </div>
+        {paged.loading ? (
+          <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, textAlign: "center", padding: "12px 0", margin: 0 }}>
+            Loading more…
+          </p>
+        ) : null}
       </div>
     </div>
   );

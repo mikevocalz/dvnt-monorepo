@@ -18,15 +18,42 @@ export type AttendeesStatusFilter =
 interface AttendeesState {
   statusFilter: AttendeesStatusFilter
   searchInput: string
+  /**
+   * Comp form. The modal is a child of this screen, so its draft lives here
+   * rather than in a second store — one `closeComp()` clears the whole form.
+   * Server state (tiers, the comp result) is NOT here; that is TanStack Query.
+   */
+  compOpen: boolean
+  compTierId: string | null
+  compRecipients: string
+  compNote: string
   setStatusFilter: (value: AttendeesStatusFilter) => void
   setSearchInput: (value: string) => void
+  openComp: () => void
+  closeComp: () => void
+  setCompTierId: (value: string | null) => void
+  setCompRecipients: (value: string) => void
+  setCompNote: (value: string) => void
   reset: () => void
 }
+
+const EMPTY_COMP = {
+  compOpen: false,
+  compTierId: null,
+  compRecipients: "",
+  compNote: "",
+} as const
 
 export const useAttendeesStore = create<AttendeesState>((set) => ({
   statusFilter: "all",
   searchInput: "",
+  ...EMPTY_COMP,
   setStatusFilter: (statusFilter) => set({ statusFilter }),
   setSearchInput: (searchInput) => set({ searchInput }),
-  reset: () => set({ statusFilter: "all", searchInput: "" }),
+  openComp: () => set({ ...EMPTY_COMP, compOpen: true }),
+  closeComp: () => set(EMPTY_COMP),
+  setCompTierId: (compTierId) => set({ compTierId }),
+  setCompRecipients: (compRecipients) => set({ compRecipients }),
+  setCompNote: (compNote) => set({ compNote }),
+  reset: () => set({ statusFilter: "all", searchInput: "", ...EMPTY_COMP }),
 }))

@@ -3,6 +3,7 @@
  */
 
 import { Platform } from "react-native";
+import { removeEventFromData } from "../events/event-cache";
 import {
   useQuery,
   useMutation,
@@ -292,72 +293,10 @@ export function useCreateEvent() {
 
   return useMutation({
     mutationFn: eventsApiClient.createEvent,
-    onMutate: async (newEventData) => {
-      // Cancel outgoing refetches
-      await queryClient.cancelQueries({ queryKey: eventKeys.all });
-
-      // Snapshot previous data
-      const previousData = queryClient.getQueriesData({
-        queryKey: eventKeys.all,
-      });
-
-      // Optimistically add the new event to all event lists
-      queryClient.setQueriesData<any[]>({ queryKey: eventKeys.all }, (old) => {
-        if (!old || !Array.isArray(old)) return old;
-        const optimisticEvent: any = {
-          id: `temp-${Date.now()}`,
-          title: newEventData.title || "New Event",
-          description: newEventData.description,
-          date: new Date(newEventData.date || Date.now())
-            .getDate()
-            .toString()
-            .padStart(2, "0"),
-          month: new Date(newEventData.date || Date.now())
-            .toLocaleString("en-US", { month: "short" })
-            .toUpperCase(),
-          fullDate: new Date(newEventData.date || Date.now()),
-          time: newEventData.time || "",
-          location: newEventData.location || "TBA",
-          price: newEventData.price || 0,
-          image:
-            newEventData.image ||
-            "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&h=1000&fit=crop",
-          category: newEventData.category || "Event",
-          attendees: [],
-          totalAttendees: 0,
-          likes: 0,
-        };
-        return [optimisticEvent, ...old];
-      });
-
-      return { previousData };
-    },
-    onError: (_err, _variables, context) => {
-      // Rollback on error
-      if (context?.previousData) {
-        context.previousData.forEach(([queryKey, data]) => {
-          queryClient.setQueryData(queryKey, data);
-        });
-      }
-    },
-    onSuccess: (newEvent) => {
-      console.log("[useCreateEvent] Event created successfully:", newEvent?.id);
-
-      // Replace the optimistic event with the real one instead of invalidating
-      // This prevents double events from appearing
-      if (newEvent?.id) {
-        queryClient.setQueriesData<any[]>(
-          { queryKey: eventKeys.all },
-          (old) => {
-            if (!old || !Array.isArray(old)) return old;
-            // Remove temp events and add real event at the beginning
-            const filteredData = old.filter(
-              (e) => !String(e.id).startsWith("temp-"),
-            );
-            return [newEvent, ...filteredData];
-          },
-        );
-      }
+    onSuccess: async () => {
+      // The server owns list membership (private, host, city and category).
+      // Refetch instead of inserting every new event into every cached list.
+      await queryClient.invalidateQueries({ queryKey: eventKeys.all });
     },
   });
 }
@@ -406,8 +345,15 @@ function buildEventCachePatch(updates: any): Record<string, unknown> {
     patch.youtube_video_url = updates.youtubeVideoUrl;
   if (updates.ticketingEnabled !== undefined)
     patch.ticketing_enabled = updates.ticketingEnabled;
-  if (updates.flyerImageUrl !== undefined)
+  if (updates.flyerImageUrl !== undefined) {
     patch.flyer_image_url = updates.flyerImageUrl;
+    patch.flyerImageUrl = updates.flyerImageUrl;
+  }
+  if (updates.videoFlyerUrl !== undefined) {
+    patch.video_flyer_url = updates.videoFlyerUrl;
+    patch.flyerVideoUrl = updates.videoFlyerUrl;
+    patch.videoFlyerUrl = updates.videoFlyerUrl;
+  }
   if (updates.coverImage !== undefined) {
     patch.cover_image_url = updates.coverImage;
     patch.image = updates.coverImage;
@@ -493,6 +439,7 @@ export function useUpdateEvent() {
             youtubeVideoUrl: r.youtube_video_url,
             ticketingEnabled: r.ticketing_enabled,
             flyerImageUrl: r.flyer_image_url,
+            videoFlyerUrl: r.video_flyer_url,
             coverImage: r.cover_image_url,
           }),
         );
@@ -504,49 +451,33 @@ export function useUpdateEvent() {
   });
 }
 
-// Delete event mutation with optimistic update
+// Delete event mutation with server-confirmed cache removal
 export function useDeleteEvent() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: eventsApiClient.deleteEvent,
-    onMutate: async (deletedEventId) => {
-      // Cancel outgoing refetches
-      await queryClient.cancelQueries({ queryKey: eventKeys.all });
-
-      // Snapshot previous data for rollback
-      const previousData = queryClient.getQueriesData({
-        queryKey: eventKeys.all,
+    onSuccess: async (_result, deletedEventId) => {
+      // Only remove the event once the server confirms its transaction.
+      // Cancel in-flight reads first so an old response cannot resurrect it.
+      await queryClient.cancelQueries({
+        predicate: (query) => ["events", "search", "promotions", "boosts", "tickets"].includes(String(query.queryKey[0])) ||
+          removeEventFromData(query.state.data, deletedEventId) !== query.state.data,
       });
-
-      // Optimistically remove from all event lists
-      queryClient.setQueriesData<Event[]>(
-        { queryKey: eventKeys.all },
-        (old) => {
-          if (!old || !Array.isArray(old)) return old;
-          return old.filter((event) => event.id !== deletedEventId);
-        },
-      );
-
-      // Remove from detail cache
-      queryClient.removeQueries({ queryKey: eventKeys.detail(deletedEventId) });
-
-      return { previousData };
-    },
-    onError: (_err, _deletedEventId, context) => {
-      // Rollback on error
-      if (context?.previousData) {
-        context.previousData.forEach(([queryKey, data]) => {
-          queryClient.setQueryData(queryKey, data);
-        });
+      for (const query of queryClient.getQueryCache().getAll()) {
+        const eventContext = query.queryKey[0] === "events";
+        const old = query.state.data;
+        const next = removeEventFromData(old, deletedEventId, eventContext);
+        if (next !== old) queryClient.setQueryData(query.queryKey, next);
       }
-    },
-    onSuccess: (_result, deletedEventId) => {
-      console.log(
-        "[useDeleteEvent] Event deleted successfully:",
-        deletedEventId,
-      );
-      // No need to invalidate - optimistic update already removed the event
+      queryClient.removeQueries({ queryKey: eventKeys.detail(deletedEventId) });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: eventKeys.all }),
+        queryClient.invalidateQueries({ queryKey: ["search"] }),
+        queryClient.invalidateQueries({ queryKey: ["tickets"] }),
+        queryClient.invalidateQueries({ queryKey: ["boosts"] }),
+        queryClient.invalidateQueries({ queryKey: ["promotions"] }),
+      ]);
     },
   });
 }

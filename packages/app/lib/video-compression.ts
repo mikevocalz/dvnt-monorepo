@@ -16,6 +16,7 @@
  */
 
 import * as LegacyFileSystem from "expo-file-system/legacy";
+import { withUploadTimeout } from "@dvnt/app/lib/media/upload-policy";
 
 const FileSystem = LegacyFileSystem;
 
@@ -249,11 +250,13 @@ export async function compressVideo(
     if (COMPRESSOR_AVAILABLE && RNCompressorVideo) {
       console.log("[VideoCompression] Starting native compression...");
 
-      const compressedUri = await RNCompressorVideo.compress(
+      let cancellationId: string | undefined;
+      const compressedUri = await withUploadTimeout(RNCompressorVideo.compress(
         inputUri,
         {
           compressionMethod: "auto",
           minimumFileSizeForCompress: 0,
+          getCancellationId: (id) => { cancellationId = id; },
         },
         (progress: number) => {
           if (onProgress) {
@@ -267,7 +270,7 @@ export async function compressVideo(
             });
           }
         },
-      );
+      ), () => { if (cancellationId) RNCompressorVideo?.cancelCompression(cancellationId); }, 180_000);
 
       // Get compressed file size
       const compressedInfo = await FileSystem.getInfoAsync(compressedUri);
@@ -324,24 +327,10 @@ export async function compressVideo(
     };
   } catch (error) {
     console.error("[VideoCompression] Compression error:", error);
-    // On compression failure, fall back to pass-through rather than blocking upload
-    console.warn("[VideoCompression] Falling back to pass-through");
-    try {
-      const fileInfo = await FileSystem.getInfoAsync(inputUri);
-      const fileSize = (fileInfo as any).size || 0;
-      return {
-        success: true,
-        outputPath: inputUri,
-        originalSize: fileSize,
-        compressedSize: fileSize,
-        compressionRatio: 0,
-      };
-    } catch {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Compression failed",
-      };
-    }
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Video compression failed. Please try again.",
+    };
   }
 }
 

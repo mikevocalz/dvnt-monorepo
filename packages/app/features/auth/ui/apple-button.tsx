@@ -53,6 +53,9 @@ export function AppleButton({ onSuccess, onError }: AppleButtonProps) {
       });
 
       if (result.error) {
+        if (/signup.*disabled|sign.?up.*disabled|AGE_REGISTRATION_REQUIRED/i.test(`${result.error.code} ${result.error.message}`)) {
+          throw new Error("Create your 18+ DVNT account with your date of birth first, then sign in or link Apple.");
+        }
         throw new Error(result.error.message || "Apple sign in failed");
       }
 

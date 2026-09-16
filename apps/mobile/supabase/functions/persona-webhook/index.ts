@@ -38,6 +38,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { parseBirthDate, verificationAgeDecision } from "../_shared/age-policy.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -217,7 +218,8 @@ Deno.serve(async (req) => {
     return new Response("ok", { status: 200 });
   }
 
-  const dob = inquiry?.fields?.birthdate?.value ?? null;
+  const dob = parseBirthDate(inquiry?.fields?.birthdate?.value);
+  const ageDecision = verificationAgeDecision(nextStatus, dob);
   const country = inquiry?.fields?.["country-code"]?.value ?? null;
   const failureMessage =
     inquiry?.["failure-reason"] ?? inquiry?.["decline-reason"] ?? null;
@@ -228,11 +230,11 @@ Deno.serve(async (req) => {
       p_user_id: referenceId,
       p_provider: "persona",
       p_provider_ref: inquiryId,
-      p_status: nextStatus,
+      p_status: ageDecision.status,
       p_doc_country: country,
       p_date_of_birth: dob,
-      p_failure_code: null,
-      p_failure_message: failureMessage,
+      p_failure_code: ageDecision.failureCode,
+      p_failure_message: ageDecision.failureMessage ?? failureMessage,
       p_event_created_at: eventCreatedAt,
     },
   );

@@ -1,3 +1,5 @@
+import { canAccessEvent } from "../_shared/event-access.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 /**
  * Ticket Checkout Edge Function
  *
@@ -161,6 +163,18 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // Verified-only admission for signed-in buyers. A client that skips the
+    // banner is still refused. Guest checkout keeps its own identity rules.
+    if (user_id) {
+      const admission = await resolveVerifiedAdmission(supabase, user_id);
+      if (admission.state === "blocked") {
+        return new Response(
+          JSON.stringify({ error: admissionRefusal(admission).message }),
+          { status: 403, headers: { "Content-Type": "application/json" } },
+        );
+      }
+    }
+
     const buyerKey = user_id || `guest:${trimmedGuestEmail}`;
 
     // Rate-limit ticket holds by buyer. A single buyer starting more
@@ -191,6 +205,12 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Invalid quantity" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!await canAccessEvent(supabase, Number(event_id), user_id)) {
+      return new Response(JSON.stringify({ error: "Event not found or invitation required" }), {
+        status: 404, headers: { "Content-Type": "application/json" },
       });
     }
 

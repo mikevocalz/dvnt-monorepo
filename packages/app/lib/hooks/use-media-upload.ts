@@ -16,6 +16,7 @@
  */
 
 import { useState, useCallback } from "react";
+import { Platform } from "react-native";
 import {
   uploadToServer as serverUpload,
   deleteFromServer,
@@ -126,27 +127,36 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
   );
 
   const uploadMultiple = useCallback(
-    async (files: MediaFile[]): Promise<MediaUploadResult[]> => {
+    async (files: MediaFile[], onStatus?: (message: string) => void): Promise<MediaUploadResult[]> => {
+      const reportStatus = (message: string | null) => {
+        setStatusMessage(message);
+        if (message) onStatus?.(message);
+      };
       setIsUploading(true);
       setProgress(0);
       setCompressionProgress(0);
       setError(null);
       setStatusMessage(null);
 
+      try {
       const results: MediaUploadResult[] = [];
       const videoCount = files.filter((f) => f.type === "video" && f.kind !== "animated_video").length;
       const animatedVideoCount = files.filter((f) => f.kind === "animated_video").length;
       const imageCount = files.length - videoCount - animatedVideoCount;
       const isStory = folder === "stories";
+      const needsThumbnail = isStory || folder === "posts";
       // Story videos add a thumbnail generation/reconciliation step before publish.
-      const videoSteps = isStory ? 4 : 3;
+      const videoSteps = needsThumbnail ? 4 : 3;
       const totalSteps = videoCount * videoSteps + animatedVideoCount * 2 + imageCount;
       let completedSteps = 0;
 
+      const reportBytes = (p: UploadProgress) => {
+        setProgress(Math.round(((completedSteps + p.percentage / 100) / Math.max(totalSteps, 1)) * 100));
+      };
       const updateProgress = (message?: string) => {
         completedSteps++;
         setProgress(Math.round((completedSteps / totalSteps) * 100));
-        if (message) setStatusMessage(message);
+        if (message) reportStatus(message);
       };
 
       for (const file of files) {
@@ -184,7 +194,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           );
 
           // Step 1: Validate video
-          setStatusMessage("Validating video...");
+          reportStatus("Validating video...");
           const validation = await validateVideo(file.uri);
           if (!validation.valid) {
             console.error(
@@ -206,7 +216,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
 
           // Step 2: MANDATORY compression
           setIsCompressing(true);
-          setStatusMessage("Compressing video...");
+          reportStatus(Platform.OS === "web" ? "Preparing video..." : "Compressing video...");
           console.log("[useMediaUpload] Starting MANDATORY video compression");
 
           const compressionResult = await compressVideo(file.uri, (p) => {
@@ -250,8 +260,8 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           let thumbnailPath: string | undefined;
           let thumbnailNeedsCleanup = false;
 
-          if (isStory) {
-            setStatusMessage("Generating video thumbnail...");
+          if (needsThumbnail) {
+            reportStatus("Generating video thumbnail...");
             const localThumbnailSources = [
               compressionResult.outputPath,
               file.uri,
@@ -273,16 +283,18 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
 
             updateProgress(
               thumbnailAssetUri
-                ? "Story thumbnail generated"
-                : "Continuing with story thumbnail fallback",
+                ? "Video preview ready"
+                : "Preparing video preview",
             );
           }
 
           // Step 4: Upload COMPRESSED video (never raw)
-          setStatusMessage("Uploading video...");
+          reportStatus("Uploading video...");
           const uploadResult = await serverUpload(
             compressionResult.outputPath,
             folder,
+            reportBytes,
+            { mimeType: compressionResult.outputPath === file.uri ? file.mimeType || (/\.mov(?:[?#]|$)/i.test(file.uri) ? "video/quicktime" : "video/mp4") : "video/mp4" },
           );
 
           // Clean up compressed file after upload
@@ -300,16 +312,16 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
               error: uploadResult.error,
             });
           } else {
-            if (isStory) {
+            if (needsThumbnail) {
               if (!thumbnailAssetUri) {
-                setStatusMessage("Recovering story thumbnail...");
+                reportStatus("Preparing video preview...");
                 thumbnailAssetUri =
                   (await getVideoThumbnail(uploadResult.url)) || undefined;
                 thumbnailNeedsCleanup = false;
               }
 
               if (thumbnailAssetUri) {
-                setStatusMessage("Uploading story thumbnail...");
+                reportStatus("Uploading video preview...");
                 const thumbnailUploadResult = await serverUpload(
                   thumbnailAssetUri,
                   folder,
@@ -330,7 +342,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
                 await cleanupThumbnail(thumbnailAssetUri);
               }
 
-              if (!thumbnailUrl) {
+              if (!thumbnailUrl && isStory) {
                 if (uploadResult.path) {
                   await deleteFromServer([uploadResult.path]).catch((cleanupErr) =>
                     console.error(
@@ -359,6 +371,8 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
             }
             results.push({
               type: "video",
+              kind: "video",
+              mimeType: Platform.OS === "web" ? file.mimeType || "video/mp4" : "video/mp4",
               url: uploadResult.url,
               path: uploadResult.path,
               thumbnail: thumbnailUrl,
@@ -378,7 +392,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
         } else if (file.kind === "animated_video") {
           // ========== ANIMATED VIDEO (short loop — compress + mark with special mimeType) ==========
           console.log("[useMediaUpload] Animated video — compress + mark as animated");
-          setStatusMessage("Compressing animated video...");
+          reportStatus(Platform.OS === "web" ? "Preparing video..." : "Compressing animated video...");
           setIsCompressing(true);
 
           const compressionResult = await compressVideo(file.uri, (p) => {
@@ -396,8 +410,18 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
             });
             updateProgress("Animated video failed");
           } else {
-            setStatusMessage("Uploading animated video...");
-            const uploadResult = await serverUpload(compressionResult.outputPath, folder);
+            reportStatus("Uploading animated video...");
+            const uploadResult = await serverUpload(compressionResult.outputPath, folder, reportBytes, { mimeType: compressionResult.outputPath === file.uri ? file.mimeType || (/\.mov(?:[?#]|$)/i.test(file.uri) ? "video/quicktime" : "video/mp4") : "video/mp4" });
+            let loopThumbnail: string | undefined;
+            if (uploadResult.success && needsThumbnail) {
+              reportStatus("Preparing video preview...");
+              const preview = await generateVideoThumbnail(compressionResult.outputPath, 0);
+              if (preview.success && preview.uri) {
+                const previewUpload = await serverUpload(preview.uri, folder);
+                if (previewUpload.success) loopThumbnail = previewUpload.url;
+                await cleanupThumbnail(preview.uri);
+              }
+            }
             await cleanupCompressedVideo(compressionResult.outputPath);
 
             if (!uploadResult.success) {
@@ -413,6 +437,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
                 type: "video",
                 kind: "animated_video",
                 url: uploadResult.url,
+                thumbnail: loopThumbnail,
                 mimeType: "video/mp4+animated",
                 success: true,
               });
@@ -422,7 +447,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
         } else if (file.kind === "gif") {
           // ========== GIF PROCESSING (NO compression — would destroy frames) ==========
           console.log("[useMediaUpload] GIF detected — skipping compression");
-          setStatusMessage("Uploading GIF...");
+          reportStatus("Uploading GIF...");
           // ph:// URIs don't carry extension info — copy to a .gif cache file so the
           // upload pipeline uses the correct mime type and extension.
           let gifUri = file.uri;
@@ -435,7 +460,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
               console.warn("[useMediaUpload] GIF ph:// copy failed:", copyErr);
             }
           }
-          const uploadResult = await serverUpload(gifUri, folder);
+          const uploadResult = await serverUpload(gifUri, folder, reportBytes);
           if (!uploadResult.success) {
             results.push({
               type: "image",
@@ -460,7 +485,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           console.log(
             "[useMediaUpload] Live Photo detected — uploading still + paired video",
           );
-          setStatusMessage("Uploading Live Photo...");
+          reportStatus("Uploading Live Photo...");
 
           // Upload the still UNALTERED. Running it through manipulateAsync
           // (resize / re-encode to JPEG) strips the Apple Live Photo
@@ -472,7 +497,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           const stillResult = await serverUpload(file.uri, folder);
 
           // Upload the paired video (no compression — short clip, Live Photo quality must be preserved)
-          setStatusMessage("Uploading Live Photo video...");
+          reportStatus("Uploading Live Photo video...");
           const videoResult = await serverUpload(file.pairedVideoUri, folder);
 
           if (!stillResult.success) {
@@ -498,7 +523,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           updateProgress("Live Photo uploaded");
         } else {
           // ========== IMAGE PROCESSING (compress + upload) ==========
-          setStatusMessage("Optimizing image...");
+          reportStatus("Optimizing image...");
           let imageUri = file.uri;
           try {
             const compressed = await manipulateAsync(
@@ -523,8 +548,8 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           // Never blocks the upload (returns undefined on failure).
           const blurhash = await generateBlurPlaceholder(imageUri);
 
-          setStatusMessage("Uploading image...");
-          const uploadResult = await serverUpload(imageUri, folder, undefined, {
+          reportStatus("Uploading image...");
+          const uploadResult = await serverUpload(imageUri, folder, reportBytes, {
             blurhash,
           });
 
@@ -550,7 +575,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
       }
 
       setIsUploading(false);
-      setStatusMessage(null);
+      reportStatus(null);
 
       const successResults = results.filter((r) => r.success);
       const failedResults = results.filter((r) => !r.success);
@@ -576,6 +601,11 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
       }
 
       return results;
+      } finally {
+        setIsUploading(false);
+        setIsCompressing(false);
+        setStatusMessage(null);
+      }
     },
     [folder, userId, onSuccess, onError],
   );

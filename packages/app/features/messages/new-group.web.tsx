@@ -131,7 +131,9 @@ function UserRows({
   );
 }
 
-export function NewGroupScreen() {
+export function NewGroupScreen({ onClose }: { onClose?: () => void }) {
+  // Route on its own, or the inbox's composer dialog — see new-message.web.tsx.
+  const inDialog = typeof onClose === "function";
   const router = useRouter();
   const currentUser = useAuthStore((s) => s.user);
   const showToast = useUIStore((s) => s.showToast);
@@ -212,15 +214,15 @@ export function NewGroupScreen() {
   const canCreate = selectedUsers.length >= 2;
 
   return (
-    <div className="min-h-[100dvh] bg-[#06070d] text-white">
+    <div className={inDialog ? "bg-[#06070d] text-white" : "min-h-[100dvh] bg-[#06070d] text-white"}>
       {/* Sticky header */}
       <div
         className="sticky top-0 z-20 flex items-center gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 py-3 backdrop-blur"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
         <button
-          onClick={() => router.back()}
-          aria-label="Back"
+          onClick={() => (onClose ? onClose() : router.back())}
+          aria-label={inDialog ? "Close" : "Back"}
           className="shrink-0 active:scale-95"
         >
           <ArrowLeft size={24} color="#fff" />

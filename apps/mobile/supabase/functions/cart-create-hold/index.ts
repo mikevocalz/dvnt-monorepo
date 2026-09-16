@@ -1,3 +1,4 @@
+import { canAccessEvent } from "../_shared/event-access.ts";
 /**
  * cart-create-hold Edge Function
  *
@@ -236,6 +237,10 @@ Deno.serve(async (req: Request) => {
 
     const body = validateBody(parsed);
     if ("error" in body) return errorResponse(body.error, 400);
+
+    if (!await canAccessEvent(supabase, Number(body.eventId), authId)) {
+      return errorResponse("Event not found or invitation required", 404);
+    }
 
     console.log("[cart-create-hold] hold create requested", {
       cartId: body.cartId,

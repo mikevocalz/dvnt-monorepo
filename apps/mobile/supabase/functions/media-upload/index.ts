@@ -302,8 +302,13 @@ Deno.serve(async (req) => {
         return errorResponse("Missing file or kind in form data");
       }
 
-      fileBytes = new Uint8Array(await file.arrayBuffer());
       kind = kindField as MediaKind;
+      const limit = SIZE_LIMITS[kind];
+      if (!limit) return errorResponse("Invalid media kind");
+      if (file.size > limit) {
+        return errorResponse(`File too large for ${kind}: ${(file.size / 1024 / 1024).toFixed(2)}MB exceeds ${(limit / 1024 / 1024).toFixed(1)}MB limit`);
+      }
+      fileBytes = new Uint8Array(await file.arrayBuffer());
       filename = file.name || "upload";
       mime = file.type || "application/octet-stream";
 
@@ -427,6 +432,7 @@ Deno.serve(async (req) => {
           "Content-Length": String(fileBytes.length),
         },
         body: fileBytes as unknown as BodyInit,
+        signal: AbortSignal.timeout(45_000),
       });
 
       if (response.status === 201 || response.status === 200) {

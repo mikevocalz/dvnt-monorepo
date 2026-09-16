@@ -8,8 +8,8 @@
  * Contract — VERIFIED against Didit's webhook docs (docs.didit.me/integration/webhooks):
  *
  *   SIGNATURE — Didit sends every scheme on every delivery. We verify a
- *   BODY-authenticating one (V2 or raw) and only fall back to "simple" when
- *   neither is present — "simple" covers just the envelope, not the decision.
+ *   BODY-authenticating one (V2 or raw). Envelope-only signatures cannot
+ *   authenticate the DOB or user binding and are insufficient for approval.
  *     x-signature-v2     : HMAC-SHA256(secret, canonical JSON = keys sorted,
  *                          compact separators, Unicode preserved). Survives
  *                          proxy re-encoding. Recommended.
@@ -31,6 +31,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { parseBirthDate, verificationAgeDecision } from "../_shared/age-policy.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -153,12 +154,9 @@ Deno.serve(async (req) => {
     return new Response("Stale event", { status: 400 });
   }
 
-  // I4 — signature verify, fail closed. Prefer a BODY-authenticating scheme
-  // (v2 canonical, then raw bytes); "simple" only authenticates the envelope so
-  // it is a last resort when no body-sig header is present.
+  // Require a signature covering the DOB and vendor_data user binding.
   const sigV2 = req.headers.get("x-signature-v2");
   const sigRaw = req.headers.get("x-signature");
-  const sigSimple = req.headers.get("x-signature-simple");
   let okSig = false;
   if (sigV2) {
     okSig = timingSafeEqualHex(
@@ -170,18 +168,6 @@ Deno.serve(async (req) => {
     okSig = timingSafeEqualHex(
       await hmacHex(DIDIT_WEBHOOK_SECRET, rawBody),
       sigRaw.toLowerCase(),
-    );
-  }
-  if (!okSig && !sigV2 && !sigRaw && sigSimple) {
-    const canonical = [
-      String(eventTs),
-      String(ev.session_id ?? ""),
-      String(ev.status ?? ""),
-      String(ev.webhook_type ?? ""),
-    ].join(":");
-    okSig = timingSafeEqualHex(
-      await hmacHex(DIDIT_WEBHOOK_SECRET, canonical),
-      sigSimple.toLowerCase(),
     );
   }
   if (!okSig) {
@@ -211,6 +197,13 @@ Deno.serve(async (req) => {
   // I2 — dedup on Didit's event_id when present; else synthesize per
   // (session, webhook_type, status) so retries of a transition are idempotent
   // while genuine state changes still pass.
+  // Pulled out of the decision before the audit insert, because that insert
+  // records the country and whether a DOB was present rather than the document.
+  const idv =
+    ev.decision?.id_verification ?? ev.decision?.id_verifications?.[0] ?? null;
+  const dob = parseBirthDate(idv?.date_of_birth);
+  const country = idv?.issuing_country ?? null;
+
   const eventId = ev.event_id
     ? `didit:${ev.event_id}`
     : `didit:${sessionId}:${ev.webhook_type ?? "status.updated"}:${eventName}`;
@@ -220,7 +213,27 @@ Deno.serve(async (req) => {
     user_id: referenceId,
     provider_ref: sessionId,
     event_type: eventName,
-    payload: ev,
+    // Allow-list, not the raw body. `ev.decision.id_verification` carries the
+    // full name, date of birth, document number and image URLs. Storing it here
+    // would undo the care taken twenty lines below, where the legal name is
+    // hashed precisely so it never persists — the platform confirms age and
+    // keeps no identity document.
+    //
+    // Nothing reads this column; it exists for dedup and for answering "did a
+    // webhook arrive and what did it say". Country and the presence of a DOB
+    // answer that. The DOB itself already lives on identity_verifications,
+    // where the age check needs it, and nowhere else.
+    payload: {
+      session_id: ev.session_id ?? null,
+      event_id: ev.event_id ?? null,
+      webhook_type: ev.webhook_type ?? null,
+      status: ev.status ?? null,
+      created_at: ev.created_at ?? null,
+      timestamp: ev.timestamp ?? null,
+      decision_present: Boolean(ev.decision),
+      issuing_country: country,
+      date_of_birth_present: Boolean(dob),
+    },
   });
   if (dedupErr && dedupErr.code === "23505") {
     return new Response("ok", { status: 200 }); // already processed
@@ -235,10 +248,6 @@ Deno.serve(async (req) => {
     return new Response("ok", { status: 200 }); // not a state-moving event
   }
 
-  const idv =
-    ev.decision?.id_verification ?? ev.decision?.id_verifications?.[0] ?? null;
-  const dob = idv?.date_of_birth ?? null;
-  const country = idv?.issuing_country ?? null;
 
   // One-account-per-person: the same document (normalized name + DOB) may not
   // verify a second account. Only the sha256 hash is stored — plaintext legal
@@ -253,10 +262,11 @@ Deno.serve(async (req) => {
     .replace(/[^a-z\s]/g, "")
     .replace(/\s+/g, " ");
   let identityHash: string | null = null;
-  let finalStatus = nextStatus;
-  let failureCode: string | null = null;
-  let failureMessage: string | null = null;
-  if (nextStatus === "passed" && dob && docName) {
+  const ageDecision = verificationAgeDecision(nextStatus, dob);
+  let finalStatus = ageDecision.status;
+  let failureCode: string | null = ageDecision.failureCode;
+  let failureMessage: string | null = ageDecision.failureMessage;
+  if (finalStatus === "passed" && dob && docName) {
     const digest = await crypto.subtle.digest(
       "SHA-256",
       new TextEncoder().encode(`${docName}|${dob}`),

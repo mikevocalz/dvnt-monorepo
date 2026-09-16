@@ -13,6 +13,10 @@
  * hashtag results (Hash header + grid), Users + Posts result sections, plus the
  * empty / loading states.
  *
+ * Grid columns come from `useResponsiveGrid` — the same hook and the same
+ * minimum-tile / ceiling numbers native uses, resolved through its `.web`
+ * variant so no react-native import is needed to read the viewport.
+ *
  * Law 3: raw semantic HTML + Tailwind only (NativeWind interop off). No
  * <View>/<Text>. Lists/grids = TanStack Virtual (never FlatList/FlashList).
  * Avatars are rounded squares (rounded-xl). Routing via Solito:
@@ -42,6 +46,7 @@ import {
 } from "lucide-react";
 import { WebAvatar } from "@dvnt/app/components/ui/web-avatar";
 import { useSearchStore } from "@dvnt/app/lib/stores/search-store";
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import {
   useDiscoverData,
   useSearchResults,
@@ -54,6 +59,17 @@ import {
 import type { Post } from "@dvnt/app/lib/types";
 
 const CYAN = "#3FDCFF";
+
+// Grid metrics, mirroring the native screen's constants so both platforms
+// resolve the same column count at the same width.
+/** Smallest explore tile worth drawing. */
+const MIN_TILE = 110;
+/** `gap-1.5` in pixels — the grid's own gutter. */
+const GRID_GAP = 6;
+/** `max-w-2xl px-4` content column: 16px each side. */
+const CONTENT_PADDING = 32;
+/** Smallest "Discover New Profiles" card. */
+const MIN_DISCOVER_TILE = 120;
 
 const CDN_URL =
   process.env.NEXT_PUBLIC_BUNNY_CDN_URL ||
@@ -186,10 +202,27 @@ function PostTile({ post, big = false }: { post: Post; big?: boolean }) {
  * uniform squares for scannability.
  */
 function PostGrid({ posts, mosaic = false }: { posts: Post[]; mosaic?: boolean }) {
+  // Native's explore wall, same hook and same numbers: columns fall out of how
+  // many readable tiles fit, with the SAME designed ceilings (4 portrait, 5
+  // landscape) past which the wall stops reading as individual posts. The old
+  // `grid-cols-3 md:grid-cols-4` ladder stranded a landscape column.
+  const { columns } = useResponsiveGrid({
+    minCellWidth: MIN_TILE,
+    gap: GRID_GAP,
+    horizontalPadding: CONTENT_PADDING,
+    maxColumnsPortrait: 4,
+    maxColumnsLandscape: 5,
+    maxColumns: 5,
+  });
   return (
     <div
-      className="grid grid-cols-3 gap-1.5 md:grid-cols-4"
-      style={mosaic ? { gridAutoFlow: "dense", gridAutoRows: "minmax(0, auto)" } : undefined}
+      className="grid gap-1.5"
+      style={{
+        gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+        ...(mosaic
+          ? { gridAutoFlow: "dense" as const, gridAutoRows: "minmax(0, auto)" }
+          : null),
+      }}
     >
       {posts.map((post, i) => {
         const eyecatcher =
@@ -207,6 +240,15 @@ function PostGrid({ posts, mosaic = false }: { posts: Post[]; mosaic?: boolean }
 // ── Discover: horizontal "Discover New Profiles" user cards ─────────
 function DiscoverProfiles({ users }: { users: DiscoverDTO["users"] }) {
   const router = useRouter();
+  // The rail's cards are sized off the viewport, not frozen at 140px, so a
+  // phone shows three whole cards and a wide window shows wider ones — same
+  // call the native screen makes for the same rail.
+  const { cellWidth: cardWidth } = useResponsiveGrid({
+    minCellWidth: MIN_DISCOVER_TILE,
+    gap: 4,
+    horizontalPadding: 8,
+    maxColumns: 8,
+  });
   return (
     <section className="py-4">
       <div className="mb-4 flex items-center gap-2.5 px-1">
@@ -229,7 +271,8 @@ function DiscoverProfiles({ users }: { users: DiscoverDTO["users"] }) {
             <button
               key={user.id}
               onClick={() => router.push(`/profile/${user.username}`)}
-              className="flex w-[140px] shrink-0 flex-col items-center rounded-2xl border border-white/[0.06] bg-[rgba(30,30,30,0.8)] py-4 transition hover:border-cyan-400/30 hover:bg-[rgba(40,40,46,0.9)] active:scale-[0.98]"
+              style={{ width: Math.round(cardWidth) }}
+              className="flex shrink-0 flex-col items-center rounded-2xl border border-white/[0.06] bg-[rgba(30,30,30,0.8)] py-4 transition hover:border-cyan-400/30 hover:bg-[rgba(40,40,46,0.9)] active:scale-[0.98]"
             >
               <WebAvatar avatar={user.avatar} username={user.username} size={64} />
               <div className="mt-2 flex w-full items-center justify-center gap-1 px-2">

@@ -16,6 +16,8 @@ import {
   useUpdatePrivacySettings,
   type PrivacySettings,
 } from "@dvnt/app/lib/hooks/use-user-settings";
+import { CityVisibilityCard } from "@dvnt/app/features/settings/ui/CityVisibilityCard";
+import { CITY_VISIBILITY_COPY } from "@dvnt/app/lib/stores/city-discovery-visibility";
 
 export default function PrivacyScreen() {
   const router = useRouter();
@@ -139,6 +141,11 @@ export default function PrivacyScreen() {
               />
             </View>
           </View>
+
+          <Text className="mb-2 px-1 text-sm font-semibold uppercase text-muted-foreground">
+            {CITY_VISIBILITY_COPY.sectionTitle}
+          </Text>
+          <CityVisibilityCard />
 
           <View className="mt-2 rounded-xl border border-primary/20 bg-primary/5 p-4">
             <Text className="text-sm text-muted-foreground">

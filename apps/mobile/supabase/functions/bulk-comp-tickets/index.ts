@@ -12,17 +12,23 @@
  * Owner or accepted admin only. Issues free tickets (status=active,
  * purchase_amount_cents=0) to every resolved recipient. Skips silently
  * if a recipient already has an active/transfer_pending ticket on
- * this event (no duplicates). Enforces tier capacity — if the comp
+ * this tier (no duplicates). Enforces tier capacity — if the comp
  * batch would exceed quantity_total, returns 409 with a "would_exceed"
  * indicator and issues NOTHING.
  *
  * Sends push + activity feed entry to every issued recipient. The
  * actor is the host (so the recipient sees who comped them).
  *
+ * An email with no DVNT account gets a GUEST comp instead: a $0 ticket on
+ * the same tier, keyed by email, emailed as the same no-login claim link the
+ * RSVP guest path sends. Issuance and delivery are reported separately —
+ * a ticket that exists but whose email bounced is never called delivered.
+ *
  * Rate-limited 3 per 5 minutes per (sender, event).
  *
  * Returns:
- *   { ok: true, data: { issued, skipped: [{recipient, reason}] } }
+ *   { ok: true, data: { issued, guest_issued, skipped: [{recipient, reason}],
+ *     delivery: [{recipient, status, error?}] } }
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -31,10 +37,21 @@ import {
   corsHeaders,
   optionsResponse,
 } from "../_shared/verify-session.ts";
+import {
+  normalizeCompRecipient as normRecipient,
+  dedupeCompAccounts,
+  routeCompRecipient,
+  summarizeCompDelivery,
+} from "../_shared/comp-recipients.ts";
+import {
+  sendResendEmail,
+  ticketConfirmation,
+} from "../_shared/send-resend-email.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live").replace(/\/$/, "");
 
 const MAX_BATCH = 100;
 
@@ -51,27 +68,6 @@ function err(message: string, status: number, req: Request, extras?: any) {
     status,
     req,
   );
-}
-
-function normRecipient(raw: string): {
-  kind: "email" | "username";
-  value: string;
-} | null {
-  const s = (raw || "").trim().replace(/^@/, "");
-  if (!s) return null;
-  if (s.includes("@") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) {
-    return { kind: "email", value: s.toLowerCase() };
-  }
-  if (/^[A-Za-z0-9._-]{2,40}$/.test(s)) {
-    return { kind: "username", value: s.toLowerCase() };
-  }
-  return null;
-}
-
-function rndHex(n: number): string {
-  const bytes = new Uint8Array(n);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 Deno.serve(async (req: Request) => {
@@ -121,7 +117,9 @@ Deno.serve(async (req: Request) => {
     // Permission: owner or accepted admin only.
     const { data: event } = await supabase
       .from("events")
-      .select("id, host_id, title, status")
+      // date/location/flyer feed the guest ticket email — the same fields the
+      // RSVP guest email already carries, nothing more, private event or not.
+      .select("id, host_id, title, status, date, location, flyer_image_url, dominant_color")
       .eq("id", eventId)
       .maybeSingle();
     if (!event) return err("Event not found", 404, req);
@@ -184,7 +182,7 @@ Deno.serve(async (req: Request) => {
     const seen = new Set<string>();
     const parsed: { raw: string; norm: ReturnType<typeof normRecipient> }[] = [];
     for (const r of recipientsRaw) {
-      const norm = normRecipient(String(r));
+      const norm = normRecipient(r);
       if (!norm) {
         parsed.push({ raw: String(r), norm: null });
         continue;
@@ -198,7 +196,8 @@ Deno.serve(async (req: Request) => {
     const skipped: { recipient: string; reason: string }[] = [];
     const validParsed = parsed.filter((p) => {
       if (!p.norm) {
-        skipped.push({ recipient: p.raw, reason: "Invalid username or email" });
+        const route = routeCompRecipient(p.raw, null);
+        if (route.route === "skip") skipped.push({ recipient: p.raw, reason: route.reason });
         return false;
       }
       return true;
@@ -222,10 +221,11 @@ Deno.serve(async (req: Request) => {
     >();
 
     if (usernames.length > 0) {
-      const { data: rows } = await supabase
+      const { data: rows, error: lookupError } = await supabase
         .from("users")
         .select("id, username, auth_id")
         .in("username", usernames);
+      if (lookupError) throw new Error("Could not resolve recipients. Try again.");
       for (const r of rows || []) {
         userByUsername.set(String((r as any).username).toLowerCase(), {
           authId: (r as any).auth_id,
@@ -234,18 +234,21 @@ Deno.serve(async (req: Request) => {
       }
     }
     if (emails.length > 0) {
-      const { data: rows } = await supabase
+      const { data: rows, error: lookupError } = await supabase
         .from("user")
         .select("id, email")
         .in("email", emails);
+      if (lookupError) throw new Error("Could not resolve recipients. Try again.");
       for (const r of rows || []) {
         // also enrich int id
         const authId2 = (r as any).id;
-        const { data: appUser } = await supabase
+        const { data: appUser, error: appUserError } = await supabase
           .from("users")
           .select("id")
           .eq("auth_id", authId2)
           .maybeSingle();
+        if (appUserError) throw new Error("Could not resolve recipient account");
+        if (!appUser) continue;
         userByEmail.set(String((r as any).email).toLowerCase(), {
           authId: authId2,
           intId: appUser?.id ?? null,
@@ -260,99 +263,110 @@ Deno.serve(async (req: Request) => {
       intId: number | null;
     };
     const resolved: Resolved[] = [];
+    const guests: { raw: string; email: string }[] = [];
+    const guestSeen = new Set<string>();
     for (const p of validParsed) {
       const n = p.norm!;
       const u =
         n.kind === "username"
           ? userByUsername.get(n.value)
           : userByEmail.get(n.value);
-      if (!u) {
-        skipped.push({ recipient: p.raw, reason: "User not found" });
+      const route = routeCompRecipient(p.raw, u ?? null);
+      if (route.route === "skip") {
+        skipped.push({ recipient: p.raw, reason: route.reason });
         continue;
       }
-      resolved.push({ raw: p.raw, authId: u.authId, intId: u.intId });
+      if (route.route === "guest") {
+        if (guestSeen.has(route.email)) {
+          skipped.push({ recipient: p.raw, reason: "Same email already included in this batch" });
+          continue;
+        }
+        guestSeen.add(route.email);
+        guests.push({ raw: p.raw, email: route.email });
+        continue;
+      }
+      resolved.push({ raw: p.raw, authId: u!.authId, intId: u!.intId });
     }
 
-    if (resolved.length === 0) {
+    if (resolved.length === 0 && guests.length === 0) {
       return json(
-        { ok: true, data: { issued: 0, skipped } },
+        { ok: true, data: { issued: 0, guest_issued: 0, skipped, delivery: [] } },
         200,
         req,
       );
     }
 
-    // Capacity check (ticket_types.quantity_total can be null = unlimited).
-    if (tier.quantity_total != null) {
-      const remaining =
-        Number(tier.quantity_total) - Number(tier.quantity_sold || 0);
-      if (resolved.length > remaining) {
-        return err(
-          `Tier capacity would be exceeded. ${remaining} remaining, batch is ${resolved.length}.`,
-          409,
-          req,
-          { would_exceed: true, remaining },
-        );
+    // Dedupe identities after resolution: @name and name@email may be one user.
+    const accounts = dedupeCompAccounts(resolved);
+    skipped.push(...accounts.skipped);
+    let inserted: { id: string; user_id: string }[] = [];
+    let toIssue: Resolved[] = [];
+    if (accounts.unique.length > 0) {
+      const { data: issuance, error: issueError } = await supabase.rpc("issue_comp_tickets_atomic", {
+        p_event_id: eventId,
+        p_tier_id: tierId,
+        p_actor_id: authId,
+        p_user_ids: accounts.unique.map((recipient) => recipient.authId),
+      });
+      if (issueError) {
+        console.error("[bulk-comp-tickets] atomic issuance failed:", issueError);
+        return err("Could not issue tickets. Try again.", 500, req);
       }
-    }
-
-    // Skip duplicates: recipients who already hold an active ticket on this event.
-    const recipAuthIds = resolved.map((r) => r.authId);
-    const { data: existing } = await supabase
-      .from("tickets")
-      .select("user_id")
-      .eq("event_id", eventId)
-      .in("user_id", recipAuthIds)
-      .in("status", ["active", "transfer_pending", "scanned"]);
-    const alreadyHas = new Set(
-      (existing || []).map((r: any) => String(r.user_id)),
-    );
-
-    const toIssue = resolved.filter((r) => {
-      if (alreadyHas.has(r.authId)) {
-        skipped.push({
-          recipient: r.raw,
-          reason: "Already holds a ticket to this event",
+      if (!issuance?.ok) {
+        return err(issuance?.error || "Could not issue tickets", 409, req, {
+          would_exceed: issuance?.would_exceed === true,
+          remaining: issuance?.remaining,
         });
-        return false;
       }
-      return true;
-    });
+      inserted = (issuance.tickets || []) as { id: string; user_id: string }[];
+      const issuedIds = new Set(inserted.map((ticket) => ticket.user_id));
+      toIssue = accounts.unique.filter((recipient) => issuedIds.has(recipient.authId));
+      for (const recipient of accounts.unique) {
+        if (!issuedIds.has(recipient.authId)) skipped.push({
+          recipient: recipient.raw, reason: "Already holds a ticket in this tier",
+        });
+      }
+    }
 
-    if (toIssue.length === 0) {
-      return json(
-        { ok: true, data: { issued: 0, skipped } },
-        200,
-        req,
+    // ── Guest comps: $0 ticket by email, no account required ──────────────
+    // ponytail: members and guests are two serialized RPC calls, not one
+    // transaction. Both take the same event lock so capacity can never be
+    // oversold, but a guest half that hits the cap leaves the member half
+    // issued. Upgrade path is one RPC taking both arrays.
+    let guestIssued: { guest_email: string; guest_lookup_token: string }[] = [];
+    if (guests.length > 0) {
+      const { data: guestIssuance, error: guestError } = await supabase.rpc(
+        "issue_guest_comp_tickets_atomic",
+        {
+          p_event_id: eventId,
+          p_tier_id: tierId,
+          p_actor_id: authId,
+          p_guest_emails: guests.map((g) => g.email),
+        },
       );
-    }
-
-    // Bulk insert
-    const rows = toIssue.map((r) => ({
-      event_id: eventId,
-      ticket_type_id: tierId,
-      user_id: r.authId,
-      status: "active",
-      qr_token: rndHex(32),
-      purchase_amount_cents: 0,
-      category: tier.category || "admission",
-    }));
-    const { data: inserted, error: insErr } = await supabase
-      .from("tickets")
-      .insert(rows)
-      .select("id, user_id");
-    if (insErr) {
-      console.error("[bulk-comp-tickets] insert error:", insErr);
-      return err("Could not issue tickets", 500, req);
-    }
-
-    // Bump quantity_sold to keep tier capacity tracking honest.
-    if (tier.quantity_total != null) {
-      await supabase
-        .from("ticket_types")
-        .update({
-          quantity_sold: Number(tier.quantity_sold || 0) + (inserted?.length || 0),
-        })
-        .eq("id", tierId);
+      if (guestError) {
+        console.error("[bulk-comp-tickets] guest issuance failed:", guestError);
+        return err("Could not issue guest tickets. Try again.", 500, req);
+      }
+      if (!guestIssuance?.ok) {
+        // Capacity is a per-recipient outcome here, not a batch failure: the
+        // member half may already be issued and the host needs both numbers.
+        const reason = guestIssuance?.would_exceed === true
+          ? `Tier capacity reached — ${guestIssuance?.remaining ?? 0} left, no guest tickets issued`
+          : guestIssuance?.error || "Could not issue guest ticket";
+        for (const g of guests) skipped.push({ recipient: g.raw, reason });
+      } else {
+        guestIssued = (guestIssuance.tickets || []) as {
+          guest_email: string;
+          guest_lookup_token: string;
+        }[];
+        const mintedEmails = new Set(guestIssued.map((t) => t.guest_email));
+        for (const g of guests) {
+          if (!mintedEmails.has(g.email)) skipped.push({
+            recipient: g.raw, reason: "Already holds a ticket in this tier",
+          });
+        }
+      }
     }
 
     // In-app notifications
@@ -414,12 +428,82 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Email every guest ticket. A send that throws leaves the ticket alone:
+    // it exists, it just hasn't reached anyone yet, and the host is told so.
+    const rawByEmail = new Map(guests.map((g) => [g.email, g.raw]));
+    const guestNote = (body.note || "").toString().trim().slice(0, 240);
+    const dateLine = event.date
+      ? new Date(event.date).toLocaleString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : null;
+    const sends = await Promise.all(
+      guestIssued.map(async (ticket) => {
+        const recipient = rawByEmail.get(ticket.guest_email) || ticket.guest_email;
+        try {
+          const messageId = await sendResendEmail({
+            to: ticket.guest_email,
+            ...ticketConfirmation({
+              eventTitle: event.title || "your event",
+              flyerUrl: event.flyer_image_url ?? null,
+              dominantColor: event.dominant_color ?? null,
+              dateLine,
+              location: event.location ?? null,
+              toEmail: ticket.guest_email,
+              guestNudge: true,
+              greeting:
+                guestNote ||
+                `The host comped you a ticket to ${event.title || "their event"}. Open it below — the QR at the door is inside, no account needed.`,
+              tickets: [
+                {
+                  tier: tier.name,
+                  lookupUrl: `${SITE_URL}/public/tickets/guest/${ticket.guest_lookup_token}`,
+                },
+              ],
+            }),
+          });
+          // sendResendEmail returns null when RESEND_API_KEY is unset — nothing
+          // was sent, so that is a delivery failure, not a quiet success.
+          if (!messageId) {
+            return { recipient, delivered: false, error: "Email provider not configured" };
+          }
+          return { recipient, delivered: true, email: ticket.guest_email };
+        } catch (sendErr: any) {
+          console.error("[bulk-comp-tickets] guest email failed:", sendErr);
+          return { recipient, delivered: false, error: "Email delivery failed" };
+        }
+      }),
+    );
+    const deliveredEmails = sends
+      .filter((s) => s.delivered)
+      .map((s) => (s as { email: string }).email);
+    if (deliveredEmails.length > 0) {
+      // ponytail: one timestamp, no failure reason column and no retry queue.
+      // Upgrade path is a Resend webhook writing bounce/complaint state here.
+      const { error: stampError } = await supabase
+        .from("tickets")
+        .update({ guest_email_sent_at: new Date().toISOString() })
+        .eq("event_id", eventId)
+        .eq("ticket_type_id", tierId)
+        .in("guest_email", deliveredEmails);
+      if (stampError) {
+        console.warn("[bulk-comp-tickets] delivery stamp failed:", stampError);
+      }
+    }
+    const delivery = summarizeCompDelivery(sends);
+
     return json(
       {
         ok: true,
         data: {
           issued: inserted?.length || 0,
+          guest_issued: guestIssued.length,
           skipped,
+          delivery: delivery.results,
           tier: tier.name,
         },
       },

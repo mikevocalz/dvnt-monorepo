@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
-import { slugify } from "@dvnt/app/lib/slug";
+import {
+  isDiscoverableEvent,
+  resolveEventBySlug,
+} from "@dvnt/app/lib/events/event-discovery";
 
 /**
  * Shared server-side helpers for the per-event share moment (WS-7):
@@ -64,12 +67,14 @@ export type ShareEvent = {
   event_tz: string | null;
   is_online: boolean | null;
   updated_at: string | null;
+  created_at: string | null;
 };
 
 const EVENT_SELECT =
   "id,title,description,start_date,end_date,location,location_name," +
   "visibility,status,image,cover_image_url,flyer_image_url,event_tz," +
-  "is_online,updated_at";
+  // created_at is the slug-collision tie-breaker in resolveEventBySlug.
+  "is_online,updated_at,created_at";
 
 async function restGet(query: string): Promise<ShareEvent[] | null> {
   try {
@@ -78,7 +83,8 @@ async function restGet(query: string): Promise<ShareEvent[] | null> {
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
       },
-      next: { revalidate: 300 },
+      // Deleted events must stop appearing on freshly opened share links.
+      cache: "no-store",
     });
     if (!res.ok) return null;
     const rows = (await res.json()) as ShareEvent[];
@@ -97,8 +103,10 @@ export async function fetchShareEvent(id: string): Promise<ShareEvent | null> {
 
 /**
  * Resolve a title-derived slug to an event — the same mechanism the client
- * detail screen uses (`matchBySlug` over the events list; events have no
- * slug column). Recent-first so a colliding slug resolves like the UI does.
+ * detail screen uses (events have no populated slug column). Cancelled and
+ * other non-discoverable rows are dropped before matching, and a remaining
+ * collision resolves to the most recently created event; both rules live in
+ * `resolveEventBySlug` so the web route and the client screen agree.
  */
 export async function fetchShareEventBySlug(
   slug: string,
@@ -107,21 +115,22 @@ export async function fetchShareEventBySlug(
     `select=${EVENT_SELECT}&order=start_date.desc.nullslast&limit=500`,
   );
   if (!rows) return null;
-  return rows.find((e) => slugify(e.title) === slug) ?? null;
+  return resolveEventBySlug(rows, slug) ?? null;
 }
 
 // ---------------------------------------------------------------------------
-// Visibility gate — private events and drafts must not leak into unfurls.
-// (`link_only`/legacy `unlisted` events are shared BY link, so they render;
-// `suspended` is a moderation state and stays generic too.)
+// Visibility gate — private events, drafts and cancelled events must not leak
+// into unfurls. (`link_only`/legacy `unlisted` events are shared BY link, so
+// they render.) Status is delegated to the shared discovery gate, which also
+// covers `draft`, `suspended`, `deleted` and `cancelled`; visibility is the
+// second axis and stays here.
 
 export function isShareableEvent(
   e: ShareEvent | null,
 ): e is ShareEvent {
   if (!e) return false;
   if (e.visibility === "private") return false;
-  if (e.status === "draft" || e.status === "suspended") return false;
-  return true;
+  return isDiscoverableEvent(e);
 }
 
 // ---------------------------------------------------------------------------

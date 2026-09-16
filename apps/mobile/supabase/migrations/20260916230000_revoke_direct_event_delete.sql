@@ -1,0 +1,22 @@
+-- APPLY ONLY AFTER the updated clients and the delete-event edge function are
+-- released, and after the minimum supported app version no longer deletes an
+-- event with a direct PostgREST DELETE.
+--
+-- Split out of 20260916123000_event_lifecycle_integrity.sql deliberately. That
+-- migration was applied on 16 September 2026 without this line, because
+-- `authenticated` still held DELETE on public.events at the time and the
+-- deployed client used it. Revoking ahead of the client release would have
+-- turned every host's Delete button into a failure, which is the class of
+-- outage this whole branch exists to stop causing.
+--
+-- delete_event_guarded() already exists and is granted to service_role, so the
+-- new edge function works today. This revoke only closes the old path once
+-- nothing depends on it.
+--
+-- Check before applying:
+--   select grantee, privilege_type from information_schema.role_table_grants
+--   where table_schema = 'public' and table_name = 'events'
+--     and privilege_type = 'DELETE';
+-- Expect service_role only after this runs.
+
+REVOKE DELETE ON TABLE public.events FROM PUBLIC, anon, authenticated;

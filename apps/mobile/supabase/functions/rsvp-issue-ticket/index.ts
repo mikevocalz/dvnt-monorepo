@@ -1,3 +1,4 @@
+import { canAccessEvent } from "../_shared/event-access.ts";
 /**
  * Edge Function: rsvp-issue-ticket
  * Issues a free-RSVP ticket for an event. Derives the caller's auth_id
@@ -91,6 +92,10 @@ Deno.serve(async (req) => {
         "eventId is required and must be a positive integer",
         400,
       );
+    }
+
+    if (!await canAccessEvent(supabase, eventIdInt, authUserId)) {
+      return errorResponse(req, "not_found", "Event not found or invitation required", 404);
     }
 
     // CRITICAL: refuse to issue a free RSVP ticket when the event has

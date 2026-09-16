@@ -1,3 +1,4 @@
+import { canAccessEvent } from "../_shared/event-access.ts";
 /**
  * Create Payment Intent Edge Function
  *
@@ -183,6 +184,10 @@ Deno.serve(async (req: Request) => {
 
     if (!event_id || !ticket_type_id) {
       return json({ error: "Missing required fields" }, 400);
+    }
+
+    if (!await canAccessEvent(supabase, Number(event_id), user_id)) {
+      return json({ error: "Event not found or invitation required" }, 404);
     }
 
     // Promoter attribution code (WS-4) — from a tracked ?ref= link.

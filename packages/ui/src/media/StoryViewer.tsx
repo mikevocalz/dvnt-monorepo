@@ -13,6 +13,7 @@ export interface StoryViewerProps {
   currentIndex?: number;
   onAllStoriesEnd?: () => void;
   onStoryChange?: (index: number) => void;
+  onProfilePress?: () => void;
   width?: number | string;
   height?: number | string;
   loop?: boolean;

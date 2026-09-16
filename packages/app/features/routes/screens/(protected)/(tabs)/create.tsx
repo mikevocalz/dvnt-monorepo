@@ -26,7 +26,6 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Motion } from "@legendapp/motion";
-import { Progress } from "@dvnt/app/components/ui/progress";
 import {
   LocationAutocompleteInstagram,
   type LocationData,
@@ -37,15 +36,14 @@ import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { useCreateHeaderStore } from "@dvnt/app/lib/stores/create-header-store";
 import { useTabBarTopInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
-import { useCreatePost } from "@dvnt/app/lib/hooks/use-posts";
-import { postTagsApi } from "@dvnt/app/lib/api/post-tags";
+import { usePublishPost } from "@dvnt/app/lib/hooks/use-publish-post";
+import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
+import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
 import {
   TagPeopleSheet,
   type TagCandidate,
 } from "@dvnt/app/features/tags";
-import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
-import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { UserMentionAutocomplete } from "@dvnt/app/components/ui/user-mention-autocomplete";
 import { Switch } from "react-native";
@@ -55,9 +53,8 @@ import Logo from "@dvnt/app/components/logo";
 import { TextPostSlidesComposer } from "@dvnt/app/features/post";
 import {
   TEXT_POST_MAX_LENGTH,
-  serializeTextSlidesForMutation,
 } from "@dvnt/app/lib/posts/text-post";
-import { AppTrace, getErrorMessage } from "@dvnt/app/lib/diagnostics/app-trace";
+import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -109,22 +106,13 @@ function CreateScreenContent() {
   const [showTagSheet, setShowTagSheet] = useState(false);
   const [selectedTagUsers, setSelectedTagUsers] = useState<TagCandidate[]>([]);
   const { pickFromLibrary } = useMediaPicker();
-  const { mutate: createPost, isPending: isCreating } = useCreatePost();
+  const publishPost = usePublishPost();
   const isSubmittingRef = useRef(false);
   const [isSubmitLocked, setIsSubmitLocked] = useState(false);
-  const { user } = useAuthStore();
   const showToast = useUIStore((s) => s.showToast);
   const { colors } = useColorScheme();
   const consumeCameraResult = useCameraResultStore((s) => s.consumeResult);
-  const {
-    uploadMultiple,
-    isUploading,
-    isCompressing,
-    progress: uploadProgress,
-    compressionProgress,
-    statusMessage,
-    cancelUpload,
-  } = useMediaUpload({ folder: "posts" });
+
 
   const canAddMore = selectedMedia.length < MAX_PHOTOS;
   const isTextPost = postKind === "text";
@@ -300,315 +288,26 @@ function CreateScreenContent() {
   );
 
   const handlePost = useCallback(async () => {
-    const {
-      selectedMedia: currentSelectedMedia,
-      caption: currentCaption,
-      textSlides: currentTextSlides,
-      location: currentLocation,
-      isNSFW: currentIsNSFW,
-      tags: currentTags,
-      placedTags: currentPlacedTags,
-      postKind: currentPostKind,
-      textTheme: currentTextTheme,
-    } = useCreatePostStore.getState();
-    const isTextSubmission = currentPostKind === "text";
-    const trimmedCaption = currentCaption.trim();
-    const normalizedTextSlides = currentTextSlides.map((slide) =>
-      slide.content.trim(),
-    );
-    const startedAt = Date.now();
-
-    console.log("[Create] handlePost called!");
-    console.log("[Create] isUploading:", isUploading);
-    console.log("[Create] isCreating:", isCreating);
-    console.log("[Create] postKind:", currentPostKind);
-    console.log("[Create] selectedMedia:", currentSelectedMedia.length);
-    console.log("[Create] caption length:", trimmedCaption.length);
-
-    // Prevent double submission — ref check is synchronous (survives rapid taps)
-    if (isSubmittingRef.current || isSubmitLocked || isCreating || isUploading) {
-      console.log("[Create] Already submitting, ignoring");
-      AppTrace.warn("POST", "submit_blocked_inflight", {
-        postKind: currentPostKind,
-        isCreating,
-        isUploading,
-        submitLocked: isSubmitLocked,
-      });
-      return;
-    }
-    AppTrace.trace("POST", "submit_started", {
-      postKind: currentPostKind,
-      mediaCount: currentSelectedMedia.length,
-      captionLength: trimmedCaption.length,
-      tagCount: currentTags.length,
-      hasLocation: Boolean(currentLocation),
-      isNSFW: isTextSubmission ? false : currentIsNSFW,
-    });
+    if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     setIsSubmitLocked(true);
-
-    if (!isTextSubmission && currentSelectedMedia.length === 0) {
-      AppTrace.warn("POST", "submit_blocked_no_media", {
-        postKind: currentPostKind,
-      });
-      showToast("error", "No Photos", "Please select at least one photo.");
-      isSubmittingRef.current = false;
-      setIsSubmitLocked(false);
-      return;
-    }
-
-    if (
-      isTextSubmission &&
-      normalizedTextSlides.some((slide) => slide.length === 0)
-    ) {
-      AppTrace.warn("POST", "submit_blocked_empty_slide", {
-        slideCount: normalizedTextSlides.length,
-      });
-      showToast(
-        "error",
-        "Empty Slide",
-        "Each slide needs text before you can post.",
-      );
-      isSubmittingRef.current = false;
-      setIsSubmitLocked(false);
-      return;
-    }
-
-    if (
-      isTextSubmission &&
-      normalizedTextSlides.some((slide) => slide.length > TEXT_POST_MAX_LENGTH)
-    ) {
-      AppTrace.warn("POST", "submit_blocked_text_too_long", {
-        slideCount: normalizedTextSlides.length,
-      });
-      showToast(
-        "error",
-        "Too Long",
-        `Text posts are limited to ${TEXT_POST_MAX_LENGTH} characters.`,
-      );
-      isSubmittingRef.current = false;
-      setIsSubmitLocked(false);
-      return;
-    }
-
     try {
-      console.log("[Create] Starting post creation...");
-      console.log(
-        "[Create] Selected media count:",
-        currentSelectedMedia.length,
-      );
-
-      // Upload media to Bunny.net CDN
-      // Use editedUri if user explicitly edited, otherwise use original uri
-      const mediaFiles = currentSelectedMedia.map((m) => {
-        const uploadUri = m.editorOpened && m.editedUri ? m.editedUri : m.uri;
-        if (__DEV__) {
-          console.log("[MediaPipeline] UPLOAD:", {
-            id: m.id,
-            originalUri: m.uri.substring(0, 60),
-            editedUri: m.editedUri?.substring(0, 60) ?? null,
-            uploadUri: uploadUri.substring(0, 60),
-            editorOpened: !!m.editorOpened,
-            usingEdited: !!(m.editorOpened && m.editedUri),
-          });
-        }
-        return {
-          uri: uploadUri,
-          type: m.type as "image" | "video",
-          kind: m.kind,
-          mimeType: m.mimeType,
-          pairedVideoUri: m.pairedVideoUri,
-        };
-      });
-
-      let postMedia: Array<{
-        type: string;
-        url: string;
-        thumbnail?: string;
-        mimeType?: string;
-        livePhotoVideoUrl?: string;
-      }> = [];
-
-      if (!isTextSubmission) {
-        console.log("[Create] Uploading media to CDN...");
-        AppTrace.trace("POST", "media_upload_started", {
-          mediaCount: mediaFiles.length,
-          hasVideo: mediaFiles.some((item) => item.type === "video"),
-        });
-        let uploadResults;
-        try {
-          uploadResults = await uploadMultiple(mediaFiles);
-          console.log(
-            "[Create] Upload results:",
-            JSON.stringify(uploadResults),
-          );
-        } catch (uploadError) {
-          console.error("[Create] Upload threw error:", uploadError);
-          AppTrace.error("POST", "media_upload_failed", {
-            elapsedMs: Date.now() - startedAt,
-            error: getErrorMessage(uploadError),
-          });
-          showToast(
-            "error",
-            "Upload Failed",
-            "Could not upload media. Please try again.",
-          );
-          isSubmittingRef.current = false;
-          setIsSubmitLocked(false);
-          return;
-        }
-
-        const failedUploads = uploadResults.filter((r) => !r.success);
-        if (failedUploads.length > 0) {
-          console.error("[Create] Upload failures:", failedUploads);
-          AppTrace.error("POST", "media_upload_partial_failure", {
-            elapsedMs: Date.now() - startedAt,
-            failedUploads: failedUploads.length,
-          });
-          showToast(
-            "error",
-            "Upload Error",
-            `${failedUploads.length} file(s) failed to upload. Please try again.`,
-          );
-          isSubmittingRef.current = false;
-          setIsSubmitLocked(false);
-          return;
-        }
-
-        postMedia = uploadResults.map((r) => ({
-          // DB posts_media.type only accepts "image" | "video".
-          // Special kinds are distinguished via mimeType or livePhotoVideoUrl on read:
-          //   gif           → type="image", mimeType="image/gif"
-          //   livePhoto     → type="image", livePhotoVideoUrl=<url>
-          //   animated_video → type="video", mimeType="video/mp4+animated"
-          type: (r.kind === "animated_video" || r.kind === "video") ? "video" : "image",
-          url: r.url,
-          mimeType:
-            r.kind === "gif" ? "image/gif"
-            : r.kind === "animated_video" ? "video/mp4+animated"
-            : (r.mimeType ?? undefined),
-          ...(r.thumbnail && { thumbnail: r.thumbnail }),
-          ...(r.livePhotoVideoUrl && { livePhotoVideoUrl: r.livePhotoVideoUrl }),
-        }));
-      }
-
-      console.log("[Create] Creating post with CDN URLs:", postMedia);
-      console.log("[Create] Author ID:", user?.id, "Username:", user?.username);
-
-      const tagsString =
-        currentTags.length > 0
-          ? "\n" + currentTags.map((t) => `#${t}`).join(" ")
-          : "";
-      const fullContent = currentCaption + tagsString;
-      const textSlidesWithTags = isTextSubmission
-        ? normalizedTextSlides.map((slide, index) =>
-            index === normalizedTextSlides.length - 1
-              ? `${slide}${tagsString}`.trim()
-              : slide,
-          )
-        : [];
-
-      createPost(
-        {
-          kind: isTextSubmission ? "text" : "media",
-          textTheme: currentTextTheme,
-          content: isTextSubmission ? textSlidesWithTags[0] : fullContent,
-          slides: isTextSubmission
-            ? serializeTextSlidesForMutation(
-                textSlidesWithTags.map((content, order) => ({
-                  id: `draft-${order}`,
-                  order,
-                  content,
-                })),
-              )
-            : undefined,
-          location: currentLocation,
-          media: postMedia,
-          isNSFW: isTextSubmission ? false : currentIsNSFW,
-        },
-        {
-          onSuccess: async (newPost) => {
-            console.log("[Create] Post created successfully:", newPost?.id);
-            AppTrace.trace("POST", "submit_success", {
-              elapsedMs: Date.now() - startedAt,
-              postKind: currentPostKind,
-              mediaCount: postMedia.length,
-              hasLocation: Boolean(currentLocation),
-            });
-
-            // Save placed tags to backend (fire-and-forget)
-            if (
-              !isTextSubmission &&
-              newPost?.id &&
-              currentPlacedTags.length > 0
-            ) {
-              try {
-                await postTagsApi.addTags(
-                  String(newPost.id),
-                  currentPlacedTags.map((t) => ({
-                    userId: t.userId,
-                    x: t.x,
-                    y: t.y,
-                    mediaIndex: t.mediaIndex,
-                  })),
-                );
-                console.log("[Create] Saved", placedTags.length, "tags");
-              } catch (tagErr) {
-                console.error("[Create] Failed to save tags:", tagErr);
-              }
-            }
-
-            // No success toast — the user lands back on the feed where
-            // their new post is already at the top (optimistic insert).
-            reset();
-            setSelectedTagUsers([]);
-            router.back();
-          },
-          onError: (error: any) => {
-            console.error("[Create] Failed to create post:", error);
-            console.error(
-              "[Create] Error details:",
-              JSON.stringify(error, null, 2),
-            );
-            AppTrace.error("POST", "submit_failed", {
-              elapsedMs: Date.now() - startedAt,
-              error: getErrorMessage(error),
-              postKind: currentPostKind,
-            });
-            isSubmittingRef.current = false;
-            const errorMessage =
-              error?.message ||
-              error?.error?.message ||
-              "Failed to create post. Please try again.";
-            showToast("error", "Error", errorMessage);
-            setIsSubmitLocked(false);
-          },
-        },
-      );
+      // An event-linked draft can sit here for days. Its visibility is checked
+      // again against the server now, not trusted from when it was written.
+      await assertFirstPostPublishable();
+      publishPost(useCreatePostStore.getState());
+      useFirstPostOfferStore.getState().clearPending();
+      reset();
+      setSelectedTagUsers([]);
+      setTagInput("");
+      router.replace("/(protected)/(tabs)");
     } catch (error) {
-      console.error("[Create] Unexpected error:", error);
-      AppTrace.error("POST", "submit_failed_unexpected", {
-        elapsedMs: Date.now() - startedAt,
-        error: getErrorMessage(error),
-        postKind: currentPostKind,
-      });
+      showToast("error", "Could not share", error instanceof Error ? error.message : "Please try again.");
+    } finally {
       isSubmittingRef.current = false;
       setIsSubmitLocked(false);
-      showToast("error", "Error", "Something went wrong. Please try again.");
     }
-  }, [
-    isSubmitLocked,
-    isUploading,
-    isCreating,
-    showToast,
-    uploadMultiple,
-    user?.id,
-    user?.username,
-    createPost,
-    reset,
-    router,
-    setSelectedTagUsers,
-  ]);
+  }, [publishPost, reset, router, showToast]);
 
   const handleClose = () => {
     if (selectedMedia.length > 0 || caption.length > 0 || hasTextDraft) {
@@ -639,15 +338,15 @@ function CreateScreenContent() {
   const tabBarTopInset = useTabBarTopInset();
   const registerHeader = useCreateHeaderStore((s) => s.register);
   const resetHeader = useCreateHeaderStore((s) => s.reset);
-  const canPost = isValid && !isCreating && !isUploading && !isSubmitLocked;
+  const canPost = isValid && !isSubmitLocked;
   useEffect(() => {
     registerHeader({
       canPost,
-      postLabel: isCreating || isSubmitLocked ? "Posting..." : "Post",
+      postLabel: isSubmitLocked ? "Posting..." : "Post",
       onClose: handleClose,
       onPost: handlePost,
     });
-  }, [canPost, isCreating, isSubmitLocked, handleClose, handlePost, registerHeader]);
+  }, [canPost, isSubmitLocked, handleClose, handlePost, registerHeader]);
   useEffect(() => () => resetHeader(), [resetHeader]);
 
   return (
@@ -1230,61 +929,7 @@ function CreateScreenContent() {
         }}
       />
 
-      {/* Progress Overlay */}
-      {isUploading && (
-        <View className="absolute inset-0 bg-black/80 items-center justify-center z-50">
-          <Motion.View
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: "spring", damping: 20, stiffness: 300 }}
-            className="bg-card rounded-3xl p-8 items-center gap-4 min-w-[280px]"
-          >
-            {/* Show compression progress when compressing */}
-            {isCompressing && (
-              <>
-                <View className="w-48 mb-2">
-                  <Progress value={compressionProgress} />
-                </View>
-                <Text className="text-lg font-semibold text-foreground">
-                  Compressing Video...
-                </Text>
-                <Text className="text-sm text-muted-foreground text-center">
-                  {compressionProgress}% complete
-                </Text>
-              </>
-            )}
-            {/* Show upload progress when not compressing */}
-            {!isCompressing && (
-              <>
-                <View className="w-48 mb-2">
-                  <Progress value={uploadProgress} />
-                </View>
-                <Text className="text-lg font-semibold text-foreground">
-                  {statusMessage || "Posting..."}
-                </Text>
-                <Text className="text-sm text-muted-foreground text-center">
-                  {uploadProgress}% complete
-                </Text>
-              </>
-            )}
-            <Pressable
-              onPress={cancelUpload}
-              hitSlop={12}
-              style={{
-                marginTop: 8,
-                paddingHorizontal: 24,
-                paddingVertical: 10,
-                borderRadius: 20,
-                backgroundColor: "rgba(255,255,255,0.08)",
-              }}
-            >
-              <Text style={{ color: "#999", fontSize: 14, fontWeight: "600" }}>
-                Cancel
-              </Text>
-            </Pressable>
-          </Motion.View>
-        </View>
-      )}
+
       </View>
     </View>
   );

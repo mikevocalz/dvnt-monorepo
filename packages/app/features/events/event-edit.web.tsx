@@ -25,10 +25,18 @@ import {
   ImagePlus,
   Plus,
   X,
+  Search,
+  UserPlus,
 } from "lucide-react";
 import { FormField, StickySaveBar, useDirtyGuard } from "@dvnt/ui";
 import { useEvent, useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import {
+  EVENT_VISIBILITY_OPTIONS,
+  eventVisibilityCopy,
+  showsGuestList,
+} from "@dvnt/app/lib/events/event-visibility-copy";
+import { useEventGuestStore } from "@dvnt/app/lib/stores/event-guest-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
   ticketTypesApi,
@@ -91,6 +99,11 @@ function Section({
 export function EventEditScreen() {
   const params = useParams();
   const router = useRouter();
+  const screenMounted = useRef(true);
+  useEffect(() => {
+    screenMounted.current = true;
+    return () => { screenMounted.current = false; };
+  }, []);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const id = String((params as any)?.id ?? "");
 
@@ -226,13 +239,16 @@ export function EventEditScreen() {
   useDirtyGuard(isDirty);
 
   // ── Save (mirrors native handleSave: event row + tier CRUD diff) ──
+  const saveLock = useRef(false);
   const handleSave = async () => {
-    if (!id || updateEventMutation.isPending || uploadPct != null) return;
+    if (!id || saveLock.current || updateEventMutation.isPending || uploadPct != null) return;
     if (!s.title.trim()) {
       showToast("error", "Error", "Title is required");
       return;
     }
 
+    saveLock.current = true;
+    setUploadPct(0);
     try {
       const allImages = s.eventImages;
 
@@ -250,28 +266,18 @@ export function EventEditScreen() {
       // could end up describing different flyers.
       const uploadIfLocal = async (
         url: string | null | undefined,
-        timeoutMs = 30000,
       ) => {
         if (!url) return undefined;
         if (!/^(blob:|data:|file:)/.test(url)) return url;
-        const up = await withTimeout(
-          uploadToServer(url, "events", (p) => setUploadPct(p.percentage)),
-          timeoutMs,
-          "upload-flyer",
-        );
+        const up = await uploadToServer(url, "events", (p) => setUploadPct(p.percentage));
         if (!up.success || !up.url) {
           throw new Error(up.error || "Couldn't upload the flyer. Re-select it and try again.");
         }
         return up.url;
       };
 
-      // A flyer VIDEO (up to 60s / 50MB) routinely needs more than 30s on
-      // cellular — the still-image timeout aborted every video save with
-      // "stalled at: upload-flyer (30s)".
-      const primaryUrl = await uploadIfLocal(
-        s.flyerImage,
-        s.flyerMediaType === "video" ? 180000 : 30000,
-      );
+      // Upload owns real progress, cancellation and a bounded network timeout.
+      const primaryUrl = await uploadIfLocal(s.flyerImage);
       const posterUrl = await uploadIfLocal(s.flyerFallbackImage);
 
       // Video ALWAYS takes the hero; the still is its poster and the fallback
@@ -489,11 +495,12 @@ export function EventEditScreen() {
       // and this screen is reachable by direct URL and from the host menu — so
       // saving could land you on about:blank, having just been told the save
       // worked. The event you edited is the only correct destination.
-      router.push(`/feed/events/${id}`);
+      if (screenMounted.current) router.push(`/feed/events/${id}`);
     } catch (error: any) {
       console.error("[EditEvent] Save error:", error);
       showToast("error", "Error", error?.message || "Failed to save changes");
     } finally {
+      saveLock.current = false;
       setUploadPct(null);
     }
   };
@@ -595,15 +602,17 @@ export function EventEditScreen() {
           disabled={updateEventMutation.isPending || uploadPct != null}
           className="text-[16px] font-semibold text-[#3FDCFF] disabled:text-white/40"
         >
-          {uploadPct != null && uploadPct < 100
-            ? `Uploading ${uploadPct}%`
-            : updateEventMutation.isPending
-              ? "Saving…"
-              : "Done"}
+          {uploadPct != null || updateEventMutation.isPending ? "Saving…" : "Done"}
         </button>
       </div>
 
       <div className="mx-auto w-full max-w-2xl px-4 pb-32 pt-4 flex flex-col gap-4">
+        {uploadPct != null && (
+          <div role="status" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
+            Uploading event media…
+            <progress aria-label="Event media upload" value={uploadPct || undefined} max={100} className="mt-2 block h-1 w-full accent-[#3FDCFF]" />
+          </div>
+        )}
         {/* Cover / images — rounded square */}
         <Section title="Event Images">
           <div className="flex flex-wrap gap-3">
@@ -816,50 +825,50 @@ export function EventEditScreen() {
             </div>
           </FormField>
           <FormField label="Visibility">
-            <div className="flex gap-2">
-              {(["public", "private", "link_only"] as const).map((v) => {
-                const label =
-                  v === "link_only"
-                    ? "Link Only"
-                    : v === "public"
-                      ? "Public"
-                      : "Private";
+            <div className="flex gap-2" role="radiogroup" aria-label="Visibility">
+              {EVENT_VISIBILITY_OPTIONS.map((o) => {
+                const selected = s.visibility === o.value;
                 return (
                   <button
-                    key={v}
-                    onClick={() => s.setVisibility(v)}
+                    key={o.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    aria-label={`${o.label}. ${o.summary}.`}
+                    aria-describedby={
+                      selected ? "event-visibility-help" : undefined
+                    }
+                    onClick={() => s.setVisibility(o.value)}
                     className={`flex-1 h-9 rounded-xl text-sm font-medium ${
-                      s.visibility === v
+                      selected
                         ? "bg-[#3FDCFF] text-black"
                         : "bg-white/8 text-white/70"
                     }`}
                   >
-                    {label}
+                    {o.label}
                   </button>
                 );
               })}
             </div>
-            <p className="mt-2 text-[12px] leading-[17px] text-white/55 rounded-xl bg-white/[0.04] border border-white/[0.06] p-3">
-              {s.visibility === "public" ? (
-                <>
-                  <strong className="text-white">Public · </strong>Appears in the
-                  Home feed, For You, and Search. Anyone can see and buy a ticket.
-                </>
-              ) : s.visibility === "link_only" ? (
-                <>
-                  <strong className="text-white">Link Only · </strong>Hidden from
-                  the public feed and Search. Anyone with the share link can see
-                  and buy.
-                </>
-              ) : (
-                <>
-                  <strong className="text-white">Private · </strong>Hidden from
-                  the public feed and from people without the link. Invite-only
-                  guest lists.
-                </>
-              )}
+            <p
+              id="event-visibility-help"
+              aria-live="polite"
+              className="mt-2 text-[12px] leading-[17px] text-white/55 rounded-xl bg-white/[0.04] border border-white/[0.06] p-3"
+            >
+              <strong className="text-white">
+                {eventVisibilityCopy(s.visibility).label} ·{" "}
+              </strong>
+              {eventVisibilityCopy(s.visibility).helper}
             </p>
           </FormField>
+          {/* Private only. A link-only event lets anyone holding the URL in, so
+              a guest list there would grant a permission everyone already has
+              while implying a restriction. */}
+          {showsGuestList(s.visibility) ? (
+            <FormField label="Guest list">
+              <GuestListField eventId={Number(id)} />
+            </FormField>
+          ) : null}
         </Section>
 
         {/* Ticketing toggle */}
@@ -1350,4 +1359,170 @@ function toLocalInput(iso?: string | null): string {
 function fromLocalInput(v: string): string {
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+}
+
+// ── GuestListField ──────────────────────────────────────────────────────────
+// The guest list of an event that already exists, so every change writes
+// straight through — no Save needed, and the Save bar stays about the event's
+// own fields. Create stages guests instead and writes them after publish.
+//
+// A guest is not a co-organizer: a co-organizer manages the event, a guest can
+// see it and attend it. Both are host-authorized server-side.
+//
+// ponytail: usernames only. `event-invite-guests` accepts an email and
+// `can_view_event` honours it once an account verifies that address, but the
+// invitee needs a claim screen to land on after signup and that does not exist
+// yet. Shipping the field without it would send mail nobody could act on.
+function GuestListField({ eventId }: { eventId: number }) {
+  const guests = useEventGuestStore((st) => st.guests);
+  const loading = useEventGuestStore((st) => st.loading);
+  const pending = useEventGuestStore((st) => st.pending);
+  const error = useEventGuestStore((st) => st.error);
+  const search = useEventGuestStore((st) => st.search);
+  const setSearch = useEventGuestStore((st) => st.setSearch);
+  const results = useEventGuestStore((st) => st.results);
+  const setResults = useEventGuestStore((st) => st.setResults);
+  const searchUsers = useEventGuestStore((st) => st.searchUsers);
+  const load = useEventGuestStore((st) => st.load);
+  const invite = useEventGuestStore((st) => st.invite);
+  const revoke = useEventGuestStore((st) => st.revoke);
+  const reset = useEventGuestStore((st) => st.reset);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!Number.isFinite(eventId) || eventId <= 0) return;
+    load(eventId);
+    return () => reset();
+  }, [eventId, load, reset]);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (search.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(() => searchUsers(search), 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [search, searchUsers, setResults]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="relative">
+        <div className="flex items-center gap-2 rounded-xl border border-white/12 bg-white/[0.05] px-3 h-11">
+          <Search size={16} className="text-white/40 shrink-0" />
+          <input
+            className="flex-1 bg-transparent text-[15px] text-white placeholder:text-white/40 outline-none"
+            value={search}
+            placeholder="Search by username"
+            aria-label="Search for a guest by username"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setResults([]);
+              }}
+              className="text-white/40 hover:text-white/80"
+              aria-label="Clear"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+        </div>
+        {results.length > 0 ? (
+          <div className="absolute left-0 right-0 mt-1 z-10 max-h-56 overflow-auto rounded-xl border border-white/12 bg-[#0E1320] shadow-xl">
+            {results
+              .filter((u) => !guests.some((g) => g.username === u.username))
+              .map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  disabled={pending === u.username}
+                  onClick={() => invite(u.username)}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-white/5 disabled:opacity-50"
+                >
+                  {u.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={u.avatar}
+                      alt=""
+                      className="h-7 w-7 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="h-7 w-7 rounded-full bg-white/10" />
+                  )}
+                  <span className="flex-1 text-sm text-white">@{u.username}</span>
+                  {pending === u.username ? (
+                    <span className="text-xs text-white/50">Adding…</span>
+                  ) : (
+                    <UserPlus size={14} className="text-[#3FDCFF]" />
+                  )}
+                </button>
+              ))}
+          </div>
+        ) : null}
+      </div>
+
+      {error ? (
+        <p role="alert" className="text-xs text-[#FF8A8A]">
+          {error}
+        </p>
+      ) : null}
+
+      {loading ? (
+        <p className="text-xs text-white/45">Loading the guest list…</p>
+      ) : guests.length > 0 ? (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {guests.map((g) => {
+              const label = g.username ? `@${g.username}` : (g.email ?? "Guest");
+              return (
+                <span
+                  key={g.id}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white/10 py-1 pl-1 pr-2.5 text-xs font-medium text-white"
+                >
+                  {g.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={g.avatar}
+                      alt=""
+                      className="h-5 w-5 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="h-5 w-5 rounded-full bg-white/15" />
+                  )}
+                  {label}
+                  <button
+                    type="button"
+                    disabled={pending === (g.username ?? g.email)}
+                    onClick={() => revoke(g)}
+                    aria-label={`Remove ${label} from the guest list`}
+                    className="text-white/60 hover:text-white disabled:opacity-40"
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+          <p className="text-xs text-white/45">
+            {guests.length} {guests.length === 1 ? "guest" : "guests"} · added and
+            removed right away. Guests can see and attend this event. They
+            can&apos;t edit it — that&apos;s a co-organizer.
+          </p>
+        </>
+      ) : (
+        <p className="text-xs text-white/45">
+          Nobody can find a private event, so add the people you want there.
+          Guests can see and attend it; they can&apos;t edit it or see the
+          dashboard.
+        </p>
+      )}
+    </div>
+  );
 }

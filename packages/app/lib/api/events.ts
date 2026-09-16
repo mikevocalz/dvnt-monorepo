@@ -2,6 +2,7 @@ import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import {
   requireBetterAuthToken,
+  getAuthIdFromStore,
   getCurrentUserId as getIntUserIdAsync,
 } from "../auth/identity";
 import {
@@ -10,6 +11,7 @@ import {
   getCurrentUserAuthId,
 } from "./auth-helper";
 import { invokeEdge } from "./invoke-edge";
+import { filterDiscoverableEvents } from "../events/event-discovery";
 import type { TicketTypeCategory } from "./ticket-types";
 import type { TierType, TierVisibility } from "../tickets/pricing";
 import type { DraftAddon } from "../../features/events/create/addon-form";
@@ -286,7 +288,11 @@ export const eventsApi = {
       if (error) throw error;
 
       // RPC returns JSON array — map to client shape
-      const mapped = ((data as any[]) || []).map((event: any) => {
+      // Discovery lists never carry a cancelled event. The RPCs filter it
+      // server-side too (20260916190000_exclude_cancelled_events_from_discovery)
+      // — this is the client-side half, so the list is correct on a build that
+      // reaches a database where that migration has not run yet.
+      const mapped = filterDiscoverableEvents((data as any[]) || []).map((event: any) => {
         const dateParts = formatEventDate(event.start_date);
         const avatars = Array.isArray(event.attendee_avatars)
           ? event.attendee_avatars
@@ -377,7 +383,11 @@ export const eventsApi = {
         return this.getEvents(limit);
       }
 
-      const mapped = ((data as any[]) || []).map((event: any) => {
+      // Discovery lists never carry a cancelled event. The RPCs filter it
+      // server-side too (20260916190000_exclude_cancelled_events_from_discovery)
+      // — this is the client-side half, so the list is correct on a build that
+      // reaches a database where that migration has not run yet.
+      const mapped = filterDiscoverableEvents((data as any[]) || []).map((event: any) => {
         const dateParts = formatEventDate(event.start_date);
         const avatars = Array.isArray(event.attendee_avatars)
           ? event.attendee_avatars
@@ -471,6 +481,9 @@ export const eventsApi = {
       // Filtered in JS, not with .neq(): `status <> 'cancelled'` is NULL for
       // the older rows whose status is NULL, and PostgREST would drop those
       // too — hiding most of the list.
+      // Deliberately the cancelled check alone, NOT filterDiscoverableEvents:
+      // this is an ownership surface, and a host must still see their own
+      // suspended or draft event here.
       const visible = (data || []).filter(
         (event: any) => event.status !== "cancelled",
       );
@@ -517,11 +530,11 @@ export const eventsApi = {
         .limit(limit);
       if (error) throw error;
 
-      // Same cancelled-event filter as getMyEvents — a cancelled event must
-      // not advertise itself on the host's public profile either. JS-side for
-      // the same NULL-status reason.
-      const mapped = (data || [])
-        .filter((event: any) => event.status !== "cancelled")
+      // Public discovery surface (the host's profile), so it takes the full
+      // discovery gate, not just the cancelled check: a cancelled, suspended or
+      // draft event must not advertise itself on a profile anyone can open.
+      // JS-side for the same NULL-status reason as getMyEvents.
+      const mapped = filterDiscoverableEvents(data || [])
         .map((event: any) => {
         const dateParts = formatEventDate(event[DB.events.startDate]);
         return {
@@ -560,10 +573,16 @@ export const eventsApi = {
 
       if (error) throw error;
 
+      // Same discovery gate as every other list — a cancelled event does not
+      // reappear once its date passes. JS-side, not `.neq()`: `status <>
+      // 'cancelled'` is NULL for the legacy rows whose status is NULL and
+      // PostgREST would drop those too.
+      const rows = filterDiscoverableEvents(data || []);
+
       // Fetch host data separately
       const hostIds = [
         ...new Set(
-          (data || []).map((e: any) => e[DB.events.hostId]).filter(Boolean),
+          rows.map((e: any) => e[DB.events.hostId]).filter(Boolean),
         ),
       ];
       let hostsMap = new Map();
@@ -581,7 +600,7 @@ export const eventsApi = {
         );
       }
 
-      const mapped = (data || []).map((event: any) => {
+      const mapped = rows.map((event: any) => {
         const host = hostsMap.get(event[DB.events.hostId]);
         const dateParts = formatEventDate(event[DB.events.startDate]);
         return {
@@ -603,6 +622,37 @@ export const eventsApi = {
       return enrichEventsWithTierPrices(mapped);
     } catch (error) {
       console.error("[Events] getPastEvents error:", error);
+      return [];
+    }
+  },
+
+  /**
+   * One page of the "Who's going" list, past the 20 the detail RPC ships.
+   *
+   * Same gate as `getEventById`, for the same reason: the avatar row is the one
+   * place a member's ticket turns into something other members can see, so a
+   * private or link-only event is never asked about. `normalizeVisibility` folds
+   * "unlisted" into link_only here too, and an unknown/absent visibility fails
+   * to "public" only because that is what the row itself resolves to — callers
+   * pass the visibility straight off the fetched event, never a guess.
+   * `can_view_event` re-checks it server-side, so a caller that skipped this
+   * still gets [].
+   */
+  async getEventAttendeePage(
+    id: string,
+    opts: { visibility: unknown; limit: number; offset: number },
+  ): Promise<Record<string, unknown>[]> {
+    if (normalizeVisibility(opts.visibility) !== "public") return [];
+    try {
+      const { data, error } = await supabase.rpc("get_event_attendee_page", {
+        p_event_id: parseInt(id),
+        p_limit: opts.limit,
+        p_offset: opts.offset,
+      });
+      if (error) throw error;
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.error("[Events] getEventAttendeePage error:", error);
       return [];
     }
   },
@@ -641,10 +691,22 @@ export const eventsApi = {
       // Attendee avatars aren't in the detail RPC (it returns only the count) —
       // fetch the same top-5 "going" avatars the feed uses so "Who's going"
       // shows faces, not an empty row.
-      const { data: avatarsJson } = await supabase.rpc(
-        "get_event_attendee_avatars",
-        { p_event_id: parseInt(id) },
-      );
+      //
+      // Public events only. The avatar row is the one place a member's ticket
+      // turns into something other members can see, so for a private or
+      // link-only event it is not fetched at all: holding a ticket to an event
+      // nobody can list must not become a discovery signal, and a link that
+      // leaks must not also hand over the guest list. `get_event_attendee_avatars`
+      // takes no viewer id, so the client is where this has to be decided.
+      // Routed through normalizeVisibility so "unlisted" collapses to
+      // link_only here exactly as it does everywhere else, rather than slipping
+      // through an === "private" check that never heard of it.
+      const canListAttendees = normalizeVisibility(ev.visibility) === "public";
+      const { data: avatarsJson } = canListAttendees
+        ? await supabase.rpc("get_event_attendee_avatars", {
+            p_event_id: parseInt(id),
+          })
+        : { data: null };
       const attendeeAvatars = Array.isArray(avatarsJson) ? avatarsJson : [];
 
       return {
@@ -852,9 +914,13 @@ export const eventsApi = {
 
       const result = await invokeEdge<{
         ok: boolean;
-        data?: { event?: Record<string, any> };
+        data?: { event?: Record<string, any>; replayed?: boolean };
         error?: { code: string; message: string };
-      }>("create-event", { ...eventData, eventTz });
+      }>("create-event", {
+        ...eventData,
+        eventTz,
+        expectedAuthId: eventData.expectedAuthId || getAuthIdFromStore(),
+      });
 
       if (result.error) throw new Error(result.error.message);
       if (!result.data?.ok || !result.data.data?.event) {
@@ -880,6 +946,7 @@ export const eventsApi = {
       // Return formatted event data for optimistic updates
       const dateParts = formatEventDate(data[DB.events.startDate]);
       return {
+        replayed: result.data.data.replayed === true,
         id: String(data[DB.events.id]),
         title: data[DB.events.title],
         description: data[DB.events.description],
@@ -1118,168 +1185,23 @@ export const eventsApi = {
 
   /**
    * Delete event (only host can delete)
-   * Also cleans up associated images from Bunny CDN
+   * Server verifies ownership and all commerce history in one transaction.
+   * Media is retained: duplicated events may still reference the same files.
    */
   async deleteEvent(eventId: string) {
-    try {
-      console.log("[Events] deleteEvent:", eventId);
-
-      const eventIdInt = parseInt(eventId);
-
-      // Resolve all possible user identifiers for ownership check
-      const authId = await getCurrentUserAuthId();
-      const userIdInt = getCurrentUserIdSync();
-      const userId = getCurrentUserId();
-      console.log(
-        "[Events] deleteEvent identifiers — authId:",
-        authId,
-        "userIdInt:",
-        userIdInt,
-        "userId:",
-        userId,
-      );
-
-      if (!authId && !userIdInt && !userId)
-        throw new Error("Not authenticated");
-
-      // 1. Fetch event by ID only (no host filter — we verify ownership in code)
-      const { data: event, error: fetchError } = await supabase
-        .from(DB.events.table)
-        .select("*")
-        .eq(DB.events.id, eventIdInt)
-        .maybeSingle();
-
-      if (fetchError || !event) {
-        console.error("[Events] deleteEvent fetch error:", fetchError);
-        throw new Error("Event not found");
-      }
-
-      // Verify ownership: host_id could be authId (string) or userId (integer as string)
-      const hostId = String(event[DB.events.hostId]);
-      console.log("[Events] deleteEvent hostId from DB:", hostId);
-      const isOwner =
-        (authId && hostId === authId) ||
-        (userId && hostId === userId) ||
-        (userIdInt != null && hostId === String(userIdInt));
-
-      if (!isOwner) {
-        console.error(
-          "[Events] deleteEvent ownership mismatch — hostId:",
-          hostId,
-          "authId:",
-          authId,
-          "userId:",
-          userId,
-        );
-        throw new Error("You are not the host of this event");
-      }
-
-      // WS-9 guard — FIRST step of the cascade: never hard-delete an
-      // event that has taken money that wasn't returned. Any
-      // non-terminal ticket carrying a Stripe payment intent means the
-      // host must Cancel instead (event-cancel edge fn refunds every
-      // paid order + notifies attendees). Server-side delete-event has
-      // the same 409 guard; this stops the client-cascade path too.
-      // Fail CLOSED: if the count can't be read, refuse the delete.
-      const { count: paidCount, error: paidErr } = await supabase
-        .from("tickets")
-        .select("id", { count: "exact", head: true })
-        .eq("event_id", eventIdInt)
-        .in("status", ["active", "transfer_pending", "scanned"])
-        .not("stripe_payment_intent_id", "is", null);
-      if (paidErr) {
-        console.error("[Events] deleteEvent paid-ticket check failed:", paidErr);
-        throw new Error(
-          "Couldn't verify ticket sales for this event. Try again in a moment.",
-        );
-      }
-      if ((paidCount ?? 0) > 0) {
-        throw new Error(
-          "This event has paid tickets. Cancel the event instead — attendees are refunded and notified automatically.",
-        );
-      }
-
-      // Collect all image URLs for CDN cleanup
-      const imageUrls: string[] = [];
-      const coverImage = event[DB.events.coverImageUrl] || event["image"];
-      if (coverImage) imageUrls.push(coverImage);
-      const extraImages = parseJsonbArray(event[DB.events.images]);
-      for (const img of extraImages) {
-        const url = typeof img === "string" ? img : img?.url;
-        if (url) imageUrls.push(url);
-      }
-
-      // 2. Delete related records (in case FK cascade is missing)
-      const relatedDeletes = [
-        supabase
-          .from(DB.eventRsvps.table)
-          .delete()
-          .eq(DB.eventRsvps.eventId, eventIdInt),
-        supabase
-          .from(DB.eventLikes.table)
-          .delete()
-          .eq(DB.eventLikes.eventId, eventIdInt),
-        supabase.from("event_comments").delete().eq("event_id", eventIdInt),
-        supabase.from("event_reviews").delete().eq("event_id", eventIdInt),
-      ];
-
-      const results = await Promise.allSettled(relatedDeletes);
-      results.forEach((r, i) => {
-        if (r.status === "rejected") {
-          console.warn(
-            `[Events] deleteEvent related delete ${i} failed:`,
-            r.reason,
-          );
-        } else if (r.status === "fulfilled" && r.value?.error) {
-          console.warn(
-            `[Events] deleteEvent related delete ${i} DB error:`,
-            r.value.error,
-          );
-        }
-      });
-
-      // 3. Delete the event itself using the actual host_id from the DB row
-      const { error, count } = await supabase
-        .from(DB.events.table)
-        .delete()
-        .eq(DB.events.id, eventIdInt)
-        .eq(DB.events.hostId, hostId);
-
-      if (error) {
-        console.error("[Events] deleteEvent DB error:", error);
-        throw error;
-      }
-
-      console.log("[Events] deleteEvent success, deleted count:", count);
-
-      // 4. Clean up images from Bunny CDN via server (best-effort, don't block)
-      if (imageUrls.length > 0) {
-        const { deleteFromServer } = await import("../server-upload");
-        const CDN_URL =
-          process.env.EXPO_PUBLIC_BUNNY_CDN_URL || "https://dvnt.b-cdn.net";
-        const keys = imageUrls
-          .map((url) =>
-            url.startsWith(CDN_URL) ? url.slice(CDN_URL.length + 1) : null,
-          )
-          .filter((k): k is string => !!k);
-
-        if (keys.length > 0) {
-          deleteFromServer(keys).then((result) => {
-            console.log(
-              "[Events] CDN cleanup:",
-              result.ok,
-              result.results?.length,
-              "keys",
-            );
-          });
-        }
-      }
-
-      return { success: true };
-    } catch (error: any) {
-      console.error("[Events] deleteEvent error:", error?.message || error);
-      throw error;
+    const id = Number(eventId);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Invalid event ID");
+    const result = await invokeEdge<{
+      ok: boolean;
+      data?: { eventId: string };
+      error?: { code: string; message: string };
+    }>("delete-event", { eventId: id });
+    if (result.error) throw new Error(result.error.message);
+    if (!result.data?.ok || String(result.data.data?.eventId) !== String(id)) {
+      throw new Error(result.data?.error?.message || "Event deletion was not confirmed");
     }
+    return { success: true };
+
   },
 
   /**

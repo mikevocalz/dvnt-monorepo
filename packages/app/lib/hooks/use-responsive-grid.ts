@@ -1,4 +1,9 @@
 import { useWindowDimensions } from "react-native";
+import {
+  resolveResponsiveGrid,
+  type ResponsiveGrid,
+  type ResponsiveGridOptions,
+} from "./responsive-grid";
 
 /**
  * Columns derived from the width the screen actually has, right now.
@@ -21,55 +26,11 @@ import { useWindowDimensions } from "react-native";
  * Give it the smallest cell that is still worth showing; it returns how many
  * fit and how wide each one is once the gaps are taken out.
  */
-export interface ResponsiveGrid {
-  /** How many cells fit across, at least 1. */
-  columns: number;
-  /** Width of one cell, gaps already removed. */
-  cellWidth: number;
-  /** The width the grid is laying out inside (screen minus padding). */
-  available: number;
-  /** Convenience for `columns > 1`, which is usually what a container branches on. */
-  isGrid: boolean;
-}
+export type { ResponsiveGrid, ResponsiveGridOptions } from "./responsive-grid";
 
-export function useResponsiveGrid({
-  minCellWidth,
-  gap = 12,
-  horizontalPadding = 32,
-  maxColumns = 6,
-  maxColumnsPortrait,
-  maxColumnsLandscape,
-  containerWidth,
-}: {
-  minCellWidth: number;
-  gap?: number;
-  horizontalPadding?: number;
-  maxColumns?: number;
-  /** Hard ceiling in portrait, when a surface has a designed maximum. */
-  maxColumnsPortrait?: number;
-  /** Hard ceiling in landscape. */
-  maxColumnsLandscape?: number;
-  /**
-   * Width the grid actually lays out inside, when that is NOT the window.
-   *
-   * A screen that caps its content column (max-w-3xl and friends) is the case
-   * this exists for: sizing cells off the window there makes every cell too
-   * wide for the box holding them, so the last column runs past the edge. The
-   * orientation ceilings still read the real window, because portrait vs
-   * landscape is a property of the device, not of the container.
-   */
-  containerWidth?: number;
-}): ResponsiveGrid {
-  const { width: windowWidth, height } = useWindowDimensions();
-  const width = containerWidth ?? windowWidth;
-  const orientationCap =
-    windowWidth > height ? maxColumnsLandscape : maxColumnsPortrait;
-  const available = Math.max(0, width - horizontalPadding);
-  const ceiling = Math.min(maxColumns, orientationCap ?? maxColumns);
-  const columns = Math.max(
-    1,
-    Math.min(ceiling, Math.floor((available + gap) / (minCellWidth + gap))),
-  );
-  const cellWidth = (available - gap * (columns - 1)) / columns;
-  return { columns, cellWidth, available, isGrid: columns > 1 };
+export function useResponsiveGrid(
+  options: ResponsiveGridOptions,
+): ResponsiveGrid {
+  const { width, height } = useWindowDimensions();
+  return resolveResponsiveGrid(width, height, options);
 }

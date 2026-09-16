@@ -6,6 +6,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
+import { ensureDirectConversation } from "../_shared/conversation-delivery.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -108,98 +109,24 @@ Deno.serve(async (req) => {
       otherAuthId = otherUser.auth_id;
     }
 
-    // Check if conversation exists
-    // conversations_rels.users_id is TEXT (auth_id)
-    const { data: userConvs } = await supabaseAdmin
-      .from("conversations_rels")
-      .select("parent_id")
-      .eq("users_id", myAuthId);
-
-    const { data: otherConvs } = await supabaseAdmin
-      .from("conversations_rels")
-      .select("parent_id")
-      .eq("users_id", otherAuthId);
-
-    const userConvIds = (userConvs || []).map((c: any) => c.parent_id);
-    const otherConvIds = (otherConvs || []).map((c: any) => c.parent_id);
-    const commonConvIds = userConvIds.filter((id: number) =>
-      otherConvIds.includes(id),
+    // conversations_rels.users_id is TEXT (auth_id). The lookup/create and the
+    // participant rows live in _shared/conversation-delivery.ts so the brand
+    // outbox worker opens a DM on exactly the same rows this endpoint does.
+    const conversation = await ensureDirectConversation(
+      supabaseAdmin,
+      myAuthId,
+      otherAuthId,
     );
-
-    // Check if any common conversation is a direct (non-group) conversation
-    for (const convId of commonConvIds) {
-      const { data: conv } = await supabaseAdmin
-        .from("conversations")
-        .select("id, is_group")
-        .eq("id", convId)
-        .single();
-
-      if (conv && !conv.is_group) {
-        // CRITICAL: Verify this conversation actually has BOTH participants
-        // (prevents returning orphaned conversations with no participants)
-        const { data: participants } = await supabaseAdmin
-          .from("conversations_rels")
-          .select("users_id")
-          .eq("parent_id", conv.id)
-          .eq("path", "participants");
-
-        const participantIds = (participants || []).map((p: any) => p.users_id);
-        const hasBothParticipants =
-          participantIds.includes(myAuthId) &&
-          participantIds.includes(otherAuthId);
-
-        if (hasBothParticipants) {
-          return jsonResponse({
-            ok: true,
-            data: { conversationId: String(conv.id), isNew: false },
-          });
-        }
-        // If participants are missing, skip this orphaned conversation and continue
-        console.log(
-          `[Edge:create-conversation] Skipping orphaned conversation ${conv.id}`,
-        );
-      }
-    }
-
-    // Create new conversation
-    const { data: newConv, error: convError } = await supabaseAdmin
-      .from("conversations")
-      .insert({ is_group: false, last_message_at: new Date().toISOString() })
-      .select()
-      .single();
-
-    if (convError)
-      return errorResponse(
-        "internal_error",
-        "Failed to create conversation",
-        500,
-      );
-
-    // Add participants (users_id is TEXT/auth_id)
-    const { error: participantsError } = await supabaseAdmin
-      .from("conversations_rels")
-      .insert([
-        { parent_id: newConv.id, users_id: myAuthId, path: "participants" },
-        { parent_id: newConv.id, users_id: otherAuthId, path: "participants" },
-      ]);
-
-    if (participantsError) {
-      console.error(
-        "[Edge:create-conversation] Failed to add participants:",
-        participantsError,
-      );
-      // Rollback: delete the conversation we just created
-      await supabaseAdmin.from("conversations").delete().eq("id", newConv.id);
-      return errorResponse(
-        "internal_error",
-        "Failed to add participants to conversation",
-        500,
-      );
+    if (!conversation.ok) {
+      return errorResponse("internal_error", conversation.error, 500);
     }
 
     return jsonResponse({
       ok: true,
-      data: { conversationId: String(newConv.id), isNew: true },
+      data: {
+        conversationId: String(conversation.conversationId),
+        isNew: conversation.isNew,
+      },
     });
   } catch (err) {
     console.error("[Edge:create-conversation] Error:", err);

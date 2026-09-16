@@ -1,13 +1,4 @@
-/**
- * Age Verification Utility
- * 
- * CRITICAL: This module enforces strict 18+ age verification.
- * NO EXCEPTIONS - users under 18 are permanently blocked.
- * 
- * Earliest allowed birth year: 2008 (as of 2026)
- * 
- * This is a compliance-critical module. DO NOT modify age limits.
- */
+/** Date-of-birth validation for the 18+ admission rule. This is not identity verification. */
 
 // Minimum age required to use the platform
 export const MINIMUM_AGE = 18;
@@ -26,52 +17,24 @@ export const EARLIEST_ALLOWED_BIRTH_YEAR = getEarliestAllowedBirthYear();
  * @param dob - Date of birth as Date object or string (YYYY-MM-DD, MM/DD/YYYY, etc.)
  * @returns Age in years, or null if invalid
  */
-export function calculateAge(dob: Date | string): number | null {
-  try {
-    let birthDate: Date;
-    
-    if (typeof dob === 'string') {
-      // Handle multiple date formats
-      const cleanDob = dob.trim();
-      
-      // Try YYYY-MM-DD format
-      if (/^\d{4}-\d{2}-\d{2}$/.test(cleanDob)) {
-        const [year, month, day] = cleanDob.split('-').map(Number);
-        birthDate = new Date(year, month - 1, day);
-      }
-      // Try MM/DD/YYYY format
-      else if (/^\d{2}\/\d{2}\/\d{4}$/.test(cleanDob)) {
-        const [month, day, year] = cleanDob.split('/').map(Number);
-        birthDate = new Date(year, month - 1, day);
-      }
-      // Try generic parsing as fallback
-      else {
-        birthDate = new Date(cleanDob);
-      }
-    } else {
-      birthDate = dob;
-    }
-    
-    // Validate the date
-    if (isNaN(birthDate.getTime())) {
-      console.error('[AgeVerification] Invalid date:', dob);
-      return null;
-    }
-    
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    
-    // Adjust age if birthday hasn't occurred yet this year
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-    
-    return age;
-  } catch (error) {
-    console.error('[AgeVerification] Error calculating age:', error);
+export function calculateAge(dob: Date | string, now = new Date()): number | null {
+  let year: number, month: number, day: number;
+  if (dob instanceof Date) {
+    if (!Number.isFinite(dob.getTime())) return null;
+    year = dob.getFullYear(); month = dob.getMonth() + 1; day = dob.getDate();
+  } else if (typeof dob === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+    [year, month, day] = dob.split('-').map(Number);
+  } else if (typeof dob === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(dob)) {
+    [month, day, year] = dob.split('/').map(Number);
+  } else {
     return null;
   }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (year < 1900 || !Number.isFinite(now.getTime()) || date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return now.getUTCFullYear() - year - Number(
+    now.getUTCMonth() + 1 < month || (now.getUTCMonth() + 1 === month && now.getUTCDate() < day),
+  );
 }
 
 /**
@@ -125,8 +88,8 @@ export interface AgeValidationResult {
   errorMessage: string | null;
 }
 
-export function validateDateOfBirth(dob: Date | string): AgeValidationResult {
-  const age = calculateAge(dob);
+export function validateDateOfBirth(dob: Date | string, now = new Date()): AgeValidationResult {
+  const age = calculateAge(dob, now);
   
   if (age === null) {
     return {

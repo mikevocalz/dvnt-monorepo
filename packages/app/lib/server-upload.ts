@@ -11,6 +11,8 @@ import { getAuthToken } from "@dvnt/app/lib/auth-client";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { beginUpload, settleUpload } from "@dvnt/app/lib/media/upload-watchdog-store";
 
+import { sizeLimitForKind, uploadPercentage, withUploadTimeout } from "@dvnt/app/lib/media/upload-policy";
+
 const FileSystem = LegacyFileSystem;
 
 const _rawSupabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -98,39 +100,6 @@ function folderToKind(folder: string, mime?: string): string {
   return imageMap[folder] || "post-image";
 }
 
-/**
- * Per-kind byte ceilings — MUST mirror SIZE_LIMITS in the media-upload edge
- * function (apps/mobile/supabase/functions/media-upload/index.ts). Keep in sync.
- *
- * Checked CLIENT-SIDE so an over-cap file is refused instantly instead of
- * after minutes of doomed upload. The server does reject it correctly — a
- * 52.4MB event-video returns "File too large for event-video: 52.44MB
- * exceeds 50.0MB limit" (verified against production 2026-09-13, alongside
- * successful uploads at 8/18/31/47MB) — but only AFTER the whole file has
- * been sent. On a phone that is minutes of waiting, and on iOS Safari the
- * tab can die building a multi-hundred-MB body before the request is even
- * made, which surfaces as nothing at all.
- *
- * Real 60s iPhone footage is 60-400MB, so this ceiling is reached constantly.
- * The paired fix is `videoQuality` on the library picker
- * (lib/hooks/use-media-picker.ts) — without it iOS hands back the
- * uncompressed original and nothing fits.
- */
-const KIND_SIZE_LIMITS: Record<string, number> = {
-  "event-video": 50 * 1024 * 1024,
-  "event-moment-video": 50 * 1024 * 1024,
-  "post-video": 50 * 1024 * 1024,
-  "story-video": 50 * 1024 * 1024,
-  "message-video": 50 * 1024 * 1024,
-};
-
-/** Default ceiling for kinds not listed above (images). */
-const DEFAULT_SIZE_LIMIT = 25 * 1024 * 1024;
-
-function sizeLimitForKind(kind: string): number {
-  return KIND_SIZE_LIMITS[kind] ?? DEFAULT_SIZE_LIMIT;
-}
-
 /** Human-readable MB, no trailing ".0". */
 function mb(bytes: number): string {
   const v = bytes / (1024 * 1024);
@@ -152,7 +121,7 @@ function tooLargeError(bytes: number, kind: string, isVideo: boolean): string {
  * Get mime type from file extension
  */
 function getMimeFromUri(uri: string): string {
-  const ext = uri.split(".").pop()?.toLowerCase() || "";
+  const ext = uri.split(/[?#]/)[0].split(".").pop()?.toLowerCase() || "";
   const mimeMap: Record<string, string> = {
     jpg: "image/jpeg",
     jpeg: "image/jpeg",
@@ -232,7 +201,7 @@ export async function uploadToServer(
   uri: string,
   folder: string = "uploads",
   onProgress?: (progress: UploadProgress) => void,
-  opts?: { blurhash?: string },
+  opts?: { blurhash?: string; mimeType?: string },
 ): Promise<ServerUploadResult> {
   const watchId = beginUpload(uri, folder);
   try {
@@ -256,6 +225,7 @@ async function uploadToServerImpl(
      * function can persist it into the historically-NULL `blurhash` column.
      */
     blurhash?: string;
+    mimeType?: string;
   },
 ): Promise<ServerUploadResult> {
   console.log("[ServerUpload] Starting upload via Edge Function:", {
@@ -285,7 +255,7 @@ async function uploadToServerImpl(
         const resp = await fetch(uri);
         if (!resp.ok) throw new Error(`Could not read selected media (${resp.status})`);
         const blob = await resp.blob();
-        const mime = blob.type || getMimeFromUri(uri);
+        const mime = blob.type || opts?.mimeType || getMimeFromUri(uri);
         const kind = folderToKind(folder, mime);
         // Refuse over-cap BEFORE sending — see KIND_SIZE_LIMITS.
         if (blob.size > sizeLimitForKind(kind)) {
@@ -298,7 +268,7 @@ async function uploadToServerImpl(
           };
         }
         const filename = `upload_${Date.now()}.${getExtension(uri, mime)}`;
-        onProgress?.({ loaded: 10, total: 100, percentage: 10 });
+        onProgress?.({ loaded: 0, total: blob.size, percentage: 0 });
         const form = new FormData();
         form.append("file", blob, filename);
         form.append("kind", kind);
@@ -309,11 +279,13 @@ async function uploadToServerImpl(
         // browser (empty apikey in the web bundle + preflight); invoke uses the
         // correctly-initialized client key + the mechanism that works for every
         // other web edge call. supabase-js sets Content-Type for FormData.
+        const controller = new AbortController();
         const { data: body, error: invokeErr } =
-          await supabase.functions.invoke("media-upload", {
+          await withUploadTimeout(supabase.functions.invoke("media-upload", {
             body: form,
             headers: { Authorization: `Bearer ${authToken}` },
-          });
+            signal: controller.signal,
+          }), () => controller.abort());
         // supabase-js collapses any non-2xx into "Edge Function returned a
         // non-2xx status code" and hides the response on `.context`. The
         // function's own validation failures come back as HTTP 200 + ok:false,
@@ -364,7 +336,7 @@ async function uploadToServerImpl(
     }
 
     // Determine mime type and kind (mime-aware so videos get post-video, not post-image)
-    const mime = getMimeFromUri(uri);
+    const mime = opts?.mimeType || getMimeFromUri(uri);
     const accessibleUri = await ensureFileAccessible(uri, mime);
     const accessibleInfo = await FileSystem.getInfoAsync(accessibleUri).catch(
       () => null,
@@ -390,13 +362,13 @@ async function uploadToServerImpl(
     }
     const filename = accessibleUri.split("/").pop() || "upload";
 
-    onProgress?.({ loaded: 0, total: 100, percentage: 10 });
+    onProgress?.({ loaded: 0, total: localSize || 0, percentage: 0 });
 
     // Upload via FileSystem.uploadAsync (multipart form)
     // Pass mimeType explicitly — Expo's multipart upload may default to
     // application/octet-stream if the extension isn't detected by the OS,
     // which would fail the edge function's mime validation.
-    const uploadResult = await FileSystem.uploadAsync(
+    const uploadTask = FileSystem.createUploadTask(
       MEDIA_UPLOAD_URL,
       accessibleUri,
       {
@@ -414,13 +386,20 @@ async function uploadToServerImpl(
           apikey: SUPABASE_ANON_KEY,
         },
       },
+      ({ totalBytesSent, totalBytesExpectedToSend }) => onProgress?.({
+        loaded: totalBytesSent,
+        total: totalBytesExpectedToSend,
+        percentage: uploadPercentage(totalBytesSent, totalBytesExpectedToSend),
+      }),
     );
+    const uploadResult = await withUploadTimeout(uploadTask.uploadAsync(), () => uploadTask.cancelAsync());
+    if (!uploadResult) throw new Error("Upload cancelled. Please try again.");
 
-    onProgress?.({ loaded: 80, total: 100, percentage: 80 });
+    let body: { ok?: boolean; error?: string; media?: { url: string; key?: string } };
+    try { body = JSON.parse(uploadResult.body); }
+    catch { throw new Error(`Upload failed (HTTP ${uploadResult.status}). Please try again.`); }
 
-    const body = JSON.parse(uploadResult.body);
-
-    if (uploadResult.status === 200 && body.ok) {
+    if (uploadResult.status === 200 && body.ok && body.media?.url) {
       onProgress?.({ loaded: 100, total: 100, percentage: 100 });
       console.log("[ServerUpload] Success:", body.media?.url);
       return {

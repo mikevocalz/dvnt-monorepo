@@ -24,13 +24,20 @@
  * circles). Screen-local UI state (status filter + search input) lives in a
  * tiny Zustand store, never useState. Navigation via Solito; id via useParams.
  *
- * The native write-side affordances (export CSV, broadcast, comp, refund
- * selection) are intentionally out of scope for this read-only roster port —
- * the read path (list + search + filters + capacity + role + states) is ported
- * faithfully.
+ * Comping is ported (it is the only way to add a guest to a private event —
+ * `event_invites` is unwritten and there is no separate invite feature, so a
+ * host on web previously had no way to put anyone on the list). Export CSV,
+ * broadcast, and refund selection remain native-only.
+ *
+ * ponytail: the comp control is gated on the caller's effective `role` from
+ * the roster response — owner or accepted admin, matching `bulk-comp-tickets`.
+ * The server is still the authority; this only stops the UI promising a 403.
  */
 
 import { useMemo, useRef, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { CompTicketsModal } from "./ui/comp-tickets-modal";
+import { canCompTickets } from "@dvnt/app/lib/tickets/comp-recipients";
 import { CardLink } from "@dvnt/app/components/ui/card-link.web";
 import { useParams, useRouter } from "solito/navigation";
 import { useInfiniteQuery } from "@tanstack/react-query";
@@ -44,6 +51,7 @@ import {
   ArrowLeftRight,
   Ban,
   X,
+  Gift,
 } from "lucide-react";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
@@ -202,6 +210,10 @@ export function AttendeesScreen() {
   const setStatusFilter = useAttendeesStore((s) => s.setStatusFilter);
   const searchInput = useAttendeesStore((s) => s.searchInput);
   const setSearchInput = useAttendeesStore((s) => s.setSearchInput);
+  const compOpen = useAttendeesStore((s) => s.compOpen);
+  const openComp = useAttendeesStore((s) => s.openComp);
+  const closeComp = useAttendeesStore((s) => s.closeComp);
+  const queryClient = useQueryClient();
 
   // Debounce 200ms so each keystroke doesn't hit the edge fn (mirrors native).
   const [searchDebounced] = useDebouncedValue(searchInput, { wait: 200 });
@@ -226,6 +238,7 @@ export function AttendeesScreen() {
   );
   const total = query.data?.pages[query.data.pages.length - 1]?.total ?? null;
   const role = query.data?.pages[0]?.role ?? null;
+  const canComp = canCompTickets(role);
 
   const search = searchDebounced.trim();
 
@@ -267,13 +280,25 @@ export function AttendeesScreen() {
             </p>
           ) : null}
         </div>
-        <button
-          onClick={() => router.back()}
-          aria-label="Close"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/8 active:scale-95"
-        >
-          <X size={18} color="#fff" />
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {canComp ? (
+            <button
+              onClick={openComp}
+              aria-label="Comp tickets"
+              className="flex h-9 items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/12 px-3 text-[13px] font-semibold text-cyan-200 active:scale-95"
+            >
+              <Gift size={16} />
+              Comp
+            </button>
+          ) : null}
+          <button
+            onClick={() => router.back()}
+            aria-label="Close"
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 active:scale-95"
+          >
+            <X size={18} color="#fff" />
+          </button>
+        </div>
       </div>
 
       <main className="mx-auto w-full max-w-2xl px-4 py-4">
@@ -378,6 +403,21 @@ export function AttendeesScreen() {
           </div>
         )}
       </main>
+
+      {/* Mounted only for a host who may actually comp, so nobody else's
+          browser even asks for the tier list. */}
+      {canComp ? (
+        <CompTicketsModal
+          visible={compOpen}
+          onClose={closeComp}
+          eventId={eventId}
+          onSuccess={() =>
+            queryClient.invalidateQueries({
+              queryKey: ["event-attendees", eventId],
+            })
+          }
+        />
+      ) : null}
     </div>
   );
 }

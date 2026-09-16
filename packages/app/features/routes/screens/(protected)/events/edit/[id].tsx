@@ -1,3 +1,4 @@
+import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
@@ -46,6 +47,7 @@ function EditEventScreenContent() {
   const [maxAttendees, setMaxAttendees] = useState("");
   const showToast = useUIStore((s) => s.showToast);
   const updateEventMutation = useUpdateEvent();
+  const deleteEventMutation = useDeleteEvent();
 
   useEffect(() => {
     loadEvent();
@@ -160,6 +162,7 @@ function EditEventScreenContent() {
   };
 
   const handleDelete = () => {
+    if (deleteEventMutation.isPending) return;
     Alert.alert(
       "Delete Event",
       "This permanently removes the event. Events with paid tickets can't be deleted — cancel instead, which refunds every attendee.",
@@ -170,7 +173,7 @@ function EditEventScreenContent() {
           style: "destructive",
           onPress: async () => {
             try {
-              await eventsApi.deleteEvent(eventId);
+              await deleteEventMutation.mutateAsync(eventId);
               showToast("success", "Event deleted", "");
               router.replace("/(protected)/(tabs)/events");
             } catch (error) {

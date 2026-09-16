@@ -6,6 +6,7 @@ import {
   BottomSheetScrollView,
 } from "@gorhom/bottom-sheet";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
+import { EVENT_VISIBILITY_COPY } from "@dvnt/app/lib/events/event-visibility-copy";
 import {
   MapPin,
   Globe,
@@ -55,8 +56,11 @@ const QUICK_FILTERS: {
     activeColor: "#EC4899",
   },
   {
+    // Query value stays "invite_only"; only the label changes. There is no
+    // guest-list feature, so the shared private-visibility copy is the honest
+    // label. See event-visibility-copy.ts.
     id: "invite_only",
-    label: "Invite-only",
+    label: EVENT_VISIBILITY_COPY.private.label,
     icon: Lock,
     activeColor: "#EF4444",
   },

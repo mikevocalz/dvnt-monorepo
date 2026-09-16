@@ -416,15 +416,30 @@ export async function exportEventAttendeesCsv(eventId: number): Promise<{
 
 export type BroadcastAudience = "all" | "scanned" | "unscanned";
 
+export interface CompDeliveryResult {
+  recipient: string;
+  status: "delivered" | "failed";
+  error?: string;
+}
+
 export interface CompResult {
+  /** Tickets issued into an existing DVNT account's wallet. */
   issued: number;
+  /**
+   * Guest tickets minted for emails with no account. Issued is not delivered:
+   * read `delivery` for whether the claim email actually went out. Optional
+   * because a deployed older edge fn doesn't send these fields.
+   */
+  guest_issued?: number;
+  delivery?: CompDeliveryResult[];
   skipped: { recipient: string; reason: string }[];
   tier?: string;
 }
 
 /**
  * Bulk-issue free tickets to a list of usernames/emails. Owner or
- * admin only. Server enforces tier capacity + skips dupes.
+ * admin only. Server enforces tier capacity + skips dupes. An email
+ * with no account gets a guest ticket emailed as a claim link.
  */
 export async function bulkCompTickets(
   eventId: number,
@@ -539,6 +554,61 @@ export async function revokeCoOrganizer(
   return invokeEdgeFunction("invite-co-organizer", {
     action: "revoke",
     invite_id: inviteId,
+  });
+}
+
+// ── Guest list (private events) ─────────────────────────────────────────────
+// A guest is not a co-organizer: a co-organizer manages the event, a guest can
+// see it and attend it. Both calls are host-authorized server-side by
+// `event-invite-guests`; nobody can add themselves.
+
+export interface EventGuest {
+  id: string;
+  authId: string | null;
+  email: string | null;
+  status: "pending" | "accepted" | "declined";
+  username: string | null;
+  avatar: string;
+}
+
+export async function listEventGuests(
+  eventId: number,
+): Promise<{ guests: EventGuest[] }> {
+  return invokeEdgeFunction("event-invite-guests", {
+    action: "list",
+    event_id: eventId,
+  });
+}
+
+/** `recipients` accepts usernames (with or without `@`) and email addresses. */
+export async function inviteEventGuests(
+  eventId: number,
+  recipients: string[],
+  note?: string,
+): Promise<{
+  invited: number;
+  already_invited: { recipient: string; reason: string }[];
+  skipped: { recipient: string; reason: string }[];
+  delivery: { recipient: string; status: "delivered" | "failed" }[];
+}> {
+  return invokeEdgeFunction("event-invite-guests", {
+    action: "invite",
+    event_id: eventId,
+    recipients,
+    note,
+  });
+}
+
+/** Removing the row removes access — there is no other source for that guest. */
+export async function revokeEventGuest(
+  eventId: number,
+  target: { authId?: string | null; email?: string | null },
+): Promise<{ revoked: number }> {
+  return invokeEdgeFunction("event-invite-guests", {
+    action: "revoke",
+    event_id: eventId,
+    invited_user_id: target.authId ?? undefined,
+    invited_email: target.email ?? undefined,
   });
 }
 

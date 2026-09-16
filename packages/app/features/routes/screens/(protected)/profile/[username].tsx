@@ -1,3 +1,4 @@
+import { followButtonLabel } from "@dvnt/app/lib/profile/follow-relationship";
 import * as Haptics from "expo-haptics";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
@@ -1066,9 +1067,7 @@ function UserProfileScreenComponent() {
                           ? followVars?.action === "follow"
                             ? "Now Following"
                             : "Unfollowing..."
-                          : isFollowing
-                            ? "Following"
-                            : "Follow"}
+                          : followButtonLabel({ isFollowing, followsYou: (resolvedUserData as any)?.followsYou })}
                       </Text>
                     </Motion.View>
                   </Motion.Pressable>

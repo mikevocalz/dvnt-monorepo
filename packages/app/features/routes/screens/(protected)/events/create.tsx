@@ -1,5 +1,5 @@
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
-import { useEffect, useCallback, useMemo, useState } from "react";
+import { useEffect, useCallback, useMemo, useState, useRef } from "react";
 import * as Haptics from "expo-haptics";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import {
@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useRouter } from "expo-router";
+import { getAuthIdFromStore } from "@dvnt/app/lib/auth/identity";
 import { useNavigation } from "expo-router";
 import { useSafeHeader } from "@dvnt/app/lib/hooks/use-safe-header";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
@@ -52,6 +53,12 @@ import { useColorScheme, useMediaPicker } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
+import {
+  EVENT_VISIBILITY_OPTIONS,
+  eventVisibilityCopy,
+  showsGuestList,
+} from "@dvnt/app/lib/events/event-visibility-copy";
+import { inviteEventGuests } from "@dvnt/app/lib/api/privileged";
 // Popover removed — inline expanding pickers used instead
 import { DvntMap } from "@dvnt/app/components/map";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
@@ -144,6 +151,11 @@ const SUGGESTED_TAGS = [
 
 function CreateEventScreenContent() {
   const router = useRouter();
+  const screenMounted = useRef(true);
+  useEffect(() => {
+    screenMounted.current = true;
+    return () => { screenMounted.current = false; };
+  }, []);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { colors } = useColorScheme();
@@ -164,7 +176,6 @@ function CreateEventScreenContent() {
     uploadMultiple,
     isUploading: isUploadingMedia,
     progress: mediaUploadProgress,
-    cancelUpload: cancelMediaUpload,
   } = useMediaUpload({ folder: "events" });
 
   // All form state lives in Zustand (MMKV-persisted draft). Each field is
@@ -259,6 +270,13 @@ function CreateEventScreenContent() {
   const setCoOrganizerResults = useCreateEventStore(
     (s) => s.setCoOrganizerResults,
   );
+  const guests = useCreateEventStore((s) => s.guests);
+  const addGuest = useCreateEventStore((s) => s.addGuest);
+  const removeGuest = useCreateEventStore((s) => s.removeGuest);
+  const guestSearch = useCreateEventStore((s) => s.guestSearch);
+  const setGuestSearch = useCreateEventStore((s) => s.setGuestSearch);
+  const guestResults = useCreateEventStore((s) => s.guestResults);
+  const setGuestResults = useCreateEventStore((s) => s.setGuestResults);
   const removeLineupItem = useCreateEventStore((s) => s.removeLineupItem);
   const removePerk = useCreateEventStore((s) => s.removePerk);
   const currentStep = useCreateEventStore((s) => s.currentStep);
@@ -342,6 +360,35 @@ function CreateEventScreenContent() {
     coOrgSearchDebouncer.maybeExecute(coOrganizerSearch);
   }, [coOrganizerSearch, coOrgSearchDebouncer]);
 
+  // Debounced guest search — same 300ms shape as the co-organizer one above.
+  const guestSearchDebouncer = useMemo(
+    () =>
+      new Debouncer(
+        async (query: string) => {
+          if (query.length < 2) {
+            setGuestResults([]);
+            return;
+          }
+          const { docs } = await usersApi.searchUsers(query, 6);
+          setGuestResults(
+            docs.map((u: any) => ({
+              id: u.id,
+              authId: u.authId,
+              username: u.username,
+              avatar: u.avatar,
+              name: u.name,
+            })),
+          );
+        },
+        { wait: 300 },
+      ),
+    [setGuestResults],
+  );
+
+  useEffect(() => {
+    guestSearchDebouncer.maybeExecute(guestSearch);
+  }, [guestSearch, guestSearchDebouncer]);
+
   const handlePickImages = async () => {
     const remaining = 4 - eventImages.length;
     if (remaining <= 0) return;
@@ -419,102 +466,104 @@ function CreateEventScreenContent() {
 
   const handleSubmit = async () => {
     // Prevent double submission
-    if (isSubmitting || createEvent.isPending) {
+    if (useCreateEventStore.getState().isSubmitting || createEvent.isPending) {
       console.log("[CreateEvent] Already submitting, ignoring");
       return;
     }
 
-    if (!title.trim()) {
-      showToast("error", "Add a title", "Please enter an event title");
-      return;
-    }
-    if (!eventType) {
-      showToast("error", "Pick a type", "Choose what kind of event this is");
-      return;
-    }
-    // Honor virtual events — an online event doesn't need a typed location.
-    if (!isOnline && !location.trim()) {
-      showToast(
-        "error",
-        "Add a location",
-        "Enter a venue, or switch the event to online",
-      );
-      return;
-    }
+    const publishingAuthId = getAuthIdFromStore();
+    setIsSubmitting(true);
+    try {
+      if (!title.trim()) {
+        showToast("error", "Add a title", "Please enter an event title");
+        return;
+      }
+      if (!eventType) {
+        showToast("error", "Pick a type", "Choose what kind of event this is");
+        return;
+      }
+      // Honor virtual events — an online event doesn't need a typed location.
+      if (!isOnline && !location.trim()) {
+        showToast(
+          "error",
+          "Add a location",
+          "Enter a venue, or switch the event to online",
+        );
+        return;
+      }
 
-    // ── MANDATORY STRIPE CONNECT CHECK ───────────────────────────────
-    // If the organizer is enabling paid ticketing and has any tier
-    // priced > 0, they MUST have completed Stripe Connect onboarding
-    // (charges_enabled + payouts_enabled) before the event can go
-    // live. Previously buyers tapped "Get Tickets" and saw a generic
-    // "Organizer has not completed payment setup" error — by then the
-    // damage (embarrassment + lost sale) was done. We block at
-    // publish time and route the host to the onboarding screen.
-    const hasPaidTier =
-      ticketingEnabled &&
-      (ticketTiers.some((t) => t.priceCents > 0) ||
-        (ticketTiers.length === 0 &&
-          !!ticketPrice &&
-          parseFloat(ticketPrice) > 0));
+      // ── MANDATORY STRIPE CONNECT CHECK ───────────────────────────────
+      // If the organizer is enabling paid ticketing and has any tier
+      // priced > 0, they MUST have completed Stripe Connect onboarding
+      // (charges_enabled + payouts_enabled) before the event can go
+      // live. Previously buyers tapped "Get Tickets" and saw a generic
+      // "Organizer has not completed payment setup" error — by then the
+      // damage (embarrassment + lost sale) was done. We block at
+      // publish time and route the host to the onboarding screen.
+      const hasPaidTier =
+        ticketingEnabled &&
+        (ticketTiers.some((t) => t.priceCents > 0) ||
+          (ticketTiers.length === 0 &&
+            !!ticketPrice &&
+            parseFloat(ticketPrice) > 0));
 
-    if (hasPaidTier) {
-      try {
-        const status = await organizerApi.getStatus();
-        const ready =
-          status.connected &&
-          status.charges_enabled === true &&
-          status.payouts_enabled === true;
-        if (!ready) {
+      if (hasPaidTier) {
+        try {
+          const status = await organizerApi.getStatus();
+          const ready =
+            status.connected &&
+            status.charges_enabled === true &&
+            status.payouts_enabled === true;
+          if (!ready) {
+            showToast(
+              "error",
+              "Connect your bank first",
+              "Paid events need a Stripe payout account so you can actually get paid. Let's finish that now.",
+            );
+            router.push("/(protected)/events/organizer-setup" as any);
+            return;
+          }
+        } catch (err) {
+          console.error("[CreateEvent] Stripe status check failed:", err);
           showToast(
             "error",
-            "Connect your bank first",
-            "Paid events need a Stripe payout account so you can actually get paid. Let's finish that now.",
+            "Couldn't verify payout setup",
+            "We couldn't confirm your Stripe account status. Please try again.",
           );
-          router.push("/(protected)/events/organizer-setup" as any);
           return;
         }
-      } catch (err) {
-        console.error("[CreateEvent] Stripe status check failed:", err);
-        showToast(
-          "error",
-          "Couldn't verify payout setup",
-          "We couldn't confirm your Stripe account status. Please try again.",
-        );
-        return;
       }
-    }
 
-    // ── TIER PRICE FLOOR ─────────────────────────────────────────────
-    // The fee policy is 2.5% + $1/ticket per side, so any tier priced
-    // below $2 would result in a negative organizer transfer at checkout
-    // (server-side computeFees throws). Block at publish time with a
-    // clear message instead of letting buyers hit a generic checkout
-    // error. $2 is also the smallest payout that's not embarrassing
-    // after fees (~$0.85 to organizer).
-    const MIN_PAID_TIER_CENTS = 200;
-    if (hasPaidTier) {
-      const offending = ticketTiers.filter(
-        (t) => t.priceCents > 0 && t.priceCents < MIN_PAID_TIER_CENTS,
-      );
-      const singleTooLow =
-        ticketTiers.length === 0 &&
-        !!ticketPrice &&
-        parseFloat(ticketPrice) > 0 &&
-        parseFloat(ticketPrice) < MIN_PAID_TIER_CENTS / 100;
-      if (offending.length > 0 || singleTooLow) {
-        showToast(
-          "error",
-          "Tier price too low",
-          "Paid tiers must be at least $2.00 to cover platform fees and leave a payout for the organizer.",
+      // ── TIER PRICE FLOOR ─────────────────────────────────────────────
+      // The fee policy is 2.5% + $1/ticket per side, so any tier priced
+      // below $2 would result in a negative organizer transfer at checkout
+      // (server-side computeFees throws). Block at publish time with a
+      // clear message instead of letting buyers hit a generic checkout
+      // error. $2 is also the smallest payout that's not embarrassing
+      // after fees (~$0.85 to organizer).
+      const MIN_PAID_TIER_CENTS = 200;
+      if (hasPaidTier) {
+        const offending = ticketTiers.filter(
+          (t) => t.priceCents > 0 && t.priceCents < MIN_PAID_TIER_CENTS,
         );
-        return;
+        const singleTooLow =
+          ticketTiers.length === 0 &&
+          !!ticketPrice &&
+          parseFloat(ticketPrice) > 0 &&
+          parseFloat(ticketPrice) < MIN_PAID_TIER_CENTS / 100;
+        if (offending.length > 0 || singleTooLow) {
+          showToast(
+            "error",
+            "Tier price too low",
+            "Paid tiers must be at least $2.00 to cover platform fees and leave a payout for the organizer.",
+          );
+          return;
+        }
       }
-    }
 
-    setIsSubmitting(true);
-    setUploadProgress(0);
+      setIsSubmitting(true);
+      setUploadProgress(0);
 
-    try {
       // Upload main event image (first image) and additional images to Bunny.net CDN
       let mainEventImageUrl = "";
       let additionalImageUrls: string[] = [];
@@ -616,9 +665,11 @@ function CreateEventScreenContent() {
               type: flyerMediaType as "image" | "video",
             },
           ]);
-          if (flyerResults[0]?.success) {
-            flyerImageUrl = flyerResults[0].url;
+          if (!flyerResults[0]?.success || !flyerResults[0].url) {
+            throw new Error(flyerResults[0]?.error || "Flyer upload failed. Please try again.");
           }
+          flyerImageUrl = flyerResults[0].url;
+          setFlyerImage(flyerImageUrl);
         }
       }
 
@@ -656,6 +707,8 @@ function CreateEventScreenContent() {
       }
 
       const eventData: Record<string, any> = {
+        clientRequestId: useCreateEventStore.getState().getPublishRequestId(),
+        expectedAuthId: publishingAuthId,
         title: title.trim(),
         description: description.trim(),
         date: eventDateISO,
@@ -668,7 +721,8 @@ function CreateEventScreenContent() {
         maxAttendees: maxAttendees ? parseInt(maxAttendees, 10) : undefined,
         youtubeVideoUrl: youtubeUrl.trim() || undefined,
         lynkRoomId,
-        flyerImageUrl: flyerImageUrl || undefined,
+        flyerImageUrl: flyerMediaType === "image" ? flyerImageUrl || undefined : undefined,
+        videoFlyerUrl: flyerMediaType === "video" ? flyerImageUrl || undefined : undefined,
         // V2 fields — location coordinates from autocomplete
         locationLat: locationData?.latitude,
         locationLng: locationData?.longitude,
@@ -692,148 +746,167 @@ function CreateEventScreenContent() {
 
       console.log("[CreateEvent] Creating event with data:", eventData);
 
-      createEvent.mutate(eventData, {
-        onSuccess: async (data) => {
-          console.log("[CreateEvent] Event created successfully:", data);
+      const data = await createEvent.mutateAsync(eventData);
+      if (data?.replayed && data.id) {
+        resetDraft();
+        showToast("warning", "Event already published", "Review tickets and add-ons in Edit before sharing it.");
+        if (screenMounted.current) router.replace(`/(protected)/events/${data.id}/edit` as any);
+        return;
+      }
 
-          // Create ticket types if ticketing is enabled
-          // Local editor tier id → created ticket_types uuid, so add-on
-          // per-tier eligibility (requires_tier_id) points at the real row.
-          const createdTierIdByLocalId = new Map<string, string>();
-          if (ticketingEnabled && data?.id) {
-            if (ticketTiers.length > 0) {
-              // Multi-tier: create each tier
-              for (const tier of ticketTiers) {
-                const createdTier = await ticketTypesApi.create({
-                  eventId: String(data.id),
-                  name: tier.name,
-                  category: tier.category || "admission",
-                  description: tier.description || undefined,
-                  priceCents: tier.priceCents,
-                  quantityTotal: tier.quantity,
-                  maxPerUser: tier.maxPerUser,
-                  saleStart: tier.saleStart || undefined,
-                  saleEnd: tier.saleEnd || undefined,
-                  // v2 tier model — visibility, type, early-bird pricing.
-                  tierType: tier.tierType,
-                  tierVisibility: tier.visibility,
-                  unlockCode:
-                    tier.visibility === "locked" ? tier.unlockCode : undefined,
-                  priceSchedule: scheduleRowsToEntries(tier.priceSchedule),
-                  subAllocations: bandRowsToSubAllocations(tier.subAllocations),
-                });
-                if (createdTier?.id) {
-                  createdTierIdByLocalId.set(tier.id, String(createdTier.id));
-                }
-              }
-              console.log(
-                "[CreateEvent] Created",
-                ticketTiers.length,
-                "ticket tiers",
-              );
-            } else {
-              // Fallback: single default tier
-              const priceCents = ticketPrice
-                ? Math.round(parseFloat(ticketPrice) * 100)
-                : 0;
-              const qty = maxAttendees ? parseInt(maxAttendees, 10) : 200;
-              const tierName =
-                ticketTierName.trim() ||
-                (priceCents === 0 ? "Free" : "General Admission");
-              await ticketTypesApi.create({
-                eventId: String(data.id),
-                name: tierName,
-                priceCents,
-                quantityTotal: qty,
-                maxPerUser: simpleMaxPerUser || 4,
-              });
-              console.log("[CreateEvent] Default ticket type created");
+      console.log("[CreateEvent] Event created successfully:", data);
+
+      // Create ticket types if ticketing is enabled
+      // Local editor tier id → created ticket_types uuid, so add-on
+      // per-tier eligibility (requires_tier_id) points at the real row.
+      const createdTierIdByLocalId = new Map<string, string>();
+      if (ticketingEnabled && data?.id) {
+        if (ticketTiers.length > 0) {
+          // Multi-tier: create each tier
+          for (const tier of ticketTiers) {
+            const createdTier = await ticketTypesApi.create({
+              eventId: String(data.id),
+              name: tier.name,
+              category: tier.category || "admission",
+              description: tier.description || undefined,
+              priceCents: tier.priceCents,
+              quantityTotal: tier.quantity,
+              maxPerUser: tier.maxPerUser,
+              saleStart: tier.saleStart || undefined,
+              saleEnd: tier.saleEnd || undefined,
+              // v2 tier model — visibility, type, early-bird pricing.
+              tierType: tier.tierType,
+              tierVisibility: tier.visibility,
+              unlockCode:
+                tier.visibility === "locked" ? tier.unlockCode : undefined,
+              priceSchedule: scheduleRowsToEntries(tier.priceSchedule),
+              subAllocations: bandRowsToSubAllocations(tier.subAllocations),
+            });
+            if (createdTier?.id) {
+              createdTierIdByLocalId.set(tier.id, String(createdTier.id));
             }
           }
-
-          // Add-on catalog (WS-3). Post-publish setup like tiers — a
-          // failure never rolls back the live event (host retries from
-          // edit). Serialization to integer cents lives in addon-form.ts;
-          // checkout reprices every line server-side regardless.
-          if (data?.id && addons.length > 0) {
-            for (const [i, draft] of addons.entries()) {
-              const params = draftAddonToCreateParams(
-                draft,
-                String(data.id),
-                (localTierId) =>
-                  createdTierIdByLocalId.get(localTierId) ?? null,
-                i,
-              );
-              if (!params) continue; // unnamed row — nothing to persist
-              try {
-                await addonsApi.create(params);
-              } catch (addonErr) {
-                console.warn(
-                  "[CreateEvent] add-on setup failed after publish",
-                  addonErr,
-                );
-              }
-            }
-          }
-
-          // Invite co-organizers (best-effort, non-blocking). The
-          // invite-co-organizer edge function fires a push + in-app
-          // notification to each invitee.
-          if (coOrganizers.length > 0 && data?.id) {
-            let invitedCount = 0;
-            for (const org of coOrganizers) {
-              if (!org.username) {
-                console.warn(
-                  "[CreateEvent] Skipping co-organizer with no username",
-                  org,
-                );
-                continue;
-              }
-              try {
-                await eventsApi.addCoOrganizer(
-                  String(data.id),
-                  org.username,
-                  "editor",
-                );
-                invitedCount += 1;
-              } catch (coOrgErr) {
-                console.error(
-                  "[CreateEvent] Failed to invite co-organizer:",
-                  org.username,
-                  coOrgErr,
-                );
-              }
-            }
-            if (invitedCount > 0) {
-              showToast(
-                "success",
-                invitedCount === 1 ? "Invited" : `Invited ${invitedCount}`,
-                invitedCount === 1
-                  ? `@${coOrganizers[0]?.username} has been notified`
-                  : `${invitedCount} co-organizers were notified`,
-              );
-            }
-          }
-
-          setUploadProgress(100);
-          showToast("success", "Success", "Event created successfully!");
-          resetDraft();
-          router.back();
-        },
-        onError: (error: any) => {
-          setIsSubmitting(false);
-          console.error("[CreateEvent] Error creating event:", error);
-          console.error(
-            "[CreateEvent] Error details:",
-            JSON.stringify(error, null, 2),
+          console.log(
+            "[CreateEvent] Created",
+            ticketTiers.length,
+            "ticket tiers",
           );
-          const errorMessage =
-            error?.message ||
-            error?.error?.message ||
-            "Failed to create event. Please try again.";
-          showToast("error", "Error", errorMessage);
-        },
-      });
+        } else {
+          // Fallback: single default tier
+          const priceCents = ticketPrice
+            ? Math.round(parseFloat(ticketPrice) * 100)
+            : 0;
+          const qty = maxAttendees ? parseInt(maxAttendees, 10) : 200;
+          const tierName =
+            ticketTierName.trim() ||
+            (priceCents === 0 ? "Free" : "General Admission");
+          await ticketTypesApi.create({
+            eventId: String(data.id),
+            name: tierName,
+            priceCents,
+            quantityTotal: qty,
+            maxPerUser: simpleMaxPerUser || 4,
+          });
+          console.log("[CreateEvent] Default ticket type created");
+        }
+      }
+
+      // Add-on catalog (WS-3). Post-publish setup like tiers — a
+      // failure never rolls back the live event (host retries from
+      // edit). Serialization to integer cents lives in addon-form.ts;
+      // checkout reprices every line server-side regardless.
+      if (data?.id && addons.length > 0) {
+        for (const [i, draft] of addons.entries()) {
+          const params = draftAddonToCreateParams(
+            draft,
+            String(data.id),
+            (localTierId) =>
+              createdTierIdByLocalId.get(localTierId) ?? null,
+            i,
+          );
+          if (!params) continue; // unnamed row — nothing to persist
+          try {
+            await addonsApi.create(params);
+          } catch (addonErr) {
+            console.warn(
+              "[CreateEvent] add-on setup failed after publish",
+              addonErr,
+            );
+          }
+        }
+      }
+
+      // Invite co-organizers (best-effort, non-blocking). The
+      // invite-co-organizer edge function fires a push + in-app
+      // notification to each invitee.
+      if (coOrganizers.length > 0 && data?.id) {
+        let invitedCount = 0;
+        for (const org of coOrganizers) {
+          if (!org.username) {
+            console.warn(
+              "[CreateEvent] Skipping co-organizer with no username",
+              org,
+            );
+            continue;
+          }
+          try {
+            await eventsApi.addCoOrganizer(
+              String(data.id),
+              org.username,
+              "editor",
+            );
+            invitedCount += 1;
+          } catch (coOrgErr) {
+            console.error(
+              "[CreateEvent] Failed to invite co-organizer:",
+              org.username,
+              coOrgErr,
+            );
+          }
+        }
+        if (invitedCount > 0) {
+          showToast(
+            "success",
+            invitedCount === 1 ? "Invited" : `Invited ${invitedCount}`,
+            invitedCount === 1
+              ? `@${coOrganizers[0]?.username} has been notified`
+              : `${invitedCount} co-organizers were notified`,
+          );
+        }
+      }
+
+      // Guest list. Same write-after-publish shape as the co-organizer block
+      // above and for the same reason: there was no event id to attach an
+      // invite to until now. One batched call; a guest who can't be added
+      // never rolls back a published event — the host retries from Edit.
+      if (guests.length > 0 && data?.id && visibility === "private") {
+        try {
+          const res = await inviteEventGuests(
+            Number(data.id),
+            guests.map((g) => g.username).filter(Boolean),
+          );
+          const refused = res?.skipped ?? [];
+          if (refused.length > 0) {
+            showToast(
+              "warning",
+              "Some guests weren't added",
+              `Add them from Edit: ${refused.map((r) => r.recipient).join(", ")}.`,
+            );
+          }
+        } catch (guestErr) {
+          console.error("[CreateEvent] Guest invites failed:", guestErr);
+          showToast(
+            "warning",
+            "Guest list not saved",
+            "Your event is live. Add guests from Edit.",
+          );
+        }
+      }
+
+      setUploadProgress(100);
+      showToast("success", "Success", "Event created successfully!");
+      resetDraft();
+      if (screenMounted.current) router.back();
     } catch (error: any) {
       setIsSubmitting(false);
       console.error("[CreateEvent] Unexpected error:", error);
@@ -842,6 +915,9 @@ function CreateEventScreenContent() {
         "Error",
         error?.message || "An unexpected error occurred. Please try again.",
       );
+    } finally {
+      setIsSubmitting(false);
+      setUploadProgress(0);
     }
   };
 
@@ -901,6 +977,17 @@ function CreateEventScreenContent() {
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
+      {isSubmitting && (
+        <View accessibilityLiveRegion="polite" className="px-5 py-3 bg-card border-b border-border">
+          <View className="flex-row items-center justify-between mb-2">
+            <Text className="text-sm font-semibold text-foreground">
+              {isUploadingMedia ? "Uploading event media…" : "Publishing event…"}
+            </Text>
+
+          </View>
+          <Progress value={isUploadingMedia ? mediaUploadProgress : uploadProgress} />
+        </View>
+      )}
       <KeyboardAwareScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -1352,19 +1439,16 @@ function CreateEventScreenContent() {
                   </Text>
                 </View>
                 <View className="flex-row gap-2">
-                  {(
-                    ["public", "private", "link_only"] as VisibilityOption[]
-                  ).map((opt) => {
-                    const labels: Record<VisibilityOption, string> = {
-                      public: "Public",
-                      private: "Private",
-                      link_only: "Link Only",
-                    };
-                    const isActive = visibility === opt;
+                  {EVENT_VISIBILITY_OPTIONS.map((opt) => {
+                    const isActive = visibility === opt.value;
                     return (
                       <Pressable
-                        key={opt}
-                        onPress={() => setVisibility(opt)}
+                        key={opt.value}
+                        onPress={() => setVisibility(opt.value)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: isActive }}
+                        accessibilityLabel={`${opt.label}. ${opt.summary}.`}
+                        accessibilityHint={opt.helper}
                         className="flex-1 py-2.5 rounded-xl items-center"
                         style={{
                           backgroundColor: isActive
@@ -1382,7 +1466,7 @@ function CreateEventScreenContent() {
                             color: isActive ? "#fff" : colors.mutedForeground,
                           }}
                         >
-                          {labels[opt]}
+                          {opt.label}
                         </Text>
                       </Pressable>
                     );
@@ -1404,47 +1488,114 @@ function CreateEventScreenContent() {
                     className="text-[12px] leading-[17px]"
                     style={{ color: colors.mutedForeground }}
                   >
-                    {visibility === "public" && (
-                      <>
-                        <Text
-                          className="font-bold"
-                          style={{ color: colors.foreground }}
-                        >
-                          Public ·{" "}
-                        </Text>
-                        Appears in the Home feed, For You, and Search. Anyone
-                        can see and buy a ticket. Best for events you want to
-                        fill.
-                      </>
-                    )}
-                    {visibility === "link_only" && (
-                      <>
-                        <Text
-                          className="font-bold"
-                          style={{ color: colors.foreground }}
-                        >
-                          Link Only ·{" "}
-                        </Text>
-                        Hidden from the public feed and Search. Anyone with the
-                        share link can see and buy. Best for soft-launch events
-                        you promote on Instagram, group chats, or email.
-                      </>
-                    )}
-                    {visibility === "private" && (
-                      <>
-                        <Text
-                          className="font-bold"
-                          style={{ color: colors.foreground }}
-                        >
-                          Private ·{" "}
-                        </Text>
-                        Hidden from the public feed and from people without the
-                        link. Intended for invite-only guest lists.
-                      </>
-                    )}
+                    <Text className="font-bold" style={{ color: colors.foreground }}>
+                      {eventVisibilityCopy(visibility).label} ·{" "}
+                    </Text>
+                    {eventVisibilityCopy(visibility).helper}
                   </Text>
                 </View>
               </View>
+
+              {/* Guest list — private only. A link-only event lets anyone
+                  holding the URL in, so a list there would grant a permission
+                  everyone already has while implying a restriction. */}
+              {showsGuestList(visibility) ? (
+                <View className="bg-card rounded-2xl p-4">
+                  <View className="flex-row items-center gap-2 mb-1">
+                    <UserPlus size={18} color={colors.mutedForeground} />
+                    <Text className="text-sm font-semibold text-foreground">
+                      Guest list
+                    </Text>
+                  </View>
+                  <Text className="text-xs text-muted-foreground mb-3">
+                    Nobody can find a private event, so add the people you want
+                    there. Guests can see and attend it; they can&apos;t edit it
+                    or see the dashboard.
+                  </Text>
+
+                  {guests.length > 0 && (
+                    <View className="flex-row flex-wrap gap-2 mb-3">
+                      {guests.map((g) => (
+                        <View
+                          key={g.id}
+                          className="flex-row items-center gap-2 bg-muted px-3 py-1.5 rounded-full"
+                        >
+                          <Avatar uri={g.avatar} username={g.username} size={20} />
+                          <Text className="text-sm text-foreground">
+                            @{g.username}
+                          </Text>
+                          <Pressable
+                            onPress={() => removeGuest(g.id)}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${g.username} from the guest list`}
+                          >
+                            <X size={12} color={colors.mutedForeground} />
+                          </Pressable>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  <TextInput
+                    className="py-2.5 text-base text-foreground"
+                    placeholder="Search by username..."
+                    placeholderTextColor={colors.mutedForeground}
+                    value={guestSearch}
+                    onChangeText={setGuestSearch}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+
+                  {guestResults.length > 0 && (
+                    <View className="mt-2 border-t border-border pt-2">
+                      {guestResults
+                        .filter((u) => !guests.some((g) => g.id === u.id))
+                        .map((user) => (
+                          <Pressable
+                            key={user.id}
+                            onPress={() => {
+                              Haptics.impactAsync(
+                                Haptics.ImpactFeedbackStyle.Light,
+                              );
+                              addGuest({
+                                id: user.id,
+                                authId: user.authId,
+                                username: user.username,
+                                avatar: user.avatar,
+                              });
+                              setGuestSearch("");
+                              setGuestResults([]);
+                            }}
+                            className="flex-row items-center gap-3 py-2.5"
+                          >
+                            <Avatar
+                              uri={user.avatar}
+                              username={user.username}
+                              size={32}
+                            />
+                            <View className="flex-1">
+                              <Text className="text-sm font-semibold text-foreground">
+                                {user.name}
+                              </Text>
+                              <Text className="text-xs text-muted-foreground">
+                                @{user.username}
+                              </Text>
+                            </View>
+                            <Plus size={16} color={colors.primary} />
+                          </Pressable>
+                        ))}
+                    </View>
+                  )}
+
+                  {guests.length > 0 && (
+                    <Text className="text-xs text-muted-foreground mt-3">
+                      {guests.length} {guests.length === 1 ? "guest" : "guests"} ·
+                      they get a notification when you publish.
+                    </Text>
+                  )}
+                </View>
+              ) : null}
 
               {/* Age Restriction */}
               <View className="bg-card rounded-2xl p-4">
@@ -3198,46 +3349,7 @@ function CreateEventScreenContent() {
         )}
       </View>
 
-      {/* Progress Overlay */}
-      {isSubmitting && (
-        <View className="absolute inset-0 bg-black/80 items-center justify-center z-50">
-          <Motion.View
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: "spring", damping: 20, stiffness: 300 }}
-            className="bg-card rounded-3xl p-8 items-center gap-4"
-          >
-            <View className="w-48 mb-2">
-              <Progress value={uploadProgress} />
-            </View>
-            <Text className="text-lg font-semibold text-foreground">
-              Creating Event...
-            </Text>
-            <Text className="text-sm text-muted-foreground text-center">
-              Please wait while we set up your event
-            </Text>
-            <Pressable
-              onPress={() => {
-                cancelMediaUpload();
-                setIsSubmitting(false);
-                setUploadProgress(0);
-              }}
-              hitSlop={12}
-              style={{
-                marginTop: 8,
-                paddingHorizontal: 24,
-                paddingVertical: 10,
-                borderRadius: 20,
-                backgroundColor: "rgba(255,255,255,0.08)",
-              }}
-            >
-              <Text style={{ color: "#999", fontSize: 14, fontWeight: "600" }}>
-                Cancel
-              </Text>
-            </Pressable>
-          </Motion.View>
-        </View>
-      )}
+
     </SafeAreaView>
   );
 }

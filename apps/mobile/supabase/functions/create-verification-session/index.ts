@@ -18,6 +18,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { checkAdultBirthDate } from "../_shared/age-policy.ts";
 
 function json(req: Request, data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -53,11 +54,11 @@ Deno.serve(
     // Already approved → the user never sees the flow again (B3).
     const { data: existing } = await supabase
       .from("identity_verifications")
-      .select("status, provider_ref")
+      .select("status, provider_ref, date_of_birth")
       .eq("user_id", authUserId)
       .maybeSingle();
     // Table vocabulary (CHECK constraint): pending|submitted|passed|failed|expired|review.
-    if (existing?.status === "passed") {
+    if (existing?.status === "passed" && checkAdultBirthDate(existing.date_of_birth).allowed) {
       return json(req, { ok: true, data: { status: "passed" } });
     }
 

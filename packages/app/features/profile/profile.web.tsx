@@ -9,6 +9,10 @@
  * `useTaggedPosts`, `useMyEvents`, `useLikedEvents`, `useAppStore` (nsfw),
  * `useAuthStore`, plus the followers/following prefetch + `useMediaUpload` /
  * `usersApi.updateAvatar` avatar flow. Every tab and its query is preserved.
+ * `useEntitlements` is in that list for a reason: the tier beside your name is
+ * membership STATE, and a web build that skipped the query showed a paying
+ * member no tier at all. It resolves from Supabase like native, never from a
+ * processor SDK or a client price guess.
  *
  * Law 3 (raw web): NativeWind interop is off — Tailwind className only on raw DOM
  * tags. Header bg #06070d, content column max-w-2xl, full-bleed masonry, white/4
@@ -19,7 +23,6 @@
  */
 
 import { useEffect, useMemo, useRef } from "react";
-import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -58,6 +61,8 @@ import {
   formatCountSafe,
   type SafeGridTile,
 } from "@dvnt/app/lib/utils/safe-profile-mappers";
+import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
+import { TierBadge } from "@dvnt/app/components/membership/TierBadge";
 import { ProfileMasonryGrid } from "./ProfileMasonryGrid.web";
 import { ProfilePronounsPill } from "./ProfilePronounsPill.web";
 
@@ -96,10 +101,15 @@ const TABS = [
 export function ProfileScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { width: winW } = useWindowDimensions();
 
   // Bootstrap above-the-fold profile cache (matches native).
   useBootstrapProfile();
+
+  // What you are paying for, read the same way native reads it: one
+  // server-authoritative entitlements query, never a client price guess. The
+  // tier mark beside your name is wrong the moment this is missing, and
+  // "wrong membership state" is a correctness bug, not a missing decoration.
+  const { entitlements } = useEntitlements();
 
   const { activeTab, setActiveTab } = useProfileStore();
   const user = useAuthStore((s) => s.user);
@@ -398,6 +408,13 @@ export function ProfileScreen() {
         <div className="mt-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-base font-semibold">{displayName}</span>
+            {/* Your OWN profile, so the tier is spelled out — you should be
+                able to see what you are paying for without decoding a colour.
+                Everyone else gets the mark alone (see user-profile.web).
+                Free renders nothing at all: there is no badge for not
+                subscribing, and a "Free" chip beside your name is a scarlet
+                letter rather than a feature. */}
+            <TierBadge plan={entitlements?.planKey} size={16} showLabel />
             <ProfilePronounsPill pronouns={displayPronouns} inline />
           </div>
           {displayBio ? (

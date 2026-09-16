@@ -58,6 +58,15 @@ interface CoOrganizer {
   avatar: string;
 }
 
+/**
+ * Someone invited to SEE and ATTEND a private event — not to manage it.
+ * Same shape as a co-organizer because both come out of the same user search,
+ * but they land in different tables: staff in `event_co_organizers`, guests in
+ * `event_invites`. Staged here and written after publish, because at create
+ * time there is no event id to attach an invite to.
+ */
+export type EventGuestDraft = CoOrganizer;
+
 /** Editor row → `price_schedule` jsonb entry ("price changes to $X at T"). */
 export interface TierScheduleRow {
   effectiveAt: string; // ISO — when the new price takes effect
@@ -90,6 +99,7 @@ interface TicketTier {
 
 // Fields that persist as a draft
 interface DraftFields {
+  clientRequestId: string | null;
   title: string;
   description: string;
   location: string;
@@ -115,6 +125,7 @@ interface DraftFields {
    *  editor id; resolved to the created ticket_types uuid at publish. */
   addons: DraftAddon[];
   coOrganizers: CoOrganizer[];
+  guests: EventGuestDraft[];
   flyerImage: string | null;
   flyerMediaType: "image" | "video";
   // Fallback still image shown when the primary flyer is a video and the
@@ -147,12 +158,21 @@ interface UIFields {
     avatar: string;
     name: string;
   }[];
+  guestSearch: string;
+  guestResults: {
+    id: string;
+    authId?: string;
+    username: string;
+    avatar: string;
+    name: string;
+  }[];
   currentStep: number;
   totalSteps: number;
   agreementAccepted: boolean;
 }
 
 interface CreateEventActions {
+  getPublishRequestId: () => string;
   // Draft field setters
   setTitle: (v: string) => void;
   setDescription: (v: string) => void;
@@ -216,6 +236,18 @@ interface CreateEventActions {
       name: string;
     }[],
   ) => void;
+  addGuest: (user: EventGuestDraft) => void;
+  removeGuest: (userId: string) => void;
+  setGuestSearch: (v: string) => void;
+  setGuestResults: (
+    v: {
+      id: string;
+      authId?: string;
+      username: string;
+      avatar: string;
+      name: string;
+    }[],
+  ) => void;
   removeLineupItem: (index: number) => void;
   removePerk: (index: number) => void;
   setCurrentStep: (step: number) => void;
@@ -229,6 +261,7 @@ interface CreateEventActions {
 type CreateEventState = DraftFields & UIFields & CreateEventActions;
 
 const DRAFT_DEFAULTS: DraftFields = {
+  clientRequestId: null,
   title: "",
   description: "",
   location: "",
@@ -252,6 +285,7 @@ const DRAFT_DEFAULTS: DraftFields = {
   ticketTiers: [],
   addons: [],
   coOrganizers: [],
+  guests: [],
   flyerImage: null,
   flyerMediaType: "image",
   flyerFallbackImage: null,
@@ -274,6 +308,8 @@ const UI_DEFAULTS: UIFields = {
   simpleMaxPerUser: 4,
   coOrganizerSearch: "",
   coOrganizerResults: [],
+  guestSearch: "",
+  guestResults: [],
   currentStep: 0,
   totalSteps: 6,
   agreementAccepted: false,
@@ -322,6 +358,14 @@ export const useCreateEventStore = create<CreateEventState>()(
       setEventType: (v) => set({ eventType: v }),
       setDisclaimers: (v) => set({ disclaimers: v }),
       setIsNsfw: (v) => set({ isNsfw: v }),
+
+      getPublishRequestId: () => {
+        const existing = get().clientRequestId;
+        if (existing) return existing;
+        const id = `event-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+        set({ clientRequestId: id });
+        return id;
+      },
 
       // UI-only setters
       setShowDatePicker: (v) => set({ showDatePicker: v }),
@@ -383,6 +427,19 @@ export const useCreateEventStore = create<CreateEventState>()(
       setCoOrganizerSearch: (v) => set({ coOrganizerSearch: v }),
 
       setCoOrganizerResults: (v) => set({ coOrganizerResults: v }),
+
+      addGuest: (user) => {
+        if (!get().guests.some((g) => g.id === user.id)) {
+          set((s) => ({ guests: [...s.guests, user], guestSearch: "" }));
+        }
+      },
+
+      removeGuest: (userId) =>
+        set((s) => ({ guests: s.guests.filter((g) => g.id !== userId) })),
+
+      setGuestSearch: (v) => set({ guestSearch: v }),
+
+      setGuestResults: (v) => set({ guestResults: v }),
 
       removeLineupItem: (index) =>
         set((s) => ({ lineup: s.lineup.filter((_, i) => i !== index) })),
@@ -465,6 +522,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         return { ...current, ...p };
       },
       partialize: (state) => ({
+        clientRequestId: state.clientRequestId,
         title: state.title,
         description: state.description,
         location: state.location,
@@ -488,6 +546,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         ticketTiers: state.ticketTiers,
         addons: state.addons,
         coOrganizers: state.coOrganizers,
+        guests: state.guests,
         flyerImage: state.flyerImage,
         flyerMediaType: state.flyerMediaType,
         flyerFallbackImage: state.flyerFallbackImage,

@@ -7,7 +7,7 @@
  * (useEventsScreenStore — no local useState). The native screen pulls maps/media
  * that crash on web, so this is the web view.
  */
-import { useMemo, useRef, useEffect, useState } from "react";
+import { useMemo, useRef, useEffect } from "react";
 import { useRouter } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
@@ -40,7 +40,12 @@ import {
   usePromotedEventIds,
 } from "@dvnt/app/lib/hooks/use-promotions";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
+// Resolves to `use-responsive-grid.web.ts` (webpack `.web.ts` extension order),
+// which reads the viewport with a `resize` listener instead of react-native's
+// `useWindowDimensions`. Same `resolveResponsiveGrid` maths as native.
+import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import { slugify } from "@dvnt/app/lib/slug";
+import { EVENT_VISIBILITY_COPY } from "@dvnt/app/lib/events/event-visibility-copy";
 import { EVENT_CARD_ASPECT } from "@dvnt/app/components/event/feed-event-card-shape";
 import {
   resolvePosterUrl,
@@ -49,13 +54,29 @@ import {
 
 const TABS = ["Upcoming", "For You", "All", "Past"] as const;
 
+/** Gap between event cards, in px. Feeds the grid resolver and the CSS gap. */
+const GAP = 16;
+/** Narrowest event card that still fits its overlaid RSVP button legibly. */
+const MIN_EVENT_CARD_WIDTH = 288;
+/** `mx-auto max-w-6xl` on the page column below — Tailwind's 6xl is 72rem. */
+const EVENTS_CONTENT_MAX_WIDTH = 1152;
+
 const FILTERS = [
   { id: "in_city", label: "In City", Icon: MapPin, color: "#3EA4E5" },
   { id: "online", label: "Online", Icon: Globe, color: "#10B981" },
   { id: "tonight", label: "Tonight", Icon: Moon, color: "#8B5CF6" },
   { id: "this_weekend", label: "Weekend", Icon: Calendar, color: "#F59E0B" },
   { id: "friends_going", label: "Friends Going", Icon: Users, color: "#EC4899" },
-  { id: "invite_only", label: "Invite-only", Icon: Lock, color: "#EF4444" },
+  // Filter id stays "invite_only" — it is the query value, and renaming it
+  // would change semantics. The LABEL is the shared private-visibility copy:
+  // there is no guest-list feature, so "Invite-only" promised something the
+  // product does not do. See event-visibility-copy.ts.
+  {
+    id: "invite_only",
+    label: EVENT_VISIBILITY_COPY.private.label,
+    Icon: Lock,
+    color: "#EF4444",
+  },
 ] as const;
 
 function shortDate(iso?: string): string {
@@ -462,25 +483,26 @@ function VirtualEventList({
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Columns by container width. One card per row left a ~510px card centred in
-  // a 1372px viewport with ~290px of dead gutter on each side — a phone layout
-  // stretched onto a desktop. Posh, Nextdoor and Eventbrite all run 3-4 columns
-  // for the same portrait-flyer card; 3 keeps the card wide enough for the
-  // overlaid RSVP button, which is why this stops short of Posh's 4.
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
-    ro.observe(el);
-    setWidth(el.getBoundingClientRect().width);
-    return () => ro.disconnect();
-  }, []);
-
-  // Thresholds are on the CONTAINER, not the viewport. They sit below the
-  // obvious 768/1280 because the page column is narrower than the window:
-  // 736px used to yield 1 column because it missed 768 by 32px.
-  const columns = width >= 960 ? 3 : width >= 600 ? 2 : 1;
+  // Columns from the SHARED resolver — the same `resolveResponsiveGrid` the
+  // native events screen calls, so a tablet browser and a tablet agree. One
+  // card per row left a ~510px card centred in a 1372px viewport with ~290px of
+  // dead gutter on each side — a phone layout stretched onto a desktop. Posh,
+  // Nextdoor and Eventbrite all run 3-4 columns for the same portrait-flyer
+  // card; `maxColumns: 3` keeps the card wide enough for the overlaid RSVP
+  // button, which is why this stops short of Posh's 4.
+  //
+  // The layout box is the page's own `mx-auto max-w-6xl px-4` column, not the
+  // window — 736px of viewport used to yield 1 column because the container was
+  // 32px narrower than the threshold. `maxContainerWidth` states that cap
+  // instead of measuring it, which is why the ResizeObserver this used to run
+  // is gone.
+  const { columns, cellWidth } = useResponsiveGrid({
+    minCellWidth: MIN_EVENT_CARD_WIDTH,
+    gap: GAP,
+    horizontalPadding: 32,
+    maxColumns: 3,
+    maxContainerWidth: EVENTS_CONTENT_MAX_WIDTH,
+  });
 
   // Rows of `columns` cards. The virtualizer still measures real rows, so this
   // only has to be close; it positions from the estimate before measurement.
@@ -492,12 +514,9 @@ function VirtualEventList({
     return out;
   }, [events, columns]);
 
-  const GAP = 16;
   // 4:5 portrait, so height follows the column width. The card keeps its
   // max-w-md cap, which only binds in the single-column case.
-  const cardWidth = width
-    ? Math.min((width - GAP * (columns - 1)) / columns, 448)
-    : 448;
+  const cardWidth = Math.min(cellWidth, 448);
 
   const virtualizer = useWindowVirtualizer({
     count: rows.length,
@@ -551,7 +570,8 @@ function VirtualEventList({
 
 // Large hero card — matches the mobile event card (full image/VIDEO background,
 // gradient, title/date/location, price + RSVP). Laid out in a responsive grid by
-// VirtualEventList: 1 column on phones, 2 from 768px, 3 from 1280px.
+// VirtualEventList via `useResponsiveGrid`: as many 288px-wide cards as the
+// max-w-6xl column fits, capped at 3.
 function LargeEventCard({
   event: e,
   onOpen,
