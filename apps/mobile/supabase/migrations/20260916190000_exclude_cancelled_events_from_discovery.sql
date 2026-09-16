@@ -10,7 +10,7 @@
 --
 -- CHANGE: add one predicate next to the existing visibility filter in all three
 -- discovery functions (get_events_for_you, and both get_events_home overloads):
---   AND COALESCE(e.status, 'active') NOT IN ('cancelled','deleted','draft','suspended')
+--   AND COALESCE(e.status, 'active') NOT IN ('cancelled','canceled','draft','suspended')
 -- COALESCE, not `e.status <> 'cancelled'`: status is nullable and most legacy rows
 -- are NULL, and a bare <> is NULL for those, which would drop the whole backlog.
 -- Nothing else in the three bodies changes — same STABLE SECURITY DEFINER mode,
@@ -153,7 +153,7 @@ BEGIN
     ) cat_affinity ON true
     WHERE e.start_date IS NOT NULL
       AND COALESCE(e.visibility, 'public') = 'public'
-      AND COALESCE(e.status, 'active') NOT IN ('cancelled', 'deleted', 'draft', 'suspended')
+      AND COALESCE(e.status, 'active') NOT IN ('cancelled', 'canceled', 'draft', 'suspended')
     ORDER BY score DESC, e.start_date ASC
     LIMIT p_limit
     OFFSET p_offset
@@ -246,7 +246,7 @@ BEGIN
     WHERE e.start_date IS NOT NULL
       AND COALESCE(e.end_date, e.start_date + interval '6 hours') >= now() - interval '24 hours'
       AND COALESCE(e.visibility, 'public') = 'public'
-      AND COALESCE(e.status, 'active') NOT IN ('cancelled', 'deleted', 'draft', 'suspended')
+      AND COALESCE(e.status, 'active') NOT IN ('cancelled', 'canceled', 'draft', 'suspended')
       AND (p_nsfw IS NULL OR COALESCE(e.nsfw, false) = p_nsfw)
       AND (p_filter_online IS NULL OR
            (p_filter_online = true AND e.location_type = 'virtual') OR
@@ -358,7 +358,7 @@ BEGIN
     ) lc ON true
     WHERE e.start_date IS NOT NULL
       AND COALESCE(e.visibility, 'public') = 'public'
-      AND COALESCE(e.status, 'active') NOT IN ('cancelled', 'deleted', 'draft', 'suspended')
+      AND COALESCE(e.status, 'active') NOT IN ('cancelled', 'canceled', 'draft', 'suspended')
       AND (p_filter_online IS NULL OR
            (p_filter_online = true AND e.location_type = 'virtual') OR
            (p_filter_online = false AND (e.location_type IS NULL OR e.location_type = 'physical')))

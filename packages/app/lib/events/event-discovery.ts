@@ -14,8 +14,21 @@
 
 import { slugify } from "../slug.ts";
 
-/** Statuses that must never be offered to someone who wasn't already holding a link to the row. */
-const HIDDEN_STATUSES = new Set(["cancelled", "canceled", "deleted", "draft", "suspended"]);
+/**
+ * Statuses that must never be offered to someone who wasn't already holding a
+ * link to the row. Matched against the real constraint, which is
+ * `events_status_check`: draft | active | cancelled | postponed | suspended.
+ *
+ * `active` and `postponed` are deliberately absent. A postponed event still
+ * has to be findable — the people holding tickets need to see that it moved,
+ * and hiding it turns a date change into a disappearance.
+ *
+ * "canceled" (one l) and "deleted" were in this list and cannot occur: the
+ * CHECK rejects both. Keeping the spelling variant costs nothing and guards a
+ * future rename; "deleted" is dropped because a reader would otherwise assume
+ * soft-deletes exist here, and they do not — deletion removes the row.
+ */
+const HIDDEN_STATUSES = new Set(["cancelled", "canceled", "draft", "suspended"]);
 
 export type DiscoveryEvent = {
   id?: number | string | null;
