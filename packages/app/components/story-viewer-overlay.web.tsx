@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "solito/navigation";
-import { X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import { StoryViewer } from "@dvnt/ui";
 import { useStoryViewerStore } from "@dvnt/app/lib/stores/story-viewer-store";
 import { StoryOverlaysLayer } from "@dvnt/app/components/story-overlays-layer.web";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useDeleteStory } from "@dvnt/app/lib/hooks/use-stories";
+import { isSameUser } from "@dvnt/app/lib/profile/same-user";
 import { storyProfilePath } from "@dvnt/app/lib/profile/story-profile-path";
 
 /**
@@ -42,6 +44,14 @@ export function StoryViewerOverlay() {
   // remounts per group via key={group.id}).
   const [storyIndex, setStoryIndex] = useState(0);
   useEffect(() => setStoryIndex(0), [groupIndex]);
+
+  // Deleting your own story existed on native and nowhere on web: the web
+  // overlay had a close button and nothing else, so a member could post a story
+  // here and never take it down. Same mutation native uses, so the rail drops
+  // it optimistically and the list refetches behind that.
+  const deleteStory = useDeleteStory();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  useEffect(() => setConfirmingDelete(false), [groupIndex]);
 
   // react-insta-stories positions its internal layers using the width/height
   // props as PIXEL values — passing "100%" breaks its layout math so segments
@@ -108,6 +118,20 @@ export function StoryViewerOverlay() {
   if (!group || group.segments.length === 0) return null;
   const segment =
     group.segments[Math.min(storyIndex, group.segments.length - 1)];
+  // By id only. isSameUser deliberately refuses a username fallback, and this
+  // is an ownership check that hands out a Delete button.
+  const isOwnStory = isSameUser(viewer, { userId: group.userId });
+  const removeStory = () => {
+    deleteStory.mutate(group.id, {
+      // The group is gone from the rail either way; leaving the viewer on a
+      // deleted story is the one thing that must not happen.
+      onSettled: () => {
+        setConfirmingDelete(false);
+        if (groups.length > 1) nextGroup();
+        else close();
+      },
+    });
+  };
 
   // Portal to <body> so the overlay escapes every ancestor stacking context
   // (the shell's backdrop-filter / transforms) and truly sits on top of the
@@ -127,6 +151,32 @@ export function StoryViewerOverlay() {
       >
         <X size={18} color="#fff" />
       </button>
+
+      {/* Owner-only delete. Two taps, not a browser confirm() — a modal dialog
+          over a playing story is worse than a button that asks once. */}
+      {isOwnStory ? (
+        <button
+          onClick={() => (confirmingDelete ? removeStory() : setConfirmingDelete(true))}
+          disabled={deleteStory.isPending}
+          aria-label={confirmingDelete ? "Confirm delete story" : "Delete story"}
+          className="absolute right-16 z-10 h-9 rounded-xl flex items-center justify-center gap-2 px-3 active:scale-95 border border-white/20 disabled:opacity-50"
+          style={{
+            top: "calc(env(safe-area-inset-top) + 14px)",
+            background: confirmingDelete
+              ? "rgba(244,63,94,0.85)"
+              : "rgba(255,255,255,0.12)",
+            backdropFilter: "saturate(160%) blur(18px)",
+            WebkitBackdropFilter: "saturate(160%) blur(18px)",
+          }}
+        >
+          <Trash2 size={18} color="#fff" />
+          {confirmingDelete || deleteStory.isPending ? (
+            <span className="text-[13px] font-semibold text-white">
+              {deleteStory.isPending ? "Deleting…" : "Delete story"}
+            </span>
+          ) : null}
+        </button>
+      ) : null}
 
       {/* Centered portrait frame — letterboxed on the black backdrop. */}
       <div

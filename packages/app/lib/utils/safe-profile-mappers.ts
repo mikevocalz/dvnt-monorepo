@@ -160,6 +160,18 @@ export function safeGridTile(post: any): SafeGridTile {
     let kind: SafeGridTile["kind"] =
       post.kind === "text" ? "text" : "image";
     const firstType = media[0]?.type;
+    // A caption with no media is a text post whatever the row calls itself.
+    // Without this it fell through to "image", found no coverUrl and rendered
+    // a grey "No preview" tile — which reads as a broken or half-deleted post
+    // rather than the words the member actually wrote.
+    if (
+      kind !== "text" &&
+      mediaCount === 0 &&
+      typeof post.caption === "string" &&
+      post.caption.trim().length > 0
+    ) {
+      kind = "text";
+    }
     if (kind === "text") {
       kind = "text";
     } else if (mediaCount > 1) {
