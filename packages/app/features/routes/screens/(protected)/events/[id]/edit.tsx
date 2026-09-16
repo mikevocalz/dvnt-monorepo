@@ -44,6 +44,7 @@ import {
   Music,
   Gift,
   ChevronDown,
+  UserPlus,
 } from "lucide-react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useColorScheme, useMediaPicker } from "@dvnt/app/lib/hooks";
@@ -52,7 +53,10 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
   EVENT_VISIBILITY_OPTIONS,
   eventVisibilityCopy,
+  showsGuestList,
 } from "@dvnt/app/lib/events/event-visibility-copy";
+import { useEventGuestStore } from "@dvnt/app/lib/stores/event-guest-store";
+import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { Progress } from "@dvnt/app/components/ui/progress";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { eventsApi, formatEventDate } from "@dvnt/app/lib/api/events";
@@ -1419,6 +1423,15 @@ function EditEventScreenContent() {
           </View>
         </View>
 
+        {/* Guest list — private only. A link-only event lets anyone holding
+            the URL in, so a list there would grant a permission everyone
+            already has while implying a restriction. */}
+        {showsGuestList(visibility) ? (
+          <View className="mb-4">
+            <GuestListSection eventId={Number(id)} />
+          </View>
+        ) : null}
+
         {/* Ticketing Toggle — visible on EVERY event so a free event can
             be flipped paid (and vice versa) without leaving the screen. */}
         <View
@@ -2086,5 +2099,157 @@ export default function EditEventScreen() {
     <ErrorBoundary screenName="EditEventDetail" onGoBack={() => router.back()}>
       <EditEventScreenContent />
     </ErrorBoundary>
+  );
+}
+
+// ── GuestListSection ────────────────────────────────────────────────────────
+// The guest list of an event that already exists, so every change writes
+// straight through — no Save needed, and Save stays about the event's own
+// fields. Create stages guests instead and writes them after publish.
+//
+// A guest is not a co-organizer: a co-organizer manages the event, a guest can
+// see it and attend it. Both are host-authorized server-side.
+//
+// ponytail: usernames only. `event-invite-guests` accepts an email and
+// `can_view_event` honours it once an account verifies that address, but the
+// invitee needs a claim screen to land on after signup and that does not exist
+// yet. Shipping the field without it would send mail nobody could act on.
+function GuestListSection({ eventId }: { eventId: number }) {
+  const { colors } = useColorScheme();
+  const guests = useEventGuestStore((st) => st.guests);
+  const loading = useEventGuestStore((st) => st.loading);
+  const pending = useEventGuestStore((st) => st.pending);
+  const error = useEventGuestStore((st) => st.error);
+  const search = useEventGuestStore((st) => st.search);
+  const setSearch = useEventGuestStore((st) => st.setSearch);
+  const results = useEventGuestStore((st) => st.results);
+  const setResults = useEventGuestStore((st) => st.setResults);
+  const searchUsers = useEventGuestStore((st) => st.searchUsers);
+  const load = useEventGuestStore((st) => st.load);
+  const invite = useEventGuestStore((st) => st.invite);
+  const revoke = useEventGuestStore((st) => st.revoke);
+  const reset = useEventGuestStore((st) => st.reset);
+
+  useEffect(() => {
+    if (!Number.isFinite(eventId) || eventId <= 0) return;
+    load(eventId);
+    return () => reset();
+  }, [eventId, load, reset]);
+
+  // ponytail: a setTimeout ref, same as the web field. A pacer Debouncer
+  // here would be a second mechanism for one 300ms input.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (search.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(() => searchUsers(search), 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [search, searchUsers, setResults]);
+
+  return (
+    <View className="bg-card rounded-2xl p-4">
+      <View className="flex-row items-center gap-2 mb-1">
+        <UserPlus size={18} color={colors.mutedForeground} />
+        <Text className="text-sm font-semibold text-foreground">Guest list</Text>
+      </View>
+      <Text className="text-xs text-muted-foreground mb-3">
+        Nobody can find a private event, so add the people you want there.
+        Guests can see and attend it; they can&apos;t edit it or see the
+        dashboard.
+      </Text>
+
+      {error ? (
+        <Text
+          accessibilityRole="alert"
+          className="text-xs mb-3"
+          style={{ color: colors.destructive ?? "#FF8A8A" }}
+        >
+          {error}
+        </Text>
+      ) : null}
+
+      {loading ? (
+        <Text className="text-xs text-muted-foreground mb-3">
+          Loading the guest list…
+        </Text>
+      ) : guests.length > 0 ? (
+        <View className="flex-row flex-wrap gap-2 mb-3">
+          {guests.map((g) => {
+            const label = g.username ? `@${g.username}` : (g.email ?? "Guest");
+            return (
+              <View
+                key={g.id}
+                className="flex-row items-center gap-2 bg-muted px-3 py-1.5 rounded-full"
+              >
+                <Avatar uri={g.avatar} username={g.username ?? ""} size={20} />
+                <Text className="text-sm text-foreground">{label}</Text>
+                <Pressable
+                  onPress={() => revoke(g)}
+                  disabled={pending === (g.username ?? g.email)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${label} from the guest list`}
+                >
+                  <X size={12} color={colors.mutedForeground} />
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+
+      <TextInput
+        className="py-2.5 text-base text-foreground"
+        placeholder="Search by username..."
+        placeholderTextColor={colors.mutedForeground}
+        value={search}
+        onChangeText={setSearch}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+
+      {results.length > 0 && (
+        <View className="mt-2 border-t border-border pt-2">
+          {results
+            .filter((u) => !guests.some((g) => g.username === u.username))
+            .map((user) => (
+              <Pressable
+                key={user.id}
+                disabled={pending === user.username}
+                onPress={() => invite(user.username)}
+                className="flex-row items-center gap-3 py-2.5"
+              >
+                <Avatar uri={user.avatar} username={user.username} size={32} />
+                <View className="flex-1">
+                  <Text className="text-sm font-semibold text-foreground">
+                    {user.name}
+                  </Text>
+                  <Text className="text-xs text-muted-foreground">
+                    @{user.username}
+                  </Text>
+                </View>
+                {pending === user.username ? (
+                  <Text className="text-xs text-muted-foreground">Adding…</Text>
+                ) : (
+                  <Plus size={16} color={colors.primary} />
+                )}
+              </Pressable>
+            ))}
+        </View>
+      )}
+
+      {guests.length > 0 ? (
+        <Text className="text-xs text-muted-foreground mt-3">
+          {guests.length} {guests.length === 1 ? "guest" : "guests"} · added and
+          removed right away. Guests can see and attend this event; they
+          can&apos;t edit it — that&apos;s a co-organizer.
+        </Text>
+      ) : null}
+    </View>
   );
 }

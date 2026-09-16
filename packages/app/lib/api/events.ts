@@ -627,6 +627,37 @@ export const eventsApi = {
   },
 
   /**
+   * One page of the "Who's going" list, past the 20 the detail RPC ships.
+   *
+   * Same gate as `getEventById`, for the same reason: the avatar row is the one
+   * place a member's ticket turns into something other members can see, so a
+   * private or link-only event is never asked about. `normalizeVisibility` folds
+   * "unlisted" into link_only here too, and an unknown/absent visibility fails
+   * to "public" only because that is what the row itself resolves to — callers
+   * pass the visibility straight off the fetched event, never a guess.
+   * `can_view_event` re-checks it server-side, so a caller that skipped this
+   * still gets [].
+   */
+  async getEventAttendeePage(
+    id: string,
+    opts: { visibility: unknown; limit: number; offset: number },
+  ): Promise<Record<string, unknown>[]> {
+    if (normalizeVisibility(opts.visibility) !== "public") return [];
+    try {
+      const { data, error } = await supabase.rpc("get_event_attendee_page", {
+        p_event_id: parseInt(id),
+        p_limit: opts.limit,
+        p_offset: opts.offset,
+      });
+      if (error) throw error;
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.error("[Events] getEventAttendeePage error:", error);
+      return [];
+    }
+  },
+
+  /**
    * Get single event with ALL detail data via batch RPC.
    * Returns event + host + isLiked + reviews + comments + tiers + attendees
    * in a SINGLE round-trip.

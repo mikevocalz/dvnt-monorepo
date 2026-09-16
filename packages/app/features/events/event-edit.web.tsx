@@ -25,6 +25,8 @@ import {
   ImagePlus,
   Plus,
   X,
+  Search,
+  UserPlus,
 } from "lucide-react";
 import { FormField, StickySaveBar, useDirtyGuard } from "@dvnt/ui";
 import { useEvent, useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
@@ -32,7 +34,9 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
   EVENT_VISIBILITY_OPTIONS,
   eventVisibilityCopy,
+  showsGuestList,
 } from "@dvnt/app/lib/events/event-visibility-copy";
+import { useEventGuestStore } from "@dvnt/app/lib/stores/event-guest-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
   ticketTypesApi,
@@ -857,6 +861,14 @@ export function EventEditScreen() {
               {eventVisibilityCopy(s.visibility).helper}
             </p>
           </FormField>
+          {/* Private only. A link-only event lets anyone holding the URL in, so
+              a guest list there would grant a permission everyone already has
+              while implying a restriction. */}
+          {showsGuestList(s.visibility) ? (
+            <FormField label="Guest list">
+              <GuestListField eventId={Number(id)} />
+            </FormField>
+          ) : null}
         </Section>
 
         {/* Ticketing toggle */}
@@ -1347,4 +1359,170 @@ function toLocalInput(iso?: string | null): string {
 function fromLocalInput(v: string): string {
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+}
+
+// ── GuestListField ──────────────────────────────────────────────────────────
+// The guest list of an event that already exists, so every change writes
+// straight through — no Save needed, and the Save bar stays about the event's
+// own fields. Create stages guests instead and writes them after publish.
+//
+// A guest is not a co-organizer: a co-organizer manages the event, a guest can
+// see it and attend it. Both are host-authorized server-side.
+//
+// ponytail: usernames only. `event-invite-guests` accepts an email and
+// `can_view_event` honours it once an account verifies that address, but the
+// invitee needs a claim screen to land on after signup and that does not exist
+// yet. Shipping the field without it would send mail nobody could act on.
+function GuestListField({ eventId }: { eventId: number }) {
+  const guests = useEventGuestStore((st) => st.guests);
+  const loading = useEventGuestStore((st) => st.loading);
+  const pending = useEventGuestStore((st) => st.pending);
+  const error = useEventGuestStore((st) => st.error);
+  const search = useEventGuestStore((st) => st.search);
+  const setSearch = useEventGuestStore((st) => st.setSearch);
+  const results = useEventGuestStore((st) => st.results);
+  const setResults = useEventGuestStore((st) => st.setResults);
+  const searchUsers = useEventGuestStore((st) => st.searchUsers);
+  const load = useEventGuestStore((st) => st.load);
+  const invite = useEventGuestStore((st) => st.invite);
+  const revoke = useEventGuestStore((st) => st.revoke);
+  const reset = useEventGuestStore((st) => st.reset);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!Number.isFinite(eventId) || eventId <= 0) return;
+    load(eventId);
+    return () => reset();
+  }, [eventId, load, reset]);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (search.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(() => searchUsers(search), 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [search, searchUsers, setResults]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="relative">
+        <div className="flex items-center gap-2 rounded-xl border border-white/12 bg-white/[0.05] px-3 h-11">
+          <Search size={16} className="text-white/40 shrink-0" />
+          <input
+            className="flex-1 bg-transparent text-[15px] text-white placeholder:text-white/40 outline-none"
+            value={search}
+            placeholder="Search by username"
+            aria-label="Search for a guest by username"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setResults([]);
+              }}
+              className="text-white/40 hover:text-white/80"
+              aria-label="Clear"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+        </div>
+        {results.length > 0 ? (
+          <div className="absolute left-0 right-0 mt-1 z-10 max-h-56 overflow-auto rounded-xl border border-white/12 bg-[#0E1320] shadow-xl">
+            {results
+              .filter((u) => !guests.some((g) => g.username === u.username))
+              .map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  disabled={pending === u.username}
+                  onClick={() => invite(u.username)}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-white/5 disabled:opacity-50"
+                >
+                  {u.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={u.avatar}
+                      alt=""
+                      className="h-7 w-7 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="h-7 w-7 rounded-full bg-white/10" />
+                  )}
+                  <span className="flex-1 text-sm text-white">@{u.username}</span>
+                  {pending === u.username ? (
+                    <span className="text-xs text-white/50">Adding…</span>
+                  ) : (
+                    <UserPlus size={14} className="text-[#3FDCFF]" />
+                  )}
+                </button>
+              ))}
+          </div>
+        ) : null}
+      </div>
+
+      {error ? (
+        <p role="alert" className="text-xs text-[#FF8A8A]">
+          {error}
+        </p>
+      ) : null}
+
+      {loading ? (
+        <p className="text-xs text-white/45">Loading the guest list…</p>
+      ) : guests.length > 0 ? (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {guests.map((g) => {
+              const label = g.username ? `@${g.username}` : (g.email ?? "Guest");
+              return (
+                <span
+                  key={g.id}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white/10 py-1 pl-1 pr-2.5 text-xs font-medium text-white"
+                >
+                  {g.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={g.avatar}
+                      alt=""
+                      className="h-5 w-5 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="h-5 w-5 rounded-full bg-white/15" />
+                  )}
+                  {label}
+                  <button
+                    type="button"
+                    disabled={pending === (g.username ?? g.email)}
+                    onClick={() => revoke(g)}
+                    aria-label={`Remove ${label} from the guest list`}
+                    className="text-white/60 hover:text-white disabled:opacity-40"
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+          <p className="text-xs text-white/45">
+            {guests.length} {guests.length === 1 ? "guest" : "guests"} · added and
+            removed right away. Guests can see and attend this event. They
+            can&apos;t edit it — that&apos;s a co-organizer.
+          </p>
+        </>
+      ) : (
+        <p className="text-xs text-white/45">
+          Nobody can find a private event, so add the people you want there.
+          Guests can see and attend it; they can&apos;t edit it or see the
+          dashboard.
+        </p>
+      )}
+    </div>
+  );
 }

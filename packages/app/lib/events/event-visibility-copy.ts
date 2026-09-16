@@ -5,9 +5,10 @@
  * Every helper string answers the same three questions in the same order:
  * who can find it, who can open it, and how someone gets in.
  *
- * Accuracy rule: describe only mechanisms that exist today. There is no
- * guest-list feature. Access to a private event comes from a comped ticket or
- * from being a co-organizer, so that is what the copy says.
+ * Accuracy rule: describe only mechanisms that exist today. A private event
+ * admits the guest list, a comped ticket holder, and a co-organizer, so that is
+ * what the copy says — guest list first, because it is the one the host reaches
+ * for on the create screen.
  */
 
 export type EventVisibility = "public" | "private" | "link_only";
@@ -45,7 +46,7 @@ export const EVENT_VISIBILITY_COPY: Record<
     label: "Private",
     summary: "Unlisted, and the link alone is not enough",
     helper:
-      "Not listed anywhere, and the link alone will not open it. People get in when you comp them a ticket or add them as a co-organizer.",
+      "Not listed anywhere, and the link alone will not open it. Add people to the guest list below — or comp them a ticket, or add them as a co-organizer.",
   },
 };
 
@@ -67,6 +68,19 @@ export function resolveEventVisibility(value: unknown): EventVisibility {
   }
   if (value === "unlisted") return "link_only";
   return "public";
+}
+
+/**
+ * Does this visibility need a guest list?
+ *
+ * Private only. A guest-list row's whole job is to admit someone the event
+ * would otherwise refuse, and public and link-only events refuse nobody — for
+ * link-only, anyone holding the URL is already in, so a list there would grant
+ * a permission everyone already has while implying the opposite. Offering it
+ * would read as a restriction the product does not enforce.
+ */
+export function showsGuestList(value: unknown): boolean {
+  return resolveEventVisibility(value) === "private";
 }
 
 export function eventVisibilityCopy(value: unknown): EventVisibilityCopy {

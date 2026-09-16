@@ -557,6 +557,61 @@ export async function revokeCoOrganizer(
   });
 }
 
+// ── Guest list (private events) ─────────────────────────────────────────────
+// A guest is not a co-organizer: a co-organizer manages the event, a guest can
+// see it and attend it. Both calls are host-authorized server-side by
+// `event-invite-guests`; nobody can add themselves.
+
+export interface EventGuest {
+  id: string;
+  authId: string | null;
+  email: string | null;
+  status: "pending" | "accepted" | "declined";
+  username: string | null;
+  avatar: string;
+}
+
+export async function listEventGuests(
+  eventId: number,
+): Promise<{ guests: EventGuest[] }> {
+  return invokeEdgeFunction("event-invite-guests", {
+    action: "list",
+    event_id: eventId,
+  });
+}
+
+/** `recipients` accepts usernames (with or without `@`) and email addresses. */
+export async function inviteEventGuests(
+  eventId: number,
+  recipients: string[],
+  note?: string,
+): Promise<{
+  invited: number;
+  already_invited: { recipient: string; reason: string }[];
+  skipped: { recipient: string; reason: string }[];
+  delivery: { recipient: string; status: "delivered" | "failed" }[];
+}> {
+  return invokeEdgeFunction("event-invite-guests", {
+    action: "invite",
+    event_id: eventId,
+    recipients,
+    note,
+  });
+}
+
+/** Removing the row removes access — there is no other source for that guest. */
+export async function revokeEventGuest(
+  eventId: number,
+  target: { authId?: string | null; email?: string | null },
+): Promise<{ revoked: number }> {
+  return invokeEdgeFunction("event-invite-guests", {
+    action: "revoke",
+    event_id: eventId,
+    invited_user_id: target.authId ?? undefined,
+    invited_email: target.email ?? undefined,
+  });
+}
+
 /**
  * RSVP to an event.
  */

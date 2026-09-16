@@ -58,6 +58,15 @@ interface CoOrganizer {
   avatar: string;
 }
 
+/**
+ * Someone invited to SEE and ATTEND a private event — not to manage it.
+ * Same shape as a co-organizer because both come out of the same user search,
+ * but they land in different tables: staff in `event_co_organizers`, guests in
+ * `event_invites`. Staged here and written after publish, because at create
+ * time there is no event id to attach an invite to.
+ */
+export type EventGuestDraft = CoOrganizer;
+
 /** Editor row → `price_schedule` jsonb entry ("price changes to $X at T"). */
 export interface TierScheduleRow {
   effectiveAt: string; // ISO — when the new price takes effect
@@ -116,6 +125,7 @@ interface DraftFields {
    *  editor id; resolved to the created ticket_types uuid at publish. */
   addons: DraftAddon[];
   coOrganizers: CoOrganizer[];
+  guests: EventGuestDraft[];
   flyerImage: string | null;
   flyerMediaType: "image" | "video";
   // Fallback still image shown when the primary flyer is a video and the
@@ -142,6 +152,14 @@ interface UIFields {
   simpleMaxPerUser: number;
   coOrganizerSearch: string;
   coOrganizerResults: {
+    id: string;
+    authId?: string;
+    username: string;
+    avatar: string;
+    name: string;
+  }[];
+  guestSearch: string;
+  guestResults: {
     id: string;
     authId?: string;
     username: string;
@@ -218,6 +236,18 @@ interface CreateEventActions {
       name: string;
     }[],
   ) => void;
+  addGuest: (user: EventGuestDraft) => void;
+  removeGuest: (userId: string) => void;
+  setGuestSearch: (v: string) => void;
+  setGuestResults: (
+    v: {
+      id: string;
+      authId?: string;
+      username: string;
+      avatar: string;
+      name: string;
+    }[],
+  ) => void;
   removeLineupItem: (index: number) => void;
   removePerk: (index: number) => void;
   setCurrentStep: (step: number) => void;
@@ -255,6 +285,7 @@ const DRAFT_DEFAULTS: DraftFields = {
   ticketTiers: [],
   addons: [],
   coOrganizers: [],
+  guests: [],
   flyerImage: null,
   flyerMediaType: "image",
   flyerFallbackImage: null,
@@ -277,6 +308,8 @@ const UI_DEFAULTS: UIFields = {
   simpleMaxPerUser: 4,
   coOrganizerSearch: "",
   coOrganizerResults: [],
+  guestSearch: "",
+  guestResults: [],
   currentStep: 0,
   totalSteps: 6,
   agreementAccepted: false,
@@ -395,6 +428,19 @@ export const useCreateEventStore = create<CreateEventState>()(
 
       setCoOrganizerResults: (v) => set({ coOrganizerResults: v }),
 
+      addGuest: (user) => {
+        if (!get().guests.some((g) => g.id === user.id)) {
+          set((s) => ({ guests: [...s.guests, user], guestSearch: "" }));
+        }
+      },
+
+      removeGuest: (userId) =>
+        set((s) => ({ guests: s.guests.filter((g) => g.id !== userId) })),
+
+      setGuestSearch: (v) => set({ guestSearch: v }),
+
+      setGuestResults: (v) => set({ guestResults: v }),
+
       removeLineupItem: (index) =>
         set((s) => ({ lineup: s.lineup.filter((_, i) => i !== index) })),
 
@@ -500,6 +546,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         ticketTiers: state.ticketTiers,
         addons: state.addons,
         coOrganizers: state.coOrganizers,
+        guests: state.guests,
         flyerImage: state.flyerImage,
         flyerMediaType: state.flyerMediaType,
         flyerFallbackImage: state.flyerFallbackImage,

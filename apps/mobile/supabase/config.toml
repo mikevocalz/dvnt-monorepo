@@ -218,6 +218,9 @@ verify_jwt = false
 [functions.event-cancel]
 verify_jwt = false
 
+[functions.event-invite-guests]
+verify_jwt = false
+
 [functions.event-postpone]
 verify_jwt = false
 

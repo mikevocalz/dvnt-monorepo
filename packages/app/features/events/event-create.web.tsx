@@ -65,7 +65,9 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
   EVENT_VISIBILITY_OPTIONS,
   eventVisibilityCopy,
+  showsGuestList,
 } from "@dvnt/app/lib/events/event-visibility-copy";
+import { inviteEventGuests } from "@dvnt/app/lib/api/privileged";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import {
@@ -467,6 +469,34 @@ export function CreateEventScreen() {
             "warning",
             "Some co-organizers weren't invited",
             `Retry from the event dashboard: ${failed.map((u) => "@" + u).join(", ")}.`,
+          );
+        }
+      }
+
+      // Guest list. Same shape as the co-organizer write-back and for the same
+      // reason: there was no event id to attach an invite to until now. One
+      // batched call, and a guest who can't be added never rolls back a
+      // published event — the host retries from Edit.
+      if (id && s.guests.length > 0 && s.visibility === "private") {
+        try {
+          const res = await inviteEventGuests(
+            Number(id),
+            s.guests.map((g) => g.username).filter(Boolean),
+          );
+          const refused = res?.skipped ?? [];
+          if (refused.length > 0) {
+            showToast(
+              "warning",
+              "Some guests weren't added",
+              `Add them from Edit: ${refused.map((r) => r.recipient).join(", ")}.`,
+            );
+          }
+        } catch (guestErr) {
+          console.warn("[create-event] guest invites failed", guestErr);
+          showToast(
+            "warning",
+            "Guest list not saved",
+            "Your event is live. Add guests from Edit.",
           );
         }
       }
@@ -1019,6 +1049,14 @@ export function CreateEventScreen() {
                   {eventVisibilityCopy(s.visibility).helper}
                 </p>
               </Field>
+              {/* Private only. A link-only event lets anyone holding the URL in,
+                  so a guest list there would grant a permission everyone
+                  already has while implying a restriction. */}
+              {showsGuestList(s.visibility) ? (
+                <Field label="Guest list">
+                  <GuestsField />
+                </Field>
+              ) : null}
               <Field label="Age restriction">
                 <div className="flex gap-2" role="radiogroup" aria-label="Age restriction">
                   {(["none", "18+", "21+"] as const).map((a) => (
@@ -1787,6 +1825,166 @@ function CoOrganizersField() {
         <p className="text-xs text-white/45">
           Type a username to search. Co-organizers can edit this event and view
           its dashboard.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── GuestsField ─────────────────────────────────────────────────────────────
+// The guest list of a private event. Same search-and-chip shape as
+// CoOrganizersField on purpose — one component shape, one behaviour — but the
+// two grant different things, and the copy under each says which.
+//
+// Staged here and written after publish, because at create time there is no
+// event id to hang an invite on. See the write-back in handleSubmit.
+//
+// ponytail: usernames only. Inviting an email address is a real path in
+// `event-invite-guests`, and `can_view_event` honours it once an account
+// verifies that address — but it needs a claim screen the invitee lands on
+// after signup, which does not exist yet. Shipping the field without that
+// screen would send mail nobody could act on.
+function GuestsField() {
+  const guests = useCreateEventStore((st) => st.guests);
+  const addGuest = useCreateEventStore((st) => st.addGuest);
+  const removeGuest = useCreateEventStore((st) => st.removeGuest);
+  const search = useCreateEventStore((st) => st.guestSearch);
+  const setSearch = useCreateEventStore((st) => st.setGuestSearch);
+  const results = useCreateEventStore((st) => st.guestResults);
+  const setResults = useCreateEventStore((st) => st.setGuestResults);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (search.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const { docs } = await usersApi.searchUsers(search.trim(), 6);
+        setResults(
+          (docs || []).map((u: any) => ({
+            id: u.id,
+            authId: u.authId,
+            username: u.username,
+            avatar: u.avatar,
+            name: u.name ?? "",
+          })),
+        );
+      } catch {
+        setResults([]);
+      }
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [search, setResults]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="relative">
+        <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-[#111] px-3 h-11">
+          <Search size={16} className="text-white/40" />
+          <input
+            className="flex-1 bg-transparent text-sm text-white placeholder:text-white/40 outline-none"
+            value={search}
+            placeholder="Search by username"
+            aria-label="Search for a guest by username"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setResults([]);
+              }}
+              className="text-white/40 hover:text-white/80"
+              aria-label="Clear"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+        </div>
+        {results.length > 0 ? (
+          <div className="absolute left-0 right-0 mt-1 z-10 max-h-56 overflow-auto rounded-2xl border border-white/10 bg-[#0E1320] shadow-xl">
+            {results
+              .filter((u) => !guests.some((g) => g.id === u.id))
+              .map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  onClick={() => {
+                    addGuest({
+                      id: u.id,
+                      authId: u.authId,
+                      username: u.username,
+                      avatar: u.avatar,
+                    });
+                    setSearch("");
+                    setResults([]);
+                  }}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-white/5"
+                >
+                  {u.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={u.avatar}
+                      alt=""
+                      className="h-7 w-7 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="h-7 w-7 rounded-full bg-white/10" />
+                  )}
+                  <span className="text-sm text-white">@{u.username}</span>
+                </button>
+              ))}
+          </div>
+        ) : null}
+      </div>
+      {guests.length > 0 ? (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {guests.map((g) => (
+              <span
+                key={g.id}
+                className="inline-flex items-center gap-1.5 rounded-full bg-white/10 py-1 pl-1 pr-2.5 text-xs font-medium text-white"
+              >
+                {g.avatar ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={g.avatar}
+                    alt=""
+                    className="h-5 w-5 rounded-full object-cover"
+                  />
+                ) : (
+                  <span className="h-5 w-5 rounded-full bg-white/15" />
+                )}
+                @{g.username}
+                <button
+                  type="button"
+                  onClick={() => removeGuest(g.id)}
+                  aria-label={`Remove ${g.username} from the guest list`}
+                  className="text-white/60 hover:text-white"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+          <p className="text-xs text-white/45">
+            {guests.length} {guests.length === 1 ? "guest" : "guests"} · they get
+            a notification when you publish. Guests can see and attend this
+            event. They can&apos;t edit it — that&apos;s a co-organizer.
+          </p>
+        </>
+      ) : (
+        <p className="text-xs text-white/45">
+          Nobody can find a private event, so add the people you want there.
+          Guests can see and attend it; they can&apos;t edit it or see the
+          dashboard.
         </p>
       )}
     </div>

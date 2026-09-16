@@ -56,7 +56,9 @@ import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import {
   EVENT_VISIBILITY_OPTIONS,
   eventVisibilityCopy,
+  showsGuestList,
 } from "@dvnt/app/lib/events/event-visibility-copy";
+import { inviteEventGuests } from "@dvnt/app/lib/api/privileged";
 // Popover removed — inline expanding pickers used instead
 import { DvntMap } from "@dvnt/app/components/map";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
@@ -268,6 +270,13 @@ function CreateEventScreenContent() {
   const setCoOrganizerResults = useCreateEventStore(
     (s) => s.setCoOrganizerResults,
   );
+  const guests = useCreateEventStore((s) => s.guests);
+  const addGuest = useCreateEventStore((s) => s.addGuest);
+  const removeGuest = useCreateEventStore((s) => s.removeGuest);
+  const guestSearch = useCreateEventStore((s) => s.guestSearch);
+  const setGuestSearch = useCreateEventStore((s) => s.setGuestSearch);
+  const guestResults = useCreateEventStore((s) => s.guestResults);
+  const setGuestResults = useCreateEventStore((s) => s.setGuestResults);
   const removeLineupItem = useCreateEventStore((s) => s.removeLineupItem);
   const removePerk = useCreateEventStore((s) => s.removePerk);
   const currentStep = useCreateEventStore((s) => s.currentStep);
@@ -350,6 +359,35 @@ function CreateEventScreenContent() {
   useEffect(() => {
     coOrgSearchDebouncer.maybeExecute(coOrganizerSearch);
   }, [coOrganizerSearch, coOrgSearchDebouncer]);
+
+  // Debounced guest search — same 300ms shape as the co-organizer one above.
+  const guestSearchDebouncer = useMemo(
+    () =>
+      new Debouncer(
+        async (query: string) => {
+          if (query.length < 2) {
+            setGuestResults([]);
+            return;
+          }
+          const { docs } = await usersApi.searchUsers(query, 6);
+          setGuestResults(
+            docs.map((u: any) => ({
+              id: u.id,
+              authId: u.authId,
+              username: u.username,
+              avatar: u.avatar,
+              name: u.name,
+            })),
+          );
+        },
+        { wait: 300 },
+      ),
+    [setGuestResults],
+  );
+
+  useEffect(() => {
+    guestSearchDebouncer.maybeExecute(guestSearch);
+  }, [guestSearch, guestSearchDebouncer]);
 
   const handlePickImages = async () => {
     const remaining = 4 - eventImages.length;
@@ -833,6 +871,34 @@ function CreateEventScreenContent() {
             invitedCount === 1
               ? `@${coOrganizers[0]?.username} has been notified`
               : `${invitedCount} co-organizers were notified`,
+          );
+        }
+      }
+
+      // Guest list. Same write-after-publish shape as the co-organizer block
+      // above and for the same reason: there was no event id to attach an
+      // invite to until now. One batched call; a guest who can't be added
+      // never rolls back a published event — the host retries from Edit.
+      if (guests.length > 0 && data?.id && visibility === "private") {
+        try {
+          const res = await inviteEventGuests(
+            Number(data.id),
+            guests.map((g) => g.username).filter(Boolean),
+          );
+          const refused = res?.skipped ?? [];
+          if (refused.length > 0) {
+            showToast(
+              "warning",
+              "Some guests weren't added",
+              `Add them from Edit: ${refused.map((r) => r.recipient).join(", ")}.`,
+            );
+          }
+        } catch (guestErr) {
+          console.error("[CreateEvent] Guest invites failed:", guestErr);
+          showToast(
+            "warning",
+            "Guest list not saved",
+            "Your event is live. Add guests from Edit.",
           );
         }
       }
@@ -1429,6 +1495,107 @@ function CreateEventScreenContent() {
                   </Text>
                 </View>
               </View>
+
+              {/* Guest list — private only. A link-only event lets anyone
+                  holding the URL in, so a list there would grant a permission
+                  everyone already has while implying a restriction. */}
+              {showsGuestList(visibility) ? (
+                <View className="bg-card rounded-2xl p-4">
+                  <View className="flex-row items-center gap-2 mb-1">
+                    <UserPlus size={18} color={colors.mutedForeground} />
+                    <Text className="text-sm font-semibold text-foreground">
+                      Guest list
+                    </Text>
+                  </View>
+                  <Text className="text-xs text-muted-foreground mb-3">
+                    Nobody can find a private event, so add the people you want
+                    there. Guests can see and attend it; they can&apos;t edit it
+                    or see the dashboard.
+                  </Text>
+
+                  {guests.length > 0 && (
+                    <View className="flex-row flex-wrap gap-2 mb-3">
+                      {guests.map((g) => (
+                        <View
+                          key={g.id}
+                          className="flex-row items-center gap-2 bg-muted px-3 py-1.5 rounded-full"
+                        >
+                          <Avatar uri={g.avatar} username={g.username} size={20} />
+                          <Text className="text-sm text-foreground">
+                            @{g.username}
+                          </Text>
+                          <Pressable
+                            onPress={() => removeGuest(g.id)}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${g.username} from the guest list`}
+                          >
+                            <X size={12} color={colors.mutedForeground} />
+                          </Pressable>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  <TextInput
+                    className="py-2.5 text-base text-foreground"
+                    placeholder="Search by username..."
+                    placeholderTextColor={colors.mutedForeground}
+                    value={guestSearch}
+                    onChangeText={setGuestSearch}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+
+                  {guestResults.length > 0 && (
+                    <View className="mt-2 border-t border-border pt-2">
+                      {guestResults
+                        .filter((u) => !guests.some((g) => g.id === u.id))
+                        .map((user) => (
+                          <Pressable
+                            key={user.id}
+                            onPress={() => {
+                              Haptics.impactAsync(
+                                Haptics.ImpactFeedbackStyle.Light,
+                              );
+                              addGuest({
+                                id: user.id,
+                                authId: user.authId,
+                                username: user.username,
+                                avatar: user.avatar,
+                              });
+                              setGuestSearch("");
+                              setGuestResults([]);
+                            }}
+                            className="flex-row items-center gap-3 py-2.5"
+                          >
+                            <Avatar
+                              uri={user.avatar}
+                              username={user.username}
+                              size={32}
+                            />
+                            <View className="flex-1">
+                              <Text className="text-sm font-semibold text-foreground">
+                                {user.name}
+                              </Text>
+                              <Text className="text-xs text-muted-foreground">
+                                @{user.username}
+                              </Text>
+                            </View>
+                            <Plus size={16} color={colors.primary} />
+                          </Pressable>
+                        ))}
+                    </View>
+                  )}
+
+                  {guests.length > 0 && (
+                    <Text className="text-xs text-muted-foreground mt-3">
+                      {guests.length} {guests.length === 1 ? "guest" : "guests"} ·
+                      they get a notification when you publish.
+                    </Text>
+                  )}
+                </View>
+              ) : null}
 
               {/* Age Restriction */}
               <View className="bg-card rounded-2xl p-4">

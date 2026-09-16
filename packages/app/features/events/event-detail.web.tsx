@@ -1657,6 +1657,8 @@ export function EventDetailScreen() {
                 // teaser + sign-in nudge from inside the component.
                 <GoingAccordion
                   id={eventId}
+                  eventId={eventId}
+                  visibility={e.visibility}
                   attendees={goingAttendees}
                   totalCount={going}
                   isLoggedIn={isAuthenticated}
