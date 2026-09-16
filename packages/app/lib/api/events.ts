@@ -633,20 +633,15 @@ export const eventsApi = {
   /**
    * One page of the "Who's going" list, past the 20 the detail RPC ships.
    *
-   * Same gate as `getEventById`, for the same reason: the avatar row is the one
-   * place a member's ticket turns into something other members can see, so a
-   * private or link-only event is never asked about. `normalizeVisibility` folds
-   * "unlisted" into link_only here too, and an unknown/absent visibility fails
-   * to "public" only because that is what the row itself resolves to — callers
-   * pass the visibility straight off the fetched event, never a guess.
-   * `can_view_event` re-checks it server-side, so a caller that skipped this
-   * still gets [].
+   * Same gate as `getEventById`, and it is the server's: get_event_attendee_page
+   * answers [] unless the viewer is the host, a co-organizer, going, or holding
+   * a ticket. `visibility` is still accepted so callers need no change; it no
+   * longer decides anything.
    */
   async getEventAttendeePage(
     id: string,
-    opts: { visibility: unknown; limit: number; offset: number },
+    opts: { visibility?: unknown; limit: number; offset: number },
   ): Promise<Record<string, unknown>[]> {
-    if (normalizeVisibility(opts.visibility) !== "public") return [];
     try {
       const { data, error } = await supabase.rpc("get_event_attendee_page", {
         p_event_id: parseInt(id),
@@ -693,24 +688,19 @@ export const eventsApi = {
         .maybeSingle();
 
       // Attendee avatars aren't in the detail RPC (it returns only the count) —
-      // fetch the same top-5 "going" avatars the feed uses so "Who's going"
+      // fetch the same top "going" avatars the feed uses so "Who's going"
       // shows faces, not an empty row.
       //
-      // Public events only. The avatar row is the one place a member's ticket
-      // turns into something other members can see, so for a private or
-      // link-only event it is not fetched at all: holding a ticket to an event
-      // nobody can list must not become a discovery signal, and a link that
-      // leaks must not also hand over the guest list. `get_event_attendee_avatars`
-      // takes no viewer id, so the client is where this has to be decided.
-      // Routed through normalizeVisibility so "unlisted" collapses to
-      // link_only here exactly as it does everywhere else, rather than slipping
-      // through an === "private" check that never heard of it.
-      const canListAttendees = normalizeVisibility(ev.visibility) === "public";
-      const { data: avatarsJson } = canListAttendees
-        ? await supabase.rpc("get_event_attendee_avatars", {
-            p_event_id: parseInt(id),
-          })
-        : { data: null };
+      // Who may see the list is the server's call, not the client's:
+      // get_event_attendee_avatars() answers '[]' unless the viewer is the
+      // host, a co-organizer, going, or holding a ticket. Deciding it here by
+      // visibility hid the guest list from the host and from the people
+      // actually going, while get_event_detail shipped it to anyone holding the
+      // link anyway.
+      const { data: avatarsJson } = await supabase.rpc(
+        "get_event_attendee_avatars",
+        { p_event_id: parseInt(id) },
+      );
       const attendeeAvatars = Array.isArray(avatarsJson) ? avatarsJson : [];
 
       return {

@@ -153,6 +153,24 @@ export function GoingAccordion({ id, attendees, totalCount, isLoggedIn, restrict
     );
   }
 
+  // Nothing to expand into: the viewer is not going, so the server withheld the
+  // guest list. An accordion that opens onto an empty grid reads as broken —
+  // say the count and why the faces are missing, and drop the chevron.
+  if (rows.length === 0 && totalCount > 0) {
+    return (
+      <div style={container}>
+        <div style={{ textAlign: "left" }}>
+          <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 14 }}>
+            <span style={{ color: "#fff", fontWeight: 700 }}>{totalCount}</span> going
+          </span>
+          <span style={{ display: "block", color: "rgba(255,255,255,0.35)", fontSize: 11, marginTop: 1 }}>
+            Only people going can see who&apos;s going
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={container}>
       <button onClick={() => toggle(id)} style={{ display: "flex", alignItems: "center", width: "100%", background: "transparent", border: 0, cursor: "pointer", padding: 0 }}>

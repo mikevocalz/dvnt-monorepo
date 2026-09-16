@@ -176,6 +176,22 @@ export const GoingAccordion = memo(function GoingAccordion({
     );
   }
 
+  // Nothing to expand into: the viewer is not going, so the server withheld the
+  // guest list. An accordion that opens onto an empty grid reads as broken —
+  // say the count and why the faces are missing, and drop the chevron.
+  if (rows.length === 0 && totalCount > 0) {
+    return (
+      <View style={styles.container}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.countText}>
+            <Text style={styles.countBold}>{totalCount}</Text> going
+          </Text>
+          <Text style={styles.tapHint}>Only people going can see who's going</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Header row — always visible */}
