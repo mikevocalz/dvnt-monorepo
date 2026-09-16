@@ -118,6 +118,19 @@ export const GoingAccordion = memo(function GoingAccordion({
     if (eventId && canLoadMore && !paged.loading) loadMore(eventId, visibility);
   }, [eventId, canLoadMore, paged.loading, loadMore, visibility]);
 
+  // The list is measured while the panel is collapsed, so onEndReached cannot
+  // be relied on to prime the first page. The web port hit exactly this: the
+  // detail RPC seeds 20, the grid never overflows, the scroll that would ask
+  // for more never happens, and the list sits at 20. Fetch while open and
+  // short; onEndReached takes over once the list is long enough to scroll.
+  //
+  // ponytail: one page per effect pass. Each fetch grows rows, re-running
+  // this, so it walks to the end and a failed request stops it.
+  useEffect(() => {
+    if (!expanded || !eventId || !canLoadMore || paged.loading) return;
+    loadMore(eventId, visibility);
+  }, [expanded, eventId, canLoadMore, paged.loading, loadMore, visibility]);
+
   const toggle = useCallback(() => {
     const next = !expanded;
     setExpanded(next);

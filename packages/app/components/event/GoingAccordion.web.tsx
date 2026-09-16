@@ -99,6 +99,21 @@ export function GoingAccordion({ id, attendees, totalCount, isLoggedIn, restrict
     [eventId, canLoadMore, paged.loading, loadMore, visibility],
   );
 
+  // Paging cannot wait for a scroll that will never happen. The detail RPC
+  // seeds 20 avatars; at five columns that is four rows, nowhere near the
+  // panel's 600px, so the container does not overflow, onScroll never fires
+  // and the list stays at 20 forever — visibly "only showing some", with no
+  // way to reach the rest. Fetch while the panel is open and short, and the
+  // scroll handler takes over once there is something to scroll.
+  //
+  // ponytail: one page per effect pass rather than a while-loop. Each fetch
+  // grows rows, which re-runs this, so it walks to the end on its own and a
+  // failed request stops it instead of spinning.
+  useEffect(() => {
+    if (!expanded || !eventId || !canLoadMore || paged.loading) return;
+    void loadMore(eventId, visibility);
+  }, [expanded, eventId, canLoadMore, paged.loading, loadMore, visibility]);
+
   const container: React.CSSProperties = {
     background: "rgba(138,64,207,0.08)",
     borderRadius: 16,
