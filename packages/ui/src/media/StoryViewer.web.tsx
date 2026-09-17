@@ -30,6 +30,12 @@ export interface StoryViewerProps {
   height?: number | string;
   /** Loop back to the first story instead of ending. Default false. */
   loop?: boolean;
+  /**
+   * Hold the story where it is. The reply composer sets this: a story that
+   * keeps advancing while you type a reply to it is a story you cannot reply
+   * to.
+   */
+  paused?: boolean;
 }
 
 const VIDEO_RE = /\.(mp4|mov|webm|m3u8)(\?|$)/i;
@@ -88,6 +94,7 @@ export function StoryViewer({
   width = "100%",
   height = "100%",
   loop = false,
+  paused = false,
 }: StoryViewerProps) {
   const [activeIndex, setActiveIndex] = useState(currentIndex);
   const activeHeader = stories[activeIndex]?.header;
@@ -127,6 +134,7 @@ export function StoryViewer({
         height={height}
         defaultInterval={5000}
         currentIndex={currentIndex}
+        isPaused={paused}
         loop={loop}
         keyboardNavigation
         header={() => <></>}

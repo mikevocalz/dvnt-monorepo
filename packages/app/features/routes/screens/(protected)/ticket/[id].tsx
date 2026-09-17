@@ -18,6 +18,7 @@ import {
   TicketX,
   Shield,
   WalletCards,
+  CalendarDays,
   ChevronRight,
   Sparkles,
   CheckCircle2,
@@ -512,6 +513,26 @@ function ViewTicketScreenContent() {
         <View style={styles.heroWrap}>
           <TicketHeroCard ticket={ticket} />
         </View>
+
+        {/* The way back to the event. The only link here used to be the pink
+            add-ons card, which is an upsell wearing the event's clothes: a
+            holder looking for the time, the address or the host had nothing to
+            tap. Plain label, plain destination. */}
+        {eventId ? (
+          <Pressable
+            onPress={() => router.push(`/(protected)/events/${eventId}` as any)}
+            accessibilityRole="button"
+            accessibilityLabel="View event"
+            style={({ pressed }) => [
+              styles.viewEventRow,
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <CalendarDays size={18} color="rgba(255,255,255,0.7)" />
+            <Text style={styles.viewEventText}>View event</Text>
+            <ChevronRight size={18} color="rgba(255,255,255,0.4)" />
+          </Pressable>
+        ) : null}
 
         {/* ── Weather strip — event day forecast ── */}
         <WeatherStrip lat={weatherLat} lng={weatherLng} />
@@ -1145,6 +1166,25 @@ const styles = StyleSheet.create({
   heroWrap: {
     paddingHorizontal: 16,
     paddingTop: 16,
+  },
+  viewEventRow: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  viewEventText: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
   },
   statusBanner: {
     flexDirection: "row",

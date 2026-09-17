@@ -1,14 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "solito/navigation";
-import { Trash2, X } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Eye, SendHorizontal, Trash2, X } from "lucide-react";
 import { StoryViewer } from "@dvnt/ui";
 import { useStoryViewerStore } from "@dvnt/app/lib/stores/story-viewer-store";
 import { StoryOverlaysLayer } from "@dvnt/app/components/story-overlays-layer.web";
+import { StoryViewersSheetWeb } from "@dvnt/app/components/story-viewers-sheet.web";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useDeleteStory } from "@dvnt/app/lib/hooks/use-stories";
+import {
+  STORY_REACTION_EMOJIS,
+  sendStoryMessage,
+} from "@dvnt/app/lib/stories/story-message";
 import { isSameUser } from "@dvnt/app/lib/profile/same-user";
 import { storyProfilePath } from "@dvnt/app/lib/profile/story-profile-path";
 
@@ -52,6 +59,28 @@ export function StoryViewerOverlay() {
   const deleteStory = useDeleteStory();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   useEffect(() => setConfirmingDelete(false), [groupIndex]);
+
+  // Replying and reacting — the half of stories web never had. Both are DMs
+  // carrying story context; the shaping lives in lib/stories/story-message so
+  // the two platforms send the same thing.
+  const queryClient = useQueryClient();
+  const showToast = useUIStore((s) => s.showToast);
+  const [replyText, setReplyText] = useState("");
+  const [sendingReply, setSendingReply] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const [showViewers, setShowViewers] = useState(false);
+  // Reactions land as a floating emoji so the send is visible without a toast
+  // interrupting the story.
+  const [floatingEmojis, setFloatingEmojis] = useState<
+    Array<{ id: number; emoji: string }>
+  >([]);
+  const emojiCounter = useRef(0);
+  const lastReactionAt = useRef(0);
+  useEffect(() => {
+    setReplyText("");
+    setComposerFocused(false);
+    setShowViewers(false);
+  }, [groupIndex]);
 
   // react-insta-stories positions its internal layers using the width/height
   // props as PIXEL values — passing "100%" breaks its layout math so segments
@@ -133,6 +162,67 @@ export function StoryViewerOverlay() {
     });
   };
 
+  // The story context the DM carries. Segments are the items, in order.
+  const storyContext = {
+    id: group.id,
+    username: group.username,
+    avatar: group.avatar,
+    items: group.segments.map((s) => ({ type: s.type, url: s.url })),
+  };
+  const canMessageOwner = !isOwnStory && !!group.userId;
+
+  const sendReply = async () => {
+    const text = replyText.trim();
+    if (!text || sendingReply || !group.userId) return;
+    setSendingReply(true);
+    try {
+      await sendStoryMessage({
+        queryClient,
+        recipientUserId: group.userId,
+        story: storyContext,
+        itemIndex: storyIndex,
+        kind: "story_reply",
+        content: text,
+      });
+      setReplyText("");
+      showToast("success", "Sent", `Reply sent to @${group.username}`);
+    } catch (e: unknown) {
+      showToast(
+        "error",
+        "Reply didn't send",
+        e instanceof Error ? e.message : "Try again in a moment.",
+      );
+    } finally {
+      setSendingReply(false);
+      setComposerFocused(false);
+    }
+  };
+
+  const sendReaction = (emoji: string) => {
+    if (!group.userId) return;
+    // Same 1.5s throttle native uses — the row is tappable faster than anyone
+    // means to send five DMs.
+    const now = Date.now();
+    const id = emojiCounter.current++;
+    setFloatingEmojis((prev) => [...prev, { id, emoji }]);
+    window.setTimeout(
+      () => setFloatingEmojis((prev) => prev.filter((f) => f.id !== id)),
+      1400,
+    );
+    if (now - lastReactionAt.current < 1500) return;
+    lastReactionAt.current = now;
+    void sendStoryMessage({
+      queryClient,
+      recipientUserId: group.userId,
+      story: storyContext,
+      itemIndex: storyIndex,
+      kind: "story_reaction",
+      content: emoji,
+    }).catch(() => {
+      showToast("error", "Reaction didn't send", "Try again in a moment.");
+    });
+  };
+
   // Portal to <body> so the overlay escapes every ancestor stacking context
   // (the shell's backdrop-filter / transforms) and truly sits on top of the
   // whole app — above header (z-100), tab bar (z-1000) and lightbox (z-2000).
@@ -205,6 +295,7 @@ export function StoryViewerOverlay() {
           }}
           width={size.w}
           height={size.h}
+          paused={composerFocused || showViewers || confirmingDelete}
         />
 
         {/* Story overlays for the current segment — the SAME shared renderer the
@@ -221,6 +312,106 @@ export function StoryViewerOverlay() {
             }}
           />
         ) : null}
+
+        {/* Reactions in flight — the receipt for a tap, without a toast over
+            the story. */}
+        {floatingEmojis.length > 0 ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-28 z-20 flex justify-center">
+            <style>{`
+              @keyframes dvnt-story-float {
+                0%   { opacity: 0; transform: translateY(0) scale(0.6); }
+                20%  { opacity: 1; transform: translateY(-16px) scale(1.15); }
+                100% { opacity: 0; transform: translateY(-140px) scale(1); }
+              }
+              @media (prefers-reduced-motion: reduce) {
+                .dvnt-story-emoji { animation-duration: 0.01ms !important; }
+              }
+            `}</style>
+            {floatingEmojis.map((f, i) => (
+              <span
+                key={f.id}
+                className="dvnt-story-emoji absolute text-4xl"
+                style={{
+                  animation: "dvnt-story-float 1.4s ease-out forwards",
+                  marginLeft: (i % 3) * 28 - 28,
+                }}
+              >
+                {f.emoji}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Own story → who saw it. Someone else's → react or reply. Native has
+            had both; web had neither. */}
+        {isOwnStory ? (
+          <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-5">
+            <button
+              onClick={() => setShowViewers(true)}
+              className="flex items-center gap-2 rounded-2xl border border-white/15 bg-black/45 px-4 py-2.5 backdrop-blur-md"
+              aria-label="See who viewed this story"
+            >
+              <Eye size={16} color="#fff" />
+              <span className="text-[13px] font-semibold text-white">
+                Viewers
+              </span>
+            </button>
+          </div>
+        ) : canMessageOwner ? (
+          <div className="absolute inset-x-0 bottom-0 z-20 flex flex-col gap-3 px-4 pb-5">
+            {!composerFocused ? (
+              <div className="flex justify-center gap-2">
+                {STORY_REACTION_EMOJIS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    onClick={() => sendReaction(emoji)}
+                    aria-label={`React ${emoji}`}
+                    className="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-black/45 text-[22px] backdrop-blur-md transition-transform active:scale-90 hover:scale-110"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void sendReply();
+              }}
+              className="flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-4 py-2 backdrop-blur-md"
+            >
+              <input
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                onFocus={() => setComposerFocused(true)}
+                onBlur={() => setComposerFocused(false)}
+                placeholder={`Reply to @${group.username}…`}
+                aria-label={`Reply to ${group.username}`}
+                maxLength={1000}
+                className="min-w-0 flex-1 bg-transparent py-1.5 text-[15px] text-white placeholder:text-white/45 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={!replyText.trim() || sendingReply}
+                aria-label="Send reply"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15 disabled:opacity-40"
+              >
+                <SendHorizontal size={17} color="#fff" />
+              </button>
+            </form>
+          </div>
+        ) : null}
+
+        <StoryViewersSheetWeb
+          storyId={group.id}
+          open={showViewers}
+          onClose={() => setShowViewers(false)}
+          onProfilePress={(username) => {
+            closeForNavigation();
+            router.push(`/feed/${username}`);
+          }}
+        />
       </div>
     </div>,
     document.body,

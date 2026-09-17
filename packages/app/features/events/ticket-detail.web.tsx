@@ -31,6 +31,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import {
   ArrowLeft,
+  CalendarDays,
   CalendarPlus,
   CheckCircle2,
   ChevronRight,
@@ -635,6 +636,24 @@ export function TicketDetailScreen() {
             ) : null}
           </div>
         </section>
+
+        {/* The way back to the event. The only link here used to be the pink
+            add-ons card, which is an upsell wearing the event's clothes: a
+            holder looking for the time, the address or the host had nothing to
+            tap. Plain label, plain destination. */}
+        {eventId ? (
+          <button
+            onClick={() => router.push(`/feed/events/${eventId}`)}
+            aria-label="View event"
+            className="mt-3 flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/4 px-4 py-3.5 text-left active:bg-white/6"
+          >
+            <span className="flex items-center gap-3">
+              <CalendarDays size={18} color="rgba(255,255,255,0.7)" />
+              <span className="text-sm font-bold text-white">View event</span>
+            </span>
+            <ChevronRight size={18} color="rgba(255,255,255,0.4)" />
+          </button>
+        ) : null}
 
         {/* ── Transfer pending banner ── */}
         {isTransferPending ? (

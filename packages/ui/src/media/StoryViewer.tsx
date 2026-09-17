@@ -17,6 +17,12 @@ export interface StoryViewerProps {
   width?: number | string;
   height?: number | string;
   loop?: boolean;
+  /**
+   * Hold the story where it is (web honours this). Declared here so the shared
+   * prop type matches; native plays stories through its own StoryScreen, which
+   * has its own pause.
+   */
+  paused?: boolean;
 }
 
 /**

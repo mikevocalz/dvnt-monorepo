@@ -62,6 +62,10 @@ import { storyViewsApi } from "@dvnt/app/lib/api/stories";
 import { StoryViewersSheet } from "@dvnt/app/features/stories";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { messagesApiClient } from "@dvnt/app/lib/api/messages";
+import {
+  STORY_REACTION_EMOJIS,
+  buildStoryMessageMetadata,
+} from "@dvnt/app/lib/stories/story-message";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useStoryViewerScreenStore } from "@dvnt/app/lib/stores/story-viewer-screen-store";
 import { normalizeRouteParams } from "@dvnt/app/lib/navigation/route-params";
@@ -746,7 +750,9 @@ function StoryViewerScreenContent() {
 
   const emojiCounter = useRef(0);
 
-  const REACTION_EMOJIS = ["❤️", "🔥", "😂", "😍", "👏", "😮", "😈"];
+  // One list, shared with web — the rows used to be two copies of the same
+  // seven emoji and only one of them existed on web at all.
+  const REACTION_EMOJIS = STORY_REACTION_EMOJIS;
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPaused = useRef(false);
   const hasAdvanced = useRef(false);
@@ -1530,26 +1536,15 @@ function StoryViewerScreenContent() {
           );
           if (!conversationId) return;
 
-          const item = s.items?.[idx];
-          const previewUrl =
-            item?.type === "video"
-              ? item?.thumbnail || item?.url || ""
-              : item?.url || "";
-
           await messagesApiClient.sendMessage({
             conversationId,
             content: emoji,
-            metadata: {
-              type: "story_reaction",
-              storyId: s.id || "",
-              storyMediaUrl: previewUrl,
-              storyUsername: s.username || "",
-              storyAvatar: s.avatar || "",
-              reactionEmoji: emoji,
-              storyExpiresAt: new Date(
-                Date.now() + 24 * 60 * 60 * 1000,
-              ).toISOString(),
-            },
+            metadata: buildStoryMessageMetadata(
+              "story_reaction",
+              s,
+              idx,
+              emoji,
+            ),
           });
 
           console.log("[StoryViewer] Reaction sent:", emoji);
@@ -1608,27 +1603,16 @@ function StoryViewerScreenContent() {
         return;
       }
 
-      // Send reply with story context as metadata for StoryReplyBubble rendering
-      const currentItem = story.items?.[currentItemIndex];
-      // For video stories, use thumbnail if available for the preview image
-      const previewUrl =
-        currentItem?.type === "video"
-          ? currentItem?.thumbnail || currentItem?.url || ""
-          : currentItem?.url || "";
-      const message = await messagesApiClient.sendMessage({
+      // Story context for StoryReplyBubble rendering — shaped in
+      // lib/stories/story-message so web sends the identical thing.
+      await messagesApiClient.sendMessage({
         conversationId: conversationId,
         content: replyText.trim(),
-        metadata: {
-          type: "story_reply",
-          storyId: story.id || "",
-          storyMediaUrl: previewUrl,
-          storyUsername: story.username || "",
-          storyAvatar: story.avatar || "",
-          // Story expires 24h after creation — pass expiry so chat can show/hide preview
-          storyExpiresAt: new Date(
-            Date.now() + 24 * 60 * 60 * 1000,
-          ).toISOString(),
-        },
+        metadata: buildStoryMessageMetadata(
+          "story_reply",
+          story,
+          currentItemIndex,
+        ),
       });
 
       console.log("[StoryViewer] Reply sent successfully");
