@@ -27,6 +27,7 @@ import {
   Search,
   Heart,
   MessageCircle,
+  Gamepad2,
   User,
   Plus,
 } from "lucide-react";
@@ -99,6 +100,8 @@ export function AppShell({
     { href: "/feed/search", Icon: Search, label: "Search" },
     { href: "/notifications", Icon: Heart, label: "Activity" },
     { href: "/feed/messages", Icon: MessageCircle, label: "Messages" },
+    // Lands in the same change as /feed/game-night, never before it.
+    { href: "/feed/game-night", Icon: Gamepad2, label: "Game Night" },
     {
       // Own profile route directly — ProfileScreen. Going via
       // /profile/{username} loaded the OTHER-user UserProfileScreen first,
