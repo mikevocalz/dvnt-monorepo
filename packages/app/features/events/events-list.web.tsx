@@ -8,6 +8,7 @@
  * that crash on web, so this is the web view.
  */
 import { useMemo, useRef, useEffect } from "react";
+import { useWindowScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
 import { useRouter } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
@@ -105,6 +106,8 @@ function weekendRange() {
 }
 
 export function EventsListScreen() {
+  // Back from an event returns to the card you opened.
+  useWindowScrollRestoration("events");
   const router = useRouter();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   // Phase 2 — live propagation: patch any event card in place when its row

@@ -29,6 +29,7 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
 import { CardLink } from "@dvnt/app/components/ui/card-link.web";
 import { useRouter } from "solito/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -385,6 +386,9 @@ export function MyTicketsScreen() {
   }, [activeTab, pendingTransfers, upcoming, past]);
 
   const parentRef = useRef<HTMLDivElement>(null);
+  // The wallet owns its scroll, so Back from a ticket used to land on the
+  // first pass no matter how far down the one you opened was.
+  useScrollRestoration(parentRef, "my-tickets");
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,

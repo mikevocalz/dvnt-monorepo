@@ -23,6 +23,7 @@
  */
 
 import { followButtonLabel } from "@dvnt/app/lib/profile/follow-relationship";
+import { useWindowScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
 import { useCallback, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -74,6 +75,8 @@ export function UserProfileScreen() {
   const router = useRouter();
   const params = useParams();
   const username = String((params as { username?: string })?.username ?? "");
+  // Per profile, so coming back from a post lands where you left THAT grid.
+  useWindowScrollRestoration(`profile:${username}`, !!username);
 
   const queryClient = useQueryClient();
   // The own-profile screen owns its tab in this store; the redirect below hands

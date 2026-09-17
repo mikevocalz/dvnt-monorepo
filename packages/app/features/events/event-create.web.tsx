@@ -27,6 +27,11 @@ import {
   type ReactElement,
 } from "react";
 import { useRouter } from "solito/navigation";
+import {
+  MAX_VIDEO_SECONDS,
+  isWithinVideoLimit,
+  readVideoDurationSec,
+} from "@dvnt/app/lib/media/video-duration.web";
 import { getAuthIdFromStore } from "@dvnt/app/lib/auth/identity";
 import {
   Calendar,
@@ -531,8 +536,9 @@ export function CreateEventScreen() {
   // the previously-picked image stays as the fallback. Uploading an image
   // when a video is already set lands it in the fallback slot. Uploading an
   // image when there's no video makes it the primary.
-  const onVideoFlyerPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onVideoFlyerPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    const input = e.currentTarget;
     if (!file) return;
     if (!file.type.startsWith("video/")) return;
     // Server caps event-video at 50MB (media-upload SIZE_LIMITS) — reject at
@@ -546,6 +552,18 @@ export function CreateEventScreen() {
       e.currentTarget.value = "";
       return;
     }
+    // Length is the other server limit, and the only one that used to be
+    // discovered after a full upload. 60s passes; 61 does not.
+    const durationSec = await readVideoDurationSec(file);
+    if (!isWithinVideoLimit(durationSec)) {
+      showToast(
+        "error",
+        "Video too long",
+        `That clip is ${Math.round(durationSec ?? 0)}s — flyers are ${MAX_VIDEO_SECONDS}s or less.`,
+      );
+      input.value = "";
+      return;
+    }
     // If an image had been picked as primary, demote it to the fallback
     // slot so the user doesn't lose it.
     if (s.flyerImage && s.flyerMediaType === "image" && !s.flyerFallbackImage) {
@@ -553,7 +571,7 @@ export function CreateEventScreen() {
     }
     s.setFlyerImage(URL.createObjectURL(file));
     s.setFlyerMediaType("video");
-    e.currentTarget.value = "";
+    input.value = "";
   };
 
   const onImageFlyerPick = (e: React.ChangeEvent<HTMLInputElement>) => {

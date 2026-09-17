@@ -14,6 +14,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  MAX_VIDEO_SECONDS,
+  isWithinVideoLimit,
+  readVideoDurationSec,
+} from "@dvnt/app/lib/media/video-duration.web";
 import { useParams, useRouter } from "solito/navigation";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import {
@@ -522,8 +527,9 @@ export function EventEditScreen() {
    * video is the explicit way to go back to a still, and that promotes the
    * poster rather than leaving the event with no flyer at all.
    */
-  const onFlyerPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onFlyerPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    const input = e.currentTarget;
     if (!file) return;
     const isVideo = file.type.startsWith("video/");
     // Server caps event-video at 50MB (media-upload SIZE_LIMITS) — reject at
@@ -536,6 +542,20 @@ export function EventEditScreen() {
       );
       e.currentTarget.value = "";
       return;
+    }
+    if (isVideo) {
+      // Length is the other server limit, and the only one that used to be
+      // discovered after a full upload. 60s passes; 61 does not.
+      const durationSec = await readVideoDurationSec(file);
+      if (!isWithinVideoLimit(durationSec)) {
+        showToast(
+          "error",
+          "Video too long",
+          `That clip is ${Math.round(durationSec ?? 0)}s — flyers are ${MAX_VIDEO_SECONDS}s or less.`,
+        );
+        input.value = "";
+        return;
+      }
     }
     const url = URL.createObjectURL(file);
     if (isVideo) {
@@ -550,7 +570,7 @@ export function EventEditScreen() {
       s.setFlyerImage(url);
       s.setFlyerMediaType("image");
     }
-    e.currentTarget.value = "";
+    input.value = "";
   };
 
   if (isLoading || s.hydratedId !== id) {

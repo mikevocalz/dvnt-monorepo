@@ -23,6 +23,7 @@
  */
 
 import { useEffect, useMemo, useRef } from "react";
+import { useWindowScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
 import { useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -99,6 +100,8 @@ const TABS = [
 ] as const;
 
 export function ProfileScreen() {
+  // Back from a post returns to the row you opened it from.
+  useWindowScrollRestoration("profile:me");
   const router = useRouter();
   const queryClient = useQueryClient();
 

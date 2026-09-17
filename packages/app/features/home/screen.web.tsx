@@ -25,6 +25,7 @@ import {
 import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
 import { CardLink } from "@dvnt/app/components/ui/card-link.web";
+import { useScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
 import { Heart, Bookmark, Play, Grid3x3, Plus } from "lucide-react";
 import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
 import { useEvents } from "@dvnt/app/lib/hooks/use-events";
@@ -172,6 +173,10 @@ export function HomeScreen() {
   // horizontal scrollbar. Measuring the scroller makes it fit any container and
   // stay responsive (2/3/4 columns by the real available width).
   const parentRef = useRef<HTMLDivElement>(null);
+  // Back from a post lands where you left the feed, not at the top. The
+  // feed owns its scroll (it slides under the glass header), so the
+  // browser's own restoration never applied to it.
+  useScrollRestoration(parentRef, "feed");
   const [measuredW, setMeasuredW] = useState(0);
   useEffect(() => {
     const el = parentRef.current;
