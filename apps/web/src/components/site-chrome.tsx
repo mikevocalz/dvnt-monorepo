@@ -51,6 +51,7 @@ const APP_SURFACES = [
   '/events',
   '/blog',
   '/posts',
+  '/game-night',
 ];
 
 const isAppSurface = (path: string) =>

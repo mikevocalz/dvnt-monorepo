@@ -306,7 +306,10 @@ function EmptyLobby() {
       ref={scope as React.RefObject<HTMLElement>}
       className="mt-10 rounded-2xl border border-dashed border-white/15 p-10 text-center"
     >
-      <ul className="mb-5 flex justify-center -space-x-2" aria-hidden>
+      {/* Spaced, not stacked. The overlap is an avatar convention and it needs
+          a filled seat to read against; four dashed outlines overlapping merge
+          into one box, which is the opposite of the point. */}
+      <ul className="mb-5 flex justify-center gap-2" aria-hidden>
         {[0, 1, 2, 3].map((i) => (
           <li
             key={i}
