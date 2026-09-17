@@ -59,6 +59,18 @@ import { TextPostSurface } from "@dvnt/app/features/post";
 import type { Post } from "@dvnt/app/lib/types";
 
 const GAP = 10;
+/**
+ * Reserved height of a feed event card at a given width — the packer's number
+ * AND the rendered number, because it is the same function at both sites.
+ *
+ * The card was the one tile in the masonry whose height was ESTIMATED here and
+ * then left intrinsic in the DOM; every post tile pins `fallbackHeight`. A card
+ * that rendered a few pixels short of its estimate moved its own column up
+ * relative to the neighbour holding its spacer, and the shortfall accumulated
+ * down the feed until a spanning card was painted over a post ~270px below
+ * where its spacer sat. Pinning it makes the packer's arithmetic true again.
+ */
+const eventCardHeight = (width: number) => width / EVENT_CARD_ASPECT + 24;
 const MAX_W = 1320;
 const VARIATION = 0.3;
 
@@ -250,11 +262,7 @@ export function HomeScreen() {
       columnWidth,
       gap: GAP,
       postHeight: cellHeight,
-      // The card's own 12px vertical padding, on top of its aspect box. The
-      // ratio is IMPORTED rather than repeated: when the packer and the card
-      // disagree, the column reserves the wrong height and the card either
-      // overlaps its neighbour or leaves a void.
-      eventHeight: (width) => width / EVENT_CARD_ASPECT + 24,
+      eventHeight: eventCardHeight,
     }).columns;
   }, [posts, feedEvents, numColumns, columnWidth]);
 
@@ -333,7 +341,14 @@ export function HomeScreen() {
                       <div
                         key={tile.key}
                         aria-hidden
-                        style={{ height: tile.height - GAP }}
+                        // ponytail: a levelling deficit below GAP would make this
+                        // negative, which the browser clamps to 0 while the
+                        // flex gap still adds GAP — so the column runs up to
+                        // GAP-1 px short of the packer's model. Bounded and
+                        // invisible at GAP=10; if it ever matters, make the
+                        // packer round `top` up so no spacer is thinner than
+                        // the gap it sits next to.
+                        style={{ height: Math.max(0, tile.height - GAP) }}
                       />
                     ) : tile.kind === "event" ? (
                       <EventCardBoundary key={tile.key}>
@@ -342,11 +357,23 @@ export function HomeScreen() {
                             overflow lands on reserved space rather than on a
                             post. */}
                         <div
-                          style={
-                            tile.span === 2
-                              ? { width: columnWidth * 2 + GAP }
-                              : undefined
-                          }
+                          // Pinned to the RESERVED height, not the card's
+                          // intrinsic one — the same contract MasonryCell keeps
+                          // for posts. `overflow: hidden` makes a card that
+                          // wants to be taller clip instead of drifting its
+                          // column out of step with the spacer opposite it.
+                          style={{
+                            width:
+                              tile.span === 2
+                                ? columnWidth * 2 + GAP
+                                : undefined,
+                            height: eventCardHeight(
+                              tile.span === 2
+                                ? columnWidth * 2 + GAP
+                                : columnWidth,
+                            ),
+                            overflow: "hidden",
+                          }}
                         >
                           <FeedEventCard data={toFeedEventCardData(tile.event)} />
                         </div>
