@@ -1416,8 +1416,8 @@ importers:
         specifier: 1.0.7
         version: 1.0.7(tailwindcss@4.3.3)
       three:
-        specifier: ^0.171.0
-        version: 0.171.0
+        specifier: 0.184.0
+        version: 0.184.0
       typegpu:
         specifier: ^0.12.0
         version: 0.12.0
@@ -1447,7 +1447,7 @@ importers:
         specifier: ~19.2.3
         version: 19.2.3(@types/react@19.2.14)
       '@types/three':
-        specifier: ^0.184.1
+        specifier: 0.184.1
         version: 0.184.1
       eslint:
         specifier: ^9.25.0
@@ -12077,8 +12077,8 @@ packages:
     resolution: {integrity: sha512-e2zZ96wSChazBsbENf/Pcm/4swHt2cEKQ92rhUjkL9GCKiTDJIaTBenjE/m9DXi0QBmTMDkFDdOomUy20A1tDQ==}
     engines: {node: '>=20'}
 
-  three@0.171.0:
-    resolution: {integrity: sha512-Y/lAXPaKZPcEdkKjh0JOAHVv8OOnv/NDJqm0wjfCzyQmfKxV7zvkwsnBgPBKTzJHToSOhRGQAGbPJObT59B/PQ==}
+  three@0.184.0:
+    resolution: {integrity: sha512-wtTRjG92pM5eUg/KuUnHsqSAlPM296brTOcLgMRqEeylYTh/CdtvKUvCyyCQTzFuStieWxvZb8mVTMvdPyUpxg==}
 
   throat@5.0.0:
     resolution: {integrity: sha512-fcwX4mndzpLQKBS1DVYhGAcYaYt7vsHNIvQV+WXMvnow5cgjPphq5CaayLaGsjRdSCKZFNGt7/GYAuXaNOiYCA==}
@@ -27726,7 +27726,7 @@ snapshots:
     dependencies:
       real-require: 1.0.0
 
-  three@0.171.0: {}
+  three@0.184.0: {}
 
   throat@5.0.0: {}
 

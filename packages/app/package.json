@@ -359,7 +359,7 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
     "tailwindcss-animate": "1.0.7",
-    "three": "^0.171.0",
+    "three": "0.184.0",
     "typegpu": "^0.12.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.12"
@@ -371,7 +371,7 @@
     "@types/pg": "^8.20.0",
     "@types/react": "~19.2.14",
     "@types/react-dom": "~19.2.3",
-    "@types/three": "^0.184.1",
+    "@types/three": "0.184.1",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~57.0.0",
     "typescript": "~6.0.3"

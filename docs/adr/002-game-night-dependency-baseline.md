@@ -1,6 +1,7 @@
 # ADR 002 — Game Night: the dependency decisions PROMPT 0 left open
 
-Status: accepted, not applied
+Status: accepted — `three` applied and verified; typegpu and
+`react-native-webgpu` decided, not applied
 Date: 2026-09-17
 
 ## Context
@@ -206,11 +207,29 @@ server-authoritative card game does not have.
 `three` is web-only in this repo today. The sole consumer is
 `PhoneStage.web.tsx:15-18`, which uses core `THREE` plus three `examples/jsm`
 addons and `WebGLRenderer` — no TSL, no WebGPU. So the 143-symbol type gap bites
-nothing that exists; it bites the first line of WebGPU code anyone writes. All 24
-`THREE.*` symbols that file uses survive at 0.184.0 and all three addon paths
-resolve, but it will **look** different: r181 PBR energy conservation and PMREM,
-r183 `RoomEnvironment` scene position, r184 environment-rotation alignment all
-land on `:892`, `:899-910` and every `MeshStandardMaterial` in it.
+nothing that exists; it bites the first line of WebGPU code anyone writes.
+
+**Two claims in the first draft of this ADR were wrong, and are corrected here.**
+
+- *r184 environment-rotation alignment* does not affect this file. The change is
+  real, but `PhoneStage.web.tsx` never sets `scene.environmentRotation` or
+  `backgroundRotation`, and with a zero Euler the old negate-then-build and the
+  new build-then-transpose both yield identity. The residual x-flip is gated on
+  `envMap.isCubeTexture && isRenderTargetTexture === false`, and a PMREM output
+  is a render-target texture with `CubeUVReflectionMapping`, so that branch is
+  skipped at both versions. There is no `scene.background` here either.
+- *r181 energy conservation* is guide-scoped to `roughness > 0.5`. Every material
+  in this file is 0.02–0.38, so the Turquin compensation term is near zero.
+
+What actually moves is narrower: r181's reflect-vector change
+(`mix(reflectVec, normal, roughness*roughness)` → `pow4(roughness)`, which at the
+chassis's 0.38 drops the mix factor 0.144 → 0.021, so reflections bend far less
+toward the normal), r181's PMREM rewrite to GGX VNDF importance sampling, and
+r183's `RoomEnvironment` gaining `position.y = -3.5`, which lifts the PMREM cube
+camera 3.5 units in the room. Also unchanged, contrary to suspicion: tone
+mapping, exposure and colour-space defaults are byte-identical r171→r184, and
+`RoundedBoxGeometry`'s segment arithmetic is unchanged, so the silhouette is
+vertex-for-vertex identical.
 
 `three/webgpu` unminified is 982 KB at 0.171 and 2,061 KB at 0.184. Metro does
 not tree-shake here, so the whole module enters the RN bundle at the first
@@ -250,12 +269,63 @@ None of these can be closed by reading, and the first could reverse decision 3.
 6. Whether `@typegpu/react@0.12.0`'s `WebGPUModule.install()` composes with
    `GpuRuntime.initOnce()` (`GpuRuntime.ts:47-63`, which assumes `navigator.gpu`
    is already polyfilled) or double-installs.
-7. The `PhoneStage.web.tsx` visual delta — a screenshot diff of the landing page,
-   which is web and therefore the one item here that needs no device.
+(Item 7, the `PhoneStage.web.tsx` visual delta, is closed — see Measured
+result below.)
+
+## Measured result — the `three` bump, applied 2026-09-17
+
+Applied: `three` 0.171.0 → 0.184.0 and `@types/three` pinned 0.184.1, both exact.
+
+The contract this ADR was written to fix is now true. The probe that previously
+threw `SyntaxError` on import resolves at runtime for all nine names checked —
+`CubeRenderTarget`, `RenderPipeline`, `WebGPURenderer`, `Storage3DTexture` from
+`three/webgpu`, and `TWO_PI`, `setName`, `sample`, `materialAO`, `struct` from
+`three/tsl`. `packages/app` typecheck exits 0 with zero errors, and
+`apps/web next build` exits 0 with 112/112 static pages. (The build log's eleven
+`ECONNREFUSED 127.0.0.1:5433` lines are Payload reaching for a local Postgres
+that is not running; the log mentions `three` zero times.)
+
+**Visual delta: real, small, and confined to specular rim highlights.**
+
+The first attempt at this measurement was invalid and is recorded because the
+failure is instructive. `OrbitControls.autoRotate` is on at
+`PhoneStage.web.tsx:1076` with `autoRotateSpeed = 1.6`, so every capture lands at
+a different rotation. The same-version control diffed **12.00%** of canvas pixels
+against the cross-version test's **8.10%** — the noise exceeded the signal, and
+any conclusion drawn there would have been capture timing read as a rendering
+change.
+
+Playwright's `reducedMotion: 'reduce'` takes the branch at `:1149`
+(`if (reduce) controls.autoRotate = false`), which makes the capture
+deterministic. Same-version control then diffs **0.00%, max channel delta 0**.
+
+Against that control, 0.171.0 vs 0.184.0 over the 584×680 canvas:
+
+| metric | value |
+|---|---|
+| pixels changed > 4 | 8,940 (2.25%) |
+| pixels changed > 24 | 1,089 (0.27%) |
+| max channel delta | 76 |
+| bounding box | (184, 95) – (423, 626) — the phone body |
+| mean luma in that box | 56.35 → 56.54 (+0.34%) |
+
+An 8×-amplified difference image puts the change entirely on the metal frame:
+the top edge, the right chamfer and the side rails. Screen content and the flat
+body faces are pure black in the diff, which is the expected anchor — the screen
+plane is `MeshBasicMaterial` with `toneMapped: false` and is excluded from
+`scene.environment`.
+
+Accepted. It is a subtle sharpening of specular rim highlights on a dark phone
+mockup, not a regression, and it buys a type contract that is otherwise false.
+
+Incidental, pre-existing, not fixed here: the `new RoomEnvironment()` at
+`PhoneStage.web.tsx:910` is never disposed, so its geometry and eight materials
+leak on every mount. `envTex` and `pmrem` are disposed at `:1197-1198`; the
+source scene is not.
 
 ## Application order
 
-Nothing in this ADR is applied. When it resumes: `@types/three` and `three`
+`three` is applied. The rest is not. When it resumes: `@types/three` and `three`
 together (never one without the other, or the contract stays false);
 `react-native-webgpu` in both manifests with `GpuReactionOverlay.tsx:134` in the
 same commit; `expo prebuild --clean` and a full native rebuild, uninstalling the
