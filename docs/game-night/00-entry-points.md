@@ -25,7 +25,7 @@ detail line — not a badge or a promoted card.
 
 **Web ≥768:** a gated rail item, same position logic as the existing ones.
 
-**Web <768: no entry point is rendered.** `/feed/game-night` resolves for an
+**Web <768: no entry point is rendered.** `/game-night` resolves for an
 allowlisted account that arrives by URL or invite link; nothing advertises it.
 
 ### Why not force one in
@@ -98,10 +98,15 @@ labels the member rather than the thing.
 - The absence of a narrow-web entry point must not be communicated as an error
   state; there is simply no row.
 
+> **SUPERSEDED in part, 2026-09-17.** The destination is built and lives at
+> `/game-night`, NOT `/feed/game-night` as written below. Game Night is its own
+> top-level surface alongside `/events` and `/blog`, not a sub-route of the feed.
+> The web rail row ships; the narrow-web and drawer decisions below still stand.
+
 ## Status — DEFERRED 2026-09-17
 
 Nothing in this document is built. Verified by sweep, not inferred: no
-`/feed/game-night` route, no `useFeatureAccess` hook, no `game_night` gate, no
+`/game-night` route, no `useFeatureAccess` hook, no `game_night` gate, no
 rail or drawer row, and no room or game-state tables under
 `apps/mobile/supabase/migrations`. The only `game_night` identifier in the repo
 is the event CATEGORY enum at `packages/app/lib/constants/event-categories.ts:18`

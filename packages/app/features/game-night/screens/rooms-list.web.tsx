@@ -24,7 +24,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "solito/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Gamepad2, Eye, Plus, AlertTriangle, WifiOff } from "lucide-react";
+import { Gamepad2, Eye, Plus, AlertTriangle } from "lucide-react";
 import {
   useGsapScope,
   prefersReducedMotion,
@@ -80,7 +80,7 @@ export function GameNightRoomsScreen() {
   });
 
   const startRoom = useCallback(() => {
-    router.push(`/feed/game-night/room/${generateRoomCode()}`);
+    router.push(`/game-night/room/${generateRoomCode()}`);
   }, [router]);
 
   return (
@@ -97,7 +97,7 @@ export function GameNightRoomsScreen() {
         ) : status === "loading" ? (
           <RoomSkeletons />
         ) : rooms.length === 0 ? (
-          <EmptyLobby onStart={startRoom} />
+          <EmptyLobby />
         ) : (
           <div
             ref={parentRef}
@@ -167,7 +167,7 @@ function Header({ onStart, count }: { onStart: () => void; count: number }) {
             stay reachable from it — otherwise someone holding a code has
             nowhere to type it. */}
         <a
-          href="/feed/game-night/join"
+          href="/game-night/join"
           className="text-xs text-white/50 underline-offset-4 hover:text-white/80 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0]"
         >
           Have a code?
@@ -186,7 +186,7 @@ function RoomCard({ room }: { room: WatchableRoom }) {
   // trap a keyboard user inside a row.
   return (
     <a
-      href={`/feed/game-night/room/${room.roomCode}`}
+      href={`/game-night/room/${room.roomCode}`}
       className="group block rounded-2xl border border-white/10 bg-white/4 p-4 transition-colors hover:border-[#8A40CF]/50 hover:bg-white/6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0]"
     >
       {/* Reserved for the table art. Sized now so dropping the graphic in
@@ -287,7 +287,7 @@ function RoomSkeletons() {
   );
 }
 
-function EmptyLobby({ onStart }: { onStart: () => void }) {
+function EmptyLobby() {
   // An empty screen is an invitation, and it carries the action rather than
   // describing one that lives elsewhere.
   const scope = useGsapScope((self, gsap) => {
@@ -317,17 +317,9 @@ function EmptyLobby({ onStart }: { onStart: () => void }) {
       </ul>
       <h2 className="text-lg font-semibold text-white">No tables running</h2>
       <p className="mx-auto mt-1 max-w-sm text-sm text-white/55">
-        Start one and read the code out. Four people sit down, everyone else
-        watches.
+        Four people sit down, everyone else watches. Start one with the button
+        above and read the code out.
       </p>
-      <button
-        type="button"
-        onClick={onStart}
-        className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#8A40CF] px-5 py-3 font-semibold text-white transition-colors hover:bg-[#7A35BC] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0]"
-      >
-        <Plus aria-hidden className="h-4 w-4" />
-        Start a table
-      </button>
     </section>
   );
 }

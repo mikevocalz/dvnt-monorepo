@@ -75,7 +75,7 @@ export interface DrawerViewer {
  *   specifies this row (lucide `Gamepad2`, label "Game Night", detail "Party
  *   card game", gated on `useFeatureAccess("game_night")`) and its web rail
  *   twin. None of it can land yet, because the destination does not exist:
- *   there is no `/feed/game-night` route, no `useFeatureAccess` hook, no
+ *   there is no `/game-night` route, no `useFeatureAccess` hook, no
  *   `game_night` gate, and no room or game-state tables in
  *   `apps/mobile/supabase/migrations`. The only `game_night` identifier in the
  *   repo is the event CATEGORY enum (`lib/constants/event-categories.ts:18`) —

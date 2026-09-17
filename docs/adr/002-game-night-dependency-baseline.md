@@ -12,7 +12,7 @@ whether `react-native-webgpu` moves off 0.8.2. `00-entry-points.md` specified th
 drawer and rail rows and said "Nothing blocking" under Open, which stopped being
 true the moment the versions doc landed.
 
-Nothing in either document is built. No `/feed/game-night` route, no
+Nothing in either document is built. No `/game-night` route, no
 `useFeatureAccess` hook, no `game_night` gate, no room or game-state tables. The
 entry points are deferred at the nav site in
 `packages/app/features/navigation/drawer-destinations.ts`, and the order recorded

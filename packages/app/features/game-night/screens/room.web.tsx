@@ -74,7 +74,7 @@ export function GameNightRoomScreen() {
   const copyLink = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(
-        `${window.location.origin}/feed/game-night/room/${code}`,
+        `${window.location.origin}/game-night/room/${code}`,
       );
       setCopied(true);
     } catch {
@@ -93,7 +93,7 @@ export function GameNightRoomScreen() {
             Codes are six characters. Check the one you were given.
           </p>
           <Link
-            href="/feed/game-night"
+            href="/game-night"
             className="mt-6 inline-block rounded-xl bg-[#8A40CF] px-5 py-3 font-semibold text-white hover:bg-[#7A35BC]"
           >
             Back to Game Night

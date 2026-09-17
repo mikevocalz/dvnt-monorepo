@@ -30,12 +30,12 @@ export function GameNightLobbyScreen() {
   const ready = isCompleteRoomCode(joinCode);
 
   const startRoom = useCallback(() => {
-    router.push(`/feed/game-night/room/${generateRoomCode()}`);
+    router.push(`/game-night/room/${generateRoomCode()}`);
   }, [router]);
 
   const joinRoom = useCallback(() => {
     if (!ready) return;
-    router.push(`/feed/game-night/room/${normalizeRoomCode(joinCode)}`);
+    router.push(`/game-night/room/${normalizeRoomCode(joinCode)}`);
   }, [ready, joinCode, router]);
 
   return (
