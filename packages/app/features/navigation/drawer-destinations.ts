@@ -81,15 +81,21 @@ export interface DrawerViewer {
  *   repo is the event CATEGORY enum (`lib/constants/event-categories.ts:18`) —
  *   unrelated, and the thing to not mistake for progress.
  *
- *   The blockers are decisions PROMPT 0 assigned to itself and left open in
- *   `docs/game-night/00-versions.md`: which `three` the monorepo pins (0.171.0
- *   installed vs 0.184.0 in the reference, and `@types/three` is 0.184.1
- *   against the 0.171.0 runtime); which `typegpu` line, given `@typegpu/three`
- *   and `@typegpu/react` are NOT INSTALLED; and whether
- *   `react-native-webgpu` goes 0.8.2 → 0.10.2, unattempted. Multiplayer has no
- *   transport either — `y-protocols` is absent and `yjs` is transitive-only via
- *   Payload's `@lexical/yjs`, so it is not a dependency anything here may
- *   import.
+ *   Those dependency questions are now DECIDED but NOT APPLIED — see
+ *   `docs/adr/002-game-night-dependency-baseline.md`: pin `three` 0.184.0 with
+ *   `@types/three` 0.184.1, stay on `typegpu` 0.12.x, take
+ *   `react-native-webgpu` to 0.10.2 in both manifests. The ADR's PENDING list
+ *   needs a device build, and its first item — whether RN 0.86 works with
+ *   rn-webgpu 0.10.2 at all, which upstream never tested — could reverse it.
+ *
+ *   Two things the spec assumed that do not exist, also settled in the ADR.
+ *   Multiplayer needs no new dependency: Supabase Realtime already carries
+ *   room-scoped events here (`sneaky-lynk/hooks/useRoomEvents.ts` via
+ *   `lib/supabase/realtime`), and yjs would be a CRDT for a problem a
+ *   server-authoritative card game does not have. And the gate cannot be
+ *   `useFeatureAccess`: `lib/feature-flags.tsx:67` is a build-wide env var, and
+ *   `allowlisted_emails` gates SIGNUP, so it is already true for every account.
+ *   For two accounts the gate is room membership.
  *
  *   Add the row in the same change as the route, not before. Until then a
  *   member who taps it lands nowhere, which is the dead end this block exists

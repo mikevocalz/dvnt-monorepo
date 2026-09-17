@@ -232,13 +232,18 @@ the remainder (per prompt).
 
 ## Decision 5 — GPU reactions: **TypeGPU + instanced particles, overlay surface**, with two Phase-0 corrections
 
-**Package reconciliation (resolve before any GPU code):** node_modules contains
-**both** `react-native-wgpu` (declared `^0.5.11` in `apps/mobile/package.json:174`)
-and `react-native-webgpu` (declared `^0.5.15` in `packages/app/package.json:349`)
-— two copies of the same lib, both resolving 0.5.15. All source imports the
-successor name. Fix: drop the `react-native-wgpu` declaration from apps/mobile;
-one line + lockfile. **TypeGPU is not installed anywhere** — adding `typegpu`
-is a new (pure-TS, no native module) dependency; recommended per the spec.
+**Package reconciliation — RESOLVED 2026-09-17, both items were already done.**
+This paragraph described a duplicate `react-native-wgpu` / `react-native-webgpu`
+pair at ^0.5.x and said "TypeGPU is not installed anywhere". Neither is true now:
+
+- No manifest declares `react-native-wgpu` and no such directory exists in any
+  `node_modules`. The name is npm-deprecated in favour of `react-native-webgpu`,
+  which is declared at `apps/mobile/package.json:177` and
+  `packages/app/package.json:352`, both `^0.8.2`, resolving to one hoisted copy.
+- `typegpu` is installed at 0.12.0 (`packages/app/package.json:363`) and already
+  imported by `packages/app/features/gpu/reactions/engine.ts:16-17`.
+
+Version decisions for both live in `docs/adr/002-game-night-dependency-baseline.md`.
 
 **Honest-state corrections to the prompt’s premises:**
 - “Fifty reactions is fifty views” — today reactions are **hard-capped at 6**
@@ -290,8 +295,9 @@ cutover waits for a stable call domain from WS-1.
 2. `react-native-moq` GO on native (WHIP retained through burn-in) — approve?
 3. Routed screens keep their UI; genesis MoQ screens deleted after rescue — approve?
 4. `expo-callkit-telecom` phased behind the coordinator interface — approve?
-5. Add `typegpu` (pure-TS dep) + drop the duplicate `react-native-wgpu`
-   declaration — approve?
+5. ~~Add `typegpu` + drop the duplicate `react-native-wgpu` declaration~~ —
+   CLOSED 2026-09-17: both were already done. See the reconciliation note above
+   and `docs/adr/002-game-night-dependency-baseline.md`.
 
 ---
 

@@ -91,6 +91,18 @@ with the version bump applied. Not run.
 
 ## Open questions, not assumptions
 
+> **CLOSED 2026-09-17 by `docs/adr/002-game-night-dependency-baseline.md`.** All
+> three are decided there with evidence: pin `three` 0.184.0 + `@types/three`
+> 0.184.1 exactly, stay on `typegpu` 0.12.x (a full 0.12 family is published, so
+> the premise that only 0.11.x is compatible was wrong), and take
+> `react-native-webgpu` to 0.10.2 in both manifests. The ADR also corrects this
+> document on two points: typegpu IS already imported here
+> (`features/gpu/reactions/engine.ts:16-17`), and the reference checkout never
+> wires typegpu and three together. Nothing is applied yet; the ADR carries the
+> PENDING list that needs a device build.
+
+The questions as originally written:
+
 1. **three version.** 0.171.0 is installed; the reference runs 0.184.0. Pinning
    the monorepo to one version is PROMPT 0's job, and the decision needs the
    `Cube`/`InstancedMesh` examples run against DVNT's Metro config — not a
