@@ -152,6 +152,64 @@ function errorResponse(message: string): Response {
   return jsonResponse({ ok: false, error: message }, 200);
 }
 
+/**
+ * Pass-through that counts bytes and aborts the moment the limit is passed.
+ *
+ * Backpressure is preserved because TransformStream only pulls from the source
+ * as the destination consumes — this never accumulates the file, and the only
+ * memory held is the chunk in flight. An oversized body dies mid-transfer
+ * instead of being measured after it has all arrived.
+ */
+function boundedCountingStream(
+  source: ReadableStream<Uint8Array>,
+  limit: number,
+  onCount: (total: number) => void,
+): ReadableStream<Uint8Array> {
+  let total = 0;
+  const counter = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      total += chunk.byteLength;
+      if (limit && total > limit) {
+        controller.error(
+          new Error(
+            `upload exceeded ${(limit / 1024 / 1024).toFixed(1)}MB while transferring`,
+          ),
+        );
+        return;
+      }
+      onCount(total);
+      controller.enqueue(chunk);
+    },
+    flush() {
+      onCount(total);
+    },
+  });
+  return source.pipeThrough(counter);
+}
+
+/**
+ * Remove an object we are not going to reference. A failed or truncated upload
+ * that stays in the zone is an orphan nothing will ever clean up, because the
+ * key only exists in this function's local scope once the request ends.
+ */
+async function deleteStoredObject(
+  host: string,
+  zone: string,
+  accessKey: string,
+  key: string,
+): Promise<void> {
+  try {
+    const resp = await fetch(`https://${host}/${zone}/${key}`, {
+      method: "DELETE",
+      headers: { AccessKey: accessKey },
+      signal: AbortSignal.timeout(15_000),
+    });
+    console.log(`[media-upload] cleanup DELETE ${key} → ${resp.status}`);
+  } catch (err) {
+    console.error(`[media-upload] cleanup DELETE ${key} failed:`, err);
+  }
+}
+
 // Main handler
 Deno.serve(async (req) => {
   // CORS preflight
@@ -290,7 +348,9 @@ Deno.serve(async (req) => {
 
   // ── POST handler (upload) ──────────────────────────────────────────
   // Parse request - support both multipart and raw bytes
-  let fileBytes: Uint8Array;
+  // Empty unless the buffered (image) path fills it; the streamed path leaves
+  // it empty by design and reports its size from the counter instead.
+  let fileBytes: Uint8Array = new Uint8Array(0);
   let kind: MediaKind;
   let filename: string;
   let mime: string;
@@ -304,6 +364,8 @@ Deno.serve(async (req) => {
   /** Set instead of `fileBytes` when the body is piped straight to storage. */
   let fileStream: ReadableStream<Uint8Array> | null = null;
   let streamLength = 0;
+  /** Bytes actually forwarded. Set by the counting stream as it drains. */
+  let streamedBytes = 0;
 
   const contentType = req.headers.get("Content-Type") || "";
 
@@ -390,14 +452,30 @@ Deno.serve(async (req) => {
           req.headers.get("Content-Length") ||
           0,
       );
-      if (isVideoKind(kind) && req.body && declaredLength > 0) {
+      if (isVideoKind(kind)) {
+        // A video without a usable declared length must NOT fall through to
+        // req.arrayBuffer(): that is the unbounded path this function is
+        // supposed to have stopped using, and it is reachable by anyone who
+        // omits a header.
+        if (!req.body || !Number.isFinite(declaredLength) || declaredLength <= 0) {
+          return errorResponse(
+            "Missing or invalid x-content-length for a video upload",
+          );
+        }
         const limit = SIZE_LIMITS[kind];
         if (limit && declaredLength > limit) {
           return errorResponse(
             `File too large for ${kind}: ${(declaredLength / 1024 / 1024).toFixed(2)}MB exceeds ${(limit / 1024 / 1024).toFixed(1)}MB limit`,
           );
         }
-        fileStream = req.body;
+        // The declared length is a claim by the caller — on web it cannot even
+        // be the real Content-Length, since browsers forbid setting that
+        // header. Count what actually arrives and fail the transfer the moment
+        // it exceeds the limit, rather than trusting the number and finding
+        // out afterwards.
+        fileStream = boundedCountingStream(req.body, limit, (n) => {
+          streamedBytes = n;
+        });
         streamLength = declaredLength;
       } else {
         fileBytes = new Uint8Array(await req.arrayBuffer());
@@ -494,6 +572,22 @@ Deno.serve(async (req) => {
       } as RequestInit);
 
       if (response.status === 201 || response.status === 200) {
+        // Bunny accepted it — now check that what we forwarded is what the
+        // caller said they were sending. A truncated body (dropped connection,
+        // a client that lied about the length) otherwise lands as a short,
+        // unplayable object that the DB row describes as complete.
+        if (streaming && streamedBytes !== streamLength) {
+          lastError =
+            `truncated upload: forwarded ${streamedBytes} bytes, declared ${streamLength}`;
+          console.error(`[media-upload] ${lastError} — deleting ${key}`);
+          await deleteStoredObject(
+            BUNNY_STORAGE_HOST,
+            BUNNY_STORAGE_ZONE,
+            BUNNY_ACCESS_KEY,
+            key,
+          );
+          break;
+        }
         uploadSuccess = true;
         console.log(`[media-upload] Upload successful: ${key}`);
         break;
@@ -541,7 +635,8 @@ Deno.serve(async (req) => {
     url: publicUrl,
     filename: key,
     mime_type: mime,
-    filesize: declaredSize,
+    // What was actually forwarded and accepted — not what the caller claimed.
+    filesize: fileStream ? streamedBytes : fileBytes.length,
     width: width || null,
     height: height || null,
     type: isVideoKind(kind) ? "video" : "image",
@@ -563,7 +658,15 @@ Deno.serve(async (req) => {
       insertError.code,
       insertError.details,
     );
-    // TODO: Consider deleting the uploaded file from Bunny on DB failure
+    // The object is in the zone and nothing will ever reference it — the key
+    // lives only in this request. Remove it rather than leave an orphan that
+    // bills storage forever and appears in no listing anyone reads.
+    await deleteStoredObject(
+      BUNNY_STORAGE_HOST,
+      BUNNY_STORAGE_ZONE,
+      BUNNY_ACCESS_KEY,
+      key,
+    );
     return errorResponse(`Failed to save media record: ${insertError.message}`);
   }
 
