@@ -735,7 +735,15 @@ export function useRsvpEvent() {
         });
       }
     },
-    onSuccess: (_result, { eventId }) => {
+    onSuccess: (_result, { eventId, status }) => {
+      // Cancelling flips the button and nothing else happened on screen, so a
+      // cancel and a cancel that failed looked identical. Confirm both ways.
+      const toast = useUIStore.getState().showToast;
+      if (status === "not_going") {
+        toast("success", "RSVP cancelled", "You're off the guest list.");
+      } else if (status === "going") {
+        toast("success", "You're going", "Your ticket is in My Tickets.");
+      }
       queryClient.invalidateQueries({ queryKey: eventKeys.detail(eventId) });
       queryClient.invalidateQueries({
         queryKey: [...eventKeys.all, "mine"],
