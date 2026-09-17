@@ -98,8 +98,43 @@ labels the member rather than the thing.
 - The absence of a narrow-web entry point must not be communicated as an error
   state; there is simply no row.
 
+## Status — DEFERRED 2026-09-17
+
+Nothing in this document is built. Verified by sweep, not inferred: no
+`/feed/game-night` route, no `useFeatureAccess` hook, no `game_night` gate, no
+rail or drawer row, and no room or game-state tables under
+`apps/mobile/supabase/migrations`. The only `game_night` identifier in the repo
+is the event CATEGORY enum at `packages/app/lib/constants/event-categories.ts:18`
+— unrelated to this feature.
+
+The entry points are deferred rather than struck: the design above stands, and
+what blocks it is a set of decisions, not a missing subsystem. They are the three
+that `00-versions.md` leaves open under "Open questions, not assumptions":
+
+1. Which `three` the monorepo pins — 0.171.0 installed, 0.184.0 in the
+   reference, and `@types/three` at 0.184.1 describing APIs the runtime may not
+   have.
+2. Which `typegpu` line, given `@typegpu/three` and `@typegpu/react` are NOT
+   INSTALLED and `@typegpu/react ≥ 0.11.2` imports `react-native-webgpu` under
+   its current name.
+3. Whether `react-native-webgpu` goes 0.8.2 → 0.10.2. Unattempted.
+
+Multiplayer has no transport: `y-protocols` is absent and `yjs` is
+transitive-only via Payload's `@lexical/yjs`, so no workspace package may import
+it.
+
+The deferral is recorded a second time at the nav site itself —
+`packages/app/features/navigation/drawer-destinations.ts`, in the
+`STRUCK_DESTINATIONS` block — so the next person to ask "why is there no Game
+Night row" starts from the blocker instead of adding a row to nowhere.
+
+**Order when it resumes:** close the three version questions first (they decide
+what the table can be built with), then the `game_night` gate and the room
+tables, then the Skia/Reanimated table, which `00-versions.md` names as the
+guaranteed path. The rail and drawer rows land last, in the same change as the
+route.
+
 ## Open
 
-Nothing blocking. When the allowlist widens beyond two accounts, revisit the
-narrow-web case with the "More" overflow pattern above rather than reopening the
-tab-bar question.
+When the allowlist widens beyond two accounts, revisit the narrow-web case with
+the "More" overflow pattern above rather than reopening the tab-bar question.

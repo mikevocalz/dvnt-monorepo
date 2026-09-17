@@ -71,8 +71,36 @@ export interface DrawerViewer {
  *   (`apps/web/src/app/(frontend)/(marketing)/blog`). No native route, so a
  *   native row would have to open a browser; that is a product call, not a
  *   navigation gap.
+ * - **Game Night** — DEFERRED 2026-09-17. `docs/game-night/00-entry-points.md`
+ *   specifies this row (lucide `Gamepad2`, label "Game Night", detail "Party
+ *   card game", gated on `useFeatureAccess("game_night")`) and its web rail
+ *   twin. None of it can land yet, because the destination does not exist:
+ *   there is no `/feed/game-night` route, no `useFeatureAccess` hook, no
+ *   `game_night` gate, and no room or game-state tables in
+ *   `apps/mobile/supabase/migrations`. The only `game_night` identifier in the
+ *   repo is the event CATEGORY enum (`lib/constants/event-categories.ts:18`) —
+ *   unrelated, and the thing to not mistake for progress.
+ *
+ *   The blockers are decisions PROMPT 0 assigned to itself and left open in
+ *   `docs/game-night/00-versions.md`: which `three` the monorepo pins (0.171.0
+ *   installed vs 0.184.0 in the reference, and `@types/three` is 0.184.1
+ *   against the 0.171.0 runtime); which `typegpu` line, given `@typegpu/three`
+ *   and `@typegpu/react` are NOT INSTALLED; and whether
+ *   `react-native-webgpu` goes 0.8.2 → 0.10.2, unattempted. Multiplayer has no
+ *   transport either — `y-protocols` is absent and `yjs` is transitive-only via
+ *   Payload's `@lexical/yjs`, so it is not a dependency anything here may
+ *   import.
+ *
+ *   Add the row in the same change as the route, not before. Until then a
+ *   member who taps it lands nowhere, which is the dead end this block exists
+ *   to prevent.
  */
-export const STRUCK_DESTINATIONS = ["saved", "scan-tickets", "blog"] as const;
+export const STRUCK_DESTINATIONS = [
+  "saved",
+  "scan-tickets",
+  "blog",
+  "game-night",
+] as const;
 
 export function buildDrawerSections(
   viewer: DrawerViewer,
