@@ -110,3 +110,56 @@ render; Skia objects and paths are memoized rather than rebuilt per frame; card
 drag uses the Gesture Builder API writing shared values in `onUpdate`, with
 `runOnJS`/`scheduleOnRN` reserved for committing a move to the server — not for
 per-frame work.
+
+## Findings from the resolution audit
+
+### Metro resolves the WebGPU three entry points
+
+`apps/mobile/metro.config.js:23` sets `unstable_enablePackageExports = true`, and
+three's `./webgpu` / `./tsl` subpaths are plain string targets with no conditions
+to miss, so both resolve. `nodeModulesPaths` (`:15-19`) includes the monorepo
+root where three is hoisted, `disableHierarchicalLookup` is unset, and the custom
+`resolveRequest` (`:86-147`) does not intercept `three*`. If package exports were
+ever disabled, both would hard-fail — there is no `main`/`browser` fallback for a
+subpath.
+
+### What is actually installed
+
+| Package | State |
+|---|---|
+| `three` | 0.171.0 (root, hoisted) |
+| `typegpu` | **0.12.0** |
+| `react-native-webgpu` | 0.8.2 |
+| `@typegpu/three` | **NOT INSTALLED** |
+| `@typegpu/react` | **NOT INSTALLED** |
+| `y-protocols` | **NOT INSTALLED** |
+| `yjs` | 13.6.31, **transitive only** via `@lexical/yjs` (Payload) — not a direct dependency of any workspace package |
+| `@types/three` | **0.184.1** against a 0.171.0 runtime — a 13-minor gap, so the types describe APIs the installed runtime may not have |
+
+### A pre-existing bundle leak, now fixed
+
+`(protected)/_layout.tsx` wraps every protected screen. Line 34 imported
+`useEventsTabVisibility` from the `weatherfx` **barrel**, which re-exports
+`WeatherGPUEngine` (`weatherfx/index.ts:35`), whose module-scope
+`require("react-native-webgpu")` (`WeatherGPUEngine.tsx:38`) runs on import —
+along with five GPU layer modules that each import `GpuRuntime`, which does its
+own module-scope require at `GpuRuntime.ts:14`.
+
+The component itself is commented out in the JSX (`_layout.tsx:521-522`,
+"disabled - requires react-native-wgpu native module"), so this bought nothing.
+With Metro tree-shaking off, a barrel import is a whole-module import. Changed to
+the direct path, matching the three sibling weatherfx imports at `:29-32` which
+already avoid the barrel.
+
+This is the exact hazard the Game Night bundle rule describes, and it was already
+live.
+
+### Two things the GPU code says about itself that are not true
+
+- `WorkletRenderLoop.ts` contains **no worklets** — no `'worklet'` directive, no
+  shared values, no Reanimated import. It is a plain JS-thread `requestAnimationFrame`
+  loop (`:70`, `:73`), while its header claims it "Communicates with Reanimated
+  shared values". A renderer that shares this loop would be on the JS thread.
+- `GpuReactionOverlay.tsx` has **zero importers** — it is dead code today, so the
+  "two live renderers" disposal conflict is currently theoretical. It becomes real
+  the moment the overlay is mounted alongside a table renderer.

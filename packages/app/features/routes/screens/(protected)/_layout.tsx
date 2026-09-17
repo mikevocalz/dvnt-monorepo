@@ -31,7 +31,14 @@ import { useWeatherFXStore } from "@dvnt/app/features/weatherfx/WeatherFXStore";
 // import { WeatherGPUEngine } from "@dvnt/app/features/weatherfx/WeatherGPUEngine";
 import { WeatherReanimatedOverlay } from "@dvnt/app/features/weatherfx/WeatherReanimatedOverlay";
 import { IncomingCallOverlay } from "@dvnt/app/features/call/ui/incoming-call-overlay";
-import { useEventsTabVisibility } from "@dvnt/app/features/weatherfx";
+// Direct path, not the barrel. The weatherfx barrel re-exports
+// WeatherGPUEngine, whose module-scope require("react-native-webgpu")
+// runs on import — and this layout wraps every protected screen. The
+// component below is commented out, but the barrel still dragged the GPU
+// stack (plus five layer modules, each pulling GpuRuntime) into the graph
+// on every screen. Metro tree-shaking is off in this repo, so a barrel
+// import is a whole-module import.
+import { useEventsTabVisibility } from "@dvnt/app/features/weatherfx/hooks/useEventsTabVisibility";
 // import { isWebGPUAvailable } from "@dvnt/app/features/gpu/GpuRuntime";
 import { useLiveSurface } from "@dvnt/app/features/live-surface";
 import { useWatchTicketSync } from "@dvnt/app/features/watch/use-watch-ticket-sync";
