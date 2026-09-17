@@ -300,10 +300,24 @@ export function PhoneStage() {
   const addLog = (msg: string) =>
     setSystemLogs((prev) => [msg, ...prev.slice(0, 5)]);
 
+  // The id is kept so unmount can clear it. Discarding it meant every tab tap
+  // within 3.8s of leaving the page ran setToast(null) on a dead component.
+  // Clearing the previous one also stops a second toast cutting the first short.
+  const toastTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current !== null)
+        window.clearTimeout(toastTimerRef.current);
+    },
+    [],
+  );
+
   const triggerToast = (message: string) => {
     setToast(message);
     addLog(`System Signal: ${message}`);
-    window.setTimeout(() => setToast(null), 3800);
+    if (toastTimerRef.current !== null)
+      window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3800);
   };
 
   const resetOrientation = () => {
@@ -907,7 +921,15 @@ export function PhoneStage() {
     // Environment map — metals reflect this; without it a metalness≈1 phone
     // renders pure black. RoomEnvironment gives soft studio reflections.
     const pmrem = new THREE.PMREMGenerator(renderer);
-    const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    // Both halves are held, because both leak if they are not.
+    // `new RoomEnvironment()` inline had nothing left pointing at it once the
+    // expression finished, so its BoxGeometry and 8 materials were orphaned on
+    // every mount. And `.fromScene()` returns a render target whose framebuffer
+    // and depth renderbuffer are NOT freed by `pmrem.dispose()` — that only
+    // clears the generator's own blur/GGX scratch.
+    const roomEnv = new RoomEnvironment();
+    const envRT = pmrem.fromScene(roomEnv, 0.04);
+    const envTex = envRT.texture;
     scene.environment = envTex;
 
     // Lighting rig — hemisphere fill + key spot + neon rim accents.
@@ -941,6 +963,8 @@ export function PhoneStage() {
 
     let screenMeshRef: THREE.Mesh | null = null;
     let logoTexture: THREE.CanvasTexture | null = null;
+    /** Set by the cleanup so the async SVG rasterize below cannot outlive it. */
+    let disposed = false;
 
     // Titanium phone built in-engine; the screen is the canvas texture.
     const buildPhone = (): THREE.Object3D => {
@@ -984,6 +1008,12 @@ export function PhoneStage() {
       // Rasterize the SVG → full-color, transparent-background texture.
       const logoImg = new Image();
       logoImg.onload = () => {
+        // The SVG decode races unmount. Losing that race used to build a
+        // 1024x1024 canvas and a CanvasTexture that nothing could reach, then
+        // assign `map` onto a material the cleanup had already disposed.
+        // StrictMode made it near-certain in dev: the first mount's cleanup
+        // runs long before /dvnt-logo.svg resolves.
+        if (disposed) return;
         const px = 1024;
         const lc = document.createElement("canvas");
         lc.width = px;
@@ -1176,7 +1206,11 @@ export function PhoneStage() {
     window.addEventListener("resize", resizeHandler);
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(frameId);
+      // Unmounting mid-hover otherwise leaves the whole document stuck on a
+      // "grabbing" cursor, because the pointer handlers set it on <body>.
+      document.body.style.cursor = "default";
       window.removeEventListener("resize", resizeHandler);
       io.disconnect();
       el.removeEventListener("pointerdown", handleDown);
@@ -1194,9 +1228,21 @@ export function PhoneStage() {
       });
       canvasTexture.dispose();
       logoTexture?.dispose();
-      envTex.dispose();
+      // Supersedes envTex.dispose(): RenderTarget.dispose() frees the
+      // framebuffers, the depth renderbuffer AND the attached texture.
+      roomEnv.dispose();
+      envRT.dispose();
       pmrem.dispose();
       renderer.dispose();
+      // `renderer.dispose()` does NOT drop the GL context — verified in
+      // three 0.184.0, where forceContextLoss() is the only caller of
+      // WEBGL_lose_context. Without this every visit to the landing page
+      // retains a context against the browser's ~16 cap, and the browser
+      // starts killing the OLDEST context on the page, which need not be ours.
+      renderer.forceContextLoss();
+      rendererRef.current = null;
+      controlsRef.current = null;
+      cameraRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
