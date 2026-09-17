@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "solito/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -157,8 +157,47 @@ export function StoryViewerOverlay() {
     };
   }, [open, close]);
 
+  // Everything below runs on EVERY render, before any early return. The tags
+  // query used to sit under them, so a closed overlay ran one fewer hook than
+  // an open one — React counts hooks per render, and reopening a story after a
+  // close is exactly when it noticed.
+  const activeGroup =
+    groups.length > 0
+      ? groups[Math.min(groupIndex, groups.length - 1)]
+      : undefined;
+
+  // Tagged people — native shows a pill over the story; web showed nothing, so
+  // being tagged was invisible to everyone but the poster.
+  const { data: storyTags = [] } = useQuery({
+    queryKey: ["story-tags", activeGroup?.id ?? ""],
+    queryFn: () => storyTagsApi.getTagsForStory(activeGroup?.id ?? ""),
+    enabled: open && !!activeGroup?.id,
+    staleTime: 60_000,
+  });
+
+  /**
+   * A fresh `stories` array on every render makes react-insta-stories reset the
+   * segment it is playing. Before the composer existed this component barely
+   * re-rendered; now a keystroke, a floating emoji and the tags query all
+   * re-render it — so the story restarted under the reply box while you typed.
+   * The identity has to be stable.
+   */
+  const storyItems = useMemo(
+    () =>
+      (activeGroup?.segments ?? []).map((seg) => ({
+        url: seg.url,
+        type: seg.type,
+        duration: seg.duration,
+        header: {
+          heading: activeGroup?.username ?? "",
+          profileImage: activeGroup?.avatar ?? "",
+        },
+      })),
+    [activeGroup],
+  );
+
   if (!mounted || !open || groups.length === 0 || size.w === 0) return null;
-  const group = groups[Math.min(groupIndex, groups.length - 1)];
+  const group = activeGroup;
   if (!group || group.segments.length === 0) return null;
   const segment =
     group.segments[Math.min(storyIndex, group.segments.length - 1)];
@@ -176,15 +215,6 @@ export function StoryViewerOverlay() {
       },
     });
   };
-
-  // Tagged people — native shows a pill over the story; web showed nothing, so
-  // being tagged was invisible to everyone but the poster.
-  const { data: storyTags = [] } = useQuery({
-    queryKey: ["story-tags", group.id],
-    queryFn: () => storyTagsApi.getTagsForStory(group.id),
-    enabled: !!group.id,
-    staleTime: 60_000,
-  });
 
   // The story context the DM carries. Segments are the items, in order.
   const storyContext = {
@@ -304,12 +334,7 @@ export function StoryViewerOverlay() {
       >
         <StoryViewer
           key={group.id}
-          stories={group.segments.map((seg) => ({
-            url: seg.url,
-            type: seg.type,
-            duration: seg.duration,
-            header: { heading: group.username, profileImage: group.avatar },
-          }))}
+          stories={storyItems}
           onAllStoriesEnd={nextGroup}
           onStoryChange={setStoryIndex}
           onProfilePress={() => {
