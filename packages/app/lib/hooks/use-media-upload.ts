@@ -16,6 +16,7 @@
  */
 
 import { useState, useCallback } from "react";
+import { sizeLimitForKind } from "@dvnt/app/lib/media/upload-policy";
 import { Platform } from "react-native";
 import {
   uploadToServer as serverUpload,
@@ -121,6 +122,24 @@ async function assertReadableMediaUri(uri: string): Promise<void> {
  * not a conversion, and it is how 43 stored rows ended up describing a
  * container they are not. `reencoded` is the only thing that licenses "mp4".
  */
+/**
+ * The byte budget for video from this surface, read from the one policy table
+ * the Edge Function is pinned to. `folderToKind` in server-upload.ts does the
+ * same mapping for the upload itself; this keeps preparation and validation
+ * talking about the same number.
+ */
+function videoBudgetForFolder(folder: string): number {
+  const kindByFolder: Record<string, string> = {
+    posts: "post-video",
+    stories: "story-video",
+    chat: "message-video",
+    events: "event-video",
+    "event-moments": "event-moment-video",
+    uploads: "post-video",
+  };
+  return sizeLimitForKind(kindByFolder[folder] ?? "post-video");
+}
+
 function uploadMimeForVideo(
   sourceUri: string,
   sourceMime: string | undefined,
@@ -261,9 +280,15 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           // compressed, and the old label described work that no longer
           // happens (and, when it did happen, was the bug).
           reportStatus("Preparing video...");
-          const compressionResult = await compressVideo(file.uri, (p) => {
-            setCompressionProgress(p.percentage);
-          });
+          const compressionResult = await compressVideo(
+            file.uri,
+            (p) => setCompressionProgress(p.percentage),
+            // The budget belongs to the surface: a story is 18MiB, a post
+            // 25MiB. Passing it here is what lets a clip that already fits be
+            // uploaded untouched, and a larger one be encoded to fit at its
+            // own resolution.
+            videoBudgetForFolder(folder),
+          );
 
           if (!compressionResult.success || !compressionResult.outputPath) {
             console.error(
@@ -453,9 +478,15 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           // the label follows the work, and the work is no longer compression.
           reportStatus("Preparing video...");
 
-          const compressionResult = await compressVideo(file.uri, (p) => {
-            setCompressionProgress(p.percentage);
-          });
+          const compressionResult = await compressVideo(
+            file.uri,
+            (p) => setCompressionProgress(p.percentage),
+            // The budget belongs to the surface: a story is 18MiB, a post
+            // 25MiB. Passing it here is what lets a clip that already fits be
+            // uploaded untouched, and a larger one be encoded to fit at its
+            // own resolution.
+            videoBudgetForFolder(folder),
+          );
 
           if (!compressionResult.success || !compressionResult.outputPath) {
             results.push({

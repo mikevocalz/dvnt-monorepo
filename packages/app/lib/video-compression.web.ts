@@ -43,10 +43,21 @@ export async function validateVideo(uri: string): Promise<ValidationResult> {
   if (metadata.fileSize > 150 * 1024 * 1024) errors.push("Video exceeds 150MB. Trim or export a smaller MP4.");
   return { valid: !errors.length, errors, metadata };
 }
-export async function compressVideo(uri: string, onProgress?: (progress: CompressionProgress) => void): Promise<CompressionResult> {
+export async function compressVideo(uri: string, onProgress?: (progress: CompressionProgress) => void, budgetBytes?: number): Promise<CompressionResult> {
   const validation = await validateVideo(uri);
   if (!validation.valid) return { success: false, error: validation.errors.join(" ") };
   onProgress?.({ percentage: 100, timeElapsed: 0 });
+  // The browser has no encoder here, so a file over the surface's budget is
+  // reported rather than shipped to be refused by the server. react-native-
+  // compressor is native-only; adding a WASM/MediaRecorder encode on web is a
+  // separate decision, not something to fake with a size check.
+  const size = validation.metadata!.fileSize;
+  if (budgetBytes && size > budgetBytes) {
+    return {
+      success: false,
+      error: `That video is ${(size / 1048576).toFixed(1)}MB — the limit here is ${(budgetBytes / 1048576).toFixed(0)}MB. Trim it, or export a smaller file.`,
+    };
+  }
   // The upload transport enforces the actual server limit before sending bytes.
   // Do not pretend this browser has transcoded the file or shrunk it.
   return { success: true, outputPath: uri, originalSize: validation.metadata!.fileSize,

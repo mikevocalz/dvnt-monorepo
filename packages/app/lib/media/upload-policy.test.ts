@@ -9,14 +9,12 @@ test('client preflight caps match every server media kind', () => {
   const block = source.split('const SIZE_LIMITS:')[1].split('};')[0];
   const serverCaps = Object.fromEntries([...block.matchAll(/(?:"([a-z-]+)"|\b(avatar)):\s*(\d+)\s*\*\s*1024\s*\*\s*1024/g)].map((match) => [match[1] || match[2], Number(match[3]) * 1024 * 1024]));
   assert.deepEqual(MEDIA_SIZE_LIMITS, serverCaps);
-  // Video caps are sized for an unedited original, not for the 360x640
-  // re-encode the phone used to make.
-  assert.equal(sizeLimitForKind('event-video'), 96 * 1024 * 1024);
-  assert.equal(sizeLimitForKind('post-video'), 96 * 1024 * 1024);
-  assert.equal(sizeLimitForKind('story-video'), 96 * 1024 * 1024);
-  // A 60s 1080p original is 60-90MB — it has to fit, or the policy is a
-  // compression mandate wearing a size limit.
-  assert.ok(sizeLimitForKind('post-video') >= 90 * 1024 * 1024);
+  // Small budgets on purpose: the client prepares video toward them at source
+  // resolution rather than shipping originals.
+  assert.equal(sizeLimitForKind('story-video'), 18 * 1024 * 1024);
+  assert.equal(sizeLimitForKind('post-video'), 25 * 1024 * 1024);
+  assert.equal(sizeLimitForKind('message-video'), 12 * 1024 * 1024);
+  assert.equal(sizeLimitForKind('event-video'), 50 * 1024 * 1024);
 });
 test('byte progress is bounded and reserves completion for server acknowledgement', () => {
   assert.equal(uploadPercentage(0, 100), 0);

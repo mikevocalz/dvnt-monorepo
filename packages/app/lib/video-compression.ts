@@ -16,10 +16,9 @@
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import { withUploadTimeout } from "@dvnt/app/lib/media/upload-policy";
 import {
-  DEFAULT_VIDEO_UPLOAD_MODE,
-  isUsableSmallerCopy,
-  ladderTierFor,
-  type VideoUploadMode,
+  isUsablePreparedCopy,
+  planVideoUpload,
+  type VideoPlan,
 } from "@dvnt/app/lib/media/video-quality";
 
 const FileSystem = LegacyFileSystem;
@@ -85,6 +84,8 @@ export interface CompressionResult {
   /** Measured source dimensions, or null when they could not be read. */
   width?: number | null;
   height?: number | null;
+  /** What was decided and why — carried so callers can explain themselves. */
+  plan?: import("@dvnt/app/lib/media/video-quality").VideoPlan;
 }
 
 export interface CompressionProgress {
@@ -243,11 +244,12 @@ export async function compressVideo(
   inputUri: string,
   onProgress?: (progress: CompressionProgress) => void,
   /**
-   * Defaults to `original`: the file is validated and handed straight on, with
-   * no encoder involved and the same bytes it arrived with. `smaller` is an
-   * explicit request for a lossy copy and is the only value that re-encodes.
+   * The surface's byte budget. A clip already inside it is passed through
+   * untouched; a larger one is encoded AT ITS OWN DIMENSIONS with a bitrate
+   * sized to fit. When neither is possible the result says so instead of
+   * shipping a ruined encode.
    */
-  mode: VideoUploadMode = DEFAULT_VIDEO_UPLOAD_MODE,
+  budgetBytes?: number,
 ): Promise<CompressionResult> {
   console.log("[VideoCompression] ==========================================");
   console.log("[VideoCompression] Compressor available:", COMPRESSOR_AVAILABLE);
@@ -268,12 +270,17 @@ export async function compressVideo(
     const originalSize = metadata.fileSize;
     const startTime = Date.now();
 
-    // ORIGINAL — the default, and the whole point. No encoder, no resize, no
-    // container change, no colour conversion. The selected file IS the upload.
-    if (mode === "original") {
-      console.log(
-        "[VideoCompression] Original mode — publishing source bytes untouched",
-      );
+    const plan: VideoPlan = planVideoUpload({
+      sizeBytes: originalSize,
+      budgetBytes: budgetBytes ?? originalSize,
+      durationSec: metadata.duration,
+      width: metadata.width,
+      height: metadata.height,
+      fps: metadata.fps,
+    });
+    console.log("[VideoCompression] Plan:", plan.action, "—", plan.reason);
+
+    if (plan.action === "passthrough") {
       return {
         success: true,
         outputPath: inputUri,
@@ -283,6 +290,19 @@ export async function compressVideo(
         reencoded: false,
         width: metadata.width,
         height: metadata.height,
+        plan,
+      };
+    }
+
+    if (plan.action === "too_large") {
+      // Never silently destroy detail to force a fit. The caller turns this
+      // into a choice: trim, or export smaller on purpose.
+      return {
+        success: false,
+        error: plan.fittingDurationSec
+          ? `That clip is too long for this quality. About ${plan.fittingDurationSec}s would fit — trim it, or choose a smaller export.`
+          : "That clip cannot be prepared at this quality. Trim it, or choose a smaller export.",
+        plan,
       };
     }
 
@@ -291,15 +311,10 @@ export async function compressVideo(
     // react-native-compressor use 640 for the LONGER edge, which is what
     // turned 1080x1920 uploads into 360x640.
     if (COMPRESSOR_AVAILABLE && RNCompressorVideo) {
-      const longEdge =
-        metadata.width != null && metadata.height != null
-          ? Math.max(metadata.width, metadata.height)
-          : null;
-      const tier = ladderTierFor(longEdge);
       console.log(
-        "[VideoCompression] Smaller copy requested —",
-        `longEdge=${longEdge ?? "unknown"} → maxSize=${tier.maxLongEdge}`,
-        `bitrate=${tier.bitrateBps}`,
+        "[VideoCompression] Encoding at source size —",
+        `maxSize=${plan.maxLongEdge} bitrate=${plan.videoBitrateBps}`,
+        `bpp=${plan.bitsPerPixel?.toFixed(3)}`,
       );
 
       let cancellationId: string | undefined;
@@ -307,8 +322,8 @@ export async function compressVideo(
         inputUri,
         {
           compressionMethod: "manual",
-          maxSize: tier.maxLongEdge,
-          bitrate: tier.bitrateBps,
+          maxSize: plan.maxLongEdge,
+          bitrate: plan.videoBitrateBps,
           minimumFileSizeForCompress: 0,
           getCancellationId: (id) => { cancellationId = id; },
         },
@@ -356,7 +371,11 @@ export async function compressVideo(
       // "The encoder returned" is not "the output is good". A copy that is
       // bigger than the source, or a sliver of it, is a failed export with a
       // success return value — keep the source rather than publish damage.
-      const verdict = isUsableSmallerCopy(originalSize, compressedSize);
+      const verdict = isUsablePreparedCopy(
+        originalSize,
+        compressedSize,
+        budgetBytes ?? originalSize,
+      );
       if (!verdict.usable) {
         console.warn(
           "[VideoCompression] Discarding smaller copy —",

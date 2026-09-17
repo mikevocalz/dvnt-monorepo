@@ -55,31 +55,27 @@ const ALLOWED_IMAGE_MIMES = [
 const ALLOWED_VIDEO_MIMES = ["video/mp4", "video/quicktime", "video/mov"];
 
 /**
- * Byte ceilings. Videos are sized for an UNEDITED ORIGINAL, because that is
- * what the client now sends: the old 18/25 MB caps were sized for the 360x640
- * re-encode that used to happen on the phone, and a real 60s 1080p clip is
- * 60-90 MB.
+ * Byte ceilings, mirrored by packages/app/lib/media/upload-policy.ts and
+ * pinned to it by upload-policy.test.ts.
  *
- * 96 MiB is not arbitrary. Video now streams through this function without
- * being buffered (see uploadToBunny), so the ceiling is about what a member
- * can actually get up a mobile connection inside the 150s request idle timeout
- * rather than about isolate memory: 96 MiB needs roughly 5 Mbps sustained.
- * Beyond that the honest answer is "that file is too big", which the client
- * says plainly instead of quietly re-encoding it.
+ * These are small on purpose. The client prepares video toward the budget —
+ * preserving dimensions and spending the budget on bitrate — so what arrives
+ * here is already sized. Streaming (see below) means the ceiling is a product
+ * decision rather than an isolate-memory one.
  */
 const SIZE_LIMITS: Record<MediaKind, number> = {
   avatar: 2 * 1024 * 1024, // 2 MB
   "post-image": 10 * 1024 * 1024, // 10 MB (GIFs can exceed 5MB)
-  "post-video": 96 * 1024 * 1024, // an unedited 60s 1080p original
+  "post-video": 25 * 1024 * 1024,
   "story-image": 5 * 1024 * 1024, // 5 MB
-  "story-video": 96 * 1024 * 1024, // an unedited 60s 1080p original
+  "story-video": 18 * 1024 * 1024,
   "event-cover": 5 * 1024 * 1024, // 5 MB
   "event-image": 5 * 1024 * 1024, // 5 MB
   "event-moment-photo": 10 * 1024 * 1024, // 10 MB
-  "event-moment-video": 96 * 1024 * 1024,
-  "event-video": 96 * 1024 * 1024, // event flyer/trailer, original
+  "event-moment-video": 50 * 1024 * 1024,
+  "event-video": 50 * 1024 * 1024, // flyer/trailer — measured separately
   "message-image": 5 * 1024 * 1024, // 5 MB
-  "message-video": 64 * 1024 * 1024, // DM clip, original
+  "message-video": 12 * 1024 * 1024,
 };
 
 const VIDEO_KINDS: MediaKind[] = ["post-video", "story-video", "message-video", "event-moment-video", "event-video"];
