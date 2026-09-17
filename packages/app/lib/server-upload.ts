@@ -289,6 +289,15 @@ async function uploadToServerImpl(
         form.append("kind", kind);
         form.append("mime", mime);
         if (opts?.blurhash) form.append("blurhash", opts.blurhash);
+        // The native branch sends these; web did not, so a verified
+        // byte-identical web upload still landed with NULL width/height —
+        // the row could not say what it held. The function already reads all
+        // three form fields (media-upload/index.ts:324-331).
+        if (opts?.width) form.append("width", String(opts.width));
+        if (opts?.height) form.append("height", String(opts.height));
+        if (opts?.durationSec) {
+          form.append("durationSec", String(Math.round(opts.durationSec)));
+        }
         // Use supabase.functions.invoke — NOT a raw fetch. A raw cross-origin
         // fetch to the functions host fails with "Failed to fetch" in the
         // browser (empty apikey in the web bundle + preflight); invoke uses the
