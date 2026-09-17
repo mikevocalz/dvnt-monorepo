@@ -3,8 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "solito/navigation";
-import { useQueryClient } from "@tanstack/react-query";
-import { Eye, SendHorizontal, Trash2, X } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Eye,
+  SendHorizontal,
+  Trash2,
+  Users,
+  Volume2,
+  VolumeX,
+  X,
+} from "lucide-react";
+import { storyTagsApi } from "@dvnt/app/lib/api/stories";
 import { StoryViewer } from "@dvnt/ui";
 import { useStoryViewerStore } from "@dvnt/app/lib/stores/story-viewer-store";
 import { StoryOverlaysLayer } from "@dvnt/app/components/story-overlays-layer.web";
@@ -76,10 +85,16 @@ export function StoryViewerOverlay() {
   >([]);
   const emojiCounter = useRef(0);
   const lastReactionAt = useRef(0);
+  const [showTags, setShowTags] = useState(false);
+  // Browsers only autoplay muted video, so a story with sound opens silent and
+  // says so. Native starts unmuted because it can.
+  const [muted, setMuted] = useState(true);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     setReplyText("");
     setComposerFocused(false);
     setShowViewers(false);
+    setShowTags(false);
   }, [groupIndex]);
 
   // react-insta-stories positions its internal layers using the width/height
@@ -161,6 +176,15 @@ export function StoryViewerOverlay() {
       },
     });
   };
+
+  // Tagged people — native shows a pill over the story; web showed nothing, so
+  // being tagged was invisible to everyone but the poster.
+  const { data: storyTags = [] } = useQuery({
+    queryKey: ["story-tags", group.id],
+    queryFn: () => storyTagsApi.getTagsForStory(group.id),
+    enabled: !!group.id,
+    staleTime: 60_000,
+  });
 
   // The story context the DM carries. Segments are the items, in order.
   const storyContext = {
@@ -270,6 +294,7 @@ export function StoryViewerOverlay() {
 
       {/* Centered portrait frame — letterboxed on the black backdrop. */}
       <div
+        ref={frameRef}
         style={{
           width: size.w,
           height: size.h,
@@ -311,6 +336,80 @@ export function StoryViewerOverlay() {
               router.push(path);
             }}
           />
+        ) : null}
+
+        {/* Sound. The kit's <video> is muted so the browser will autoplay it at
+            all; this is the only way back to the audio the poster recorded. */}
+        {segment?.type === "video" ? (
+          <button
+            onClick={() => {
+              const next = !muted;
+              setMuted(next);
+              frameRef.current
+                ?.querySelectorAll("video")
+                .forEach((v) => {
+                  v.muted = next;
+                  if (!next) void v.play().catch(() => {});
+                });
+            }}
+            aria-label={muted ? "Unmute story" : "Mute story"}
+            className="absolute right-4 top-16 z-20 flex h-9 w-9 items-center justify-center rounded-xl border border-white/20 bg-black/45 backdrop-blur-md"
+          >
+            {muted ? (
+              <VolumeX size={17} color="#fff" />
+            ) : (
+              <Volume2 size={17} color="#fff" />
+            )}
+          </button>
+        ) : null}
+
+        {/* Tagged people. Collapsed to a count, because a story with six tags
+            should not cover the story with six names. */}
+        {storyTags.length > 0 ? (
+          <div
+            className="absolute inset-x-0 z-20 flex justify-center px-4"
+            style={{ bottom: isOwnStory ? 76 : 150 }}
+          >
+            {showTags ? (
+              <div className="flex max-w-full flex-col gap-1 rounded-2xl border border-white/15 bg-black/65 p-2 backdrop-blur-md">
+                {storyTags.map((tag) => (
+                  <button
+                    key={tag.id}
+                    onClick={() => {
+                      closeForNavigation();
+                      router.push(`/feed/${tag.username}`);
+                    }}
+                    className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-white/10"
+                  >
+                    {tag.avatar ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={tag.avatar}
+                        alt=""
+                        className="h-6 w-6 rounded-md bg-white/10 object-cover"
+                      />
+                    ) : null}
+                    <span className="text-[13px] font-semibold text-white">
+                      @{tag.username}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowTags(true)}
+                aria-label={`${storyTags.length} people tagged`}
+                className="flex items-center gap-2 rounded-2xl border border-white/15 bg-black/60 px-3.5 py-2 backdrop-blur-md"
+              >
+                <Users size={14} color="#fff" />
+                <span className="text-[13px] font-semibold text-white">
+                  {storyTags.length === 1
+                    ? `@${storyTags[0].username}`
+                    : `${storyTags.length} people`}
+                </span>
+              </button>
+            )}
+          </div>
         ) : null}
 
         {/* Reactions in flight — the receipt for a tap, without a toast over
