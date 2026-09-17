@@ -92,6 +92,17 @@ export function useMediaPicker() {
         mediaTypes: options?.mediaTypes ?? ["images", "videos"],
         allowsMultipleSelection: allowMultiple,
         quality: 1,
+        // Hand over the asset as it is stored, without asking Photos to build
+        // a "compatible" representation first. The native @Field default is
+        // already `.current` (ios/ImagePickerOptions.swift:44) but the TS docs
+        // say Automatic (ImagePicker.types.d.ts:512) — an undocumented native
+        // default that contradicts its own types is not a guarantee, so the
+        // intent is stated. It reaches PHPickerConfiguration
+        // .assetRepresentationMode at ios/ImagePickerModule.swift:157.
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+        // exif/base64 are left off for video: neither is read on this path and
+        // base64 would pull the whole file through JS.
         videoMaxDuration: 60,
         // `videoQuality` is deliberately NOT set here, and the comment that
         // used to justify it was wrong on both counts.
@@ -236,8 +247,12 @@ export function useMediaPicker() {
         quality: 0.8,
         videoMaxDuration: maxDuration,
         selectionLimit: 4,
-        // Inert on a PHPicker library pick — see pickFromLibrary. Removed so
-        // it cannot be read as a quality decision that is actually in force.
+        // Same guarantee as pickFromLibrary: the stored representation, not a
+        // rebuilt "compatible" one. `videoQuality` was removed from here — it
+        // is inert on a PHPicker library pick and read as a quality decision
+        // that was never in force.
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
       });
 
       if (!result.canceled && result.assets) {
