@@ -161,11 +161,7 @@ export function TicketDetailScreen() {
   const showToast = useUIStore((s) => s.showToast);
 
   const rawId = params?.id;
-  const eventId = Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? "");
-
-  // Phase 2 — the wallet ticket reflects live event changes (time/venue/cancel)
-  // the holder is staring at, no manual refresh.
-  useEventRealtime(eventId);
+  const routeId = Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? "");
 
   const viewerId = useTicketViewerId();
   /**
@@ -178,10 +174,28 @@ export function TicketDetailScreen() {
   const isLoading = route.isLoading;
   const dbTicket =
     route.resolution.kind === "ticket" ? route.resolution.ticket : undefined;
-  const storeTicket = useTicketStore((s) => s.getTicketByEventId(eventId));
+  const storeTicket = useTicketStore((s) => s.getTicketByEventId(routeId));
   const ticket: Ticket | undefined = dbTicket
     ? dbToTicket(dbTicket)
     : storeTicket;
+
+  /**
+   * This route takes EITHER a ticket uuid or an event id — My Tickets links by
+   * ticket, so in practice it is almost always a uuid. `eventId` used to be the
+   * raw route param, which meant every event-keyed thing on this screen was
+   * handed a ticket id: "View event" and the add-ons card opened
+   * /feed/events/<uuid> ("Event not found"), the upgrade link pointed at
+   * nothing, the add-ons query asked about an event that does not exist, and
+   * realtime subscribed to it.
+   *
+   * `useTicketRoute` already resolves this — native has been reading
+   * `route.eventId` all along. Web just never asked it.
+   */
+  const eventId = route.eventId ?? ticket?.eventId ?? "";
+
+  // Phase 2 — the wallet ticket reflects live event changes (time/venue/cancel)
+  // the holder is staring at, no manual refresh.
+  useEventRealtime(eventId);
 
   // ── Transient UI (Zustand, never useState) ──
   const qrDataUrl = useTicketDetailUIStore((s) => s.qrDataUrl);
@@ -208,7 +222,7 @@ export function TicketDetailScreen() {
   useEffect(() => {
     resetUI();
     return () => resetUI();
-  }, [eventId, resetUI]);
+  }, [routeId, resetUI]);
 
   // ── Generate QR data url from the token (async → Zustand field) ──
   const qrToken = ticket?.qrToken || "";
