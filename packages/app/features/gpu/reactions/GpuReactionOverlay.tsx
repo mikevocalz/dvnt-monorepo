@@ -131,7 +131,17 @@ export function GpuReactionOverlay({
   return (
     <Canvas
       ref={canvasRef}
-      transparent
+      // `transparent` was removed in react-native-webgpu 0.10.0 and replaced by
+      // `opaque`, whose sense is INVERTED and whose default is true — so simply
+      // dropping the old prop would have made this overlay paint opaque black
+      // over the video streams it sits on.
+      //
+      // No `android.surfaceType` is set on purpose: opaque={false} already
+      // defaults the backing view to TextureView, which the library documents
+      // as the only pairing that composites correctly in RN stacking order.
+      // The two things it asks you to pair this with are already here —
+      // alphaMode "premultiplied" above, and an alpha-0 clear in engine.ts.
+      opaque={false}
       pointerEvents="none"
       style={[StyleSheet.absoluteFill, style]}
     />

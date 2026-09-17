@@ -464,8 +464,8 @@ importers:
         specifier: 0.21.2
         version: 0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react-native-webgpu:
-        specifier: ^0.8.2
-        version: 0.8.2(react-native-reanimated@4.5.3(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+        specifier: 0.10.2
+        version: 0.10.2(react-native-reanimated@4.5.3(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-webview:
         specifier: 13.16.1
         version: 13.16.1(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
@@ -1386,8 +1386,8 @@ importers:
         specifier: 0.21.2
         version: 0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react-native-webgpu:
-        specifier: ^0.8.2
-        version: 0.8.2(react-native-reanimated@4.5.3(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
+        specifier: 0.10.2
+        version: 0.10.2(react-native-reanimated@4.5.3(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       react-native-webview:
         specifier: 13.16.1
         version: 13.16.1(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
@@ -11206,8 +11206,8 @@ packages:
       react: 19.2.3
       react-dom: 19.2.3
 
-  react-native-webgpu@0.8.2:
-    resolution: {integrity: sha512-V4di0H8T/i/+hr9fj3cFA6Q/KBuTXxoSNK58bX0sJbh28bPCEPXrzIwVNfEIBevnfrNHMkn+OlidqXoZDsCdRw==}
+  react-native-webgpu@0.10.2:
+    resolution: {integrity: sha512-lRoBIpo9uXG0rRSGaf9XOY3SynV5YePrsJUlyy3jN5ySHEaVkcQtF6L7zA/Frn22BgWKOZ+Kk5W6No+0Kut6/g==}
     peerDependencies:
       react: 19.2.3
       react-native: 0.86.0
@@ -26459,7 +26459,7 @@ snapshots:
     transitivePeerDependencies:
       - encoding
 
-  react-native-webgpu@0.8.2(react-native-reanimated@4.5.3(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
+  react-native-webgpu@0.10.2(react-native-reanimated@4.5.3(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.11.3(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
     dependencies:
       react: 19.2.3
       react-native: 0.86.0(@babel/core@7.28.5)(@react-native/metro-config@0.86.0(@babel/core@7.28.5))(@types/react@19.2.14)(react@19.2.3)

@@ -1,7 +1,7 @@
 # ADR 002 — Game Night: the dependency decisions PROMPT 0 left open
 
-Status: accepted — `three` applied and verified; typegpu and
-`react-native-webgpu` decided, not applied
+Status: accepted — `three` and `react-native-webgpu` applied; typegpu already
+on the decided line; `@typegpu/*` deliberately not installed
 Date: 2026-09-17
 
 ## Context
@@ -323,9 +323,60 @@ Incidental, pre-existing, not fixed here: the `new RoomEnvironment()` at
 leak on every mount. `envTex` and `pmrem` are disposed at `:1197-1198`; the
 source scene is not.
 
+## Applied — `react-native-webgpu` 0.8.2 → 0.10.2, 2026-09-17
+
+Both declarations moved together and are pinned exact:
+`apps/mobile/package.json:177` and `packages/app/package.json:352`. Splitting
+them resolves two copies of a native module.
+
+The JS change set is genuinely one line, confirmed by grep over the whole repo
+rather than assumed. There are exactly three places that render the library's
+`Canvas`:
+
+- `GpuReactionOverlay.tsx:134` — the only one that passed `transparent`. Now
+  `opaque={false}`.
+- `WeatherGPUEngine.tsx:275` — passes only `ref` and `style`, and is the dead
+  component described above (`useCanvasEffect` is undefined).
+- `SafeWGPUCanvas` in both `safe-native-modules.tsx` — aliased to `View`.
+
+The prop migration was read off the installed 0.10.2 source, not the changelog.
+`src/Canvas.tsx:70` declares `opaque?: boolean` and `:86` defaults it to `true`,
+so dropping `transparent` without replacing it would have painted an opaque
+black canvas over the video streams this overlay exists to sit on top of.
+
+No `android.surfaceType` is set, on purpose. `AndroidCanvasProps` (`:50-56`)
+documents that the backing view already "Defaults to `SurfaceView` when the
+canvas is opaque and `TextureView` otherwise, which is the only pairing that
+composites correctly in React Native stacking order without further flags." The
+two things `opaque` asks to be paired with are both already present —
+`alphaMode: "premultiplied"` at `GpuReactionOverlay.tsx:73` and an alpha-0
+`clearValue` at `reactions/engine.ts:312-313`.
+
+Verified: `packages/app` typecheck exits 0 with zero errors; 617 node tests pass.
+**Not verified: anything native.** Every item in the PENDING list below that
+needs a device build is still open, including the one that could reverse this
+decision.
+
+## typegpu — nothing to install
+
+`typegpu` was already at 0.12.0, which is the decided line, so the decision was
+a no-op by construction. `@typegpu/react` and `@typegpu/three` remain
+uninstalled because nothing in the repo imports either, and `@typegpu/three`
+additionally requires `@typegpu/gl` as a non-optional peer.
+
+One objection to `@typegpu/three` did die with the `three` bump, and the ADR
+should not keep citing it. All 11 TSL exports it reads that were absent at
+three 0.171.0 — `bentNormalView`, `cameraIndex`, `cameraViewport`,
+`clearcoatNormalView`, `globalId`, `highpModelNormalViewMatrix`,
+`mediumpModelViewMatrix`, `modelRadius`, `normalViewGeometry`,
+`normalWorldGeometry`, `screenDPR` — each import successfully from `three/tsl`
+at 0.184.0. The silent `fromTSL(undefined, …)` hazard is gone. What remains
+against it is only the extra required peer and the absence of any consumer.
+
 ## Application order
 
-`three` is applied. The rest is not. When it resumes: `@types/three` and `three`
+`three` and `react-native-webgpu` are applied. `@typegpu/*` is not, for want of
+a consumer rather than a blocker. When it resumes: `@types/three` and `three`
 together (never one without the other, or the contract stays false);
 `react-native-webgpu` in both manifests with `GpuReactionOverlay.tsx:134` in the
 same commit; `expo prebuild --clean` and a full native rebuild, uninstalling the
