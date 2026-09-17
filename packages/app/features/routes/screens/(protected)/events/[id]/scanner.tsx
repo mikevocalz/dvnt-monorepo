@@ -37,6 +37,10 @@ import {
 } from "lucide-react-native";
 import type { ScanAddonSummary } from "@dvnt/app/lib/api/tickets";
 import { useScanTicket } from "@dvnt/app/lib/hooks/use-tickets";
+import {
+  isScanFailure,
+  scanVerdictMessage,
+} from "@dvnt/app/lib/tickets/scan-verdict";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
@@ -357,9 +361,12 @@ function ScanResultOverlay({
   }
 
   const isSuccess = result.type === "success";
+  // Amber = "no verdict, rescan"; red is reserved for a ticket the SERVER rejected.
   const bgColor = isSuccess
     ? "rgba(34, 197, 94, 0.95)"
-    : "rgba(239, 68, 68, 0.95)";
+    : result.type === "error"
+      ? "rgba(217, 119, 6, 0.96)"
+      : "rgba(239, 68, 68, 0.95)";
   const Icon = isSuccess ? CheckCircle2 : XCircle;
 
   return (
@@ -612,9 +619,14 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                   ? Haptics.NotificationFeedbackType.Warning
                   : Haptics.NotificationFeedbackType.Error,
               );
+              // "We could not ask" (dead session / 403 / 429 / 5xx) is NOT a
+              // verdict on the ticket — render "Scan Error", never "Invalid".
+              const isFailure = isScanFailure(data.reason);
               const resultType = isDuplicate
                 ? ("already_scanned" as const)
-                : ("not_found" as const);
+                : isFailure
+                  ? ("error" as const)
+                  : ("not_found" as const);
               setScanResult({
                 type: resultType,
                 kind: data.kind ?? "ticket",
@@ -629,17 +641,14 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                 checkedInByName: data.checked_in_by_name ?? null,
                 addons: data.addons,
                 optimistic: false,
-                message: isDuplicate
-                  ? "This ticket was already scanned"
-                  : data.reason === "refunded"
-                    ? "This ticket has been refunded"
-                    : "This QR code is not a valid ticket",
+                message: scanVerdictMessage(data.reason),
               });
               if (isDuplicate) {
                 offlineStore.markScannedLocal(eventId, qrToken);
               }
-              // Optimistic paint already logged this duplicate.
-              if (!(isDuplicate && knownDuplicate)) {
+              // Optimistic paint already logged this duplicate; a failure is
+              // not a verdict, so it never enters the door log as "Invalid".
+              if (!isFailure && !(isDuplicate && knownDuplicate)) {
                 setScanHistory((h) =>
                   [
                     {

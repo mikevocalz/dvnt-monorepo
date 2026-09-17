@@ -35,7 +35,8 @@ const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Headers":
+    "Content-Type, Authorization, apikey, x-client-info, x-auth-token, sentry-trace, baggage",
 };
 
 function json(data: unknown, status = 200) {
@@ -435,7 +436,7 @@ Deno.serve(async (req: Request) => {
         const { data: ticket } = await supabase
           .from("tickets")
           .select(
-            "id, event_id, ticket_type_id, user_id, status, qr_token, checked_in_at, checked_in_by, purchase_amount_cents, cart_id",
+            "id, event_id, ticket_type_id, user_id, status, qr_token, checked_in_at, checked_in_by, purchase_amount_cents, cart_id, guest_name, attendee_name",
           )
           .eq("id", rpcResult.ticketId)
           .single();
@@ -477,9 +478,16 @@ Deno.serve(async (req: Request) => {
               checked_in_at: rpcResult.checkedInAt,
             }),
             username: user?.username || "Unknown",
+            // Whose ticket is this, for the ID check at the door:
+            //   1. attendee_name — the per-ticket name on a named/group order
+            //   2. the account holder (member purchase)
+            //   3. guest_name — guest checkout has user_id NULL, so without
+            //      this every no-account buyer read "Guest" on the card.
             name:
+              (ticket as any)?.attendee_name?.trim() ||
               [user?.first_name, user?.last_name].filter(Boolean).join(" ") ||
               user?.username ||
+              (ticket as any)?.guest_name?.trim() ||
               "Guest",
             tier_name: ticketType?.name || "General",
           },

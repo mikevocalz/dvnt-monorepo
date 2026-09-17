@@ -289,6 +289,12 @@ export function useScanTicket() {
       scannedBy?: string;
       eventId?: string;
     }) => ticketsApi.scanTicket(qrToken, scannedBy, scanEventId),
+    // Default networkMode ("online") PAUSES a mutation while the device reports
+    // offline: no onSuccess, no onError, the scanner sits on "Validating…" with
+    // its cooldown latched. A door scan must always run — when the request
+    // fails it rejects, and the scanner's onError offline fallback takes over.
+    networkMode: "always",
+    retry: false,
     onSuccess: (_data, variables) => {
       if (variables.eventId) {
         queryClient.invalidateQueries({

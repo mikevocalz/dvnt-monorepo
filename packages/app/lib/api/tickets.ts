@@ -2,6 +2,7 @@ import { supabase } from "../supabase/client";
 import { getCurrentUserAuthId } from "./auth-helper";
 import { requireBetterAuthToken } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
+import { scanFailureReasonForStatus } from "../tickets/scan-verdict";
 import { getPendingPromoterRef } from "../stores/promoter-ref-store";
 import {
   CartLineRefundResponseDTO,
@@ -407,28 +408,47 @@ export const ticketsApi = {
     scannedBy?: string,
     eventId?: string,
   ): Promise<ScanTicketResponse> {
+    // A door verdict is never guessed (see lib/tickets/scan-verdict.ts):
+    //   • no session / 401 / 403 / 429 / 5xx → a typed NO-VERDICT reason the
+    //     scanners render as "Scan Error", never as "Invalid Ticket".
+    //   • transport failure (no HTTP response at all) → THROW. This used to be
+    //     swallowed into `{ valid:false, reason:"network_error" }`, which (a)
+    //     painted a red "Invalid Ticket" on a real ticket whenever the venue
+    //     signal dropped, and (b) made the scanners' `onError` offline
+    //     fallback unreachable, because the mutation could never reject.
+    let token: string;
     try {
-      // ticket-scan now requires a Better Auth session (host-only). Without
-      // this header it returns 401 and scans silently fail.
-      const token = await requireBetterAuthToken();
-      const { data, error } = await supabase.functions.invoke("ticket-scan", {
-        body: {
-          qr_token: qrToken,
-          scanned_by: scannedBy,
-          ...(eventId ? { event_id: eventId } : {}),
-        },
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "x-auth-token": token,
-        },
-      });
-
-      if (error) throw error;
-      return data;
-    } catch (error: any) {
-      console.error("[Tickets] scanTicket error:", error);
-      return { valid: false, reason: "network_error" };
+      // ticket-scan requires a Better Auth session (host / door staff).
+      token = await requireBetterAuthToken();
+    } catch {
+      return { valid: false, reason: "unauthorized" };
     }
+
+    const { data, error } = await supabase.functions.invoke("ticket-scan", {
+      body: {
+        qr_token: qrToken,
+        scanned_by: scannedBy,
+        ...(eventId ? { event_id: eventId } : {}),
+      },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "x-auth-token": token,
+      },
+    });
+
+    if (error) {
+      // FunctionsHttpError carries the Response in `context`; a fetch failure
+      // (FunctionsFetchError) has none — that one is a genuine network error.
+      const status = (error as { context?: { status?: number } })?.context
+        ?.status;
+      if (typeof status !== "number") {
+        console.warn("[Tickets] scanTicket transport failure:", error);
+        throw error;
+      }
+      console.error("[Tickets] scanTicket HTTP", status);
+      return { valid: false, reason: scanFailureReasonForStatus(status) };
+    }
+    return typeof data === "string" ? JSON.parse(data) : data;
   },
 
   /**
@@ -781,11 +801,16 @@ export const ticketsApi = {
   async checkIn(data: {
     qrToken: string;
   }): Promise<{ success: boolean; alreadyCheckedIn?: boolean }> {
-    const result = await ticketsApi.scanTicket(data.qrToken);
-    return {
-      success: result.valid,
-      alreadyCheckedIn: result.reason === "already_scanned",
-    };
+    // Legacy contract: never throws (scanTicket now rejects on transport failure).
+    try {
+      const result = await ticketsApi.scanTicket(data.qrToken);
+      return {
+        success: result.valid,
+        alreadyCheckedIn: result.reason === "already_scanned",
+      };
+    } catch {
+      return { success: false };
+    }
   },
 };
 

@@ -40,3 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# QR reader WASM, self-hosted by the apps/web postinstall (copy-zxing-wasm.cjs).
+# Generated, versioned by zxing-wasm's own version, and regenerated on every
+# install — including Vercel's, whose installCommand is `pnpm install`. Checking
+# it in would let a stale binary outlive the JS glue it has to match.
+/public/vendor/zxing/

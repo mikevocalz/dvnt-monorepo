@@ -47,17 +47,18 @@
     "@expo/ui": "~57.0.2",
     "@fishjam-cloud/react-native-client": "0.29.0",
     "@vis.gl/react-google-maps": "^1.8.3",
-    "react-native-webview": "13.16.1",
+    "barcode-detector": "^3.2.0",
     "clsx": "^2.1.1",
     "expo-image": "~57.0.0",
     "expo-paste-input": "^0.2.1",
     "html-to-image": "^1.11.13",
-    "html5-qrcode": "^2.3.8",
     "react-easy-crop": "^6.0.2",
     "react-insta-stories": "^2.8.0",
     "react-native-css": "^3.0.7",
+    "react-native-webview": "13.16.1",
     "solito": "^5.0.0",
     "tailwind-merge": "^3.6.0",
-    "tailwind-variants": "^3.1.0"
+    "tailwind-variants": "^3.1.0",
+    "zustand": "^5.0.12"
   }
 }
