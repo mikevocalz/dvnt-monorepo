@@ -2,14 +2,14 @@
 
 import dynamic from 'next/dynamic';
 
-const GameNightLobbyScreen = dynamic(
+const GameNightRoomsScreen = dynamic(
   () =>
-    import('@dvnt/app/features/game-night/screens/lobby.web').then(
-      (m) => m.GameNightLobbyScreen,
+    import('@dvnt/app/features/game-night/screens/rooms-list.web').then(
+      (m) => m.GameNightRoomsScreen,
     ),
   { ssr: false },
 );
 
 export default function Page() {
-  return <GameNightLobbyScreen />;
+  return <GameNightRoomsScreen />;
 }
