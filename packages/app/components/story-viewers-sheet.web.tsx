@@ -58,8 +58,9 @@ export function StoryViewersSheetWeb({
 
   return (
     <div
-      className="absolute inset-0 z-30 flex flex-col justify-end"
-      style={{ background: "rgba(0,0,0,0.55)" }}
+      className="absolute inset-0 flex flex-col justify-end"
+      // Above the player's own 99999 overlay, like every other control here.
+      style={{ background: "rgba(0,0,0,0.55)", zIndex: 100001 }}
       onClick={onClose}
     >
       <div

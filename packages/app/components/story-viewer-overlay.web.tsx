@@ -40,6 +40,14 @@ import { storyProfilePath } from "@dvnt/app/lib/profile/story-profile-path";
  * would crop them hard. The frame is letterboxed on the black backdrop on wide
  * screens and fills the width on phones.
  */
+/**
+ * react-insta-stories renders its own tap/hold overlay at zIndex 99999 — every
+ * control we put over the story has to clear that or it is decoration: the
+ * click lands on the player's "next" zone instead. The reply field could not be
+ * focused at all, and tapping it advanced the story.
+ */
+const STORY_UI_Z = 100000;
+
 export function StoryViewerOverlay() {
   const router = useRouter();
   const open = useStoryViewerStore((s) => s.open);
@@ -330,6 +338,10 @@ export function StoryViewerOverlay() {
           height: size.h,
           overflow: "hidden",
           position: "relative",
+          // react-insta-stories stacks its own layers up to zIndex 99999. A
+          // stacking context keeps that contest inside this frame instead of
+          // letting it outrank the close and delete buttons beside it.
+          isolation: "isolate",
         }}
       >
         <StoryViewer
@@ -378,7 +390,8 @@ export function StoryViewerOverlay() {
                 });
             }}
             aria-label={muted ? "Unmute story" : "Mute story"}
-            className="absolute right-4 top-16 z-20 flex h-9 w-9 items-center justify-center rounded-xl border border-white/20 bg-black/45 backdrop-blur-md"
+            style={{ zIndex: STORY_UI_Z }}
+            className="absolute right-4 top-16 flex h-9 w-9 items-center justify-center rounded-xl border border-white/20 bg-black/45 backdrop-blur-md"
           >
             {muted ? (
               <VolumeX size={17} color="#fff" />
@@ -392,8 +405,8 @@ export function StoryViewerOverlay() {
             should not cover the story with six names. */}
         {storyTags.length > 0 ? (
           <div
-            className="absolute inset-x-0 z-20 flex justify-center px-4"
-            style={{ bottom: isOwnStory ? 76 : 150 }}
+            className="absolute inset-x-0 flex justify-center px-4"
+            style={{ bottom: isOwnStory ? 76 : 150, zIndex: STORY_UI_Z }}
           >
             {showTags ? (
               <div className="flex max-w-full flex-col gap-1 rounded-2xl border border-white/15 bg-black/65 p-2 backdrop-blur-md">
@@ -440,7 +453,10 @@ export function StoryViewerOverlay() {
         {/* Reactions in flight — the receipt for a tap, without a toast over
             the story. */}
         {floatingEmojis.length > 0 ? (
-          <div className="pointer-events-none absolute inset-x-0 bottom-28 z-20 flex justify-center">
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-28 flex justify-center"
+            style={{ zIndex: STORY_UI_Z }}
+          >
             <style>{`
               @keyframes dvnt-story-float {
                 0%   { opacity: 0; transform: translateY(0) scale(0.6); }
@@ -469,7 +485,10 @@ export function StoryViewerOverlay() {
         {/* Own story → who saw it. Someone else's → react or reply. Native has
             had both; web had neither. */}
         {isOwnStory ? (
-          <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-5">
+          <div
+            className="absolute inset-x-0 bottom-0 flex justify-center px-4 pb-5"
+            style={{ zIndex: STORY_UI_Z }}
+          >
             <button
               onClick={() => setShowViewers(true)}
               className="flex items-center gap-2 rounded-2xl border border-white/15 bg-black/45 px-4 py-2.5 backdrop-blur-md"
@@ -482,7 +501,10 @@ export function StoryViewerOverlay() {
             </button>
           </div>
         ) : canMessageOwner ? (
-          <div className="absolute inset-x-0 bottom-0 z-20 flex flex-col gap-3 px-4 pb-5">
+          <div
+            className="absolute inset-x-0 bottom-0 flex flex-col gap-3 px-4 pb-5"
+            style={{ zIndex: STORY_UI_Z }}
+          >
             {!composerFocused ? (
               <div className="flex justify-center gap-2">
                 {STORY_REACTION_EMOJIS.map((emoji) => (
