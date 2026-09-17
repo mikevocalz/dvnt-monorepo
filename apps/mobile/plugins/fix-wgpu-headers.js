@@ -6,8 +6,10 @@
  * can resolve bare #include "X.h" to Skia's copy instead of wgpu's, causing
  * 'utils/RNSkLog.h' file not found errors.
  *
- * The primary fix is in scripts/patch-wgpu.sh which qualifies all colliding includes
- * with jsi/ or ./ prefixes so they bypass header-map bare-filename lookup.
+ * HEADER_SEARCH_PATHS below is the ONLY mechanism. An earlier comment here
+ * pointed at scripts/patch-wgpu.sh as "the primary fix"; no such file exists
+ * anywhere in the repo, so anyone trusting that line would go looking for a
+ * safety net that is not there.
  *
  * This plugin is belt-and-suspenders: it ensures wgpu's cpp/ and cpp/jsi/ are in
  * HEADER_SEARCH_PATHS so the qualified includes resolve correctly.

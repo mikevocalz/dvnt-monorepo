@@ -31,7 +31,7 @@ import { ThunderOverlay } from "./layers/ThunderOverlay";
 import { PostFXPass } from "./postfx/PostFXPass";
 import { WeatherAudioEngine } from "../weatheraudio/WeatherAudioEngine";
 
-// ── Safe import of react-native-wgpu Canvas ─────────────────────────
+// ── Safe import of react-native-webgpu Canvas ─────────────────────────
 let WgpuCanvas: React.ComponentType<any> | null = null;
 let useCanvasEffect: any = null;
 try {
@@ -63,10 +63,21 @@ function canWeatherCanvasRender(): boolean {
 }
 
 function WeatherCanvas() {
-  // `useCanvasEffect` is resolved from an optional native module, so the
-  // guard cannot move below it — there may be no hook to call. Bail in the
-  // PARENT instead, so this component either mounts with the module present
-  // or never mounts at all, and its hook order is fixed either way.
+  // `useCanvasEffect` is always undefined, so this component never renders.
+  //
+  // It is not a missing native module — `react-native-webgpu` 0.8.2 is
+  // installed and `wgpu.Canvas` resolves. `useCanvasEffect` was the API of the
+  // PRE-RENAME `react-native-wgpu` package; the renamed package exports
+  // `useSurface`, `useCanvasRef` and `useDevice` and has never exported
+  // `useCanvasEffect` (verified against node_modules/react-native-webgpu/src).
+  // So `canWeatherCanvasRender()` has returned false since the rename.
+  //
+  // Reviving this means porting to `useCanvasRef`, which changes what draws on
+  // screen and needs a device build to verify — not a rename.
+  //
+  // The guard cannot move below the hook — there may be no hook to call. Bail
+  // in the PARENT instead, so this component either mounts with the module
+  // present or never mounts at all, and its hook order is fixed either way.
   if (!useCanvasEffect || !WgpuCanvas) {
     throw new Error(
       "WeatherCanvas mounted without the WebGPU module; render it only when canWeatherCanvasRender() is true.",

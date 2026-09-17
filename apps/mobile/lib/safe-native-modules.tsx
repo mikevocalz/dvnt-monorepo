@@ -129,7 +129,7 @@ export const SafeLiquidGlassContainerView: React.ComponentType<any> =
   _LiquidGlassContainerView ?? View;
 export const safeIsLiquidGlassSupported = _isLiquidGlassSupported;
 
-// ── react-native-wgpu ───────────────────────────────────────────────
+// ── react-native-webgpu ───────────────────────────────────────────────
 // NOTE: Cannot use require() here because Metro will try to resolve the native
 // components even inside try/catch. The entire WeatherGPU feature must be
 // conditionally imported at the app level instead.

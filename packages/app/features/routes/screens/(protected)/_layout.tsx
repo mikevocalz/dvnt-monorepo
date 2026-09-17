@@ -525,7 +525,10 @@ export default function ProtectedLayout() {
           registerWatchCallHandler are fired from inside it — so while this was
           unmounted, incoming calls rang on neither the phone nor the wrist. */}
       <IncomingCallOverlay />
-      {/* WeatherGPUEngine disabled - requires react-native-wgpu native module */}
+      {/* WeatherGPUEngine disabled — NOT for a missing native module.
+          react-native-webgpu is installed; the engine reaches for
+          `useCanvasEffect`, which the renamed package does not export. See
+          WeatherGPUEngine.tsx. */}
       {/* {isWebGPUAvailable() && <WeatherGPUEngine />} */}
     </>
   );

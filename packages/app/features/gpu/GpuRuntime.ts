@@ -3,18 +3,18 @@
  *
  * ONE device, ONE context for the entire app. All pipelines and buffers
  * are cached. Safe-wrapped so OTA updates on binaries without
- * react-native-wgpu gracefully degrade to no-op.
+ * react-native-webgpu gracefully degrade to no-op.
  *
- * Uses react-native-wgpu as the single WebGPU bridge.
+ * Uses react-native-webgpu as the single WebGPU bridge.
  */
 
-// ── Safe import of react-native-wgpu ────────────────────────────────
+// ── Safe import of react-native-webgpu ────────────────────────────────
 let _wgpuAvailable = false;
 try {
   require("react-native-webgpu");
   _wgpuAvailable = true;
 } catch {
-  console.warn("[GpuRuntime] react-native-wgpu not available in this binary");
+  console.warn("[GpuRuntime] react-native-webgpu not available in this binary");
 }
 
 export function isWebGPUAvailable(): boolean {
@@ -44,7 +44,7 @@ export const GpuRuntime = {
 
     _initPromise = (async () => {
       try {
-        // navigator.gpu is polyfilled by react-native-wgpu
+        // navigator.gpu is polyfilled by react-native-webgpu
         if (typeof navigator === "undefined" || !navigator.gpu) {
           console.warn("[GpuRuntime] navigator.gpu not available");
           return false;
