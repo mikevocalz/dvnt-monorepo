@@ -33,7 +33,7 @@
     "@types/react": "~19.2.14",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~57.0.0",
-    "expo": "~57.0.1",
+    "expo": "~57.0.23",
     "nativewind": "5.0.0-preview.4",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.0",

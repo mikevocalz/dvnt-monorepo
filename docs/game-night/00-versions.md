@@ -9,10 +9,10 @@ assumed.
 
 | Package | Version | Where |
 |---|---|---|
-| `three` | **0.184.0**, pinned exact (was 0.171.0) | `packages/app/package.json` |
-| `typegpu` | `^0.12.0` | `packages/app/package.json` |
+| `three` | **0.186.0**, pinned exact (was 0.184.0, was 0.171.0) — see ADR-002's supersession note | `packages/app/package.json` |
+| `typegpu` | `^0.12.0`, resolving **0.12.5** | `packages/app/package.json` |
 | `react-native-webgpu` | **0.10.2** (was `^0.8.2`) | `apps/mobile/package.json` AND `packages/app/package.json` — both, pinned exact |
-| `@shopify/react-native-skia` | `2.6.2` | `apps/mobile/package.json` |
+| `@shopify/react-native-skia` | `2.6.2` — held; 2.12.0 has no web Graphite, see ADR-003 | `apps/mobile/package.json` |
 | `react-native-reanimated` | `4.5.3` | `apps/mobile/package.json` |
 | `react-native-gesture-handler` | `~2.32.0` | `apps/mobile/package.json` |
 
@@ -115,6 +115,15 @@ The questions as originally written:
    set was one line (`Canvas`'s removed `transparent` prop → `opaque={false}`,
    inverted sense). Native is unverified — see the ADR's PENDING list.
 
+## The web renderer is decided — ADR-003
+
+> This document assumed Graphite was a live option for a web build. It is not,
+> at any published version: 2.6.2's `WebGPUCanvas.web.js` renders a `<div>` over
+> the comment "WebGPU Canvas is not supported on web", and 2.12.0 removes the
+> component entirely while its web entry stays `JsiSkApi(global.CanvasKit)`.
+> `docs/adr/003-game-night-table-renderer.md` settles it: the web table is Skia
+> on CanvasKit, sharing the native table's component tree.
+
 ## Applies to the fallback table too
 
 The Skia/Reanimated table is the guaranteed path (native has no WebGL fallback,
@@ -141,14 +150,14 @@ subpath.
 
 | Package | State |
 |---|---|
-| `three` | **0.184.0**, pinned exact (was 0.171.0, root, hoisted) |
-| `typegpu` | **0.12.0** |
+| `three` | **0.186.0**, pinned exact (was 0.184.0, root, hoisted) |
+| `typegpu` | **0.12.5** (range `^0.12.0`) |
 | `react-native-webgpu` | **0.10.2** (was 0.8.2) |
 | `@typegpu/three` | **NOT INSTALLED** |
 | `@typegpu/react` | **NOT INSTALLED** |
 | `y-protocols` | **NOT INSTALLED** |
 | `yjs` | 13.6.31, **transitive only** via `@lexical/yjs` (Payload) — not a direct dependency of any workspace package |
-| `@types/three` | **0.184.1** against a 0.184.0 runtime — the gap is closed. It was 13 minors, and the types described 143 TSL symbols the runtime did not export |
+| `@types/three` | **0.186.0** against a 0.186.0 runtime — the gap is closed. It was 13 minors, and the types described 143 TSL symbols the runtime did not export |
 
 ### A pre-existing bundle leak, now fixed
 
