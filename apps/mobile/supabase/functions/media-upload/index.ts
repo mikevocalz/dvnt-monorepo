@@ -54,19 +54,32 @@ const ALLOWED_IMAGE_MIMES = [
 ];
 const ALLOWED_VIDEO_MIMES = ["video/mp4", "video/quicktime", "video/mov"];
 
+/**
+ * Byte ceilings. Videos are sized for an UNEDITED ORIGINAL, because that is
+ * what the client now sends: the old 18/25 MB caps were sized for the 360x640
+ * re-encode that used to happen on the phone, and a real 60s 1080p clip is
+ * 60-90 MB.
+ *
+ * 96 MiB is not arbitrary. Video now streams through this function without
+ * being buffered (see uploadToBunny), so the ceiling is about what a member
+ * can actually get up a mobile connection inside the 150s request idle timeout
+ * rather than about isolate memory: 96 MiB needs roughly 5 Mbps sustained.
+ * Beyond that the honest answer is "that file is too big", which the client
+ * says plainly instead of quietly re-encoding it.
+ */
 const SIZE_LIMITS: Record<MediaKind, number> = {
   avatar: 2 * 1024 * 1024, // 2 MB
   "post-image": 10 * 1024 * 1024, // 10 MB (GIFs can exceed 5MB)
-  "post-video": 25 * 1024 * 1024, // 25 MB
+  "post-video": 96 * 1024 * 1024, // an unedited 60s 1080p original
   "story-image": 5 * 1024 * 1024, // 5 MB
-  "story-video": 18 * 1024 * 1024, // 18 MB
+  "story-video": 96 * 1024 * 1024, // an unedited 60s 1080p original
   "event-cover": 5 * 1024 * 1024, // 5 MB
   "event-image": 5 * 1024 * 1024, // 5 MB
   "event-moment-photo": 10 * 1024 * 1024, // 10 MB
-  "event-moment-video": 50 * 1024 * 1024, // 50 MB (30s max)
-  "event-video": 50 * 1024 * 1024, // 50 MB — event flyer/trailer video
+  "event-moment-video": 96 * 1024 * 1024,
+  "event-video": 96 * 1024 * 1024, // event flyer/trailer, original
   "message-image": 5 * 1024 * 1024, // 5 MB
-  "message-video": 12 * 1024 * 1024, // 12 MB
+  "message-video": 64 * 1024 * 1024, // DM clip, original
 };
 
 const VIDEO_KINDS: MediaKind[] = ["post-video", "story-video", "message-video", "event-moment-video", "event-video"];
@@ -288,6 +301,9 @@ Deno.serve(async (req) => {
   // generated client-side (server-upload.ts). Persisted to the historically-NULL
   // `blurhash` column so surfaces can fade images in with zero CLS.
   let blurhash: string | undefined;
+  /** Set instead of `fileBytes` when the body is piped straight to storage. */
+  let fileStream: ReadableStream<Uint8Array> | null = null;
+  let streamLength = 0;
 
   const contentType = req.headers.get("Content-Type") || "";
 
@@ -364,7 +380,28 @@ Deno.serve(async (req) => {
         blurhash = blurhashHeader.trim();
       }
 
-      fileBytes = new Uint8Array(await req.arrayBuffer());
+      // Video is streamed, not buffered. `req.arrayBuffer()` materialises the
+      // whole file inside a 256MB isolate, which is what made a 96MB original
+      // impossible regardless of what the size limit said. Images keep the
+      // buffered path — they are small, and the blurhash/probe work wants the
+      // bytes in hand anyway.
+      const declaredLength = Number(
+        req.headers.get("x-content-length") ||
+          req.headers.get("Content-Length") ||
+          0,
+      );
+      if (isVideoKind(kind) && req.body && declaredLength > 0) {
+        const limit = SIZE_LIMITS[kind];
+        if (limit && declaredLength > limit) {
+          return errorResponse(
+            `File too large for ${kind}: ${(declaredLength / 1024 / 1024).toFixed(2)}MB exceeds ${(limit / 1024 / 1024).toFixed(1)}MB limit`,
+          );
+        }
+        fileStream = req.body;
+        streamLength = declaredLength;
+      } else {
+        fileBytes = new Uint8Array(await req.arrayBuffer());
+      }
     }
   } catch (parseError) {
     console.error("[media-upload] Parse error:", parseError);
@@ -387,14 +424,17 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Validate size
+  // Validate size. A streamed body was already checked against the declared
+  // Content-Length before a byte was piped — checking `fileBytes` here would
+  // read 0 and reject every streamed upload as empty.
   const sizeLimit = SIZE_LIMITS[kind];
-  if (fileBytes.length === 0) {
+  const declaredSize = fileStream ? streamLength : fileBytes.length;
+  if (declaredSize === 0) {
     return errorResponse("Empty file");
   }
-  if (fileBytes.length > sizeLimit) {
+  if (declaredSize > sizeLimit) {
     const limitMB = (sizeLimit / (1024 * 1024)).toFixed(1);
-    const actualMB = (fileBytes.length / (1024 * 1024)).toFixed(2);
+    const actualMB = (declaredSize / (1024 * 1024)).toFixed(2);
     return errorResponse(
       `File too large for ${kind}: ${actualMB}MB exceeds ${limitMB}MB limit`,
     );
@@ -424,16 +464,34 @@ Deno.serve(async (req) => {
         `[media-upload] Attempt ${attempt}/${MAX_RETRIES} uploading to Bunny: ${key}`,
       );
 
+      // A stream can only be consumed once, so a streamed upload gets one
+      // attempt — the retry loop below still covers the buffered (image) path.
+      // Content-Length is sent explicitly in both cases: Bunny Storage sizes
+      // the object from it, and a chunked PUT without it is not worth risking
+      // on a member's only copy.
+      const streaming = fileStream !== null;
+      if (streaming && attempt > 1) {
+        lastError =
+          "upload stream already consumed — cannot retry a streamed body";
+        break;
+      }
+
       const response = await fetch(uploadUrl, {
         method: "PUT",
         headers: {
           AccessKey: BUNNY_ACCESS_KEY,
           "Content-Type": mime,
-          "Content-Length": String(fileBytes.length),
+          "Content-Length": String(streaming ? streamLength : fileBytes.length),
         },
-        body: fileBytes as unknown as BodyInit,
-        signal: AbortSignal.timeout(45_000),
-      });
+        body: streaming
+          ? (fileStream as unknown as BodyInit)
+          : (fileBytes as unknown as BodyInit),
+        // A 96MB original on a slow connection needs more than the 45s that
+        // was sized for a 4MB re-encode.
+        signal: AbortSignal.timeout(streaming ? 120_000 : 45_000),
+        // Deno needs this to send a stream body at all.
+        ...(streaming ? { duplex: "half" } : {}),
+      } as RequestInit);
 
       if (response.status === 201 || response.status === 200) {
         uploadSuccess = true;
@@ -483,7 +541,7 @@ Deno.serve(async (req) => {
     url: publicUrl,
     filename: key,
     mime_type: mime,
-    filesize: fileBytes.length,
+    filesize: declaredSize,
     width: width || null,
     height: height || null,
     type: isVideoKind(kind) ? "video" : "image",

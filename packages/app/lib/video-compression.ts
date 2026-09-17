@@ -1,22 +1,26 @@
 /**
- * Video Compression Utility for Deviant
+ * Video on its way out of the app.
  *
- * Uses react-native-compressor for client-side video compression.
- * Falls back to pass-through if native module is unavailable.
+ * The default is `original`: the member's file is validated and uploaded as-is.
+ * Nothing is resized, re-encoded, re-contained, converted from HEVC, flattened
+ * from HDR, or reframed. `smaller` is the one mode that runs an encoder, only
+ * when a caller asks for it, and it states its own dimensions and bitrate.
  *
- * Target Output (Feed-Safe):
- * - Container: MP4
- * - Video Codec: H.264 (Main Profile, Level 4.1)
- * - Resolution: 1280×720 preferred, 1920×1080 max
- * - FPS: 24–30
- * - Video Bitrate: 1.4–2.0 Mbps
- * - Audio Codec: AAC @ 96 kbps
- * - Pixel Format: yuv420p
- * - Max Duration: 60s
+ * The header this replaces described a "feed-safe target" of 1280x720 at
+ * 1.4-2.0 Mbps. None of it was ever passed to the encoder — the call was a bare
+ * `compressionMethod: "auto"`, which in react-native-compressor@1.16.0 means a
+ * 640px LONGER EDGE. Every post, story and event video published from a phone
+ * was stored at 360x640, and the source was deleted after upload.
  */
 
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import { withUploadTimeout } from "@dvnt/app/lib/media/upload-policy";
+import {
+  DEFAULT_VIDEO_UPLOAD_MODE,
+  isUsableSmallerCopy,
+  ladderTierFor,
+  type VideoUploadMode,
+} from "@dvnt/app/lib/media/video-quality";
 
 const FileSystem = LegacyFileSystem;
 
@@ -40,26 +44,23 @@ const COMPRESSOR_AVAILABLE = !!RNCompressorVideo;
 
 // Validation limits
 const MAX_DURATION_SECONDS = 60;
-const MAX_RESOLUTION = 1080;
 const MAX_FILE_SIZE_MB = 150;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
-// Target compression settings
-const TARGET_WIDTH = 1280;
-const TARGET_BITRATE = "1800k";
-const TARGET_MAX_BITRATE = "2000k";
-const TARGET_BUFFER_SIZE = "4000k";
-const TARGET_FPS = 30;
-const TARGET_AUDIO_BITRATE = "96k";
 
+/**
+ * `null` means "not measured" — never a stand-in default. Callers must decide
+ * what to do with an unknown rather than being handed a plausible-looking
+ * number. Unknown must never trigger a destructive conversion.
+ */
 export interface VideoMetadata {
-  duration: number; // seconds
-  width: number;
-  height: number;
-  bitrate: number; // bps
-  codec: string;
-  fileSize: number; // bytes
-  fps: number;
+  duration: number | null; // seconds
+  width: number | null;
+  height: number | null;
+  bitrate: number | null; // bps
+  codec: string | null;
+  fileSize: number; // bytes — from the filesystem, always known
+  fps: number | null;
 }
 
 export interface ValidationResult {
@@ -75,6 +76,15 @@ export interface CompressionResult {
   compressedSize?: number;
   compressionRatio?: number;
   error?: string;
+  /**
+   * Did an encoder touch these bytes? Callers use this to decide whether the
+   * upload is the member's original file or a copy we made — the MIME type and
+   * the stored provenance both depend on the answer.
+   */
+  reencoded?: boolean;
+  /** Measured source dimensions, or null when they could not be read. */
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface CompressionProgress {
@@ -105,40 +115,45 @@ export async function getVideoMetadata(
 
     const fileSize = (fileInfo as any).size || 0;
 
-    // Use real metadata from react-native-compressor if available
+    // Measured, or null. This used to answer 1920x1080 @ 30fps / 30s whenever
+    // the native call was unavailable or a field was missing, and log it as
+    // "real" — so an unmeasurable 4K 90-second clip read as a compliant 1080p
+    // half-minute and sailed through the duration gate. A guess that is
+    // indistinguishable from a measurement is worse than no answer.
     if (RNCompressorGetMeta) {
       try {
         const meta = await RNCompressorGetMeta(videoUri);
         const metadata: VideoMetadata = {
-          duration: meta.duration || 0,
-          width: meta.width || 1920,
-          height: meta.height || 1080,
-          bitrate: 0,
-          codec: "unknown",
+          duration: typeof meta.duration === "number" ? meta.duration : null,
+          width: typeof meta.width === "number" ? meta.width : null,
+          height: typeof meta.height === "number" ? meta.height : null,
+          // The library reports neither, so neither is claimed.
+          bitrate: null,
+          codec: null,
           fileSize: meta.size || fileSize,
-          fps: 30,
+          fps: null,
         };
-        console.log("[VideoCompression] Metadata (real):", metadata);
+        console.log("[VideoCompression] Metadata (measured):", metadata);
         return metadata;
       } catch (metaErr) {
         console.warn(
-          "[VideoCompression] Native metadata failed, using estimates:",
+          "[VideoCompression] Native metadata unavailable:",
           metaErr,
         );
       }
     }
 
-    // Fallback: estimated metadata
+    // Size is the one thing the filesystem actually knows.
     const metadata: VideoMetadata = {
-      duration: 30,
-      width: 1920,
-      height: 1080,
-      bitrate: 0,
-      codec: "unknown",
+      duration: null,
+      width: null,
+      height: null,
+      bitrate: null,
+      codec: null,
       fileSize,
-      fps: 30,
+      fps: null,
     };
-    console.log("[VideoCompression] Metadata (estimated):", metadata);
+    console.log("[VideoCompression] Metadata (size only):", metadata);
     return metadata;
   } catch (error) {
     console.error("[VideoCompression] Metadata extraction failed:", error);
@@ -180,29 +195,30 @@ export async function validateVideo(
     return { valid: false, errors: ["Could not read video metadata"] };
   }
 
-  // Validate duration
-  if (metadata.duration > MAX_DURATION_SECONDS) {
+  // Duration: only judged when it was measured. An unmeasured duration is not
+  // a pass and not a failure — the server checks it again with its own read.
+  if (metadata.duration != null && metadata.duration > MAX_DURATION_SECONDS) {
     errors.push(
       `Duration ${Math.round(metadata.duration)}s exceeds ${MAX_DURATION_SECONDS}s limit`,
     );
   }
 
-  // Validate resolution
-  const maxDimension = Math.max(metadata.width, metadata.height);
-  if (maxDimension > MAX_RESOLUTION) {
-    // This is a warning, not an error - we'll scale it down
+  // Resolution is NOT a validation failure and no longer implies a downscale.
+  // A 4K source is a 4K source; it is published at 4K.
+  if (metadata.width != null && metadata.height != null) {
     console.log(
-      "[VideoCompression] Video will be scaled from",
-      maxDimension,
-      "to",
-      TARGET_WIDTH,
+      "[VideoCompression] Source resolution:",
+      `${metadata.width}x${metadata.height}`,
     );
   }
 
-  // Check for unsupported codecs (we can transcode most, but some may fail)
-  const unsupportedCodecs = ["prores", "dnxhd", "rawvideo"];
-  if (unsupportedCodecs.includes(metadata.codec.toLowerCase())) {
-    errors.push(`Unsupported codec: ${metadata.codec}`);
+  // Codec is never reported by the metadata call, so the old check could never
+  // fire. Rejecting on an unknown codec would mean rejecting every video.
+  if (metadata.codec) {
+    const unsupportedCodecs = ["prores", "dnxhd", "rawvideo"];
+    if (unsupportedCodecs.includes(metadata.codec.toLowerCase())) {
+      errors.push(`Unsupported codec: ${metadata.codec}`);
+    }
   }
 
   const result: ValidationResult = {
@@ -226,6 +242,12 @@ export async function validateVideo(
 export async function compressVideo(
   inputUri: string,
   onProgress?: (progress: CompressionProgress) => void,
+  /**
+   * Defaults to `original`: the file is validated and handed straight on, with
+   * no encoder involved and the same bytes it arrived with. `smaller` is an
+   * explicit request for a lossy copy and is the only value that re-encodes.
+   */
+  mode: VideoUploadMode = DEFAULT_VIDEO_UPLOAD_MODE,
 ): Promise<CompressionResult> {
   console.log("[VideoCompression] ==========================================");
   console.log("[VideoCompression] Compressor available:", COMPRESSOR_AVAILABLE);
@@ -246,15 +268,47 @@ export async function compressVideo(
     const originalSize = metadata.fileSize;
     const startTime = Date.now();
 
-    // Use real compression if available
+    // ORIGINAL — the default, and the whole point. No encoder, no resize, no
+    // container change, no colour conversion. The selected file IS the upload.
+    if (mode === "original") {
+      console.log(
+        "[VideoCompression] Original mode — publishing source bytes untouched",
+      );
+      return {
+        success: true,
+        outputPath: inputUri,
+        originalSize,
+        compressedSize: originalSize,
+        compressionRatio: 0,
+        reencoded: false,
+        width: metadata.width,
+        height: metadata.height,
+      };
+    }
+
+    // SMALLER — an explicit, stated encode. Dimensions and bitrate come from
+    // the ladder, never from the library's defaults: omitting `maxSize` makes
+    // react-native-compressor use 640 for the LONGER edge, which is what
+    // turned 1080x1920 uploads into 360x640.
     if (COMPRESSOR_AVAILABLE && RNCompressorVideo) {
-      console.log("[VideoCompression] Starting native compression...");
+      const longEdge =
+        metadata.width != null && metadata.height != null
+          ? Math.max(metadata.width, metadata.height)
+          : null;
+      const tier = ladderTierFor(longEdge);
+      console.log(
+        "[VideoCompression] Smaller copy requested —",
+        `longEdge=${longEdge ?? "unknown"} → maxSize=${tier.maxLongEdge}`,
+        `bitrate=${tier.bitrateBps}`,
+      );
 
       let cancellationId: string | undefined;
       const compressedUri = await withUploadTimeout(RNCompressorVideo.compress(
         inputUri,
         {
-          compressionMethod: "auto",
+          compressionMethod: "manual",
+          maxSize: tier.maxLongEdge,
+          bitrate: tier.bitrateBps,
           minimumFileSizeForCompress: 0,
           getCancellationId: (id) => { cancellationId = id; },
         },
@@ -299,12 +353,36 @@ export async function compressVideo(
         "[VideoCompression] ==========================================",
       );
 
+      // "The encoder returned" is not "the output is good". A copy that is
+      // bigger than the source, or a sliver of it, is a failed export with a
+      // success return value — keep the source rather than publish damage.
+      const verdict = isUsableSmallerCopy(originalSize, compressedSize);
+      if (!verdict.usable) {
+        console.warn(
+          "[VideoCompression] Discarding smaller copy —",
+          verdict.reason,
+        );
+        return {
+          success: true,
+          outputPath: inputUri,
+          originalSize,
+          compressedSize: originalSize,
+          compressionRatio: 0,
+          reencoded: false,
+          width: metadata.width,
+          height: metadata.height,
+        };
+      }
+
       return {
         success: true,
         outputPath: compressedUri,
         originalSize,
         compressedSize,
         compressionRatio: ratio,
+        reencoded: true,
+        width: metadata.width,
+        height: metadata.height,
       };
     }
 
@@ -324,6 +402,9 @@ export async function compressVideo(
       originalSize,
       compressedSize: originalSize,
       compressionRatio: 0,
+      reencoded: false,
+      width: metadata.width,
+      height: metadata.height,
     };
   } catch (error) {
     console.error("[VideoCompression] Compression error:", error);
@@ -348,23 +429,6 @@ export async function cleanupCompressedVideo(filePath: string): Promise<void> {
   }
 }
 
-/**
- * Check if a video needs compression
- * Returns true if the video should be compressed before upload
- */
-export function shouldCompress(metadata: VideoMetadata): boolean {
-  // Always compress videos for consistent quality and size
-  // Even if a video is small, we want consistent codec/bitrate
-  return true;
-}
 
-/**
- * Estimate compressed file size
- * Useful for showing user expected upload size
- */
-export function estimateCompressedSize(metadata: VideoMetadata): number {
-  // Target bitrate in bits per second
-  const targetBitrate = 1800000 + 96000; // Video + Audio
-  // Estimated size = bitrate * duration / 8 (convert to bytes)
-  return Math.round((targetBitrate * metadata.duration) / 8);
-}
+
+

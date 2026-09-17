@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { sizeLimitForKind } from "@dvnt/app/lib/media/upload-policy";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import { Platform } from "react-native";
@@ -39,7 +40,14 @@ export interface StoryMediaOptions {
 }
 
 const STORY_MAX_DURATION = 30;
-const STORY_MAX_FILE_SIZE_MB = 50;
+/**
+ * Read from the one policy table rather than restated here. This was a literal
+ * 50, while the server enforced 18MB — so the picker told a member their 40MB
+ * story video was fine and the upload refused it. There is one number now.
+ */
+const STORY_MAX_FILE_SIZE_MB = Math.floor(
+  sizeLimitForKind("story-video") / (1024 * 1024),
+);
 const STORY_ASPECT_RATIO = 9 / 16;
 
 export function useMediaPicker() {
@@ -85,12 +93,22 @@ export function useMediaPicker() {
         allowsMultipleSelection: allowMultiple,
         quality: 1,
         videoMaxDuration: 60,
-        // Without this, videoExportPreset defaults to Passthrough — iOS hands
-        // back the ORIGINAL file. 60s of iPhone footage is 60-400MB, and
-        // media-upload caps event/post video at 50MB, so every video picked
-        // here (event flyer included) was doomed before it left the device.
-        // Every other picker in this file already sets Medium.
-        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
+        // `videoQuality` is deliberately NOT set here, and the comment that
+        // used to justify it was wrong on both counts.
+        //
+        // It claimed Medium was needed to stop iOS handing back the original.
+        // Handing back the original is the intent — and `videoQuality` could
+        // not have prevented it anyway: in expo-image-picker 57 it is only
+        // applied on the legacy UIImagePickerController
+        // (ios/ImagePickerModule.swift:128), while a library pick with
+        // allowsEditing false goes to PHPicker (:92-96), whose video branch
+        // reads `videoExportPreset` — which already defaults to `.passthrough`
+        // (ios/ImagePickerOptions.swift:32) and keeps the source extension
+        // (ios/MediaHandler.swift:444-448). The option was inert.
+        //
+        // Passthrough is what we want, so it is left at its default rather
+        // than restated: the picker returns the member's file, and nothing
+        // downstream re-encodes it.
         selectionLimit: options?.maxSelection ?? 10,
       });
 
@@ -171,8 +189,13 @@ export function useMediaPicker() {
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ["videos"],
         videoMaxDuration: maxDuration,
-        quality: 0.7,
-        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
+        // `quality` is image-only (ImagePicker.types.d.ts:403-415); it does
+        // nothing to a video and is dropped rather than left looking load-
+        // bearing. `videoQuality` DOES apply here — this is the legacy camera
+        // controller path (ios/ImagePickerModule.swift:128) — so it names the
+        // highest the device offers instead of Medium, which was recording
+        // members' footage at reduced quality before a single byte was picked.
+        videoQuality: ImagePicker.UIImagePickerControllerQualityType.High,
       });
 
       if (!result.canceled && result.assets[0]) {
@@ -213,7 +236,8 @@ export function useMediaPicker() {
         quality: 0.8,
         videoMaxDuration: maxDuration,
         selectionLimit: 4,
-        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
+        // Inert on a PHPicker library pick — see pickFromLibrary. Removed so
+        // it cannot be read as a quality decision that is actually in force.
       });
 
       if (!result.canceled && result.assets) {
@@ -291,8 +315,13 @@ export function useMediaPicker() {
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ["videos"],
         videoMaxDuration: maxDuration,
-        quality: 0.7,
-        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
+        // `quality` is image-only (ImagePicker.types.d.ts:403-415); it does
+        // nothing to a video and is dropped rather than left looking load-
+        // bearing. `videoQuality` DOES apply here — this is the legacy camera
+        // controller path (ios/ImagePickerModule.swift:128) — so it names the
+        // highest the device offers instead of Medium, which was recording
+        // members' footage at reduced quality before a single byte was picked.
+        videoQuality: ImagePicker.UIImagePickerControllerQualityType.High,
       });
 
       if (!result.canceled && result.assets[0]) {

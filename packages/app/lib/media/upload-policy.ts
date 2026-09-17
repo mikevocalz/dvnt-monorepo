@@ -1,17 +1,27 @@
-/** Keep byte ceilings aligned with media-upload's server validation. */
+/**
+ * Byte ceilings. This table and the one in media-upload's `SIZE_LIMITS` are the
+ * only two that exist, and `upload-policy.test.ts` parses the edge function to
+ * keep them identical — three other tables used to quote a member three
+ * different numbers for the same story video (50MB at the picker, 28MB in the
+ * dead compressor, 18MB actually enforced).
+ *
+ * Video is sized for an UNEDITED ORIGINAL. The old caps were sized for the
+ * 360x640 re-encode the phone used to perform; a real 60s 1080p clip is
+ * 60-90MB and could never have fitted.
+ */
 export const MEDIA_SIZE_LIMITS: Record<string, number> = {
   avatar: 2 * 1024 * 1024,
   "post-image": 10 * 1024 * 1024,
-  "post-video": 25 * 1024 * 1024,
+  "post-video": 96 * 1024 * 1024,
   "story-image": 5 * 1024 * 1024,
-  "story-video": 18 * 1024 * 1024,
+  "story-video": 96 * 1024 * 1024,
   "event-cover": 5 * 1024 * 1024,
   "event-image": 5 * 1024 * 1024,
-  "event-video": 50 * 1024 * 1024,
+  "event-video": 96 * 1024 * 1024,
   "event-moment-photo": 10 * 1024 * 1024,
-  "event-moment-video": 50 * 1024 * 1024,
+  "event-moment-video": 96 * 1024 * 1024,
   "message-image": 5 * 1024 * 1024,
-  "message-video": 12 * 1024 * 1024,
+  "message-video": 64 * 1024 * 1024,
 };
 export const UPLOAD_TIMEOUT_MS = 5 * 60_000;
 export function sizeLimitForKind(kind: string): number {

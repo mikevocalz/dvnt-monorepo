@@ -55,6 +55,13 @@ export interface MediaFile {
   kind?: import("@dvnt/app/lib/media/types").MediaKind;
   mimeType?: string;
   pairedVideoUri?: string; // Live Photo paired video (iOS)
+  /**
+   * Dimensions the picker measured, when it reported them. Used as the source
+   * of truth for the stored row when the native metadata call cannot read the
+   * file itself. Never a default — absent means unknown.
+   */
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface MediaUploadResult {
@@ -75,6 +82,20 @@ export interface MediaUploadResult {
     compressedSize: number;
     reductionPercent: number;
   };
+  /**
+   * Measured source dimensions, when the platform could read them. Every one
+   * of the 179 video rows in production has NULL width/height, so no surface
+   * can tell what it is playing — including the surfaces that would need it to
+   * choose a rendition.
+   */
+  width?: number | null;
+  height?: number | null;
+  /**
+   * False for an untouched original, true for a copy an encoder produced.
+   * Stored so nothing downstream has to guess whether these are the member's
+   * own bytes.
+   */
+  reencoded?: boolean;
 }
 
 async function assertReadableMediaUri(uri: string): Promise<void> {
@@ -90,6 +111,24 @@ async function assertReadableMediaUri(uri: string): Promise<void> {
   throw new Error(
     "Selected media is no longer available. Please remove it and choose it again.",
   );
+}
+
+/**
+ * The MIME type of the bytes we are actually sending.
+ *
+ * A re-encode produces MP4 and may honestly say so. A pass-through must keep
+ * the source's own type: a QuickTime file declared as `video/mp4` is a rename,
+ * not a conversion, and it is how 43 stored rows ended up describing a
+ * container they are not. `reencoded` is the only thing that licenses "mp4".
+ */
+function uploadMimeForVideo(
+  sourceUri: string,
+  sourceMime: string | undefined,
+  reencoded: boolean | undefined,
+): string {
+  if (reencoded) return "video/mp4";
+  if (sourceMime) return sourceMime;
+  return /\.mov(?:[?#]|$)/i.test(sourceUri) ? "video/quicktime" : "video/mp4";
 }
 
 export function useMediaUpload(options: UseMediaUploadOptions = {}) {
@@ -188,9 +227,12 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
         }
 
         if (file.type === "video" && file.kind !== "animated_video") {
-          // ========== VIDEO PROCESSING (MANDATORY COMPRESSION) ==========
+          // ========== VIDEO: PUBLISHED AS SELECTED ==========
+          // No encoder runs here. `compressVideo` defaults to `original`, which
+          // validates and hands the same file back. Publishing a video is not a
+          // reason to change it.
           console.log(
-            "[useMediaUpload] ========== VIDEO COMPRESSION PIPELINE ==========",
+            "[useMediaUpload] ========== VIDEO PIPELINE (original) ==========",
           );
 
           // Step 1: Validate video
@@ -214,29 +256,25 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           }
           updateProgress("Video validated");
 
-          // Step 2: MANDATORY compression
-          setIsCompressing(true);
-          reportStatus(Platform.OS === "web" ? "Preparing video..." : "Compressing video...");
-          console.log("[useMediaUpload] Starting MANDATORY video compression");
-
+          // Step 2: prepare — original mode, so this is a pass-through. The
+          // status says "Preparing", not "Compressing": nothing is being
+          // compressed, and the old label described work that no longer
+          // happens (and, when it did happen, was the bug).
+          reportStatus("Preparing video...");
           const compressionResult = await compressVideo(file.uri, (p) => {
             setCompressionProgress(p.percentage);
           });
-          setIsCompressing(false);
 
           if (!compressionResult.success || !compressionResult.outputPath) {
-            // CRITICAL: If compression fails, DO NOT upload raw video
             console.error(
-              "[useMediaUpload] COMPRESSION FAILED - BLOCKING UPLOAD",
+              "[useMediaUpload] Video could not be prepared:",
+              compressionResult.error,
             );
-            console.error("[useMediaUpload] Error:", compressionResult.error);
             results.push({
               type: "video",
               url: "",
               success: false,
-              error:
-                compressionResult.error ||
-                "Video compression failed. Cannot upload raw video.",
+              error: compressionResult.error || "Could not read that video.",
             });
             // Skip remaining steps
             completedSteps += videoSteps - 1;
@@ -294,7 +332,17 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
             compressionResult.outputPath,
             folder,
             reportBytes,
-            { mimeType: compressionResult.outputPath === file.uri ? file.mimeType || (/\.mov(?:[?#]|$)/i.test(file.uri) ? "video/quicktime" : "video/mp4") : "video/mp4" },
+            {
+              mimeType: uploadMimeForVideo(
+                file.uri,
+                file.mimeType,
+                compressionResult.reencoded,
+              ),
+              // Measured — or absent. Sent so the stored row records the real
+              // resolution instead of the NULL every existing video row has.
+              width: compressionResult.width ?? file.width ?? null,
+              height: compressionResult.height ?? file.height ?? null,
+            },
           );
 
           // Clean up compressed file after upload
@@ -372,12 +420,21 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
             results.push({
               type: "video",
               kind: "video",
-              mimeType: Platform.OS === "web" ? file.mimeType || "video/mp4" : "video/mp4",
+              // Recorded as what it IS. This said "video/mp4" for every native
+              // upload regardless of the container that was actually stored.
+              mimeType: uploadMimeForVideo(
+                file.uri,
+                file.mimeType,
+                compressionResult.reencoded,
+              ),
               url: uploadResult.url,
               path: uploadResult.path,
               thumbnail: thumbnailUrl,
               thumbnailPath,
               success: true,
+              width: compressionResult.width ?? file.width ?? null,
+              height: compressionResult.height ?? file.height ?? null,
+              reencoded: compressionResult.reencoded === true,
               compressionStats: {
                 originalSize: compressionResult.originalSize || 0,
                 compressedSize: compressionResult.compressedSize || 0,
@@ -392,13 +449,13 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
         } else if (file.kind === "animated_video") {
           // ========== ANIMATED VIDEO (short loop — compress + mark with special mimeType) ==========
           console.log("[useMediaUpload] Animated video — compress + mark as animated");
-          reportStatus(Platform.OS === "web" ? "Preparing video..." : "Compressing animated video...");
-          setIsCompressing(true);
+          // Looping clips take the same original path as any other video —
+          // the label follows the work, and the work is no longer compression.
+          reportStatus("Preparing video...");
 
           const compressionResult = await compressVideo(file.uri, (p) => {
             setCompressionProgress(p.percentage);
           });
-          setIsCompressing(false);
 
           if (!compressionResult.success || !compressionResult.outputPath) {
             results.push({
@@ -411,7 +468,17 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
             updateProgress("Animated video failed");
           } else {
             reportStatus("Uploading animated video...");
-            const uploadResult = await serverUpload(compressionResult.outputPath, folder, reportBytes, { mimeType: compressionResult.outputPath === file.uri ? file.mimeType || (/\.mov(?:[?#]|$)/i.test(file.uri) ? "video/quicktime" : "video/mp4") : "video/mp4" });
+            const uploadResult = await serverUpload(compressionResult.outputPath, folder, reportBytes, {
+              mimeType: uploadMimeForVideo(
+                file.uri,
+                file.mimeType,
+                compressionResult.reencoded,
+              ),
+              // Measured — or absent. Sent so the stored row records the real
+              // resolution instead of the NULL every existing video row has.
+              width: compressionResult.width ?? file.width ?? null,
+              height: compressionResult.height ?? file.height ?? null,
+            });
             let loopThumbnail: string | undefined;
             if (uploadResult.success && needsThumbnail) {
               reportStatus("Preparing video preview...");

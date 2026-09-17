@@ -201,7 +201,13 @@ export async function uploadToServer(
   uri: string,
   folder: string = "uploads",
   onProgress?: (progress: UploadProgress) => void,
-  opts?: { blurhash?: string; mimeType?: string },
+  opts?: {
+    blurhash?: string;
+    mimeType?: string;
+    width?: number | null;
+    height?: number | null;
+    durationSec?: number | null;
+  },
 ): Promise<ServerUploadResult> {
   const watchId = beginUpload(uri, folder);
   try {
@@ -226,6 +232,15 @@ async function uploadToServerImpl(
      */
     blurhash?: string;
     mimeType?: string;
+    /**
+     * Measured, never estimated. These are forwarded so the `media` row records
+     * what was actually stored — production has 179 video rows and NULL
+     * width/height on every one, so no surface can tell a 4K original from a
+     * 360x640 re-encode.
+     */
+    width?: number | null;
+    height?: number | null;
+    durationSec?: number | null;
   },
 ): Promise<ServerUploadResult> {
   console.log("[ServerUpload] Starting upload via Edge Function:", {
@@ -347,6 +362,10 @@ async function uploadToServerImpl(
       );
     }
     const kind = folderToKind(folder, mime);
+    // The extension follows the real container: a .mov stays .mov. Renaming a
+    // QuickTime file to .mp4 is not a conversion, and the stored object should
+    // not claim to be something it is not.
+    const uploadFilename = `upload_${Date.now()}.${getExtension(uri, mime)}`;
     // Refuse over-cap BEFORE sending — see KIND_SIZE_LIMITS. `size` is present
     // on the info object whenever the file exists, which the check above
     // already established.
@@ -364,14 +383,47 @@ async function uploadToServerImpl(
 
     onProgress?.({ loaded: 0, total: localSize || 0, percentage: 0 });
 
-    // Upload via FileSystem.uploadAsync (multipart form)
-    // Pass mimeType explicitly — Expo's multipart upload may default to
-    // application/octet-stream if the extension isn't detected by the OS,
-    // which would fail the edge function's mime validation.
+    // Video goes up as a raw binary body; images stay multipart.
+    //
+    // Multipart makes the function call `req.formData()`, which buffers the
+    // whole file inside a 256MB isolate before anything can be checked — fine
+    // for a 4MB image, fatal for a 96MB original. BINARY_CONTENT lets the
+    // function pipe `req.body` straight to storage, so memory is flat in the
+    // size of the file. Both transports are already understood server-side
+    // (multipart at index.ts:295, raw + x-* headers at :338).
+    //
+    // Either way expo-file-system streams from the file path: the bytes never
+    // enter JS.
+    const isVideoUpload = mime.startsWith("video/");
     const uploadTask = FileSystem.createUploadTask(
       MEDIA_UPLOAD_URL,
       accessibleUri,
-      {
+      isVideoUpload
+        ? {
+            httpMethod: "POST",
+            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+              apikey: SUPABASE_ANON_KEY,
+              "Content-Type": mime,
+              // The function sizes and limit-checks the object from this
+              // before it pipes a single byte.
+              "x-content-length": String(localSize ?? 0),
+              "x-kind": kind,
+              "x-file-name": uploadFilename,
+              "x-mime": mime,
+              ...(opts?.durationSec
+                ? { "x-duration-sec": String(Math.round(opts.durationSec)) }
+                : {}),
+              // Measured dimensions, so the stored row knows what it holds.
+              // Every video row in production has NULL width/height because
+              // nothing ever sent them.
+              ...(opts?.width ? { "x-width": String(opts.width) } : {}),
+              ...(opts?.height ? { "x-height": String(opts.height) } : {}),
+              ...(opts?.blurhash ? { "x-blurhash": opts.blurhash } : {}),
+            },
+          }
+        : {
         httpMethod: "POST",
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: "file",
@@ -380,6 +432,11 @@ async function uploadToServerImpl(
           kind,
           mime,
           ...(opts?.blurhash ? { blurhash: opts.blurhash } : {}),
+          ...(opts?.durationSec
+            ? { durationSec: String(Math.round(opts.durationSec)) }
+            : {}),
+          ...(opts?.width ? { width: String(opts.width) } : {}),
+          ...(opts?.height ? { height: String(opts.height) } : {}),
         },
         headers: {
           Authorization: `Bearer ${authToken}`,
