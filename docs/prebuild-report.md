@@ -121,7 +121,7 @@ All 6 fired on `pnpm install` and none hard-failed. The two that touch deeply-ne
 
 | Pod | Version | Note |
 |---|---|---|
-| `react-native-webgpu` | 0.5.15 | the wgpu pod (`fix-wgpu-headers` ran) |
+| `react-native-webgpu` | 0.10.2 (this row read 0.5.15 until 2026-09-17) | the wgpu pod (`fix-wgpu-headers` ran) |
 | `FishjamReactNativeWebrtc` | 0.26.2 | + `JitsiWebRTC 124.0.2` |
 | `VisionCamera` | — | barcode-scanner Swift fix applied |
 | `stripe-react-native` | — | Apple Pay merchant wired |

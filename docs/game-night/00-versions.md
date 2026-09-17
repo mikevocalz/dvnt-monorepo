@@ -9,9 +9,9 @@ assumed.
 
 | Package | Version | Where |
 |---|---|---|
-| `three` | **0.171.0** | `node_modules/three/package.json` |
+| `three` | **0.184.0**, pinned exact (was 0.171.0) | `packages/app/package.json` |
 | `typegpu` | `^0.12.0` | `packages/app/package.json` |
-| `react-native-webgpu` | `^0.8.2` | `apps/mobile/package.json` |
+| `react-native-webgpu` | **0.10.2** (was `^0.8.2`) | `apps/mobile/package.json` AND `packages/app/package.json` — both, pinned exact |
 | `@shopify/react-native-skia` | `2.6.2` | `apps/mobile/package.json` |
 | `react-native-reanimated` | `4.5.3` | `apps/mobile/package.json` |
 | `react-native-gesture-handler` | `~2.32.0` | `apps/mobile/package.json` |
@@ -111,7 +111,9 @@ The questions as originally written:
    `@typegpu/three` and `@typegpu/react` must be resolved against whichever is
    chosen, and `@typegpu/react ≥ 0.11.2` imports `react-native-webgpu` under its
    current name.
-3. **`react-native-webgpu` 0.8.2 → 0.10.2.** Not attempted here.
+3. **`react-native-webgpu` 0.8.2 → 0.10.2.** APPLIED 2026-09-17. The JS change
+   set was one line (`Canvas`'s removed `transparent` prop → `opaque={false}`,
+   inverted sense). Native is unverified — see the ADR's PENDING list.
 
 ## Applies to the fallback table too
 
@@ -139,14 +141,14 @@ subpath.
 
 | Package | State |
 |---|---|
-| `three` | 0.171.0 (root, hoisted) |
+| `three` | **0.184.0**, pinned exact (was 0.171.0, root, hoisted) |
 | `typegpu` | **0.12.0** |
-| `react-native-webgpu` | 0.8.2 |
+| `react-native-webgpu` | **0.10.2** (was 0.8.2) |
 | `@typegpu/three` | **NOT INSTALLED** |
 | `@typegpu/react` | **NOT INSTALLED** |
 | `y-protocols` | **NOT INSTALLED** |
 | `yjs` | 13.6.31, **transitive only** via `@lexical/yjs` (Payload) — not a direct dependency of any workspace package |
-| `@types/three` | **0.184.1** against a 0.171.0 runtime — a 13-minor gap, so the types describe APIs the installed runtime may not have |
+| `@types/three` | **0.184.1** against a 0.184.0 runtime — the gap is closed. It was 13 minors, and the types described 143 TSL symbols the runtime did not export |
 
 ### A pre-existing bundle leak, now fixed
 

@@ -81,7 +81,8 @@ export interface DrawerViewer {
  *   repo is the event CATEGORY enum (`lib/constants/event-categories.ts:18`) —
  *   unrelated, and the thing to not mistake for progress.
  *
- *   Those dependency questions are now DECIDED but NOT APPLIED — see
+ *   Those dependency questions are now DECIDED, and the dependency half is
+ *   APPLIED — see
  *   `docs/adr/002-game-night-dependency-baseline.md`: pin `three` 0.184.0 with
  *   `@types/three` 0.184.1, stay on `typegpu` 0.12.x, take
  *   `react-native-webgpu` to 0.10.2 in both manifests. The ADR's PENDING list

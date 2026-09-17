@@ -1,7 +1,10 @@
 /**
- * Expo Config Plugin: Fix react-native-wgpu header collision with @shopify/react-native-skia
+ * Expo Config Plugin: Fix react-native-webgpu header collision with @shopify/react-native-skia
  *
- * Both packages share 6 identically-named C++ headers. CocoaPods flattens private
+ * Both packages share 109 identically-named C++ headers — counted by basename
+ * across both cpp/ trees, not the 6 an earlier version of this comment claimed.
+ * Skia vendors its own cpp/rnwgpu tree, which is where almost all of them come
+ * from. CocoaPods flattens private
  * headers into Pods/Headers/Private/<pod>/ and the Xcode project-level header map
  * can resolve bare #include "X.h" to Skia's copy instead of wgpu's, causing
  * 'utils/RNSkLog.h' file not found errors.

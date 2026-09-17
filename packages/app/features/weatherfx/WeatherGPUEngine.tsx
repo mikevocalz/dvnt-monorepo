@@ -65,7 +65,7 @@ function canWeatherCanvasRender(): boolean {
 function WeatherCanvas() {
   // `useCanvasEffect` is always undefined, so this component never renders.
   //
-  // It is not a missing native module — `react-native-webgpu` 0.8.2 is
+  // It is not a missing native module — `react-native-webgpu` 0.10.2 is
   // installed and `wgpu.Canvas` resolves. `useCanvasEffect` was the API of the
   // PRE-RENAME `react-native-wgpu` package; the renamed package exports
   // `useSurface`, `useCanvasRef` and `useDevice` and has never exported

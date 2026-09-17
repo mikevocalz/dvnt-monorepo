@@ -117,7 +117,8 @@ that `00-versions.md` leaves open under "Open questions, not assumptions":
 2. Which `typegpu` line, given `@typegpu/three` and `@typegpu/react` are NOT
    INSTALLED and `@typegpu/react ≥ 0.11.2` imports `react-native-webgpu` under
    its current name.
-3. Whether `react-native-webgpu` goes 0.8.2 → 0.10.2. Unattempted.
+3. Whether `react-native-webgpu` goes 0.8.2 → 0.10.2. APPLIED 2026-09-17,
+   both manifests, pinned exact. Native remains unverified.
 
 Multiplayer has no transport: `y-protocols` is absent and `yjs` is
 transitive-only via Payload's `@lexical/yjs`, so no workspace package may import

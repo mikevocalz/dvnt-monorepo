@@ -9,17 +9,29 @@
 
 ### 1. wgpu / Skia Header Collision
 
-**Script:** `scripts/patch-wgpu.sh`
+**Mechanism:** the Expo config plugin `plugins/fix-wgpu-headers.js`. Nothing else.
 
-**Problem:** `react-native-skia` vendors a full copy of `react-native-wgpu`'s `cpp/` tree. Over 100 header filenames collide (e.g. `JSIConverter.h`, `NativeObject.h`, `Promise.h`). Xcode header maps flatten includes and resolve the wrong file, causing `fatal error: 'utils/RNSkLog.h' file not found`.
+This section previously described `scripts/patch-wgpu.sh` as the fix. **No such
+file exists anywhere in the repo**, and no wgpu patch exists either —
+`pnpm.patchedDependencies` lists only `react-native-css`. Anyone following the
+old text went looking for a safety net that was not there.
 
-**Fix:**
+**Problem:** `@shopify/react-native-skia` vendors its own `cpp/rnwgpu` tree, so
+its headers collide with `react-native-webgpu`'s by basename. Xcode header maps
+flatten includes and resolve the wrong file, causing
+`fatal error: 'utils/RNSkLog.h' file not found`.
 
-- Renames `JSIConverter.h` → `WGPUJSIConverter.h` inside `react-native-wgpu`
-- Qualifies all colliding includes with `jsi/` (cross-directory) or `./` (same-directory) prefixes
-- Config plugin (`plugins/fix-wgpu-headers.js`) adds `cpp/` and `cpp/jsi/` to `HEADER_SEARCH_PATHS` for the `react-native-wgpu` pod target
+**Fix:** the plugin adds the seven `cpp/` directories to `HEADER_SEARCH_PATHS`
+for the wgpu pod target, so bare-filename lookup resolves inside wgpu first. No
+file in `node_modules` is rewritten. The old claim that `JSIConverter.h` is
+renamed to `WGPUJSIConverter.h` describes something that does not happen.
 
-**Colliding headers patched:** `NativeObject.h`, `Promise.h`, `EnumMapper.h`, `RuntimeAwareCache.h`, `RuntimeLifecycleMonitor.h`, `JSIConverter.h`
+**Colliding headers:** **109**, counted by basename across both `cpp/` trees at
+`react-native-webgpu` 0.10.2 and Skia 2.6.2 — not the 6 previously listed. Two
+of those 6, `RuntimeAwareCache.h` and `RuntimeLifecycleMonitor.h`, no longer
+exist in wgpu at all: 0.10.2 deleted them in favour of `JSICache.h`, which has
+no Skia counterpart. So the bump to 0.10.2 shrank the collision set from 111 to
+109 and added none.
 
 ---
 
@@ -71,7 +83,7 @@ patch-package
 → patch-callkeep.sh
 → patch-expo-updates.sh
 → patch-worklets.sh
-→ patch-wgpu.sh
+→ patch-wgpu.sh   (LISTED BUT NONEXISTENT — see section 1)
 → patch-expo-audio.sh
 → patch-expo-factory.sh
 → patch-expo-modules-core.sh
