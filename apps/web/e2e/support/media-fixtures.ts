@@ -23,6 +23,16 @@ import path from "node:path";
 const DIR = path.join(__dirname, "../fixtures");
 export const VIDEO_FIXTURE = path.join(DIR, "talking-head.y4m");
 export const AUDIO_FIXTURE = path.join(DIR, "speech.wav");
+/** A QR code held steadily in frame — the door's happy path. */
+export const QR_FIXTURE = path.join(DIR, "qr-ticket.y4m");
+/** The same code, taken away for 2s, then presented again. */
+export const QR_PRESENT_AWAY_FIXTURE = path.join(DIR, "qr-present-away.y4m");
+/**
+ * The payload encoded in both QR fixtures. Fixed, not random: a spec asserts
+ * the scanner emits exactly this string, and a regenerated fixture must not
+ * silently change what "correct" means.
+ */
+export const QR_FIXTURE_TOKEN = "dvnt-door-rehearsal-ticket-0001";
 
 const W = 160;
 const H = 120;
@@ -44,6 +54,82 @@ function buildY4m(): Buffer {
     parts.push(Buffer.from("FRAME\n"), luma, chroma, chroma);
   }
   return Buffer.concat(parts);
+}
+
+/**
+ * Y4M of a QR code, for the scanner lane.
+ *
+ * Bigger and slower than the bar clip on purpose: expo-camera decodes on a
+ * 300ms timer (ExpoCamera.web.tsx:61), so a 1s loop would give the reader only
+ * ~3 attempts, and ZXing needs the code to occupy enough pixels to resolve its
+ * modules. 640x480 at 10fps for 4s is what the browser lab decoded 8/8 at
+ * 12-15ms/frame.
+ *
+ * `gapFrames` inserts a stretch with no code in frame, which is how the
+ * one-presentation-one-scan rule gets tested end to end rather than only in
+ * scan-gate's unit tests.
+ */
+function buildQrY4m(matrix: boolean[][], opts: { gapFrames?: number } = {}): Buffer {
+  const w = 640;
+  const h = 480;
+  const fps = 10;
+  const header = Buffer.from(`YUV4MPEG2 W${w} H${h} F${fps}:1 Ip A1:1 C420jpeg\n`);
+  const chroma = Buffer.alloc((w / 2) * (h / 2), 128);
+
+  // ZXing wants a quiet zone; the module size keeps the symbol ~300px wide.
+  const modules = matrix.length;
+  const scale = Math.max(1, Math.floor(300 / modules));
+  const size = modules * scale;
+  const ox = Math.floor((w - size) / 2);
+  const oy = Math.floor((h - size) / 2);
+
+  const withCode = Buffer.alloc(w * h, 200); // light field = the quiet zone
+  for (let my = 0; my < modules; my++) {
+    for (let mx = 0; mx < modules; mx++) {
+      if (!matrix[my]![mx]) continue;
+      for (let y = 0; y < scale; y++) {
+        const row = (oy + my * scale + y) * w + ox + mx * scale;
+        withCode.fill(16, row, row + scale);
+      }
+    }
+  }
+  const empty = Buffer.alloc(w * h, 200);
+
+  const parts: Buffer[] = [header];
+  const push = (luma: Buffer, count: number) => {
+    for (let i = 0; i < count; i++) parts.push(Buffer.from("FRAME\n"), luma, chroma, chroma);
+  };
+  const gap = opts.gapFrames ?? 0;
+  if (gap > 0) {
+    push(withCode, fps * 3);
+    push(empty, gap);
+    push(withCode, fps * 3);
+  } else {
+    push(withCode, fps * 4);
+  }
+  return Buffer.concat(parts);
+}
+
+/**
+ * QR modules for `QR_FIXTURE_TOKEN`, via the `qrcode` package that
+ * react-native-qrcode-svg already puts in the graph — no new dependency, and
+ * the encoder that produces our real tickets is the one producing the fixture.
+ */
+function qrMatrix(text: string): boolean[][] {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { create } = require("qrcode") as {
+    create: (t: string, o: { errorCorrectionLevel: string }) => {
+      modules: { size: number; data: Uint8Array | number[] };
+    };
+  };
+  const { modules } = create(text, { errorCorrectionLevel: "H" });
+  const out: boolean[][] = [];
+  for (let y = 0; y < modules.size; y++) {
+    const row: boolean[] = [];
+    for (let x = 0; x < modules.size; x++) row.push(!!modules.data[y * modules.size + x]);
+    out.push(row);
+  }
+  return out;
 }
 
 /** 16-bit mono PCM WAV — a 440 Hz tone at ~0.3 amplitude (RMS ≈ 0.21). */
@@ -78,6 +164,13 @@ export function ensureMediaFixtures(): void {
   fs.mkdirSync(DIR, { recursive: true });
   if (!fs.existsSync(VIDEO_FIXTURE)) fs.writeFileSync(VIDEO_FIXTURE, buildY4m());
   if (!fs.existsSync(AUDIO_FIXTURE)) fs.writeFileSync(AUDIO_FIXTURE, buildWav());
+  if (!fs.existsSync(QR_FIXTURE) || !fs.existsSync(QR_PRESENT_AWAY_FIXTURE)) {
+    const matrix = qrMatrix(QR_FIXTURE_TOKEN);
+    if (!fs.existsSync(QR_FIXTURE)) fs.writeFileSync(QR_FIXTURE, buildQrY4m(matrix));
+    if (!fs.existsSync(QR_PRESENT_AWAY_FIXTURE)) {
+      fs.writeFileSync(QR_PRESENT_AWAY_FIXTURE, buildQrY4m(matrix, { gapFrames: 20 }));
+    }
+  }
 }
 
 export default function globalSetup(): void {
