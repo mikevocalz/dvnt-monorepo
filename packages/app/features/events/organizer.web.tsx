@@ -106,7 +106,12 @@ function formatDate(dateString: string): string {
 }
 
 function displayName(ticket: TicketRecord): string {
-  return ticket.username || "Guest";
+  // `username` is not a field get-event-tickets returns. The roster resolves
+  // the holder server-side into `holder_name` — attendee_name, then the
+  // account, then guest_name — so reading `username` was undefined on EVERY
+  // row and the whole dashboard read "Guest", including the 103 tickets on
+  // Saturday's door that all resolve to real accounts.
+  return ticket.holder_name || ticket.username || "Guest";
 }
 
 // Native roster statuses: "checked_in" / "revoked" / "valid". The web

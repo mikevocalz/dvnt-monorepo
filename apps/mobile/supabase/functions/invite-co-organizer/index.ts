@@ -215,11 +215,20 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const { data: recipient } = await supabase
-        .from("user")
-        .select("id")
-        .eq("username", username)
+      // Usernames live on the PROFILE table, not on Better Auth's `user`.
+      // Only 69 of 1188 auth rows carry one, while all 1190 profiles do — so
+      // looking the recipient up in `user` returned "User not found" for 1135
+      // real accounts, which is every staff invite anyone has tried to send by
+      // username. `users.auth_id` is the same id `user.id` would have given.
+      //
+      // Case-insensitive to match: the caller already lowercases the input,
+      // and stored usernames are mixed case.
+      const { data: profile } = await supabase
+        .from("users")
+        .select("auth_id")
+        .ilike("username", username)
         .maybeSingle();
+      const recipient = profile?.auth_id ? { id: profile.auth_id } : null;
       if (!recipient) return json({ error: "User not found" }, 404, req);
       if (recipient.id === authId) {
         return json({ error: "You're already on this event" }, 400, req);

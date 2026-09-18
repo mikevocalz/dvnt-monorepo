@@ -132,10 +132,17 @@ function AttendeeRow({ item }: { item: TicketRecord }) {
   // Native long-presses to a selection refund flow; on web a row click that
   // resolves to a known username opens the profile (project nav convention).
   const username = item.username;
+  // Same trap as the dashboard had: `username` is not a field the roster
+  // returns. `holder_name` is what get-event-tickets resolves server-side, so
+  // without it every row fell back to a truncated ticket id and nobody on the
+  // list had a name.
+  const holder = item.holder_name || null;
   const displayName = username
     ? `@${username}`
-    : `Ticket ${String(item.id).slice(0, 8)}`;
-  const initial = (username || item.qr_token || "?").slice(0, 1).toUpperCase();
+    : holder || `Ticket ${String(item.id).slice(0, 8)}`;
+  const initial = (username || holder || item.qr_token || "?")
+    .slice(0, 1)
+    .toUpperCase();
   const planKey = item.membership_tier?.planKey ?? null;
   // `free` carries no badge — only a paid tier is worth a chip.
   const planLabel = planKey && planKey !== "free" ? planLabelFor(planKey) : null;
