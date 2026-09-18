@@ -27,9 +27,10 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { create } from "zustand";
-import { Search, Check } from "lucide-react";
+import { Search, Check, X } from "lucide-react";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { qk } from "@dvnt/app/lib/query/keys";
+import { isAdmissible, isListable } from "@dvnt/app/lib/tickets/ticket-access";
 import {
   snapshotRoster,
   recallRoster,
@@ -117,25 +118,34 @@ export function DoorGuestList({
   const cached = useMemo(() => (isError ? recallRoster(eventId) : null), [isError, eventId]);
 
   const tickets = useMemo(() => {
-    const live = (data?.tickets ?? []).filter((t) => t.status !== "void");
+    const live = (data?.tickets ?? []).filter((t) => isListable(t.status));
     if (live.length) return live;
     // CachedGuest carries only the fields this list renders; the cast keeps
     // the row component honest about what it may read.
     return (cached?.guests ?? []).filter(
-      (g) => g.status !== "void",
+      (g) => isListable(g.status),
     ) as unknown as TicketRecord[];
   }, [data, cached]);
 
   // Snapshot every successful read, so the fallback is never older than the
   // last time this phone had signal.
   useEffect(() => {
-    const live = (data?.tickets ?? []).filter((t) => t.status !== "void");
+    const live = (data?.tickets ?? []).filter((t) => isListable(t.status));
     if (live.length) snapshotRoster(eventId, live);
   }, [data, eventId]);
 
+  // Counts describe ADMISSIBLE passes only. A refunded ticket is still listed
+  // — staff need to find that person when they turn up insisting they have a
+  // ticket — but it is not a guest who is coming, so it must not inflate the
+  // denominator that tells the door how far through the queue they are.
   const counts = useMemo(() => {
-    const checkedIn = tickets.filter((t) => !!t.checked_in_at).length;
-    return { all: tickets.length, in: checkedIn, out: tickets.length - checkedIn };
+    const admissible = tickets.filter((t) => isAdmissible(t.status));
+    const checkedIn = admissible.filter((t) => !!t.checked_in_at).length;
+    return {
+      all: admissible.length,
+      in: checkedIn,
+      out: admissible.length - checkedIn,
+    };
   }, [tickets]);
 
   /**
@@ -333,7 +343,15 @@ function GuestRow({
         </p>
       </div>
 
-      {isIn ? (
+      {!isAdmissible(ticket.status) ? (
+        // Refunded, mid-transfer, or a status this build does not know. The
+        // row stays so staff can find the person; the action does not, because
+        // the only honest answer at the door is "this pass is not valid".
+        <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-semibold text-[#F59E0B]">
+          <X size={15} aria-hidden />
+          Not valid
+        </span>
+      ) : isIn ? (
         // State, not an action: word + glyph, so it is never colour alone and
         // the column reads straight down.
         <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-semibold text-[#22C55E]">

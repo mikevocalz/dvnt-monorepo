@@ -19,6 +19,35 @@ export const ANON_VIEWER_ID = "anon";
 /** A pass that can never be presented at a door again. */
 const SPENT_STATUSES = new Set(["refunded", "void"]);
 
+/**
+ * May this pass be admitted tonight?
+ *
+ * `active` is unused, `scanned` is already inside. Everything else — refunded,
+ * void, mid-transfer, or a status this build has never heard of — is not a
+ * guest who is coming, and must not be counted as one.
+ *
+ * The door list used to exclude only `void`, which left refunded passes in the
+ * roster, in the progress denominator, and behind a live "Check in" button
+ * carrying nothing but a grey " · Refunded" suffix. On 2026-09-18 that meant
+ * two people who had their money back could still be let in.
+ */
+export function isAdmissible(status: string | null | undefined): boolean {
+  return status === "active" || status === "scanned";
+}
+
+/**
+ * Should this pass appear in the door list at all?
+ *
+ * Wider than `isAdmissible` on purpose. A refunded guest who turns up insisting
+ * they have a ticket is exactly who staff need to look up, and "not found"
+ * reads as a broken scanner rather than as an answer. So refunded rows stay
+ * visible and un-checkinable; only `void` — a pass that was never real — is
+ * hidden outright.
+ */
+export function isListable(status: string | null | undefined): boolean {
+  return status !== "void";
+}
+
 export type TicketAccessDenial =
   | "signed-out"
   | "not-holder"

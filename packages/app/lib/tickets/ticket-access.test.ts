@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   ANON_VIEWER_ID,
+  isAdmissible,
+  isListable,
   pendingTransferTicketIds,
   resolveTicketAccess,
 } from "./ticket-access.ts";
@@ -157,4 +159,29 @@ test("a missing auth id never widens the match to anything falsy", () => {
     assert.equal(a.canShowCredential, false, String(user_id));
     assert.equal(a.denial, "not-holder", String(user_id));
   }
+});
+
+// ── Door admission. A refunded pass stayed checkable at the door because the
+// list filtered only "void": it sat in the roster, in the progress
+// denominator, and behind a live "Check in" button wearing nothing but a grey
+// " · Refunded" suffix.
+test("only active and scanned passes may be admitted", () => {
+  assert.equal(isAdmissible("active"), true);
+  assert.equal(isAdmissible("scanned"), true);
+  for (const s of ["refunded", "void", "transfer_pending", "", null, undefined, "something_new"])
+    assert.equal(isAdmissible(s), false, String(s));
+});
+
+test("a refunded pass is still listed, so staff can look the person up", () => {
+  assert.equal(isListable("refunded"), true);
+  assert.equal(isListable("active"), true);
+  assert.equal(isListable("transfer_pending"), true);
+  assert.equal(isListable("void"), false);
+});
+
+test("listable is deliberately wider than admissible", () => {
+  const listedButRefused = ["refunded", "transfer_pending"].filter(
+    (s) => isListable(s) && !isAdmissible(s),
+  );
+  assert.deepEqual(listedButRefused, ["refunded", "transfer_pending"]);
 });
