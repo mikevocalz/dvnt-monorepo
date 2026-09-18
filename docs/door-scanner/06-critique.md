@@ -52,10 +52,11 @@ under it are actions.
 ## Still worse than the references
 
 **No undo on a check-in from the list.** Luma flips its primary to "Undo Check
-In" in the same position. Ours has no undo path at all — a mis-tap on the wrong
-row is currently unrecoverable from the scanner, and the fix is a host-side
-correction. This is the largest remaining gap against the product bar, and it is
-not fixed.
+In" in the same position. Ours has no undo at all, because no server operation
+reverses a check-in — every edge function touching `checked_in_at` only reads
+it. Adding one two days before a door, next to the functions the brief marks
+do-not-touch, is a worse risk than the gap. A mis-tap is corrected by the host,
+out of band. See 08-code-review.md.
 
 **The guest list caps at 200.** The server clamps `pageSize` to 200 and its
 search matches `qr_token` prefix only, so name search required fetching the

@@ -47,10 +47,27 @@ these.
 the native detector to force the fallback, which proves the fallback works —
 not that the iPhone path works. That needs the rehearsal phone.
 
-**Decode quality.** The `06` lab covers inverted, dim, blurry and small codes;
-it has NOT been re-run, on the evidence that `packages/ui/src/media/qr/` is
-byte-identical to what its 8/8 was measured against. The e2e uses one clean
-code.
+**Decode quality — measured directly, 4/4.** Against the same `zxing-wasm`
+reader the browser loads, at 640x480:
+
+| Condition | Result | Frame time |
+|---|---|---|
+| normal | exact token | 198ms (includes WASM init) |
+| inverted | exact token | 3.2ms |
+| dim + blurry (35% brightness, 2-pass blur) | exact token | 3.5ms |
+| small (150px symbol) | exact token | 3.2ms |
+
+~3ms per frame against expo-camera's 300ms interval, so decode is not the
+bottleneck at a door.
+
+This measures the DECODER, which is what the `06` lab's 8/8 measures. It does
+not replace the lab's other two checks — expo-camera's loop driven in a real
+browser, and the CDN fallback when the self-hosted WASM is blocked. The loop is
+covered instead by the e2e running against the real mounted route; the CDN
+fallback is covered only in the sense that its failure state renders, not that
+the CDN itself serves. The lab has NOT been re-run, on the evidence that
+`packages/ui/src/media/qr/` is byte-identical to what its 8/8 was measured
+against.
 
 **Undo.** There is no undo on a check-in, from the camera or the list. Nothing
 tests it because nothing implements it.

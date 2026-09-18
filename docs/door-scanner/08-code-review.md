@@ -52,9 +52,23 @@ installed source.*
 
 ## Accepted, not fixed
 
-**No undo on a check-in.** The largest remaining gap against the product bar
-(Luma flips its primary to "Undo Check In"). A mis-tap is currently
-unrecoverable from the scanner.
+**No undo on a check-in — and it is not a safe pre-Saturday change.** The
+largest remaining gap against the product bar (Luma flips its primary to "Undo
+Check In"), and a mis-tap on the guest list is currently unrecoverable from the
+scanner.
+
+It is not built because there is nothing to build it on. Nothing server-side
+reverses a check-in: grepping every edge function for `checked_in_at` returns
+only reads, analytics, export and refund — no un-redeem, no `action` parameter
+on `ticket-scan`, no migration that clears the column. Undo would mean a NEW
+write path against check-in state, two days before a door, in the neighbourhood
+the brief marks do-not-touch (`redeem_ticket` / `redeem_addon`), with no way to
+exercise it end-to-end before Friday's freeze. The brief's own rule — never add
+a second way to mark a ticket scanned — points the same way about its inverse.
+
+The correction path at the door is therefore the host, out of band. That is
+worse than Luma and it is a real gap; it is recorded as one rather than closed
+badly. Build it after Saturday, server-side first.
 
 **The guest list caps at 200**, the server's `pageSize` clamp. Surfaced on
 screen rather than silently truncating.
