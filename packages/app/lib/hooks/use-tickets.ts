@@ -11,6 +11,7 @@
  *    each is a separate credential with its own identity.
  */
 
+import { useEffect } from "react";
 import {
   useQuery,
   useMutation,
@@ -18,6 +19,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { ticketsApi, TicketsUnavailableError } from "@dvnt/app/lib/api/tickets";
+import { getCurrentUserRow } from "@dvnt/app/lib/auth/identity";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { qk } from "@dvnt/app/lib/query/keys";
 import { STALE_TIMES, GC_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
@@ -48,12 +50,42 @@ export function useTicketViewerId(): string {
  * returning null and failing an ownership check closed.
  */
 export function useTicketViewerAuthId(): string | undefined {
-  return useAuthStore((s) => {
+  const fromStore = useAuthStore((s) => {
     const user = s.user;
     if (!user) return undefined;
     if (user.authId) return user.authId;
     return /^\d+$/.test(String(user.id)) ? undefined : String(user.id);
   });
+  const viewerId = useAuthStore((s) => s.user?.id);
+
+  // Sessions persisted before `authId` was carried have only the integer id,
+  // and there are a lot of them — every member already signed in. Reading it
+  // back from the users table costs one cached query and repairs them in
+  // place. The alternative, bumping the persist version to discard the old
+  // blob, signs everyone out, and `02-after-saturday-web-session-fix.patch` is
+  // on the do-not-deploy list for precisely that: it can drop a guest while
+  // they are pulling up their pass in the queue.
+  const resolved = useQuery({
+    queryKey: ["viewer-auth-id", viewerId ?? "anon"],
+    queryFn: async () => (await getCurrentUserRow())?.authId ?? null,
+    enabled: !fromStore && !!viewerId,
+    staleTime: Infinity,
+    gcTime: GC_TIMES.standard,
+    retry: 1,
+  });
+
+  // Write it back so every other reader — the watch projection, my-tickets,
+  // anything added later — gets it without repeating this lookup.
+  useEffect(() => {
+    const authId = resolved.data;
+    if (!authId) return;
+    const store = useAuthStore.getState();
+    const user = store.user;
+    if (!user || user.authId) return;
+    store.setUser({ ...user, authId });
+  }, [resolved.data]);
+
+  return fromStore ?? resolved.data ?? undefined;
 }
 
 /**
