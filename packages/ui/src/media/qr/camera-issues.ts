@@ -14,6 +14,7 @@ export type CameraIssueKind =
   | "no_camera"
   | "busy"
   | "engine"
+  | "stalled"
   | "unknown";
 
 export interface CameraIssue {
@@ -64,6 +65,28 @@ export function detectPreflightIssue(env: {
   }
   return null;
 }
+
+/**
+ * The camera opened and then stopped producing frames.
+ *
+ * Nothing in expo-camera's web path reports this. Its decode loop is handed no
+ * `onError` (ExpoCamera.web.js:25-31), the catch inside it is a no-op, and the
+ * `finally` reschedules unconditionally — so a stream that dies after a
+ * successful start looks exactly like a stream nobody has held a code up to.
+ * On iOS the usual cause is Low Power Mode, which suspends autoplay of inline
+ * video including a MediaStream, and which a wake-locked screen at full
+ * brightness makes more likely as the night goes on.
+ *
+ * Named separately from `busy` because the fix is different: nothing else is
+ * holding the camera, the frames just stopped.
+ */
+export const STALLED_ISSUE: CameraIssue = {
+  kind: "stalled",
+  title: "The camera stopped",
+  message:
+    "Frames stopped arriving. On iPhone this is usually Low Power Mode — turn it off in Settings › Battery, then try again. Typed codes still work below.",
+  canRetry: true,
+};
 
 /** getUserMedia / decoder errors, by DOMException name first, message second. */
 export function classifyCameraError(err: unknown): CameraIssue {
