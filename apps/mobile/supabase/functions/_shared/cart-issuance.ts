@@ -175,12 +175,32 @@ async function prepareCartAddonRows(
   return rows;
 }
 
+/**
+ * `refundOnAllocationFailure` — whether a rejected issuance may take the
+ * buyer's money back.
+ *
+ * TRUE is right for the webhook, where the cart is seconds old: the hold is
+ * live, the seats are really gone if the RPC says so, and refunding
+ * immediately is the honest answer.
+ *
+ * FALSE is the only safe value for the reconciler. A cart hold lasts minutes
+ * and the orders it sweeps are hours or days old, so `cart_complete_issuance`
+ * returns `hold_expired` for essentially all of them — a statement about the
+ * clock, not about inventory. On 2026-09-18 that distinction cost six buyers
+ * their tickets: a grant fix removed an unrelated exception that had been
+ * accidentally stopping this path short, the next sweep reached the refund
+ * call, and $186.40 went back across six orders whose tiers had 97 free seats.
+ * An expired hold means "a human should re-arm this", never "give the money
+ * back".
+ */
 export async function handleCartPaymentIntentSucceeded(
   // deno-lint-ignore no-explicit-any
   supabase: any,
   // deno-lint-ignore no-explicit-any
   pi: any,
+  options: { refundOnAllocationFailure?: boolean } = {},
 ): Promise<boolean> {
+  const mayRefund = options.refundOnAllocationFailure !== false;
   const metadata = pi.metadata || {};
   const cartId = metadata.cart_id;
   if (!cartId) return false;
@@ -211,12 +231,41 @@ export async function handleCartPaymentIntentSucceeded(
 
   if (issuanceError) {
     console.error("[stripe-webhook] cart issuance RPC failed:", issuanceError);
-    await refundPaymentIntentForAllocationFailure(pi.id, cartId);
+    if (mayRefund) await refundPaymentIntentForAllocationFailure(pi.id, cartId);
     throw issuanceError;
   }
 
   if (!issuanceResult?.ok) {
     console.error("[stripe-webhook] cart issuance rejected:", issuanceResult);
+
+    if (!mayRefund) {
+      // Leave the money where it is and the order where it is, so the next run
+      // — or a human with a re-armed hold — can still deliver the ticket. A
+      // refund here is unrecoverable: the buyer wanted the pass, not the money.
+      console.error(
+        `[reconcile] PAID BUT UNISSUED cart=${cartId} pi=${pi.id} reason=${
+          issuanceResult?.error ?? "unknown"
+        } — NOT refunding; left pending for a human`,
+      );
+      const { data: blockedOrder } = await supabase
+        .from("orders")
+        .select("id")
+        .eq("cart_id", cartId)
+        .maybeSingle();
+      if (blockedOrder?.id) {
+        await supabase.from("order_timeline").insert({
+          order_id: blockedOrder.id,
+          type: "reconcile_blocked",
+          label: "Paid, tickets not issued yet",
+          detail:
+            `Cart issuance was rejected (${issuanceResult?.error ?? "unknown"}). ` +
+            `Payment is confirmed and has NOT been refunded. Re-arm the cart ` +
+            `hold and re-run issuance to deliver the ticket.`,
+        });
+      }
+      return false;
+    }
+
     await refundPaymentIntentForAllocationFailure(pi.id, cartId);
 
     await supabase

@@ -102,6 +102,34 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
       by_status: {} as Record<string, number>,
     };
 
+    /**
+     * Undo the `paid` CAS when issuance could not finish.
+     *
+     * The claim at the top of this loop flips the order to `paid`, which takes
+     * it out of the `status = 'payment_pending'` query this job selects on. So
+     * any failure after that point used to strand the buyer permanently:
+     * charged, marked paid, holding nothing, and invisible to every later run.
+     * Handing the row back costs one update and keeps it in the queue.
+     */
+    const releaseClaim = async (orderId: string, why: string) => {
+      await supabase
+        .from("orders")
+        .update({
+          status: "payment_pending",
+          paid_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", orderId)
+        .eq("status", "paid");
+      await supabase.from("order_timeline").insert({
+        order_id: orderId,
+        type: "reconcile_blocked",
+        label: "Paid, tickets not issued yet",
+        detail: `${why} Payment is confirmed and has NOT been refunded.`,
+      });
+      console.error(`[reconcile] PAID BUT UNISSUED order=${orderId} — ${why}`);
+    };
+
     // ── 1. Expire stale ticket holds ─────────────────────────
     const { data: staleHolds, error: holdsError } = await supabase
       .from("ticket_holds")
@@ -266,7 +294,13 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
               });
               continue;
             }
-            await handleCartPaymentIntentSucceeded(supabase, paymentIntentObj);
+            // NEVER refund from the sweep. A cart hold lives for minutes and
+            // these orders are hours or days old, so `hold_expired` is about
+            // the clock, not inventory — and on 2026-09-18 it refunded six
+            // buyers whose tiers had 97 seats free.
+            await handleCartPaymentIntentSucceeded(supabase, paymentIntentObj, {
+              refundOnAllocationFailure: false,
+            });
             // The handler returns true for success, duplicate AND the
             // allocation-failure path (refund + payment_failed) — re-read
             // the order status to tell them apart.
@@ -361,7 +395,9 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
             })
             .eq("id", order.id)
             .eq("status", "payment_pending")
-            .select("id, user_id, event_id, quantity, stripe_payment_intent_id")
+            .select(
+              "id, user_id, event_id, quantity, stripe_payment_intent_id, total_cents, stripe_checkout_session_id, cart_id",
+            )
             .single();
 
           if (claimErr || !claimedOrder) {
@@ -381,15 +417,40 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
 
             if ((existingCount || 0) === 0) {
               // Fetch ticket_type_id from holds or order metadata
-              const { data: hold } = await supabase
+              const { data: hold, error: holdErr } = await supabase
                 .from("ticket_holds")
                 .select("ticket_type_id")
                 .eq("payment_intent_id", claimedOrder.stripe_payment_intent_id)
                 .limit(1)
-                .single();
+                .maybeSingle();
 
-              if (hold?.ticket_type_id) {
+              // No hold means no tier to issue against. That used to fall
+              // through the `if` below and leave the order `paid` with zero
+              // tickets — out of this job's `payment_pending` query forever,
+              // so nothing would ever look at it again. Hand it back instead.
+              if (holdErr || !hold?.ticket_type_id) {
+                await releaseClaim(
+                  order.id,
+                  holdErr
+                    ? `Could not read the inventory hold: ${holdErr.message}`
+                    : "Payment confirmed at Stripe, but no inventory hold records which tier was bought, so this job cannot issue. Left pending for a human.",
+                );
+                stats.needs_attention = (stats.needs_attention ?? 0) + 1;
+                continue;
+              }
+
+              {
                 const qty = claimedOrder.quantity || 1;
+                // The buyer's own money, split per seat. `total_cents` is what
+                // Stripe actually charged (face value + buyer fee), which is
+                // the same basis every other issuance path records, so a refund
+                // or a payout reads the same number here as it would anywhere
+                // else. Null total → null, never 0: a wrong number that looks
+                // plausible is worse than an absent one.
+                const perTicketCents =
+                  typeof claimedOrder.total_cents === "number" && qty > 0
+                    ? Math.round(claimedOrder.total_cents / qty)
+                    : null;
                 const ticketRows = [];
                 for (let i = 0; i < qty; i++) {
                   const ticketUuid = crypto.randomUUID();
@@ -407,9 +468,39 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
                     qr_payload: qrPayload,
                     stripe_payment_intent_id:
                       claimedOrder.stripe_payment_intent_id,
+                    // WITHOUT THIS the rescued ticket reads as free, and the
+                    // system believes it. ticket-refund:145 does
+                    // `purchase_amount_cents ?? 0` and refunds nothing while
+                    // reporting success, and payouts-release:346 sums the same
+                    // column, so the organizer is paid $0 for the seat and
+                    // still charged the $1 per-ticket fee. Every other
+                    // issuance path sets it; this one did not.
+                    purchase_amount_cents: perTicketCents,
+                    order_index: i + 1,
+                    order_count: qty,
+                    cart_id: claimedOrder.cart_id ?? null,
+                    stripe_checkout_session_id:
+                      claimedOrder.stripe_checkout_session_id ?? null,
                   });
                 }
-                await supabase.from("tickets").insert(ticketRows);
+                const { error: insertErr } = await supabase
+                  .from("tickets")
+                  .insert(ticketRows);
+
+                // The order was CAS-flipped to `paid` above, which removes it
+                // from the `payment_pending` query this job selects on. A
+                // discarded error here therefore stranded the buyer
+                // permanently: charged, marked paid, holding nothing, and
+                // invisible to every future run. Put it back.
+                if (insertErr) {
+                  await releaseClaim(
+                    order.id,
+                    `Ticket insert failed (${insertErr.code ?? "unknown"}): ${insertErr.message}`,
+                  );
+                  stats.needs_attention = (stats.needs_attention ?? 0) + 1;
+                  stats.failed++;
+                  continue;
+                }
 
                 // Convert hold
                 await supabase
