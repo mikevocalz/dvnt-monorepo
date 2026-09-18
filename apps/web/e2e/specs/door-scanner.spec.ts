@@ -156,6 +156,34 @@ test.describe("door scanner", () => {
     await expect(page.locator('[data-qr-engine="modern"]')).toHaveCount(0);
   });
 
+  test("the gate tells three different problems apart", async ({ page }) => {
+    await stubEvent(page);
+
+    // 403 — the server answered, and the answer was no. The only real refusal.
+    await page.route("**/api/fn/get-event-tickets**", (route) =>
+      route.fulfill({ status: 403, contentType: "application/json", body: "{}" }),
+    );
+    await page.goto(SCANNER_URL);
+    await expect(
+      page.getByRole("heading", { name: /not on door staff/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    // The account being refused, which is usually the whole problem.
+    await expect(page.getByText(/Signed in as /)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sign in as someone else" })).toBeVisible();
+
+    // No answer at all. This says nothing about the staffer, so it must not
+    // read as a refusal — and it must not claim they were removed from a door
+    // they are standing at.
+    await page.unroute("**/api/fn/get-event-tickets**");
+    await page.route("**/api/fn/get-event-tickets**", (route) => route.abort());
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /can.t check your access offline/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+    await expect(page.getByText(/not on door staff/i)).toHaveCount(0);
+  });
+
   test("a dead decode engine is a readable panel, not a black camera", async ({
     page,
   }) => {

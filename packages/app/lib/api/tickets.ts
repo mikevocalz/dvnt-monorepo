@@ -206,10 +206,27 @@ export const ticketsApi = {
       cursor: opts.cursor ?? null,
     });
     if (error) {
-      console.error(
-        "[Tickets] getEventTicketsPaginated error:",
-        error.message,
-      );
+      // Same split patch 01 made in scanTicket, for the same reason and with
+      // the same consequence if it is missing. Returning `role: null` for BOTH
+      // a refusal and a dropped connection made `useEventRole` resolve
+      // successfully with "no role", so the scanner's gate told a staffer
+      // standing in a basement that they were not on the door — a network
+      // failure rendered as a refusal, the exact class of bug patch 01 exists
+      // to remove.
+      //
+      // The field is `error.status`, not `error.context.status`: invokeEdge
+      // already unwraps the FunctionsHttpError Response and normalises it
+      // (invoke-edge.ts:26-35), and leaves status undefined when the function
+      // never answered. That normalisation is the whole reason it exists.
+      const { status } = error;
+      if (typeof status !== "number") {
+        console.warn(
+          "[Tickets] getEventTicketsPaginated transport failure:",
+          error,
+        );
+        throw error;
+      }
+      console.error("[Tickets] getEventTicketsPaginated HTTP", status);
       return {
         tickets: [],
         page: opts.page ?? 1,

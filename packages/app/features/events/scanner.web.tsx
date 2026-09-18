@@ -33,6 +33,10 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { DismissOverlayButton } from "@dvnt/app/components/ui/card-link.web";
 import { useParams, useRouter } from "solito/navigation";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import {
+  rememberDoorRole,
+  recallDoorRole,
+} from "@dvnt/app/lib/events/confirmed-door-role";
 import { canScanTickets } from "@dvnt/app/lib/events/event-role";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -622,6 +626,86 @@ function ScannerActive({ eventId }: { eventId: string }) {
   );
 }
 
+/**
+ * One shape for all three gate outcomes, so a volunteer reads the same layout
+ * whichever wall they hit: what happened, what to do, who they are, and which
+ * door this is.
+ *
+ * `identity` is the load-bearing line. Nine times in ten the volunteer is
+ * signed into a personal account and the host added a different one — without
+ * the address on screen that is undiagnosable, and they blame the app.
+ *
+ * `tone` is never the only signal: each panel carries an icon and a first word
+ * as well, because this is read in the dark on cracked screens (05-a11y.md).
+ * Amber here is dark-on-light, not white-on-amber, which fails AA outright.
+ */
+function GatePanel({
+  tone,
+  title,
+  body,
+  action,
+  secondary,
+  identity,
+  hostName,
+}: {
+  tone: "warn" | "deny";
+  title: string;
+  body: string;
+  action: { label: string; onPress: () => void };
+  secondary?: { label: string; onPress: () => void };
+  identity?: string | null;
+  hostName?: string | null;
+}) {
+  const Icon = tone === "deny" ? XCircle : AlertTriangle;
+  return (
+    <main
+      role="alert"
+      className="mx-auto flex w-full max-w-xl flex-col items-center px-8 py-16 text-center"
+    >
+      <span
+        className={
+          tone === "deny"
+            ? "flex h-16 w-16 items-center justify-center rounded-2xl bg-[#F43F5E]/15"
+            : "flex h-16 w-16 items-center justify-center rounded-2xl bg-[#FEF3C7]"
+        }
+      >
+        <Icon size={36} color={tone === "deny" ? "#F43F5E" : "#78350F"} />
+      </span>
+
+      <h2 className="mt-5 text-[20px] font-semibold leading-snug text-white">
+        {title}
+      </h2>
+      <p className="mt-2 max-w-sm text-[15px] leading-relaxed text-white/70">
+        {body}
+      </p>
+
+      <button
+        type="button"
+        onClick={action.onPress}
+        className="mt-6 h-12 min-w-[180px] rounded-xl bg-white px-6 text-[15px] font-semibold text-black active:scale-95"
+      >
+        {action.label}
+      </button>
+      {secondary ? (
+        <button
+          type="button"
+          onClick={secondary.onPress}
+          className="mt-3 h-12 rounded-xl px-5 text-[14px] font-semibold text-white/75 underline underline-offset-4 active:text-white"
+        >
+          {secondary.label}
+        </button>
+      ) : null}
+
+      {identity || hostName ? (
+        <div className="mt-8 space-y-1 text-[13px] text-white/45">
+          {identity ? <p>Signed in as {identity}</p> : null}
+          {hostName ? <p>Door: {hostName}</p> : null}
+        </div>
+      ) : null}
+    </main>
+  );
+}
+
 // ── EventScannerScreen ────────────────────────────────────────────────────────
 export function EventScannerScreen() {
   const params = useParams();
@@ -637,8 +721,46 @@ export function EventScannerScreen() {
    * The owner-only comparison this replaces refused the scanner screen to
    * anyone given the `scanner` role — the people it exists for.
    */
-  const { role, isLoading: roleLoading } = useEventRole(eventId);
-  const mayScan = canScanTickets(role);
+  const { role, isLoading: roleLoading, isError: roleError, refetch: refetchRole } =
+    useEventRole(eventId);
+  const isAuthenticated = useAuthStore((st) => st.isAuthenticated);
+  const hasHydrated = useAuthStore((st) => st._hasHydrated);
+  const offlineStore = useOfflineCheckinStore();
+
+  // A confirmed role is remembered so a phone that has already been told it is
+  // staff can still open the door when the venue's signal drops.
+  useEffect(() => {
+    if (!roleError && !roleLoading && role) rememberDoorRole(eventId, role);
+  }, [role, roleError, roleLoading, eventId]);
+
+  /**
+   * Three different problems used to render one "Not authorized", which sends
+   * a volunteer to argue with the host about a dead session, or to stand in a
+   * basement believing they were removed from the door.
+   *
+   *   signed_out    — no session at all. Fix: sign in again.
+   *   not_staff     — the server answered, and the answer was no.
+   *   cannot_verify — we never got an answer. Says nothing about the staffer.
+   *
+   * Only `not_staff` is a refusal. `cannot_verify` falls through to offline
+   * mode when this device has BOTH a remembered role and downloaded tokens —
+   * remembering a role you were granted is not granting yourself one, and a
+   * device that has never been confirmed for this event still does not get in.
+   */
+  const remembered = recallDoorRole(eventId);
+  const canOpenOffline = !!remembered && offlineStore.hasOfflineData(eventId);
+  const gate: "loading" | "signed_out" | "not_staff" | "cannot_verify" | "open" =
+    !hasHydrated || eventLoading || roleLoading
+      ? "loading"
+      : !isAuthenticated
+        ? "signed_out"
+        : canScanTickets(role)
+          ? "open"
+          : roleError
+            ? canOpenOffline
+              ? "open"
+              : "cannot_verify"
+            : "not_staff";
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -661,25 +783,57 @@ export function EventScannerScreen() {
         </button>
       </div>
 
-      {eventLoading || roleLoading ? (
+      {gate === "loading" ? (
         <div className="flex flex-col items-center justify-center py-24">
           <Loader2 size={32} className="animate-spin text-white/60" />
         </div>
-      ) : !mayScan ? (
-        <main className="mx-auto flex w-full max-w-xl flex-col items-center px-8 py-24 text-center">
-          <XCircle size={64} color="#F43F5E" />
-          <p className="mt-4 text-lg font-semibold text-white">Not authorized</p>
-          <p className="mt-2 text-sm text-white/60">
-            You are not on this event&rsquo;s door staff. Ask the host to add
-            you.
-          </p>
-          <button
-            onClick={() => router.back()}
-            className="mt-6 rounded-full bg-white/10 px-6 py-3 text-sm font-semibold text-white active:bg-white/15"
-          >
-            Go Back
-          </button>
-        </main>
+      ) : gate === "signed_out" ? (
+        <GatePanel
+          tone="warn"
+          title="You&rsquo;ve been signed out"
+          body="Sign in again to keep scanning. Nothing you already scanned was lost."
+          action={{
+            label: "Sign in",
+            // Back to this exact door after signing in, not to the feed.
+            onPress: () =>
+              router.push(
+                `/auth/login?next=${encodeURIComponent(
+                  typeof window !== "undefined"
+                    ? window.location.pathname + window.location.search
+                    : `/feed/events/${eventId}/scanner`,
+                )}`,
+              ),
+          }}
+          identity={user?.email ?? null}
+          hostName={event?.title ?? null}
+        />
+      ) : gate === "cannot_verify" ? (
+        <GatePanel
+          tone="warn"
+          title="Can&rsquo;t check your access offline"
+          body="We can&rsquo;t confirm you&rsquo;re door staff without signal. Get signal, then tap Try again."
+          action={{ label: "Try again", onPress: () => void refetchRole() }}
+          identity={user?.email ?? null}
+          hostName={event?.title ?? null}
+        />
+      ) : gate === "not_staff" ? (
+        <GatePanel
+          tone="deny"
+          title="You&rsquo;re not on door staff for this event"
+          body={
+            user?.email
+              ? `Ask the host to add ${user.email}, then reload this page.`
+              : "Ask the host to add your account, then reload this page."
+          }
+          action={{
+            label: "Reload",
+            onPress: () =>
+              typeof window !== "undefined" ? window.location.reload() : undefined,
+          }}
+          secondary={{ label: "Sign in as someone else", onPress: () => router.push("/auth/login") }}
+          identity={user?.email ?? null}
+          hostName={event?.title ?? null}
+        />
       ) : (
         <ScannerActive eventId={eventId} />
       )}
