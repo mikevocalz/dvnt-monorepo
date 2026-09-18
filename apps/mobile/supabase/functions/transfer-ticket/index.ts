@@ -340,6 +340,17 @@ Deno.serve(async (req: Request) => {
           qr_token: qrToken,
           qr_payload: qrPayload,
           transferred_from: transfer.from_user_id,
+          // The pass belongs to someone else now, so the name on it must not.
+          // The door resolves its guest list from attendee_name FIRST, then
+          // the account, then guest_name — leaving either behind means staff
+          // read out the previous owner's name to the person in front of them,
+          // and the new holder cannot correct it because the row no longer
+          // matches anything they recognise. Cleared here rather than hidden
+          // at render time: the door reads the column, not the screen.
+          attendee_name: null,
+          guest_name: null,
+          guest_email: null,
+          guest_phone: null,
           wallet_serial_number: null,
           wallet_auth_token: null,
           wallet_pass_type_id: null,
