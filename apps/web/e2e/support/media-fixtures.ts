@@ -25,8 +25,6 @@ export const VIDEO_FIXTURE = path.join(DIR, "talking-head.y4m");
 export const AUDIO_FIXTURE = path.join(DIR, "speech.wav");
 /** A QR code held steadily in frame — the door's happy path. */
 export const QR_FIXTURE = path.join(DIR, "qr-ticket.y4m");
-/** The same code, taken away for 2s, then presented again. */
-export const QR_PRESENT_AWAY_FIXTURE = path.join(DIR, "qr-present-away.y4m");
 /**
  * The payload encoded in both QR fixtures. Fixed, not random: a spec asserts
  * the scanner emits exactly this string, and a regenerated fixture must not
@@ -65,11 +63,13 @@ function buildY4m(): Buffer {
  * modules. 640x480 at 10fps for 4s is what the browser lab decoded 8/8 at
  * 12-15ms/frame.
  *
- * `gapFrames` inserts a stretch with no code in frame, which is how the
- * one-presentation-one-scan rule gets tested end to end rather than only in
- * scan-gate's unit tests.
+ * Ten frames, not four seconds' worth. Y4M is uncompressed — 640x480 4:2:0 is
+ * 460,800 bytes PER FRAME, so a 4s clip is 18 MB, and this repo shares a disk
+ * with several Android build caches. Chrome loops the file, so a clip where
+ * every frame carries the code is indistinguishable from a long one: the code
+ * is simply always in frame.
  */
-function buildQrY4m(matrix: boolean[][], opts: { gapFrames?: number } = {}): Buffer {
+function buildQrY4m(matrix: boolean[][]): Buffer {
   const w = 640;
   const h = 480;
   const fps = 10;
@@ -93,19 +93,9 @@ function buildQrY4m(matrix: boolean[][], opts: { gapFrames?: number } = {}): Buf
       }
     }
   }
-  const empty = Buffer.alloc(w * h, 200);
-
   const parts: Buffer[] = [header];
-  const push = (luma: Buffer, count: number) => {
-    for (let i = 0; i < count; i++) parts.push(Buffer.from("FRAME\n"), luma, chroma, chroma);
-  };
-  const gap = opts.gapFrames ?? 0;
-  if (gap > 0) {
-    push(withCode, fps * 3);
-    push(empty, gap);
-    push(withCode, fps * 3);
-  } else {
-    push(withCode, fps * 4);
+  for (let i = 0; i < 10; i++) {
+    parts.push(Buffer.from("FRAME\n"), withCode, chroma, chroma);
   }
   return Buffer.concat(parts);
 }
@@ -164,12 +154,8 @@ export function ensureMediaFixtures(): void {
   fs.mkdirSync(DIR, { recursive: true });
   if (!fs.existsSync(VIDEO_FIXTURE)) fs.writeFileSync(VIDEO_FIXTURE, buildY4m());
   if (!fs.existsSync(AUDIO_FIXTURE)) fs.writeFileSync(AUDIO_FIXTURE, buildWav());
-  if (!fs.existsSync(QR_FIXTURE) || !fs.existsSync(QR_PRESENT_AWAY_FIXTURE)) {
-    const matrix = qrMatrix(QR_FIXTURE_TOKEN);
-    if (!fs.existsSync(QR_FIXTURE)) fs.writeFileSync(QR_FIXTURE, buildQrY4m(matrix));
-    if (!fs.existsSync(QR_PRESENT_AWAY_FIXTURE)) {
-      fs.writeFileSync(QR_PRESENT_AWAY_FIXTURE, buildQrY4m(matrix, { gapFrames: 20 }));
-    }
+  if (!fs.existsSync(QR_FIXTURE)) {
+    fs.writeFileSync(QR_FIXTURE, buildQrY4m(qrMatrix(QR_FIXTURE_TOKEN)));
   }
 }
 

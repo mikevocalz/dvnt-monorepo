@@ -638,8 +638,11 @@ export function EventScannerScreen() {
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
       {/* Sticky glass header. */}
       <div
-        className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 py-3 backdrop-blur"
-        style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
+        // Clearance as a class, not an inline style: an inline paddingTop beats
+        // every Tailwind variant, so the notch inset was also pinning desktop
+        // to 12px and the title sat flush against the viewport edge. The
+        // safe-area term still carries the notch on a phone; md+ just gets room.
+        className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 pb-3 pt-[calc(env(safe-area-inset-top)+12px)] backdrop-blur md:pt-[calc(env(safe-area-inset-top)+28px)] md:pb-5"
       >
         <span className="w-9" />
         <h1 className="text-[17px] font-semibold">Scanner</h1>

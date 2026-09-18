@@ -341,7 +341,7 @@ function ModernQrScanner({
 
   if (issue) {
     return (
-      <div role="alert" className="flex aspect-square w-full flex-col items-center justify-center gap-3 rounded-2xl bg-black px-6 text-center">
+      <div role="alert" data-qr-engine="modern" className="flex aspect-square w-full flex-col items-center justify-center gap-3 rounded-2xl bg-black px-6 text-center">
         <p className="text-[17px] font-semibold text-white">{issue.title}</p>
         <p className="text-[13px] leading-relaxed text-white/70">{issue.message}</p>
         <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
@@ -371,7 +371,7 @@ function ModernQrScanner({
 
   if (status === "needs_permission") {
     return (
-      <div className="flex aspect-square w-full flex-col items-center justify-center gap-4 rounded-2xl bg-black px-6 text-center">
+      <div data-qr-engine="modern" className="flex aspect-square w-full flex-col items-center justify-center gap-4 rounded-2xl bg-black px-6 text-center">
         <p className="text-[15px] text-white">Camera access is needed to scan tickets.</p>
         <button
           type="button"
@@ -391,7 +391,7 @@ function ModernQrScanner({
   }
 
   return (
-    <div ref={hostRef} className="relative aspect-square w-full overflow-hidden rounded-2xl bg-black">
+    <div ref={hostRef} data-qr-engine="modern" className="relative aspect-square w-full overflow-hidden rounded-2xl bg-black">
       {status === "starting" ? (
         <p className="absolute inset-0 flex items-center justify-center text-[13px] text-white/60">
           Starting camera…

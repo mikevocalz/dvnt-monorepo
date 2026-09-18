@@ -67,5 +67,14 @@ export function LegacyQrScanner({ onScan, onError, oneShot = true }: LegacyQrSca
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <div ref={elRef} className="w-full overflow-hidden rounded-2xl bg-black" />;
+  // Which engine is live, readable from the DOM. The door switches engines by
+  // URL with no deploy, so "which one am I actually running" has to be
+  // answerable from a phone someone hands you mid-shift.
+  return (
+    <div
+      ref={elRef}
+      data-qr-engine="legacy"
+      className="w-full overflow-hidden rounded-2xl bg-black"
+    />
+  );
 }
