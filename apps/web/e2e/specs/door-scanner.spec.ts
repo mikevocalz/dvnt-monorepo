@@ -91,6 +91,56 @@ async function gotoLobbyScanner(page: Page) {
   });
 }
 
+/** Two guests, one of whom holds two tickets — the real door's shape. */
+async function stubRoster(page: Page) {
+  await page.route("**/api/fn/get-event-tickets**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+          // `ok` is load-bearing: getEventTicketsPaginated reads
+          // `data?.ok ? data.tickets : []` but takes `role` unconditionally,
+          // so omitting it yields a roster of zero with the gate still open.
+          ok: true,
+          role: "scanner",
+          total: 2,
+          page: 1,
+          pageSize: 200,
+          hasMore: false,
+          tickets: [
+            {
+              id: "1",
+              status: "scanned",
+              qr_token: "TOK-IN",
+              holder_name: "Ada Okonkwo",
+              ticket_type_name: "GA",
+              checked_in_at: new Date(Date.now() - 19 * 60_000).toISOString(),
+            },
+            {
+              id: "2",
+              status: "active",
+              qr_token: "TOK-OUT",
+              holder_name: "Bo Mensah",
+              ticket_type_name: "VIP",
+              checked_in_at: null,
+            },
+            // A second ticket for the same person. On the real door 22 people
+            // hold more than one and one holds five, so identical rows are the
+            // normal case, not an edge case.
+            {
+              id: "3",
+              status: "active",
+              qr_token: "TOK-OUT-2",
+              holder_name: "Bo Mensah",
+              ticket_type_name: "VIP",
+              checked_in_at: null,
+            },
+          ],
+        }),
+    }),
+  );
+}
+
 test.describe("door scanner", () => {
   // The scanner route is a client screen behind a role gate; a cold compile of
   // it plus expo-camera plus the WASM does not fit the suite's default budget.
@@ -205,52 +255,7 @@ test.describe("door scanner", () => {
 
     // A roster with one guest already in and one still outside. `qr_token` is
     // present because get-event-tickets returns it to scanner-role callers.
-    await page.route("**/api/fn/get-event-tickets**", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          // `ok` is load-bearing: getEventTicketsPaginated reads
-          // `data?.ok ? data.tickets : []` but takes `role` unconditionally,
-          // so omitting it yields a roster of zero with the gate still open.
-          ok: true,
-          role: "scanner",
-          total: 2,
-          page: 1,
-          pageSize: 200,
-          hasMore: false,
-          tickets: [
-            {
-              id: "1",
-              status: "scanned",
-              qr_token: "TOK-IN",
-              holder_name: "Ada Okonkwo",
-              ticket_type_name: "GA",
-              checked_in_at: new Date(Date.now() - 19 * 60_000).toISOString(),
-            },
-            {
-              id: "2",
-              status: "active",
-              qr_token: "TOK-OUT",
-              holder_name: "Bo Mensah",
-              ticket_type_name: "VIP",
-              checked_in_at: null,
-            },
-            // A second ticket for the same person. On the real door 22 people
-            // hold more than one and one holds five, so identical rows are the
-            // normal case, not an edge case.
-            {
-              id: "3",
-              status: "active",
-              qr_token: "TOK-OUT-2",
-              holder_name: "Bo Mensah",
-              ticket_type_name: "VIP",
-              checked_in_at: null,
-            },
-          ],
-        }),
-      }),
-    );
+    await stubRoster(page);
 
     await gotoLobbyScanner(page);
     await page.getByRole("button", { name: "Guest list" }).click();
@@ -342,6 +347,51 @@ test.describe("door scanner", () => {
     await expect(amber).toHaveAttribute("data-verdict", "no_verdict");
     await expect(amber).toContainText(/^Not checked in/);
     await expect(amber).not.toContainText(/Already scanned/i);
+  });
+
+  test("with no signal the guest list still names people, from cache", async ({
+    page,
+  }) => {
+    await stubEvent(page);
+    await stubStaffRole(page);
+    await stubAdmittingScan(page);
+    await stubRoster(page);
+
+    // Load it once with signal, so the device has a snapshot.
+    await gotoLobbyScanner(page);
+    await page.getByRole("button", { name: "Guest list" }).click();
+    await expect(page.getByText("Bo Mensah").first()).toBeVisible({ timeout: 30_000 });
+
+    // Now the venue's signal dies and the phone reloads — the case that left
+    // an empty list, because the roster query is memory-only on web.
+    //
+    // Only the ROSTER read is cut, not the role read. Both hit
+    // /api/fn/get-event-tickets, and killing the endpoint outright would take
+    // the access gate down too and never reach the list. They are told apart
+    // by pageSize — useEventRole asks for 1 row purely to read its `role`,
+    // the roster asks for 200 — which is the same split production has.
+    await page.unroute("**/api/fn/get-event-tickets**");
+    await page.route("**/api/fn/get-event-tickets**", (route) => {
+      const body = route.request().postData() ?? "";
+      if (/"pageSize"\s*:\s*1\b/.test(body)) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true, role: "scanner", tickets: [], total: 0, page: 1, pageSize: 1, hasMore: false }),
+        });
+      }
+      return route.abort();
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "Guest list" }).click();
+
+    await expect(page.getByText(/Offline — showing the list saved/)).toBeVisible({
+      timeout: 30_000,
+    });
+    // The point: names, not an empty screen. Someone with a dead phone is
+    // still findable.
+    await expect(page.getByText("Bo Mensah").first()).toBeVisible();
+    await expect(page.getByText("Ada Okonkwo")).toBeVisible();
   });
 
   test("the gate tells three different problems apart", async ({ page }) => {

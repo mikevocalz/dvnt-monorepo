@@ -23,18 +23,32 @@
  * handled here.
  */
 
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { create } from "zustand";
 import { Search, Check } from "lucide-react";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { qk } from "@dvnt/app/lib/query/keys";
+import {
+  snapshotRoster,
+  recallRoster,
+  type CachedGuest,
+} from "./door-roster-cache.web";
 
 const ROSTER_CEILING = 200;
 
-/** One roster query key, so the progress bar and the list cannot disagree. */
-export const doorRosterKey = (eventId: string) =>
-  ["door-roster", eventId] as const;
+/**
+ * The registry's roster key, not a private one.
+ *
+ * This used to be `["door-roster", eventId]`. `useScanTicket` invalidates
+ * `qk.tickets.roster(eventId)` on every successful check-in — a different key
+ * — so the guest list and the progress bar never refreshed after a scan. At a
+ * door that means checking someone in from the camera and still seeing them in
+ * "Not in yet", and a "still outside" count that only ever goes down when the
+ * 30s staleTime happens to expire.
+ */
+export const doorRosterKey = (eventId: string) => qk.tickets.roster(eventId);
 const ROW_ESTIMATE = 68;
 
 type Filter = "all" | "in" | "out";
@@ -95,10 +109,29 @@ export function DoorGuestList({
     staleTime: 30_000,
   });
 
-  const tickets = useMemo(
-    () => (data?.tickets ?? []).filter((t) => t.status !== "void"),
-    [data],
-  );
+  /**
+   * Live roster when there is one, the device's last snapshot when there is
+   * not. A door with no signal and a reloaded phone otherwise has an empty
+   * list and no way to look anyone up.
+   */
+  const cached = useMemo(() => (isError ? recallRoster(eventId) : null), [isError, eventId]);
+
+  const tickets = useMemo(() => {
+    const live = (data?.tickets ?? []).filter((t) => t.status !== "void");
+    if (live.length) return live;
+    // CachedGuest carries only the fields this list renders; the cast keeps
+    // the row component honest about what it may read.
+    return (cached?.guests ?? []).filter(
+      (g) => g.status !== "void",
+    ) as unknown as TicketRecord[];
+  }, [data, cached]);
+
+  // Snapshot every successful read, so the fallback is never older than the
+  // last time this phone had signal.
+  useEffect(() => {
+    const live = (data?.tickets ?? []).filter((t) => t.status !== "void");
+    if (live.length) snapshotRoster(eventId, live);
+  }, [data, eventId]);
 
   const counts = useMemo(() => {
     const checkedIn = tickets.filter((t) => !!t.checked_in_at).length;
@@ -172,6 +205,14 @@ export function DoorGuestList({
 
   return (
     <section className="mt-3">
+      {cached && tickets.length ? (
+        <p role="status" className="mb-2 rounded-lg bg-[#FEF3C7] px-3 py-2 text-[12px] font-medium text-[#78350F]">
+          Offline — showing the list saved{" "}
+          {Math.max(1, Math.round((Date.now() - cached.at) / 60_000))} min ago.
+          Check-ins from other phones since then are not in it.
+        </p>
+      ) : null}
+
       <label className="flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
         <Search size={16} color="rgba(255,255,255,0.45)" aria-hidden />
         <span className="sr-only">Search guests</span>
@@ -197,7 +238,7 @@ export function DoorGuestList({
         <p role="status" className="py-10 text-center text-[14px] text-white/55">
           Loading tonight&rsquo;s guests…
         </p>
-      ) : isError ? (
+      ) : isError && !tickets.length ? (
         <div role="status" className="py-8 text-center">
           <p className="text-[14px] text-white/75">
             Couldn&rsquo;t load the guest list. Scanning still works.

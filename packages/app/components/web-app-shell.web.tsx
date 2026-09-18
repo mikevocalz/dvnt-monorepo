@@ -59,9 +59,22 @@ export function WebAppShell({
           resolved by the browser after the HTML is already correct. */}
       <Main
         className={
-          ownsHeader || publicChrome
-            ? undefined
-            : "pt-[env(safe-area-inset-top)] md:pt-0"
+          // Bottom clearance for EVERY app screen, not per page.
+          //
+          // The phone tab bar is fixed, so the last thing on any screen sits
+          // under it — the dashboard's final row, the scanner's recent-scans
+          // list, a guest list's last attendee. Each screen was left to
+          // remember its own padding and none of them did. `lg:` drops it
+          // because the desktop rail is a sidebar, not a bottom bar, and the
+          // safe-area term carries the home indicator on notched phones.
+          [
+            ownsHeader || publicChrome
+              ? ""
+              : "pt-[env(safe-area-inset-top)] md:pt-0",
+            "pb-[calc(env(safe-area-inset-bottom)+88px)] lg:pb-10",
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined
         }
         style={
           ownsHeader ? undefined : publicChrome ? styles.contentPublic : undefined
