@@ -1315,9 +1315,23 @@ export function EventDetailScreen() {
             }
 
             if (hasTicket) {
+              // Route by TICKET id, not event id.
+              //
+              // `/feed/ticket/:id` accepts either, but an integer is read as an
+              // event and `resolveTicketRoute` answers `{kind: "group"}` for
+              // anyone holding more than one pass. The web pass screen only
+              // unwraps `kind: "ticket"`, so a group resolved to undefined and
+              // rendered "Ticket Not Found · This ticket may have been
+              // removed" — to 24 of the 70 people coming on Friday, about
+              // their perfectly valid tickets. `myTicketData` is the group's
+              // display representative, so this opens a real pass; the picker
+              // native already has is the proper fix.
+              const ticketPath = myTicketData?.id
+                ? `/feed/ticket/${myTicketData.id}`
+                : `/feed/ticket/${eventId}`;
               return (
                 <button
-                  onClick={() => router.push(`/feed/ticket/${eventId}`)}
+                  onClick={() => router.push(ticketPath)}
                   className="w-full mt-4 h-12 rounded-xl bg-white/10 text-white font-bold flex items-center justify-center gap-2"
                 >
                   <Ticket size={18} color="#379ED8" /> View ticket

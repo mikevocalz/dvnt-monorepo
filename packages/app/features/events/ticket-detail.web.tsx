@@ -50,6 +50,7 @@ import {
   Star,
   Ticket as TicketIcon,
   TicketX,
+  WifiOff,
   XCircle,
 } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
@@ -172,6 +173,12 @@ export function TicketDetailScreen() {
    */
   const route = useTicketRoute(rawId);
   const isLoading = route.isLoading;
+  // A failed read is NOT a missing ticket. Reading only `isLoading` meant a
+  // 500, a dropped connection or an expired session all rendered "Ticket Not
+  // Found · This ticket may have been removed" — to someone standing in a
+  // queue holding a valid pass. Native already says the opposite, and says it
+  // for the right reason: the pass is safe, the network is not.
+  const isReadFailure = route.isError;
   const dbTicket =
     route.resolution.kind === "ticket" ? route.resolution.ticket : undefined;
   const storeTicket = useTicketStore((s) => s.getTicketByEventId(routeId));
@@ -508,17 +515,41 @@ export function TicketDetailScreen() {
           <h1 className="flex-1 text-[17px] font-semibold">Ticket</h1>
         </div>
         <div className="flex flex-col items-center justify-center px-8 py-32 text-center">
-          <TicketX size={56} color="rgba(255,255,255,0.2)" />
-          <p className="mt-4 text-xl font-bold text-white">Ticket Not Found</p>
-          <p className="mt-1 max-w-xs text-sm text-white/40">
-            This ticket may have been removed or is no longer available.
-          </p>
-          <button
-            onClick={() => router.back()}
-            className="mt-6 rounded-full bg-cyan-500 px-6 py-2.5 text-sm font-semibold text-black"
-          >
-            Go Back
-          </button>
+          {isReadFailure ? (
+            <>
+              <WifiOff size={56} color="rgba(255,255,255,0.2)" />
+              <p className="mt-4 text-xl font-bold text-white">
+                Your pass is safe
+              </p>
+              <p className="mt-1 max-w-xs text-sm text-white/40">
+                We couldn&rsquo;t reach the server to load it. Check your
+                connection and try again.
+              </p>
+              <button
+                onClick={() => route.refetch()}
+                disabled={route.isRefetching}
+                className="mt-6 rounded-full bg-cyan-500 px-6 py-2.5 text-sm font-semibold text-black disabled:opacity-50"
+              >
+                {route.isRefetching ? "Trying…" : "Try again"}
+              </button>
+            </>
+          ) : (
+            <>
+              <TicketX size={56} color="rgba(255,255,255,0.2)" />
+              <p className="mt-4 text-xl font-bold text-white">
+                Ticket Not Found
+              </p>
+              <p className="mt-1 max-w-xs text-sm text-white/40">
+                This ticket may have been removed or is no longer available.
+              </p>
+              <button
+                onClick={() => router.back()}
+                className="mt-6 rounded-full bg-cyan-500 px-6 py-2.5 text-sm font-semibold text-black"
+              >
+                Go Back
+              </button>
+            </>
+          )}
         </div>
       </div>
     );

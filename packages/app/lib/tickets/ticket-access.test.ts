@@ -185,3 +185,31 @@ test("listable is deliberately wider than admissible", () => {
   );
   assert.deepEqual(listedButRefused, ["refunded", "transfer_pending"]);
 });
+
+test("the door's four tabs partition the roster with no ticket in two places", () => {
+  const roster = [
+    { status: "active", checked_in_at: null },
+    { status: "active", checked_in_at: "2026-09-20T02:10:00Z" },
+    { status: "scanned", checked_in_at: "2026-09-20T02:11:00Z" },
+    { status: "refunded", checked_in_at: null },
+    { status: "transfer_pending", checked_in_at: null },
+  ];
+  const inTab = (f: string, t: (typeof roster)[number]) => {
+    const ok = isAdmissible(t.status);
+    if (f === "refunded" ? ok : !ok) return false;
+    if (f === "in" && !t.checked_in_at) return false;
+    if (f === "out" && t.checked_in_at) return false;
+    return true;
+  };
+  assert.equal(roster.filter((t) => inTab("all", t)).length, 3);
+  assert.equal(roster.filter((t) => inTab("in", t)).length, 2);
+  assert.equal(roster.filter((t) => inTab("out", t)).length, 1);
+  assert.equal(roster.filter((t) => inTab("refunded", t)).length, 2);
+  // "in" + "out" must reconstruct "all" exactly — a head count that disagrees
+  // with the two halves is how a door loses track of the queue.
+  assert.equal(
+    roster.filter((t) => inTab("in", t)).length +
+      roster.filter((t) => inTab("out", t)).length,
+    roster.filter((t) => inTab("all", t)).length,
+  );
+});

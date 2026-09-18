@@ -52,7 +52,17 @@ const ROSTER_CEILING = 200;
 export const doorRosterKey = (eventId: string) => qk.tickets.roster(eventId);
 const ROW_ESTIMATE = 68;
 
-type Filter = "all" | "in" | "out";
+type Filter = "all" | "in" | "out" | "refunded";
+
+/**
+ * Why the refunded passes on this door exist.
+ *
+ * Staff get asked. Without an answer the row reads as an accusation, and the
+ * honest one is administrative rather than anything the guest did — so it is
+ * stated once, above the list, in the organiser's words.
+ */
+const REFUNDED_EXPLANATION =
+  "Prior event cancellation/double creation/merger";
 
 interface GuestListState {
   query: string;
@@ -152,6 +162,7 @@ export function DoorGuestList({
       all: admissible.length,
       in: checkedIn,
       out: admissible.length - checkedIn,
+      refunded: tickets.filter((t) => !isAdmissible(t.status)).length,
     };
   }, [tickets]);
 
@@ -184,6 +195,11 @@ export function DoorGuestList({
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return tickets.filter((t) => {
+      // Refunded passes live in their own tab. They used to sit in All, where
+      // a door counting heads had no way to tell them from guests who were
+      // actually coming.
+      const admissible = isAdmissible(t.status);
+      if (filter === "refunded" ? admissible : !admissible) return false;
       if (filter === "in" && !t.checked_in_at) return false;
       if (filter === "out" && t.checked_in_at) return false;
       if (!q) return true;
@@ -249,7 +265,18 @@ export function DoorGuestList({
         {chip("all", "All", counts.all)}
         {chip("in", "Checked in", counts.in)}
         {chip("out", "Not in yet", counts.out)}
+        {/* Only when there are any. An empty Refunded tab is a question staff
+            do not need to answer at a door. */}
+        {counts.refunded > 0 ? chip("refunded", "Refunded", counts.refunded) : null}
       </div>
+
+      {filter === "refunded" ? (
+        <p className="mt-2 rounded-lg bg-white/[0.06] px-3 py-2 text-[12px] leading-relaxed text-white/70">
+          These passes were refunded and cannot be checked in.
+          <br />
+          <span className="text-white/50">{REFUNDED_EXPLANATION}</span>
+        </p>
+      ) : null}
 
       {isLoading ? (
         <p role="status" className="py-10 text-center text-[14px] text-white/55">
@@ -276,7 +303,9 @@ export function DoorGuestList({
               ? "Nobody checked in yet."
               : filter === "all"
                 ? "No guests on the list yet."
-                : "Everyone here is checked in."}
+                : filter === "refunded"
+                  ? "No refunded passes on this event."
+                  : "Everyone here is checked in."}
         </p>
       ) : (
         <div
