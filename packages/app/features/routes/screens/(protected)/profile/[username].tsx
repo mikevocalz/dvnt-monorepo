@@ -1063,11 +1063,15 @@ function UserProfileScreenComponent() {
                       <Text
                         className={`font-semibold ${isFollowing ? "text-secondary-foreground" : "text-primary-foreground"}`}
                       >
+                        {/* Same state-labelled control as web: the pending text
+                            is the state being moved TO, not one already
+                            reached. Native and web must not drift here — they
+                            share followButtonLabel for exactly that reason. */}
                         {followMutation.isPending
                           ? followVars?.action === "follow"
-                            ? "Now Following"
-                            : "Unfollowing..."
-                          : followButtonLabel({ isFollowing, followsYou: (resolvedUserData as any)?.followsYou })}
+                            ? "Following…"
+                            : "Not Following…"
+                          : followButtonLabel({ isFollowing })}
                       </Text>
                     </Motion.View>
                   </Motion.Pressable>

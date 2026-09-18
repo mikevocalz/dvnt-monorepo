@@ -326,6 +326,14 @@ export function UserProfileScreen() {
                 the VIP tier". Free renders nothing. */}
             <TierBadge plan={badgeTier} size={14} />
             <ProfilePronounsPill pronouns={user?.pronouns} inline />
+            {/* The relationship the button no longer carries. It used to live
+                in a "Follow Back" label, which meant the only way to learn
+                someone follows you was to read a control about yourself. */}
+            {user?.followsYou && !isOwnProfile ? (
+              <span className="rounded-md bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white/70">
+                Follows you
+              </span>
+            ) : null}
           </div>
           {user?.bio ? (
             <p className="mt-1 text-sm text-white/90 whitespace-pre-line">{user.bio}</p>
@@ -341,11 +349,14 @@ export function UserProfileScreen() {
               isFollowing ? "bg-white/8 text-white" : "bg-[#3EA4E5] text-white"
             }`}
           >
+            {/* While the request is in flight the control shows the state it is
+                MOVING TO, not one it has reached — "Now Following" claimed the
+                server had agreed before it answered. */}
             {isFollowPending
               ? followVars?.action === "follow"
-                ? "Now Following"
-                : "Unfollowing..."
-              : followButtonLabel({ isFollowing, followsYou: user?.followsYou })}
+                ? "Following…"
+                : "Not Following…"
+              : followButtonLabel({ isFollowing })}
           </button>
           <button
             onClick={handleMessagePress}
