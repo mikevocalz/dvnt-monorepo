@@ -46,7 +46,7 @@ interface CreatePostBody {
   expectedAuthorId?: string;
   content?: string;
   kind?: "media" | "text";
-  textTheme?: "graphite" | "cobalt" | "ember" | "sage";
+  textTheme?: "graphite" | "deviant" | "cobalt" | "ember" | "sage";
   slides?: string[];
   location?: string;
   isNSFW?: boolean;
@@ -132,7 +132,14 @@ Deno.serve(async (req) => {
     const normalizedVisibility = visibility || "public";
     const normalizedIsNsfw = Boolean(isNSFW);
     const normalizedTheme =
-      textTheme && ["graphite", "cobalt", "ember", "sage"].includes(textTheme)
+      // `deviant` was missing here, so the theme the picker shows SECOND fell
+      // through to the else and was written as graphite — silently, with no
+      // error, which is why it read as "the theme didn't stick". Keep this list
+      // in step with TEXT_POST_THEMES, the posts_text_theme_check constraint,
+      // and create_post_with_dedupe; all four have to agree or the quietest one
+      // wins.
+      textTheme &&
+      ["graphite", "deviant", "cobalt", "ember", "sage"].includes(textTheme)
         ? textTheme
         : "graphite";
     const normalizedSlides =
