@@ -76,6 +76,9 @@ export function LoginScreen() {
           if (profile) {
             setUser({
               id: profile.id,
+              // Ticket rows are stamped with this, not with `id`. Dropping it here
+              // left every holder's CTA reading "RSVP" until the next page load.
+              authId: profile.authId,
               email: profile.email,
               username: profile.username,
               name: profile.name,

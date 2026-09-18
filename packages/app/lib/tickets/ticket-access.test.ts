@@ -106,3 +106,55 @@ test("a missing ticket is refused", () => {
   );
   assert.deepEqual([...pendingTransferTicketIds(null)], []);
 });
+
+// ── The production shape, which every test above misses by using one synthetic
+// id on both sides. `tickets.user_id` is stamped with the Better Auth id
+// (ticket-checkout/index.ts:137 → :366, and issue_rsvp_ticket's p_user_auth_id),
+// while the auth store's `user.id` is the users-table integer. All 304 ticket
+// rows in production carry the auth-id form, so comparing against `user.id`
+// alone refuses every real holder.
+const AUTH_ID = "pKa8v6movw4tdx0uhVN9v2IPiAEwD7ug";
+const USERS_ROW_ID = "613";
+
+test("a pass stamped with the auth id belongs to the viewer holding that auth id", () => {
+  const a = resolveTicketAccess({
+    ticket: ticket({ user_id: AUTH_ID }),
+    viewerId: USERS_ROW_ID,
+    viewerAuthId: AUTH_ID,
+  });
+  assert.equal(a.isHolder, true);
+  assert.equal(a.canShowCredential, true);
+  assert.equal(a.denial, null);
+});
+
+test("a legacy pass stamped with the users-table id still resolves", () => {
+  const a = resolveTicketAccess({
+    ticket: ticket({ user_id: USERS_ROW_ID }),
+    viewerId: USERS_ROW_ID,
+    viewerAuthId: AUTH_ID,
+  });
+  assert.equal(a.isHolder, true);
+  assert.equal(a.canShowCredential, true);
+});
+
+test("another member's auth id is still refused when both ids are known", () => {
+  const a = resolveTicketAccess({
+    ticket: ticket({ user_id: "someone-elses-auth-id" }),
+    viewerId: USERS_ROW_ID,
+    viewerAuthId: AUTH_ID,
+  });
+  assert.equal(a.canShowCredential, false);
+  assert.equal(a.denial, "not-holder");
+});
+
+test("a missing auth id never widens the match to anything falsy", () => {
+  for (const user_id of ["", null, undefined]) {
+    const a = resolveTicketAccess({
+      ticket: ticket({ user_id }),
+      viewerId: USERS_ROW_ID,
+      viewerAuthId: undefined,
+    });
+    assert.equal(a.canShowCredential, false, String(user_id));
+    assert.equal(a.denial, "not-holder", String(user_id));
+  }
+});

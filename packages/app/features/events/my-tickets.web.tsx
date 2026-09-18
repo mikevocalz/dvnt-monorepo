@@ -48,6 +48,7 @@ import {
   ticketKeys,
   useMyTickets,
   usePendingTransfers,
+  useTicketViewerAuthId,
   useTicketViewerId,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { qk } from "@dvnt/app/lib/query/keys";
@@ -118,6 +119,7 @@ function TicketCard({
   ticket,
   addonCount = 0,
   viewerId,
+  viewerAuthId,
   transferringTicketIds,
 }: {
   ticket: TicketRecord;
@@ -125,11 +127,14 @@ function TicketCard({
   addonCount?: number;
   /** `useTicketViewerId()` — "anon" when signed out. */
   viewerId: string;
+  /** `useTicketViewerAuthId()` — the id the pass is stamped with. */
+  viewerAuthId?: string;
   transferringTicketIds: ReadonlySet<string>;
 }) {
   const access = resolveTicketAccess({
     ticket,
     viewerId,
+    viewerAuthId,
     transferringTicketIds,
   });
   const status =
@@ -319,6 +324,7 @@ export function MyTicketsScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const viewerId = useTicketViewerId();
+  const viewerAuthId = useTicketViewerAuthId();
   const motionTier = useMotionTier();
   const { data: tickets, isLoading, isError, refetch } = useMyTickets();
 
@@ -524,6 +530,7 @@ export function MyTicketsScreen() {
                       <TicketCard
                         ticket={row.ticket}
                         viewerId={viewerId}
+                        viewerAuthId={viewerAuthId}
                         transferringTicketIds={transferringTicketIds}
                         addonCount={
                           addonCountByEvent.get(String(row.ticket.event_id)) ??

@@ -38,6 +38,25 @@ export function useTicketViewerId(): string {
 }
 
 /**
+ * The Better Auth id, which is what `tickets.user_id` is stamped with — NOT
+ * the same value as `useTicketViewerId()`, which is the users-table integer.
+ *
+ * Two shapes reach the store. `loadAuthState` merges `syncAuthUser()` and so
+ * carries `authId`; the hand-copied `setUser` literals at login and signup
+ * historically dropped it, which leaves `user.id` as the only id present. When
+ * that id is non-numeric it IS the auth id, so fall back to it rather than
+ * returning null and failing an ownership check closed.
+ */
+export function useTicketViewerAuthId(): string | undefined {
+  return useAuthStore((s) => {
+    const user = s.user;
+    if (!user) return undefined;
+    if (user.authId) return user.authId;
+    return /^\d+$/.test(String(user.id)) ? undefined : String(user.id);
+  });
+}
+
+/**
  * Legacy alias kept so existing call sites keep compiling. New code should use
  * `qk.tickets` directly — `lib/query/keys.ts` is the single key registry.
  *

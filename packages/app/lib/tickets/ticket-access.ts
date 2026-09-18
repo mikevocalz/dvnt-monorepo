@@ -62,23 +62,51 @@ export function pendingTransferTicketIds(
 }
 
 /**
+ * Does this stamp name this viewer, in either id namespace?
+ *
+ * Empty strings are dropped on BOTH sides before comparing, so an unstamped
+ * ticket can never match a viewer whose auth id is merely unknown.
+ */
+function isHeldBy(
+  stamp: unknown,
+  viewerId: string,
+  viewerAuthId: string | null | undefined,
+): boolean {
+  const held = String(stamp ?? "");
+  if (held.length === 0) return false;
+  return held === String(viewerId) || (!!viewerAuthId && held === String(viewerAuthId));
+}
+
+/**
  * Resolve one pass against one viewer.
  *
  * `tickets` from `get-my-tickets` are already server-scoped to the session, so
  * the holder check is defence in depth — it catches a cache that outlived a
  * logout or an account switch, which is exactly when a credential would leak.
+ *
+ * A viewer has TWO ids and the check has to know both. `tickets.user_id` is an
+ * untyped text column with no FK, and it is stamped with the Better Auth id:
+ * ticket-checkout writes `verifySession().userId`, and the RSVP rail writes
+ * `p_user_auth_id`. The auth store's `user.id`, meanwhile, is the users-table
+ * integer as a string — `auth-helper.ts` says so outright, and
+ * `getCurrentUserId()` treats an auth id there as a bug. So `viewerId` alone
+ * matches nothing a holder actually owns; `get-my-tickets` itself queries
+ * `user_id IN (authId, legacyUsersRowId)` for the same reason.
  */
 export function resolveTicketAccess(input: {
   ticket: Pick<TicketRecord, "id" | "user_id" | "status"> | null | undefined;
+  /** The users-table row id — also the ticket cache's bucket. */
   viewerId: string | null | undefined;
+  /** The Better Auth id, which is what the ticket row is actually stamped with. */
+  viewerAuthId?: string | null | undefined;
   /** From `pendingTransferTicketIds(usePendingTransfers().data)`. */
   transferringTicketIds?: ReadonlySet<string>;
 }): TicketAccess {
-  const { ticket, viewerId, transferringTicketIds } = input;
+  const { ticket, viewerId, viewerAuthId, transferringTicketIds } = input;
 
   if (!ticket) return DENY("not-holder");
   if (!viewerId || viewerId === ANON_VIEWER_ID) return DENY("signed-out");
-  if (!ticket.user_id || String(ticket.user_id) !== String(viewerId))
+  if (!isHeldBy(ticket.user_id, viewerId, viewerAuthId))
     return DENY("not-holder");
 
   const midTransfer =

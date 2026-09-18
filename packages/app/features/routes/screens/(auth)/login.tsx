@@ -100,6 +100,7 @@ export default function LoginScreen() {
             if (__DEV__) console.log("[Login] Profile loaded, ID:", profile.id);
             setUser({
               id: profile.id,
+              authId: profile.authId,
               email: profile.email,
               username: profile.username,
               name: profile.name,

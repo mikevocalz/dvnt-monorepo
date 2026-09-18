@@ -234,6 +234,7 @@ export function SignUpStep2() {
       if (profile) {
         setUser({
           id: profile.id,
+          authId: profile.authId,
           email: profile.email,
           username: profile.username,
           name:

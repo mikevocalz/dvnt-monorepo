@@ -79,7 +79,7 @@ export function SignupScreen() {
           if (data?.user) {
             let profile: any;
             try { profile = await syncAuthUser(); } catch { profile = await auth.getProfile(data.user.id, data.user.email); }
-            if (profile) setUser({ id: profile.id, email: profile.email, username: profile.username, name: profile.name, avatar: profile.avatar || '', bio: profile.bio || '', website: (profile as any).website || '', location: profile.location || '', hashtags: (profile as any).hashtags || [], isVerified: profile.isVerified, postsCount: profile.postsCount, followersCount: profile.followersCount, followingCount: profile.followingCount });
+            if (profile) setUser({ id: profile.id, authId: profile.authId, email: profile.email, username: profile.username, name: profile.name, avatar: profile.avatar || '', bio: profile.bio || '', website: (profile as any).website || '', location: profile.location || '', hashtags: (profile as any).hashtags || [], isVerified: profile.isVerified, postsCount: profile.postsCount, followersCount: profile.followersCount, followingCount: profile.followingCount });
             setActiveStep(2);
             navigate({ to: '/auth/verify-email' });
           }

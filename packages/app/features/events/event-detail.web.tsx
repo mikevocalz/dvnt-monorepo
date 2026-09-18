@@ -69,6 +69,7 @@ import { OrganizerCard } from "./ui/OrganizerCard.web";
 import {
   useTicketTypes,
   useMyTicketStatusForEvent,
+  useTicketViewerAuthId,
   useTicketViewerId,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
@@ -505,6 +506,8 @@ export function EventDetailScreen() {
   // Who is reading this page, per the auth store — `"anon"` when signed out.
   // Native's `(protected)/events/[id]/index.tsx` holds the same value.
   const viewerId = useTicketViewerId();
+  // The id the pass is actually stamped with — see useTicketViewerAuthId.
+  const viewerAuthId = useTicketViewerAuthId();
   // The CTA below routes to `/feed/ticket/:id`, which renders a QR credential,
   // so "do they hold a pass" is an authorization question, not a status string.
   // `status === "active" || "scanned"` answered it without ever asking WHOSE
@@ -516,6 +519,7 @@ export function EventDetailScreen() {
   const ticketAccess = resolveTicketAccess({
     ticket: myTicketData ?? null,
     viewerId,
+    viewerAuthId,
   });
   const hasTicket = ticketAccess.canShowCredential;
 
