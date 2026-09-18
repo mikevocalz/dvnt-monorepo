@@ -29,7 +29,7 @@
  * Navigation via Solito; id via useParams.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { DismissOverlayButton } from "@dvnt/app/components/ui/card-link.web";
 import { useParams, useRouter } from "solito/navigation";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
@@ -364,7 +364,8 @@ function ScannerActive({ eventId }: { eventId: string }) {
   const recordHistory = useScannerStore((s) => s.recordHistory);
   const reset = useScannerStore((s) => s.reset);
 
-  const [manualToken, setManualToken] = useState("");
+  const manualToken = useScannerStore((s) => s.manualToken);
+  const setManualToken = useScannerStore((s) => s.setManualToken);
   const lastScannedRef = useRef<string>("");
   const cooldownRef = useRef(false);
 
@@ -546,9 +547,14 @@ function ScannerActive({ eventId }: { eventId: string }) {
 
   return (
     <main className="relative mx-auto w-full max-w-xl px-4 py-4">
-      {/* Camera / QR surface (kit, html5-qrcode on web) */}
+      {/* Camera / QR surface — the kit QrScanner, expo-camera's CameraView. */}
       <div className="relative">
-        <QrScanner onScan={handleToken} oneShot={false} />
+        {/* `paused` stops the decode loop while a verdict is up. Without it the
+            card from the previous guest is still on screen while the NEXT
+            guest's code is already being decoded behind it — the stale-card
+            failure, and the most dangerous one per guest. The camera itself
+            stays live, so resuming costs nothing. */}
+        <QrScanner onScan={handleToken} oneShot={false} paused={!!scanResult} />
         {/* Scan frame guide. */}
         <div
           className="pointer-events-none absolute inset-0 flex items-center justify-center"

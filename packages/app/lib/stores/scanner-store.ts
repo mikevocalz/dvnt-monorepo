@@ -52,6 +52,13 @@ interface ScannerState {
   scanResult: ScanResult | null
   scanCount: number
   scanHistory: ScanHistoryEntry[]
+  /**
+   * The typed-code fallback's field. Here rather than in a useState because
+   * the project rule is Zustand for screen state — and because the door needs
+   * it to survive the verdict overlay mounting over the input.
+   */
+  manualToken: string
+  setManualToken: (value: string) => void
   setScanResult: (result: ScanResult | null) => void
   clearResult: () => void
   recordSuccess: (entry: Omit<ScanHistoryEntry, "id" | "type" | "timestamp">) => void
@@ -63,6 +70,8 @@ export const useScannerStore = create<ScannerState>((set) => ({
   scanResult: null,
   scanCount: 0,
   scanHistory: [],
+  manualToken: "",
+  setManualToken: (manualToken) => set({ manualToken }),
   setScanResult: (scanResult) => set({ scanResult }),
   clearResult: () => set({ scanResult: null }),
   recordSuccess: (entry) =>
@@ -91,5 +100,6 @@ export const useScannerStore = create<ScannerState>((set) => ({
         ...s.scanHistory,
       ].slice(0, 50),
     })),
-  reset: () => set({ scanResult: null, scanCount: 0, scanHistory: [] }),
+  reset: () =>
+    set({ scanResult: null, scanCount: 0, scanHistory: [], manualToken: "" }),
 }))
