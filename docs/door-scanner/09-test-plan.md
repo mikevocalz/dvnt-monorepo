@@ -40,7 +40,7 @@ iPhone width.
 WebKit, so iOS Safari is untested end to end: the permission prompt, torch and
 zoom capability, stream recovery after backgrounding, Wake Lock, and the
 Home-Screen web app's separate storage. WS-4 is the only thing that covers
-these.
+these; the pass is scripted in `11-iphone-rehearsal.md`.
 
 **The self-hosted WASM path on Chrome.** Chrome ships a native
 `BarcodeDetector` with `qr_code`, so it never loads our WASM. The e2e deletes
