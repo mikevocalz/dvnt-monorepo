@@ -83,6 +83,14 @@ async function stubEvent(page: Page) {
   );
 }
 
+/** Navigate and wait for the scanner to be live, not merely routed. */
+async function gotoLobbyScanner(page: Page) {
+  await page.goto(SCANNER_URL);
+  await expect(page.getByRole("heading", { name: "Scanner" })).toBeVisible({
+    timeout: 60_000,
+  });
+}
+
 test.describe("door scanner", () => {
   // The scanner route is a client screen behind a role gate; a cold compile of
   // it plus expo-camera plus the WASM does not fit the suite's default budget.
@@ -154,6 +162,39 @@ test.describe("door scanner", () => {
       timeout: 60_000,
     });
     await expect(page.locator('[data-qr-engine="modern"]')).toHaveCount(0);
+  });
+
+  test("going offline queues the scan and says so, then drains on reconnect", async ({
+    page,
+    context,
+  }) => {
+    await stubEvent(page);
+    await stubStaffRole(page);
+    const scanCalls = await stubAdmittingScan(page);
+
+    await gotoLobbyScanner(page);
+    await expect(page.getByText("Checked In!")).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("button", { name: /dismiss scan result/i }).click();
+
+    // The venue's signal drops mid-shift. Scanning must keep working, and the
+    // row has to say what happened to the scans — a door that silently queues
+    // is indistinguishable from one that silently loses them.
+    await context.setOffline(true);
+    await page.evaluate(() => window.dispatchEvent(new Event("offline")));
+    await expect(page.getByRole("status").filter({ hasText: /Offline/ })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Back online: the row must return to a non-offline state by itself. This
+    // is the wiring that did not exist on web at all — initOfflineScanAutoDrain
+    // is only ever called from the native root layout.
+    const before = scanCalls();
+    await context.setOffline(false);
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect(
+      page.getByRole("status").filter({ hasText: /Offline/ }),
+    ).toHaveCount(0, { timeout: 20_000 });
+    expect(scanCalls()).toBeGreaterThanOrEqual(before);
   });
 
   test("the gate tells three different problems apart", async ({ page }) => {

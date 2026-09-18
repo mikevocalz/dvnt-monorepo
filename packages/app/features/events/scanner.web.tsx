@@ -37,6 +37,11 @@ import {
   rememberDoorRole,
   recallDoorRole,
 } from "@dvnt/app/lib/events/confirmed-door-role";
+import {
+  useDoorOfflineKit,
+  useDoorSyncStore,
+  type DoorSyncPhase,
+} from "./door-offline-kit.web";
 import { canScanTickets } from "@dvnt/app/lib/events/event-role";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -358,6 +363,9 @@ function ScannerActive({ eventId }: { eventId: string }) {
   const scanMutation = useScanTicket();
   const offlineStore = useOfflineCheckinStore();
   const hasOfflineData = offlineStore.hasOfflineData(eventId);
+  const { queued } = useDoorOfflineKit(eventId);
+  const syncPhase = useDoorSyncStore((s) => s.phase);
+  const listUpdatedAt = useDoorSyncStore((s) => s.listUpdatedAt);
 
   const scanResult = useScannerStore((s) => s.scanResult);
   const scanCount = useScannerStore((s) => s.scanCount);
@@ -576,6 +584,8 @@ function ScannerActive({ eventId }: { eventId: string }) {
         ) : null}
       </div>
 
+      <DoorSyncRow phase={syncPhase} queued={queued} listUpdatedAt={listUpdatedAt} />
+
       {/* Manual entry — type / paste a ticket token at the door. */}
       <div className="mt-4 flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
         <ScanLine size={16} color="rgba(255,255,255,0.45)" />
@@ -703,6 +713,57 @@ function GatePanel({
         </div>
       ) : null}
     </main>
+  );
+}
+
+/**
+ * What the door's connection is doing, in one line it can ignore.
+ *
+ * Deliberately not an alert and never a blocker: scanning works in every one
+ * of these states, and a row that shouts would train staff to dismiss it. It
+ * is `role="status"` so a screen reader hears the change without losing focus
+ * (05-a11y.md, 4.1.3), and each phase carries a word plus a dot rather than a
+ * colour alone.
+ */
+function DoorSyncRow({ phase, queued, listUpdatedAt }: {
+  phase: DoorSyncPhase;
+  queued: number;
+  listUpdatedAt: number | null;
+}) {
+  const minutesAgo =
+    listUpdatedAt === null ? null : Math.floor((Date.now() - listUpdatedAt) / 60_000);
+
+  const { dot, text } =
+    phase === "offline"
+      ? {
+          dot: "bg-[#F59E0B]",
+          text:
+            queued > 0
+              ? `Offline — ${queued} ${queued === 1 ? "scan" : "scans"} queued`
+              : "Offline — scans will queue until signal returns",
+        }
+      : phase === "syncing"
+        ? { dot: "bg-[#3FDCFF]", text: "Syncing…" }
+        : phase === "synced"
+          ? { dot: "bg-[#22C55E]", text: "Synced" }
+          : {
+              dot: "bg-[#22C55E]",
+              text:
+                minutesAgo === null
+                  ? "Online"
+                  : minutesAgo < 1
+                    ? "Online · list updated just now"
+                    : `Online · list updated ${minutesAgo} min ago`,
+            };
+
+  return (
+    <p
+      role="status"
+      className="mt-3 flex items-center gap-2 text-[12px] text-white/55"
+    >
+      <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+      {text}
+    </p>
   );
 }
 
