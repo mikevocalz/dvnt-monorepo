@@ -13,6 +13,7 @@ import { useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter, usePathname } from "solito/navigation";
 import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
+import { computeFees } from "@dvnt/app/lib/stripe/fee-calculator";
 import { formatEventTime } from "@dvnt/app/lib/events/event-time";
 import {
   ArrowLeft,
@@ -1636,7 +1637,17 @@ export function EventDetailScreen() {
                       disabled={soldOut || hasTicket}
                       onClick={() => {
                         if (!isAuthenticated) {
-                          if (price > 0 && live) {
+                          // Branch on the TAPPED TIER's price, not the event's.
+                          //
+                          // `!e.price` asked whether the EVENT was free. An
+                          // event with a $25 tier and a $0 tier has
+                          // `price = 25`, so tapping the free tier fell to the
+                          // final else and threw a logged-out visitor at a
+                          // login wall — on the tier 107 of this event's 110
+                          // guests actually used, from a screen whose own
+                          // comment says "Public events, logged out → guest
+                          // flow, NEVER /login."
+                          if (priceCents > 0 && live) {
                             openGuestCheckout({
                               eventId,
                               eventTitle: e.title ?? "Event",
@@ -1644,7 +1655,7 @@ export function EventDetailScreen() {
                               tierName: live.name ?? t.name ?? "Ticket",
                               priceCents: live.price_cents,
                             });
-                          } else if (!e.price) {
+                          } else if (priceCents === 0) {
                             openGuestRsvp(eventId, e.title ?? "Event");
                           } else {
                             router.push(loginPathWithReturn(pathname));
@@ -2470,7 +2481,15 @@ function CheckoutSheet({
   const discountCents = appliedPromo
     ? computePromoDiscountCents(appliedPromo.type, appliedPromo.value, subtotalCents, qty)
     : 0;
-  const totalCents = Math.max(0, subtotalCents - discountCents) + addonPreviewCents;
+  const goodsCents = Math.max(0, subtotalCents - discountCents) + addonPreviewCents;
+  // The buyer fee is part of what Stripe charges, so it has to be part of what
+  // this sheet says. It showed "Pay $25.00" and the card was debited $26.63 —
+  // computeFees(2500, 1) is 2.5% + $1.00 per ticket — and three people were
+  // charged that way today. checkout-review has always added it; the sheet
+  // that precedes it did not, so the two screens quoted different prices for
+  // the same order.
+  const feeCents = goodsCents > 0 ? computeFees(goodsCents, qty).buyer_fee : 0;
+  const totalCents = goodsCents + feeCents;
   const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 
   const applyPromo = async () => {
@@ -2600,6 +2619,12 @@ function CheckoutSheet({
                 <span className="text-sm text-[#379ED8]">−{money(discountCents)}</span>
               </div>
             </>
+          ) : null}
+          {feeCents > 0 ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-white/55">Service fee</span>
+              <span className="text-sm text-white/80">{money(feeCents)}</span>
+            </div>
           ) : null}
           <div className="flex items-center justify-between">
             <span className="text-sm text-white/70">Total</span>
