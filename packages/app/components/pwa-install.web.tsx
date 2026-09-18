@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "solito/navigation";
 import { Share, MoreVertical, MonitorDown, Smartphone } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
 
@@ -126,18 +127,36 @@ export function PwaInstallContent({ onDone }: { onDone?: () => void }) {
   );
 }
 
+/**
+ * Routes this must never interrupt.
+ *
+ * It is a full-screen `aria-modal` dialog at z-1500, so wherever it appears it
+ * takes the whole surface and swallows pointer events. On the door scanner
+ * that means it lands over the verdict card and the guest list's check-in
+ * button while someone is waiting to get in — an e2e click was intercepted by
+ * it, which is how this was found rather than by reading the code.
+ *
+ * Asking someone to install the app is never more urgent than the task they
+ * opened. Matched by prefix so the scanner's sub-routes are covered too.
+ */
+function isWorkingSurface(pathname: string): boolean {
+  return pathname.includes("/scanner");
+}
+
 /** Auto popup — mount once inside the signed-in shell. */
 export function PwaInstallPrompt() {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname() ?? "";
 
   useEffect(() => {
+    if (isWorkingSurface(pathname)) return;
     if (isStandalone()) return;
     if (typeof localStorage === "undefined") return;
     if (localStorage.getItem(DISMISS_KEY)) return;
     // Small delay so it doesn't collide with the first paint.
     const t = setTimeout(() => setOpen(true), 1500);
     return () => clearTimeout(t);
-  }, []);
+  }, [pathname]);
 
   const dismiss = () => {
     try {

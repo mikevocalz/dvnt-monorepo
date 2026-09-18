@@ -42,6 +42,12 @@ import {
   useDoorSyncStore,
   type DoorSyncPhase,
 } from "./door-offline-kit.web";
+import { DoorGuestList, useDoorRosterCounts } from "./door-guest-list.web";
+import {
+  primeDoorAudio,
+  signalVerdict,
+  useDoorFeedbackStore,
+} from "./door-feedback.web";
 import { canScanTickets } from "@dvnt/app/lib/events/event-role";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -50,6 +56,8 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  Volume2,
+  VolumeX,
   Loader2,
 } from "lucide-react";
 import { QrScanner } from "@dvnt/ui";
@@ -364,11 +372,41 @@ function ScannerActive({ eventId }: { eventId: string }) {
   const offlineStore = useOfflineCheckinStore();
   const hasOfflineData = offlineStore.hasOfflineData(eventId);
   const { queued } = useDoorOfflineKit(eventId);
+
+  // Same roster query the guest list reads, so the two can never disagree
+  // about how many people are still outside.
+  const roster = useDoorRosterCounts(eventId);
   const syncPhase = useDoorSyncStore((s) => s.phase);
   const listUpdatedAt = useDoorSyncStore((s) => s.listUpdatedAt);
 
   const scanResult = useScannerStore((s) => s.scanResult);
   const scanCount = useScannerStore((s) => s.scanCount);
+  const soundOn = useDoorFeedbackStore((s) => s.soundOn);
+  const setSoundOn = useDoorFeedbackStore((s) => s.setSoundOn);
+
+  /**
+   * Sound and vibration follow the rendered verdict rather than being fired
+   * from each mutation branch — one place the outcome is known for certain is
+   * one place it can be signalled, and an optimistic duplicate that the server
+   * later overturns does not get to buzz twice for different reasons.
+   */
+  const lastSignalled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!scanResult) {
+      lastSignalled.current = null;
+      return;
+    }
+    const key = `${scanResult.type}:${scanResult.optimistic ? "o" : "s"}`;
+    if (lastSignalled.current === key) return;
+    lastSignalled.current = key;
+    signalVerdict(
+      scanResult.type === "success"
+        ? "admitted"
+        : scanResult.type === "error"
+          ? "no_verdict"
+          : "rejected",
+    );
+  }, [scanResult]);
   const scanHistory = useScannerStore((s) => s.scanHistory);
   const setScanResult = useScannerStore((s) => s.setScanResult);
   const clearResult = useScannerStore((s) => s.clearResult);
@@ -380,6 +418,28 @@ function ScannerActive({ eventId }: { eventId: string }) {
   const setManualToken = useScannerStore((s) => s.setManualToken);
   const lastScannedRef = useRef<string>("");
   const cooldownRef = useRef(false);
+
+  const mode = useScannerStore((s) => s.mode);
+  const setModeRaw = useScannerStore((s) => s.setMode);
+
+  /**
+   * Changing surface dismisses the verdict.
+   *
+   * The card belongs to the camera and is hidden in list mode, but
+   * `handleToken` refuses to submit while a scanResult exists — so an
+   * invisible card left armed made every "Check in" in the list do nothing at
+   * all, with no error and no feedback. Clearing it on the way over is the fix:
+   * a verdict the staffer can no longer see is one they have finished with.
+   */
+  const setMode = useCallback(
+    (next: "scan" | "list") => {
+      clearResult();
+      lastScannedRef.current = "";
+      cooldownRef.current = false;
+      setModeRaw(next);
+    },
+    [clearResult, setModeRaw],
+  );
 
   // Clear transient scan state when leaving the screen.
   useEffect(() => () => reset(), [reset]);
@@ -559,14 +619,93 @@ function ScannerActive({ eventId }: { eventId: string }) {
 
   return (
     <main className="relative mx-auto w-full max-w-xl px-4 py-4">
+      {roster.total > 0 ? (
+        <div className="mt-1">
+          <div className="flex items-baseline justify-between text-[13px]">
+            <span className="font-semibold text-white">
+              {roster.checkedIn} in
+            </span>
+            <span className="text-white/55">
+              {roster.total - roster.checkedIn} still outside
+            </span>
+          </div>
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={roster.total}
+            aria-valuenow={roster.checkedIn}
+            aria-label="Guests checked in"
+            className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/10"
+          >
+            <div
+              className="h-full rounded-full bg-[#22C55E]"
+              style={{ width: `${Math.round((roster.checkedIn / roster.total) * 100)}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {/* List | Scan on ONE surface. Two routes would mean two check-in paths
+          and a staffer navigating while someone waits. */}
+      <div
+        role="group"
+        aria-label="Door mode"
+        className="mt-1 flex gap-2"
+        onPointerDown={primeDoorAudio}
+      >
+        <button
+          type="button"
+          aria-pressed={mode === "scan"}
+          onClick={() => setMode("scan")}
+          className={`h-11 flex-1 rounded-xl text-[14px] font-semibold ${
+            mode === "scan" ? "bg-white text-black" : "border border-white/15 text-white/75"
+          }`}
+        >
+          Scan
+        </button>
+        <button
+          type="button"
+          aria-pressed={mode === "list"}
+          onClick={() => setMode("list")}
+          className={`h-11 flex-1 rounded-xl text-[14px] font-semibold ${
+            mode === "list" ? "bg-white text-black" : "border border-white/15 text-white/75"
+          }`}
+        >
+          Guest list
+        </button>
+        <button
+          type="button"
+          aria-pressed={soundOn}
+          aria-label={soundOn ? "Turn scan sound off" : "Turn scan sound on"}
+          onClick={() => {
+            primeDoorAudio();
+            setSoundOn(!soundOn);
+          }}
+          className={`h-11 w-11 shrink-0 rounded-xl text-[13px] font-semibold ${
+            soundOn ? "bg-white/15 text-white" : "border border-white/15 text-white/50"
+          }`}
+        >
+          {soundOn ? <Volume2 size={18} /> : <VolumeX size={18} />}
+        </button>
+      </div>
+
       {/* Camera / QR surface — the kit QrScanner, expo-camera's CameraView. */}
-      <div className="relative">
+      <div className={mode === "scan" ? "relative mt-3" : "hidden"}>
         {/* `paused` stops the decode loop while a verdict is up. Without it the
             card from the previous guest is still on screen while the NEXT
             guest's code is already being decoded behind it — the stale-card
             failure, and the most dangerous one per guest. The camera itself
             stays live, so resuming costs nothing. */}
-        <QrScanner onScan={handleToken} oneShot={false} paused={!!scanResult} />
+        {/* Paused for BOTH reasons, and the second one is not cosmetic: in list
+            mode the camera is only `hidden`, so it stays mounted and keeps
+            decoding. It re-read the code in frame, re-armed handleToken's
+            guard, and swallowed the guest list's "Check in" — intermittently,
+            depending on whether a decode landed before the tap. */}
+        <QrScanner
+          onScan={handleToken}
+          oneShot={false}
+          paused={mode !== "scan" || !!scanResult}
+        />
         {/* Scan frame guide. */}
         <div
           className="pointer-events-none absolute inset-0 flex items-center justify-center"
@@ -584,10 +723,25 @@ function ScannerActive({ eventId }: { eventId: string }) {
         ) : null}
       </div>
 
+      {mode === "list" ? (
+        <DoorGuestList
+          eventId={eventId}
+          onCheckIn={handleToken}
+          checkingInToken={scanMutation.isPending ? lastScannedRef.current : null}
+        />
+      ) : null}
+
       <DoorSyncRow phase={syncPhase} queued={queued} listUpdatedAt={listUpdatedAt} />
 
-      {/* Manual entry — type / paste a ticket token at the door. */}
-      <div className="mt-4 flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
+      {/* Manual entry — type / paste a ticket token at the door. Scan mode
+          only: in list mode the list IS the fallback. */}
+      <div
+        className={
+          mode === "scan"
+            ? "mt-4 flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2"
+            : "hidden"
+        }
+      >
         <ScanLine size={16} color="rgba(255,255,255,0.45)" />
         <input
           value={manualToken}

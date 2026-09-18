@@ -197,6 +197,76 @@ test.describe("door scanner", () => {
     expect(scanCalls()).toBeGreaterThanOrEqual(before);
   });
 
+  test("the guest list finds a name the camera cannot, and checks in through the same path", async ({
+    page,
+  }) => {
+    await stubEvent(page);
+    const scanCalls = await stubAdmittingScan(page);
+
+    // A roster with one guest already in and one still outside. `qr_token` is
+    // present because get-event-tickets returns it to scanner-role callers.
+    await page.route("**/api/fn/get-event-tickets**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          // `ok` is load-bearing: getEventTicketsPaginated reads
+          // `data?.ok ? data.tickets : []` but takes `role` unconditionally,
+          // so omitting it yields a roster of zero with the gate still open.
+          ok: true,
+          role: "scanner",
+          total: 2,
+          page: 1,
+          pageSize: 200,
+          hasMore: false,
+          tickets: [
+            {
+              id: "1",
+              status: "scanned",
+              qr_token: "TOK-IN",
+              holder_name: "Ada Okonkwo",
+              ticket_type_name: "GA",
+              checked_in_at: new Date(Date.now() - 19 * 60_000).toISOString(),
+            },
+            {
+              id: "2",
+              status: "active",
+              qr_token: "TOK-OUT",
+              holder_name: "Bo Mensah",
+              ticket_type_name: "VIP",
+              checked_in_at: null,
+            },
+          ],
+        }),
+      }),
+    );
+
+    await gotoLobbyScanner(page);
+    await page.getByRole("button", { name: "Guest list" }).click();
+
+    // Counts come off the same query the progress bar reads.
+    await expect(page.getByRole("button", { name: "All 2" })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByRole("button", { name: "Checked in 1" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Not in yet 1" })).toBeVisible();
+
+    // Already in: a state, with when — the fact that settles an argument.
+    await expect(page.getByText(/In · 19 min ago/)).toBeVisible();
+
+    // Name search, which the SERVER cannot do — it matches qr_token prefix
+    // only. This is why the roster is filtered client-side.
+    await page.getByPlaceholder("Search a name, or the ticket code").fill("bo");
+    await expect(page.getByText("Ada Okonkwo")).toHaveCount(0);
+    await expect(page.getByText("Bo Mensah")).toBeVisible();
+
+    // Checking in from a row goes through the same ticket-scan call the camera
+    // uses — one check-in path, whichever way the door found the ticket.
+    const before = scanCalls();
+    await page.getByRole("button", { name: "Check in" }).click();
+    await expect.poll(() => scanCalls()).toBe(before + 1);
+  });
+
   test("the gate tells three different problems apart", async ({ page }) => {
     await stubEvent(page);
 

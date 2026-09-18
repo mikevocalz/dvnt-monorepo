@@ -59,6 +59,9 @@ interface ScannerState {
    */
   manualToken: string
   setManualToken: (value: string) => void
+  /** Which surface the door is on. One screen, two modes — never two routes. */
+  mode: "scan" | "list"
+  setMode: (mode: "scan" | "list") => void
   setScanResult: (result: ScanResult | null) => void
   clearResult: () => void
   recordSuccess: (entry: Omit<ScanHistoryEntry, "id" | "type" | "timestamp">) => void
@@ -72,6 +75,8 @@ export const useScannerStore = create<ScannerState>((set) => ({
   scanHistory: [],
   manualToken: "",
   setManualToken: (manualToken) => set({ manualToken }),
+  mode: "scan",
+  setMode: (mode) => set({ mode }),
   setScanResult: (scanResult) => set({ scanResult }),
   clearResult: () => set({ scanResult: null }),
   recordSuccess: (entry) =>
@@ -101,5 +106,11 @@ export const useScannerStore = create<ScannerState>((set) => ({
       ].slice(0, 50),
     })),
   reset: () =>
-    set({ scanResult: null, scanCount: 0, scanHistory: [], manualToken: "" }),
+    set({
+      scanResult: null,
+      scanCount: 0,
+      scanHistory: [],
+      manualToken: "",
+      mode: "scan",
+    }),
 }))
