@@ -39,6 +39,7 @@ import type { ScanAddonSummary } from "@dvnt/app/lib/api/tickets";
 import { useScanTicket } from "@dvnt/app/lib/hooks/use-tickets";
 import {
   isScanFailure,
+  OFFLINE_UNVERIFIED,
   scanVerdictMessage,
   scanVerdictTitle,
 } from "@dvnt/app/lib/tickets/scan-verdict";
@@ -744,19 +745,23 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                   ].slice(0, 50),
                 );
               } else {
+                // Warning, not Error: this is a no-verdict. The downloaded
+                // list is frozen while offline, so a ticket sold at the door
+                // is absent from it through no fault of the holder — red here
+                // turns a paying guest away on a stale cache.
                 Haptics.notificationAsync(
-                  Haptics.NotificationFeedbackType.Error,
+                  Haptics.NotificationFeedbackType.Warning,
                 );
                 setScanResult({
-                  reason: null,
-                  type: "not_found",
-                  message: "Not a valid ticket (offline check)",
+                  reason: OFFLINE_UNVERIFIED,
+                  type: "error",
+                  message: scanVerdictMessage(OFFLINE_UNVERIFIED),
                 });
                 setScanHistory((h) =>
                   [
                     {
                       id: `${Date.now()}`,
-                      type: "not_found" as const,
+                      type: "error" as const,
                       timestamp: Date.now(),
                     },
                     ...h,

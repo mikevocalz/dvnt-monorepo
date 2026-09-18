@@ -9,6 +9,7 @@ import {
   scanFailureReasonForStatus,
   scanVerdictMessage,
   scanVerdictTitle,
+  OFFLINE_UNVERIFIED,
 } from "./scan-verdict.ts";
 
 test("HTTP statuses map to no-verdict reasons, never to a ticket verdict", () => {
@@ -83,4 +84,17 @@ test("red titles name the rejection, because each sends the guest elsewhere", ()
 test("admitted leads with the verdict, and add-ons are their own outcome", () => {
   assert.match(scanVerdictTitle("success", null), /^Admitted/);
   assert.equal(scanVerdictTitle("success", null, "addon"), "Add-on redeemed");
+});
+
+test("an unknown token while offline is a no-verdict, never a rejection", () => {
+  // The bug: the downloaded token list is active tickets as of the last
+  // refresh and is frozen for as long as the door is offline, so a ticket sold
+  // at the door is absent from it. Rendering that red told a paying guest
+  // their ticket was fake — a refusal the server never made, which is exactly
+  // what the brief's "zero red for anything the server did not reject" forbids.
+  assert.equal(isScanFailure(OFFLINE_UNVERIFIED), true);
+  assert.match(scanVerdictTitle("no_verdict", OFFLINE_UNVERIFIED), /^Not checked in/);
+  assert.match(scanVerdictMessage(OFFLINE_UNVERIFIED), /may be out of date/i);
+  // It must never read as a claim about the ticket's authenticity.
+  assert.doesNotMatch(scanVerdictMessage(OFFLINE_UNVERIFIED), /not a valid ticket/i);
 });

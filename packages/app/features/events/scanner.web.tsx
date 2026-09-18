@@ -76,6 +76,7 @@ import { planAccent, planLabel as planLabelFor } from "@dvnt/app/lib/theme/plan-
 import { PERK_LABELS } from "@dvnt/app/lib/perks/perk-config";
 import {
   isScanFailure,
+  OFFLINE_UNVERIFIED,
   scanVerdictMessage,
   scanVerdictTitle,
 } from "@dvnt/app/lib/tickets/scan-verdict";
@@ -625,14 +626,18 @@ function ScannerActive({ eventId }: { eventId: string }) {
                 });
                 recordSuccess({ kind: "addon", name: "Add-on Verified Offline" });
               } else {
+                // Amber, NOT red. The downloaded list is active tickets as of
+                // the last refresh, and it is frozen for as long as this phone
+                // is offline — so a ticket sold at the door is missing from it
+                // through no fault of the holder. Calling that "not a valid
+                // ticket" is a refusal the server never made, and it turns a
+                // paying guest away on the strength of a stale cache.
                 setScanResult({
-                  type: "not_found",
-                  // Absent from the downloaded token list — the offline
-                  // equivalent of the server not finding it.
-                  reason: null,
-                  message: "Not a valid ticket (offline check)",
+                  type: "error",
+                  reason: OFFLINE_UNVERIFIED,
+                  message: scanVerdictMessage(OFFLINE_UNVERIFIED),
                 });
-                recordHistory("not_found");
+                recordHistory("error");
               }
             } else {
               setScanResult({

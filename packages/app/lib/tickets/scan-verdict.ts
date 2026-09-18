@@ -24,6 +24,18 @@ const FAILURE_REASONS: readonly ScanFailureReason[] = [
   "server_error",
 ];
 
+/**
+ * Offline, and the token is not in the downloaded list.
+ *
+ * This is a NO-VERDICT, not a rejection, and the distinction is the difference
+ * between admitting someone and turning them away. The list is active tickets
+ * as of the last refresh (180s at best, and frozen for as long as the door is
+ * offline), so a ticket sold at the door is absent from it through no fault of
+ * the holder. Rendering that red told a paying guest their ticket was fake on
+ * the strength of a stale cache — a refusal the server never made.
+ */
+export const OFFLINE_UNVERIFIED = "offline_unverified";
+
 /** Map an HTTP status from the `ticket-scan` edge fn to a failure reason. */
 export function scanFailureReasonForStatus(status: number): ScanFailureReason {
   if (status === 401) return "unauthorized";
@@ -38,6 +50,7 @@ export function scanFailureReasonForStatus(status: number): ScanFailureReason {
  */
 export function isScanFailure(reason: string | null | undefined): boolean {
   return (
+    reason === OFFLINE_UNVERIFIED ||
     reason === "network_error" ||
     (FAILURE_REASONS as readonly string[]).includes(reason ?? "")
   );
@@ -67,6 +80,11 @@ export function scanVerdictMessage(reason: string | null | undefined): string {
     case "server_error":
     case "network_error":
       return "Couldn't reach the server — rescan. The ticket was NOT checked.";
+    case "offline_unverified":
+      // NOT "this is not a ticket". The downloaded list is active tickets as
+      // of the last refresh, so anything sold since — at the door, or while
+      // this phone was offline — is legitimately missing from it.
+      return "This code isn't in the downloaded list, which may be out of date. Get signal and rescan, or look them up by name.";
     default:
       return "This QR code is not a valid ticket";
   }
@@ -110,6 +128,8 @@ export function scanVerdictTitle(
         return "Not checked in — scanning too fast";
       case "network_error":
         return "Not checked in — no signal";
+      case "offline_unverified":
+        return "Not checked in — can't verify offline";
       default:
         return "Not checked in — the server didn't answer";
     }
