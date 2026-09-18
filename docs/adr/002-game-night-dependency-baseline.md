@@ -92,6 +92,23 @@ removed `waitForGPU()`.
 Stopping at 0.184 is deliberate: r185 rewrites `WebGPURenderer` premultiplied
 alpha and renames another batch of TSL.
 
+> **SUPERSEDED 2026-09-17 on the version only.** The pin is now `three` 0.186.0
+> with `@types/three` 0.186.0 — still exact, still a matched pair, which is the
+> part of decision 1 that mattered. The reason for stopping at 0.184 does not
+> apply to any code that exists: both r185 entries are about `WebGPURenderer`
+> and TSL, and the repo imports neither. Its only three usage is
+> `PhoneStage.web.tsx`, which uses `WebGLRenderer` (`:906`), `OrbitControls`,
+> `RoundedBoxGeometry` and `RoomEnvironment` — none of which have a migration
+> entry in r185 or r186. Verified after the bump: `tsc --noEmit` exits 0, the
+> production build exits 0, and the landing page serves a live WebGL context
+> with no console or page errors.
+>
+> The obligation the original reason was protecting still stands, and moves
+> here: **a future `three/webgpu` table must configure an opaque
+> `Scene.background`** (or an opaque clear colour) to account for r185's
+> premultiplied-alpha change. Per ADR-003 the WEB table is CanvasKit, so this
+> binds only a native WebGPU table if one is ever built.
+
 ### typegpu
 
 `@typegpu/react@0.12.0` peers exactly what is installed — `typegpu ^0.12.0` ✓
