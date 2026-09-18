@@ -369,7 +369,7 @@ export function MyTicketsScreen() {
 
   // Owned add-ons (WS-3) → per-event count badge on the ticket card.
   const { data: myAddons = [] } = useQuery<OrderAddonRecord[]>({
-    queryKey: ["my-order-addons", "all"],
+    queryKey: ["my-order-addons", viewerId, "all"],
     staleTime: 60 * 1000,
     queryFn: () => addonsApi.getMyAddons(),
   });

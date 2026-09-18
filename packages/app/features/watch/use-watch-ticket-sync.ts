@@ -12,6 +12,7 @@ import { useWatchSessionStore } from "./watch-session-store";
 import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import { useMyTickets } from "@dvnt/app/lib/hooks/use-tickets";
+import { useTicketViewerAuthId } from "@dvnt/app/lib/hooks/use-tickets";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 import {
@@ -27,6 +28,10 @@ export function useWatchTicketSync(): void {
   // The wrist gets that resolved object projected — it does no resolving itself.
   const { entitlements, isLoading: entitlementsLoading } = useEntitlements();
   const viewerId = useAuthStore((s) => s.user?.id ?? null);
+  // The wrist had the same bug the event page did: `user.id` is the
+  // users-table integer, `tickets.user_id` is the Better Auth id, so this
+  // filter matched nothing and the watch received an empty envelope.
+  const viewerAuthId = useTicketViewerAuthId();
   const enabled = useWatchSettingsStore((s) => s.enabled && s.tickets);
   const lastSig = useRef<string | null>(null);
   const lastEnv = useRef<WatchTicketEnvelope | null>(null);
@@ -43,7 +48,13 @@ export function useWatchTicketSync(): void {
   useEffect(() => {
     if (!enabled) { lastSig.current = null; return; }
     if (Platform.OS === "web" || !data || !viewerId) return;
-    const env = buildWatchEnvelope(data.filter((ticket) => ticket.user_id === viewerId), {
+    const mine = data.filter(
+      (ticket) =>
+        !!ticket.user_id &&
+        (ticket.user_id === viewerId ||
+          (!!viewerAuthId && ticket.user_id === viewerAuthId)),
+    );
+    const env = buildWatchEnvelope(mine, {
       // Withhold rather than send Free while the query is in flight: a paying
       // VIP must never see their perks blink off on the wrist mid-refresh.
       entitlements: entitlementsLoading ? undefined : entitlements,

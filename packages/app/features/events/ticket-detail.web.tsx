@@ -294,8 +294,12 @@ export function TicketDetailScreen() {
 
   // ── Owned add-ons (WS-3) — order_addons via RLS owner read. Holder-side
   //    display only: fulfillment/redeemed state + door QR for redeemables.
+  const addonViewerId = useTicketViewerId();
   const { data: myAddons = [] } = useQuery<OrderAddonRecord[]>({
-    queryKey: ["my-order-addons", eventId],
+    // Viewer-scoped like every qk.tickets.* key. Without it a logout/login in
+    // the same tab let member B read member A's add-ons — and OwnedAddonRow
+    // renders addon.qr_token as a scannable code.
+    queryKey: ["my-order-addons", addonViewerId, eventId],
     enabled: !!eventId,
     staleTime: 30 * 1000,
     queryFn: () => addonsApi.getMyAddonsForEvent(eventId),
