@@ -389,9 +389,19 @@ Deno.serve(async (req: Request) => {
       // distinct: `ticket_type_name` is the TICKET tier, `membership_tier` is
       // the SUBSCRIPTION tier. A guest (no user_id) simply has neither — null,
       // never a "Free" chip, so the roster never frames them as lesser.
-      const holderName = t.user_id
-        ? nameByUser.get(t.user_id) || null
-        : t.guest_name || null;
+      // attendee_name FIRST. It is the only one of the three a human chose on
+      // purpose — "who is actually using this ticket" — and until 2026-09-18
+      // nothing could write it after checkout, so it was always null and this
+      // resolution never had to consider it. Now that a holder or the buyer of
+      // a multi-ticket order can set it, the door has to read it, or the name
+      // someone typed onto their pass never reaches the person calling it out.
+      // Falls back to the account username, then the guest name, exactly as
+      // before.
+      const holderName =
+        (typeof t.attendee_name === "string" && t.attendee_name.trim().length > 0
+          ? t.attendee_name.trim()
+          : null) ??
+        (t.user_id ? nameByUser.get(t.user_id) || null : t.guest_name || null);
       const tier = t.user_id ? tierByUser.get(t.user_id) || null : null;
       const membership_tier = tier
         ? { planKey: tier.planKey, rank: tier.rank }

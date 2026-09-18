@@ -32,6 +32,9 @@ interface AttendeesState {
   openComp: () => void
   closeComp: () => void
   setCompTierId: (value: string | null) => void
+  /** Username autocomplete draft for the comp sheet. */
+  compUserQuery: string;
+  setCompUserQuery: (v: string) => void;
   setCompRecipients: (value: string) => void
   setCompNote: (value: string) => void
   reset: () => void
@@ -41,6 +44,7 @@ const EMPTY_COMP = {
   compOpen: false,
   compTierId: null,
   compRecipients: "",
+  compUserQuery: "",
   compNote: "",
 } as const
 
@@ -54,6 +58,7 @@ export const useAttendeesStore = create<AttendeesState>((set) => ({
   closeComp: () => set(EMPTY_COMP),
   setCompTierId: (compTierId) => set({ compTierId }),
   setCompRecipients: (compRecipients) => set({ compRecipients }),
+  setCompUserQuery: (compUserQuery) => set({ compUserQuery }),
   setCompNote: (compNote) => set({ compNote }),
   reset: () => set({ statusFilter: "all", searchInput: "", ...EMPTY_COMP }),
 }))

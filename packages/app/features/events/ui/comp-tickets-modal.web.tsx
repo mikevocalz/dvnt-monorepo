@@ -22,6 +22,7 @@ import { useEffect, useMemo } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Gift, Check, AlertCircle, Mail } from "lucide-react";
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
+import { searchApi } from "@dvnt/app/lib/api/search";
 import { bulkCompTickets, type CompResult } from "@dvnt/app/lib/api/privileged";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -155,6 +156,35 @@ export function CompTicketsModal({
   const setTierId = useAttendeesStore((s) => s.setCompTierId);
   const recipientsRaw = useAttendeesStore((s) => s.compRecipients);
   const setRecipientsRaw = useAttendeesStore((s) => s.setCompRecipients);
+  const userQuery = useAttendeesStore((s) => s.compUserQuery);
+  const setUserQuery = useAttendeesStore((s) => s.setCompUserQuery);
+
+  // Typing a username from memory is the slowest, most error-prone way to comp
+  // a member — one wrong character silently becomes a guest-email comp or
+  // nothing at all. Search the same directory every other picker uses.
+  const userResults = useQuery({
+    queryKey: ["comp-user-search", userQuery.trim()],
+    queryFn: () => searchApi.searchUsers(userQuery.trim(), 8),
+    enabled: userQuery.trim().length >= 2,
+    staleTime: 30_000,
+  });
+
+  const alreadyAdded = useMemo(() => {
+    const set = new Set<string>();
+    for (const raw of recipientsRaw.split(/[\s,;]+/)) {
+      const v = raw.trim().replace(/^@/, "").toLowerCase();
+      if (v) set.add(v);
+    }
+    return set;
+  }, [recipientsRaw]);
+
+  const addRecipient = (username: string) => {
+    const handle = username.replace(/^@/, "");
+    if (alreadyAdded.has(handle.toLowerCase())) return;
+    const sep = recipientsRaw.trim().length === 0 ? "" : ", ";
+    setRecipientsRaw(`${recipientsRaw.trim()}${sep}@${handle}`);
+    setUserQuery("");
+  };
   const note = useAttendeesStore((s) => s.compNote);
   const setNote = useAttendeesStore((s) => s.setCompNote);
 
@@ -368,6 +398,73 @@ export function CompTicketsModal({
           </fieldset>
 
           <div>
+            <label
+              htmlFor="comp-user-search"
+              className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-white/45"
+            >
+              Find a member
+            </label>
+            <input
+              id="comp-user-search"
+              value={userQuery}
+              onChange={(e) => setUserQuery(e.target.value)}
+              disabled={sending}
+              spellCheck={false}
+              autoCapitalize="none"
+              autoCorrect="off"
+              placeholder="Search by name or username"
+              className="mb-2 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[15px] text-white placeholder:text-white/30 outline-none focus:border-white/30 focus:ring-2 focus:ring-cyan-400/40 disabled:opacity-50"
+            />
+            {userQuery.trim().length >= 2 ? (
+              <div className="mb-3 overflow-hidden rounded-xl border border-white/10">
+                {userResults.isPending ? (
+                  <p className="px-3 py-3 text-[13px] text-white/45">Searching…</p>
+                ) : (userResults.data?.docs.length ?? 0) === 0 ? (
+                  <p className="px-3 py-3 text-[13px] text-white/45">
+                    No member matches “{userQuery.trim()}”. You can still type an
+                    email below to send a guest ticket.
+                  </p>
+                ) : (
+                  userResults.data!.docs.map((u) => {
+                    const added = alreadyAdded.has(u.username.toLowerCase());
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        disabled={added || sending}
+                        onClick={() => addRecipient(u.username)}
+                        className="flex w-full items-center gap-3 border-b border-white/6 px-3 py-2.5 text-left last:border-b-0 active:bg-white/5 disabled:opacity-45"
+                      >
+                        {u.avatar ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={u.avatar}
+                            alt=""
+                            className="h-8 w-8 rounded-lg object-cover"
+                          />
+                        ) : (
+                          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-[12px] font-bold text-white/70">
+                            {u.username.slice(0, 2).toUpperCase()}
+                          </span>
+                        )}
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate text-[14px] font-semibold text-white">
+                            {u.name}
+                          </span>
+                          <span className="truncate text-[12px] text-white/45">
+                            @{u.username}
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-[12px] font-semibold text-cyan-300">
+                          {added ? "Added" : "Add"}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            ) : null}
+
             <label
               htmlFor="comp-recipients"
               className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-white/45"

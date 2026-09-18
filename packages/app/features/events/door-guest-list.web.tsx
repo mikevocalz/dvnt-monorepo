@@ -194,10 +194,24 @@ export function DoorGuestList({
       if (filter === "in" && !t.checked_in_at) return false;
       if (filter === "out" && t.checked_in_at) return false;
       if (!q) return true;
-      return (
-        (t.holder_name ?? "").toLowerCase().includes(q) ||
-        (t.qr_token ?? "").toLowerCase().startsWith(q)
-      );
+      // Match every name the row can carry, not just the resolved one. An
+      // owner/admin roster returns the full ticket, so a guest who bought
+      // under one name and is listed under another is findable either way —
+      // staff get told a name at the door, not a field label. Scanner rosters
+      // are PII-redacted and simply have fewer of these, which costs nothing.
+      const t2 = t as typeof t & {
+        attendee_name?: string | null;
+        guest_name?: string | null;
+        guest_email?: string | null;
+      };
+      const haystacks = [
+        t.holder_name,
+        t2.attendee_name,
+        t2.guest_name,
+        t2.guest_email,
+      ];
+      if (haystacks.some((h) => (h ?? "").toLowerCase().includes(q))) return true;
+      return (t.qr_token ?? "").toLowerCase().startsWith(q);
     });
   }, [tickets, query, filter]);
 
@@ -239,11 +253,11 @@ export function DoorGuestList({
 
       <label className="flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
         <Search size={16} color="rgba(255,255,255,0.45)" aria-hidden />
-        <span className="sr-only">Search guests</span>
+        <span className="sr-only">Search guests to check someone in by hand</span>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search a name, or the ticket code"
+          placeholder="Search a name, email, or ticket code"
           className="h-8 w-full bg-transparent text-[15px] text-white placeholder:text-white/35 focus:outline-none"
         />
       </label>

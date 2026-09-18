@@ -363,10 +363,47 @@ export function EventStaffScreen() {
         </main>
       ) : (
         <main className="mx-auto w-full max-w-2xl px-4 py-6">
+          {/* The page's whole purpose, as a labelled action rather than a 36px
+              glyph in a corner. The header icon stays for anyone who already
+              knows where it is; this is for everyone else. When there is no
+              staff yet it is the only thing on screen, because an empty roster
+              is an invitation to add someone, not a dead end. */}
+          {canManage ? (
+            <button
+              type="button"
+              onClick={openInvite}
+              className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#3FDCFF] py-3 text-[15px] font-bold text-black active:scale-[0.99]"
+            >
+              <UserPlus size={18} color="#000" aria-hidden />
+              Add staff member
+            </button>
+          ) : (
+            // Not a blank spacer. Someone looking for this button deserves to
+            // know why it is missing rather than assume the page is broken.
+            <p className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3 text-[13px] leading-relaxed text-white/50">
+              Only the event owner or an admin can add staff. Ask them to invite
+              you as an admin if you need to manage this list.
+            </p>
+          )}
+
+          {staff.length === 0 ? (
+            <div className="rounded-2xl border border-white/8 bg-white/4 px-6 py-10 text-center">
+              <Shield size={28} color="rgba(255,255,255,0.25)" aria-hidden />
+              <p className="mt-3 text-[15px] font-semibold text-white">
+                No staff yet
+              </p>
+              <p className="mt-1 text-[13px] leading-relaxed text-white/50">
+                {canManage
+                  ? "Add someone as a scanner and they can check guests in at the door."
+                  : "Nobody has been added to work this door yet."}
+              </p>
+            </div>
+          ) : null}
+
           <div
             ref={parentRef}
             className="overflow-y-auto"
-            style={{ maxHeight: "calc(100dvh - 140px)" }}
+            style={{ maxHeight: "calc(100svh - 140px)" }}
           >
             <div
               className="relative w-full"
