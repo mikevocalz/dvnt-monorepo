@@ -230,9 +230,20 @@ function DuplicateFlash({
 function ScanResultOverlay({
   result,
   onDismiss,
+  fixed = false,
 }: {
   result: ScanResult;
   onDismiss: () => void;
+  /**
+   * Position against the viewport instead of the camera frame.
+   *
+   * In guest-list mode there IS no camera frame — its container is `hidden`,
+   * so an `absolute inset-0` card had nothing to size against and painted
+   * nowhere. Staff checked a guest in from the list, saw no verdict, and
+   * because `dismissResult` is the only thing that clears the scan latch,
+   * every later tap was a silent no-op.
+   */
+  fixed?: boolean;
 }) {
   // Duplicates get the loud full-viewport treatment.
   if (result.type === "already_scanned") {
@@ -267,7 +278,9 @@ function ScanResultOverlay({
   const title = scanVerdictTitle(outcome, result.reason, result.kind);
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 px-10">
+    <div
+      className={`${fixed ? "fixed" : "absolute"} inset-0 z-50 flex items-center justify-center bg-black/70 px-10`}
+    >
       <DismissOverlayButton onPress={onDismiss} label="Dismiss scan result" />
       {/* The card announces itself. 05-a11y.md: an admitted verdict is polite
           so it does not interrupt a scanner mid-flow, while a rejection and a
@@ -779,7 +792,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
             <span className="text-sm text-white">Validating...</span>
           </div>
         ) : null}
-        {scanResult ? (
+        {scanResult && mode === "scan" ? (
           <ScanResultOverlay result={scanResult} onDismiss={dismissResult} />
         ) : null}
       </div>
@@ -790,6 +803,15 @@ function ScannerActive({ eventId }: { eventId: string }) {
           onCheckIn={handleToken}
           checkingInToken={scanMutation.isPending ? lastScannedRef.current : null}
         />
+      ) : null}
+
+      {/* The same verdict, against the viewport, because the camera frame it
+          normally sizes against is `hidden` in this mode. Rendered here rather
+          than inside that container so the list keeps its own layout and the
+          card still covers it — a verdict staff can walk past is the one
+          failure this screen cannot have. */}
+      {scanResult && mode === "list" ? (
+        <ScanResultOverlay result={scanResult} onDismiss={dismissResult} fixed />
       ) : null}
 
       <DoorSyncRow phase={syncPhase} queued={queued} listUpdatedAt={listUpdatedAt} />

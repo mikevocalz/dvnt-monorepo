@@ -108,6 +108,13 @@ export function DoorGuestList({
     // The camera invalidates nothing here; a door re-reads the list when it
     // opens it, which is when someone is standing in front of them.
     staleTime: 30_000,
+    // Run the query even with no connection, so a failure is an ERROR rather
+    // than a pause. React Query's default `networkMode: "online"` parks an
+    // offline query in `isPending` with `isError` false — which meant the
+    // saved-roster fallback below, the one thing that exists for a venue with
+    // no signal, never ran in the only situation it was written for. The scan
+    // mutation already sets this for the same reason (use-tickets.ts).
+    networkMode: "always",
   });
 
   /**
@@ -267,13 +274,18 @@ export function DoorGuestList({
             ? `Nobody matches “${query.trim()}”. Try fewer letters.`
             : filter === "in"
               ? "Nobody checked in yet."
-              : "Everyone here is checked in."}
+              : filter === "all"
+                ? "No guests on the list yet."
+                : "Everyone here is checked in."}
         </p>
       ) : (
         <div
           ref={parentRef}
           className="mt-2 overflow-y-auto"
-          style={{ maxHeight: "calc(100dvh - 380px)" }}
+          // `svh`, not `dvh`: Safari's toolbar collapses as you scroll, and a
+          // `dvh` height re-measures mid-gesture against absolutely positioned
+          // virtual rows. The small viewport does not move.
+          style={{ maxHeight: "calc(100svh - 380px)" }}
         >
           <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
             {virtualizer.getVirtualItems().map((item) => {

@@ -226,16 +226,19 @@ export const ticketsApi = {
         );
         throw error;
       }
+      // THROW, do not return an empty roster.
+      //
+      // A 401, a 403 or a 500 answered with `{tickets: []}` is indistinguishable
+      // from an event where nobody has arrived. React Query saw a successful
+      // read, `isError` stayed false, and the door list rendered its empty
+      // state — "Everyone here is checked in", with chips reading All 0 ·
+      // Checked in 0 · Not in yet 0 — while the retry branch that owns the only
+      // way out sat unreachable behind `isError`.
+      //
+      // Staff at a door cannot tell a failure from an empty venue. The query
+      // must fail so the screen can say so.
       console.error("[Tickets] getEventTicketsPaginated HTTP", status);
-      return {
-        tickets: [],
-        page: opts.page ?? 1,
-        pageSize: opts.pageSize ?? 50,
-        total: null,
-        hasMore: false,
-        role: null,
-        nextCursor: null,
-      };
+      throw new Error(`Could not load the guest list (HTTP ${status}).`);
     }
     const tickets = data?.ok ? (data.tickets ?? []) : [];
     return {
