@@ -111,7 +111,7 @@ Every string opens with **"Not checked in"**. The ticket's state is the first fa
 | id | context | string | why |
 |---|---|---|---|
 | `list.title` | Header | Guest list | |
-| `list.search` | Search placeholder | Search name, email, or code | Names all three keys so nobody guesses. |
+| `list.search` | Search placeholder | Search a name, or the ticket code | **Corrected from "Search name, email, or code".** A scanner-role caller never receives an email (`get-event-tickets/index.ts:404-411` withholds it), and the server's own search matches `qr_token` PREFIX only — its comment says name search "is left for a follow-up" (`:284-290`). Name search works because the roster is fetched whole and filtered client-side, which caps the list at the server's 200-row clamp (`:262`). |
 | `list.chip.all` | Filter chip | All {n} | Count trails the label. |
 | `list.chip.in` | Filter chip | Checked in {n} | |
 | `list.chip.out` | Filter chip | Not in yet {n} | Neutral, not a judgement. |

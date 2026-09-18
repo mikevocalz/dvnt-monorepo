@@ -629,7 +629,8 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                   : Haptics.NotificationFeedbackType.Error,
               );
               // "We could not ask" (dead session / 403 / 429 / 5xx) is NOT a
-              // verdict on the ticket — render "Scan Error", never "Invalid".
+              // verdict on the ticket — scanVerdictTitle renders a "Not checked in"
+              // title, never one that calls the ticket invalid.
               const isFailure = isScanFailure(data.reason);
               const resultType = isDuplicate
                 ? ("already_scanned" as const)

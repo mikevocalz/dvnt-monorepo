@@ -239,13 +239,23 @@ function ScanResultOverlay({
   }
 
   const isSuccess = result.type === "success";
-  const Icon = isSuccess ? CheckCircle2 : XCircle;
   // Amber = "no verdict, rescan"; red is reserved for a ticket the SERVER rejected.
+  // Amber is dark-on-light, and that is a correctness fix rather than taste:
+  // white on mid-amber (#D97706) measures ~3.0:1 and fails AA for body text
+  // outright — the verdict most likely to be misread was the least readable.
+  // #78350F on #FEF3C7 is ~10:1 and still reads as a colour field at arm's
+  // length, which a dark brown would not (05-a11y.md).
+  const noVerdict = result.type === "error";
   const bg = isSuccess
     ? "rgba(34,197,94,0.95)"
-    : result.type === "error"
-      ? "rgba(217,119,6,0.96)"
+    : noVerdict
+      ? "#FEF3C7"
       : "rgba(244,63,94,0.95)";
+  const fg = noVerdict ? "#78350F" : "#FFFFFF";
+  // A third glyph, not a reused one. Colour + word + icon must each carry the
+  // verdict alone, and ✕ on both a rejection and a no-verdict left the icon
+  // saying nothing.
+  const Icon = isSuccess ? CheckCircle2 : noVerdict ? AlertTriangle : XCircle;
   // Title, colour and icon all derive from the SAME outcome, so the card
   // cannot say one thing in words and another in colour.
   const outcome: "success" | "rejected" | "no_verdict" = isSuccess
@@ -274,13 +284,19 @@ function ScanResultOverlay({
         className="flex w-full max-w-sm flex-col items-center gap-3 rounded-3xl p-8 text-center"
         style={{ backgroundColor: bg }}
       >
-        <Icon size={56} color="#fff" strokeWidth={2} />
-        <p className="text-[22px] font-bold text-white">{title}</p>
+        <Icon size={56} color={fg} strokeWidth={2} />
+        <p className="text-[22px] font-bold" style={{ color: fg }}>
+          {title}
+        </p>
         {result.name ? (
-          <p className="text-base font-medium text-white/90">{result.name}</p>
+          <p className="text-base font-medium" style={{ color: fg, opacity: 0.92 }}>
+            {result.name}
+          </p>
         ) : null}
         {result.tierName ? (
-          <p className="text-sm text-white/70">{result.tierName}</p>
+          <p className="text-sm" style={{ color: fg, opacity: 0.75 }}>
+            {result.tierName}
+          </p>
         ) : null}
         {/* WS-4 — subscription tier + perks, sized to be read at a door in the
             dark at arm's length. Deliberately louder than the ticket tier above
@@ -302,10 +318,17 @@ function ScanResultOverlay({
           </p>
         ) : null}
         {result.message ? (
-          <p className="text-[13px] text-white/70">{result.message}</p>
+          // The sentence that says the ticket was NOT checked. On the amber
+          // card this was the least readable text on screen and the most
+          // important — at 13px, white on mid-amber is nowhere near AA.
+          <p className="text-[13px]" style={{ color: fg, opacity: 0.85 }}>
+            {result.message}
+          </p>
         ) : null}
         {result.addons?.length ? <AddonRows addons={result.addons} /> : null}
-        <p className="mt-2 text-xs text-white/50">Tap anywhere to scan next</p>
+        <p className="mt-2 text-xs" style={{ color: fg, opacity: 0.6 }}>
+          Tap anywhere to scan next
+        </p>
       </div>
     </div>
   );
@@ -532,7 +555,8 @@ function ScannerActive({ eventId }: { eventId: string }) {
             } else {
               const isDuplicate = data.reason === "already_scanned";
               // "We could not ask" (dead session / 403 / 429 / 5xx) is NOT a
-              // verdict on the ticket — render "Scan Error", never "Invalid".
+              // verdict on the ticket — scanVerdictTitle renders a "Not checked in"
+              // title, never one that calls the ticket invalid.
               const isFailure = isScanFailure(data.reason);
               const resultType = isDuplicate
                 ? ("already_scanned" as const)
