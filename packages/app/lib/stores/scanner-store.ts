@@ -19,6 +19,15 @@ export interface ScanResult {
   name?: string
   tierName?: string
   message?: string
+  /**
+   * The server's rejection code, or the client's typed no-verdict reason.
+   *
+   * Load-bearing: the card's TITLE is derived from it, so a missing reason
+   * turns an already-scanned ticket into "Not a ticket for tonight" — telling
+   * a door a legitimate guest is carrying a forgery. Every setScanResult call
+   * must pass it, including the offline paths.
+   */
+  reason?: string | null
   /** Order add-ons shown on the result card ("VIP table ×1 — unredeemed"). */
   addons?: ScanAddonSummary[]
   /** WS-4: holder's SUBSCRIPTION tier label — distinct from `tierName`, which

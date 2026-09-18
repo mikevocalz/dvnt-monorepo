@@ -8,6 +8,7 @@ import {
   isScanFailure,
   scanFailureReasonForStatus,
   scanVerdictMessage,
+  scanVerdictTitle,
 } from "./scan-verdict.ts";
 
 test("HTTP statuses map to no-verdict reasons, never to a ticket verdict", () => {
@@ -41,4 +42,45 @@ test("each server verdict gets its own sentence; unknown stays 'not a valid tick
   assert.match(scanVerdictMessage("transfer_pending"), /mid-transfer/);
   assert.match(scanVerdictMessage("refunded"), /refunded/);
   assert.equal(scanVerdictMessage("ticket_not_found"), "This QR code is not a valid ticket");
+});
+
+test("a rejection and a no-verdict never share a title", () => {
+  // The bug this exists to prevent: "Scan Error" was rendered for BOTH an
+  // already-scanned ticket and a server we could not reach, leaving colour as
+  // the only difference between "turn them away" and "try again".
+  const rejected = scanVerdictTitle("rejected", "already_scanned");
+  const noVerdict = scanVerdictTitle("no_verdict", "server_error");
+  assert.notEqual(rejected, noVerdict);
+  assert.match(rejected, /already scanned/i);
+  assert.match(noVerdict, /^Not checked in/);
+});
+
+test("every no-verdict title states the ticket was not checked in, first", () => {
+  for (const reason of [
+    "unauthorized",
+    "forbidden",
+    "rate_limited",
+    "network_error",
+    "server_error",
+    undefined,
+  ]) {
+    assert.match(
+      scanVerdictTitle("no_verdict", reason),
+      /^Not checked in/,
+      `no-verdict title for ${String(reason)} must open with "Not checked in"`,
+    );
+  }
+});
+
+test("red titles name the rejection, because each sends the guest elsewhere", () => {
+  assert.match(scanVerdictTitle("rejected", "refunded"), /refunded/i);
+  assert.match(scanVerdictTitle("rejected", "wrong_event"), /wrong event/i);
+  assert.match(scanVerdictTitle("rejected", "voided"), /cancelled/i);
+  // An unknown rejection must not claim more than the server said.
+  assert.equal(scanVerdictTitle("rejected", null), "Not a ticket for tonight");
+});
+
+test("admitted leads with the verdict, and add-ons are their own outcome", () => {
+  assert.match(scanVerdictTitle("success", null), /^Admitted/);
+  assert.equal(scanVerdictTitle("success", null, "addon"), "Add-on redeemed");
 });

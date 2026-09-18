@@ -40,6 +40,7 @@ import { useScanTicket } from "@dvnt/app/lib/hooks/use-tickets";
 import {
   isScanFailure,
   scanVerdictMessage,
+  scanVerdictTitle,
 } from "@dvnt/app/lib/tickets/scan-verdict";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -83,6 +84,8 @@ type ScanResult = {
   name?: string;
   tierName?: string;
   message?: string;
+  /** Server rejection code / typed no-verdict reason — drives the title. */
+  reason?: string | null;
   /** Order add-ons shown on the result card ("VIP table ×1 — unredeemed"). */
   addons?: ScanAddonSummary[];
   /** already_scanned: the ORIGINAL check-in facts from the server CAS. */
@@ -408,13 +411,18 @@ function ScanResultOverlay({
               textAlign: "center",
             }}
           >
-            {isSuccess
-              ? result.kind === "addon"
-                ? "Add-on Redeemed!"
-                : "Checked In!"
-              : result.type === "not_found"
-                ? "Invalid Ticket"
-                : "Scan Error"}
+            {/* Shared with web via scanVerdictTitle so the two cannot disagree
+                about what a ticket means. "Scan Error" used to cover both a
+                server rejection and a scan that never got an answer. */}
+            {scanVerdictTitle(
+              isSuccess
+                ? "success"
+                : result.type === "error"
+                  ? "no_verdict"
+                  : "rejected",
+              result.reason,
+              result.kind,
+            )}
           </Text>
           {result.name && (
             <Text
@@ -563,6 +571,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
       if (knownDuplicate) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         setScanResult({
+          reason: "already_scanned",
           type: "already_scanned",
           optimistic: true,
           message: "This ticket was already scanned on this device",
@@ -641,6 +650,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                 checkedInByName: data.checked_in_by_name ?? null,
                 addons: data.addons,
                 optimistic: false,
+                reason: data.reason ?? null,
                 message: scanVerdictMessage(data.reason),
               });
               if (isDuplicate) {
@@ -671,6 +681,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                   Haptics.NotificationFeedbackType.Warning,
                 );
                 setScanResult({
+                  reason: "already_scanned",
                   type: "already_scanned",
                   optimistic: true,
                   message: "This ticket was already scanned (offline)",
@@ -736,6 +747,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                   Haptics.NotificationFeedbackType.Error,
                 );
                 setScanResult({
+                  reason: null,
                   type: "not_found",
                   message: "Not a valid ticket (offline check)",
                 });
@@ -753,6 +765,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
             } else {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
               setScanResult({
+                reason: "network_error",
                 type: "error",
                 message:
                   "Network error. Download tickets for offline scanning.",

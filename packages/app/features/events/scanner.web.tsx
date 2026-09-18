@@ -77,6 +77,7 @@ import { PERK_LABELS } from "@dvnt/app/lib/perks/perk-config";
 import {
   isScanFailure,
   scanVerdictMessage,
+  scanVerdictTitle,
 } from "@dvnt/app/lib/tickets/scan-verdict";
 
 const ROW_HEIGHT = 44;
@@ -154,6 +155,10 @@ function DuplicateFlash({
   return (
     <div
       aria-live="assertive"
+      // Carries the same marker as the standard card. A duplicate takes this
+      // separate full-viewport treatment rather than the card, so without it
+      // the most COMMON rejection is the one path nothing can assert on.
+      data-verdict="rejected"
       className="dvnt-dup-flash fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 px-8 text-center"
       style={{ backgroundColor: "#FC253A" }}
     >
@@ -180,6 +185,13 @@ function DuplicateFlash({
       <AlertTriangle size={64} color="#fff" strokeWidth={2.5} />
       <p className="text-[28px] font-bold uppercase tracking-[0.08em] text-white">
         Already scanned
+      </p>
+      {/* The instruction the big red word does not give. A door person who
+          reads only "already scanned" still has to decide what to DO, and the
+          answer is not "turn them away" — it is "get the host", because a
+          double-scan is as often a staff mistake as a guest's. */}
+      <p className="text-[15px] font-semibold text-white">
+        Don&rsquo;t let them in yet — get the host.
       </p>
       {result.kind === "addon" && result.name ? (
         <p className="text-base font-semibold text-white/95">{result.name}</p>
@@ -234,18 +246,31 @@ function ScanResultOverlay({
     : result.type === "error"
       ? "rgba(217,119,6,0.96)"
       : "rgba(244,63,94,0.95)";
-  const title = isSuccess
-    ? result.kind === "addon"
-      ? "Add-on Redeemed!"
-      : "Checked In!"
-    : result.type === "not_found"
-      ? "Invalid Ticket"
-      : "Scan Error";
+  // Title, colour and icon all derive from the SAME outcome, so the card
+  // cannot say one thing in words and another in colour.
+  const outcome: "success" | "rejected" | "no_verdict" = isSuccess
+    ? "success"
+    : result.type === "error"
+      ? "no_verdict"
+      : "rejected";
+  const title = scanVerdictTitle(outcome, result.reason, result.kind);
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 px-10">
       <DismissOverlayButton onPress={onDismiss} label="Dismiss scan result" />
+      {/* The card announces itself. 05-a11y.md: an admitted verdict is polite
+          so it does not interrupt a scanner mid-flow, while a rejection and a
+          no-verdict are assertive because acting on a missed one means letting
+          the wrong person through. The accessible name is the title, so the
+          outcome is the first thing read — and it gives the card an identity
+          the recent-scans list below it does not share. */}
       <div
+        role={outcome === "success" ? "status" : "alert"}
+        aria-label={title}
+        // The card and the recent-scans list below it both render the same
+        // verdict words, so "is this string on the page" cannot tell them
+        // apart. This names the card itself.
+        data-verdict={outcome}
         className="flex w-full max-w-sm flex-col items-center gap-3 rounded-3xl p-8 text-center"
         style={{ backgroundColor: bg }}
       >
@@ -468,6 +493,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
         setScanResult({
           type: "already_scanned",
           optimistic: true,
+          reason: "already_scanned",
           message: "This ticket was already scanned on this device",
         });
         recordHistory("already_scanned");
@@ -527,6 +553,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
                 checkedInByName: data.checked_in_by_name ?? null,
                 addons: data.addons,
                 optimistic: false,
+                reason: data.reason ?? null,
                 message: scanVerdictMessage(data.reason),
               });
               if (isDuplicate) {
@@ -547,6 +574,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
                 setScanResult({
                   type: "already_scanned",
                   optimistic: true,
+                  reason: "already_scanned",
                   message: "This ticket was already scanned (offline)",
                 });
                 recordHistory("already_scanned");
@@ -575,6 +603,9 @@ function ScannerActive({ eventId }: { eventId: string }) {
               } else {
                 setScanResult({
                   type: "not_found",
+                  // Absent from the downloaded token list — the offline
+                  // equivalent of the server not finding it.
+                  reason: null,
                   message: "Not a valid ticket (offline check)",
                 });
                 recordHistory("not_found");
@@ -582,6 +613,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
             } else {
               setScanResult({
                 type: "error",
+                reason: "network_error",
                 message: "Network error. Download tickets for offline scanning.",
               });
             }

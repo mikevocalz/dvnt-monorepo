@@ -110,7 +110,7 @@ test.describe("door scanner", () => {
     await page.goto(SCANNER_URL);
 
     // The verdict, not a log line, is the proof the whole chain worked.
-    await expect(page.getByText("Checked In!")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/Admitted/)).toBeVisible({ timeout: 60_000 });
     // Twice by design — on the verdict card and in the recent-scans list under
     // it — so this is scoped rather than made strict. The name is what door
     // staff match to the face, and it comes from the server's resolved
@@ -136,7 +136,7 @@ test.describe("door scanner", () => {
     const scanCalls = await stubAdmittingScan(page);
 
     await page.goto(SCANNER_URL);
-    await expect(page.getByText("Checked In!")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/Admitted/)).toBeVisible({ timeout: 60_000 });
 
     // The camera is still mounted and the code is still in frame. `paused`
     // feeds onBarcodeScanned={undefined}, which is how expo-camera's web
@@ -145,7 +145,7 @@ test.describe("door scanner", () => {
     const before = scanCalls();
     await page.waitForTimeout(4000);
     expect(scanCalls()).toBe(before);
-    await expect(page.getByText("Checked In!")).toBeVisible();
+    await expect(page.getByText(/Admitted/)).toBeVisible();
   });
 
   test("?engine=legacy runs the old scanner, with no deploy", async ({ page }) => {
@@ -173,7 +173,7 @@ test.describe("door scanner", () => {
     const scanCalls = await stubAdmittingScan(page);
 
     await gotoLobbyScanner(page);
-    await expect(page.getByText("Checked In!")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/Admitted/)).toBeVisible({ timeout: 60_000 });
     await page.getByRole("button", { name: /dismiss scan result/i }).click();
 
     // The venue's signal drops mid-shift. Scanning must keep working, and the
@@ -265,6 +265,65 @@ test.describe("door scanner", () => {
     const before = scanCalls();
     await page.getByRole("button", { name: "Check in" }).click();
     await expect.poll(() => scanCalls()).toBe(before + 1);
+  });
+
+  test("a used ticket reads as used, and an unreachable server as unchecked", async ({
+    page,
+  }) => {
+    await stubEvent(page);
+    await stubStaffRole(page);
+
+    // The server answered: this ticket was already used. That is a refusal,
+    // and it must NOT read as a forgery — a guest who already went in is not
+    // someone carrying a fake.
+    await page.route("**/api/fn/ticket-scan**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          valid: false,
+          reason: "already_scanned",
+          checked_in_at: new Date(Date.now() - 12 * 60_000).toISOString(),
+        }),
+      }),
+    );
+    await gotoLobbyScanner(page);
+    // Twice by design: the verdict card and the recent-scans row beneath it.
+    // Scoped to the verdict card, not the page: the recent-scans list below it
+    // legitimately keeps showing past outcomes.
+    const card = page.locator("[data-verdict]");
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    await expect(card).toHaveAttribute("data-verdict", "rejected");
+    await expect(card).toContainText(/Already scanned/i);
+    // The two failures that must never be confused: a used ticket is not a
+    // forgery, and it is not an unanswered scan.
+    await expect(card).not.toContainText(/Not a ticket/i);
+    await expect(card).not.toContainText(/Not checked in/i);
+
+    // A 500 is not a verdict about the ticket. It must say so, in words, not
+    // only by turning amber.
+    //
+    // Local knowledge is cleared first, and that is the point rather than test
+    // hygiene: having just seen this token used, the device correctly keeps
+    // painting "Already scanned" from its own offline set even when the server
+    // stops answering. The no-verdict case is a device that knows NOTHING
+    // about the ticket in front of it.
+    // ONLY the offline check-in store. `localStorage.clear()` also wipes the
+    // persisted auth session, so the reload lands on the signed-out gate and
+    // the scanner never mounts — which is what happened the first time.
+    await page.evaluate(() =>
+      window.localStorage.removeItem("offline-checkin-store"),
+    );
+    await page.unroute("**/api/fn/ticket-scan**");
+    await page.route("**/api/fn/ticket-scan**", (route) =>
+      route.fulfill({ status: 500, contentType: "application/json", body: "{}" }),
+    );
+    await page.reload();
+    const amber = page.locator("[data-verdict]");
+    await expect(amber).toBeVisible({ timeout: 60_000 });
+    await expect(amber).toHaveAttribute("data-verdict", "no_verdict");
+    await expect(amber).toContainText(/^Not checked in/);
+    await expect(amber).not.toContainText(/Already scanned/i);
   });
 
   test("the gate tells three different problems apart", async ({ page }) => {

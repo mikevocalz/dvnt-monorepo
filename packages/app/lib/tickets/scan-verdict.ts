@@ -71,3 +71,62 @@ export function scanVerdictMessage(reason: string | null | undefined): string {
       return "This QR code is not a valid ticket";
   }
 }
+
+/**
+ * The first line of the verdict card.
+ *
+ * Splitting this out of the screen is not tidiness — the title was the one
+ * part of the card that did NOT distinguish the two outcomes it matters most
+ * to tell apart. "Scan Error" was shown both for a ticket the server rejected
+ * (red) and for a scan that never got an answer (amber), so the only thing
+ * separating "turn this person away" from "try again" was the background
+ * colour. At a dark door, through a cracked screen, that is no distinction at
+ * all, and 05-a11y.md forbids relying on it.
+ *
+ * Three rules hold here:
+ *   • the verdict word comes first, so a screen reader announces the outcome
+ *     before the detail
+ *   • red titles name the actual rejection, because already-scanned, refunded
+ *     and wrong-event send the guest to three different places
+ *   • every no-verdict title opens with "Not checked in", so the ticket's
+ *     state is the first fact and never a footnote
+ */
+export function scanVerdictTitle(
+  outcome: "success" | "rejected" | "no_verdict",
+  reason: string | null | undefined,
+  kind?: "ticket" | "addon",
+): string {
+  if (outcome === "success") {
+    return kind === "addon" ? "Add-on redeemed" : "Admitted — let them in";
+  }
+
+  if (outcome === "no_verdict") {
+    switch (reason) {
+      case "unauthorized":
+        return "Not checked in — you were signed out";
+      case "forbidden":
+        return "Not checked in — you're not on door staff";
+      case "rate_limited":
+        return "Not checked in — scanning too fast";
+      case "network_error":
+        return "Not checked in — no signal";
+      default:
+        return "Not checked in — the server didn't answer";
+    }
+  }
+
+  switch (reason) {
+    case "already_scanned":
+      return "Already scanned — don't let them in yet";
+    case "refunded":
+      return "Refunded — don't let them in";
+    case "voided":
+      return "Ticket cancelled — don't let them in";
+    case "wrong_event":
+      return "Wrong event — don't let them in";
+    case "transfer_pending":
+      return "Transferred — this ticket isn't the valid one";
+    default:
+      return "Not a ticket for tonight";
+  }
+}
