@@ -1,4 +1,6 @@
 import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canScanTickets, canViewFullRoster } from "@dvnt/app/lib/events/event-role";
 /**
  * Event detail — WEB (@dvnt/app/features/events/event-detail). URL /events/{slug}.
  * Resolves the slug to an event id from the list, then loads the FULL event via
@@ -14,38 +16,40 @@ import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
 import { formatEventTime } from "@dvnt/app/lib/events/event-time";
 import {
   ArrowLeft,
-  MoreHorizontal,
+  ArrowUpCircle,
+  Ban,
   Calendar,
-  MapPin,
-  CloudSun,
+  CalendarX2,
   Check,
-  Users,
-  Share2,
-  Pencil,
-  Flag,
-  Music2,
-  Sparkles,
-  Shirt,
+  Clock,
+  CloudSun,
+  Copy,
   DoorOpen,
   ExternalLink,
-  Clock,
-  ImageIcon,
-  Star,
-  MessageCircle,
+  Flag,
   Heart,
-  Ticket,
+  ImageIcon,
   Languages,
-  Megaphone,
-  ArrowUpCircle,
-  Minus,
-  Plus,
+  LayoutDashboard,
   Lock,
-  Copy,
-  CalendarX2,
-  RotateCcw,
-  Ban,
-  Trash2,
+  MapPin,
+  Megaphone,
+  MessageCircle,
+  Minus,
+  MoreHorizontal,
+  Music2,
+  Pencil,
+  Plus,
   Radio,
+  RotateCcw,
+  ScanLine,
+  Share2,
+  Shirt,
+  Sparkles,
+  Star,
+  Ticket,
+  Trash2,
+  Users,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
@@ -664,6 +668,22 @@ export function EventDetailScreen() {
   const isHost = !!me && me === e?.host?.username;
 
   /**
+   * Door tools, from the server's role ladder rather than event ownership.
+   *
+   * Web had NO entry point to the organizer dashboard or the scanner at all —
+   * both screens existed and neither was reachable from the UI, so a host on a
+   * phone had no way to open the thing they were standing at the door to use.
+   *
+   * Role, not `isHost`, because the native screen gates its Scanner button on
+   * ownership and therefore hides it from every `scanner`-role staffer — the
+   * exact people the role was created for. A hired door person is not the host
+   * and never will be.
+   */
+  const { role: doorRole } = useEventRole(eventId);
+  const mayScan = canScanTickets(doorRole);
+  const mayManage = isHost || canViewFullRoster(doorRole);
+
+  /**
    * Open the event's Lynk — and make sure there is a live one to open.
    *
    * The companion room is created when the EVENT is published, which for an
@@ -1223,6 +1243,37 @@ export function EventDetailScreen() {
                 Starts in
               </div>
               <div className="text-xl font-extrabold mt-0.5">{countdown}</div>
+            </div>
+          ) : null}
+
+          {/* Door tools — the entry point web did not have at all.
+              Above the buy/RSVP CTA, not below it and not in the overflow
+              menu: someone who can scan opened this page to work the door, and
+              making them scroll past "RSVP" to find it is the wrong order.
+              Scanner shows for anyone the server says may scan, so hired door
+              staff can reach it; the dashboard stays at editor and above. */}
+          {mayScan || mayManage ? (
+            <div className="mt-4 flex gap-2">
+              {mayManage ? (
+                <button
+                  type="button"
+                  onClick={() => router.push(`/feed/events/${eventId}/organizer`)}
+                  className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl border border-white/15 text-[15px] font-semibold text-white active:bg-white/10"
+                >
+                  <LayoutDashboard size={17} color="#8A40CF" />
+                  Dashboard
+                </button>
+              ) : null}
+              {mayScan ? (
+                <button
+                  type="button"
+                  onClick={() => router.push(`/feed/events/${eventId}/scanner`)}
+                  className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-white text-[15px] font-semibold text-black active:scale-[0.98]"
+                >
+                  <ScanLine size={17} color="#000" />
+                  Scan tickets
+                </button>
+              ) : null}
             </div>
           ) : null}
 

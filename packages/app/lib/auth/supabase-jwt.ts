@@ -25,7 +25,11 @@
 
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { supabase, setBridgeAccessToken } from "../supabase/client";
+import {
+  supabase,
+  setBridgeAccessToken,
+  setBridgeTokenMinter,
+} from "../supabase/client";
 import { getBetterAuthToken } from "./identity";
 
 const STORAGE_KEY = "dvnt-supabase-jwt-v1";
@@ -212,6 +216,16 @@ async function attachToSupabaseClient(jwt: MintedJwt | null): Promise<void> {
  * Returns true if an authenticated JWT is now active, false if we
  * fell back to anon-only.
  */
+/**
+ * Let the supabase client wait for a mint instead of racing it.
+ *
+ * Registered at module load, which is the point: the client needs this the
+ * moment the FIRST read fires, and that can be before any effect has run.
+ * Without it a cold load of a private surface reads as anon and caches the
+ * empty answer.
+ */
+setBridgeTokenMinter(() => ensureSupabaseJwt());
+
 export async function ensureSupabaseJwt(): Promise<boolean> {
   // 1. In-memory cache hit
   if (isFresh(cached)) return true;

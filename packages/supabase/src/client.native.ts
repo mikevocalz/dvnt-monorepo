@@ -64,4 +64,13 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // import resolvable on native; only the web client (accessToken option) uses it.
 export function setBridgeAccessToken(_token: string | null): void {}
 
+/**
+ * Same no-op reason as above: native has a real GoTrue session, so there is no
+ * bridged token to wait for and nothing to mint. Present only so the shared
+ * import surface is identical on both platforms.
+ */
+export function setBridgeTokenMinter(
+  _fn: (() => Promise<boolean>) | null,
+): void {}
+
 console.log("[Supabase] Client initialized (anon only)");

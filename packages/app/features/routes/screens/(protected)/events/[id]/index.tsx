@@ -111,6 +111,8 @@ import {
   TicketsOpeningSoonCard,
   OrganizerCard,
 } from "@dvnt/app/features/events/ui";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canScanTickets } from "@dvnt/app/lib/events/event-role";
 import type {
   TicketTier,
   EventAttendee,
@@ -1121,6 +1123,17 @@ function EventDetailScreenContent() {
     });
     router.push(`/(protected)/ticket/${eventId}` as any);
   }, [eventId, queryClient, router, viewerId]);
+
+  /**
+   * Scanner access from the server's role ladder, not ownership.
+   *
+   * The organizer block below is gated on `isHost`, which hides the Scanner
+   * button from every `scanner`-role co-organizer — the exact people the role
+   * exists for. A hired door person is not the host and never will be, so on
+   * their phone the scanner was unreachable from the UI entirely.
+   */
+  const { role: doorRole } = useEventRole(eventId);
+  const mayScanTickets = canScanTickets(doorRole);
 
   const isHost = useMemo(() => {
     if (!user?.id || !eventData?.host?.id) return false;
@@ -2293,6 +2306,21 @@ function EventDetailScreenContent() {
 
           {/* ── Hosted by — organizer card (posh-style) ──────────── */}
           <OrganizerCard eventId={eventId} />
+
+          {/* ── 3.25 DOOR STAFF — scanner only, for non-host staff ──── */}
+          {!isHost && mayScanTickets ? (
+            <View style={s.section}>
+              <Pressable
+                onPress={() =>
+                  router.push(`/(protected)/events/${eventId}/scanner` as any)
+                }
+                style={s.organizerButton}
+              >
+                <ScanLine size={16} color="#22C55E" />
+                <Text style={s.organizerButtonText}>Scan tickets</Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           {/* ── 3.25 HOST ORGANIZER TOOLS ──────────────────────────── */}
           {isHost ? (

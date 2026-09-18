@@ -185,8 +185,48 @@ const proxiedFetch: typeof fetch = (input, init) => {
   return fetch(input as RequestInfo, init);
 };
 
+/**
+ * How the client asks for a token it does not have yet.
+ *
+ * `_bridgeToken` is module state, so on a COLD page load it is null until
+ * SiteChrome's effect has run and minted. Any read that fires before that goes
+ * out with the anon key — which is invisible on public data and silently wrong
+ * on private data: a private event's RPC returns null, TanStack caches the
+ * null, nothing retries, and the screen shows "Loading…" forever. That is what
+ * door staff hit opening a private event on a fresh load.
+ *
+ * `supabase-jwt.ts` registers its own `ensureSupabaseJwt` here, so the client
+ * can wait for the mint already in flight rather than racing it. Registering
+ * from the other side keeps this file free of any auth import.
+ */
+type BridgeMinter = () => Promise<boolean>;
+let _mintBridgeToken: BridgeMinter | null = null;
+export function setBridgeTokenMinter(fn: BridgeMinter | null): void {
+  _mintBridgeToken = fn;
+}
+
+/**
+ * A signed-in reader with no token yet waits once for the mint. Everyone else
+ * — genuinely logged out, or mint unavailable — falls through to the anon key
+ * immediately, which is the pre-bridge behaviour and still serves public data.
+ */
+async function bridgeTokenOrAnon(): Promise<string> {
+  const existing = usableBridgeToken();
+  if (existing) return existing;
+  if (_mintBridgeToken) {
+    try {
+      await _mintBridgeToken();
+      const minted = usableBridgeToken();
+      if (minted) return minted;
+    } catch {
+      // Offline, cold edge fn, blocked request. Anon still reads public data.
+    }
+  }
+  return clientKey;
+}
+
 export const supabase = createClient(supabaseUrl, clientKey, {
-  accessToken: async () => usableBridgeToken() ?? clientKey,
+  accessToken: bridgeTokenOrAnon,
   global: { fetch: proxiedFetch },
 });
 
