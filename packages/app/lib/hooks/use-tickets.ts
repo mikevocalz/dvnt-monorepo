@@ -89,6 +89,37 @@ export function useTicketViewerAuthId(): string | undefined {
 }
 
 /**
+ * Is the viewer's identity still being established?
+ *
+ * True while the auth-id backfill above is in flight. A CTA that reads
+ * `hasTicket === false` during this window tells a holder they have no ticket,
+ * which is the same wrong answer the namespace bug gave — just for a second
+ * instead of forever. Callers should render neither "buy" nor "view" until
+ * this settles.
+ */
+export function useTicketViewerIdentityPending(): boolean {
+  const fromStore = useAuthStore((s) => {
+    const user = s.user;
+    if (!user) return undefined;
+    if (user.authId) return user.authId;
+    return /^\d+$/.test(String(user.id)) ? undefined : String(user.id);
+  });
+  const viewerId = useAuthStore((s) => s.user?.id);
+  const isAuthed = useAuthStore((s) => s.isAuthenticated);
+  const resolved = useQuery({
+    queryKey: ["viewer-auth-id", viewerId ?? "anon"],
+    queryFn: async () => (await getCurrentUserRow())?.authId ?? null,
+    enabled: !fromStore && !!viewerId,
+    staleTime: Infinity,
+    gcTime: GC_TIMES.standard,
+    retry: 1,
+  });
+  if (!isAuthed) return false;
+  if (fromStore) return false;
+  return resolved.isPending || resolved.isFetching;
+}
+
+/**
  * Legacy alias kept so existing call sites keep compiling. New code should use
  * `qk.tickets` directly — `lib/query/keys.ts` is the single key registry.
  *
@@ -351,6 +382,33 @@ export function useScanTicket() {
         queryClient.invalidateQueries({
           queryKey: qk.tickets.roster(variables.eventId),
         });
+      }
+    },
+  });
+}
+
+
+/**
+ * Set the attendee name on a pass.
+ *
+ * Invalidates the viewer's ticket reads AND the event roster, because the door
+ * list renders the same value through `holder_name` — a name changed on the
+ * pass that does not reach the door is worse than no name at all.
+ */
+export function useSetAttendeeName(eventId?: string) {
+  const queryClient = useQueryClient();
+  const viewerId = useTicketViewerId();
+  return useMutation({
+    mutationFn: ({ ticketId, name }: { ticketId: string; name: string }) =>
+      ticketsApi.setAttendeeName(ticketId, name),
+    onSuccess: (result) => {
+      if (!result.ok) return;
+      queryClient.invalidateQueries({ queryKey: qk.tickets.mine(viewerId) });
+      if (eventId) {
+        queryClient.invalidateQueries({
+          queryKey: qk.tickets.forEvent(viewerId, eventId),
+        });
+        queryClient.invalidateQueries({ queryKey: qk.tickets.roster(eventId) });
       }
     },
   });

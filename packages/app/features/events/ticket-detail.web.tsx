@@ -50,6 +50,7 @@ import {
   Star,
   Ticket as TicketIcon,
   RotateCcw,
+  User as UserIcon,
   TicketX,
   WifiOff,
   XCircle,
@@ -77,6 +78,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useSearchUsers } from "@dvnt/app/lib/hooks/use-search";
 import { qk } from "@dvnt/app/lib/query/keys";
 import { useEventRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
+import { useSetAttendeeName } from "@dvnt/app/lib/hooks/use-tickets";
 import { useTicketDetailUIStore } from "@dvnt/app/lib/stores/ticket-detail-ui-store";
 
 const CDN_URL =
@@ -570,6 +572,20 @@ export function TicketDetailScreen() {
   const TierIcon = config.Icon;
   const isExpired = ticket.status === "expired";
   const isRefunded = ticket.status === "refunded";
+  // Only a live pass is worth naming; a refunded or void one is not going
+  // through a door, and the column it writes is the one the door reads.
+  const isAdmissibleTicket =
+    ticket.status === "valid" ||
+    ticket.status === "checked_in" ||
+    ticket.status === "transfer_pending";
+  const attendeeName = dbTicket?.attendee_name ?? null;
+  const editingName = useTicketDetailUIStore((st) => st.editingName);
+  const setEditingName = useTicketDetailUIStore((st) => st.setEditingName);
+  const nameDraft = useTicketDetailUIStore((st) => st.nameDraft);
+  const setNameDraft = useTicketDetailUIStore((st) => st.setNameDraft);
+  const setAttendeeName = useSetAttendeeName(
+    dbTicket?.event_id != null ? String(dbTicket.event_id) : undefined,
+  );
   // What they actually paid, so the banner names a number they can match
   // against their statement rather than asking them to trust a word.
   const refundedAmount =
@@ -998,7 +1014,108 @@ export function TicketDetailScreen() {
           </section>
         ) : null}
 
-        {/* ── 3. ACCESS DETAILS ── */}
+        {/* ── 3. ATTENDEE ──
+            Whose pass this is. The door resolves its list from this column
+            first (attendee_name → account → guest_name), so a name set here is
+            the name staff read out. Editable by the holder and by whoever
+            bought the order, which is what makes a multi-ticket purchase
+            usable: four passes bought together were four identical rows. */}
+        {isAdmissibleTicket ? (
+          <section className="mb-4 flex flex-col gap-2.5">
+            <span className="ml-1 text-[11px] font-bold tracking-[2px] text-white/35">
+              ATTENDEE
+            </span>
+            <div className="rounded-3xl border border-white/6 bg-white/4 p-4">
+              {editingName ? (
+                <div className="flex flex-col gap-3">
+                  <label
+                    htmlFor="attendee-name"
+                    className="text-[11px] font-semibold uppercase tracking-wide text-white/40"
+                  >
+                    Name on this ticket
+                  </label>
+                  <input
+                    id="attendee-name"
+                    value={nameDraft}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    maxLength={80}
+                    autoFocus
+                    placeholder="Who is using this ticket?"
+                    className="h-11 rounded-xl border border-white/15 bg-black/40 px-3 text-[15px] text-white placeholder:text-white/30 focus:border-white/40 focus:outline-none"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAttendeeName.mutate(
+                          { ticketId: ticket.id, name: nameDraft },
+                          {
+                            onSuccess: (r: { ok: boolean }) => {
+                              if (r.ok) setEditingName(false);
+                            },
+                          },
+                        );
+                      }}
+                      disabled={setAttendeeName.isPending}
+                      className="h-11 flex-1 rounded-xl bg-white text-[14px] font-bold text-black disabled:opacity-50"
+                    >
+                      {setAttendeeName.isPending ? "Saving…" : "Save name"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingName(false);
+                        setNameDraft(dbTicket?.attendee_name ?? "");
+                      }}
+                      className="h-11 rounded-xl border border-white/15 px-4 text-[14px] font-semibold text-white"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {setAttendeeName.data && !setAttendeeName.data.ok ? (
+                    <p role="alert" className="text-[12px] text-[#FC253A]">
+                      {setAttendeeName.data.error === "not_allowed"
+                        ? "Only the ticket holder or the person who bought it can change this name."
+                        : setAttendeeName.data.error === "name_too_long"
+                          ? "That name is too long — 80 characters maximum."
+                          : "Could not save the name. Try again."}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/6">
+                    <UserIcon size={16} color={accent} />
+                  </span>
+                  <span className="flex flex-1 flex-col gap-0.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
+                      Name on this ticket
+                    </span>
+                    <span
+                      className={`text-sm font-semibold ${
+                        attendeeName ? "text-white" : "text-white/40"
+                      }`}
+                    >
+                      {attendeeName || "Not set"}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNameDraft(dbTicket?.attendee_name ?? "");
+                      setEditingName(true);
+                    }}
+                    className="h-9 shrink-0 rounded-xl border border-white/15 px-3 text-[13px] font-semibold text-white active:bg-white/10"
+                  >
+                    {attendeeName ? "Edit" : "Add name"}
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+        ) : null}
+
+        {/* ── 4. ACCESS DETAILS ── */}
         {hasAccessDetails ? (
           <section className="mb-4 flex flex-col gap-2.5">
             <span className="ml-1 text-[11px] font-bold tracking-[2px] text-white/35">

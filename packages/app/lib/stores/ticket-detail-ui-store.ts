@@ -19,6 +19,11 @@ interface TicketDetailUIState {
   // Per-action transient states
   shareState: ActionState;
   cancelingTransfer: boolean;
+  /** Inline attendee-name editor. */
+  editingName: boolean;
+  setEditingName: (v: boolean) => void;
+  nameDraft: string;
+  setNameDraft: (v: string) => void;
   refundStep: RefundStep;
   setShareState: (s: ActionState) => void;
   setCancelingTransfer: (v: boolean) => void;
@@ -45,7 +50,11 @@ export const useTicketDetailUIStore = create<TicketDetailUIState>((set) => ({
 
   shareState: "idle",
   cancelingTransfer: false,
+  editingName: false,
+  nameDraft: "",
   refundStep: "idle",
+  setEditingName: (editingName) => set({ editingName }),
+  setNameDraft: (nameDraft) => set({ nameDraft }),
   setShareState: (shareState) => set({ shareState }),
   setCancelingTransfer: (cancelingTransfer) => set({ cancelingTransfer }),
   setRefundStep: (refundStep) => set({ refundStep }),
@@ -58,6 +67,8 @@ export const useTicketDetailUIStore = create<TicketDetailUIState>((set) => ({
       transferState: "idle",
       shareState: "idle",
       cancelingTransfer: false,
+      editingName: false,
+      nameDraft: "",
       refundStep: "idle",
     }),
 }));

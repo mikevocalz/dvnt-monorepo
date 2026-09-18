@@ -19,6 +19,8 @@ export interface RosterCursor {
 }
 
 export interface TicketRecord {
+  /** Who this pass is for. The door reads it before the account name. */
+  attendee_name?: string | null;
   id: string;
   event_id: number;
   ticket_type_id: string;
@@ -124,6 +126,40 @@ export class TicketsUnavailableError extends Error {
 }
 
 export const ticketsApi = {
+  /**
+   * Name the person a ticket is for.
+   *
+   * `attendee_name` is read by the door (it resolves `holder_name` from
+   * attendee_name, then the account, then guest_name), by GuestTicketView and
+   * by WalletGroupCard — and until now it could only ever be written once, at
+   * checkout, and only when the event had `attendee_name_requirement` switched
+   * on. Event 79 has it off, so all 111 of its tickets carry a null name.
+   *
+   * Goes through `set_ticket_attendee_name` rather than a direct update
+   * because RLS on `tickets` grants UPDATE to the host alone, and RLS cannot
+   * restrict a column — opening it to holders would open `status` and
+   * `qr_token` with it. The function writes one column and authorises the
+   * holder (in either id namespace) or the buyer of the order.
+   */
+  async setAttendeeName(
+    ticketId: string,
+    attendeeName: string,
+  ): Promise<{ ok: boolean; error?: string; attendee_name?: string | null }> {
+    const { data, error } = await supabase.rpc("set_ticket_attendee_name", {
+      p_ticket_id: ticketId,
+      p_attendee_name: attendeeName,
+    });
+    if (error) {
+      console.error("[Tickets] setAttendeeName failed:", error);
+      return { ok: false, error: error.message };
+    }
+    return (data ?? { ok: false, error: "no_response" }) as {
+      ok: boolean;
+      error?: string;
+      attendee_name?: string | null;
+    };
+  },
+
   /**
    * Get all tickets for an event via the get-event-tickets edge fn.
    * Backwards-compat wrapper around the paginated variant — returns

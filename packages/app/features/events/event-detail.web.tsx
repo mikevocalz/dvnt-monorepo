@@ -72,6 +72,7 @@ import {
   useMyTicketStatusForEvent,
   useTicketViewerAuthId,
   useTicketViewerId,
+  useTicketViewerIdentityPending,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
@@ -499,7 +500,11 @@ export function EventDetailScreen() {
   // ── 1. TICKETS — live ticket types + checkout + my-ticket + upgrade ──
   const { data: liveTicketTypes = [] } = useTicketTypes(eventId);
   // Display only — drives the CTA, never opens a pass.
-  const { primary: myTicketData } = useMyTicketStatusForEvent(eventId);
+  const {
+    primary: myTicketData,
+    isPending: ticketsPending,
+    isError: ticketsFailed,
+  } = useMyTicketStatusForEvent(eventId);
   const { checkout, isLoading: isCheckingOut } = useTicketCheckout();
   // Authed RSVP for free, tier-less events (no checkout sheet to open).
   const rsvpMutation = useRsvpEvent();
@@ -509,6 +514,7 @@ export function EventDetailScreen() {
   const viewerId = useTicketViewerId();
   // The id the pass is actually stamped with — see useTicketViewerAuthId.
   const viewerAuthId = useTicketViewerAuthId();
+  const identityPending = useTicketViewerIdentityPending();
   // The CTA below routes to `/feed/ticket/:id`, which renders a QR credential,
   // so "do they hold a pass" is an authorization question, not a status string.
   // `status === "active" || "scanned"` answered it without ever asking WHOSE
@@ -523,6 +529,14 @@ export function EventDetailScreen() {
     viewerAuthId,
   });
   const hasTicket = ticketAccess.canShowCredential;
+  // "Do they hold a pass" has three answers, not two, and the third one used to
+  // be rendered as "no". While the ticket read is in flight — or the viewer's
+  // auth id is still being resolved for a session persisted without it — the
+  // honest state is UNKNOWN, and showing a buy button then tells a holder they
+  // own nothing. Offline (`ticketsFailed`) is deliberately not unknown: the
+  // query has given its answer and the cached rows are what we have.
+  const ownershipUnknown =
+    isAuthenticated && !hasTicket && !ticketsFailed && (ticketsPending || identityPending);
 
   // Upgrade options derived from live tiers + the user's current ticket.
   const upgradeOptions = useTicketUpgradeOptions(
@@ -1312,6 +1326,23 @@ export function EventDetailScreen() {
                 >
                   <Check size={18} color="#379ED8" /> You&apos;re going · Tap to cancel
                 </button>
+              );
+            }
+
+            // Unknown beats a wrong answer. A skeleton for a moment is
+            // recoverable; "RSVP" shown to someone holding two passes is the
+            // bug this whole chain has been about.
+            if (ownershipUnknown) {
+              return (
+                <div
+                  role="status"
+                  aria-label="Checking your tickets"
+                  className="w-full mt-4 h-12 rounded-xl bg-white/[0.06] flex items-center justify-center"
+                >
+                  <span className="text-[13px] font-semibold text-white/45">
+                    Checking your tickets…
+                  </span>
+                </div>
               );
             }
 
