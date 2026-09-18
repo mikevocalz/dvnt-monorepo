@@ -31,6 +31,7 @@ import { Search, Check, X } from "lucide-react";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { qk } from "@dvnt/app/lib/query/keys";
 import { isAdmissible, isListable } from "@dvnt/app/lib/tickets/ticket-access";
+import { REFUND_DOOR_NOTE, REFUND_REASON } from "@dvnt/app/lib/tickets/refund-notice";
 import {
   snapshotRoster,
   recallRoster,
@@ -53,16 +54,6 @@ export const doorRosterKey = (eventId: string) => qk.tickets.roster(eventId);
 const ROW_ESTIMATE = 68;
 
 type Filter = "all" | "in" | "out" | "refunded";
-
-/**
- * Why the refunded passes on this door exist.
- *
- * Staff get asked. Without an answer the row reads as an accusation, and the
- * honest one is administrative rather than anything the guest did — so it is
- * stated once, above the list, in the organiser's words.
- */
-const REFUNDED_EXPLANATION =
-  "Prior event cancellation/double creation/merger";
 
 interface GuestListState {
   query: string;
@@ -272,9 +263,9 @@ export function DoorGuestList({
 
       {filter === "refunded" ? (
         <p className="mt-2 rounded-lg bg-white/[0.06] px-3 py-2 text-[12px] leading-relaxed text-white/70">
-          These passes were refunded and cannot be checked in.
+          {REFUND_DOOR_NOTE}
           <br />
-          <span className="text-white/50">{REFUNDED_EXPLANATION}</span>
+          <span className="text-white/50">{REFUND_REASON}</span>
         </p>
       ) : null}
 

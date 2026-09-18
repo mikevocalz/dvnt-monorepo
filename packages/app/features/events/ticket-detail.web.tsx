@@ -49,6 +49,7 @@ import {
   Sparkles,
   Star,
   Ticket as TicketIcon,
+  RotateCcw,
   TicketX,
   WifiOff,
   XCircle,
@@ -61,6 +62,12 @@ import {
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
 import { addonsApi, type OrderAddonRecord } from "@dvnt/app/lib/api/addons";
+import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
+import {
+  REFUND_REASON,
+  REFUND_TIMING,
+  REFUND_TITLE,
+} from "@dvnt/app/lib/tickets/refund-notice";
 import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
 import type {
   Ticket,
@@ -113,8 +120,10 @@ function dbToTicket(rec: TicketRecord): Ticket {
         ? "valid"
         : rec.status === "scanned"
           ? "checked_in"
-          : rec.status === "refunded" || rec.status === "void"
-            ? "revoked"
+          : rec.status === "refunded"
+            ? "refunded"
+            : rec.status === "void"
+              ? "revoked"
             : rec.status === "transfer_pending"
               ? "transfer_pending"
               : "expired",
@@ -560,11 +569,19 @@ export function TicketDetailScreen() {
   const config = TIER_CONFIG[tier];
   const TierIcon = config.Icon;
   const isExpired = ticket.status === "expired";
+  const isRefunded = ticket.status === "refunded";
+  // What they actually paid, so the banner names a number they can match
+  // against their statement rather than asking them to trust a word.
+  const refundedAmount =
+    typeof dbTicket?.purchase_amount_cents === "number" &&
+    dbTicket.purchase_amount_cents > 0
+      ? formatCents(dbTicket.purchase_amount_cents)
+      : null;
   const isRevoked = ticket.status === "revoked";
   const isTransferPending = ticket.status === "transfer_pending";
   const isCheckedIn = ticket.status === "checked_in";
   const isActive = ticket.status === "valid";
-  const isBlocked = isRevoked || isExpired || isCheckedIn;
+  const isBlocked = isRevoked || isRefunded || isExpired || isCheckedIn;
   const heroImage = resolveImageUrl(ticket.eventImage);
 
   // Access details (only render rows that exist)
@@ -726,8 +743,37 @@ export function TicketDetailScreen() {
           </div>
         ) : null}
 
-        {/* ── Expired / revoked banner ── */}
-        {isExpired || isRevoked ? (
+        {/* ── Refunded / expired / revoked banner ──
+            Refunded is amber, not red. Red is the app's alarm colour and it
+            reads as "you did something wrong"; a refund is the opposite — the
+            money came back. Amber is the same value the door uses for the same
+            status, so staff and guest see one answer. It is also the only one
+            of the three that owes an explanation, so it gets a second line
+            instead of a lone verdict. */}
+        {isRefunded ? (
+          <div
+            className="mt-4 rounded-2xl border px-4 py-3"
+            style={{
+              backgroundColor: "rgba(245,158,11,0.12)",
+              borderColor: "rgba(245,158,11,0.25)",
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <RotateCcw size={16} color="#F59E0B" aria-hidden />
+              <span className="text-[13px] font-semibold" style={{ color: "#F59E0B" }}>
+                {REFUND_TITLE}
+              </span>
+            </div>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-white/60">
+              {REFUND_REASON}. {REFUND_TIMING}
+            </p>
+            {ticket.paid && refundedAmount ? (
+              <p className="mt-1 text-[12px] font-semibold text-white/75">
+                {refundedAmount} returned
+              </p>
+            ) : null}
+          </div>
+        ) : isExpired || isRevoked ? (
           <div
             className="mt-4 flex items-center gap-2 rounded-2xl border px-4 py-3"
             style={{
@@ -788,6 +834,13 @@ export function TicketDetailScreen() {
                     <CheckCircle2 size={28} color="#3FDCFF" />
                     <span className="text-base font-bold text-[#3FDCFF]">
                       Checked In
+                    </span>
+                  </>
+                ) : isRefunded ? (
+                  <>
+                    <RotateCcw size={28} color="#F59E0B" aria-hidden />
+                    <span className="text-base font-bold text-[#F59E0B]">
+                      Refunded
                     </span>
                   </>
                 ) : isRevoked ? (

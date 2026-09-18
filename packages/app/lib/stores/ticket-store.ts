@@ -3,6 +3,9 @@ import { create } from "zustand";
 export type TicketStatus =
   | "valid"
   | "checked_in"
+  /** Purchase returned. Distinct from `revoked`: nothing went wrong. */
+  | "refunded"
+  /** Cancelled pass. The holder did not get money back for this one. */
   | "revoked"
   | "expired"
   | "transfer_pending";

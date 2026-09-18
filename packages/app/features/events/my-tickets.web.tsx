@@ -52,6 +52,7 @@ import {
   useTicketViewerId,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { qk } from "@dvnt/app/lib/query/keys";
+import { isAdmissible } from "@dvnt/app/lib/tickets/ticket-access";
 import { useMotionTier } from "@dvnt/app/lib/navigation/use-motion-tier";
 import {
   pendingTransferTicketIds,
@@ -81,7 +82,11 @@ const STATUS_COLORS: Record<
 > = {
   active: { bg: "rgba(34, 197, 94, 0.15)", text: "#22C55E", label: "Active" },
   scanned: { bg: "rgba(59, 130, 246, 0.15)", text: "#3B82F6", label: "Used" },
-  refunded: { bg: "rgba(239, 68, 68, 0.15)", text: "#EF4444", label: "Refunded" },
+  // Amber, not red. Red is this app's alarm colour and a refund is not an
+  // alarm — the money came back. It also matches the door's "Not valid" chip
+  // and the pass screen's banner, so one status wears one colour wherever it
+  // appears.
+  refunded: { bg: "rgba(245, 158, 11, 0.15)", text: "#F59E0B", label: "Refunded" },
   void: { bg: "rgba(107, 114, 128, 0.15)", text: "#6B7280", label: "Void" },
   transfer_pending: {
     bg: "rgba(138, 64, 207, 0.15)",
@@ -150,7 +155,13 @@ function TicketCard({
       ariaLabel={`${
         isCoatCheck ? "Coat check" : ticket.ticket_type_name || "Admission"
       } for ${ticket.event_title || "event"}. ${status.label}.`}
+      // A spent pass is dimmed so the eye skips it when scanning a list for
+      // tonight's ticket. Not hidden and still tappable — the detail screen is
+      // where "refunded" is explained, and a card you cannot open is a dead
+      // end. 70% keeps the chip legible against AA.
       className={`flex overflow-hidden rounded-2xl border cursor-pointer transition-colors ${
+        isAdmissible(ticket.status) ? "" : "opacity-70"
+      } ${
         isCoatCheck
           ? "border-purple-500/20 bg-slate-950 active:bg-slate-900"
           : "border-white/10 bg-white/4 active:bg-white/6"
