@@ -1117,11 +1117,20 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
           />
         </div>
         <div>
-          <span className="block text-[11px] text-white/50 mb-1">Max/Order</span>
+          {/* This is `max_per_user` — a lifetime cap per PERSON across all their
+              orders, not a per-order limit. The create screen already calls it
+              "Max tickets per person"; this one said "Max/Order", so setting 1
+              here reads as "one per order" and actually means "one ever". On
+              a live event that silently refuses every returning claimer with
+              "Already at the maximum 1 tickets for this email". */}
+          <span className="block text-[11px] text-white/50 mb-1">
+            Max per person
+          </span>
           <input
             className="w-full bg-white/[0.05] rounded-lg px-2.5 py-1.5 text-[15px] font-semibold text-white outline-none"
             inputMode="numeric"
             placeholder="4"
+            aria-describedby={`max-per-person-${idx}`}
             value={tier.maxPerOrder}
             onChange={(e) => updateTier(idx, { maxPerOrder: e.target.value })}
           />
