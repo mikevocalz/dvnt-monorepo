@@ -29,6 +29,7 @@ import { createScanGate } from "./qr/scan-gate";
 import {
   classifyCameraError,
   detectPreflightIssue,
+  STALLED_ISSUE,
   type CameraIssue,
 } from "./qr/camera-issues";
 import { LegacyQrScanner } from "./QrScanner.legacy.web";
@@ -265,6 +266,18 @@ function ModernQrScanner({
       }
       capsProbe.current = null;
       track.addEventListener("ended", restart, { once: true });
+      // Nothing calls play(). expo-camera assigns `srcObject` and relies on the
+      // `autoPlay` attribute (useWebCameraStream.js:129-135) — which iOS
+      // suspends in Low Power Mode, including for muted inline video off a
+      // MediaStream. The stream is live, the element never starts, and because
+      // expo-camera's decode loop is handed no `onError` its every-300ms bail
+      // on `readyState` is indistinguishable from nobody holding up a code.
+      // A wake-locked screen at full brightness is exactly what drives a door
+      // phone into Low Power Mode by 1am.
+      void video?.play?.().catch(() => {
+        // Autoplay refused. The stall watchdog below turns this into a panel;
+        // throwing here would only race it.
+      });
       const c = (track.getCapabilities?.() ?? {}) as { torch?: boolean; zoom?: { min: number; max: number } };
       store.setState({
         caps: {
@@ -323,6 +336,43 @@ function ModernQrScanner({
       });
     }, 8000);
     return () => window.clearTimeout(t);
+  }, [issue, status, fail]);
+
+  // 3c ── stall watchdog. The one in 3b only guards STARTUP; once `status` is
+  // "scanning" it is torn down, and after that a camera that dies is silent
+  // forever. expo-camera's decode loop catches into a no-op and reschedules
+  // unconditionally (useWebBarcodeScanner.js:52-64), so a suspended stream and
+  // an empty doorway look identical: live preview, frame guide, no verdicts.
+  //
+  // The signal is FRAME ARRIVAL, not decode success. "No decodes in N seconds"
+  // was the obvious check and it is wrong — a door has long quiet stretches
+  // with nobody in front of it, and firing then would train staff to ignore
+  // the panel. `currentTime` advances only while frames are being delivered,
+  // which is true whether or not anyone is holding up a code.
+  useEffect(() => {
+    if (issue || status !== "scanning") return;
+    let lastTime = -1;
+    let stalledSince = 0;
+    const id = window.setInterval(() => {
+      const video = hostRef.current?.querySelector("video");
+      const now = video?.currentTime ?? -1;
+      if (now < 0) return;
+      if (now !== lastTime) {
+        lastTime = now;
+        stalledSince = 0;
+        return;
+      }
+      // Frozen. Give it a grace period before calling it: a backgrounded tab
+      // legitimately stops delivering frames, and the visibility recovery in
+      // step 2 already owns that case.
+      if (document.visibilityState !== "visible") return;
+      if (!stalledSince) {
+        stalledSince = Date.now();
+        return;
+      }
+      if (Date.now() - stalledSince >= 6000) fail(STALLED_ISSUE);
+    }, 1000);
+    return () => window.clearInterval(id);
   }, [issue, status, fail]);
 
   // expo-camera maps zoom 0..1 onto the track's [min,max]; 2× is what lets staff

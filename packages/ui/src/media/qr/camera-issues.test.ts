@@ -1,7 +1,7 @@
 /** node --import tsx --test packages/ui/src/media/qr/camera-issues.test.ts */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyCameraError, detectPreflightIssue, isInAppBrowser } from "./camera-issues.ts";
+import { STALLED_ISSUE, classifyCameraError, detectPreflightIssue, isInAppBrowser } from "./camera-issues.ts";
 
 const SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
 const INSTAGRAM = SAFARI.replace("Safari/604.1", "Instagram 380.0.0.30.75 (iPhone15,2; iOS 18_5)");
@@ -35,4 +35,16 @@ test("denied copy tells staff where the switch is; unknown still offers a retry"
   assert.match(classifyCameraError({ name: "NotAllowedError" }).message, /Website Settings/);
   const u = classifyCameraError({ name: "WeirdError", message: "??" });
   assert.equal(u.kind, "unknown"); assert.equal(u.canRetry, true);
+});
+
+test("a stalled camera is its own kind, not 'busy'", () => {
+  // The fix differs: nothing else is holding the camera, the frames just
+  // stopped. Reusing "busy" would have told staff to close FaceTime.
+  assert.equal(STALLED_ISSUE.kind, "stalled");
+  assert.equal(STALLED_ISSUE.canRetry, true);
+  assert.notEqual(STALLED_ISSUE.title, classifyCameraError({ name: "NotReadableError" }).title);
+  // Names the actual iOS cause and where to fix it, not just "try again".
+  assert.match(STALLED_ISSUE.message, /Low Power Mode/);
+  // Typed codes remain the fallback in every camera failure state.
+  assert.match(STALLED_ISSUE.message, /[Tt]yped codes/);
 });
