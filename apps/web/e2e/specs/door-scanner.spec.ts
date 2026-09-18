@@ -236,6 +236,17 @@ test.describe("door scanner", () => {
               ticket_type_name: "VIP",
               checked_in_at: null,
             },
+            // A second ticket for the same person. On the real door 22 people
+            // hold more than one and one holds five, so identical rows are the
+            // normal case, not an edge case.
+            {
+              id: "3",
+              status: "active",
+              qr_token: "TOK-OUT-2",
+              holder_name: "Bo Mensah",
+              ticket_type_name: "VIP",
+              checked_in_at: null,
+            },
           ],
         }),
       }),
@@ -245,11 +256,16 @@ test.describe("door scanner", () => {
     await page.getByRole("button", { name: "Guest list" }).click();
 
     // Counts come off the same query the progress bar reads.
-    await expect(page.getByRole("button", { name: "All 2" })).toBeVisible({
+    await expect(page.getByRole("button", { name: "All 3" })).toBeVisible({
       timeout: 30_000,
     });
     await expect(page.getByRole("button", { name: "Checked in 1" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Not in yet 1" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Not in yet 2" })).toBeVisible();
+
+    // Two identical names must be tellable apart, or staff cannot know which
+    // of a guest's tickets they just admitted.
+    await expect(page.getByText(/ticket 1 of 2/)).toBeVisible();
+    await expect(page.getByText(/ticket 2 of 2/)).toBeVisible();
 
     // Already in: a state, with when — the fact that settles an argument.
     await expect(page.getByText(/In · 19 min ago/)).toBeVisible();
@@ -258,12 +274,14 @@ test.describe("door scanner", () => {
     // only. This is why the roster is filtered client-side.
     await page.getByPlaceholder("Search a name, or the ticket code").fill("bo");
     await expect(page.getByText("Ada Okonkwo")).toHaveCount(0);
-    await expect(page.getByText("Bo Mensah")).toBeVisible();
+    await expect(page.getByText("Bo Mensah").first()).toBeVisible();
 
     // Checking in from a row goes through the same ticket-scan call the camera
     // uses — one check-in path, whichever way the door found the ticket.
     const before = scanCalls();
-    await page.getByRole("button", { name: "Check in" }).click();
+    // Two rows, two buttons — checking one in must admit exactly one ticket,
+    // not both and not the wrong one.
+    await page.getByRole("button", { name: "Check in" }).first().click();
     await expect.poll(() => scanCalls()).toBe(before + 1);
   });
 

@@ -105,6 +105,32 @@ export function DoorGuestList({
     return { all: tickets.length, in: checkedIn, out: tickets.length - checkedIn };
   }, [tickets]);
 
+  /**
+   * How many tickets each person holds, and which one a row is.
+   *
+   * On the real door 68 people hold 103 tickets — 22 of them hold more than
+   * one, and one holds five. Every ticket is a separate QR and a separate
+   * admission, so the list shows a row per TICKET, not per person. Without a
+   * counter those rows are identical: staff check one in and cannot tell which
+   * of the five it was, or how many that guest still has waiting.
+   */
+  const holdings = useMemo(() => {
+    const total = new Map<string, number>();
+    for (const t of tickets) {
+      const k = t.holder_name ?? t.user_id ?? t.id;
+      total.set(k, (total.get(k) ?? 0) + 1);
+    }
+    const seen = new Map<string, number>();
+    const index = new Map<string, { n: number; of: number }>();
+    for (const t of tickets) {
+      const k = t.holder_name ?? t.user_id ?? t.id;
+      const n = (seen.get(k) ?? 0) + 1;
+      seen.set(k, n);
+      index.set(t.id, { n, of: total.get(k) ?? 1 });
+    }
+    return index;
+  }, [tickets]);
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return tickets.filter((t) => {
@@ -217,6 +243,7 @@ export function DoorGuestList({
                 >
                   <GuestRow
                     ticket={t}
+                    holding={holdings.get(t.id)}
                     busy={checkingInToken === t.qr_token}
                     onCheckIn={onCheckIn}
                   />
@@ -239,10 +266,13 @@ export function DoorGuestList({
 
 function GuestRow({
   ticket,
+  holding,
   busy,
   onCheckIn,
 }: {
   ticket: TicketRecord;
+  /** Which of this person's tickets this row is, when they hold several. */
+  holding?: { n: number; of: number };
   busy: boolean;
   onCheckIn: (qrToken: string) => void;
 }) {
@@ -257,6 +287,7 @@ function GuestRow({
         </p>
         <p className="truncate text-[12px] text-white/50">
           {ticket.ticket_type_name ?? "General"}
+          {holding && holding.of > 1 ? ` · ticket ${holding.n} of ${holding.of}` : ""}
           {ticket.status === "refunded" ? " · Refunded" : ""}
         </p>
       </div>
