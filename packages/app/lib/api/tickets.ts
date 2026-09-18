@@ -21,6 +21,8 @@ export interface RosterCursor {
 export interface TicketRecord {
   /** Who this pass is for. The door reads it before the account name. */
   attendee_name?: string | null;
+  /** Better Auth id of whoever handed this pass over, set on transfer accept. */
+  transferred_from?: string | null;
   id: string;
   event_id: number;
   ticket_type_id: string;
@@ -126,6 +128,28 @@ export class TicketsUnavailableError extends Error {
 }
 
 export const ticketsApi = {
+  /**
+   * Resolve a transfer sender's handle for display.
+   *
+   * `tickets.transferred_from` stores a Better Auth id and nothing else, so
+   * the pass can say a ticket was handed over but not by whom. Degrades to
+   * null rather than throwing — "Transferred to you" without a name is still
+   * true, and a failed lookup must not take the pass screen down with it.
+   */
+  async lookupTransferSender(authId: string): Promise<string | null> {
+    try {
+      const { data, error } = await supabase
+        .from("users")
+        .select("username")
+        .eq("auth_id", authId)
+        .maybeSingle();
+      if (error || !data) return null;
+      return (data as { username?: string | null }).username ?? null;
+    } catch {
+      return null;
+    }
+  },
+
   /**
    * Name the person a ticket is for.
    *

@@ -51,6 +51,7 @@ import {
   useTicketViewerAuthId,
   useTicketViewerId,
 } from "@dvnt/app/lib/hooks/use-tickets";
+import { toast } from "sonner";
 import { qk } from "@dvnt/app/lib/query/keys";
 import { isAdmissible } from "@dvnt/app/lib/tickets/ticket-access";
 import { useMotionTier } from "@dvnt/app/lib/navigation/use-motion-tier";
@@ -265,22 +266,46 @@ function PendingTransferCard({
   onAction: () => void;
 }) {
   const [isActing, setIsActing] = useState(false);
+  const router = useRouter();
   const eventTitle = transfer.tickets?.events?.title || "Event";
   const tierName = transfer.tickets?.ticket_types?.name || "Ticket";
 
+  // Accepting told you nothing and took you nowhere: the card vanished on
+  // refetch and the pass you had just been given was somewhere in a list. Now
+  // it confirms, then opens the actual ticket — the thing you accepted it for.
   const handleAccept = async () => {
     setIsActing(true);
     const result = await ticketsApi.acceptTransfer(transfer.id);
-    if (!result.error) onAction();
     setIsActing(false);
+    if (result.error || !result.ticket_id) {
+      toast.error("Could not accept the transfer", {
+        description: result.error ?? "Try again in a moment.",
+      });
+      return;
+    }
+    toast.success(`${eventTitle} is yours`, {
+      description: "Opening your ticket.",
+    });
+    onAction();
+    router.push(`/feed/ticket/${result.ticket_id}`);
   };
 
+  // `window.confirm` is a browser chrome dialog in the middle of an app that
+  // has its own language for this, and it blocks the page while it is up.
+  // Declining is also reversible by asking the sender again, so a second step
+  // buys nothing — the toast carries the undo affordance instead.
   const handleDecline = async () => {
-    if (!window.confirm("Decline this transfer?")) return;
     setIsActing(true);
     const result = await ticketsApi.declineTransfer(transfer.id);
-    if (!result.error) onAction();
     setIsActing(false);
+    if (result.error) {
+      toast.error("Could not decline the transfer", { description: result.error });
+      return;
+    }
+    toast(`Declined ${eventTitle}`, {
+      description: "The sender keeps their ticket.",
+    });
+    onAction();
   };
 
   return (

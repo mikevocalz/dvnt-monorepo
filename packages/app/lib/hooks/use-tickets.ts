@@ -413,3 +413,16 @@ export function useSetAttendeeName(eventId?: string) {
     },
   });
 }
+
+
+/** Handle of whoever transferred this pass, or null. Never throws. */
+export function useTransferSender(authId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["transfer-sender", authId ?? "none"],
+    queryFn: () => ticketsApi.lookupTransferSender(authId as string),
+    enabled: !!authId,
+    staleTime: Infinity,
+    gcTime: GC_TIMES.standard,
+    retry: 0,
+  });
+}

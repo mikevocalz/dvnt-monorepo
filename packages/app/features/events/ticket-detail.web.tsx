@@ -78,7 +78,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useSearchUsers } from "@dvnt/app/lib/hooks/use-search";
 import { qk } from "@dvnt/app/lib/query/keys";
 import { useEventRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
-import { useSetAttendeeName } from "@dvnt/app/lib/hooks/use-tickets";
+import { useSetAttendeeName, useTransferSender } from "@dvnt/app/lib/hooks/use-tickets";
 import { useTicketDetailUIStore } from "@dvnt/app/lib/stores/ticket-detail-ui-store";
 
 const CDN_URL =
@@ -579,6 +579,7 @@ export function TicketDetailScreen() {
     ticket.status === "checked_in" ||
     ticket.status === "transfer_pending";
   const attendeeName = dbTicket?.attendee_name ?? null;
+  const transferSender = useTransferSender(dbTicket?.transferred_from);
   const editingName = useTicketDetailUIStore((st) => st.editingName);
   const setEditingName = useTicketDetailUIStore((st) => st.setEditingName);
   const nameDraft = useTicketDetailUIStore((st) => st.nameDraft);
@@ -1012,6 +1013,22 @@ export function TicketDetailScreen() {
               ))}
             </div>
           </section>
+        ) : null}
+
+        {/* ── Handed to you ──
+            A transferred pass looked identical to one you bought, which is
+            disorienting when you open it in a queue and cannot remember buying
+            it. Names the sender when the handle resolves and stays truthful
+            when it does not. */}
+        {dbTicket?.transferred_from && isAdmissibleTicket ? (
+          <div className="mb-4 flex items-center gap-2 rounded-2xl border border-[#8A40CF]/25 bg-[#8A40CF]/10 px-4 py-3">
+            <Send size={16} color="#B98CE8" aria-hidden />
+            <span className="text-[13px] font-semibold text-[#B98CE8]">
+              {transferSender.data
+                ? `Transferred to you by @${transferSender.data}`
+                : "Transferred to you"}
+            </span>
+          </div>
         ) : null}
 
         {/* ── 3. ATTENDEE ──

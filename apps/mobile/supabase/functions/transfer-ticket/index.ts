@@ -226,6 +226,35 @@ Deno.serve(async (req: Request) => {
       // Void sender's wallet pass (if any)
       await voidWalletPass(supabase, ticket_id);
 
+      // A transfer lives until the day after the event, not 24h from now.
+      //
+      // The column default is `now() + 24h`, which is the wrong clock: a pass
+      // handed over a week early died before the recipient had any reason to
+      // open the app, and one sent the morning of the event expired while the
+      // event was still running. Tying it to the event means "you can still
+      // hand your ticket to a friend right up to the door, and the day after
+      // it stops mattering".
+      const { data: evt } = await supabase
+        .from("events")
+        .select("start_date, end_date")
+        .eq("id", ticket.event_id)
+        .maybeSingle();
+
+      const eventEnd = evt?.end_date ?? evt?.start_date ?? null;
+      const expiresAt = eventEnd
+        ? new Date(new Date(eventEnd).getTime() + 24 * 60 * 60 * 1000)
+        : new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      // A window that has already closed would create a transfer that the
+      // sweep expires within five minutes, taking the sender's ticket out of
+      // service on the way. Refuse instead of handing back something dead.
+      if (expiresAt.getTime() <= Date.now()) {
+        return json(
+          { error: "This event has already passed, so its tickets can no longer be transferred." },
+          400,
+        );
+      }
+
       // Create transfer record
       const { data: transfer, error: createErr } = await supabase
         .from("ticket_transfers")
@@ -234,6 +263,7 @@ Deno.serve(async (req: Request) => {
           from_user_id: userId,
           to_user_id: recipient.id,
           status: "pending",
+          expires_at: expiresAt.toISOString(),
         })
         .select("id, expires_at")
         .single();
