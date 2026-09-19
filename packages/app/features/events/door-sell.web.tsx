@@ -160,7 +160,7 @@ function Stepper({
   name: string;
 }) {
   const btn =
-    "flex h-12 w-12 items-center justify-center rounded-xl bg-white/10 active:scale-95 disabled:opacity-40";
+    "flex h-12 w-12 items-center justify-center rounded-xl bg-white/10 active:scale-95 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-[#379ED8]";
   return (
     <div className="flex items-center gap-2">
       <button
@@ -240,7 +240,7 @@ function DoorPayForm({
         type="button"
         disabled={busy || !stripe || !elements}
         onClick={handlePay}
-        className="mt-4 h-14 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-base font-bold text-white disabled:opacity-50"
+        className="mt-4 h-14 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-base font-bold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7fd4ff] disabled:opacity-50"
       >
         {busy
           ? "Confirming with the bank…"
@@ -511,7 +511,7 @@ export function DoorSellScreen() {
             <button
               type="button"
               onClick={reset}
-              className="mt-6 h-14 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-base font-bold text-white"
+              className="mt-6 h-14 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-base font-bold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7fd4ff]"
             >
               Next customer
             </button>
@@ -681,7 +681,12 @@ export function DoorSellScreen() {
 
           {/* Payment sheet (inline panel — one surface at a time) */}
           {pendingPayment ? (
-            <section className="mt-6 rounded-2xl border border-white/12 bg-white/[0.04] p-4">
+            <section
+              className="mt-6 rounded-2xl border border-white/12 bg-white/[0.04] p-4"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") cancelSheet();
+              }}
+            >
               <p className="text-sm font-semibold text-white">
                 Hand the phone to the guest to pay.
               </p>
@@ -734,7 +739,7 @@ export function DoorSellScreen() {
                 !primary || !quote || !emailValid || phase === "quoting" || !online
               }
               onClick={startSale}
-              className="h-14 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-base font-bold text-white active:scale-[0.99] disabled:opacity-50"
+              className="h-14 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-base font-bold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7fd4ff] active:scale-[0.99] disabled:opacity-50"
             >
               {phase === "quoting"
                 ? "Getting total…"
@@ -775,7 +780,7 @@ function GatePanel({
       <button
         type="button"
         onClick={onAction}
-        className="mt-6 h-14 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-base font-bold text-white"
+        className="mt-6 h-14 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-base font-bold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7fd4ff]"
       >
         {actionLabel}
       </button>

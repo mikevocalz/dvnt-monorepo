@@ -410,33 +410,10 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── Atomic inventory hold — same RPC as online checkout ────────────
-    const { data: holdResult, error: holdRpcError } = await supabase.rpc(
-      "ticket_hold_create_atomic",
-      {
-        p_ticket_type_id: ticket_type_id,
-        p_quantity: quantity,
-        // Placeholder PI id; stamped with the real one after mint below.
-        p_payment_intent_id: `door_pending_${crypto.randomUUID()}`,
-        p_user_id: staffUserId,
-        p_hold_seconds: 600,
-      },
-    );
-    if (holdRpcError || !holdResult?.ok) {
-      const available = holdResult?.available;
-      return json(
-        {
-          error:
-            typeof available === "number" && available > 0
-              ? `Only ${available} left — reduce the quantity and try again.`
-              : `${ticketType.name || "This tier"} sold out while you were selling.`,
-          code: "sold_out",
-        },
-        409,
-      );
-    }
-
     // ── PaymentIntent — web rail: automatic_payment_methods only ──────
+    // Minted BEFORE the hold so the hold binds the real PI id in one
+    // write — a placeholder-then-rebind pattern can collide with another
+    // seller's concurrent hold on the same tier.
     let pi: any;
     try {
       pi = await stripeRequest("/payment_intents", {
@@ -473,29 +450,54 @@ Deno.serve(async (req: Request) => {
           : {}),
       });
     } catch (stripeErr) {
-      // No charge exists yet — release the hold so inventory isn't stranded.
-      await supabase
-        .from("ticket_holds")
-        .update({ status: "released" })
-        .eq("ticket_type_id", ticket_type_id)
-        .eq("status", "active")
-        .like("payment_intent_id", "door_pending_%");
       throw stripeErr;
     }
 
-    // Bind the hold to the real PI id so the webhook can convert it.
-    await supabase
-      .from("ticket_holds")
-      .update({ payment_intent_id: pi.id })
-      .eq("ticket_type_id", ticket_type_id)
-      .eq("status", "active")
-      .like("payment_intent_id", "door_pending_%");
+    // ── Atomic inventory hold — same RPC as online checkout ────────────
+    const { data: holdResult, error: holdRpcError } = await supabase.rpc(
+      "ticket_hold_create_atomic",
+      {
+        p_ticket_type_id: ticket_type_id,
+        p_quantity: quantity,
+        p_payment_intent_id: pi.id,
+        p_user_id: staffUserId,
+        p_hold_seconds: 600,
+      },
+    );
+    if (holdRpcError || !holdResult?.ok) {
+      // Someone took the seat while Stripe was minting the intent. Cancel
+      // the PaymentIntent so the guest is never left with an uncancelled
+      // intent for inventory they cannot have. (Mirrors
+      // create-payment-intent.)
+      try {
+        await stripeRequest(`/payment_intents/${pi.id}/cancel`, {});
+      } catch (e) {
+        console.error(
+          "[door-sell] hold failed AND PI cancel failed",
+          pi.id,
+          e,
+        );
+      }
+      const available = holdResult?.available;
+      return json(
+        {
+          error:
+            typeof available === "number" && available > 0
+              ? `Only ${available} left — reduce the quantity and try again.`
+              : `${ticketType.name || "This tier"} sold out while you were selling.`,
+          code: "sold_out",
+        },
+        409,
+      );
+    }
 
     if (promoResult) {
       await incrementPromoUsage(supabase, promoResult.promo_code_id);
     }
 
     // ── Order row — payment_pending, seller + guest recorded ──────────
+    // If this fails with a live PI + hold, undo both: an intent with no
+    // order is a charge the webhook cannot reconcile to a seller.
     const { data: orderRow, error: orderError } = await supabase
       .from("orders")
       .insert({
@@ -541,7 +543,19 @@ Deno.serve(async (req: Request) => {
       })
       .select("id")
       .single();
-    if (orderError) throw orderError;
+    if (orderError) {
+      try {
+        await stripeRequest(`/payment_intents/${pi.id}/cancel`, {});
+      } catch (e) {
+        console.error("[door-sell] order failed AND PI cancel failed", pi.id, e);
+      }
+      await supabase
+        .from("ticket_holds")
+        .update({ status: "released" })
+        .eq("payment_intent_id", pi.id)
+        .eq("status", "active");
+      throw orderError;
+    }
 
     return json({
       ok: true,
