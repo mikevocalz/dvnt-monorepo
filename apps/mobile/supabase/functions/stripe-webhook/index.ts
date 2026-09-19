@@ -1135,6 +1135,25 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         if (accountError) {
           console.error("[stripe-webhook] Account update error:", accountError);
         }
+
+        // Phase 3: promoter accounts use the same Express account object;
+        // keep event_promoters in sync when the connected account is theirs.
+        const { error: promoterAccountError } = await supabase
+          .from("event_promoters")
+          .update({
+            charges_enabled: account.charges_enabled,
+            payouts_enabled: account.payouts_enabled,
+            details_submitted: account.details_submitted,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("stripe_account_id", account.id);
+
+        if (promoterAccountError) {
+          console.error(
+            "[stripe-webhook] Promoter account update error:",
+            promoterAccountError,
+          );
+        }
         break;
       }
 
