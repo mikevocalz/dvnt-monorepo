@@ -19,6 +19,9 @@ import {
   incrementPromoUsage,
 } from "../_shared/apply-promo-code.ts";
 import {
+  validateAndApplyPromoterCode,
+} from "../_shared/apply-promoter-code.ts";
+import {
   verifySession,
   jsonResponse,
   errorResponse,
@@ -189,9 +192,10 @@ Deno.serve(async (req: Request) => {
         ? String((parsed as Record<string, unknown>).promoCode || "").trim()
         : "";
 
-    // Promoter attribution code (WS-4) — never touches pricing. Stashed
-    // in PI metadata (dvnt_* house key); stripe-webhook records the
-    // attribution + rev-share ledger entry on payment_intent.succeeded.
+    // Promoter attribution code (WS-4 / Phase 2) — from a tracked ?ref=
+    // link. A valid promoter code now BOTH attributes the order AND gives
+    // the buyer a customer discount on admission tickets. The discount is
+    // computed server-side and locked on the order.
     const promoterCodeRaw =
       parsed && typeof parsed === "object"
         ? String((parsed as Record<string, unknown>).promoterCode || "")
@@ -278,6 +282,8 @@ Deno.serve(async (req: Request) => {
     const currency = String(cart.currency || "usd").toLowerCase();
     let subtotalCents = 0;
     let quantity = 0;
+    let admissionSubtotalCents = 0;
+    let admissionQuantity = 0;
 
     for (const item of lineItems as CartLineItemRow[]) {
       const tier = item.ticket_types;
@@ -295,31 +301,54 @@ Deno.serve(async (req: Request) => {
         return errorResponse("Cart line item price is invalid", 400);
       }
 
-      subtotalCents += tier.price_cents * item.quantity;
+      const lineTotal = tier.price_cents * item.quantity;
+      subtotalCents += lineTotal;
       quantity += item.quantity;
+
+      // Promoter discounts apply to admission tickets only (not add-ons
+      // such as coat check).
+      if (item.category === "admission") {
+        admissionSubtotalCents += lineTotal;
+        admissionQuantity += item.quantity;
+      }
     }
 
     if (subtotalCents <= 0) {
       return errorResponse("Cart total must be greater than zero", 400);
     }
 
-    // Apply a promo code server-side (authoritative). The client only previews
-    // the discount; this is what actually reduces the charge. Mirrors
-    // create-payment-intent's flow via the shared validator.
-    let promoResult = null;
+    // Apply a promoter code server-side first; the post-promoter subtotal is
+    // the commission basis and the base for any additional promo code.
+    let promoterResult: any = null;
     let discountCents = 0;
+    if (promoterCode && admissionSubtotalCents > 0) {
+      const { result, error: promoterErr } = await validateAndApplyPromoterCode(
+        supabase,
+        cart.event_id,
+        promoterCode,
+        admissionSubtotalCents,
+        admissionQuantity,
+      );
+      if (promoterErr) return errorResponse(promoterErr, 400);
+      promoterResult = result;
+      discountCents += result?.discount_cents || 0;
+    }
+
+    // Apply a promo code server-side (authoritative). The client only previews
+    // the discount; this is what actually reduces the charge.
+    let promoResult = null;
     if (promoCode) {
       const { result, error: promoErr } = await validateAndApplyPromo(
         supabase,
         cart.event_id,
         promoCode,
         null,
-        subtotalCents,
+        Math.max(0, subtotalCents - discountCents),
         { quantity, userId: authId },
       );
       if (promoErr) return errorResponse(promoErr, 400);
       promoResult = result;
-      discountCents = result?.discount_cents || 0;
+      discountCents += result?.discount_cents || 0;
     }
 
     const effectiveSubtotal = Math.max(0, subtotalCents - discountCents);
@@ -484,6 +513,18 @@ Deno.serve(async (req: Request) => {
           ? {
               promo_code_id: promoResult.promo_code_id,
               discount_cents: discountCents,
+            }
+          : {}),
+        ...(promoterResult
+          ? {
+              promoter_policy_version: "v2_eligible_subtotal_after_discount",
+              promoter_original_amount_cents: admissionSubtotalCents,
+              promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+              promoter_discount_amount_cents: promoterResult.discount_cents,
+              promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+              promoter_code: promoterResult.code,
+              promoter_commission_bps: promoterResult.promoter_commission_bps,
+              promoter_commission_amount_cents: promoterResult.commission_cents,
             }
           : {}),
       },
