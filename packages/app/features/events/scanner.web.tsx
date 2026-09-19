@@ -43,6 +43,7 @@ import {
   type DoorSyncPhase,
 } from "./door-offline-kit.web";
 import { DoorGuestList, useDoorRosterCounts } from "./door-guest-list.web";
+import { DoorModeTabs } from "./door-mode-tabs.web";
 import {
   primeDoorAudio,
   signalVerdict,
@@ -1092,7 +1093,7 @@ export function EventScannerScreen() {
         className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 pb-3 pt-[calc(env(safe-area-inset-top)+12px)] backdrop-blur md:pt-[calc(env(safe-area-inset-top)+28px)] md:pb-5"
       >
         <span className="w-9" />
-        <h1 className="text-[17px] font-semibold">Scanner</h1>
+        <DoorModeTabs eventId={eventId} role={role ?? null} active="scan" />
         <button
           onClick={() => router.back()}
           aria-label="Close"

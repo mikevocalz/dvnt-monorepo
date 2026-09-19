@@ -38,19 +38,14 @@ import {
   Loader2,
   Minus,
   Plus,
-  ScanLine,
-  Ticket,
-  Users,
   WifiOff,
   XCircle,
 } from "lucide-react";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import {
-  canManageStaff,
-  canScanTickets,
-} from "@dvnt/app/lib/events/event-role";
+import { canScanTickets } from "@dvnt/app/lib/events/event-role";
+import { DoorModeTabs } from "./door-mode-tabs.web";
 import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
 import { doorApi, type DoorQuote } from "@dvnt/app/lib/api/door";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
@@ -150,48 +145,7 @@ function maskEmail(email: string): string {
   return `${email[0]}***@${email.slice(at + 1)}`;
 }
 
-// ── Mode tabs: Scan / Sell / Staff are peers ─────────────────────────────
-function ModeTabs({
-  eventId,
-  role,
-}: {
-  eventId: string;
-  role: string | null;
-}) {
-  const router = useRouter();
-  const tabCls =
-    "flex h-12 min-w-[88px] items-center justify-center gap-1.5 rounded-xl px-4 text-sm font-bold";
-  return (
-    <nav
-      aria-label="Event door modes"
-      className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] p-1"
-    >
-      <button
-        type="button"
-        onClick={() => router.push(`/feed/events/${eventId}/scanner`)}
-        className={`${tabCls} text-white/70`}
-      >
-        <ScanLine size={16} /> Scan
-      </button>
-      <button
-        type="button"
-        aria-current="page"
-        className={`${tabCls} bg-[#379ED8]/20 text-[#7fd4ff]`}
-      >
-        <Ticket size={16} /> Sell
-      </button>
-      {canManageStaff(role as never) ? (
-        <button
-          type="button"
-          onClick={() => router.push(`/feed/events/${eventId}/staff`)}
-          className={`${tabCls} text-white/70`}
-        >
-          <Users size={16} /> Staff
-        </button>
-      ) : null}
-    </nav>
-  );
-}
+// ── Mode tabs: Scan / Sell / Staff are peers (shared component) ─────────
 
 // ── Quantity stepper ─────────────────────────────────────────────────────
 function Stepper({
@@ -500,7 +454,7 @@ export function DoorSellScreen() {
           >
             <ArrowLeft size={18} color="#fff" />
           </button>
-          <ModeTabs eventId={eventId} role={role ?? null} />
+          <DoorModeTabs eventId={eventId} role={role ?? null} active="sell" />
           <span className="w-9" />
         </div>
         <p className="mt-2 truncate text-center text-xs text-white/55">

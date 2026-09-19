@@ -43,6 +43,7 @@ import {
   type CoOrgRole,
 } from "@dvnt/app/lib/api/privileged";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { DoorModeTabs } from "./door-mode-tabs.web";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
 import { Dialog } from "@dvnt/ui";
 
@@ -336,7 +337,11 @@ export function EventStaffScreen() {
         >
           <ArrowLeft size={22} color="#fff" />
         </button>
-        <h1 className="text-[17px] font-semibold">Staff</h1>
+        <DoorModeTabs
+          eventId={String(eventId)}
+          role={callerRole as never}
+          active="staff"
+        />
         {canManage ? (
           <button
             onClick={openInvite}
