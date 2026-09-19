@@ -37,7 +37,14 @@ import {
   upsertOrderMoneyState,
 } from "../_shared/order-state.ts";
 import { handleCartPaymentIntentSucceeded } from "../_shared/cart-issuance.ts";
-import { issueTicketsForCheckoutSession } from "../_shared/session-issuance.ts";
+import {
+  issueTicketsForCheckoutSession,
+  sendGuestTicketEmail,
+} from "../_shared/session-issuance.ts";
+import {
+  parseDoorSaleMetadata,
+  doorGuestTicketBase,
+} from "../_shared/door-sale.ts";
 
 /**
  * Baseline §4 mitigation: one row per user in membership_subscriptions
@@ -394,8 +401,13 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         } else if (piMetadata.type === "event_ticket") {
           const piEventId = parseInt(piMetadata.event_id);
           const piTicketTypeId = piMetadata.ticket_type_id;
-          const piUserId = piMetadata.user_id;
           const piQuantity = parseInt(piMetadata.quantity) || 1;
+
+          // Door POS sale? metadata.is_door_sale flips the buyer identity
+          // to guest_email; the staff id stays on the order, never the
+          // ticket.
+          const door = parseDoorSaleMetadata(piMetadata);
+          const piUserId = door.isDoorSale ? null : piMetadata.user_id;
 
           // Check if tickets already issued (e.g. by checkout.session.completed)
           const { count: piExistingCount } = await supabase
@@ -419,22 +431,40 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
               ticketUuid,
               piEventId,
             );
+            const base = door.isDoorSale && door.guestEmail
+              ? doorGuestTicketBase.build({
+                  eventId: piEventId,
+                  ticketTypeId: piTicketTypeId,
+                  guestEmail: door.guestEmail,
+                  guestName: door.guestName,
+                  paymentIntentId: pi.id,
+                  quantity: piQuantity,
+                  amountCents: pi.amount || 0,
+                  index: i,
+                })
+              : {
+                  event_id: piEventId,
+                  ticket_type_id: piTicketTypeId,
+                  user_id: piUserId,
+                  status: "active",
+                  stripe_payment_intent_id: pi.id,
+                  purchase_amount_cents: Math.round(
+                    (pi.amount || 0) / piQuantity,
+                  ),
+                };
             piTicketRows.push({
+              ...base,
               id: ticketUuid,
-              event_id: piEventId,
-              ticket_type_id: piTicketTypeId,
-              user_id: piUserId,
-              status: "active",
               qr_token: qrToken,
               qr_payload: qrPayload,
-              stripe_payment_intent_id: pi.id,
-              purchase_amount_cents: Math.round((pi.amount || 0) / piQuantity),
             });
           }
 
-          const { error: piTicketError } = await supabase
-            .from("tickets")
-            .insert(piTicketRows);
+          const { data: piInsertedTickets, error: piTicketError } =
+            await supabase
+              .from("tickets")
+              .insert(piTicketRows)
+              .select("id, qr_token, guest_lookup_token");
 
           if (piTicketError) {
             console.error(
@@ -442,6 +472,50 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
               piTicketError,
             );
             throw piTicketError;
+          }
+
+          // Door sale → email the guest their QR + lookup link, exactly
+          // like hosted-checkout guest orders. Failure logs but does not
+          // roll back the issued tickets.
+          if (
+            door.isDoorSale && door.guestEmail &&
+            piInsertedTickets && piInsertedTickets.length > 0
+          ) {
+            try {
+              const { data: doorEventRow } = await supabase
+                .from("events")
+                .select(
+                  "title, start_date, location_name, location_address, flyer_image_url, dominant_color",
+                )
+                .eq("id", piEventId)
+                .maybeSingle();
+              const { data: doorTtRow } = await supabase
+                .from("ticket_types")
+                .select("name, category")
+                .eq("id", piTicketTypeId)
+                .maybeSingle();
+              await sendGuestTicketEmail(
+                door.guestEmail,
+                door.guestName,
+                doorEventRow?.title || "your event",
+                doorEventRow?.start_date || null,
+                doorEventRow?.location_name ||
+                  doorEventRow?.location_address || null,
+                piInsertedTickets,
+                {
+                  tier: doorTtRow?.category ?? null,
+                  tierLabel: doorTtRow?.name ?? null,
+                  flyerUrl: doorEventRow?.flyer_image_url ?? null,
+                  dominantColor: doorEventRow?.dominant_color ?? null,
+                  logPrefix: "[stripe-webhook]",
+                },
+              );
+            } catch (mailErr) {
+              console.error(
+                "[stripe-webhook] door guest email send failed:",
+                mailErr,
+              );
+            }
           }
 
           // Increment quantity_sold

@@ -1,0 +1,114 @@
+/**
+ * Door POS API — web "Sell" rail.
+ *
+ * Talks to the `door-sell` edge function. All money math happens server
+ * side; this module only shapes requests and types responses. A client
+ * can never send an amount.
+ */
+
+import { invokeEdge } from "./invoke-edge";
+
+export interface DoorQuote {
+  currency: string;
+  subtotal_cents: number;
+  discount_cents: number;
+  discounted_subtotal_cents: number;
+  fee_cents: number;
+  total_cents: number;
+  code: string | null;
+  quantity: number;
+}
+
+export interface DoorSellResult {
+  ok: boolean;
+  free?: boolean;
+  order_id: string | null;
+  tickets_issued?: number;
+  clientSecret?: string;
+  publishableKey?: string;
+  paymentIntentId?: string;
+  quote: DoorQuote;
+}
+
+interface DoorSellResponse extends Partial<DoorSellResult> {
+  ok?: boolean;
+  error?: string;
+  code?: string;
+  role?: string | null;
+}
+
+function unwrap(
+  data: DoorSellResponse | null | undefined,
+  error: any,
+): DoorSellResponse {
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("No response from door-sell");
+  if (data.error) {
+    const err = new Error(data.error) as Error & { code?: string };
+    err.code = data.code;
+    throw err;
+  }
+  return data;
+}
+
+export const doorApi = {
+  /**
+   * Server quote for tier + quantity + codes. Creates nothing — the Pay
+   * button's amount comes only from this response.
+   */
+  async quote(params: {
+    eventId: number;
+    ticketTypeId: string;
+    quantity: number;
+    promoterCode?: string;
+    promoCode?: string;
+  }): Promise<DoorQuote> {
+    const { data, error } = await invokeEdge<DoorSellResponse>("door-sell", {
+      action: "quote",
+      event_id: params.eventId,
+      ticket_type_id: params.ticketTypeId,
+      quantity: params.quantity,
+      ...(params.promoterCode ? { promoter_code: params.promoterCode } : {}),
+      ...(params.promoCode ? { promo_code: params.promoCode } : {}),
+    });
+    const res = unwrap(data, error);
+    if (!res.quote) throw new Error("Missing quote");
+    return res.quote;
+  },
+
+  /**
+   * Create the hold + PaymentIntent + pending order for a door sale, or
+   * run the secure free path when the server total is 0.
+   */
+  async sell(params: {
+    eventId: number;
+    ticketTypeId: string;
+    quantity: number;
+    guestEmail: string;
+    guestName?: string;
+    promoterCode?: string;
+    promoCode?: string;
+  }): Promise<DoorSellResult> {
+    const { data, error } = await invokeEdge<DoorSellResponse>("door-sell", {
+      action: "sell",
+      event_id: params.eventId,
+      ticket_type_id: params.ticketTypeId,
+      quantity: params.quantity,
+      guest_email: params.guestEmail,
+      ...(params.guestName ? { guest_name: params.guestName } : {}),
+      ...(params.promoterCode ? { promoter_code: params.promoterCode } : {}),
+      ...(params.promoCode ? { promo_code: params.promoCode } : {}),
+    });
+    const res = unwrap(data, error);
+    return {
+      ok: res.ok ?? true,
+      free: res.free,
+      order_id: res.order_id ?? null,
+      tickets_issued: res.tickets_issued,
+      clientSecret: res.clientSecret,
+      publishableKey: res.publishableKey,
+      paymentIntentId: res.paymentIntentId,
+      quote: res.quote as DoorQuote,
+    };
+  },
+};

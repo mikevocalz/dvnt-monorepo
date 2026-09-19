@@ -33,7 +33,7 @@ const SITE_URL =
  * Send a guest the QR + lookup link for the tickets they just bought.
  * Throws on Resend failure so the caller can decide whether to retry.
  */
-async function sendGuestTicketEmail(
+export async function sendGuestTicketEmail(
   to: string,
   name: string | null,
   eventTitle: string,
