@@ -191,12 +191,17 @@ Deno.serve(async (req: Request) => {
     // Decrement quantity_sold on ticket_type. Best-effort — the trigger
     // handles total_attendees. (The builder is thenable but has no .catch,
     // so the old `.catch(() => {})` was a type error, not a guard.)
-    try {
-      await supabase.rpc("decrement_ticket_quantity_sold", {
-        p_ticket_type_id: ticket.ticket_type_id,
-      });
-    } catch (e) {
-      console.warn("[ticket-refund] decrement failed (non-fatal):", e);
+    // supabase.rpc() resolves with { error } rather than throwing, so a
+    // missing/failed RPC lands in `error`, not the catch. Check it.
+    const { error: decrementError } = await supabase.rpc(
+      "decrement_ticket_quantity_sold",
+      { p_ticket_type_id: ticket.ticket_type_id },
+    );
+    if (decrementError) {
+      console.warn(
+        "[ticket-refund] decrement failed (non-fatal):",
+        decrementError,
+      );
     }
 
     return json({
