@@ -1,16 +1,17 @@
 import { useRef } from "react";
-import { View, Pressable } from "react-native";
+import { View, Pressable , Text } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Text } from "react-native";
 
 export interface QrScannerProps {
   onScan: (text: string) => void;
   onError?: (message: string) => void;
   oneShot?: boolean;
+  /** Stop decoding while a result card or sheet is showing. Camera stays live. */
+  paused?: boolean;
 }
 
 /** Native QR/barcode scanner via expo-camera. Mirror of `QrScanner.web.tsx`. */
-export function QrScanner({ onScan, oneShot = true }: QrScannerProps) {
+export function QrScanner({ onScan, oneShot = true, paused = false }: QrScannerProps) {
   const [permission, requestPermission] = useCameraPermissions();
   const doneRef = useRef(false);
 
@@ -31,11 +32,15 @@ export function QrScanner({ onScan, oneShot = true }: QrScannerProps) {
         style={{ flex: 1 }}
         facing="back"
         barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-        onBarcodeScanned={({ data }) => {
-          if (oneShot && doneRef.current) return;
-          doneRef.current = true;
-          onScan(data);
-        }}
+        onBarcodeScanned={
+          paused
+            ? undefined
+            : ({ data }) => {
+                if (oneShot && doneRef.current) return;
+                doneRef.current = true;
+                onScan(data);
+              }
+        }
       />
     </View>
   );
