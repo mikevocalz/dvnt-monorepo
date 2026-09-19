@@ -335,8 +335,14 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
           .gt("expires_at", nowIso),
       ]);
     const held =
-      (liveTicketHolds || []).reduce((s, h) => s + (h.quantity || 0), 0) +
-      (liveCartHolds || []).reduce((s, h) => s + (h.qty || 0), 0);
+      (liveTicketHolds || []).reduce(
+        (s: number, h: { quantity?: number }) => s + (h.quantity || 0),
+        0,
+      ) +
+      (liveCartHolds || []).reduce(
+        (s: number, h: { qty?: number }) => s + (h.qty || 0),
+        0,
+      );
     const remaining = typeof ticketType.quantity_total === "number"
       ? ticketType.quantity_total - (ticketType.quantity_sold || 0) - held
       : null;
