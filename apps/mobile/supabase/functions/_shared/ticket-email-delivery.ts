@@ -19,8 +19,8 @@
 
 import { sendResendEmail, ticketConfirmation } from "./send-resend-email.ts";
 
-const SITE_URL =
-  (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live").replace(
+const SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live")
+  .replace(
     /\/$/,
     "",
   );
@@ -248,12 +248,12 @@ export async function deliverTicketBundleEmail(
           },
           ...(order.total_cents != null
             ? [{
-                label: "Paid",
-                value: `$${(order.total_cents / 100).toFixed(2)} ${
-                  (order.currency || "usd").toUpperCase()
-                }`,
-                strong: true,
-              }]
+              label: "Paid",
+              value: `$${(order.total_cents / 100).toFixed(2)} ${
+                (order.currency || "usd").toUpperCase()
+              }`,
+              strong: true,
+            }]
             : []),
         ],
         tickets: tickets.map((t) => ({
@@ -277,18 +277,30 @@ export async function deliverTicketBundleEmail(
         ticket_email_last_error: null,
       })
       .eq("id", orderId);
-    await supabase.from("order_timeline").insert({
-      order_id: orderId,
-      type: kind === "manual_resend" ? "ticket_email_resent" : "ticket_email_sent",
-      label: kind === "manual_resend"
-        ? "Tickets re-sent to guest"
-        : `Tickets emailed to ${maskEmail(to)}`,
-      detail: `${tickets.length} ticket(s) in one email${
-        messageId ? ` (Resend ${messageId})` : ""
-      }`,
-    });
+    try {
+      await supabase.from("order_timeline").insert({
+        order_id: orderId,
+        type: kind === "manual_resend"
+          ? "ticket_email_resent"
+          : "ticket_email_sent",
+        label: kind === "manual_resend"
+          ? "Tickets re-sent to guest"
+          : `Tickets emailed to ${maskEmail(to)}`,
+        detail: `${tickets.length} ticket(s) in one email${
+          messageId ? ` (Resend ${messageId})` : ""
+        }`,
+      });
+    } catch (timelineErr) {
+      // Audit-log failure must not corrupt delivery state — the send succeeded.
+      console.warn(
+        `${logPrefix} timeline insert failed (send ok):`,
+        timelineErr,
+      );
+    }
     console.log(
-      `${logPrefix} ${kind} ticket email → ${maskEmail(to)} (${tickets.length} tickets, id ${messageId})`,
+      `${logPrefix} ${kind} ticket email → ${
+        maskEmail(to)
+      } (${tickets.length} tickets, id ${messageId})`,
     );
     return { ok: true };
   } catch (sendErr) {
@@ -300,13 +312,20 @@ export async function deliverTicketBundleEmail(
         ticket_email_last_error: msg,
       })
       .eq("id", orderId);
-    await supabase.from("order_timeline").insert({
-      order_id: orderId,
-      type: "ticket_email_failed",
-      label: "Ticket email failed — will retry",
-      detail: msg,
-    });
-    console.error(`${logPrefix} ticket email failed for order ${orderId}:`, msg);
+    try {
+      await supabase.from("order_timeline").insert({
+        order_id: orderId,
+        type: "ticket_email_failed",
+        label: "Ticket email failed — will retry",
+        detail: msg,
+      });
+    } catch (timelineErr) {
+      console.warn(`${logPrefix} failure-timeline insert failed:`, timelineErr);
+    }
+    console.error(
+      `${logPrefix} ticket email failed for order ${orderId}:`,
+      msg,
+    );
     return { ok: false, reason: "send_failed" };
   }
 }
