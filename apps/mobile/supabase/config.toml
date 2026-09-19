@@ -425,6 +425,9 @@ verify_jwt = false
 [functions.promoter-connect]
 verify_jwt = false
 
+[functions.promoter-self]
+verify_jwt = false
+
 [functions.organizer-refund]
 verify_jwt = false
 

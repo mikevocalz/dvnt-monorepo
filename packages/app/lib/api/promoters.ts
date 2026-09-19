@@ -167,4 +167,98 @@ export const promotersApi = {
     if (!data?.ok) return [];
     return data.leaderboard ?? [];
   },
+
+  /** Current user's own promoter record + earnings for an event. */
+  async me(eventId: number): Promise<{
+    isPromoter: boolean;
+    promoter?: {
+      id: string;
+      code: string;
+      status: string;
+      customerDiscountBps: number;
+      promoterCommissionBps: number;
+      attributedOrders: number;
+      earnedCents: number;
+      connect: {
+        stripeAccountId: string | null;
+        chargesEnabled: boolean;
+        payoutsEnabled: boolean;
+        detailsSubmitted: boolean;
+      };
+    };
+  }> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      isPromoter: boolean;
+      promoter?: {
+        id: string;
+        code: string;
+        status: string;
+        customerDiscountBps: number;
+        promoterCommissionBps: number;
+        attributedOrders: number;
+        earnedCents: number;
+        connect: {
+          stripeAccountId: string | null;
+          chargesEnabled: boolean;
+          payoutsEnabled: boolean;
+          detailsSubmitted: boolean;
+        };
+      };
+      error?: string;
+    }>("promoter-self", { action: "me", event_id: eventId });
+    if (error) throw new Error(error.message);
+    if (!data?.ok) throw new Error(data?.error || "Could not load promoter");
+    return { isPromoter: data.isPromoter, promoter: data.promoter };
+  },
+
+  /** Start Stripe Connect onboarding for the current user's promoter account. */
+  async connectStart(eventId: number): Promise<{ url: string; accountId: string }> {
+    const { data, error } = await invokeEdge<{
+      url?: string;
+      account_id?: string;
+      error?: string;
+    }>("promoter-connect", { action: "start", event_id: eventId });
+    if (error) throw new Error(error.message);
+    if (!data?.url || !data?.account_id) {
+      throw new Error(data?.error || "Could not start Connect onboarding");
+    }
+    return { url: data.url, accountId: data.account_id };
+  },
+
+  /** Poll Connect onboarding status for the current user's promoter account. */
+  async connectStatus(eventId: number): Promise<{
+    connected: boolean;
+    chargesEnabled?: boolean;
+    payoutsEnabled?: boolean;
+    detailsSubmitted?: boolean;
+    currentlyDue?: string[];
+    pendingVerification?: string[];
+    pastDue?: string[];
+    disabledReason?: string | null;
+  }> {
+    const { data, error } = await invokeEdge<{
+      connected: boolean;
+      charges_enabled?: boolean;
+      payouts_enabled?: boolean;
+      details_submitted?: boolean;
+      currently_due?: string[];
+      pending_verification?: string[];
+      past_due?: string[];
+      disabled_reason?: string | null;
+      error?: string;
+    }>("promoter-connect", { action: "status", event_id: eventId });
+    if (error) throw new Error(error.message);
+    if (data?.error) throw new Error(data.error);
+    return {
+      connected: data?.connected ?? false,
+      chargesEnabled: data?.charges_enabled,
+      payoutsEnabled: data?.payouts_enabled,
+      detailsSubmitted: data?.details_submitted,
+      currentlyDue: data?.currently_due,
+      pendingVerification: data?.pending_verification,
+      pastDue: data?.past_due,
+      disabledReason: data?.disabled_reason,
+    };
+  },
 };
