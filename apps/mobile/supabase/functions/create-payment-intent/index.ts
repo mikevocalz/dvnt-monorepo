@@ -27,6 +27,9 @@ import {
   validateAndApplyPromo,
   incrementPromoUsage,
 } from "../_shared/apply-promo-code.ts";
+import {
+  validateAndApplyPromoterCode,
+} from "../_shared/apply-promoter-code.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -190,10 +193,10 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Event not found or invitation required" }, 404);
     }
 
-    // Promoter attribution code (WS-4) — from a tracked ?ref= link.
-    // Never touches pricing; stashed in PI metadata (dvnt_* house key)
-    // so stripe-webhook records attribution + rev-share on
-    // payment_intent.succeeded.
+    // Promoter attribution code (WS-4 / Phase 2) — from a tracked ?ref= link.
+    // A valid promoter code now BOTH attributes the order AND gives the
+    // buyer a customer discount. The discount is computed server-side and
+    // locked on the order; the webhook records attribution + commission.
     const promoterCodeRaw =
       typeof promoter_code === "string"
         ? promoter_code.trim().toUpperCase().slice(0, 32)
@@ -269,24 +272,43 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── Promo code validation (before free/paid branching) ────
+    // ── Promoter + promo code validation (before free/paid branching) ────
+    const rawSubtotal = ticketType.price_cents * quantity;
     let promoResult: any = null;
+    let promoterResult: any = null;
     let discountCents = 0;
+
+    // Promoter discount is applied first; the post-promoter subtotal is the
+    // commission basis and also the base for any additional promo code.
+    if (validPromoterCode) {
+      const { result, error: promoterErr } = await validateAndApplyPromoterCode(
+        supabase,
+        parseInt(event_id),
+        validPromoterCode,
+        rawSubtotal,
+        quantity,
+      );
+      if (promoterErr) return json({ error: promoterErr }, 400);
+      promoterResult = result;
+      discountCents += promoterResult?.discount_cents || 0;
+    }
+
+    const subtotalAfterPromoter = Math.max(0, rawSubtotal - discountCents);
+
     if (promo_code) {
       const { result, error: promoErr } = await validateAndApplyPromo(
         supabase,
         parseInt(event_id),
         promo_code,
         ticket_type_id,
-        ticketType.price_cents * quantity,
+        subtotalAfterPromoter,
         { quantity, userId: user_id },
       );
       if (promoErr) return json({ error: promoErr }, 400);
       promoResult = result;
-      discountCents = promoResult?.discount_cents || 0;
+      discountCents += promoResult?.discount_cents || 0;
     }
 
-    const rawSubtotal = ticketType.price_cents * quantity;
     const effectiveSubtotal = Math.max(0, rawSubtotal - discountCents);
 
     // ── Free tickets (or fully discounted): issue directly ────
@@ -342,6 +364,18 @@ Deno.serve(async (req: Request) => {
             ? {
                 promo_code_id: promoResult.promo_code_id,
                 discount_cents: discountCents,
+              }
+            : {}),
+          ...(promoterResult
+            ? {
+                promoter_policy_version: "v2_eligible_subtotal_after_discount",
+                promoter_original_amount_cents: rawSubtotal,
+                promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+                promoter_discount_amount_cents: promoterResult.discount_cents,
+                promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+                promoter_code: promoterResult.code,
+                promoter_commission_bps: promoterResult.promoter_commission_bps,
+                promoter_commission_amount_cents: 0,
               }
             : {}),
         })
@@ -564,6 +598,18 @@ Deno.serve(async (req: Request) => {
         ? {
             promo_code_id: promoResult.promo_code_id,
             discount_cents: discountCents,
+          }
+        : {}),
+      ...(promoterResult
+        ? {
+            promoter_policy_version: "v2_eligible_subtotal_after_discount",
+            promoter_original_amount_cents: rawSubtotal,
+            promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+            promoter_discount_amount_cents: promoterResult.discount_cents,
+            promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+            promoter_code: promoterResult.code,
+            promoter_commission_bps: promoterResult.promoter_commission_bps,
+            promoter_commission_amount_cents: promoterResult.commission_cents,
           }
         : {}),
     });
