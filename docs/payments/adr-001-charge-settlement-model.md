@@ -1,6 +1,6 @@
 # ADR-001: Charge and settlement model
 
-Status: Draft — pending Mike approval  
+Status: Approved — Mike confirmed on 2026-09-19  
 Date: 2026-09-19  
 Scope: DVNT ticket orders, promoter payouts, organizer settlements
 

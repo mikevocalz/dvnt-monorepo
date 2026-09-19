@@ -1,6 +1,6 @@
 # ADR-003: Policy decisions for promoter payouts, attribution, and door access
 
-Status: Draft — requires Mike sign-off  
+Status: Approved — decisions confirmed by Mike on 2026-09-19  
 Date: 2026-09-19  
 Scope: Commission rules, code stacking, self-referral, held earnings, offline scanner authorization, legacy editor permissions
 
@@ -27,7 +27,7 @@ The payments prompt (Phase 2–4) requires explicit product policy before code i
 - New policy version = `v2_eligible_subtotal_after_discount`.
 - Historical rows keep their computed value and version.
 
-**Decision needed from Mike**: confirm the basis and the version name.
+**Approved.** Basis and version name confirmed.
 
 ### 2. Discount / commission stacking
 
@@ -44,7 +44,7 @@ The payments prompt (Phase 2–4) requires explicit product policy before code i
 - Example: $50 tier, ANDRE 10% off → $45 subtotal, 10% commission on $45 = $4.50.
 - If another coupon is present, commission is still on the post-ANDRE amount.
 
-**Decision needed from Mike**: confirm stacking order and whether promoter commission is ever calculated on the fully-discounted (zero) amount.
+**Approved.** Stacking order and zero-amount commission rule confirmed.
 
 ### 3. Self-referral and duplicate attribution
 
@@ -58,7 +58,7 @@ The payments prompt (Phase 2–4) requires explicit product policy before code i
 - Duplicate attribution: the last valid code applied before payment wins. A code typed after a tracked link replaces earlier attribution deterministically.
 - Audit data kept: store the raw entry path (`ref` query param, typed code, or direct), the code at time of hold, and the final locked code.
 
-**Decision needed from Mike**: confirm self-referral block scope (authenticated buyers only, or also guest email matching?), and whether guest self-referral is a known acceptable risk.
+**Approved.** Self-referral block scope and guest policy confirmed.
 
 ### 4. Held earnings for unonboarded promoters
 
@@ -73,7 +73,7 @@ The payments prompt (Phase 2–4) requires explicit product policy before code i
 - Add a separate scheduled job or extend `payouts-release` to process held rows for released events.
 - Settlement claims an immutable ledger-row set atomically, then transfers, then records the Transfer id; rows arriving mid-run are not swept in.
 
-**Decision needed from Mike**: confirm the held-earnings policy and acceptable retry cadence.
+**Approved.** Held-earnings policy and retry cadence confirmed.
 
 ### 5. Offline scanner authorization window
 
@@ -87,7 +87,7 @@ The payments prompt (Phase 2–4) requires explicit product policy before code i
 - The scanner UI shows an "Offline" state and pauses sales and scanning when no connection is detected.
 - This avoids silent acceptance of revoked staff, refunded tickets, or wrong-event codes.
 
-**Decision needed from Mike**: confirm no offline scan window for Phase 4, or define a bounded window (e.g., last server sync within N minutes with a signed token).
+**Approved.** No offline scan window for Phase 4 confirmed.
 
 ### 6. Legacy editor permissions
 
@@ -103,13 +103,13 @@ The payments prompt (Phase 2–4) requires explicit product policy before code i
 - Update the web staff role description to match the actual permission.
 - Rename label from "Manager" to "Editor" or update copy to "Scanner + full roster + refunds" without analytics.
 
-**Decision needed from Mike**: confirm the reduced `editor` scope and the UI label/copy change.
+**Approved.** Reduced `editor` scope and UI label/copy change confirmed.
 
 ---
 
-## Blockers
+## Approval
 
-This ADR must be approved before Phase 2 code starts. The open product-policy questions above cannot be resolved by engineering inference.
+This ADR was approved by Mike on 2026-09-19. All policy decisions above are confirmed and Phase 2 implementation can proceed.
 
 ## References
 

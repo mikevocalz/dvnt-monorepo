@@ -1,6 +1,6 @@
 # ADR-002: Promoter accounts
 
-Status: Draft — pending Mike approval  
+Status: Approved — Mike confirmed on 2026-09-19  
 Date: 2026-09-19  
 Scope: Payout recipients for promoter commissions
 
