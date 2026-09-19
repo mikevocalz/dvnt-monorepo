@@ -38,6 +38,9 @@ import {
   validateAndApplyPromo,
   incrementPromoUsage,
 } from "../_shared/apply-promo-code.ts";
+import {
+  validateAndApplyPromoterCode,
+} from "../_shared/apply-promoter-code.ts";
 import { maybeFireCapacityAlerts } from "../_shared/capacity-alerts.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 
@@ -117,14 +120,12 @@ Deno.serve(async (req: Request) => {
       guest_name,
     } = await req.json();
 
-    // ── Promoter attribution code (WS-4) ──────────────────────
+    // ── Promoter attribution code (WS-4 / Phase 2) ─────────────
     // Arrives from a tracked share link (?ref=CODE) or manual entry.
-    // Distinct from promo codes: it never changes the price — it only
-    // attributes the order to an event promoter for rev-share. We
-    // validate shape here and stash it in Stripe metadata; the
-    // stripe-webhook records the attribution when the order flips paid
-    // (record_promoter_attribution is idempotent + validates the code
-    // against event_promoters server-side).
+    // A valid promoter code now BOTH attributes the order AND gives the
+    // buyer a customer discount. The discount is computed server-side and
+    // locked on the order; the Stripe webhook records attribution + the
+    // commission ledger entry when the order flips paid.
     const trimmedPromoterCode =
       typeof promoter_code === "string"
         ? promoter_code.trim().toUpperCase().slice(0, 32)
@@ -325,16 +326,41 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── Promo code validation (before free/paid branching) ────
+    // ── Promoter + promo code validation (before free/paid branching) ────
+    const rawSubtotal = ticketType.price_cents * quantity;
     let promoResult: any = null;
+    let promoterResult: any = null;
     let discountCents = 0;
+
+    // Promoter discount is applied first; the post-promoter subtotal is the
+    // commission basis and also the base for any additional promo code.
+    if (validPromoterCode) {
+      const { result, error: promoterErr } = await validateAndApplyPromoterCode(
+        supabase,
+        parseInt(event_id),
+        validPromoterCode,
+        rawSubtotal,
+        quantity,
+      );
+      if (promoterErr) {
+        return new Response(JSON.stringify({ error: promoterErr }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      promoterResult = result;
+      discountCents += promoterResult?.discount_cents || 0;
+    }
+
+    const subtotalAfterPromoter = Math.max(0, rawSubtotal - discountCents);
+
     if (promo_code) {
       const { result, error: promoErr } = await validateAndApplyPromo(
         supabase,
         parseInt(event_id),
         promo_code,
         ticket_type_id,
-        ticketType.price_cents * quantity,
+        subtotalAfterPromoter,
       );
       if (promoErr) {
         return new Response(JSON.stringify({ error: promoErr }), {
@@ -343,10 +369,9 @@ Deno.serve(async (req: Request) => {
         });
       }
       promoResult = result;
-      discountCents = promoResult?.discount_cents || 0;
+      discountCents += promoResult?.discount_cents || 0;
     }
 
-    const rawSubtotal = ticketType.price_cents * quantity;
     const effectiveSubtotal = Math.max(0, rawSubtotal - discountCents);
 
     // Free tickets (or fully discounted): issue directly without Stripe
@@ -416,6 +441,18 @@ Deno.serve(async (req: Request) => {
             ? {
                 promo_code_id: promoResult.promo_code_id,
                 discount_cents: discountCents,
+              }
+            : {}),
+          ...(promoterResult
+            ? {
+                promoter_policy_version: "v2_eligible_subtotal_after_discount",
+                promoter_original_amount_cents: rawSubtotal,
+                promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+                promoter_discount_amount_cents: promoterResult.discount_cents,
+                promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+                promoter_code: promoterResult.code,
+                promoter_commission_bps: promoterResult.promoter_commission_bps,
+                promoter_commission_amount_cents: 0,
               }
             : {}),
         })
@@ -491,7 +528,18 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── Fee structure (v1_250_1pt) — fee_mode-aware (absorb|pass) ──
-    const subtotalCents = effectiveSubtotal;
+    // If a promoter discount applies, drop the per-ticket line item so the
+    // customer is charged the discounted base price. We round per unit to
+    // keep Stripe's line item quantity intact; the order snapshot keeps the
+    // exact unrounded discount from computePromoterCommission.
+    let ticketUnitAmount = ticketType.price_cents;
+    if (promoterResult && promoterResult.discount_cents > 0) {
+      ticketUnitAmount = Math.round(
+        (rawSubtotal - promoterResult.discount_cents) / quantity,
+      );
+    }
+    const checkoutSubtotal = ticketUnitAmount * quantity;
+    const subtotalCents = checkoutSubtotal;
     const fees = computeFeesWithMode(subtotalCents, quantity, event.fee_mode);
 
     const currency = ticketType.currency || "usd";
@@ -525,10 +573,10 @@ Deno.serve(async (req: Request) => {
             customer_creation: "always",
           }
         : {}),
-      // Line 0: base ticket price
+      // Line 0: base ticket price (discounted if a promoter code applies)
       "line_items[0][price_data][currency]": currency,
       "line_items[0][price_data][unit_amount]":
-        ticketType.price_cents.toString(),
+        ticketUnitAmount.toString(),
       "line_items[0][price_data][product_data][name]": ticketType.name,
       "line_items[0][quantity]": quantity.toString(),
       // Line 1: DVNT buyer service fee (one lump item) — only in 'pass'
@@ -643,6 +691,18 @@ Deno.serve(async (req: Request) => {
         ? {
             promo_code_id: promoResult.promo_code_id,
             discount_cents: discountCents,
+          }
+        : {}),
+      ...(promoterResult
+        ? {
+            promoter_policy_version: "v2_eligible_subtotal_after_discount",
+            promoter_original_amount_cents: rawSubtotal,
+            promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+            promoter_discount_amount_cents: promoterResult.discount_cents,
+            promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+            promoter_code: promoterResult.code,
+            promoter_commission_bps: promoterResult.promoter_commission_bps,
+            promoter_commission_amount_cents: promoterResult.commission_cents,
           }
         : {}),
     });
