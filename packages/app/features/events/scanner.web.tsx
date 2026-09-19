@@ -471,6 +471,11 @@ function ScannerActive({ eventId }: { eventId: string }) {
   }, [scanResult]);
   const scanHistory = useScannerStore((s) => s.scanHistory);
   const setScanResult = useScannerStore((s) => s.setScanResult);
+  const scannerError = useScannerStore((st) => st.scannerError);
+  const setScannerError = useScannerStore((st) => st.setScannerError);
+  const legacyEngine =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("engine") === "legacy";
   const clearResult = useScannerStore((s) => s.clearResult);
   const recordSuccess = useScannerStore((s) => s.recordSuccess);
   const recordHistory = useScannerStore((s) => s.recordHistory);
@@ -779,7 +784,23 @@ function ScannerActive({ eventId }: { eventId: string }) {
           onScan={handleToken}
           oneShot={false}
           paused={mode !== "scan" || !!scanResult}
+          // The legacy engine has no issue panel of its own — its ONLY error
+          // channel is this callback, and it was never passed. Staff hitting a
+          // camera error, tapping the "Switch scanner engine" button the UI
+          // recommends, and landing somewhere that reports nothing is the one
+          // failure this screen cannot have, because it is the escape hatch
+          // from every other failure. The modern engine renders its own panel
+          // and calls this too; a second channel costs nothing.
+          onError={(message) => setScannerError(message)}
         />
+        {scannerError && legacyEngine ? (
+          <div
+            role="alert"
+            className="absolute inset-x-3 bottom-3 rounded-xl bg-[#FEF3C7] px-3 py-2.5 text-[13px] font-semibold text-[#78350F]"
+          >
+            {scannerError} Typed codes still work below.
+          </div>
+        ) : null}
         {/* Scan frame guide. */}
         <div
           className="pointer-events-none absolute inset-0 flex items-center justify-center"

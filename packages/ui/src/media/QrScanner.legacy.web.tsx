@@ -74,7 +74,13 @@ export function LegacyQrScanner({ onScan, onError, oneShot = true }: LegacyQrSca
     <div
       ref={elRef}
       data-qr-engine="legacy"
-      className="w-full overflow-hidden rounded-2xl bg-black"
+      // aspect-square, so a failed start() is a visible black panel the issue
+      // text can sit against rather than a zero-height element. Without it,
+      // html5-qrcode rejecting — a denied camera is the likeliest cause on
+      // iOS — left the frame guide floating over literally nothing, which is
+      // the "silent black box" the rewrite was supposed to remove and which
+      // this component is the documented fallback FOR.
+      className="aspect-square w-full overflow-hidden rounded-2xl bg-black"
     />
   );
 }

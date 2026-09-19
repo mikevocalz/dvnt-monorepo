@@ -68,6 +68,15 @@ interface ScannerState {
    */
   manualToken: string
   setManualToken: (value: string) => void
+  /**
+   * Last message the camera engine reported.
+   *
+   * The modern engine renders its own issue panel; the LEGACY one has no UI at
+   * all and this callback is its only channel. Kept here so the message
+   * survives the engine remounting under it.
+   */
+  scannerError: string | null
+  setScannerError: (message: string | null) => void
   /** Which surface the door is on. One screen, two modes — never two routes. */
   mode: "scan" | "list"
   setMode: (mode: "scan" | "list") => void
@@ -84,6 +93,8 @@ export const useScannerStore = create<ScannerState>((set) => ({
   scanHistory: [],
   manualToken: "",
   setManualToken: (manualToken) => set({ manualToken }),
+  scannerError: null,
+  setScannerError: (scannerError) => set({ scannerError }),
   mode: "scan",
   setMode: (mode) => set({ mode }),
   setScanResult: (scanResult) => set({ scanResult }),
