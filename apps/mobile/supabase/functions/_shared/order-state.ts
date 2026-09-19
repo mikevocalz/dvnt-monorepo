@@ -4,11 +4,8 @@
  * stripe-webhook/index.ts.
  */
 
-import { computeFees } from "./fee-calculator.ts";
-import {
-  computePromoterCommission,
-  type CommissionLine,
-} from "./promoter-commission.ts";
+import { computePromoterCommission } from "./promoter-commission.ts";
+import { computeLockedPromoterEarning } from "./promoter-earning.ts";
 
 /**
  * Route an order money-state write through the guarded RPC
@@ -118,30 +115,38 @@ export async function recordPromoterEarning(
       .maybeSingle();
     if (!order) return;
 
-    // If the order already has a locked commission amount, use it.
-    let earningCents: number | null = null;
-    if (Number.isInteger(order.promoter_commission_amount_cents)) {
-      earningCents = order.promoter_commission_amount_cents as number;
-    }
+    // Pure helper: locked amount → Phase 2 snapshot → legacy organizer-net.
+    let earningCents = computeLockedPromoterEarning({
+      promoterCommissionAmountCents: order.promoter_commission_amount_cents,
+      promoterOriginalAmountCents: order.promoter_original_amount_cents,
+      promoterCustomerDiscountBps: order.promoter_customer_discount_bps,
+      promoterCommissionBps: order.promoter_commission_bps,
+      subtotalCents: order.subtotal_cents,
+      organizerFeeCents: order.organizer_fee_cents,
+      quantity: order.quantity,
+      lockedRevShareBps: locked.locked_rev_share_bps,
+      lockedCustomerDiscountBps: locked.locked_customer_discount_bps,
+      lockedPromoterCommissionBps: locked.locked_promoter_commission_bps,
+    });
 
-    // Otherwise compute from the Phase 2 snapshot fields if present.
+    // If we derived the earning from a v2 snapshot and had no locked
+    // commission amount, persist the computed snapshot back to the order
+    // and attribution row so later webhook replays and payouts read it.
     if (
-      earningCents == null &&
-      Number.isInteger(order.promoter_original_amount_cents) &&
-      (order.promoter_customer_discount_bps != null ||
-        locked.locked_customer_discount_bps != null) &&
-      (order.promoter_commission_bps != null ||
-        locked.locked_promoter_commission_bps != null)
+      earningCents != null &&
+      earningCents > 0 &&
+      !Number.isInteger(order.promoter_commission_amount_cents) &&
+      Number.isInteger(order.promoter_original_amount_cents)
     ) {
-      const lines: CommissionLine[] = [{
-        eligibleAmountCents: order.promoter_original_amount_cents as number,
-        quantity: Number.isInteger(order.quantity) && order.quantity > 0
-          ? order.quantity
-          : 1,
-      }];
       try {
         const commission = computePromoterCommission({
-          lines,
+          lines: [{
+            eligibleAmountCents: order.promoter_original_amount_cents as number,
+            quantity:
+              Number.isInteger(order.quantity) && order.quantity > 0
+                ? order.quantity
+                : 1,
+          }],
           customerDiscountBps:
             (order.promoter_customer_discount_bps as number) ??
               locked.locked_customer_discount_bps,
@@ -149,9 +154,6 @@ export async function recordPromoterEarning(
             (order.promoter_commission_bps as number) ??
               locked.locked_promoter_commission_bps,
         });
-        earningCents = commission.commissionAmountCents;
-
-        // Persist the computed snapshot back to the order and attribution.
         await supabase
           .from("orders")
           .update({
@@ -177,40 +179,12 @@ export async function recordPromoterEarning(
           })
           .eq("order_id", orderId);
       } catch {
-        earningCents = null;
+        // Persistence is best-effort; the earning is still correct for this
+        // webhook invocation.
       }
     }
 
-    // Fallback to the legacy organizer-net basis for historical rows.
-    if (earningCents == null) {
-      let organizerNet: number | null = null;
-      if (
-        Number.isInteger(order.subtotal_cents) &&
-        Number.isInteger(order.organizer_fee_cents)
-      ) {
-        organizerNet = order.subtotal_cents - order.organizer_fee_cents;
-      } else if (
-        Number.isInteger(order.subtotal_cents) &&
-        order.subtotal_cents > 0
-      ) {
-        try {
-          organizerNet = computeFees(
-            order.subtotal_cents,
-            Number.isInteger(order.quantity) && order.quantity > 0
-              ? order.quantity
-              : 1,
-          ).organizer_transfer_amount;
-        } catch {
-          organizerNet = null;
-        }
-      }
-      if (organizerNet == null || organizerNet <= 0) return;
-      earningCents = Math.floor(
-        (organizerNet * locked.locked_rev_share_bps) / 10000,
-      );
-    }
-
-    if (!Number.isInteger(earningCents) || earningCents <= 0) return;
+    if (!Number.isInteger(earningCents) || earningCents! <= 0) return;
 
     const { data: ledger, error: ledgerError } = await supabase.rpc(
       "record_promoter_ledger_entry",
