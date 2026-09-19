@@ -1,4 +1,5 @@
 import { useColorScheme as useNativewindColorScheme } from "nativewind"
+import { Platform } from "react-native"
 import { COLORS } from "@dvnt/app/theme/colors"
 
 /**
@@ -18,15 +19,17 @@ function useColorScheme() {
   const { setColorScheme } = useNativewindColorScheme()
   const resolvedColorScheme = "dark" as const
 
-  function toggleColorScheme() {
-    return setColorScheme("dark")
+  function applyDarkScheme() {
+    // DVNT-WEB-S: NativeWind calls Appearance.setColorScheme, which is not
+    // implemented by react-native-web. Web already renders the dark palette.
+    if (Platform.OS !== "web") setColorScheme("dark")
   }
 
   return {
     colorScheme: resolvedColorScheme,
     isDarkColorScheme: true,
-    setColorScheme: () => setColorScheme("dark"),
-    toggleColorScheme,
+    setColorScheme: applyDarkScheme,
+    toggleColorScheme: applyDarkScheme,
     colors: COLORS.dark,
   }
 }
