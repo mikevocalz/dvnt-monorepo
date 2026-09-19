@@ -29,6 +29,7 @@ import {
   corsHeaders,
   optionsResponse,
 } from "../_shared/verify-session.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -89,7 +90,7 @@ interface PromoterRow {
   created_at: string;
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("manage-promoters", async (req: Request) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST")
     return json({ error: "Method not allowed" }, 405, req);
@@ -536,4 +537,4 @@ Deno.serve(async (req: Request) => {
     console.error("[manage-promoters] Unexpected:", err);
     return json({ error: err.message || "Internal error" }, 500, req);
   }
-});
+}));

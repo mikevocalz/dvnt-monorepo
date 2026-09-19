@@ -2008,6 +2008,14 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
       .eq("event_id", event.id);
   } catch (err) {
     console.error("[stripe-webhook] Processing error:", err);
+    // This catch swallows fulfillment failures — without a capture here the
+    // only trace is a function log line. captureEdge never throws.
+    await captureEdge(err, {
+      function: "stripe-webhook",
+      "webhook.source": "stripe",
+      "event.type": event?.type,
+      "event.id": event?.id,
+    });
     return new Response(JSON.stringify({ error: "Processing failed" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },

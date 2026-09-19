@@ -47,6 +47,7 @@ import {
   canSellAtDoor,
   doorGuestTicketBase,
 } from "../_shared/door-sale.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -80,7 +81,7 @@ async function stripeRequest(
   return data;
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("door-sell", async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -566,4 +567,4 @@ Deno.serve(async (req: Request) => {
     console.error("[door-sell] Error:", err);
     return json({ error: err.message || "Internal error" }, 500);
   }
-});
+}));

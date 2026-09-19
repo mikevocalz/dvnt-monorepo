@@ -19,6 +19,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -55,7 +56,7 @@ async function stripeRefund(params: Record<string, string>): Promise<any> {
   return res.json();
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("ticket-refund", async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: cors });
   }
@@ -216,4 +217,4 @@ Deno.serve(async (req: Request) => {
     console.error("[ticket-refund]", err);
     return json({ error: err.message || "Internal error" }, 500);
   }
-});
+}));

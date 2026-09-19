@@ -27,6 +27,7 @@ import {
   errorResponse,
   optionsResponse,
 } from "../_shared/verify-session.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -151,7 +152,7 @@ function requireCartReady(cart: CartRow): Response | null {
   return null;
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("cart-checkout", async (req: Request) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST") return errorResponse("Method not allowed", 405);
 
@@ -567,4 +568,4 @@ Deno.serve(async (req: Request) => {
       500,
     );
   }
-});
+}));

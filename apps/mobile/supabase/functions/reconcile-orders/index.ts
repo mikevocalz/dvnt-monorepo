@@ -10,7 +10,7 @@
  * Should be called periodically (e.g. every 15 minutes via cron).
  */
 
-import { withSentry } from "../_shared/sentry.ts";
+import { captureEdge, withSentry } from "../_shared/sentry.ts";
 import { withHeartbeat, tryClaimJob, releaseJob } from "../_shared/heartbeat.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
@@ -667,6 +667,12 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
         // else: still processing, leave as-is
       } catch (err) {
         console.error(`[reconcile] Error processing order ${order.id}:`, err);
+        // Per-order failures were silently logged before; a stuck paid order
+        // is exactly the class of bug that hid for days. Never throws.
+        await captureEdge(err, {
+          function: "reconcile-orders",
+          "event.id": order.id,
+        });
       }
     }
 

@@ -30,6 +30,7 @@ import {
 import {
   validateAndApplyPromoterCode,
 } from "../_shared/apply-promoter-code.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -149,7 +150,7 @@ async function getOrCreateCustomer(
   return customer.id;
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -625,4 +626,4 @@ Deno.serve(async (req: Request) => {
     console.error("[create-payment-intent] Error:", err);
     return json({ error: err.message || "Internal error" }, 500);
   }
-});
+}));

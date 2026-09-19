@@ -30,6 +30,7 @@ import {
 } from "../_shared/verify-session.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { notifyNextWaitlister } from "../_shared/notify-waitlisters.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -55,7 +56,7 @@ async function stripeRefund(
   return res.json();
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("organizer-refund", async (req: Request) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST") return errorResponse("Method not allowed", 405);
 
@@ -222,4 +223,4 @@ Deno.serve(async (req: Request) => {
     console.error("[organizer-refund] unexpected:", err);
     return errorResponse("Internal error", 500);
   }
-});
+}));

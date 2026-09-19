@@ -12,6 +12,7 @@ import {
   payoutStatement,
 } from "../_shared/send-resend-email.ts";
 import { withHeartbeat, tryClaimJob, releaseJob } from "../_shared/heartbeat.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -234,7 +235,7 @@ async function settlePromoters(
 
 const CRON_SECRET = Deno.env.get("CRON_SECRET") || "";
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("payouts-release", async (req: Request) => {
   // ── Auth: require cron secret header ────────────────────
   if (CRON_SECRET) {
     const provided = req.headers.get("x-cron-secret") || "";
@@ -556,4 +557,4 @@ Deno.serve(async (req: Request) => {
   } finally {
     await releaseJob(JOB);
   }
-});
+}));

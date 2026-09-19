@@ -31,6 +31,7 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -71,7 +72,7 @@ async function stripeRefund(
   return data;
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("bulk-refund-tickets", async (req: Request) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST") return errResp("Method not allowed", 405, req);
 
@@ -310,4 +311,4 @@ Deno.serve(async (req: Request) => {
     console.error("[bulk-refund-tickets] unexpected:", e);
     return errResp(e?.message || "Internal error", 500, req);
   }
-});
+}));
