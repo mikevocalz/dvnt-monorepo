@@ -64,7 +64,7 @@ export function computeLockedPromoterEarning(
       const commission = computePromoterCommission({
         lines: [{
           eligibleAmountCents: input.promoterOriginalAmountCents as number,
-          quantity,
+          quantity: 1, // snapshot already includes every ticket
         }],
         customerDiscountBps:
           (input.promoterCustomerDiscountBps as number) ??

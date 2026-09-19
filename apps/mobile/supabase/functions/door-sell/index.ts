@@ -42,6 +42,7 @@ import {
 import { validateAndApplyPromoterCode } from "../_shared/apply-promoter-code.ts";
 import { maybeFireCapacityAlerts } from "../_shared/capacity-alerts.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
+import { sendGuestTicketEmail } from "../_shared/session-issuance.ts";
 import {
   canSellAtDoor,
   doorGuestTicketBase,
@@ -258,7 +259,7 @@ Deno.serve(async (req: Request) => {
 
     // Fees decide the customer-facing total. Zero-total quotes never hit
     // Stripe.
-    const fees = computeFeesWithMode(
+    const fees = effectiveSubtotal === 0 ? null : computeFeesWithMode(
       effectiveSubtotal,
       quantity,
       event.fee_mode,
@@ -268,9 +269,9 @@ Deno.serve(async (req: Request) => {
       subtotal_cents: rawSubtotal,
       discount_cents: discountCents,
       discounted_subtotal_cents: effectiveSubtotal,
-      fee_cents: fees.buyer_fee,
+      fee_cents: fees?.buyer_fee ?? 0,
       total_cents:
-        effectiveSubtotal === 0 ? 0 : fees.customer_charge_amount,
+        fees?.customer_charge_amount ?? 0,
       code: validPromoterCode || (promoResult?.code ?? null),
       quantity,
     };
@@ -307,63 +308,66 @@ Deno.serve(async (req: Request) => {
           stripe_payment_intent_id: null,
         });
       }
-      const { data: issued, error: issueError } = await supabase
-        .from("tickets")
-        .insert(ticketRows)
-        .select("id");
-      if (issueError) throw issueError;
-
-      await supabase
-        .from("ticket_types")
-        .update({
-          quantity_sold: (ticketType.quantity_sold || 0) + quantity,
-        })
-        .eq("id", ticket_type_id);
-
-      await maybeFireCapacityAlerts(supabase, {
-        eventId,
-        ticketTypeId: ticket_type_id,
-      });
-      if (promoResult) {
-        await incrementPromoUsage(supabase, promoResult.promo_code_id);
+      const { data: freeSale, error: freeSaleError } = await supabase.rpc(
+        "door_free_sale_atomic", {
+          p_ticket_type_id: ticket_type_id,
+          p_ticket_rows: ticketRows,
+          p_order: {
+            user_id: null,
+            guest_email: trimmedGuestEmail,
+            type: "event_ticket",
+            status: "paid",
+            quantity,
+            subtotal_cents: 0,
+            total_cents: 0,
+            event_id: eventId,
+            paid_at: new Date().toISOString(),
+            sold_by_staff_user_id: staffUserId,
+            ...(promoResult
+              ? {
+                  promo_code_id: promoResult.promo_code_id,
+                  discount_cents: discountCents,
+                }
+              : {}),
+            ...(promoterResult
+              ? {
+                  promoter_policy_version: "v2_eligible_subtotal_after_discount",
+                  promoter_original_amount_cents: rawSubtotal,
+                  promoter_customer_discount_bps:
+                    promoterResult.customer_discount_bps,
+                  promoter_discount_amount_cents: promoterResult.discount_cents,
+                  promoter_discounted_amount_cents:
+                    promoterResult.discounted_amount_cents,
+                  promoter_code: promoterResult.code,
+                  promoter_commission_bps: promoterResult.promoter_commission_bps,
+                  promoter_commission_amount_cents: 0,
+                }
+              : {}),
+            currency: ticketType.currency || "usd",
+          },
+        },
+      );
+      // Missing RPC or any SQL error fails closed: no separate inserts.
+      if (freeSaleError) throw freeSaleError;
+      if (!freeSale?.ok) {
+        return json({ error: "Not enough tickets available", code: "sold_out" }, 409);
       }
-
-      const { data: freeOrder } = await supabase
-        .from("orders")
-        .insert({
-          user_id: null,
-          guest_email: trimmedGuestEmail,
-          type: "event_ticket",
-          status: "paid",
-          quantity,
-          subtotal_cents: 0,
-          total_cents: 0,
-          event_id: eventId,
-          paid_at: new Date().toISOString(),
-          sold_by_staff_user_id: staffUserId,
-          ...(promoResult
-            ? {
-                promo_code_id: promoResult.promo_code_id,
-                discount_cents: discountCents,
-              }
-            : {}),
-          ...(promoterResult
-            ? {
-                promoter_policy_version: "v2_eligible_subtotal_after_discount",
-                promoter_original_amount_cents: rawSubtotal,
-                promoter_customer_discount_bps:
-                  promoterResult.customer_discount_bps,
-                promoter_discount_amount_cents: promoterResult.discount_cents,
-                promoter_discounted_amount_cents:
-                  promoterResult.discounted_amount_cents,
-                promoter_code: promoterResult.code,
-                promoter_commission_bps: promoterResult.promoter_commission_bps,
-                promoter_commission_amount_cents: 0,
-              }
-            : {}),
-        })
-        .select("id")
-        .single();
+      const freeOrder = { id: freeSale.order_id };
+      const issued = freeSale.tickets;
+      try {
+        await maybeFireCapacityAlerts(supabase, { eventId, ticketTypeId: ticket_type_id });
+        if (promoResult) await incrementPromoUsage(supabase, promoResult.promo_code_id);
+      } catch (sideEffectError) {
+        // The sale committed. Do not report failure and invite a second sale.
+        console.error("[door-sell] free sale follow-up failed", sideEffectError);
+      }
+      try {
+        await sendGuestTicketEmail(trimmedGuestEmail, trimmedGuestName || null,
+          event.title || "your event", null, null, issued,
+          { tierLabel: ticketType.name, logPrefix: "[door-sell]" });
+      } catch (mailError) {
+        console.error("[door-sell] free guest email failed", mailError);
+      }
 
       if (freeOrder?.id && validPromoterCode) {
         try {
@@ -375,17 +379,6 @@ Deno.serve(async (req: Request) => {
           console.error("[door-sell] free-order attribution failed:", attrErr);
         }
       }
-      if (freeOrder?.id) {
-        await supabase.from("order_timeline").insert([
-          { order_id: freeOrder.id, type: "created", label: "Order created" },
-          {
-            order_id: freeOrder.id,
-            type: "payment_captured",
-            label: "Free door order — no charge",
-          },
-        ]);
-      }
-
       return json({
         ok: true,
         free: true,
@@ -394,6 +387,8 @@ Deno.serve(async (req: Request) => {
         quote,
       });
     }
+
+    if (!fees) throw new Error("Missing paid-sale fees");
 
     // ── Paid: organizer account must be live ──────────────────────────
     const { data: organizer } = await supabase
@@ -513,7 +508,7 @@ Deno.serve(async (req: Request) => {
         total_cents: fees.customer_charge_amount,
         buyer_pct_fee_cents: fees.buyer_pct_fee,
         buyer_per_ticket_fee_cents: fees.buyer_per_ticket_fee,
-        buyer_fee_cents: fees.buyer_fee,
+        buyer_fee_cents: fees?.buyer_fee ?? 0,
         org_pct_fee_cents: fees.org_pct_fee,
         org_per_ticket_fee_cents: fees.org_per_ticket_fee,
         organizer_fee_cents: fees.organizer_fee,

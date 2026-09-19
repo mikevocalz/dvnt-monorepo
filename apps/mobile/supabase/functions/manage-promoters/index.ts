@@ -245,7 +245,7 @@ Deno.serve(async (req: Request) => {
     if (action === "add") {
       const customerDiscountBps = body.customer_discount_bps !== undefined
         ? Number(body.customer_discount_bps)
-        : Number(body.rev_share_bps);
+        : 0;
       const promoterCommissionBps = body.promoter_commission_bps !== undefined
         ? Number(body.promoter_commission_bps)
         : Number(body.rev_share_bps);

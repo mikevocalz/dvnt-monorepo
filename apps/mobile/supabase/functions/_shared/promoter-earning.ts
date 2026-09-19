@@ -40,10 +40,7 @@ export function computeLockedPromoterEarning(
       const commission = computePromoterCommission({
         lines: [{
           eligibleAmountCents: input.promoterOriginalAmountCents as number,
-          quantity:
-            Number.isInteger(input.quantity) && input.quantity! > 0
-              ? input.quantity
-              : 1,
+          quantity: 1, // snapshot is the whole order's eligible subtotal
         }],
         customerDiscountBps:
           (input.promoterCustomerDiscountBps as number) ??
@@ -72,7 +69,7 @@ export function computeLockedPromoterEarning(
       organizerNet = computeFees(
         input.subtotalCents as number,
         Number.isInteger(input.quantity) && input.quantity! > 0
-          ? input.quantity
+          ? input.quantity!
           : 1,
       ).organizer_transfer_amount;
     } catch {

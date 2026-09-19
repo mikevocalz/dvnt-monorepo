@@ -89,3 +89,22 @@ test("returns null when locked rev share is zero or missing in legacy mode", () 
   });
   assert.equal(result, null);
 });
+
+test("multi-ticket snapshot is not multiplied by quantity again", () => {
+  assert.equal(computeLockedPromoterEarning({
+    promoterOriginalAmountCents: 10000,
+    promoterCustomerDiscountBps: 1000,
+    promoterCommissionBps: 1000,
+    quantity: 2,
+  }), 900);
+});
+
+test("historical locked commission is preserved even if its policy changes", () => {
+  assert.equal(computeLockedPromoterEarning({
+    promoterCommissionAmountCents: 1234,
+    promoterOriginalAmountCents: 10000,
+    promoterCustomerDiscountBps: 0,
+    promoterCommissionBps: 500,
+    quantity: 2,
+  }), 1234);
+});

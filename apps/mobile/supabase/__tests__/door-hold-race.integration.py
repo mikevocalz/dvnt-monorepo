@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations/20260915172318_atomic_legacy_ticket_hold.sql"
@@ -57,6 +58,82 @@ def main():
                 expires_at timestamptz, guest_email text, hold_kind text);
             """)
             sql(MIGRATION.read_text())
+            sql("""
+              CREATE TABLE orders(
+                id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id text,
+                guest_email text, type text, status text, quantity integer,
+                currency text, subtotal_cents integer, total_cents integer,
+                event_id bigint, paid_at timestamptz, sold_by_staff_user_id text,
+                promo_code_id uuid, discount_cents integer, promoter_policy_version text,
+                promoter_original_amount_cents integer, promoter_customer_discount_bps integer,
+                promoter_discount_amount_cents integer, promoter_discounted_amount_cents integer,
+                promoter_code text, promoter_commission_bps integer,
+                promoter_commission_amount_cents integer);
+              CREATE TABLE tickets(
+                id uuid PRIMARY KEY, event_id bigint, ticket_type_id uuid,
+                user_id text, guest_email text, guest_name text, guest_lookup_token uuid,
+                status text, qr_token text NOT NULL UNIQUE, qr_payload text,
+                purchase_amount_cents integer);
+              CREATE TABLE order_timeline(order_id uuid REFERENCES orders(id), type text, label text);
+            """)
+            sql((ROOT / "migrations/20260919181000_atomic_free_door_sale.sql").read_text())
+
+            def free_sale(tier_id, invalid=False):
+                order = json.dumps(dict(event_id=1, guest_email="guest@example.test",
+                    sold_by_staff_user_id="seller", quantity=1, total_cents=0, subtotal_cents=0))
+                rows = json.dumps([dict(id=str(uuid.uuid4()),
+                    qr_token=None if invalid else str(uuid.uuid4()), qr_payload="signed",
+                    guest_lookup_token=str(uuid.uuid4()))])
+                return json.loads(sql(f"SELECT door_free_sale_atomic('{tier_id}', '{rows}', '{order}');"))
+
+            # SQL errors roll back the order, hold, inventory and tickets together.
+            free_tier = sql("INSERT INTO ticket_types(event_id,quantity_total,quantity_sold) "
+                           "VALUES (1,1,0) RETURNING id;").splitlines()[0]
+            try:
+                free_sale(free_tier, invalid=True)
+                raise AssertionError("invalid ticket unexpectedly committed")
+            except RuntimeError as e:
+                assert 'qr_token' in str(e), e
+            assert sql("SELECT count(*) FROM orders;") == "0"
+            assert sql("SELECT count(*) FROM ticket_holds;") == "0"
+            assert sql("SELECT count(*) FROM tickets;") == "0"
+            assert sql(f"SELECT quantity_sold FROM ticket_types WHERE id='{free_tier}';") == "0"
+
+            # Two free sellers and an online hold contend for the SAME last seat.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+                jobs = [ex.submit(free_sale, free_tier), ex.submit(free_sale, free_tier),
+                        ex.submit(lambda: json.loads(sql(
+                            f"SELECT ticket_hold_create_atomic('{free_tier}',1,'pi_online_free_race','buyer');")))]
+                free_results = [j.result() for j in jobs]
+            assert sum(bool(r.get('ok')) for r in free_results) == 1, free_results
+            assert sql(f"SELECT quantity_sold + (SELECT coalesce(sum(quantity),0) FROM ticket_holds "
+                       f"WHERE ticket_type_id='{free_tier}' AND status='active') "
+                       f"FROM ticket_types WHERE id='{free_tier}';") == "1"
+
+            # Cart holds also block the free path; a completed free order belongs to the guest.
+            cart_tier = sql("INSERT INTO ticket_types(event_id,quantity_total,quantity_sold) "
+                           "VALUES (1,1,0) RETURNING id;").splitlines()[0]
+            sql(f"INSERT INTO cart_holds(tier_id,qty,expires_at) VALUES ('{cart_tier}',1,now()+interval '10 minutes');")
+            assert free_sale(cart_tier)['ok'] is False
+            sql(f"UPDATE cart_holds SET released=true WHERE tier_id='{cart_tier}';")
+            sale = free_sale(cart_tier)
+            assert sale['ok'] is True and len(sale['tickets']) == 1
+            assert free_sale(cart_tier)['ok'] is False
+            assert sql(f"SELECT user_id IS NULL AND guest_email='guest@example.test' FROM tickets "
+                       f"WHERE ticket_type_id='{cart_tier}';") == 't'
+            assert sql(f"SELECT count(*) FROM order_timeline WHERE order_id='{sale['order_id']}';") == '2'
+            assert sql("SELECT has_function_privilege('anon', 'door_free_sale_atomic(uuid,jsonb,jsonb)', 'execute');") == 'f'
+
+            # Price correction affects existing code settings only, not snapshots/earnings.
+            sql("CREATE TABLE event_promoters(customer_discount_bps integer, promoter_commission_bps integer);"
+                "INSERT INTO event_promoters VALUES (1000,1500), (0,500);")
+            before_orders = sql("SELECT jsonb_agg(to_jsonb(o) ORDER BY id) FROM orders o;")
+            before_tickets = sql("SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM tickets t;")
+            sql((ROOT / "migrations/20260919180000_preserve_existing_promoter_prices.sql").read_text())
+            assert sql("SELECT string_agg(customer_discount_bps::text || ':' || promoter_commission_bps::text, ',' "
+                       "ORDER BY promoter_commission_bps) FROM event_promoters;") == '0:500,0:1500'
+            assert sql("SELECT jsonb_agg(to_jsonb(o) ORDER BY id) FROM orders o;") == before_orders
+            assert sql("SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM tickets t;") == before_tickets
 
             tier = sql(
                 "INSERT INTO ticket_types(event_id,quantity_total,quantity_sold) "

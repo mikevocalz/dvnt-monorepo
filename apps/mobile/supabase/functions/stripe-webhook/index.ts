@@ -397,7 +397,12 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         const piMetadata = pi.metadata || {};
 
         if (piMetadata.type === "cart_checkout") {
-          await handleCartPaymentIntentSucceeded(supabase, pi);
+          // Match the reconciler's protection: an expired hold on a delayed
+          // delivery must never turn a paid buyer into an automatic refund.
+          const issued = await handleCartPaymentIntentSucceeded(supabase, pi, {
+            refundOnAllocationFailure: false,
+          });
+          if (!issued) throw new Error("Paid cart issuance needs recovery");
         } else if (piMetadata.type === "event_ticket") {
           const piEventId = parseInt(piMetadata.event_id);
           const piTicketTypeId = piMetadata.ticket_type_id;

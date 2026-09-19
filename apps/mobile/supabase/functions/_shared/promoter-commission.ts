@@ -12,9 +12,9 @@
  */
 
 export interface CommissionLine {
-  /** Eligible subtotal for this line in cents. */
+  /** Eligible unit amount in cents. For a precomputed subtotal, use quantity 1. */
   eligibleAmountCents: number;
-  /** Optional quantity for debugging / display. Does not affect math. */
+  /** Optional quantity multiplied by eligibleAmountCents; defaults to 1. */
   quantity?: number;
 }
 

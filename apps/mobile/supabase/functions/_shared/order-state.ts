@@ -142,10 +142,7 @@ export async function recordPromoterEarning(
         const commission = computePromoterCommission({
           lines: [{
             eligibleAmountCents: order.promoter_original_amount_cents as number,
-            quantity:
-              Number.isInteger(order.quantity) && order.quantity > 0
-                ? order.quantity
-                : 1,
+            quantity: 1, // snapshot already includes every ticket
           }],
           customerDiscountBps:
             (order.promoter_customer_discount_bps as number) ??

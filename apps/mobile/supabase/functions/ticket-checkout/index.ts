@@ -43,6 +43,7 @@ import {
 } from "../_shared/apply-promoter-code.ts";
 import { maybeFireCapacityAlerts } from "../_shared/capacity-alerts.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
+import { checkoutTicketLines } from "../_shared/checkout-line-items.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -528,21 +529,17 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── Fee structure (v1_250_1pt) — fee_mode-aware (absorb|pass) ──
-    // If a promoter discount applies, drop the per-ticket line item so the
-    // customer is charged the discounted base price. We round per unit to
-    // keep Stripe's line item quantity intact; the order snapshot keeps the
-    // exact unrounded discount from computePromoterCommission.
-    let ticketUnitAmount = ticketType.price_cents;
-    if (promoterResult && promoterResult.discount_cents > 0) {
-      ticketUnitAmount = Math.round(
-        (rawSubtotal - promoterResult.discount_cents) / quantity,
-      );
-    }
-    const checkoutSubtotal = ticketUnitAmount * quantity;
-    const subtotalCents = checkoutSubtotal;
+    // Stripe, fees and the order must use the same exact subtotal after
+    // BOTH discounts. Split remainder cents across ticket lines instead
+    // of rounding every ticket to the same price.
+    const subtotalCents = effectiveSubtotal;
     const fees = computeFeesWithMode(subtotalCents, quantity, event.fee_mode);
 
     const currency = ticketType.currency || "usd";
+    const ticketLines = checkoutTicketLines(
+      subtotalCents, quantity, currency, ticketType.name,
+    );
+    const feeLine = ticketLines.count;
 
     // ── Async settlement (ACH + US bank transfer), high-ticket only ──
     // At/above the threshold, offer us_bank_account + customer_balance
@@ -573,24 +570,19 @@ Deno.serve(async (req: Request) => {
             customer_creation: "always",
           }
         : {}),
-      // Line 0: base ticket price (discounted if a promoter code applies)
-      "line_items[0][price_data][currency]": currency,
-      "line_items[0][price_data][unit_amount]":
-        ticketUnitAmount.toString(),
-      "line_items[0][price_data][product_data][name]": ticketType.name,
-      "line_items[0][quantity]": quantity.toString(),
-      // Line 1: DVNT buyer service fee (one lump item) — only in 'pass'
+      ...ticketLines.params,
+      // DVNT buyer service fee follows the ticket lines — only in 'pass'
       // mode; in 'absorb' the organizer eats it and the buyer pays just
       // the ticket price.
       ...(fees.fee_mode !== "absorb"
         ? {
-            "line_items[1][price_data][currency]": currency,
-            "line_items[1][price_data][unit_amount]": fees.buyer_fee.toString(),
-            "line_items[1][price_data][product_data][name]":
+            [`line_items[${feeLine}][price_data][currency]`]: currency,
+            [`line_items[${feeLine}][price_data][unit_amount]`]: fees.buyer_fee.toString(),
+            [`line_items[${feeLine}][price_data][product_data][name]`]:
               "DVNT Service Fee",
-            "line_items[1][price_data][product_data][description]":
+            [`line_items[${feeLine}][price_data][product_data][description]`]:
               "2.5% + $1/ticket • Non-refundable",
-            "line_items[1][quantity]": "1",
+            [`line_items[${feeLine}][quantity]`]: "1",
           }
         : {}),
       // Destination charge: DVNT keeps application_fee_amount, rest goes to organizer
@@ -651,17 +643,25 @@ Deno.serve(async (req: Request) => {
     const holdExpiresAt = asyncSettlement
       ? asyncSettlementHoldExpiresAt()
       : new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    await supabase.from("ticket_holds").insert({
-      user_id: isGuest ? null : user_id,
-      guest_email: isGuest ? trimmedGuestEmail : null,
-      ticket_type_id,
-      event_id: parseInt(event_id),
-      quantity,
-      status: "active",
-      hold_kind: asyncSettlement ? "async_settlement" : "checkout",
-      expires_at: holdExpiresAt,
-      payment_intent_id: session.id,
+    const { data: hold, error: holdError } = await supabase.rpc("ticket_hold_create_atomic", {
+      p_user_id: isGuest ? null : user_id,
+      p_guest_email: isGuest ? trimmedGuestEmail : null,
+      p_ticket_type_id: ticket_type_id,
+      p_quantity: quantity,
+      p_hold_kind: asyncSettlement ? "async_settlement" : "checkout",
+      p_hold_seconds: Math.max(60, Math.ceil((Date.parse(holdExpiresAt) - Date.now()) / 1000)),
+      p_payment_intent_id: session.id,
     });
+    if (holdError || !hold?.ok) {
+      try {
+        await stripeRequest(`/checkout/sessions/${session.id}/expire`, {});
+      } catch (expireError) {
+        console.error("[ticket-checkout] failed to expire unallocated session", expireError);
+      }
+      return new Response(JSON.stringify({ error: "Not enough tickets available", code: "sold_out" }), {
+        status: 409, headers: { "Content-Type": "application/json" },
+      });
+    }
 
     // NOTE: Promo usage is intentionally NOT incremented here.
     // Incrementing at checkout creation would inflate counts for sessions that are never paid.

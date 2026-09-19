@@ -58,7 +58,8 @@ export async function validateAndApplyPromoterCode(
 
   const lines: CommissionLine[] = [{
     eligibleAmountCents,
-    quantity,
+    // This argument is already the entire eligible subtotal, not a unit price.
+    quantity: 1,
   }];
 
   const commission = computePromoterCommission({
