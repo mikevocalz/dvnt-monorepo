@@ -162,7 +162,7 @@ export interface TicketConfirmationOpts {
   /** App/wallet CTA when there's no per-ticket QR (e.g. account holders). */
   manageUrl?: string | null;
   /** Order total summary lines, label→value. */
-  summary?: Array<{ label: string; value: string; strong?: boolean }>;
+  summary?: { label: string; value: string; strong?: boolean }[];
   /** "Create an account" nudge for guest checkouts. */
   guestNudge?: boolean;
   toEmail?: string | null;
@@ -176,6 +176,11 @@ export interface TicketConfirmationOpts {
   claimUrl?: string | null;
   /** Machine-readable event time → renders Google Calendar + .ics links. */
   calendar?: { startIso: string; endIso?: string | null } | null;
+  /** Overrides for non-confirmation sends (e.g. the 3-hour reminder) that
+   *  reuse this layout: subject line, hero heading, preheader text. */
+  subject?: string;
+  heading?: string;
+  preheader?: string;
 }
 
 export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
@@ -327,12 +332,13 @@ export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
       : "";
 
   return {
-    subject: multi
-      ? `Your ${tickets.length} tickets for ${opts.eventTitle}`
-      : `Your ticket for ${opts.eventTitle}`,
+    subject: opts.subject ??
+      (multi
+        ? `Your ${tickets.length} tickets for ${opts.eventTitle}`
+        : `Your ticket for ${opts.eventTitle}`),
     html: brandEmailWrapper(
       [
-        heading("You're in 🎟️"),
+        heading(opts.heading ?? "You're in 🎟️"),
         opts.greeting
           ? paragraph(esc(opts.greeting), { size: 15 })
           : paragraph(
@@ -357,7 +363,8 @@ export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
         nudge,
       ].join(""),
       {
-        preheader: `${multi ? `${tickets.length} tickets` : "Your ticket"} for ${opts.eventTitle}`,
+        preheader: opts.preheader ??
+          `${multi ? `${tickets.length} tickets` : "Your ticket"} for ${opts.eventTitle}`,
       },
     ),
   };
