@@ -83,11 +83,18 @@ interface SellState {
     clientSecret: string;
     publishableKey: string;
     paymentIntentId: string;
+    orderId: string | null;
     totalCents: number;
     currency: string;
   } | null;
   setPendingPayment: (p: SellState["pendingPayment"]) => void;
-  fulfilled: { email: string; totalCents: number; currency: string } | null;
+  fulfilled: {
+    email: string;
+    totalCents: number;
+    currency: string;
+    /** false = payment confirmed but webhook issuance not observed yet. */
+    confirmed: boolean;
+  } | null;
   setFulfilled: (f: SellState["fulfilled"]) => void;
   reset: () => void;
 }
@@ -383,6 +390,7 @@ export function DoorSellScreen() {
           email: email.trim(),
           totalCents: 0,
           currency: quote.currency,
+          confirmed: true,
         });
         setPhase("fulfilled");
         return;
@@ -394,6 +402,7 @@ export function DoorSellScreen() {
         clientSecret: res.clientSecret,
         publishableKey: res.publishableKey,
         paymentIntentId: res.paymentIntentId ?? "",
+        orderId: res.order_id ?? null,
         totalCents: res.quote.total_cents,
         currency: res.quote.currency,
       });
@@ -423,21 +432,59 @@ export function DoorSellScreen() {
     setStatusMessage("Sale canceled. Nothing was charged.");
   }, [setPendingPayment, setPhase, setStatusMessage]);
 
+  const pollCancelled = useRef(false);
+  useEffect(() => () => {
+    pollCancelled.current = true;
+  }, []);
+
   const handlePaid = useCallback(() => {
     setPhase("preparing");
     setStatusMessage("Payment received. Preparing tickets.");
-    // Issuance is webhook-driven; show preparing, then the fulfilled panel.
-    // The tickets arrive by email regardless of what this screen does next.
-    setTimeout(() => {
+    // Issuance is webhook-driven. Poll the order until the tickets exist —
+    // never claim "Tickets sent" on a timer. If the webhook is slow the
+    // panel still opens; the email delivers regardless of this screen.
+    const orderId = pendingPayment?.orderId ?? null;
+    pollCancelled.current = false;
+    const cancelled = () => pollCancelled.current;
+    const finish = (confirmed: boolean) => {
+      if (cancelled()) return;
       setFulfilled({
         email: email.trim(),
         totalCents: pendingPayment?.totalCents ?? quote?.total_cents ?? 0,
         currency: pendingPayment?.currency ?? quote?.currency ?? "usd",
+        confirmed,
       });
       setPendingPayment(null);
       setPhase("fulfilled");
-    }, 1500);
-  }, [email, pendingPayment, quote, setPhase, setStatusMessage, setFulfilled, setPendingPayment]);
+    };
+    if (!orderId) {
+      finish(true);
+      return;
+    }
+    let attempts = 0;
+    const poll = async () => {
+      while (!cancelled() && attempts < 14) {
+        attempts += 1;
+        try {
+          const s = await doorApi.status({
+            eventId: Number(eventId),
+            orderId,
+          });
+          if (s.status === "paid" || s.tickets_issued >= s.quantity) {
+            finish(true);
+            return;
+          }
+        } catch {
+          // A failed poll is not a failed order — keep waiting.
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      // ~21s without issuance: open the panel anyway, marked unconfirmed —
+      // copy says tickets are being delivered; reconcile-orders backstops.
+      finish(false);
+    };
+    void poll();
+  }, [email, pendingPayment, quote, eventId, setPhase, setStatusMessage, setFulfilled, setPendingPayment]);
 
   const gateLoading = !hasHydrated || eventLoading || roleLoading;
 
@@ -499,9 +546,11 @@ export function DoorSellScreen() {
           <div className="flex flex-col items-center rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-center">
             <CheckCircle2 size={40} className="text-[#379ED8]" />
             <h2 className="mt-3 text-xl font-bold">
-              {fulfilled.totalCents > 0
-                ? `Tickets sent to ${maskEmail(fulfilled.email)}.`
-                : `Tickets sent to ${maskEmail(fulfilled.email)}. No charge.`}
+              {fulfilled.confirmed
+                ? fulfilled.totalCents > 0
+                  ? `Tickets sent to ${maskEmail(fulfilled.email)}.`
+                  : `Tickets sent to ${maskEmail(fulfilled.email)}. No charge.`
+                : `Payment received — tickets are on the way to ${maskEmail(fulfilled.email)}.`}
             </h2>
             {fulfilled.totalCents > 0 ? (
               <p className="mt-1 text-sm text-white/60">
@@ -554,8 +603,14 @@ export function DoorSellScreen() {
               </p>
             ) : (
               tiers.map((t: any) => {
+                // The server quote counts live holds; the row-level
+                // fallback (total minus sold) does not. Prefer the quote
+                // when this tier is the selected one.
                 const remaining =
-                  typeof t.quantity_total === "number"
+                  quote && primary && t.id === primary.tier.id &&
+                    typeof quote.remaining === "number"
+                    ? quote.remaining
+                    : typeof t.quantity_total === "number"
                     ? t.quantity_total - (t.quantity_sold || 0)
                     : null;
                 const soldOut = remaining !== null && remaining <= 0;
@@ -586,7 +641,10 @@ export function DoorSellScreen() {
                       <Stepper
                         name={t.name}
                         value={qty}
-                        max={t.max_per_user || 10}
+                        max={Math.min(
+                          t.max_per_user || 10,
+                          remaining ?? Infinity,
+                        )}
                         onChange={(v) => setQuantity(String(t.id), v)}
                       />
                     )}

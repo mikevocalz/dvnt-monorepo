@@ -15,6 +15,10 @@ function fixture({ user = 'member', role, accepted = true, membershipEvent = 1,
       user_id: membershipUser, role, accepted }] : [],
     ticket_types: [{ id: 'tier', event_id: 1, name: 'Admission', price_cents: 5000,
       currency: 'usd', quantity_total: 10, quantity_sold: 0, max_per_user: 20 }],
+    // Read by the per-guest cap and the server-side remaining count.
+    tickets: [],
+    ticket_holds: [],
+    cart_holds: [],
   };
   return { reads, database: { from(table) {
     reads.push(table);
@@ -25,6 +29,7 @@ function fixture({ user = 'member', role, accepted = true, membershipEvent = 1,
     const q = { select: () => q, order: () => q, limit: () => q,
       eq: (key, value) => { selected = selected.filter(row => row[key] === value); return q; },
       in: (key, values) => { selected = selected.filter(row => values.includes(row[key])); return q; },
+      gt: () => q, neq: () => q,
       single: result, maybeSingle: result,
       then: (resolve, reject) => result().then(resolve, reject) };
     return q;

@@ -17,6 +17,8 @@ export interface DoorQuote {
   total_cents: number;
   code: string | null;
   quantity: number;
+  /** Server-computed: total minus sold minus live holds. Null = unlimited. */
+  remaining?: number | null;
 }
 
 export interface DoorSellResult {
@@ -35,6 +37,8 @@ interface DoorSellResponse extends Partial<DoorSellResult> {
   error?: string;
   code?: string;
   role?: string | null;
+  status?: string;
+  quantity?: number;
 }
 
 function unwrap(
@@ -109,6 +113,29 @@ export const doorApi = {
       publishableKey: res.publishableKey,
       paymentIntentId: res.paymentIntentId,
       quote: res.quote as DoorQuote,
+    };
+  },
+
+  /**
+   * Fulfillment truth for the success screen: order status + issued
+   * ticket count, straight from the DB the webhook writes.
+   */
+  async status(params: {
+    eventId: number;
+    orderId: string;
+  }): Promise<{ status: string; quantity: number; tickets_issued: number }> {
+    const { data, error } = await invokeEdge<
+      DoorSellResponse & { status?: string }
+    >("door-sell", {
+      action: "status",
+      event_id: params.eventId,
+      order_id: params.orderId,
+    });
+    const res = unwrap(data, error);
+    return {
+      status: res.status ?? "unknown",
+      quantity: res.quantity ?? 0,
+      tickets_issued: res.tickets_issued ?? 0,
     };
   },
 };

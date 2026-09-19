@@ -118,12 +118,13 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       promo_code,
       promoter_code,
       unlock_code,
+      order_id,
     } = body;
 
-    if (action !== "quote" && action !== "sell") {
-      return json({ error: "action must be 'quote' or 'sell'" }, 400);
+    if (!["quote", "sell", "status"].includes(action)) {
+      return json({ error: "action must be 'quote', 'sell' or 'status'" }, 400);
     }
-    if (!event_id || !ticket_type_id) {
+    if (!event_id || (action !== "status" && !ticket_type_id)) {
       return json({ error: "Missing required fields" }, 400);
     }
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) {
@@ -177,6 +178,38 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       return json({ error: "Your access to this event ended." }, 403);
     }
 
+    // Order status for the success screen — tells the seller whether the
+    // webhook has actually issued the tickets instead of a client-side
+    // timer pretending fulfillment happened. Staff-scoped to this event.
+    if (action === "status") {
+      if (!order_id) return json({ error: "Missing order_id" }, 400);
+      const { data: order } = await supabase
+        .from("orders")
+        .select("id, status, quantity, stripe_payment_intent_id")
+        .eq("id", order_id)
+        .eq("event_id", eventId)
+        .single();
+      if (!order) return json({ error: "Order not found" }, 404);
+      // Tickets link to the order via the PaymentIntent, not an order_id
+      // column. Free orders have no PI; their 'paid' status IS issuance.
+      let issued = order.status === "paid" && !order.stripe_payment_intent_id
+        ? order.quantity
+        : 0;
+      if (order.stripe_payment_intent_id) {
+        const { count } = await supabase
+          .from("tickets")
+          .select("*", { count: "exact", head: true })
+          .eq("stripe_payment_intent_id", order.stripe_payment_intent_id);
+        issued = count ?? 0;
+      }
+      return json({
+        ok: true,
+        status: order.status,
+        quantity: order.quantity,
+        tickets_issued: issued,
+      });
+    }
+
     // Rate-limit per seller — a door seller shouldn't mint hundreds of
     // holds; each active hold blocks inventory for 10 minutes.
     const rl = checkRateLimit(`door:${staffUserId}`, "door-sell", {
@@ -223,6 +256,29 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       );
     }
 
+    // Per-guest cap — same rule as ticket-checkout: active/scanned/
+    // transfer_pending tickets for this guest email count against
+    // max_per_user. Applies to quote and sell so the UI can't promise a
+    // quantity the sell call would refuse.
+    if (isValidEmail) {
+      const maxPerGuest = ticketType.max_per_user || 4;
+      const { count: guestOwned } = await supabase
+        .from("tickets")
+        .select("*", { count: "exact", head: true })
+        .eq("ticket_type_id", ticket_type_id)
+        .eq("guest_email", trimmedGuestEmail)
+        .in("status", ["active", "scanned", "transfer_pending"]);
+      if ((guestOwned || 0) + quantity > maxPerGuest) {
+        const left = maxPerGuest - (guestOwned || 0);
+        return json({
+          error: left <= 0
+            ? `This guest already has the maximum ${maxPerGuest} tickets for this tier`
+            : `This guest can only take ${left} more (max ${maxPerGuest} per person)`,
+          code: "max_per_guest",
+        }, 400);
+      }
+    }
+
     // ── Codes: promoter first (commission basis), then promo ──────────
     const rawSubtotal = ticketType.price_cents * quantity;
     let promoResult: any = null;
@@ -258,6 +314,33 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
 
     const effectiveSubtotal = Math.max(0, rawSubtotal - discountCents);
 
+    // Server-side remaining — same inventory the atomic hold counts:
+    // sold + live ticket_holds + live cart_holds. The client's
+    // total-minus-sold estimate ignores holds and can promise the last
+    // seat to two sellers at once.
+    const nowIso = now.toISOString();
+    const [{ data: liveTicketHolds }, { data: liveCartHolds }] =
+      await Promise.all([
+        supabase
+          .from("ticket_holds")
+          .select("quantity")
+          .eq("ticket_type_id", ticket_type_id)
+          .eq("status", "active")
+          .gt("expires_at", nowIso),
+        supabase
+          .from("cart_holds")
+          .select("qty")
+          .eq("tier_id", ticket_type_id)
+          .eq("released", false)
+          .gt("expires_at", nowIso),
+      ]);
+    const held =
+      (liveTicketHolds || []).reduce((s, h) => s + (h.quantity || 0), 0) +
+      (liveCartHolds || []).reduce((s, h) => s + (h.qty || 0), 0);
+    const remaining = typeof ticketType.quantity_total === "number"
+      ? ticketType.quantity_total - (ticketType.quantity_sold || 0) - held
+      : null;
+
     // Fees decide the customer-facing total. Zero-total quotes never hit
     // Stripe.
     const fees = effectiveSubtotal === 0 ? null : computeFeesWithMode(
@@ -275,6 +358,7 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
         fees?.customer_charge_amount ?? 0,
       code: validPromoterCode || (promoResult?.code ?? null),
       quantity,
+      remaining,
     };
 
     if (action === "quote") {
