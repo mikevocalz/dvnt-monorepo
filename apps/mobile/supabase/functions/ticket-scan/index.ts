@@ -436,7 +436,7 @@ Deno.serve(async (req: Request) => {
         const { data: ticket } = await supabase
           .from("tickets")
           .select(
-            "id, event_id, ticket_type_id, user_id, status, qr_token, checked_in_at, checked_in_by, purchase_amount_cents, cart_id, guest_name, attendee_name",
+            "id, event_id, ticket_type_id, user_id, status, qr_token, checked_in_at, checked_in_by, cart_id, guest_name, attendee_name",
           )
           .eq("id", rpcResult.ticketId)
           .single();
