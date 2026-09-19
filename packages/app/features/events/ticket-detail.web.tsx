@@ -504,6 +504,21 @@ export function TicketDetailScreen() {
   );
 
   // ── Loading ──
+  // ── Hooks live ABOVE every early return ──
+  // These were added below them, which is React error #310: the loading and
+  // not-found branches ran six fewer hooks than the full render, so the first
+  // successful render threw "Rendered more hooks than during the previous
+  // render" and the ticket screen went blank in production. `dbTicket` is
+  // optional here by design — each of these tolerates undefined.
+  const transferSender = useTransferSender(dbTicket?.transferred_from);
+  const editingName = useTicketDetailUIStore((st) => st.editingName);
+  const setEditingName = useTicketDetailUIStore((st) => st.setEditingName);
+  const nameDraft = useTicketDetailUIStore((st) => st.nameDraft);
+  const setNameDraft = useTicketDetailUIStore((st) => st.setNameDraft);
+  const setAttendeeName = useSetAttendeeName(
+    dbTicket?.event_id != null ? String(dbTicket.event_id) : undefined,
+  );
+
   if (isLoading && !ticket) {
     return (
       <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -583,14 +598,6 @@ export function TicketDetailScreen() {
     ticket.status === "checked_in" ||
     ticket.status === "transfer_pending";
   const attendeeName = dbTicket?.attendee_name ?? null;
-  const transferSender = useTransferSender(dbTicket?.transferred_from);
-  const editingName = useTicketDetailUIStore((st) => st.editingName);
-  const setEditingName = useTicketDetailUIStore((st) => st.setEditingName);
-  const nameDraft = useTicketDetailUIStore((st) => st.nameDraft);
-  const setNameDraft = useTicketDetailUIStore((st) => st.setNameDraft);
-  const setAttendeeName = useSetAttendeeName(
-    dbTicket?.event_id != null ? String(dbTicket.event_id) : undefined,
-  );
   // What they actually paid, so the banner names a number they can match
   // against their statement rather than asking them to trust a word.
   const refundedAmount =
