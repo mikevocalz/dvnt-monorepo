@@ -102,10 +102,12 @@ Deno.serve(async (req: Request) => {
         .from("tickets")
         .select(
           "id, user_id, guest_email, guest_name, attendee_name, qr_token, " +
-            "guest_lookup_token, status, ticket_type:ticket_types(name, category)",
+            "guest_lookup_token, status, reminder_sent_at, " +
+            "ticket_type:ticket_types(name, category)",
         )
         .eq("event_id", ev.id)
-        .not("status", "in", "(refunded,void,transfer_pending)");
+        .not("status", "in", "(refunded,void,transfer_pending)")
+        .is("reminder_sent_at", null);
       if (tErr) throw tErr;
 
       // Resolve account-holder emails (tickets.user_id is the Better Auth id).
@@ -128,14 +130,26 @@ Deno.serve(async (req: Request) => {
       }
 
       // Group every deliverable ticket by recipient — one email per inbox.
+      // Tickets with no resolvable address can never be mailed; flag them
+      // so they stop re-scanning every sweep and let the event complete.
       const byRecipient = new Map<string, any[]>();
+      const unmailable: string[] = [];
       for (const t of rows ?? []) {
         const to = t.guest_email ||
           (t.user_id ? emailByAuthId.get(String(t.user_id)) : null);
-        if (!to) continue;
+        if (!to) {
+          unmailable.push(String(t.id));
+          continue;
+        }
         const list = byRecipient.get(to) ?? [];
         list.push(t);
         byRecipient.set(to, list);
+      }
+      if (unmailable.length > 0) {
+        await supabase
+          .from("tickets")
+          .update({ reminder_sent_at: new Date().toISOString() })
+          .in("id", unmailable);
       }
 
       let eventFailed = 0;
@@ -190,6 +204,12 @@ Deno.serve(async (req: Request) => {
               }),
             }),
           });
+          // Exactly-once: flag every ticket that went into this email so a
+          // retry after a partial failure never re-mails this recipient.
+          await supabase
+            .from("tickets")
+            .update({ reminder_sent_at: new Date().toISOString() })
+            .in("id", tickets.map((t: any) => t.id));
           sent++;
         } catch (sendErr) {
           eventFailed++;
