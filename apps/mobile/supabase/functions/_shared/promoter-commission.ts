@@ -153,7 +153,7 @@ export function computePromoterCommission(
       discountAmountCents: lineDiscounts[i],
       discountedAmountCents: lineDiscountedAmounts[i],
       commissionAmountCents: lineCommissions[i],
-      quantity: Number.isInteger(line.quantity) ? line.quantity : 1,
+      quantity: Number.isInteger(line.quantity) && line.quantity! > 0 ? line.quantity! : 1,
     })),
   };
 }
