@@ -100,6 +100,21 @@ export const doorGuestTicketBase = {
   },
 };
 
+/**
+ * Door sell authorization: the event host, or an accepted co-organizer at
+ * scanner rank or above (the same ladder ticket-scan enforces). Promoter
+ * is not a staff role and never appears here.
+ */
+export function canSellAtDoor(
+  isHost: boolean,
+  coOrgRole: string | null | undefined,
+): boolean {
+  if (isHost) return true;
+  return (
+    coOrgRole === "scanner" || coOrgRole === "editor" || coOrgRole === "admin"
+  );
+}
+
 /** j***@mail.com — for the seller-facing fulfilled panel. */
 export function maskEmail(email: string): string {
   const at = email.indexOf("@");

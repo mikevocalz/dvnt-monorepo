@@ -42,7 +42,10 @@ import {
 import { validateAndApplyPromoterCode } from "../_shared/apply-promoter-code.ts";
 import { maybeFireCapacityAlerts } from "../_shared/capacity-alerts.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
-import { doorGuestTicketBase } from "../_shared/door-sale.ts";
+import {
+  canSellAtDoor,
+  doorGuestTicketBase,
+} from "../_shared/door-sale.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -155,9 +158,8 @@ Deno.serve(async (req: Request) => {
     if (!event?.host_id) return json({ error: "Event not found" }, 404);
 
     const isHost = String(event.host_id) === String(staffUserId);
-    let authorized = isHost;
     let staffRole: string | null = isHost ? "owner" : null;
-    if (!authorized) {
+    if (!isHost) {
       const { data: coOrg } = await supabase
         .from("event_co_organizers")
         .select("role, accepted")
@@ -166,9 +168,9 @@ Deno.serve(async (req: Request) => {
         .eq("accepted", true)
         .in("role", ["scanner", "editor", "admin"])
         .maybeSingle();
-      authorized = !!coOrg;
       staffRole = coOrg?.role ?? null;
     }
+    const authorized = canSellAtDoor(isHost, staffRole);
     if (!authorized) {
       return json({ error: "Your access to this event ended." }, 403);
     }

@@ -14,7 +14,7 @@ function load() {
   new Function('exports', 'module', source)(mod.exports, mod);
   return mod.exports;
 }
-const { parseDoorSaleMetadata, doorGuestTicketBase, maskEmail } = load();
+const { parseDoorSaleMetadata, doorGuestTicketBase, maskEmail, canSellAtDoor } = load();
 
 // ── parseDoorSaleMetadata ────────────────────────────────────────────────
 
@@ -83,6 +83,24 @@ test('per-ticket amounts split deterministically and sum to the charge', () => {
   assert.equal(sum, 10000);
   // deterministic: first rows absorb the remainder
   assert.deepEqual(rows.map((r) => r.purchase_amount_cents), [3334, 3333, 3333]);
+});
+
+// ── canSellAtDoor ───────────────────────────────────────────────────────
+
+test('host always sells; accepted scanner/editor/admin sell', () => {
+  assert.equal(canSellAtDoor(true, null), true);
+  for (const role of ['scanner', 'editor', 'admin']) {
+    assert.equal(canSellAtDoor(false, role), true);
+  }
+});
+
+test('promoter, viewer, pending, and strangers cannot sell', () => {
+  for (const role of ['promoter', 'viewer', null, undefined]) {
+    assert.equal(canSellAtDoor(false, role), false);
+  }
+  // A pending invite never reaches here (the query filters accepted), but
+  // the predicate must still refuse unknown roles.
+  assert.equal(canSellAtDoor(false, 'pending'), false);
 });
 
 // ── maskEmail ────────────────────────────────────────────────────────────
