@@ -22,6 +22,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { toast } from "sonner";
 import { useParams, useRouter } from "solito/navigation";
 import { create } from "zustand";
 import { useQuery } from "@tanstack/react-query";
@@ -90,6 +91,7 @@ interface SellState {
   setPendingPayment: (p: SellState["pendingPayment"]) => void;
   fulfilled: {
     email: string;
+    orderId: string | null;
     totalCents: number;
     currency: string;
     /** false = payment confirmed but webhook issuance not observed yet. */
@@ -388,6 +390,7 @@ export function DoorSellScreen() {
       if (res.free) {
         setFulfilled({
           email: email.trim(),
+          orderId: res.order_id ?? null,
           totalCents: 0,
           currency: quote.currency,
           confirmed: true,
@@ -432,6 +435,31 @@ export function DoorSellScreen() {
     setStatusMessage("Sale canceled. Nothing was charged.");
   }, [setPendingPayment, setPhase, setStatusMessage]);
 
+  // Typo correction BEFORE money moves: closing the sheet abandons the
+  // unconfirmed PI; the hold expires on its own. No "canceled" copy —
+  // the seller is fixing an email, not abandoning the sale.
+  const editContact = useCallback(() => {
+    setPendingPayment(null);
+    setPhase("idle");
+  }, [setPendingPayment, setPhase]);
+
+  const resendBusy = useRef(false);
+  const resendTickets = useCallback(async () => {
+    const orderId = fulfilled?.orderId;
+    if (!orderId || resendBusy.current) return;
+    resendBusy.current = true;
+    try {
+      await doorApi.resendTickets({ eventId: Number(eventId), orderId });
+      // Secondary confirmation only — the server-side delivery record is
+      // the source of truth.
+      toast.success(`Tickets re-sent to ${maskEmail(fulfilled!.email)}`);
+    } catch (e: any) {
+      toast.error(e?.message || "Resend failed — the guest can use ticket lookup.");
+    } finally {
+      resendBusy.current = false;
+    }
+  }, [fulfilled, eventId]);
+
   const pollCancelled = useRef(false);
   useEffect(() => () => {
     pollCancelled.current = true;
@@ -450,6 +478,7 @@ export function DoorSellScreen() {
       if (cancelled()) return;
       setFulfilled({
         email: email.trim(),
+        orderId,
         totalCents: pendingPayment?.totalCents ?? quote?.total_cents ?? 0,
         currency: pendingPayment?.currency ?? quote?.currency ?? "usd",
         confirmed,
@@ -564,6 +593,15 @@ export function DoorSellScreen() {
             >
               Next customer
             </button>
+            {fulfilled.orderId ? (
+              <button
+                type="button"
+                onClick={resendTickets}
+                className="mt-3 h-14 w-full rounded-xl bg-white/10 text-base font-bold text-white"
+              >
+                Resend tickets
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => router.push(`/feed/events/${eventId}/scanner`)}
@@ -747,6 +785,21 @@ export function DoorSellScreen() {
             >
               <p className="text-sm font-semibold text-white">
                 Hand the phone to the guest to pay.
+              </p>
+              <p className="mt-1 flex items-center justify-between gap-2 text-xs text-white/55">
+                <span className="truncate">
+                  Tickets go to{" "}
+                  <span className="font-semibold text-white/80">
+                    {email.trim()}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={editContact}
+                  className="shrink-0 font-bold text-[#7fd4ff]"
+                >
+                  Edit
+                </button>
               </p>
               <Elements
                 stripe={stripePromiseFor(pendingPayment.publishableKey)}

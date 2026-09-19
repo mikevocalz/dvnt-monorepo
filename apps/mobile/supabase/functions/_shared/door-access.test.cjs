@@ -5,8 +5,10 @@ const assert = require('node:assert/strict');
 const { harness } = require('./payment-safety.test.cjs');
 
 function fixture({ user = 'member', role, accepted = true, membershipEvent = 1,
-  membershipUser = user, expired = false, revoked = false, sessionError = false } = {}) {
+  membershipUser = user, expired = false, revoked = false, sessionError = false,
+  order } = {}) {
   const reads = [];
+  const writes = [];
   const rows = {
     session: [{ token: 'fixture-token', userId: user,
       expiresAt: new Date(Date.now() + (expired ? -60000 : 60000)).toISOString() }],
@@ -15,24 +17,41 @@ function fixture({ user = 'member', role, accepted = true, membershipEvent = 1,
       user_id: membershipUser, role, accepted }] : [],
     ticket_types: [{ id: 'tier', event_id: 1, name: 'Admission', price_cents: 5000,
       currency: 'usd', quantity_total: 10, quantity_sold: 0, max_per_user: 20 }],
-    // Read by the per-guest cap and the server-side remaining count.
-    tickets: [],
+    // Read by the per-guest cap, the server-side remaining count, and the
+    // resend bundle loader (order-linked tickets only).
+    tickets: order?.tickets ?? [],
     ticket_holds: [],
     cart_holds: [],
+    orders: order ? [order] : [],
+    order_timeline: [],
     // terminal-token reads the platform Location mapping.
     event_terminal_locations: [],
   };
-  return { reads, database: { from(table) {
+  return { reads, writes, database: { from(table) {
     reads.push(table);
     assert.ok(table in rows, `Unexpected table: ${table}`);
     let selected = rows[table];
-    const result = async () => ({ data: selected[0] || null,
-      error: table === 'session' && sessionError ? { message: 'fixture failure', code: 'TEST' } : null });
+    let operation, payload;
+    // List queries (awaited directly) get the filtered array; .single()/
+    // .maybeSingle() get the first row or null.
+    const error = table === 'session' && sessionError
+      ? { message: 'fixture failure', code: 'TEST' } : null;
+    const result = async () => {
+      if (operation) writes.push({ table, operation, payload });
+      return { data: selected, error };
+    };
+    const one = async () => {
+      if (operation) writes.push({ table, operation, payload });
+      return { data: selected[0] || null, error };
+    };
     const q = { select: () => q, order: () => q, limit: () => q,
       eq: (key, value) => { selected = selected.filter(row => row[key] === value); return q; },
       in: (key, values) => { selected = selected.filter(row => values.includes(row[key])); return q; },
-      gt: () => q, neq: () => q,
-      single: result, maybeSingle: result,
+      gt: () => q, gte: () => q, lt: () => q, neq: () => q,
+      is: () => q, not: () => q, ilike: () => q, or: () => q,
+      insert: p => { payload = p; operation = 'insert'; return q; },
+      update: p => { payload = p; operation = 'update'; return q; },
+      single: one, maybeSingle: one,
       then: (resolve, reject) => result().then(resolve, reject) };
     return q;
   }, rpc() { assert.fail('Permission probes must not call a write RPC'); } } };
@@ -71,6 +90,62 @@ for (const scenario of cases) {
       if (scenario.status === 401) assert.ok(!f.reads.includes('events'));
     });
   }
+}
+
+// action:"resend" — re-emails the order's EXISTING bundle. Denied roles
+// must never reach the order lookup; a successful resend must never write
+// a ticket, mint an order, or call Stripe — only the orders state update,
+// the timeline insert, and the Resend request.
+const paidOrder = { id: 'o1', event_id: 1, status: 'paid', quantity: 2,
+  guest_email: 'guest@fixture.co', total_cents: 9000, currency: 'usd',
+  ticket_email_status: 'sent', ticket_email_attempts: 1,
+  stripe_payment_intent_id: 'pi_fixture' };
+const orderTickets = [
+  { id: 't1', order_id: 'o1', event_id: 1, status: 'active', qr_token: 'qr1',
+    guest_lookup_token: 'look1', guest_name: 'Guest', attendee_name: null,
+    ticket_type: { name: 'GA', category: 'ga' } },
+  { id: 't2', order_id: 'o1', event_id: 1, status: 'active', qr_token: 'qr2',
+    guest_lookup_token: 'look2', guest_name: 'Guest', attendee_name: null,
+    ticket_type: { name: 'GA', category: 'ga' } },
+];
+
+for (const scenario of [
+  { name: 'resend owner re-emails bundle', user: 'owner',
+    order: { ...paidOrder, tickets: orderTickets }, status: 200 },
+  { name: 'resend unpaid order refused', user: 'owner',
+    order: { ...paidOrder, status: 'payment_pending' }, status: 409 },
+  { name: 'resend missing order', user: 'owner', status: 404 },
+  { name: 'resend outsider', role: 'outsider',
+    order: { ...paidOrder, tickets: orderTickets }, status: 403 },
+  { name: 'resend missing token', token: '',
+    order: { ...paidOrder, tickets: orderTickets }, status: 401 },
+]) {
+  test(`${scenario.name} → ${scenario.status}`, async () => {
+    const f = fixture(scenario);
+    const h = harness({ database: f.database,
+      dependencyOverrides: { 'verify-session.ts': undefined } });
+    const response = await h.invoke('door-sell', { action: 'resend',
+      event_id: 1, order_id: 'o1' },
+      { 'x-auth-token': scenario.token ?? 'fixture-token' });
+    assert.equal(response.status, scenario.status, await response.text());
+    // Never a ticket insert, never an RPC write, never a Stripe call.
+    assert.ok(!f.writes.some(w => w.table === 'tickets'));
+    assert.ok(!h.requests.some(r => String(r.url).includes('stripe.com')));
+    if (scenario.status === 200) {
+      // Exactly one outbound request: the Resend send. Plus state writes
+      // on orders + order_timeline — no ticket/order/charge creation.
+      assert.equal(h.requests.length, 1);
+      assert.ok(String(h.requests[0].url).includes('resend.com'));
+      assert.ok(f.writes.every(w =>
+        (w.table === 'orders' && w.operation === 'update') ||
+        (w.table === 'order_timeline' && w.operation === 'insert')));
+      assert.ok(f.writes.some(w =>
+        w.table === 'order_timeline' && w.payload.type === 'ticket_email_resent'));
+    } else {
+      assert.equal(h.requests.length, 0, 'No Resend request');
+      assert.equal(f.writes.length, 0);
+    }
+  });
 }
 
 // terminal-token: same event-scoped predicate, minted per call, and the

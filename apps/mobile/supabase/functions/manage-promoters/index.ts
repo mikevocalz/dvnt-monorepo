@@ -90,6 +90,76 @@ interface PromoterRow {
   created_at: string;
 }
 
+/**
+ * Tell the linked promoter they've been added (in-app + Expo push).
+ * Non-fatal by design: the event_promoters row is the source of truth,
+ * the notification is the courtesy copy.
+ */
+async function notifyPromoterAdded(
+  supabase: any,
+  params: {
+    recipientAuthId: string;
+    actorAuthId: string;
+    eventId: number;
+    eventTitle: string | null;
+    promoterId: string;
+    code: string;
+  },
+): Promise<void> {
+  try {
+    const { data: recipient } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_id", params.recipientAuthId)
+      .maybeSingle();
+    const { data: actor } = await supabase
+      .from("users")
+      .select("id, username")
+      .eq("auth_id", params.actorAuthId)
+      .maybeSingle();
+    if (!recipient?.id || !actor?.id) return;
+
+    await supabase.from("notifications").insert({
+      recipient_id: recipient.id,
+      actor_id: actor.id,
+      type: "event_promoter_added",
+      entity_type: "event",
+      entity_id: params.promoterId,
+    });
+
+    const { data: tokens } = await supabase
+      .from("push_tokens")
+      .select("token")
+      .eq("user_id", recipient.id);
+    if (!tokens?.length) return;
+
+    const senderHandle = actor.username ? `@${actor.username}` : "An event host";
+    const messages = tokens.map((t: { token: string }) => ({
+      to: t.token,
+      title: "You're a promoter",
+      body:
+        `${senderHandle} added you as a promoter for ` +
+        `${params.eventTitle || "their event"}. Your code: ${params.code}.`,
+      data: {
+        type: "event_promoter_added",
+        entityType: "event",
+        entityId: params.promoterId,
+        eventId: String(params.eventId),
+        url: `https://dvntapp.live/e/${params.eventId}`,
+      },
+      sound: "default",
+      channelId: "default",
+    }));
+    await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(messages),
+    });
+  } catch (err) {
+    console.warn("[manage-promoters] notify failed (non-fatal):", err);
+  }
+}
+
 Deno.serve(withSentry("manage-promoters", async (req: Request) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST")
@@ -380,6 +450,24 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
       if (!inserted) {
         console.error("[manage-promoters] insert failed:", lastError);
         return json({ error: "Could not add promoter" }, 500, req);
+      }
+
+      // Linked promoter → they've been added to the event; tell them.
+      // The event_promoters row is the truth; this is the courtesy copy.
+      if (userId) {
+        const { data: ev } = await supabase
+          .from("events")
+          .select("title")
+          .eq("id", eventId)
+          .maybeSingle();
+        await notifyPromoterAdded(supabase, {
+          recipientAuthId: userId,
+          actorAuthId: authId,
+          eventId: eventId!,
+          eventTitle: ev?.title ?? null,
+          promoterId: inserted.id,
+          code: inserted.code,
+        });
       }
 
       return json(

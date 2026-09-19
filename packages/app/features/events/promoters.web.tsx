@@ -43,6 +43,8 @@ import {
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { toast } from "sonner";
+import { UserPicker } from "./ui/user-picker.web";
 import { Dialog } from "@dvnt/ui";
 
 const ACCENT = "#8A40CF"; // promoter violet — cyan is staff, purple tag is promo codes
@@ -62,9 +64,8 @@ function parsePercentToBps(raw: string): number | null {
 // --- Local UI state (Zustand, never useState) -----------------------------
 interface PromotersUIState {
   addOpen: boolean;
-  addMode: "linked" | "external";
-  usernameInput: string;
-  nameInput: string;
+  pickerQuery: string;
+  selectedUser: { id: string; username: string; name: string; avatar: string } | null;
   customerDiscountInput: string;
   promoterCommissionInput: string;
   editTarget: EventPromoter | null;
@@ -73,9 +74,8 @@ interface PromotersUIState {
   removeTarget: EventPromoter | null;
   openAdd: () => void;
   closeAdd: () => void;
-  setAddMode: (m: "linked" | "external") => void;
-  setUsernameInput: (v: string) => void;
-  setNameInput: (v: string) => void;
+  setPickerQuery: (v: string) => void;
+  setSelectedUser: (u: PromotersUIState["selectedUser"]) => void;
   setCustomerDiscountInput: (v: string) => void;
   setPromoterCommissionInput: (v: string) => void;
   setEditTarget: (p: EventPromoter | null) => void;
@@ -87,9 +87,8 @@ interface PromotersUIState {
 
 const usePromotersUIStore = create<PromotersUIState>((set) => ({
   addOpen: false,
-  addMode: "linked",
-  usernameInput: "",
-  nameInput: "",
+  pickerQuery: "",
+  selectedUser: null,
   customerDiscountInput: "10",
   promoterCommissionInput: "10",
   editTarget: null,
@@ -98,9 +97,8 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   removeTarget: null,
   openAdd: () => set({ addOpen: true }),
   closeAdd: () => set({ addOpen: false }),
-  setAddMode: (m) => set({ addMode: m }),
-  setUsernameInput: (v) => set({ usernameInput: v }),
-  setNameInput: (v) => set({ nameInput: v }),
+  setPickerQuery: (v) => set({ pickerQuery: v }),
+  setSelectedUser: (u) => set({ selectedUser: u }),
   setCustomerDiscountInput: (v) => set({ customerDiscountInput: v }),
   setPromoterCommissionInput: (v) => set({ promoterCommissionInput: v }),
   setEditTarget: (p) =>
@@ -116,9 +114,8 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   resetAdd: () =>
     set({
       addOpen: false,
-      addMode: "linked",
-      usernameInput: "",
-      nameInput: "",
+      pickerQuery: "",
+      selectedUser: null,
       customerDiscountInput: "10",
       promoterCommissionInput: "10",
     }),
@@ -258,9 +255,8 @@ export function EventPromotersScreen() {
   const showToast = useUIStore((s) => s.showToast);
 
   const addOpen = usePromotersUIStore((s) => s.addOpen);
-  const addMode = usePromotersUIStore((s) => s.addMode);
-  const usernameInput = usePromotersUIStore((s) => s.usernameInput);
-  const nameInput = usePromotersUIStore((s) => s.nameInput);
+  const pickerQuery = usePromotersUIStore((s) => s.pickerQuery);
+  const selectedUser = usePromotersUIStore((s) => s.selectedUser);
   const customerDiscountInput = usePromotersUIStore((s) => s.customerDiscountInput);
   const promoterCommissionInput = usePromotersUIStore((s) => s.promoterCommissionInput);
   const editTarget = usePromotersUIStore((s) => s.editTarget);
@@ -269,9 +265,8 @@ export function EventPromotersScreen() {
   const removeTarget = usePromotersUIStore((s) => s.removeTarget);
   const openAdd = usePromotersUIStore((s) => s.openAdd);
   const closeAdd = usePromotersUIStore((s) => s.closeAdd);
-  const setAddMode = usePromotersUIStore((s) => s.setAddMode);
-  const setUsernameInput = usePromotersUIStore((s) => s.setUsernameInput);
-  const setNameInput = usePromotersUIStore((s) => s.setNameInput);
+  const setPickerQuery = usePromotersUIStore((s) => s.setPickerQuery);
+  const setSelectedUser = usePromotersUIStore((s) => s.setSelectedUser);
   const setCustomerDiscountInput = usePromotersUIStore((s) => s.setCustomerDiscountInput);
   const setPromoterCommissionInput = usePromotersUIStore((s) => s.setPromoterCommissionInput);
   const setEditTarget = usePromotersUIStore((s) => s.setEditTarget);
@@ -302,11 +297,11 @@ export function EventPromotersScreen() {
       promoterCommissionBps: number;
     }) => promotersApi.add({ eventId, ...input }),
     onSuccess: (promoter) => {
-      showToast(
-        "success",
-        "Promoter added",
-        `Code ${promoter.code} — copy their link to share.`,
-      );
+      // Secondary confirmation — the event_promoters row + the
+      // notification are the record; the toast is the "done" flash.
+      toast.success(`${promoter.displayName} added as promoter`, {
+        description: `Code ${promoter.code} — they've been notified.`,
+      });
       resetAdd();
       invalidate();
     },
@@ -378,32 +373,18 @@ export function EventPromotersScreen() {
     const customerDiscountBps = parsePercentToBps(customerDiscountInput);
     const promoterCommissionBps = parsePercentToBps(promoterCommissionInput);
     if (customerDiscountBps == null || promoterCommissionBps == null) {
-      showToast("error", "Invalid share", "Enter a percent from 0 to 100.");
+      toast.error("Enter a percent from 0 to 100.");
       return;
     }
-    if (addMode === "linked") {
-      const u = usernameInput.trim().replace(/^@/, "");
-      if (!u) {
-        showToast("error", "Username required", "");
-        return;
-      }
-      addMutation.mutate({
-        username: u,
-        customerDiscountBps,
-        promoterCommissionBps,
-      });
-    } else {
-      const n = nameInput.trim();
-      if (!n) {
-        showToast("error", "Name required", "");
-        return;
-      }
-      addMutation.mutate({
-        displayName: n,
-        customerDiscountBps,
-        promoterCommissionBps,
-      });
+    if (!selectedUser) {
+      toast.error("Pick a person first");
+      return;
     }
+    addMutation.mutate({
+      username: selectedUser.username,
+      customerDiscountBps,
+      promoterCommissionBps,
+    });
   };
 
   const onEditSubmit = () => {
@@ -547,7 +528,7 @@ export function EventPromotersScreen() {
               Cancel
             </button>
             <button
-              disabled={addMutation.isPending}
+              disabled={addMutation.isPending || !selectedUser}
               onClick={onAddSubmit}
               className="flex-1 rounded-xl py-3 font-semibold text-white disabled:opacity-60"
               style={{ backgroundColor: ACCENT }}
@@ -557,63 +538,19 @@ export function EventPromotersScreen() {
           </>
         }
       >
-        <div className="flex gap-2">
-          {(
-            [
-              { value: "linked", label: "DVNT user" },
-              { value: "external", label: "External" },
-            ] as const
-          ).map((opt) => {
-            const selected = addMode === opt.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setAddMode(opt.value)}
-                className="flex-1 rounded-xl border py-2.5 text-sm font-semibold"
-                style={
-                  selected
-                    ? {
-                        borderColor: ACCENT,
-                        backgroundColor: `${ACCENT}22`,
-                        color: "#C084FC",
-                      }
-                    : {
-                        borderColor: "rgba(255,255,255,0.08)",
-                        color: "#fff",
-                      }
-                }
-              >
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {addMode === "linked" ? (
-          <div className="mt-3 flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
-            <span className="text-[17px] font-semibold text-white/50">@</span>
-            <input
-              value={usernameInput}
-              onChange={(e) => setUsernameInput(e.target.value)}
-              placeholder="username"
-              autoCapitalize="none"
-              autoCorrect="off"
-              disabled={addMutation.isPending}
-              className="flex-1 bg-transparent text-[17px] text-white placeholder:text-white/35 outline-none disabled:opacity-50"
-            />
-          </div>
-        ) : (
-          <div className="mt-3 rounded-xl bg-white/6 px-3 py-2">
-            <input
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              placeholder="Promoter name (no DVNT account)"
-              disabled={addMutation.isPending}
-              className="w-full bg-transparent text-[17px] text-white placeholder:text-white/35 outline-none disabled:opacity-50"
-            />
-          </div>
-        )}
+        <UserPicker
+          query={pickerQuery}
+          onQueryChange={setPickerQuery}
+          selected={selectedUser}
+          onSelect={(u) => setSelectedUser(u)}
+          onClear={() => setSelectedUser(null)}
+          placeholder="Search DVNT members…"
+          disabled={addMutation.isPending}
+        />
+        <p className="mt-2 text-[11px] text-white/35">
+          They&apos;re added to the event right away and notified — no
+          accept step.
+        </p>
 
         <label className="mt-4 block">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">

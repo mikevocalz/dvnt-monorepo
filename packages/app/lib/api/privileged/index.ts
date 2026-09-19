@@ -530,6 +530,24 @@ export async function inviteCoOrganizer(
   });
 }
 
+/**
+ * Direct add (picker flow): the staff member is added immediately —
+ * accepted: true — and notified. Distinct from `inviteCoOrganizer`,
+ * which stays pending until the recipient accepts.
+ */
+export async function addCoOrganizer(
+  eventId: number,
+  username: string,
+  role: CoOrgRole,
+): Promise<{ ok: boolean; invite_id?: string; added?: boolean }> {
+  return invokeEdgeFunction("invite-co-organizer", {
+    action: "add",
+    event_id: eventId,
+    username,
+    role,
+  });
+}
+
 export async function acceptCoOrganizerInvite(
   inviteId: string,
 ): Promise<{ ok: boolean; alreadyAccepted?: boolean }> {

@@ -18,6 +18,7 @@ import {
   sendResendEmail,
   ticketConfirmation,
 } from "./send-resend-email.ts";
+import { deliverTicketBundleEmail } from "./ticket-email-delivery.ts";
 import {
   recordPromoterEarning,
   upsertOrderMoneyState,
@@ -128,6 +129,14 @@ export async function issueTicketsForCheckoutSession(
     attendeeNames = [];
   }
 
+  // Resolve the order up front so tickets stamp the authoritative
+  // order_id link (pre-migration rows used only the Stripe links).
+  const { data: orderRow } = await supabase
+    .from("orders")
+    .select("id, ticket_email_status")
+    .eq("stripe_checkout_session_id", session.id)
+    .maybeSingle();
+
   const ticketRows = [];
   for (let i = 0; i < quantity; i++) {
     const ticketUuid = crypto.randomUUID();
@@ -157,6 +166,7 @@ export async function issueTicketsForCheckoutSession(
       order_index: i + 1,
       order_count: quantity,
       attendee_name: attendeeName,
+      order_id: orderRow?.id ?? null,
     });
   }
 
@@ -219,40 +229,16 @@ export async function issueTicketsForCheckoutSession(
       await incrementPromoUsage(supabase, metadata.promo_code_id);
     }
 
-    // ── Guest tickets: email confirmation with QR + lookup link ──
-    if (isGuestPurchase && insertedTickets && insertedTickets.length > 0) {
-      try {
-        const { data: eventRow } = await supabase
-          .from("events")
-          .select(
-            "title, start_date, location_name, location_address, flyer_image_url, dominant_color",
-          )
-          .eq("id", eventId)
-          .maybeSingle();
-        const { data: ttRow } = await supabase
-          .from("ticket_types")
-          .select("name, category")
-          .eq("id", ticketTypeId)
-          .maybeSingle();
-        await sendGuestTicketEmail(
-          guestEmail!,
-          guestName,
-          eventRow?.title || "your event",
-          eventRow?.start_date || null,
-          eventRow?.location_name || eventRow?.location_address || null,
-          insertedTickets,
-          {
-            tier: ttRow?.category ?? null,
-            tierLabel: ttRow?.name ?? null,
-            flyerUrl: eventRow?.flyer_image_url ?? null,
-            dominantColor: eventRow?.dominant_color ?? null,
-            logPrefix,
-          },
-        );
-      } catch (mailErr) {
-        // Email failure should not roll back the ticket — log and move on.
-        console.error(`${logPrefix} guest email send failed:`, mailErr);
-      }
+    // ── Guest tickets: ONE bundle email built from the order's
+    // authoritative ticket rows — not just the rows this call inserted
+    // (a partial-replay edge could otherwise email an incomplete set).
+    // Delivery state persists on the order; failure never rolls back
+    // fulfillment.
+    if (isGuestPurchase && orderRow?.id) {
+      await deliverTicketBundleEmail(supabase, orderRow.id, {
+        kind: "fulfillment",
+        logPrefix,
+      });
     }
   }
 
@@ -260,13 +246,18 @@ export async function issueTicketsForCheckoutSession(
   // Runs even when issued === 0 (replay): the money-state RPC is
   // monotonic and repairs an order left payment_pending by a crashed
   // first attempt.
-  const { data: orderRow } = await supabase
-    .from("orders")
-    .select("id")
-    .eq("stripe_checkout_session_id", session.id)
-    .single();
-
   if (orderRow) {
+    // Replay self-heal: tickets already existed so the issued>0 block
+    // above was skipped — but if the first attempt's email never went
+    // out (Resend down, crash mid-send), this replay retries it. The
+    // delivery module no-ops when status is already 'sent'.
+    if (isGuestPurchase && issued === 0) {
+      await deliverTicketBundleEmail(supabase, orderRow.id, {
+        kind: "retry",
+        logPrefix,
+      });
+    }
+
     // Get payment method details from charge
     let pmBrand = null;
     let pmLast4 = null;

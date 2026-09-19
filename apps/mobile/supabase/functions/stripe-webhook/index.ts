@@ -39,8 +39,8 @@ import {
 import { handleCartPaymentIntentSucceeded } from "../_shared/cart-issuance.ts";
 import {
   issueTicketsForCheckoutSession,
-  sendGuestTicketEmail,
 } from "../_shared/session-issuance.ts";
+import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
 import {
   parseDoorSaleMetadata,
   doorGuestTicketBase,
@@ -414,6 +414,14 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           const door = parseDoorSaleMetadata(piMetadata);
           const piUserId = door.isDoorSale ? null : piMetadata.user_id;
 
+          // Resolve the order up front — tickets stamp the authoritative
+          // order_id link and the email bundle needs the order.
+          const { data: piOrder } = await supabase
+            .from("orders")
+            .select("id, ticket_email_status")
+            .eq("stripe_payment_intent_id", pi.id)
+            .maybeSingle();
+
           // Check if tickets already issued (e.g. by checkout.session.completed)
           const { count: piExistingCount } = await supabase
             .from("tickets")
@@ -425,6 +433,14 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
               "[stripe-webhook] Tickets already issued for PI:",
               pi.id,
             );
+            // Replay self-heal: if the first attempt's guest email never
+            // went out, retry it now. No-ops when already 'sent'.
+            if (door.isDoorSale && door.guestEmail && piOrder?.id) {
+              await deliverTicketBundleEmail(supabase, piOrder.id, {
+                kind: "retry",
+                logPrefix: "[stripe-webhook]",
+              });
+            }
             break;
           }
 
@@ -462,6 +478,7 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
               id: ticketUuid,
               qr_token: qrToken,
               qr_payload: qrPayload,
+              order_id: piOrder?.id ?? null,
             });
           }
 
@@ -479,48 +496,14 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             throw piTicketError;
           }
 
-          // Door sale → email the guest their QR + lookup link, exactly
-          // like hosted-checkout guest orders. Failure logs but does not
-          // roll back the issued tickets.
-          if (
-            door.isDoorSale && door.guestEmail &&
-            piInsertedTickets && piInsertedTickets.length > 0
-          ) {
-            try {
-              const { data: doorEventRow } = await supabase
-                .from("events")
-                .select(
-                  "title, start_date, location_name, location_address, flyer_image_url, dominant_color",
-                )
-                .eq("id", piEventId)
-                .maybeSingle();
-              const { data: doorTtRow } = await supabase
-                .from("ticket_types")
-                .select("name, category")
-                .eq("id", piTicketTypeId)
-                .maybeSingle();
-              await sendGuestTicketEmail(
-                door.guestEmail,
-                door.guestName,
-                doorEventRow?.title || "your event",
-                doorEventRow?.start_date || null,
-                doorEventRow?.location_name ||
-                  doorEventRow?.location_address || null,
-                piInsertedTickets,
-                {
-                  tier: doorTtRow?.category ?? null,
-                  tierLabel: doorTtRow?.name ?? null,
-                  flyerUrl: doorEventRow?.flyer_image_url ?? null,
-                  dominantColor: doorEventRow?.dominant_color ?? null,
-                  logPrefix: "[stripe-webhook]",
-                },
-              );
-            } catch (mailErr) {
-              console.error(
-                "[stripe-webhook] door guest email send failed:",
-                mailErr,
-              );
-            }
+          // Door sale → ONE bundle email from the order's authoritative
+          // ticket rows. Delivery state persists on the order; a Resend
+          // failure is retryable, never a rollback of issued tickets.
+          if (door.isDoorSale && door.guestEmail && piOrder?.id) {
+            await deliverTicketBundleEmail(supabase, piOrder.id, {
+              kind: "fulfillment",
+              logPrefix: "[stripe-webhook]",
+            });
           }
 
           // Increment quantity_sold
@@ -541,13 +524,8 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             .eq("payment_intent_id", pi.id)
             .eq("status", "active");
 
-          // Update order → paid + add timeline
-          const { data: piOrderRow } = await supabase
-            .from("orders")
-            .select("id")
-            .eq("stripe_payment_intent_id", pi.id)
-            .single();
-
+          // Update order → paid + add timeline (order resolved above).
+          const piOrderRow = piOrder;
           if (piOrderRow) {
             let piPmBrand = null;
             let piPmLast4 = null;

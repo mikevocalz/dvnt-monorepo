@@ -35,13 +35,15 @@ import {
   ScanLine,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import {
+  addCoOrganizer,
   getEventStaff,
-  inviteCoOrganizer,
   revokeCoOrganizer,
   type StaffEntry,
   type CoOrgRole,
 } from "@dvnt/app/lib/api/privileged";
+import { UserPicker } from "./ui/user-picker.web";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { DoorModeTabs } from "./door-mode-tabs.web";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
@@ -104,12 +106,14 @@ function RoleIcon({ role, size = 16 }: { role: StaffEntry["role"]; size?: number
 // --- Local UI state (Zustand, never useState) -----------------------------
 interface StaffUIState {
   inviteOpen: boolean;
-  usernameInput: string;
+  pickerQuery: string;
+  selectedUser: { id: string; username: string; name: string; avatar: string } | null;
   roleInput: CoOrgRole;
   removeTarget: StaffEntry | null;
   openInvite: () => void;
   closeInvite: () => void;
-  setUsernameInput: (v: string) => void;
+  setPickerQuery: (v: string) => void;
+  setSelectedUser: (u: StaffUIState["selectedUser"]) => void;
   setRoleInput: (v: CoOrgRole) => void;
   setRemoveTarget: (s: StaffEntry | null) => void;
   reset: () => void;
@@ -117,15 +121,23 @@ interface StaffUIState {
 
 const useStaffUIStore = create<StaffUIState>((set) => ({
   inviteOpen: false,
-  usernameInput: "",
+  pickerQuery: "",
+  selectedUser: null,
   roleInput: "scanner",
   removeTarget: null,
   openInvite: () => set({ inviteOpen: true }),
   closeInvite: () => set({ inviteOpen: false }),
-  setUsernameInput: (v) => set({ usernameInput: v }),
+  setPickerQuery: (v) => set({ pickerQuery: v }),
+  setSelectedUser: (u) => set({ selectedUser: u }),
   setRoleInput: (v) => set({ roleInput: v }),
   setRemoveTarget: (s) => set({ removeTarget: s }),
-  reset: () => set({ inviteOpen: false, usernameInput: "", roleInput: "scanner" }),
+  reset: () =>
+    set({
+      inviteOpen: false,
+      pickerQuery: "",
+      selectedUser: null,
+      roleInput: "scanner",
+    }),
 }));
 
 const ROW_HEIGHT = 76; // 64px row + 12px gap
@@ -199,12 +211,14 @@ export function EventStaffScreen() {
   const showToast = useUIStore((s) => s.showToast);
 
   const inviteOpen = useStaffUIStore((s) => s.inviteOpen);
-  const usernameInput = useStaffUIStore((s) => s.usernameInput);
+  const pickerQuery = useStaffUIStore((s) => s.pickerQuery);
+  const selectedUser = useStaffUIStore((s) => s.selectedUser);
   const roleInput = useStaffUIStore((s) => s.roleInput);
   const removeTarget = useStaffUIStore((s) => s.removeTarget);
   const openInvite = useStaffUIStore((s) => s.openInvite);
   const closeInvite = useStaffUIStore((s) => s.closeInvite);
-  const setUsernameInput = useStaffUIStore((s) => s.setUsernameInput);
+  const setPickerQuery = useStaffUIStore((s) => s.setPickerQuery);
+  const setSelectedUser = useStaffUIStore((s) => s.setSelectedUser);
   const setRoleInput = useStaffUIStore((s) => s.setRoleInput);
   const setRemoveTarget = useStaffUIStore((s) => s.setRemoveTarget);
   const reset = useStaffUIStore((s) => s.reset);
@@ -216,32 +230,28 @@ export function EventStaffScreen() {
     staleTime: 5_000,
   });
 
-  const inviteMutation = useMutation({
+  const addMutation = useMutation({
     mutationFn: ({ username, role }: { username: string; role: CoOrgRole }) =>
-      inviteCoOrganizer(eventId, username, role),
-    onSuccess: (res) => {
+      addCoOrganizer(eventId, username, role),
+    onSuccess: (res, vars) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ((res as any)?.error) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        showToast("error", "Invite failed", String((res as any).error));
+        toast.error(String((res as any).error));
         return;
       }
-      showToast(
-        "success",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (res as any)?.reinvited ? "Re-invited" : "Invite sent",
-        `Pushed @${usernameInput}.`,
-      );
+      // Secondary confirmation — the event_co_organizers row + the
+      // in-app/push notification are the record; this toast is the
+      // "done" flash for the person who tapped Add.
+      toast.success(`@${vars.username} added to staff`, {
+        description: "They've been notified.",
+      });
       reset();
       queryClient.invalidateQueries({ queryKey: ["event-staff", eventId] });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (err: any) => {
-      showToast(
-        "error",
-        "Invite failed",
-        err?.message || "Try a different username.",
-      );
+      toast.error(err?.message || "Couldn't add them — try a different person.");
     },
   });
 
@@ -307,13 +317,12 @@ export function EventStaffScreen() {
     overscan: 8,
   });
 
-  const onInviteSubmit = () => {
-    const u = usernameInput.trim().replace(/^@/, "");
-    if (!u) {
-      showToast("error", "Username required", "");
+  const onAddSubmit = () => {
+    if (!selectedUser) {
+      toast.error("Pick a person first");
       return;
     }
-    inviteMutation.mutate({ username: u, role: roleInput });
+    addMutation.mutate({ username: selectedUser.username, role: roleInput });
   };
 
   // canManage gating for a given row mirrors native: owner rows are never
@@ -450,44 +459,44 @@ export function EventStaffScreen() {
         </main>
       )}
 
-      {/* Invite — kit Dialog with username + role select + send. */}
+      {/* Add — kit Dialog with user picker + role select + add. */}
       <Dialog
         open={inviteOpen && canManage}
         onClose={() => {
-          if (!inviteMutation.isPending) closeInvite();
+          if (!addMutation.isPending) closeInvite();
         }}
-        title="Invite staff"
+        title="Add staff"
         footer={
           <>
             <button
-              disabled={inviteMutation.isPending}
+              disabled={addMutation.isPending}
               onClick={closeInvite}
               className="flex-1 rounded-xl border border-white/10 py-3 font-semibold text-white active:bg-white/5 disabled:opacity-50"
             >
               Cancel
             </button>
             <button
-              disabled={inviteMutation.isPending}
-              onClick={onInviteSubmit}
+              disabled={addMutation.isPending || !selectedUser}
+              onClick={onAddSubmit}
               className="flex-1 rounded-xl bg-[#3FDCFF] py-3 font-semibold text-black disabled:opacity-60"
             >
-              {inviteMutation.isPending ? "Sending…" : "Send invite"}
+              {addMutation.isPending ? "Adding…" : "Add to staff"}
             </button>
           </>
         }
       >
-        <div className="flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
-          <span className="text-[17px] font-semibold text-white/50">@</span>
-          <input
-            value={usernameInput}
-            onChange={(e) => setUsernameInput(e.target.value)}
-            placeholder="username"
-            autoCapitalize="none"
-            autoCorrect="off"
-            disabled={inviteMutation.isPending}
-            className="flex-1 bg-transparent text-[17px] text-white placeholder:text-white/35 outline-none disabled:opacity-50"
-          />
-        </div>
+        <UserPicker
+          query={pickerQuery}
+          onQueryChange={setPickerQuery}
+          selected={selectedUser}
+          onSelect={(u) => setSelectedUser(u)}
+          onClear={() => setSelectedUser(null)}
+          placeholder="Search DVNT members…"
+          disabled={addMutation.isPending}
+        />
+        <p className="mt-2 text-[11px] text-white/35">
+          They&apos;re added right away and notified — no accept step.
+        </p>
 
         <div className="mt-4 flex flex-col gap-2">
           {ROLE_OPTIONS.map((opt) => {

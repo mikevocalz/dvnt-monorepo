@@ -151,7 +151,9 @@ export function eventHeader(opts: {
   ].join("");
 }
 
-/** QR block — image + selectable token text + optional "view ticket" link. */
+/** QR block — image + optional "view ticket" link. The raw signed token is
+ *  never rendered: it's a credential, and the lookup link is the
+ *  images-off fallback. */
 export function qrBlock(opts: {
   qrToken: string;
   index?: number;
@@ -169,7 +171,6 @@ export function qrBlock(opts: {
   return [
     counter,
     `<img src="${qrSrc}" alt="QR code" width="200" height="200" style="display:block;margin:0 auto;width:200px;height:200px;background:#ffffff;border-radius:10px;padding:8px"/>`,
-    `<p style="margin:12px 0 0;font-family:${FONTS.mono};font-size:11px;color:${COLORS.textBody};text-align:center;word-break:break-all">${esc(opts.qrToken)}</p>`,
     link,
   ].join("");
 }

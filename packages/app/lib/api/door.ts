@@ -123,9 +123,14 @@ export const doorApi = {
   async status(params: {
     eventId: number;
     orderId: string;
-  }): Promise<{ status: string; quantity: number; tickets_issued: number }> {
+  }): Promise<{
+    status: string;
+    quantity: number;
+    tickets_issued: number;
+    ticket_email_status: string | null;
+  }> {
     const { data, error } = await invokeEdge<
-      DoorSellResponse & { status?: string }
+      DoorSellResponse & { status?: string; ticket_email_status?: string | null }
     >("door-sell", {
       action: "status",
       event_id: params.eventId,
@@ -136,7 +141,25 @@ export const doorApi = {
       status: res.status ?? "unknown",
       quantity: res.quantity ?? 0,
       tickets_issued: res.tickets_issued ?? 0,
+      ticket_email_status: res.ticket_email_status ?? null,
     };
+  },
+
+  /**
+   * Re-EMAIL the order's existing ticket bundle to the guest. Never
+   * mints tickets, never creates an order, never charges — the edge
+   * function rebuilds the canonical bundle and sends it again.
+   */
+  async resendTickets(params: {
+    eventId: number;
+    orderId: string;
+  }): Promise<void> {
+    const { data, error } = await invokeEdge<DoorSellResponse>("door-sell", {
+      action: "resend",
+      event_id: params.eventId,
+      order_id: params.orderId,
+    });
+    unwrap(data, error);
   },
 };
 

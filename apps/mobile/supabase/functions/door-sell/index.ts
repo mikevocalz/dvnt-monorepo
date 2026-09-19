@@ -42,7 +42,7 @@ import {
 import { validateAndApplyPromoterCode } from "../_shared/apply-promoter-code.ts";
 import { maybeFireCapacityAlerts } from "../_shared/capacity-alerts.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
-import { sendGuestTicketEmail } from "../_shared/session-issuance.ts";
+import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
 import {
   canSellAtDoor,
   doorGuestTicketBase,
@@ -121,13 +121,22 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       order_id,
     } = body;
 
-    if (!["quote", "sell", "status"].includes(action)) {
-      return json({ error: "action must be 'quote', 'sell' or 'status'" }, 400);
+    if (!["quote", "sell", "status", "resend"].includes(action)) {
+      return json(
+        { error: "action must be 'quote', 'sell', 'status' or 'resend'" },
+        400,
+      );
     }
-    if (!event_id || (action !== "status" && !ticket_type_id)) {
+    if (
+      !event_id ||
+      (action !== "status" && action !== "resend" && !ticket_type_id)
+    ) {
       return json({ error: "Missing required fields" }, 400);
     }
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) {
+    if (
+      action !== "resend" &&
+      (!Number.isInteger(quantity) || quantity < 1 || quantity > 20)
+    ) {
       return json({ error: "Invalid quantity" }, 400);
     }
     const eventId = parseInt(event_id);
@@ -185,13 +194,17 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       if (!order_id) return json({ error: "Missing order_id" }, 400);
       const { data: order } = await supabase
         .from("orders")
-        .select("id, status, quantity, stripe_payment_intent_id")
+        .select(
+          "id, status, quantity, stripe_payment_intent_id, " +
+            "ticket_email_status, guest_email",
+        )
         .eq("id", order_id)
         .eq("event_id", eventId)
         .single();
       if (!order) return json({ error: "Order not found" }, 404);
-      // Tickets link to the order via the PaymentIntent, not an order_id
-      // column. Free orders have no PI; their 'paid' status IS issuance.
+      // Tickets link to the order via order_id (or the PaymentIntent on
+      // pre-migration rows). Free orders have no PI; their 'paid' status
+      // IS issuance.
       let issued = order.status === "paid" && !order.stripe_payment_intent_id
         ? order.quantity
         : 0;
@@ -207,7 +220,42 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
         status: order.status,
         quantity: order.quantity,
         tickets_issued: issued,
+        ticket_email_status: order.ticket_email_status ?? null,
       });
+    }
+
+    // ── Resend tickets — RE-EMAIL the order's existing bundle. Never
+    // mints tickets, never creates an order, never touches Stripe. The
+    // delivery module rebuilds the canonical bundle from the order's
+    // authoritative ticket rows and sends it again (force), recording a
+    // manual_resend audit entry. ──────────────────────────────────────
+    if (action === "resend") {
+      if (!order_id) return json({ error: "Missing order_id" }, 400);
+      const { data: order } = await supabase
+        .from("orders")
+        .select("id, status, guest_email")
+        .eq("id", order_id)
+        .eq("event_id", eventId)
+        .single();
+      if (!order) return json({ error: "Order not found" }, 404);
+      if (order.status !== "paid") {
+        return json({ error: "This order isn't paid — nothing to resend." }, 409);
+      }
+      if (!order.guest_email) {
+        return json({ error: "This order has no guest email to send to." }, 409);
+      }
+      const result = await deliverTicketBundleEmail(supabase, order.id, {
+        force: true,
+        kind: "manual_resend",
+        logPrefix: "[door-sell]",
+      });
+      if (!result.ok) {
+        return json(
+          { error: "Resend failed — the guest can also use ticket lookup.", code: result.reason },
+          502,
+        );
+      }
+      return json({ ok: true, resent: true });
     }
 
     // Rate-limit per seller — a door seller shouldn't mint hundreds of
@@ -452,12 +500,14 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
         // The sale committed. Do not report failure and invite a second sale.
         console.error("[door-sell] free sale follow-up failed", sideEffectError);
       }
-      try {
-        await sendGuestTicketEmail(trimmedGuestEmail, trimmedGuestName || null,
-          event.title || "your event", null, null, issued,
-          { tierLabel: ticketType.name, logPrefix: "[door-sell]" });
-      } catch (mailError) {
-        console.error("[door-sell] free guest email failed", mailError);
+      // ONE bundle email from the order's authoritative ticket rows —
+      // same path as paid door sales + hosted checkout. Failure is
+      // persisted as retryable delivery state, never a rollback.
+      if (freeOrder?.id) {
+        await deliverTicketBundleEmail(supabase, freeOrder.id, {
+          kind: "fulfillment",
+          logPrefix: "[door-sell]",
+        });
       }
 
       if (freeOrder?.id && validPromoterCode) {

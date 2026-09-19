@@ -180,8 +180,13 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Invalid JSON body" }, 400, req);
     }
 
-    // ───────────── INVITE ─────────────
-    if (body.action === "invite") {
+    // ───────────── INVITE / ADD ─────────────
+    // "invite" creates a pending row the recipient must accept.
+    // "add" (picker flow) adds them immediately — accepted: true — and
+    // notifies them they've been added. Same authorization, same role
+    // rules; the notification is the recipient's record of the grant.
+    if (body.action === "invite" || body.action === "add") {
+      const autoAccept = body.action === "add";
       const eventId = Number(body.event_id);
       const username =
         typeof body.username === "string"
@@ -266,7 +271,7 @@ Deno.serve(async (req: Request) => {
         }
         const { error: updErr } = await supabase
           .from("event_co_organizers")
-          .update({ role, invited_by: authId, accepted: false })
+          .update({ role, invited_by: authId, accepted: autoAccept })
           .eq("id", existing.id);
         if (updErr) return json({ error: "Failed to re-invite" }, 500, req);
         inviteId = existing.id;
@@ -279,7 +284,7 @@ Deno.serve(async (req: Request) => {
             user_id: recipient.id,
             role,
             invited_by: authId,
-            accepted: false,
+            accepted: autoAccept,
           })
           .select("id")
           .single();
@@ -300,15 +305,23 @@ Deno.serve(async (req: Request) => {
           senderIntId: inviter.id,
           senderUsername: inviter.username,
           senderAvatar: inviter.avatar,
-          title: "Event staff invite",
-          body: `${senderHandle} invited you to ${ownerCheck?.title || "their event"} as ${role}.`,
-          notificationType: "event_co_organizer_invited",
+          title: autoAccept ? "Added to event staff" : "Event staff invite",
+          body: autoAccept
+            ? `${senderHandle} added you to ${ownerCheck?.title || "their event"} as ${role}.`
+            : `${senderHandle} invited you to ${ownerCheck?.title || "their event"} as ${role}.`,
+          notificationType: autoAccept
+            ? "event_staff_added"
+            : "event_co_organizer_invited",
           entityId: inviteId,
           eventId,
         });
       }
 
-      return json({ ok: true, invite_id: inviteId, reinvited }, 200, req);
+      return json(
+        { ok: true, invite_id: inviteId, reinvited, added: autoAccept },
+        200,
+        req,
+      );
     }
 
     // ───────────── ACCEPT / DECLINE ─────────────

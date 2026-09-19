@@ -16,6 +16,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import { handleCartPaymentIntentSucceeded } from "../_shared/cart-issuance.ts";
 import { issueTicketsForCheckoutSession } from "../_shared/session-issuance.ts";
+import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -99,6 +100,7 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
       failed: 0,
       needs_attention: 0,
       abandoned: 0,
+      emails_retried: 0,
       by_status: {} as Record<string, number>,
     };
 
@@ -673,6 +675,49 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
           function: "reconcile-orders",
           "event.id": order.id,
         });
+      }
+    }
+
+    // ── 3. Retry guest ticket emails that never landed ────────
+    // Delivery is independent of fulfillment: a paid order whose Resend
+    // call failed (or whose send attempt crashed) stays 'failed' /
+    // 'pending' / null until something retries it. This sweep is that
+    // something. It re-emails the order's EXISTING ticket bundle — it
+    // can never mint tickets, create orders, or charge anyone.
+    //   Guards: recent paid orders only (never mass-mail history),
+    //   attempts < 8, ≥2 min since the last attempt.
+    const { data: emailRetryOrders, error: emailRetryError } = await supabase
+      .from("orders")
+      .select("id, ticket_email_status, ticket_email_attempts, ticket_email_last_attempt_at")
+      .eq("status", "paid")
+      .not("guest_email", "is", null)
+      .gte("paid_at", cutoff)
+      .lt("ticket_email_attempts", 8)
+      .or("ticket_email_status.is.null,ticket_email_status.in.(pending,failed)")
+      .limit(25);
+
+    if (emailRetryError) {
+      console.error("[reconcile] email-retry fetch error:", emailRetryError);
+    }
+
+    for (const order of emailRetryOrders || []) {
+      const last = order.ticket_email_last_attempt_at
+        ? new Date(order.ticket_email_last_attempt_at).getTime()
+        : 0;
+      if (Date.now() - last < 2 * 60_000) continue;
+      try {
+        const result = await deliverTicketBundleEmail(supabase, order.id, {
+          kind: "retry",
+          logPrefix: "[reconcile]",
+        });
+        if (result.ok && result.reason !== "already_sent") {
+          stats.emails_retried++;
+        }
+      } catch (err) {
+        console.error(
+          `[reconcile] email retry failed for order ${order.id}:`,
+          err,
+        );
       }
     }
 

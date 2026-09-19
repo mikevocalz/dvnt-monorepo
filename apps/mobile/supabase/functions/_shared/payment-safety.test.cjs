@@ -56,7 +56,7 @@ function harness(config = {}) {
     'capacity-alerts.ts': { maybeFireCapacityAlerts: async () => {} },
     'hmac-qr.ts': { createSignedQrPayload: async () => ({ qrToken: crypto.randomUUID(), qrPayload: 'signed' }) },
     'session-issuance.ts': { sendGuestTicketEmail: async () => {} },
-    'sentry.ts': { withSentry: (_name, fn) => fn },
+    'sentry.ts': { withSentry: (_name, fn) => fn, captureEdge: async () => {} },
     'order-state.ts': {},
     'notify-event-organizers.ts': {}, 'notify-waitlisters.ts': {}, 'wallet-push.ts': {},
     ...config.dependencyOverrides,
