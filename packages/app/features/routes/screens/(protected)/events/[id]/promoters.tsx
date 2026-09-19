@@ -65,12 +65,14 @@ interface PromotersUIState {
   addMode: "linked" | "external";
   usernameInput: string;
   nameInput: string;
-  percentInput: string;
+  customerDiscountInput: string;
+  promoterCommissionInput: string;
   toggleAdd: () => void;
   setAddMode: (m: "linked" | "external") => void;
   setUsernameInput: (v: string) => void;
   setNameInput: (v: string) => void;
-  setPercentInput: (v: string) => void;
+  setCustomerDiscountInput: (v: string) => void;
+  setPromoterCommissionInput: (v: string) => void;
   resetAdd: () => void;
 }
 
@@ -79,19 +81,22 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   addMode: "linked",
   usernameInput: "",
   nameInput: "",
-  percentInput: "10",
+  customerDiscountInput: "10",
+  promoterCommissionInput: "10",
   toggleAdd: () => set((s) => ({ addOpen: !s.addOpen })),
   setAddMode: (m) => set({ addMode: m }),
   setUsernameInput: (v) => set({ usernameInput: v }),
   setNameInput: (v) => set({ nameInput: v }),
-  setPercentInput: (v) => set({ percentInput: v }),
+  setCustomerDiscountInput: (v) => set({ customerDiscountInput: v }),
+  setPromoterCommissionInput: (v) => set({ promoterCommissionInput: v }),
   resetAdd: () =>
     set({
       addOpen: false,
       addMode: "linked",
       usernameInput: "",
       nameInput: "",
-      percentInput: "10",
+      customerDiscountInput: "10",
+      promoterCommissionInput: "10",
     }),
 }));
 
@@ -106,12 +111,14 @@ export default function EventPromotersScreen() {
   const addMode = usePromotersUIStore((s) => s.addMode);
   const usernameInput = usePromotersUIStore((s) => s.usernameInput);
   const nameInput = usePromotersUIStore((s) => s.nameInput);
-  const percentInput = usePromotersUIStore((s) => s.percentInput);
+  const customerDiscountInput = usePromotersUIStore((s) => s.customerDiscountInput);
+  const promoterCommissionInput = usePromotersUIStore((s) => s.promoterCommissionInput);
   const toggleAdd = usePromotersUIStore((s) => s.toggleAdd);
   const setAddMode = usePromotersUIStore((s) => s.setAddMode);
   const setUsernameInput = usePromotersUIStore((s) => s.setUsernameInput);
   const setNameInput = usePromotersUIStore((s) => s.setNameInput);
-  const setPercentInput = usePromotersUIStore((s) => s.setPercentInput);
+  const setCustomerDiscountInput = usePromotersUIStore((s) => s.setCustomerDiscountInput);
+  const setPromoterCommissionInput = usePromotersUIStore((s) => s.setPromoterCommissionInput);
   const resetAdd = usePromotersUIStore((s) => s.resetAdd);
 
   const promotersQuery = useQuery({
@@ -128,7 +135,8 @@ export default function EventPromotersScreen() {
     mutationFn: (input: {
       username?: string;
       displayName?: string;
-      revShareBps: number;
+      customerDiscountBps: number;
+      promoterCommissionBps: number;
     }) => promotersApi.add({ eventId, ...input }),
     onSuccess: (promoter) => {
       showToast(
@@ -178,8 +186,9 @@ export default function EventPromotersScreen() {
   };
 
   const onAddSubmit = () => {
-    const bps = parsePercentToBps(percentInput);
-    if (bps == null) {
+    const customerDiscountBps = parsePercentToBps(customerDiscountInput);
+    const promoterCommissionBps = parsePercentToBps(promoterCommissionInput);
+    if (customerDiscountBps == null || promoterCommissionBps == null) {
       showToast("error", "Invalid share", "Enter a percent from 0 to 100.");
       return;
     }
@@ -189,14 +198,22 @@ export default function EventPromotersScreen() {
         showToast("error", "Username required", "");
         return;
       }
-      addMutation.mutate({ username: u, revShareBps: bps });
+      addMutation.mutate({
+        username: u,
+        customerDiscountBps,
+        promoterCommissionBps,
+      });
     } else {
       const n = nameInput.trim();
       if (!n) {
         showToast("error", "Name required", "");
         return;
       }
-      addMutation.mutate({ displayName: n, revShareBps: bps });
+      addMutation.mutate({
+        displayName: n,
+        customerDiscountBps,
+        promoterCommissionBps,
+      });
     }
   };
 
@@ -275,12 +292,27 @@ export default function EventPromotersScreen() {
           )}
 
           <Text style={styles.fieldLabel}>
-            REV SHARE — % OF ORGANIZER PAYOUT PER ORDER
+            CUSTOMER DISCOUNT — % OFF FOR GUESTS WHO USE THIS CODE
           </Text>
           <View style={styles.inputRow}>
             <TextInput
-              value={percentInput}
-              onChangeText={setPercentInput}
+              value={customerDiscountInput}
+              onChangeText={setCustomerDiscountInput}
+              keyboardType="decimal-pad"
+              placeholder="10"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              style={[styles.input, styles.mono]}
+            />
+            <Text style={styles.inputSuffix}>%</Text>
+          </View>
+
+          <Text style={styles.fieldLabel}>
+            PROMOTER COMMISSION — % OF ELIGIBLE TICKET SALES
+          </Text>
+          <View style={styles.inputRow}>
+            <TextInput
+              value={promoterCommissionInput}
+              onChangeText={setPromoterCommissionInput}
               keyboardType="decimal-pad"
               placeholder="10"
               placeholderTextColor="rgba(255,255,255,0.35)"
@@ -289,7 +321,7 @@ export default function EventPromotersScreen() {
             <Text style={styles.inputSuffix}>%</Text>
           </View>
           <Text style={styles.hint}>
-            The share locks per order at purchase time — changing it later
+            Both values lock per order at purchase time — changing them later
             never re-prices past orders.
           </Text>
 
@@ -353,7 +385,7 @@ export default function EventPromotersScreen() {
                       <Text style={styles.codeBadgeText}>{p.code}</Text>
                     </View>
                     <Text style={styles.shareText}>
-                      {bpsLabel(p.revShareBps)} share
+                      {bpsLabel(p.customerDiscountBps)} off · {bpsLabel(p.promoterCommissionBps)} commission
                       {paused ? " · PAUSED" : ""}
                     </Text>
                   </View>

@@ -83,6 +83,8 @@ interface PromoterRow {
   display_name: string;
   code: string;
   rev_share_bps: number;
+  customer_discount_bps: number;
+  promoter_commission_bps: number;
   status: string;
   created_at: string;
 }
@@ -115,14 +117,15 @@ Deno.serve(async (req: Request) => {
     let eventId: number | null = null;
     let promoter: PromoterRow | null = null;
 
+    const PROMOTER_SELECT =
+      "id, event_id, user_id, display_name, code, rev_share_bps, customer_discount_bps, promoter_commission_bps, status, created_at";
+
     if (action === "update" || action === "remove") {
       const promoterId = String(body.promoter_id || "");
       if (!promoterId) return json({ error: "promoter_id required" }, 400, req);
       const { data } = await supabase
         .from("event_promoters")
-        .select(
-          "id, event_id, user_id, display_name, code, rev_share_bps, status, created_at",
-        )
+        .select(PROMOTER_SELECT)
         .eq("id", promoterId)
         .maybeSingle();
       if (!data) return json({ error: "Promoter not found" }, 404, req);
@@ -144,9 +147,7 @@ Deno.serve(async (req: Request) => {
     if (action === "list") {
       const { data: promoters } = await supabase
         .from("event_promoters")
-        .select(
-          "id, event_id, user_id, display_name, code, rev_share_bps, status, created_at",
-        )
+        .select(PROMOTER_SELECT)
         .eq("event_id", eventId)
         .neq("status", "removed")
         .order("created_at", { ascending: true });
@@ -227,6 +228,8 @@ Deno.serve(async (req: Request) => {
             null,
           code: p.code,
           revShareBps: p.rev_share_bps,
+          customerDiscountBps: p.customer_discount_bps,
+          promoterCommissionBps: p.promoter_commission_bps,
           status: p.status,
           attributedOrders: stats.orders,
           grossCents: stats.grossCents,
@@ -240,14 +243,31 @@ Deno.serve(async (req: Request) => {
 
     // ── add ─────────────────────────────────────────────────────
     if (action === "add") {
-      const revShareBps = Number(body.rev_share_bps);
+      const customerDiscountBps = body.customer_discount_bps !== undefined
+        ? Number(body.customer_discount_bps)
+        : Number(body.rev_share_bps);
+      const promoterCommissionBps = body.promoter_commission_bps !== undefined
+        ? Number(body.promoter_commission_bps)
+        : Number(body.rev_share_bps);
+
       if (
-        !Number.isInteger(revShareBps) ||
-        revShareBps < 0 ||
-        revShareBps > 10000
+        !Number.isInteger(customerDiscountBps) ||
+        customerDiscountBps < 0 ||
+        customerDiscountBps > 10000
       ) {
         return json(
-          { error: "rev_share_bps must be an integer 0–10000" },
+          { error: "customer_discount_bps must be an integer 0–10000" },
+          400,
+          req,
+        );
+      }
+      if (
+        !Number.isInteger(promoterCommissionBps) ||
+        promoterCommissionBps < 0 ||
+        promoterCommissionBps > 10000
+      ) {
+        return json(
+          { error: "promoter_commission_bps must be an integer 0–10000" },
           400,
           req,
         );
@@ -332,12 +352,12 @@ Deno.serve(async (req: Request) => {
             user_id: userId,
             display_name: displayName,
             code,
-            rev_share_bps: revShareBps,
+            rev_share_bps: promoterCommissionBps,
+            customer_discount_bps: customerDiscountBps,
+            promoter_commission_bps: promoterCommissionBps,
             status: "active",
           })
-          .select(
-            "id, event_id, user_id, display_name, code, rev_share_bps, status, created_at",
-          )
+          .select(PROMOTER_SELECT)
           .single();
         if (!error && data) {
           inserted = data as PromoterRow;
@@ -373,6 +393,8 @@ Deno.serve(async (req: Request) => {
             avatarUrl: null,
             code: inserted.code,
             revShareBps: inserted.rev_share_bps,
+            customerDiscountBps: inserted.customer_discount_bps,
+            promoterCommissionBps: inserted.promoter_commission_bps,
             status: inserted.status,
             attributedOrders: 0,
             grossCents: 0,
@@ -398,6 +420,30 @@ Deno.serve(async (req: Request) => {
           );
         }
         patch.rev_share_bps = bps;
+        patch.promoter_commission_bps = bps;
+      }
+      if (body.customer_discount_bps !== undefined) {
+        const bps = Number(body.customer_discount_bps);
+        if (!Number.isInteger(bps) || bps < 0 || bps > 10000) {
+          return json(
+            { error: "customer_discount_bps must be an integer 0–10000" },
+            400,
+            req,
+          );
+        }
+        patch.customer_discount_bps = bps;
+      }
+      if (body.promoter_commission_bps !== undefined) {
+        const bps = Number(body.promoter_commission_bps);
+        if (!Number.isInteger(bps) || bps < 0 || bps > 10000) {
+          return json(
+            { error: "promoter_commission_bps must be an integer 0–10000" },
+            400,
+            req,
+          );
+        }
+        patch.promoter_commission_bps = bps;
+        patch.rev_share_bps = bps; // keep legacy column in sync
       }
       if (body.status !== undefined) {
         const status = String(body.status);

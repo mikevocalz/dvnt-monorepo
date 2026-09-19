@@ -24,7 +24,10 @@ export interface EventPromoter {
   username: string | null;
   avatarUrl: string | null;
   code: string;
+  /** @deprecated Use customerDiscountBps + promoterCommissionBps. */
   revShareBps: number;
+  customerDiscountBps: number;
+  promoterCommissionBps: number;
   status: PromoterStatus;
   /** Attributed orders that reached paid (incl. later refunds). */
   attributedOrders: number;
@@ -75,9 +78,22 @@ export const promotersApi = {
     eventId: number;
     username?: string;
     displayName?: string;
-    revShareBps: number;
+    /** @deprecated Use customerDiscountBps + promoterCommissionBps. */
+    revShareBps?: number;
+    customerDiscountBps?: number;
+    promoterCommissionBps?: number;
     code?: string;
   }): Promise<EventPromoter> {
+    const customerDiscountBps = params.customerDiscountBps ?? params.revShareBps;
+    const promoterCommissionBps = params.promoterCommissionBps ??
+      params.revShareBps;
+    if (
+      customerDiscountBps == null || promoterCommissionBps == null
+    ) {
+      throw new Error(
+        "customerDiscountBps and promoterCommissionBps (or revShareBps) are required",
+      );
+    }
     const { data, error } = await invokeEdge<{
       ok: boolean;
       promoter: EventPromoter;
@@ -87,7 +103,8 @@ export const promotersApi = {
       event_id: params.eventId,
       ...(params.username ? { username: params.username } : {}),
       ...(params.displayName ? { display_name: params.displayName } : {}),
-      rev_share_bps: params.revShareBps,
+      customer_discount_bps: customerDiscountBps,
+      promoter_commission_bps: promoterCommissionBps,
       ...(params.code ? { code: params.code } : {}),
     });
     if (error) throw new Error(error.message);
@@ -99,7 +116,10 @@ export const promotersApi = {
 
   async update(params: {
     promoterId: string;
+    /** @deprecated Use customerDiscountBps + promoterCommissionBps. */
     revShareBps?: number;
+    customerDiscountBps?: number;
+    promoterCommissionBps?: number;
     status?: "active" | "paused";
     displayName?: string;
   }): Promise<void> {
@@ -110,6 +130,12 @@ export const promotersApi = {
         promoter_id: params.promoterId,
         ...(params.revShareBps !== undefined
           ? { rev_share_bps: params.revShareBps }
+          : {}),
+        ...(params.customerDiscountBps !== undefined
+          ? { customer_discount_bps: params.customerDiscountBps }
+          : {}),
+        ...(params.promoterCommissionBps !== undefined
+          ? { promoter_commission_bps: params.promoterCommissionBps }
           : {}),
         ...(params.status !== undefined ? { status: params.status } : {}),
         ...(params.displayName !== undefined
