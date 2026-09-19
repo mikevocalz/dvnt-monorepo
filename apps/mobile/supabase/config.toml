@@ -492,3 +492,6 @@ verify_jwt = false
 # secret is unset, so verify_jwt = false does not make this reachable by anon.
 [functions.backfill-verification-emails]
 verify_jwt = false
+
+[functions.terminal-token]
+verify_jwt = false

@@ -19,6 +19,8 @@ function fixture({ user = 'member', role, accepted = true, membershipEvent = 1,
     tickets: [],
     ticket_holds: [],
     cart_holds: [],
+    // terminal-token reads the platform Location mapping.
+    event_terminal_locations: [],
   };
   return { reads, database: { from(table) {
     reads.push(table);
@@ -69,4 +71,25 @@ for (const scenario of cases) {
       if (scenario.status === 401) assert.ok(!f.reads.includes('events'));
     });
   }
+}
+
+// terminal-token: same event-scoped predicate, minted per call, and the
+// denied cases must never reach Stripe. Authorized staff without a
+// configured Terminal Location get 409, not a token.
+for (const scenario of [
+  { name: 'terminal-token owner without location', user: 'owner', status: 409 },
+  { name: 'terminal-token outsider', role: 'outsider', status: 403 },
+  { name: 'terminal-token missing token', token: '', status: 401 },
+]) {
+  test(`${scenario.name} returns ${scenario.status} without side effects`, async () => {
+    const f = fixture(scenario);
+    f.database = { from: f.database.from, rpc: f.database.rpc };
+    const h = harness({ database: f.database,
+      dependencyOverrides: { 'verify-session.ts': undefined } });
+    const response = await h.invoke('terminal-token', { event_id: 1 },
+      { 'x-auth-token': scenario.token ?? 'fixture-token' });
+    assert.equal(response.status, scenario.status, await response.text());
+    assert.equal(h.requests.length, 0, 'No Stripe request before authz/location');
+    assert.equal(h.writes.length, 0);
+  });
 }

@@ -41,10 +41,10 @@ interface DoorSellResponse extends Partial<DoorSellResult> {
   quantity?: number;
 }
 
-function unwrap(
-  data: DoorSellResponse | null | undefined,
+function unwrap<T extends { error?: string; code?: string }>(
+  data: T | null | undefined,
   error: any,
-): DoorSellResponse {
+): T {
   if (error) throw new Error(error.message);
   if (!data) throw new Error("No response from door-sell");
   if (data.error) {
@@ -137,5 +137,28 @@ export const doorApi = {
       quantity: res.quantity ?? 0,
       tickets_issued: res.tickets_issued ?? 0,
     };
+  },
+};
+
+/**
+ * Tap to Pay (Phase 5, native only). A connection token is minted per
+ * call and scoped to the event's platform-owned Terminal Location —
+ * never cache it, never send a Stripe-Account header (separate charges
+ * and transfers means the platform owns the PaymentIntent).
+ */
+export const terminalApi = {
+  async connectionToken(eventId: number): Promise<string> {
+    const { data, error } = await invokeEdge<{
+      secret?: string;
+      error?: string;
+      code?: string;
+    }>("terminal-token", { event_id: eventId });
+    const res = unwrap(data, error);
+    if (!res.secret) {
+      const err = new Error(res.error || "Tap to Pay is not available");
+      (err as Error & { code?: string }).code = res.code;
+      throw err;
+    }
+    return res.secret;
   },
 };
