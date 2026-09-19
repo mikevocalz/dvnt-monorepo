@@ -48,6 +48,7 @@ import {
   doorGuestTicketBase,
 } from "../_shared/door-sale.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -164,7 +165,7 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
     // ── Staff authorization: host or accepted co-organizer (scanner+). ──
     const { data: event } = await supabase
       .from("events")
-      .select("host_id, title, fee_mode")
+      .select("host_id, title, fee_mode, end_date, start_date")
       .eq("id", eventId)
       .single();
     if (!event?.host_id) return json({ error: "Event not found" }, 404);
@@ -185,6 +186,13 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
     const authorized = canSellAtDoor(isHost, staffRole);
     if (!authorized) {
       return json({ error: "Your access to this event ended." }, 403);
+    }
+
+    // Sales cutoff: card-not-present sales (including this web POS link)
+    // stop 30 min before event end — card-present Tap to Pay is the only
+    // exception. status/resend stay available (they move no money).
+    if ((action === "quote" || action === "sell") && isSalesClosed(event)) {
+      return json({ error: "Ticket sales have ended for this event." }, 400);
     }
 
     // Order status for the success screen — tells the seller whether the

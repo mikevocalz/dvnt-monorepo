@@ -22,6 +22,7 @@ import {
   enforceTierVisibility,
   TIER_VISIBILITY_MESSAGES,
 } from "../_shared/tier-visibility.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -156,6 +157,16 @@ Deno.serve(async (req: Request) => {
 
     if (String(ticket.ticket_type_id) === String(new_ticket_type_id)) {
       return json({ error: "You already have this tier" }, 400);
+    }
+
+    // Sales cutoff: upgrades are a purchase — same 30-min-before-end rule.
+    const { data: cutoffEvent } = await supabase
+      .from("events")
+      .select("end_date, start_date")
+      .eq("id", ticket.event_id)
+      .maybeSingle();
+    if (isSalesClosed(cutoffEvent)) {
+      return json({ error: "Ticket sales have ended for this event." }, 400);
     }
 
     // Fetch the new tier

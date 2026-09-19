@@ -14,6 +14,7 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { checkRateLimit, WRITE_LIMIT } from "../_shared/rate-limit.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 interface ApiResponse<T = unknown> {
   ok: boolean;
@@ -106,7 +107,7 @@ Deno.serve(async (req) => {
     // create-payment-intent → Stripe.
     const { data: ev, error: evErr } = await supabase
       .from("events")
-      .select("ticketing_enabled, status")
+      .select("ticketing_enabled, status, end_date, start_date")
       .eq("id", eventIdInt)
       .maybeSingle();
     if (evErr) {
@@ -121,6 +122,16 @@ Deno.serve(async (req) => {
         req,
         "validation_error",
         "Event is not active",
+        400,
+      );
+    }
+    // RSVP cutoff: 30 min before event end — Tap to Pay is the only
+    // exception after that.
+    if (isSalesClosed(ev)) {
+      return errorResponse(
+        req,
+        "sales_closed",
+        "Ticket sales have ended for this event.",
         400,
       );
     }

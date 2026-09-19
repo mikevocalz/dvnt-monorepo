@@ -22,6 +22,7 @@ import {
   enforceTierVisibility,
   TIER_VISIBILITY_MESSAGES,
 } from "../_shared/tier-visibility.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -95,11 +96,14 @@ Deno.serve(async (req) => {
     // private/spicy events (the visibility resolver hides them).
     const { data: ev } = await supabase
       .from("events")
-      .select("id, title, visibility, status, ticketing_enabled, host_id, fee_mode, attendee_name_requirement")
+      .select("id, title, visibility, status, ticketing_enabled, host_id, fee_mode, attendee_name_requirement, end_date, start_date")
       .eq("id", eventId)
       .single();
     if (!ev || ev.visibility !== "public") return err("event_not_found", "Event not found.", 404);
     if (coalesceStatus(ev.status) === "cancelled") return err("event_cancelled", "This event was cancelled.");
+    // Card-not-present sales stop 30 min before the event ends — after
+    // that the only legitimate way to sell is card-present (Tap to Pay).
+    if (isSalesClosed(ev)) return err("sales_closed", "Ticket sales have ended for this event.");
 
     // Attendee-name requirement (Eventbrite parity) — enforced before payment.
     if (ev.attendee_name_requirement === "required") {

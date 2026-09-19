@@ -18,9 +18,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import { voidWalletPass } from "../_shared/wallet-push.ts";
+import {
+  sendResendEmail,
+  ticketConfirmation,
+} from "../_shared/send-resend-email.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const SITE_URL =
+  (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live").replace(/\/$/, "");
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -313,7 +319,9 @@ Deno.serve(async (req: Request) => {
 
       const { data: transfer, error: tErr } = await supabase
         .from("ticket_transfers")
-        .select("*, tickets(id, user_id, event_id, status)")
+        .select(
+          "*, tickets(id, user_id, event_id, status, ticket_type_id, guest_lookup_token)",
+        )
         .eq("id", transfer_id)
         .single();
 
@@ -394,6 +402,85 @@ Deno.serve(async (req: Request) => {
       console.log(
         `[transfer-ticket] Transfer accepted: ${ticket.id} now owned by ${userId}`,
       );
+
+      // Email the new owner — the ticket now belongs to them, so it must
+      // also reach their inbox. Best-effort: a failed send never rolls
+      // back the accepted transfer (they can always open My Tickets).
+      try {
+        const { data: authUser } = await supabase
+          .from("user")
+          .select("email")
+          .eq("id", userId)
+          .maybeSingle();
+        if (authUser?.email) {
+          const [{ data: evt }, { data: tierRow }, { data: senderRow }] =
+            await Promise.all([
+              supabase
+                .from("events")
+                .select(
+                  "title, date, start_date, location, flyer_image_url, dominant_color",
+                )
+                .eq("id", ticket.event_id)
+                .maybeSingle(),
+              supabase
+                .from("ticket_types")
+                .select("name")
+                .eq("id", ticket.ticket_type_id)
+                .maybeSingle(),
+              supabase
+                .from("users")
+                .select("username")
+                .eq("auth_id", transfer.from_user_id)
+                .maybeSingle(),
+            ]);
+          const eventStart = evt?.start_date ?? evt?.date ?? null;
+          const dateLine = eventStart
+            ? new Date(eventStart).toLocaleString("en-US", {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })
+            : null;
+          const senderHandle = senderRow?.username
+            ? `@${senderRow.username}`
+            : "A friend";
+          await sendResendEmail({
+            to: authUser.email,
+            ...ticketConfirmation({
+              eventTitle: evt?.title ?? "your event",
+              flyerUrl: evt?.flyer_image_url ?? null,
+              dominantColor: evt?.dominant_color ?? null,
+              dateLine,
+              location: evt?.location ?? null,
+              toEmail: authUser.email,
+              greeting:
+                `${senderHandle} sent you a ticket for ${evt?.title ?? "this event"} — it's yours now.`,
+              manageUrl: `${SITE_URL}/my-tickets`,
+              // Recipient already has an account — no guest claim nudge.
+              claimUrl: null,
+              tickets: [{
+                tierLabel: tierRow?.name ?? "Ticket",
+                lookupUrl: ticket.guest_lookup_token
+                  ? `${SITE_URL}/public/tickets/guest/${ticket.guest_lookup_token}`
+                  : null,
+              }],
+              calendar: eventStart
+                ? { startIso: new Date(eventStart).toISOString() }
+                : null,
+            }),
+          });
+          console.log(
+            `[transfer-ticket] Ticket email sent to new owner for ${ticket.id}`,
+          );
+        }
+      } catch (emailErr) {
+        console.warn(
+          "[transfer-ticket] recipient email failed (non-fatal):",
+          emailErr,
+        );
+      }
 
       // Notify sender — their transfer was accepted
       const senderApp = await lookupAppUser(supabase, transfer.from_user_id);

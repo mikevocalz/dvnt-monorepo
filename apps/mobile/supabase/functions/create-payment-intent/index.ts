@@ -31,6 +31,7 @@ import {
   validateAndApplyPromoterCode,
 } from "../_shared/apply-promoter-code.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -192,6 +193,17 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
 
     if (!await canAccessEvent(supabase, Number(event_id), user_id)) {
       return json({ error: "Event not found or invitation required" }, 404);
+    }
+
+    // Sales cutoff: card-not-present sales stop 30 min before event end —
+    // Tap to Pay is the only exception after that.
+    const { data: cutoffEvent } = await supabase
+      .from("events")
+      .select("end_date, start_date")
+      .eq("id", Number(event_id))
+      .maybeSingle();
+    if (isSalesClosed(cutoffEvent)) {
+      return json({ error: "Ticket sales have ended for this event." }, 400);
     }
 
     // Promoter attribution code (WS-4 / Phase 2) — from a tracked ?ref= link.

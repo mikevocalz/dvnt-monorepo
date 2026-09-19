@@ -145,7 +145,9 @@ async function notifyPromoterAdded(
         entityType: "event",
         entityId: params.promoterId,
         eventId: String(params.eventId),
-        url: `https://dvntapp.live/e/${params.eventId}`,
+        // Lands on the promoter dashboard — payout setup is the first thing
+        // a newly-added promoter needs to do.
+        url: `https://dvntapp.live/feed/events/${params.eventId}/promoter`,
       },
       sound: "default",
       channelId: "default",

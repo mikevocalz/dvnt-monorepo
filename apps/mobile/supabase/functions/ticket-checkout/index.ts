@@ -45,6 +45,7 @@ import { maybeFireCapacityAlerts } from "../_shared/capacity-alerts.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { checkoutTicketLines } from "../_shared/checkout-line-items.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -215,6 +216,20 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       return new Response(JSON.stringify({ error: "Event not found or invitation required" }), {
         status: 404, headers: { "Content-Type": "application/json" },
       });
+    }
+
+    // Sales cutoff: card-not-present sales stop 30 min before event end —
+    // Tap to Pay is the only exception after that.
+    const { data: cutoffEvent } = await supabase
+      .from("events")
+      .select("end_date, start_date")
+      .eq("id", Number(event_id))
+      .maybeSingle();
+    if (isSalesClosed(cutoffEvent)) {
+      return new Response(
+        JSON.stringify({ error: "Ticket sales have ended for this event." }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
     }
 
     // Fetch ticket type (scoped to event to prevent cross-event manipulation)

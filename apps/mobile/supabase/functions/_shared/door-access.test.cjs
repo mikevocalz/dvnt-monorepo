@@ -6,13 +6,14 @@ const { harness } = require('./payment-safety.test.cjs');
 
 function fixture({ user = 'member', role, accepted = true, membershipEvent = 1,
   membershipUser = user, expired = false, revoked = false, sessionError = false,
-  order } = {}) {
+  order, eventDates } = {}) {
   const reads = [];
   const writes = [];
   const rows = {
     session: [{ token: 'fixture-token', userId: user,
       expiresAt: new Date(Date.now() + (expired ? -60000 : 60000)).toISOString() }],
-    events: [{ id: 1, host_id: 'owner', title: 'Isolated fixture', fee_mode: 'pass' }],
+    events: [{ id: 1, host_id: 'owner', title: 'Isolated fixture', fee_mode: 'pass',
+      ...eventDates }],
     event_co_organizers: role && !revoked ? [{ event_id: membershipEvent,
       user_id: membershipUser, role, accepted }] : [],
     ticket_types: [{ id: 'tier', event_id: 1, name: 'Admission', price_cents: 5000,
@@ -143,6 +144,47 @@ for (const scenario of [
         w.table === 'order_timeline' && w.payload.type === 'ticket_email_resent'));
     } else {
       assert.equal(h.requests.length, 0, 'No Resend request');
+      assert.equal(f.writes.length, 0);
+    }
+  });
+}
+
+// Sales cutoff — card-not-present quote/sell stop 30 min before event end.
+// status/resend stay live: they move no money. The cutoff check runs before
+// the tier lookup, so a closed sale never touches inventory.
+const closedEvent = { end_date: new Date(Date.now() + 10 * 60_000).toISOString() };
+for (const scenario of [
+  { name: 'quote inside cutoff refused', action: 'quote',
+    eventDates: closedEvent, status: 400 },
+  { name: 'sell inside cutoff refused', action: 'sell',
+    eventDates: closedEvent, status: 400 },
+  { name: 'quote past end refused', action: 'quote',
+    eventDates: { end_date: new Date(Date.now() - 60_000).toISOString() }, status: 400 },
+  { name: 'quote start_date-only inside cutoff refused', action: 'quote',
+    eventDates: { start_date: new Date(Date.now() + 10 * 60_000).toISOString() },
+    status: 400 },
+  { name: 'quote 2h before end allowed', action: 'quote',
+    eventDates: { end_date: new Date(Date.now() + 2 * 3600_000).toISOString() },
+    status: 200 },
+  { name: 'status inside cutoff still allowed', action: 'status',
+    eventDates: closedEvent, order: paidOrder, status: 200 },
+  { name: 'resend inside cutoff still allowed', action: 'resend',
+    eventDates: closedEvent, order: { ...paidOrder, tickets: orderTickets },
+    status: 200 },
+]) {
+  test(`${scenario.name} → ${scenario.status}`, async () => {
+    const f = fixture({ user: 'owner', ...scenario });
+    const h = harness({ database: f.database,
+      dependencyOverrides: { 'verify-session.ts': undefined } });
+    const response = await h.invoke('door-sell', { action: scenario.action,
+      event_id: 1, ticket_type_id: 'tier', quantity: 1,
+      guest_email: 'fixture@example.invalid', order_id: 'o1' },
+      { 'x-auth-token': 'fixture-token' });
+    assert.equal(response.status, scenario.status, await response.text());
+    if (scenario.status === 400) {
+      // Refused before the tier lookup — no inventory touched, no Stripe.
+      assert.ok(!f.reads.includes('ticket_types'));
+      assert.equal(h.requests.length, 0);
       assert.equal(f.writes.length, 0);
     }
   });

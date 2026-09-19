@@ -17,6 +17,7 @@ import {
   sendResendEmail,
   ticketConfirmation,
 } from "../_shared/send-resend-email.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -111,6 +112,15 @@ Deno.serve(async (req) => {
     if (grant.event_id !== eventId)
       return err("grant_mismatch", "Verification doesn't match this event.", 401);
 
+    // RSVP cutoff: 30 min before event end — Tap to Pay is the only
+    // exception after that. The event row is also reused for the email below.
+    const { data: ev } = await supabase
+      .from("events")
+      .select("title, date, location, flyer_image_url, dominant_color, end_date, start_date")
+      .eq("id", eventId)
+      .single();
+    if (isSalesClosed(ev)) return err("sales_closed", "Ticket sales have ended for this event.");
+
     const { data, error } = await supabase.rpc("issue_guest_rsvp_tickets", {
       p_event_id: eventId,
       p_guest_email: grant.destination,
@@ -126,17 +136,12 @@ Deno.serve(async (req) => {
     if (result?.error) return err(result.error, "Couldn't RSVP: " + result.error);
 
     // Email the ticket(s) — one delivery, each with its own no-login view link.
-    const tickets: Array<{
+    const tickets: {
       guest_lookup_token: string;
       order_index: number;
       order_count: number;
       attendee_name: string | null;
-    }> = result.tickets || [];
-    const { data: ev } = await supabase
-      .from("events")
-      .select("title, date, location, flyer_image_url, dominant_color")
-      .eq("id", eventId)
-      .single();
+    }[] = result.tickets || [];
     const evTitle = ev?.title ?? "your event";
     const dateLine = ev?.date
       ? new Date(ev.date).toLocaleString("en-US", {

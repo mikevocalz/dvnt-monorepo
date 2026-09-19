@@ -185,7 +185,7 @@ Deno.serve(withSentry("ticket-refund", async (req: Request) => {
     // Free: no Stripe event is coming, so this is the only writer.
     await supabase
       .from("tickets")
-      .update({ status: "refunded" })
+      .update({ status: isPaid ? "refunded" : "void" })
       .eq("id", ticket_id)
       .eq("status", "active");
 

@@ -28,6 +28,7 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -364,12 +365,16 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
 
     const { data: event, error: eventError } = await supabase
       .from("events")
-      .select("id, host_id, title, fee_mode")
+      .select("id, host_id, title, fee_mode, end_date, start_date")
       .eq("id", cart.event_id)
       .single();
 
     if (eventError || !event?.host_id) {
       return errorResponse("Event not found", 404);
+    }
+    // Sales cutoff: 30 min before event end — card-present only after that.
+    if (isSalesClosed(event)) {
+      return errorResponse("Ticket sales have ended for this event.", 400);
     }
 
     // fee_mode-aware (absorb|pass): in absorb the buyer is charged just

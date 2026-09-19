@@ -184,6 +184,15 @@ Deno.serve(withSentry("bulk-refund-tickets", async (req: Request) => {
       const amount = Number(t.purchase_amount_cents || 0);
       const pi = t.stripe_payment_intent_id;
 
+      if (amount > 0 && !pi) {
+        // Charged but no payment record — voiding would keep the money.
+        failures.push({
+          ticketId: t.id,
+          error: "Paid ticket missing payment record — refund manually in Stripe",
+        });
+        continue;
+      }
+
       if (amount > 0 && pi) {
         const result = await stripeRefund(
           {

@@ -318,8 +318,21 @@ export function EventPromotersScreen() {
       promoterCommissionBps?: number;
       status?: "active" | "paused";
     }) => promotersApi.update(input),
-    onSuccess: () => {
+    onSuccess: (_data, input) => {
       setEditTarget(null);
+      if (
+        input.customerDiscountBps !== undefined ||
+        input.promoterCommissionBps !== undefined
+      ) {
+        // The organizer just approved new money terms — say them back so the
+        // confirmation is unambiguous (discount off for buyers / commission
+        // to the promoter). Locked for future orders; history is untouched.
+        toast.success("Promoter terms updated", {
+          description:
+            `${input.customerDiscountBps !== undefined ? bpsLabel(input.customerDiscountBps) : "—"} buyer discount · ` +
+            `${input.promoterCommissionBps !== undefined ? bpsLabel(input.promoterCommissionBps) : "—"} commission. Applies to new orders.`,
+        });
+      }
       invalidate();
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

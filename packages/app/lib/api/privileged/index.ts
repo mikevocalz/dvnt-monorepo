@@ -507,6 +507,30 @@ export interface StaffEntry {
   invitedBy: string | null;
 }
 
+// invite-co-organizer + get-event-staff answer the FLAT { ok, ... }
+// shape — the same one invokeEdge serves — not the { ok, data }
+// PrivilegedResponse envelope invokeEdgeFunction unwraps. Routing these
+// through invokeEdgeFunction returned `undefined` payloads to the staff
+// screen (empty roster, callerRole null, manage UI hidden).
+async function invokeStaffEdge<T>(
+  functionName: "get-event-staff" | "invite-co-organizer",
+  body: Record<string, unknown>,
+): Promise<T> {
+  const { invokeEdge } = await import("../invoke-edge");
+  const { data, error } = await invokeEdge<T & { ok?: boolean; error?: string }>(
+    functionName,
+    body,
+  );
+  if (error) throw new Error(error.message);
+  const payload = data as (T & { ok?: boolean; error?: string }) | undefined;
+  if (!payload?.ok) {
+    throw new Error(
+      (payload?.error as string) || "Request failed",
+    );
+  }
+  return payload as T;
+}
+
 export async function getEventStaff(
   eventId: number,
 ): Promise<{
@@ -514,7 +538,7 @@ export async function getEventStaff(
   staff: StaffEntry[];
   callerRole: "owner" | "admin" | null;
 }> {
-  return invokeEdgeFunction("get-event-staff", { event_id: eventId });
+  return invokeStaffEdge("get-event-staff", { event_id: eventId });
 }
 
 export async function inviteCoOrganizer(
@@ -522,7 +546,7 @@ export async function inviteCoOrganizer(
   username: string,
   role: CoOrgRole,
 ): Promise<{ ok: boolean; invite_id?: string; reinvited?: boolean }> {
-  return invokeEdgeFunction("invite-co-organizer", {
+  return invokeStaffEdge("invite-co-organizer", {
     action: "invite",
     event_id: eventId,
     username,
@@ -540,7 +564,7 @@ export async function addCoOrganizer(
   username: string,
   role: CoOrgRole,
 ): Promise<{ ok: boolean; invite_id?: string; added?: boolean }> {
-  return invokeEdgeFunction("invite-co-organizer", {
+  return invokeStaffEdge("invite-co-organizer", {
     action: "add",
     event_id: eventId,
     username,
@@ -551,7 +575,7 @@ export async function addCoOrganizer(
 export async function acceptCoOrganizerInvite(
   inviteId: string,
 ): Promise<{ ok: boolean; alreadyAccepted?: boolean }> {
-  return invokeEdgeFunction("invite-co-organizer", {
+  return invokeStaffEdge("invite-co-organizer", {
     action: "accept",
     invite_id: inviteId,
   });
@@ -560,7 +584,7 @@ export async function acceptCoOrganizerInvite(
 export async function declineCoOrganizerInvite(
   inviteId: string,
 ): Promise<{ ok: boolean }> {
-  return invokeEdgeFunction("invite-co-organizer", {
+  return invokeStaffEdge("invite-co-organizer", {
     action: "decline",
     invite_id: inviteId,
   });
@@ -569,7 +593,7 @@ export async function declineCoOrganizerInvite(
 export async function revokeCoOrganizer(
   inviteId: string,
 ): Promise<{ ok: boolean }> {
-  return invokeEdgeFunction("invite-co-organizer", {
+  return invokeStaffEdge("invite-co-organizer", {
     action: "revoke",
     invite_id: inviteId,
   });

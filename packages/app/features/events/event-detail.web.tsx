@@ -1,5 +1,6 @@
 import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { canScanTickets, canViewFullRoster } from "@dvnt/app/lib/events/event-role";
 /**
  * Event detail — WEB (@dvnt/app/features/events/event-detail). URL /events/{slug}.
@@ -702,6 +703,19 @@ export function EventDetailScreen() {
   const mayScan = canScanTickets(doorRole);
   const mayManage = isHost || canViewFullRoster(doorRole);
 
+  // Promoters get their own door back to the promoter dashboard — the
+  // payout-setup screen must always be reachable, not just from the push
+  // notification that says they were added.
+  const promoterEventId = parseInt(eventId || "0", 10);
+  const promoterSelfQuery = useQuery({
+    queryKey: ["promoter-self", promoterEventId],
+    queryFn: () => promotersApi.me(promoterEventId),
+    enabled: isAuthenticated && Number.isFinite(promoterEventId) && promoterEventId > 0,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const isPromoter = promoterSelfQuery.data?.isPromoter === true;
+
   /**
    * Open the event's Lynk — and make sure there is a live one to open.
    *
@@ -1293,6 +1307,22 @@ export function EventDetailScreen() {
                   Scan tickets
                 </button>
               ) : null}
+            </div>
+          ) : null}
+
+          {/* Promoter door — code, earnings, payout setup. Always reachable
+              here for a linked promoter, not only via the "you were added"
+              notification. */}
+          {isPromoter ? (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => router.push(`/feed/events/${eventId}/promoter`)}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#8A40CF]/60 text-[15px] font-semibold text-white active:bg-white/10"
+              >
+                <Megaphone size={17} color="#C084FC" />
+                My promoter dashboard
+              </button>
             </div>
           ) : null}
 

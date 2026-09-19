@@ -135,13 +135,25 @@ Deno.serve(withSentry("organizer-refund", async (req: Request) => {
       );
     }
 
-    // Free tickets: no Stripe call, just void directly. The paid path
-    // flows through charge.refunded which handles inventory + waitlist
-    // promotion; do the same inline here.
-    if (!ticket.stripe_payment_intent_id) {
+    // Paid vs free is decided by what was CHARGED, not by whether a
+    // PaymentIntent happens to be linked. A paid ticket with no PI must
+    // never be silently voided — the guest is owed money.
+    const isPaid = (ticket.purchase_amount_cents ?? 0) > 0;
+    if (isPaid && !ticket.stripe_payment_intent_id) {
+      return errorResponse(
+        "Paid ticket has no payment record — refund it manually in Stripe.",
+        409,
+      );
+    }
+
+    // Free/RSVP tickets: nothing was charged, so nothing is refunded.
+    // Void directly — no Stripe call. The paid path flows through
+    // charge.refunded which handles inventory + waitlist promotion;
+    // do the same inline here.
+    if (!isPaid) {
       const { error: updateErr } = await supabase
         .from("tickets")
-        .update({ status: "refunded" })
+        .update({ status: "void" })
         .eq("id", ticketId);
       if (updateErr) {
         console.error("[organizer-refund] void error:", updateErr);
