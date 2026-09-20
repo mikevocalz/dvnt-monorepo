@@ -11,6 +11,10 @@ import {
   doorsOpen,
   isLive,
   isPast,
+  eventEndAt,
+  eventEnded,
+  eventSalesClosed,
+  SALES_CUTOFF_MINUTES,
 } from "./event-time.ts";
 
 // LA event: absolute instant 04:00Z, venue zone America/Los_Angeles (summer → PDT).
@@ -73,4 +77,36 @@ test("time gates operate on the UTC instant (viewer/server tz irrelevant)", () =
   assert.equal(saleWindowOpen(start, end, start + 1), true);
   assert.equal(saleWindowOpen(start, end, end), false); // closed at end
   assert.equal(saleWindowOpen(null, null, Date.now()), true); // unbounded
+});
+
+test("eventEndAt: anchor chain mirrors the server — end → start/fullDate → date", () => {
+  const end = "2026-09-21T07:00:00Z";
+  const start = "2026-09-21T02:00:00Z";
+  // endDate wins over start; camelCase and snake_case both read.
+  assert.equal(eventEndAt({ endDate: end, fullDate: start }), Date.parse(end));
+  assert.equal(eventEndAt({ end_date: end, start_date: start }), Date.parse(end));
+  // No end → anchors on start (fullDate is the card's start stamp).
+  assert.equal(eventEndAt({ fullDate: start }), Date.parse(start));
+  assert.equal(eventEndAt({ start_date: start }), Date.parse(start));
+  // ISO `date` is the last resort; day-of-month chips are NOT dates.
+  assert.equal(eventEndAt({ date: end }), Date.parse(end));
+  assert.equal(eventEndAt({ date: "05" }), null);
+  assert.equal(eventEndAt({ date: "--" }), null);
+  assert.equal(eventEndAt({}), null);
+  assert.equal(eventEndAt(null), null);
+});
+
+test("eventEnded / eventSalesClosed: cutoff is end anchor − 30 min", () => {
+  const end = Date.parse("2026-09-21T07:00:00Z");
+  const ev = { endDate: "2026-09-21T07:00:00Z" };
+  const cutoff = end - SALES_CUTOFF_MINUTES * 60_000;
+  assert.equal(eventEnded(ev, end - 1), false);
+  assert.equal(eventEnded(ev, end), true);
+  // Sales close 30 min BEFORE end — the CTA dies while the event runs.
+  assert.equal(eventSalesClosed(ev, cutoff - 1), false);
+  assert.equal(eventSalesClosed(ev, cutoff), true);
+  assert.equal(eventSalesClosed(ev, end - 1), true);
+  // No anchor → stays open (mirrors isSalesClosed).
+  assert.equal(eventSalesClosed({}, end + 999_000), false);
+  assert.equal(eventEnded({}, end + 999_000), false);
 });

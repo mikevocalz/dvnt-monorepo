@@ -47,6 +47,7 @@ import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import { slugify } from "@dvnt/app/lib/slug";
 import { EVENT_VISIBILITY_COPY } from "@dvnt/app/lib/events/event-visibility-copy";
+import { eventEnded } from "@dvnt/app/lib/events/event-time";
 import { EVENT_CARD_ASPECT } from "@dvnt/app/components/event/feed-event-card-shape";
 import {
   resolvePosterUrl,
@@ -678,9 +679,15 @@ function LargeEventCard({
             {e.price ? `$${e.price}` : "Free"}
             {e.totalAttendees ? ` · ${e.totalAttendees} going` : ""}
           </span>
-          <span className="px-5 py-1.5 rounded-lg bg-[#3EA4E5] text-white text-sm font-bold">
-            RSVP
-          </span>
+          {eventEnded(e) ? (
+            <span className="px-5 py-1.5 rounded-lg bg-white/10 text-white/60 text-sm font-bold">
+              Ended
+            </span>
+          ) : (
+            <span className="px-5 py-1.5 rounded-lg bg-[#3EA4E5] text-white text-sm font-bold">
+              RSVP
+            </span>
+          )}
         </div>
       </div>
     </div>

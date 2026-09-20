@@ -12,6 +12,7 @@ import {
 } from "./auth-helper";
 import { invokeEdge } from "./invoke-edge";
 import { filterDiscoverableEvents } from "../events/event-discovery";
+import { eventSalesClosed } from "../events/event-time";
 import type { TicketTypeCategory } from "./ticket-types";
 import type { TierType, TierVisibility } from "../tickets/pricing";
 import type { DraftAddon } from "../../features/events/create/addon-form";
@@ -306,6 +307,9 @@ export const eventsApi = {
           title: event.title,
           description: event.description,
           ...dateParts,
+          // Cards need the real end instant to swap RSVP → Ended; the RPC
+          // already returns end_date, it just never reached the client.
+          endDate: event.end_date || undefined,
           location: event.location,
           image: resolveEventImage(event),
           // Video flyer routes through the resolver — null when the
@@ -401,6 +405,9 @@ export const eventsApi = {
           title: event.title,
           description: event.description,
           ...dateParts,
+          // Cards need the real end instant to swap RSVP → Ended; the RPC
+          // already returns end_date, it just never reached the client.
+          endDate: event.end_date || undefined,
           location: event.location,
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
@@ -495,6 +502,7 @@ export const eventsApi = {
           title: event[DB.events.title],
           description: event[DB.events.description],
           ...dateParts,
+          endDate: event[DB.events.endDate] || undefined,
           location: event[DB.events.location],
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
@@ -542,6 +550,7 @@ export const eventsApi = {
           title: event[DB.events.title],
           description: event[DB.events.description],
           ...dateParts,
+          endDate: event[DB.events.endDate] || undefined,
           location: event[DB.events.location],
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
@@ -612,6 +621,7 @@ export const eventsApi = {
           title: event[DB.events.title],
           description: event[DB.events.description],
           ...dateParts,
+          endDate: event[DB.events.endDate] || undefined,
           location: event[DB.events.location],
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
@@ -803,6 +813,20 @@ export const eventsApi = {
       if (!authId) throw new Error("Not authenticated");
 
       const eventIdInt = parseInt(eventId);
+
+      // Direct table write — no edge function guards this rail, so the
+      // sales cutoff has to live here (and in the DB trigger behind it).
+      // Cancelling (not_going) stays allowed on ended events.
+      if (status !== "not_going") {
+        const { data: ev } = await supabase
+          .from(DB.events.table)
+          .select(`${DB.events.startDate}, ${DB.events.endDate}, date`)
+          .eq(DB.events.id, eventIdInt)
+          .single();
+        if (ev && eventSalesClosed(ev)) {
+          throw new Error("This event has ended — RSVPs are closed.");
+        }
+      }
 
       // Check if RSVP exists (event_rsvps.user_id is text/auth_id)
       const { data: existing } = await supabase

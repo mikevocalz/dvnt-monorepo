@@ -23,6 +23,7 @@ import {
   sendResendEmail,
   verificationCode,
 } from "../_shared/send-resend-email.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -114,12 +115,15 @@ Deno.serve(async (req) => {
     // The event must be a public, free-RSVP event (paid events use checkout).
     const { data: ev, error: evErr } = await supabase
       .from("events")
-      .select("ticketing_enabled, status, visibility")
+      .select("ticketing_enabled, status, visibility, start_date, end_date, date")
       .eq("id", eventId)
       .single();
     if (evErr || !ev) return err("event_not_found", "Event not found.", 404);
     if (ev.visibility !== "public") return err("event_not_found", "Event not found.", 404);
     if (ev.ticketing_enabled) return err("requires_checkout", "This event requires a paid ticket.");
+    // Fail fast: without this, a closed event issues the OTP and only rejects
+    // at rsvp-issue-guest — the guest does the whole code dance for nothing.
+    if (isSalesClosed(ev)) return err("sales_closed", "Ticket sales have ended for this event.");
 
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
 

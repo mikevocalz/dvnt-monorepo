@@ -15,7 +15,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter, usePathname } from "solito/navigation";
 import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
 import { computeFees } from "@dvnt/app/lib/stripe/fee-calculator";
-import { formatEventTime } from "@dvnt/app/lib/events/event-time";
+import {
+  formatEventTime,
+  eventEnded,
+  eventSalesClosed,
+} from "@dvnt/app/lib/events/event-time";
 import {
   ArrowLeft,
   ArrowUpCircle,
@@ -1398,6 +1402,19 @@ export function EventDetailScreen() {
                 >
                   <Ticket size={18} color="#379ED8" /> View ticket
                 </button>
+              );
+            }
+
+            // Sales window closed — every checkout/RSVP rail enforces the
+            // same cutoff server-side (end − 30 min), so a live button here
+            // would only click through to a sales_closed error. Ticket
+            // holders still get "View ticket" above; everyone else sees the
+            // honest state instead of Buy/RSVP/Waitlist on a dead event.
+            if (eventSalesClosed(e)) {
+              return (
+                <div className="w-full mt-4 h-12 rounded-xl bg-white/[0.05] text-white/50 font-bold flex items-center justify-center">
+                  {eventEnded(e) ? "Event ended" : "Ticket sales ended"}
+                </div>
               );
             }
 

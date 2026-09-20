@@ -124,3 +124,57 @@ export function isPast(
   const e = ms(endsAtUtc) ?? ms(startsAtUtc);
   return e != null && now > e;
 }
+
+// ── Sales cutoff ────────────────────────────────────────────────────────────
+// Client mirror of apps/mobile/supabase/functions/_shared/sales-cutoff.ts —
+// the anchor chain and the 30-minute lead MUST stay identical or the UI will
+// offer a "Buy" button the server then refuses. Anchor: end → start → date.
+
+export const SALES_CUTOFF_MINUTES = 30;
+
+interface EventTimingFields {
+  endDate?: string | null;
+  end_date?: string | null;
+  startDate?: string | null;
+  start_date?: string | null;
+  fullDate?: string | null;
+  date?: string | null;
+}
+
+/** End anchor as UTC ms (null when the event carries no usable dates). */
+export function eventEndAt(
+  event: EventTimingFields | null | undefined,
+): number | null {
+  // `date` on card-shaped objects is the day-of-month chip ("05"), not an
+  // ISO stamp — only treat it as a date when it actually looks like one.
+  const rawDate = event?.date;
+  const dateMs =
+    rawDate && /[-/T]/.test(rawDate) ? ms(rawDate) : null;
+  return (
+    ms(event?.endDate ?? event?.end_date) ??
+    ms(event?.startDate ?? event?.start_date ?? event?.fullDate) ??
+    dateMs
+  );
+}
+
+/** Event is over (past its end anchor). */
+export function eventEnded(
+  event: EventTimingFields | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  const end = eventEndAt(event);
+  return end != null && now >= end;
+}
+
+/**
+ * Card-not-present sales/RSVPs are closed — 30 min before the end anchor,
+ * same rule the checkout/RSVP edge functions enforce. Tap to Pay is the
+ * only carve-out and never consults this.
+ */
+export function eventSalesClosed(
+  event: EventTimingFields | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  const end = eventEndAt(event);
+  return end != null && now >= end - SALES_CUTOFF_MINUTES * 60_000;
+}
