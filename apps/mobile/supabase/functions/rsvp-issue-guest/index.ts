@@ -110,10 +110,22 @@ Deno.serve(async (req) => {
       ? body.attendee_names.map((n: unknown) => (n == null ? "" : String(n)))
       : null;
 
-    const grant = await verifyGrant(String(body.grant || ""));
+    const grantRaw = String(body.grant || "");
+    const grant = await verifyGrant(grantRaw);
     if (!grant) return err("invalid_grant", "Verification expired. Confirm your email again.", 401);
     if (grant.event_id !== eventId)
       return err("grant_mismatch", "Verification doesn't match this event.", 401);
+
+    // Idempotency: the grant's hash is the order's dedupe key — a
+    // double-tap Confirm or a retried request with the same grant returns
+    // the SAME order's tickets instead of minting a second set.
+    const grantHashBuf = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(grantRaw),
+    );
+    const idempotencyKey = "rsvp:" + [...new Uint8Array(grantHashBuf)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
 
     // RSVP cutoff: 30 min before event end — Tap to Pay is the only
     // exception after that. The event row is also reused for the email below.
@@ -130,6 +142,7 @@ Deno.serve(async (req) => {
       p_guest_name: guestName,
       p_attendee_names: attendeeNames,
       p_quantity: quantity,
+      p_idempotency_key: idempotencyKey,
     });
     if (error) {
       console.error("[rsvp-issue-guest] rpc error:", error);
@@ -137,6 +150,9 @@ Deno.serve(async (req) => {
     }
     const result = typeof data === "string" ? JSON.parse(data) : data;
     if (result?.error) return err(result.error, "Couldn't RSVP: " + result.error);
+    // Idempotent replay (same grant re-submitted): return the existing
+    // tickets but do NOT re-send the email — issuance emails are once.
+    const isIdempotentReplay = result?.idempotent === true;
 
     // Email the ticket(s) — one delivery, each with its own no-login view link.
     const tickets: {
@@ -156,7 +172,7 @@ Deno.serve(async (req) => {
         })
       : null;
 
-    await sendResendEmail({
+    if (!isIdempotentReplay) await sendResendEmail({
       to: grant.destination,
       ...ticketConfirmation({
         eventTitle: evTitle,

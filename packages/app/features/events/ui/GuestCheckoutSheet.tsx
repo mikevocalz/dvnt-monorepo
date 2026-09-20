@@ -9,7 +9,7 @@
  * which tier the user picked.
  */
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   Modal,
   View,
@@ -60,6 +60,13 @@ export function GuestCheckoutSheet({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // One key per sheet mount — the order's idempotency key, so a double
+  // submission returns the same tickets instead of minting duplicates.
+  const requestKeyRef = useRef(
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `gc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
 
   const trimmedEmail = email.trim().toLowerCase();
   const isValid = EMAIL_RE.test(trimmedEmail);
@@ -88,6 +95,7 @@ export function GuestCheckoutSheet({
         quantity,
         guestEmail: trimmedEmail,
         guestName: name.trim() || undefined,
+        idempotencyKey: requestKeyRef.current,
       });
       if (result.error) {
         showToast("error", "Checkout failed", result.error);

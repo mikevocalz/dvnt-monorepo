@@ -185,7 +185,40 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
       promo_code,
       promoter_code,
       unlock_code,
+      idempotency_key,
     } = await req.json();
+
+    // Idempotency: one key per checkout attempt — double-tap/retry returns
+    // the SAME order+tickets instead of minting a duplicate set.
+    const idemKey =
+      typeof idempotency_key === "string" &&
+      idempotency_key.length <= 128 &&
+      /^[A-Za-z0-9:_-]+$/.test(idempotency_key)
+        ? idempotency_key
+        : null;
+
+    // Replay short-circuit BEFORE any cap/inventory checks: a retried
+    // request would otherwise trip max_per_user on the tickets it already
+    // minted. Returns the SAME order's tickets, never a second issuance.
+    if (idemKey) {
+      const { data: existing } = await supabase
+        .from("orders")
+        .select("id")
+        .eq("idempotency_key", idemKey)
+        .maybeSingle();
+      if (existing) {
+        const { data: existingTickets } = await supabase
+          .from("tickets")
+          .select("id, qr_token")
+          .eq("order_id", existing.id);
+        return json({
+          tickets: existingTickets || [],
+          free: true,
+          order_id: existing.id,
+          idempotent: true,
+        });
+      }
+    }
 
     if (!event_id || !ticket_type_id) {
       return json({ error: "Missing required fields" }, 400);
@@ -326,44 +359,10 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
 
     // ── Free tickets (or fully discounted): issue directly ────
     if (effectiveSubtotal === 0) {
-      const tickets = [];
-      const eventIdInt = parseInt(event_id);
-      for (let i = 0; i < quantity; i++) {
-        const ticketUuid = crypto.randomUUID();
-        const { qrToken, qrPayload } = await createSignedQrPayload(
-          ticketUuid,
-          eventIdInt,
-        );
-        tickets.push({
-          id: ticketUuid,
-          event_id: eventIdInt,
-          ticket_type_id,
-          user_id,
-          status: "active",
-          qr_token: qrToken,
-          qr_payload: qrPayload,
-          purchase_amount_cents: 0,
-        });
-      }
-
-      const { data: issued, error: issueError } = await supabase
-        .from("tickets")
-        .insert(tickets)
-        .select("id, qr_token");
-
-      if (issueError) throw issueError;
-
-      await supabase
-        .from("ticket_types")
-        .update({ quantity_sold: (ticketType.quantity_sold || 0) + quantity })
-        .eq("id", ticket_type_id);
-
-      // Increment promo usage if a promo was used
-      if (promoResult) {
-        await incrementPromoUsage(supabase, promoResult.promo_code_id);
-      }
-
-      const { data: freeOrder } = await supabase
+      // Order row FIRST — it carries the idempotency key, so a losing
+      // racer fails here before any tickets exist. Tickets then stamp
+      // order_id directly.
+      const { data: freeOrder, error: freeOrderErr } = await supabase
         .from("orders")
         .insert({
           user_id,
@@ -373,6 +372,7 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
           total_cents: 0,
           event_id: parseInt(event_id),
           paid_at: new Date().toISOString(),
+          quantity,
           ...(promoResult
             ? {
                 promo_code_id: promoResult.promo_code_id,
@@ -391,9 +391,74 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
                 promoter_commission_amount_cents: 0,
               }
             : {}),
+          ...(idemKey ? { idempotency_key: idemKey } : {}),
         })
         .select("id")
         .single();
+
+      if (freeOrderErr?.code === "23505" && idemKey) {
+        const { data: won } = await supabase
+          .from("orders")
+          .select("id")
+          .eq("idempotency_key", idemKey)
+          .maybeSingle();
+        if (won) {
+          const { data: wonTickets } = await supabase
+            .from("tickets")
+            .select("id, qr_token")
+            .eq("order_id", won.id);
+          return json({
+            tickets: wonTickets || [],
+            free: true,
+            order_id: won.id,
+            idempotent: true,
+          });
+        }
+      }
+      if (freeOrderErr) throw freeOrderErr;
+
+      const tickets = [];
+      const eventIdInt = parseInt(event_id);
+      for (let i = 0; i < quantity; i++) {
+        const ticketUuid = crypto.randomUUID();
+        const { qrToken, qrPayload } = await createSignedQrPayload(
+          ticketUuid,
+          eventIdInt,
+        );
+        tickets.push({
+          id: ticketUuid,
+          event_id: eventIdInt,
+          ticket_type_id,
+          user_id,
+          status: "active",
+          qr_token: qrToken,
+          qr_payload: qrPayload,
+          purchase_amount_cents: 0,
+          order_id: freeOrder?.id ?? null,
+        });
+      }
+
+      const { data: issued, error: issueError } = await supabase
+        .from("tickets")
+        .insert(tickets)
+        .select("id, qr_token");
+
+      if (issueError) {
+        // Order exists but no tickets — drop it so a retry starts clean
+        // rather than replaying an empty order off the idempotency key.
+        await supabase.from("orders").delete().eq("id", freeOrder?.id);
+        throw issueError;
+      }
+
+      await supabase
+        .from("ticket_types")
+        .update({ quantity_sold: (ticketType.quantity_sold || 0) + quantity })
+        .eq("id", ticket_type_id);
+
+      // Increment promo usage if a promo was used
+      if (promoResult) {
+        await incrementPromoUsage(supabase, promoResult.promo_code_id);
+      }
 
       if (freeOrder?.id) {
         await supabase.from("order_timeline").insert([

@@ -94,6 +94,39 @@ Deno.serve(async (req) => {
     if (!EMAIL_RE.test(guestEmail)) return err("invalid_email", "Enter a valid email.");
     if (!Number.isFinite(eventId) || !ticketTypeId) return err("invalid_request", "Missing event or tier.");
 
+    // Idempotency: the client generates one key per sheet open, so a
+    // double-tap or retried submission returns the SAME order+tickets.
+    const idempotencyKey =
+      typeof body.idempotency_key === "string" &&
+      body.idempotency_key.length <= 128 &&
+      /^[A-Za-z0-9:_-]+$/.test(body.idempotency_key)
+        ? body.idempotency_key
+        : null;
+
+    // Replay short-circuit BEFORE any cap/inventory checks: a retried
+    // request would otherwise trip max_per_user on the tickets it already
+    // minted. Returns the SAME order, never a second issuance.
+    if (idempotencyKey) {
+      const { data: existing } = await supabase
+        .from("orders")
+        .select("id, quantity")
+        .eq("idempotency_key", idempotencyKey)
+        .maybeSingle();
+      if (existing) {
+        const { count } = await supabase
+          .from("tickets")
+          .select("id", { count: "exact", head: true })
+          .eq("order_id", existing.id);
+        return json({
+          ok: true,
+          free: true,
+          order_id: existing.id,
+          count: count ?? existing.quantity ?? quantity,
+          idempotent: true,
+        });
+      }
+    }
+
     // Event must be public + selling tickets, not cancelled. Anon never reaches
     // private/spicy events (the visibility resolver hides them).
     const { data: ev } = await supabase
@@ -213,6 +246,7 @@ Deno.serve(async (req) => {
           event_id: eventId,
           paid_at: new Date().toISOString(),
           currency: "usd",
+          ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
         })
         .select("id")
         .single();
@@ -221,6 +255,27 @@ Deno.serve(async (req) => {
           .from("ticket_holds")
           .update({ status: "released" })
           .eq("id", freeHold.holdId);
+        // Lost the same-key race → the winner's order is the answer.
+        if (freeOrderErr?.code === "23505" && idempotencyKey) {
+          const { data: won } = await supabase
+            .from("orders")
+            .select("id, quantity")
+            .eq("idempotency_key", idempotencyKey)
+            .maybeSingle();
+          if (won) {
+            const { count } = await supabase
+              .from("tickets")
+              .select("id", { count: "exact", head: true })
+              .eq("order_id", won.id);
+            return json({
+              ok: true,
+              free: true,
+              order_id: won.id,
+              count: count ?? won.quantity ?? quantity,
+              idempotent: true,
+            });
+          }
+        }
         console.error("[guest-checkout] free order insert failed:", freeOrderErr);
         return err("internal_error", "Could not issue your ticket.", 500);
       }

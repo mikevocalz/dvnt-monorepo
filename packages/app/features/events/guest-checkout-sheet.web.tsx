@@ -74,6 +74,7 @@ export function GuestCheckoutSheet() {
         quantity: s.quantity,
         guest_email: email,
         guest_name: s.name.trim() || undefined,
+        idempotency_key: s.requestKey,
         ...(collectNames ? { attendee_names: s.attendeeNames.slice(0, s.quantity) } : {}),
         ...(promoterCode ? { promoter_code: promoterCode } : {}),
       },

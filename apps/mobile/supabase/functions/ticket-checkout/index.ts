@@ -122,6 +122,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       unlock_code,
       guest_email,
       guest_name,
+      idempotency_key,
     } = await req.json();
 
     // ── Promoter attribution code (WS-4 / Phase 2) ─────────────
@@ -156,6 +157,40 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
 
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedGuestEmail);
     const isGuest = !user_id && !!trimmedGuestEmail && isValidEmail;
+    // Idempotency: one key per checkout attempt — double-tap/retry returns
+    // the SAME order+tickets instead of minting a duplicate set.
+    const idemKey =
+      typeof idempotency_key === "string" &&
+      idempotency_key.length <= 128 &&
+      /^[A-Za-z0-9:_-]+$/.test(idempotency_key)
+        ? idempotency_key
+        : null;
+
+    // Replay short-circuit BEFORE any cap/inventory checks: a retried
+    // request would otherwise trip max_per_user on the tickets it already
+    // minted. Returns the SAME order's tickets, never a second issuance.
+    if (idemKey) {
+      const { data: existing } = await supabase
+        .from("orders")
+        .select("id")
+        .eq("idempotency_key", idemKey)
+        .maybeSingle();
+      if (existing) {
+        const { data: existingTickets } = await supabase
+          .from("tickets")
+          .select("id, qr_token")
+          .eq("order_id", existing.id);
+        return new Response(
+          JSON.stringify({
+            tickets: existingTickets || [],
+            free: true,
+            order_id: existing.id,
+            idempotent: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+    }
 
     if (!user_id && !isGuest) {
       return new Response(
@@ -394,6 +429,70 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
 
     // Free tickets (or fully discounted): issue directly without Stripe
     if (effectiveSubtotal === 0) {
+      // ── Order row FIRST — it carries the idempotency key, so a losing
+      // racer fails here before any tickets exist, and the winner's rows
+      // are returned below. Tickets then stamp order_id directly.
+      const { data: freeOrder, error: freeOrderErr } = await supabase
+        .from("orders")
+        .insert({
+          user_id: isGuest ? null : user_id,
+          guest_email: isGuest ? trimmedGuestEmail : null,
+          type: "event_ticket",
+          status: "paid",
+          subtotal_cents: 0,
+          total_cents: 0,
+          event_id: parseInt(event_id),
+          paid_at: new Date().toISOString(),
+          quantity,
+          ...(promoResult
+            ? {
+                promo_code_id: promoResult.promo_code_id,
+                discount_cents: discountCents,
+              }
+            : {}),
+          ...(promoterResult
+            ? {
+                promoter_policy_version: "v2_eligible_subtotal_after_discount",
+                promoter_original_amount_cents: rawSubtotal,
+                promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+                promoter_discount_amount_cents: promoterResult.discount_cents,
+                promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+                promoter_code: promoterResult.code,
+                promoter_commission_bps: promoterResult.promoter_commission_bps,
+                promoter_commission_amount_cents: 0,
+              }
+            : {}),
+          ...(idemKey ? { idempotency_key: idemKey } : {}),
+        })
+        .select("id")
+        .single();
+
+      // Lost the same-key race → return the winner's tickets. No tickets
+      // were minted on this attempt, so nothing is orphaned or doubled.
+      if (freeOrderErr?.code === "23505" && idemKey) {
+        const { data: won } = await supabase
+          .from("orders")
+          .select("id")
+          .eq("idempotency_key", idemKey)
+          .maybeSingle();
+        if (won) {
+          const { data: wonTickets } = await supabase
+            .from("tickets")
+            .select("id, qr_token")
+            .eq("order_id", won.id);
+          return new Response(
+            JSON.stringify({
+              tickets: wonTickets || [],
+              free: true,
+              order_id: won.id,
+              idempotent: true,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+      }
+      if (freeOrderErr) throw freeOrderErr;
+
       const tickets = [];
       const eventIdInt = parseInt(event_id);
       for (let i = 0; i < quantity; i++) {
@@ -414,6 +513,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
           qr_token: qrToken,
           qr_payload: qrPayload,
           purchase_amount_cents: 0,
+          order_id: freeOrder?.id ?? null,
         });
       }
 
@@ -422,7 +522,12 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
         .insert(tickets)
         .select("id, qr_token");
 
-      if (issueError) throw issueError;
+      if (issueError) {
+        // Order exists but no tickets — drop it so a retry starts clean
+        // rather than replaying an empty order off the idempotency key.
+        await supabase.from("orders").delete().eq("id", freeOrder?.id);
+        throw issueError;
+      }
 
       // Increment sold count
       await supabase
@@ -442,40 +547,6 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       if (promoResult) {
         await incrementPromoUsage(supabase, promoResult.promo_code_id);
       }
-
-      // ── Create order row for free ticket ─────────────────
-      const { data: freeOrder } = await supabase
-        .from("orders")
-        .insert({
-          user_id: isGuest ? null : user_id,
-          guest_email: isGuest ? trimmedGuestEmail : null,
-          type: "event_ticket",
-          status: "paid",
-          subtotal_cents: 0,
-          total_cents: 0,
-          event_id: parseInt(event_id),
-          paid_at: new Date().toISOString(),
-          ...(promoResult
-            ? {
-                promo_code_id: promoResult.promo_code_id,
-                discount_cents: discountCents,
-              }
-            : {}),
-          ...(promoterResult
-            ? {
-                promoter_policy_version: "v2_eligible_subtotal_after_discount",
-                promoter_original_amount_cents: rawSubtotal,
-                promoter_customer_discount_bps: promoterResult.customer_discount_bps,
-                promoter_discount_amount_cents: promoterResult.discount_cents,
-                promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
-                promoter_code: promoterResult.code,
-                promoter_commission_bps: promoterResult.promoter_commission_bps,
-                promoter_commission_amount_cents: 0,
-              }
-            : {}),
-        })
-        .select("id")
-        .single();
 
       // Promoter attribution for free orders — no Stripe webhook will
       // fire, so record it here. Earning is 0 (organizer nets $0 on a
@@ -497,12 +568,6 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       }
 
       if (freeOrder?.id) {
-        // Stamp the authoritative order link on the tickets just issued —
-        // the bundle email + financials read from this join.
-        await supabase
-          .from("tickets")
-          .update({ order_id: freeOrder.id })
-          .in("id", (issued || []).map((t: any) => t.id));
         await supabase.from("order_timeline").insert([
           { order_id: freeOrder.id, type: "created", label: "Order created" },
           {
