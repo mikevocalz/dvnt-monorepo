@@ -23,6 +23,8 @@ import {
   TIER_VISIBILITY_MESSAGES,
 } from "../_shared/tier-visibility.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
+import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -44,7 +46,7 @@ function err(code: string, message: string, status = 200): Response {
   return json({ ok: false, error: { code, message } }, status);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 async function stripePost(endpoint: string, body: Record<string, string>): Promise<any> {
   const res = await fetch(`https://api.stripe.com/v1${endpoint}`, {
     method: "POST",
@@ -140,7 +142,6 @@ Deno.serve(async (req) => {
         visibilityError === "tier_hidden" ? 404 : 403,
       );
     }
-    if (tier.price_cents <= 0) return err("not_paid", "This is a free RSVP event.");
     const now = Date.now();
     if (tier.sale_start && new Date(tier.sale_start).getTime() > now)
       return err("not_started", "Sales haven't started yet.");
@@ -169,6 +170,132 @@ Deno.serve(async (req) => {
         .eq("status", "active");
       if ((count ?? 0) + quantity > tier.max_per_user)
         return err("limit", `Limit ${tier.max_per_user} per person for this ticket.`);
+    }
+
+    // ── Free tier on a ticketed event — issue directly, no Stripe ─────
+    // A $0 tier is still real inventory: capacity is serialized by the
+    // same atomic hold the paid rails use (counts live ticket_holds +
+    // cart_holds), converted to sold on success, released on failure.
+    // The guest gets the standard ticket-bundle email — the QR + lookup
+    // link is the whole delivery contract for account-less buyers.
+    if (tier.price_cents <= 0) {
+      const { data: freeHold, error: freeHoldErr } = await supabase.rpc(
+        "ticket_hold_create_atomic",
+        {
+          p_ticket_type_id: ticketTypeId,
+          p_quantity: quantity,
+          p_guest_email: guestEmail,
+          p_hold_seconds: 600,
+        },
+      );
+      if (freeHoldErr || !freeHold?.ok) {
+        const available = freeHold?.available;
+        return err(
+          "sold_out",
+          typeof available === "number" && available > 0
+            ? `Only ${available} left.`
+            : "Those tickets just sold out.",
+          409,
+        );
+      }
+
+      // Order first so every ticket stamps the authoritative order_id.
+      const { data: freeOrder, error: freeOrderErr } = await supabase
+        .from("orders")
+        .insert({
+          user_id: null,
+          guest_email: guestEmail,
+          type: "event_ticket",
+          status: "paid",
+          quantity,
+          subtotal_cents: 0,
+          total_cents: 0,
+          event_id: eventId,
+          paid_at: new Date().toISOString(),
+          currency: "usd",
+        })
+        .select("id")
+        .single();
+      if (freeOrderErr || !freeOrder?.id) {
+        await supabase
+          .from("ticket_holds")
+          .update({ status: "released" })
+          .eq("id", freeHold.holdId);
+        console.error("[guest-checkout] free order insert failed:", freeOrderErr);
+        return err("internal_error", "Could not issue your ticket.", 500);
+      }
+
+      const ticketRows = [];
+      for (let i = 0; i < quantity; i++) {
+        const ticketUuid = crypto.randomUUID();
+        const { qrToken, qrPayload } = await createSignedQrPayload(
+          ticketUuid,
+          eventId,
+        );
+        ticketRows.push({
+          id: ticketUuid,
+          event_id: eventId,
+          ticket_type_id: ticketTypeId,
+          user_id: null,
+          guest_email: guestEmail,
+          guest_name: guestName || null,
+          attendee_name: attendeeNames[i] || guestName || null,
+          guest_lookup_token: crypto.randomUUID(),
+          status: "active",
+          qr_token: qrToken,
+          qr_payload: qrPayload,
+          purchase_amount_cents: 0,
+          order_id: freeOrder.id,
+          order_index: i + 1,
+          order_count: quantity,
+        });
+      }
+      const { error: ticketErr } = await supabase
+        .from("tickets")
+        .insert(ticketRows);
+      if (ticketErr) {
+        // Roll back: release the hold and drop the orphaned order so a
+        // retry starts clean rather than stranding a paid-status $0 order.
+        await supabase
+          .from("ticket_holds")
+          .update({ status: "released" })
+          .eq("id", freeHold.holdId);
+        await supabase.from("orders").delete().eq("id", freeOrder.id);
+        console.error("[guest-checkout] free ticket insert failed:", ticketErr);
+        return err("internal_error", "Could not issue your ticket.", 500);
+      }
+
+      await supabase
+        .from("ticket_holds")
+        .update({ status: "converted" })
+        .eq("id", freeHold.holdId);
+      await supabase
+        .from("ticket_types")
+        .update({ quantity_sold: (tier.quantity_sold || 0) + quantity })
+        .eq("id", ticketTypeId);
+      await supabase.from("order_timeline").insert([
+        { order_id: freeOrder.id, type: "created", label: "Order created" },
+        {
+          order_id: freeOrder.id,
+          type: "payment_captured",
+          label: "Free guest ticket issued",
+        },
+      ]);
+
+      // Bundle email from the order's authoritative rows. Failure is
+      // persisted as retryable delivery state — never a rollback of
+      // issued tickets.
+      await deliverTicketBundleEmail(supabase, freeOrder.id, {
+        kind: "fulfillment",
+        logPrefix: "[guest-checkout]",
+      });
+
+      return json({
+        ok: true,
+        free: true,
+        order_id: freeOrder.id,
+        count: quantity,
+      });
     }
 
     // Organizer must be onboarded to Stripe Connect — the charge is a

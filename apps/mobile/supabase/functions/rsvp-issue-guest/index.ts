@@ -27,7 +27,10 @@ const corsHeaders = {
 };
 // I6: fail CLOSED — no hardcoded fallback secret. A public default would let
 // anyone forge grants and mint tickets. Unset env = reject every request.
-const GRANT_SECRET = Deno.env.get("TICKET_HMAC_SECRET") || "";
+// RSVP_GRANT_SECRET is dedicated to this grant so rotating it never touches
+// the QR-signing key that hmac-qr shares with TICKET_HMAC_SECRET.
+const GRANT_SECRET = Deno.env.get("RSVP_GRANT_SECRET") ||
+  Deno.env.get("TICKET_HMAC_SECRET") || "";
 const SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live").replace(/\/$/, "");
 
 function json(data: unknown, status = 200): Response {
@@ -89,7 +92,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (!GRANT_SECRET) {
     console.error(
-      "[rsvp-issue-guest] TICKET_HMAC_SECRET not set — rejecting request",
+      "[rsvp-issue-guest] RSVP_GRANT_SECRET/TICKET_HMAC_SECRET not set — rejecting request",
     );
     return err("misconfigured", "Server misconfigured.", 500);
   }

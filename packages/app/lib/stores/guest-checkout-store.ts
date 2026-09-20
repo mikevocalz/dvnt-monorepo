@@ -22,6 +22,9 @@ interface GuestCheckoutState {
   refundDaysBefore: number | null;
   loading: boolean;
   error: string | null;
+  /** Set when a $0 tier issued directly (no Stripe redirect). */
+  done: boolean;
+  resultCount: number;
 
   openSheet: (args: {
     eventId: string;
@@ -51,6 +54,8 @@ const base = {
   refundDaysBefore: null as number | null,
   loading: false,
   error: null as string | null,
+  done: false,
+  resultCount: 0,
 };
 
 export const useGuestCheckoutStore = create<GuestCheckoutState>((set) => ({

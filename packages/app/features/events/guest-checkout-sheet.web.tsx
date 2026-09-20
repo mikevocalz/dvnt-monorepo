@@ -7,7 +7,7 @@
  * in useGuestCheckoutStore (Zustand, no useState).
  */
 import { useEffect } from "react";
-import { Minus, Plus, Lock } from "lucide-react";
+import { Minus, Plus, Lock, CheckCircle2 } from "lucide-react";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useGuestCheckoutStore } from "@dvnt/app/lib/stores/guest-checkout-store";
 import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
@@ -90,6 +90,16 @@ export function GuestCheckoutSheet() {
       }
     } else if (data?.ok && data.url) {
       url = data.url;
+    } else if (data?.ok && data.free) {
+      // $0 tier — issued directly, no Stripe redirect. The ticket email
+      // carries the QR + lookup link.
+      s.patch({
+        loading: false,
+        done: true,
+        resultCount: data.count ?? s.quantity,
+        error: null,
+      });
+      return;
     } else if (data?.error?.message) {
       message = data.error.message;
     }
@@ -101,8 +111,26 @@ export function GuestCheckoutSheet() {
     s.patch({ loading: false, error: message });
   };
 
+  const isFree = s.priceCents === 0;
+
   return (
-    <BottomSheet open={s.open} onClose={s.close} title="Checkout">
+    <BottomSheet open={s.open} onClose={s.close} title={s.done ? "" : "Checkout"}>
+      {s.done ? (
+        <div className="flex flex-col items-center gap-3 py-6 text-center">
+          <CheckCircle2 size={48} color="#3FDCFF" />
+          <h2 className="text-xl font-extrabold">You&apos;re in!</h2>
+          <p className="max-w-[300px] text-sm text-white/70">
+            {s.resultCount > 1 ? `${s.resultCount} tickets are` : "Your ticket is"} on the way
+            to <b className="text-white">{s.email}</b> — each with its own QR for the door.
+          </p>
+          <button
+            onClick={s.close}
+            className="mt-2 h-12 w-full rounded-xl bg-white/10 font-bold text-white"
+          >
+            Done
+          </button>
+        </div>
+      ) : (
       <div className="flex flex-col gap-4">
         <div>
           <div className="font-bold">{s.tierName || "Ticket"}</div>
@@ -179,12 +207,14 @@ export function GuestCheckoutSheet() {
 
         <div className="flex items-center justify-between border-t border-white/10 pt-3">
           <span className="text-sm text-white/70">Total</span>
-          <span className="font-bold">${total.toFixed(2)}</span>
+          <span className="font-bold">{isFree ? "Free" : `$${total.toFixed(2)}`}</span>
         </div>
 
-        <p className="text-[11px] text-white/40">
-          {refundLabel(s.refundPolicy, s.refundDaysBefore)}
-        </p>
+        {!isFree ? (
+          <p className="text-[11px] text-white/40">
+            {refundLabel(s.refundPolicy, s.refundDaysBefore)}
+          </p>
+        ) : null}
 
         {s.error ? <p className="text-sm text-[#FC253A]">{s.error}</p> : null}
 
@@ -194,13 +224,21 @@ export function GuestCheckoutSheet() {
           className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] font-bold text-white disabled:opacity-50"
         >
           <Lock size={16} color="#fff" />
-          {s.loading ? "Starting…" : `Pay $${total.toFixed(2)}`}
+          {s.loading
+            ? "Starting…"
+            : isFree
+              ? "Get free tickets"
+              : `Pay $${total.toFixed(2)}`}
         </button>
         <p className="text-center text-[11px] text-white/40">
-          Secure checkout by Stripe. Already have an account?{" "}
+          {isFree
+            ? "Free ticket — we'll email it to you. No account needed."
+            : "Secure checkout by Stripe."}{" "}
+          Already have an account?{" "}
           <span className="text-white/60">Sign in for faster checkout.</span>
         </p>
       </div>
+      )}
     </BottomSheet>
   );
 }

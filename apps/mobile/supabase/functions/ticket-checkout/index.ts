@@ -42,6 +42,7 @@ import {
   validateAndApplyPromoterCode,
 } from "../_shared/apply-promoter-code.ts";
 import { maybeFireCapacityAlerts } from "../_shared/capacity-alerts.ts";
+import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { checkoutTicketLines } from "../_shared/checkout-line-items.ts";
 import { withSentry } from "../_shared/sentry.ts";
@@ -496,6 +497,12 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       }
 
       if (freeOrder?.id) {
+        // Stamp the authoritative order link on the tickets just issued —
+        // the bundle email + financials read from this join.
+        await supabase
+          .from("tickets")
+          .update({ order_id: freeOrder.id })
+          .in("id", (issued || []).map((t: any) => t.id));
         await supabase.from("order_timeline").insert([
           { order_id: freeOrder.id, type: "created", label: "Order created" },
           {
@@ -506,6 +513,15 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
               : "Free ticket issued",
           },
         ]);
+        // Guests have no account/My Tickets — the bundle email IS their
+        // delivery. Authed free orders have no guest_email; the delivery
+        // helper returns no_recipient and skips cleanly.
+        if (isGuest) {
+          await deliverTicketBundleEmail(supabase, freeOrder.id, {
+            kind: "fulfillment",
+            logPrefix: "[ticket-checkout]",
+          });
+        }
       }
 
       return new Response(JSON.stringify({ tickets: issued, free: true }), {

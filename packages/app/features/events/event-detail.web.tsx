@@ -1437,11 +1437,17 @@ export function EventDetailScreen() {
                 onClick={() => {
                   // Public events, logged out → guest flow, NEVER /login.
                   if (!isAuthenticated) {
-                    if (!e.price) {
+                    // The guest-RSVP sheet only serves truly tier-less free
+                    // events (ticketing_enabled=false → rsvp-issue-guest). A
+                    // TICKETED event whose cheapest tier is $0 still needs
+                    // tier inventory, so it goes through guest-checkout's
+                    // free branch — the RSVP rail rejects ticketed events.
+                    if (!e.price && sellableTiers.length === 0) {
                       openGuestRsvp(eventId, e.title ?? "Event");
                       return;
                     }
                     const tier =
+                      sellableTiers.find((t) => t.price_cents === 0) ??
                       sellableTiers.find((t) => t.price_cents > 0) ??
                       sellableTiers[0];
                     if (tier) {
@@ -1716,8 +1722,17 @@ export function EventDetailScreen() {
                               tierName: live.name ?? t.name ?? "Ticket",
                               priceCents: live.price_cents,
                             });
-                          } else if (priceCents === 0) {
-                            openGuestRsvp(eventId, e.title ?? "Event");
+                          } else if (priceCents === 0 && live) {
+                            // $0 tier on a TICKETED event → guest-checkout's
+                            // free branch (tier inventory + order + email).
+                            // The RSVP sheet only fits tier-less free events.
+                            openGuestCheckout({
+                              eventId,
+                              eventTitle: e.title ?? "Event",
+                              tierId: String(live.id),
+                              tierName: live.name ?? t.name ?? "Ticket",
+                              priceCents: 0,
+                            });
                           } else {
                             router.push(loginPathWithReturn(pathname));
                           }

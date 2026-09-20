@@ -37,7 +37,10 @@ const ISSUE_MAX_PER_WINDOW = 5; // codes per destination per window
 const GRANT_TTL_MS = 15 * 60 * 1000;
 // I6: fail CLOSED — no hardcoded fallback secret. A public default would let
 // anyone forge the grant rsvp-issue-guest trusts. Unset env = reject requests.
-const GRANT_SECRET = Deno.env.get("TICKET_HMAC_SECRET") || "";
+// RSVP_GRANT_SECRET is dedicated to this grant so rotating it never touches
+// the QR-signing key that hmac-qr shares with TICKET_HMAC_SECRET.
+const GRANT_SECRET = Deno.env.get("RSVP_GRANT_SECRET") ||
+  Deno.env.get("TICKET_HMAC_SECRET") || "";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -88,7 +91,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (!GRANT_SECRET) {
     console.error(
-      "[rsvp-verify] TICKET_HMAC_SECRET not set — rejecting request",
+      "[rsvp-verify] RSVP_GRANT_SECRET/TICKET_HMAC_SECRET not set — rejecting request",
     );
     return err("misconfigured", "Server misconfigured.", 500);
   }
