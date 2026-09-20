@@ -1412,7 +1412,7 @@ export function EventDetailScreen() {
             // honest state instead of Buy/RSVP/Waitlist on a dead event.
             if (eventSalesClosed(e)) {
               return (
-                <div className="w-full mt-4 h-12 rounded-xl bg-white/[0.05] text-white/50 font-bold flex items-center justify-center">
+                <div className="w-full mt-4 h-12 rounded-xl bg-white/5 text-white/50 font-bold flex items-center justify-center">
                   {eventEnded(e) ? "Event ended" : "Ticket sales ended"}
                 </div>
               );
