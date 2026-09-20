@@ -38,7 +38,7 @@ type BetterAuthRecoveryClient = typeof authClient & {
   requestPasswordReset?: (args: { email: string; redirectTo: string }) => Promise<{ error?: { message?: string } | null }>;
   forgetPassword?: (args: { email: string; redirectTo: string }) => Promise<{ error?: { message?: string } | null }>;
   resetPassword?: (args: { newPassword: string; token?: string }) => Promise<{ error?: { message?: string } | null }>;
-  sendVerificationEmail?: (args: { email: string }) => Promise<{ error?: { message?: string } | null }>;
+  sendVerificationEmail?: (args: { email: string; callbackURL?: string }) => Promise<{ error?: { message?: string } | null }>;
   verifyEmail?: (args: { query: { token: string } }) => Promise<{ data?: { status?: boolean } | null; error?: { message?: string } | null }>;
 };
 
@@ -77,7 +77,14 @@ export async function submitEmailVerification(token: string) {
 
 export async function resendVerificationEmail(email: string) {
   if (!recoveryClient.sendVerificationEmail) throw new Error("Email verification not available");
-  return recoveryClient.sendVerificationEmail({ email });
+  // Without a callbackURL the emitted link 302s to "/" on the Supabase
+  // origin after verifying — a dead page. Point it at this app's own
+  // verify screen so the click lands back on a working page.
+  const callbackURL =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/auth/verify-email`
+      : "https://dvntapp.live/auth/verify-email";
+  return recoveryClient.sendVerificationEmail({ email, callbackURL });
 }
 
 let globalQueryClient: QueryClient | null = null;

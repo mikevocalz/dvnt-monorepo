@@ -73,7 +73,7 @@ export function SignupScreen() {
         // move the stepper to show work is happening.
         setIsSubmitting(true);
         try {
-          const { data, error } = await signUp.email({ email: value.email, password: value.password, name: value.username, dateOfBirth: value.dateOfBirth } as any);
+          const { data, error } = await signUp.email({ email: value.email, password: value.password, name: value.username, dateOfBirth: value.dateOfBirth, callbackURL: `${window.location.origin}/auth/verify-email` } as any);
           if (error) throw Object.assign(new Error((error as any).message || 'Signup failed'), { code: (error as any).code });
           if (!data?.user) throw new Error('Could not create account — no user was returned.');
           if (data?.user) {
