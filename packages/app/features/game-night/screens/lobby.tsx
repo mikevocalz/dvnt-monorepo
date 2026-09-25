@@ -3,6 +3,7 @@ import { Pressable, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { randomUUID } from "expo-crypto";
 import { createRoom, joinRoom } from "../rooms-api";
+import { GameNightLeaderboard } from "../components/leaderboard";
 
 export default function GameNightLobbyScreen() {
   const router = useRouter();
@@ -21,5 +22,7 @@ export default function GameNightLobbyScreen() {
     <TextInput value={code} onChangeText={(v) => { setCode(v.replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 6)); setError(null); }} maxLength={6} autoCapitalize="characters" autoCorrect={false} placeholder="ABC123" placeholderTextColor="#6B7280" className="rounded-2xl border border-border bg-secondary px-4 py-5 text-center text-2xl font-black tracking-widest text-foreground" />
     {error ? <Text className="mt-3 text-center text-red-500">{error}</Text> : null}
     <Pressable disabled={busy || code.length !== 6} onPress={join} className={`mt-4 items-center rounded-full py-4 ${code.length === 6 ? "bg-primary" : "bg-secondary"}`}><Text className="font-bold text-white">{busy ? "Joining…" : "Join table"}</Text></Pressable>
+    <Text className="mt-10 text-sm font-bold uppercase tracking-widest text-[#C9A2F0]">Top players</Text>
+    <View className="mt-3"><GameNightLeaderboard mode="classic" /></View>
   </View>;
 }

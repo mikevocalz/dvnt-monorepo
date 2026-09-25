@@ -16,6 +16,7 @@ import { useRouter } from "solito/navigation";
 import { Gamepad2, ArrowRight } from "lucide-react";
 import { useGameNightStore } from "../store";
 import { createRoom, joinRoom as joinRoomByCode } from "../rooms-api";
+import { GameNightLeaderboard } from "../components/leaderboard";
 import {
   normalizeRoomCode,
   isCompleteRoomCode,
@@ -142,6 +143,13 @@ export function GameNightLobbyScreen() {
             <p className="mt-2 text-sm text-red-400">{joinError}</p>
           ) : null}
         </form>
+
+        <h2 className="mt-12 text-sm font-medium uppercase tracking-widest text-[#C9A2F0]">
+          Top players
+        </h2>
+        <div className="mt-3">
+          <GameNightLeaderboard mode="classic" />
+        </div>
       </div>
     </main>
   );

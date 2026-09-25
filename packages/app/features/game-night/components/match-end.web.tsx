@@ -5,6 +5,7 @@
 import { Trophy } from "lucide-react";
 import { startMatch } from "../rooms-api";
 import { Scoreboard } from "./scoreboard.web";
+import { GameNightLeaderboard } from "./leaderboard";
 import { CommandError, useCommand } from "./use-command";
 import { nameFor, type GameNightState } from "./game-types";
 
@@ -39,6 +40,13 @@ export function MatchEnd({
 
       <div className="mt-5">
         <Scoreboard state={state} highlightUserId={winner} />
+      </div>
+
+      <h3 className="mt-8 text-sm font-medium uppercase tracking-widest text-[#C9A2F0]">
+        All-time top players
+      </h3>
+      <div className="mt-3">
+        <GameNightLeaderboard mode={match.mode === "duel" ? "duel" : "classic"} />
       </div>
 
       {state.me.is_host ? (
