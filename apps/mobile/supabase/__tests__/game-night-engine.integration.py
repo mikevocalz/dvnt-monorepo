@@ -24,6 +24,7 @@ MIGRATIONS = [
     "migrations/20260925010000_game_night_match_engine.sql",
     "migrations/20260925020000_game_night_deck_v1.sql",
     "migrations/20260926000000_game_night_no_deck_recycle.sql",
+    "migrations/20260927000000_game_night_realtime_players_rooms.sql",
 ]
 
 USERS = ["userAlpha", "userBravo", "userCarol", "userDave", "userErin", "userFred"]

@@ -123,6 +123,26 @@ export function useGameNightState(
         {
           event: "*",
           schema: "public",
+          table: "game_night_players",
+          filter: `room_id=eq.${roomId}`,
+        },
+        scheduleRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_night_rooms",
+          filter: `id=eq.${roomId}`,
+        },
+        scheduleRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
           table: "game_night_matches",
           filter: `room_id=eq.${roomId}`,
         },
