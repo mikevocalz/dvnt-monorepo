@@ -12,7 +12,7 @@ import {
   TextInput,
 } from "react-native";
 // Galeria → MediaLightbox temporary swap (iOS 26 gesture issue, no native dep)
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { MediaLightbox as Galeria } from "@dvnt/app/components/media/MediaLightbox";
 import { LegendList } from "@dvnt/app/components/list";
 import React, { useEffect, useCallback, useMemo } from "react";

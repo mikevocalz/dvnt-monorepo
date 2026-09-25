@@ -58,7 +58,7 @@ import {
   Users,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
