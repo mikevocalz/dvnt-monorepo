@@ -21,7 +21,7 @@
  *  - Card surface `rounded-2xl border border-white/10 bg-white/4`.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "solito/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Gamepad2, Eye, Plus, AlertTriangle } from "lucide-react";
@@ -29,9 +29,12 @@ import {
   useGsapScope,
   prefersReducedMotion,
 } from "@dvnt/app/features/screens/landing/hooks/useGsap";
-import { generateRoomCode } from "../room-code";
+import {
+  createRoom,
+  listWatchableRooms,
+  type WatchableRoom,
+} from "../rooms-api";
 import { seatsFor, entryMode, seatsLeft, MAX_PLAYERS } from "../seats";
-import { listWatchableRooms, type WatchableRoom } from "../rooms-api";
 import { useRoomsListStore } from "../rooms-list-store";
 
 /** Initial guess only — measureElement corrects it once rendered. */
@@ -79,14 +82,36 @@ export function GameNightRoomsScreen() {
     overscan: 8,
   });
 
-  const startRoom = useCallback(() => {
-    router.push(`/game-night/room/${generateRoomCode()}`);
+  const [startPending, setStartPending] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+
+  const startRoom = useCallback(async () => {
+    setStartError(null);
+    setStartPending(true);
+    try {
+      const { roomCode } = await createRoom(
+        globalThis.crypto?.randomUUID?.() ?? String(Date.now()),
+        true,
+      );
+      router.push(`/game-night/room/${roomCode}`);
+    } catch (err) {
+      setStartError(
+        err instanceof Error ? err.message : "Couldn't start a table.",
+      );
+    } finally {
+      setStartPending(false);
+    }
   }, [router]);
 
   return (
     <main className="min-h-dvh bg-[#06070d] text-white">
       <div className="mx-auto w-full max-w-3xl px-6 py-10">
-        <Header onStart={startRoom} count={rooms.length} />
+        <Header
+          onStart={startRoom}
+          count={rooms.length}
+          pending={startPending}
+          error={startError}
+        />
 
         {status === "error" ? (
           <Notice
@@ -137,7 +162,17 @@ export function GameNightRoomsScreen() {
   );
 }
 
-function Header({ onStart, count }: { onStart: () => void; count: number }) {
+function Header({
+  onStart,
+  count,
+  pending,
+  error,
+}: {
+  onStart: () => void;
+  count: number;
+  pending?: boolean;
+  error?: string | null;
+}) {
   return (
     <header className="flex items-end justify-between gap-4">
       <div>
@@ -157,12 +192,14 @@ function Header({ onStart, count }: { onStart: () => void; count: number }) {
       <div className="flex shrink-0 flex-col items-end gap-2">
         <button
           type="button"
+          disabled={pending}
           onClick={onStart}
-          className="flex items-center gap-2 rounded-xl bg-[#8A40CF] px-4 py-2.5 font-semibold text-white transition-colors hover:bg-[#7A35BC] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0]"
+          className="flex items-center gap-2 rounded-xl bg-[#8A40CF] px-4 py-2.5 font-semibold text-white transition-colors hover:bg-[#7A35BC] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0] disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Plus aria-hidden className="h-4 w-4" />
           Start a table
         </button>
+        {error ? <p className="max-w-40 text-right text-xs text-red-400">{error}</p> : null}
         {/* A private table never appears in this list, so the code route has to
             stay reachable from it — otherwise someone holding a code has
             nowhere to type it. */}

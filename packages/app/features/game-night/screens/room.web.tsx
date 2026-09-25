@@ -3,25 +3,43 @@
 /**
  * Game Night — room (WEB).
  *
- * The page has one job: get the second person in. So the code is the largest
- * thing on it — it exists to be read ALOUD across a room, and the share link is
- * the primary action. The roster is feedback, not furniture.
+ * The code still leads: someone has to be able to read it aloud and send the
+ * link. On top of that sits the full game — seats and ready before the
+ * match, the prompt/hand/judging loop during it, scores and rematch after.
  *
- * Six states, all real: connecting, error, offline, alone, joined, and the
- * no-code fallback. "Nobody has joined" and "we could not reach the room" are
- * different sentences and never share a rendering.
+ * Game truth comes from `useGameNightState` (the server projection, which is
+ * deliberately role-aware — watchers never see hands). The presence roster
+ * stays for "who is connected right now", which is a different fact from
+ * membership.
  *
  * Web laws: semantic HTML + Tailwind, no <View>/<Text>. State is Zustand.
  */
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { useParams } from "solito/navigation";
+import { useParams, useRouter } from "solito/navigation";
 import { Link } from "solito/link";
-import { Gamepad2, Check, Copy, WifiOff, AlertTriangle } from "lucide-react";
+import {
+  Gamepad2,
+  Check,
+  Copy,
+  LogOut,
+  WifiOff,
+  AlertTriangle,
+} from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useGameNightStore } from "../store";
 import { useRoomPresence } from "../use-room-presence";
 import { normalizeRoomCode, isCompleteRoomCode } from "../room-code";
+import { useGameNightState } from "../use-game-state";
+import { leaveRoom, endRoom } from "../rooms-api";
+import { SeatGrid } from "../components/seat-grid.web";
+import { ClassicRound } from "../components/classic-round.web";
+import { DuelRound } from "../components/duel-round.web";
+import { MatchEnd } from "../components/match-end.web";
+import { Scoreboard } from "../components/scoreboard.web";
+import { RoomChat } from "../components/room-chat.web";
+import { Countdown, PromptCard } from "../components/prompt-card.web";
+import { CommandError, useCommand } from "../components/use-command";
 
 const subscribeOnline = (cb: () => void) => {
   window.addEventListener("online", cb);
@@ -42,16 +60,20 @@ function useIsOnline(): boolean {
 
 export function GameNightRoomScreen() {
   const params = useParams<{ id?: string | string[] }>();
+  const router = useRouter();
   const raw = Array.isArray(params?.id) ? params.id[0] : params?.id;
   const code = raw ? normalizeRoomCode(raw) : "";
   const valid = isCompleteRoomCode(code);
 
   const user = useAuthStore((s) => s.user);
   const players = useGameNightStore((s) => s.players);
-  const status = useGameNightStore((s) => s.status);
   const copied = useGameNightStore((s) => s.copied);
   const setCopied = useGameNightStore((s) => s.setCopied);
   const online = useIsOnline();
+
+  const { state, status, error, refresh } = useGameNightState(
+    valid ? code : undefined,
+  );
 
   useRoomPresence(
     valid ? code : null,
@@ -64,6 +86,16 @@ export function GameNightRoomScreen() {
         }
       : null,
   );
+
+  // Polls/realtime do the heavy lifting; refocusing the tab is the one moment
+  // a stale projection is guaranteed to be noticed, so refresh there too.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refresh]);
 
   useEffect(() => {
     if (!copied) return;
@@ -78,11 +110,20 @@ export function GameNightRoomScreen() {
       );
       setCopied(true);
     } catch {
-      // Clipboard can be denied outright. The code is on screen at 72px, so
-      // the person still has everything they need — say nothing and let them
-      // read it out.
+      // Clipboard can be denied outright. The code is on screen — the person
+      // still has everything they need, say nothing and let them read it out.
     }
   }, [code, setCopied]);
+
+  const leave = useCallback(async () => {
+    try {
+      await leaveRoom(code);
+    } catch {
+      // Leaving is a navigation too: even if the write fails, do not trap
+      // the person on a dead screen.
+    }
+    router.push("/game-night");
+  }, [code, router]);
 
   if (!valid) {
     return (
@@ -103,144 +144,217 @@ export function GameNightRoomScreen() {
     );
   }
 
-  const others = players.filter((p) => p.id !== user?.id);
+  if (status === "not_found") {
+    return (
+      <main className="grid min-h-dvh place-items-center bg-[#06070d] px-6 text-center text-white">
+        <div className="max-w-sm">
+          <h1 className="text-2xl font-semibold">No room with that code</h1>
+          <p className="mt-2 text-white/60">
+            It may have ended, or the code is off by a character.
+          </p>
+          <Link
+            href="/game-night"
+            className="mt-6 inline-block rounded-xl bg-[#8A40CF] px-5 py-3 font-semibold text-white hover:bg-[#7A35BC]"
+          >
+            Back to Game Night
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  const match = state?.match ?? null;
+  const round = state?.round ?? null;
+  const playing = state?.room.status === "playing";
+  const matchOver = match && match.status !== "active";
+  const memberCount = state?.members.length ?? players.length;
+  const watcherMode = state?.me.role === "watcher";
 
   return (
-    <main className="min-h-dvh bg-[#06070d] px-6 py-12 text-white">
-      <div className="mx-auto grid w-full max-w-4xl gap-12 md:grid-cols-[1.1fr_1fr]">
-        <section>
+    <main className="min-h-dvh bg-[#06070d] px-6 py-8 text-white">
+      <div className="mx-auto w-full max-w-6xl">
+        <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
           <span className="inline-flex items-center gap-2 rounded-full border border-[#8A40CF]/40 bg-[#8A40CF]/10 px-3 py-1 text-xs font-medium tracking-wide text-[#C9A2F0]">
             <Gamepad2 aria-hidden className="h-3.5 w-3.5" />
             Game Night
           </span>
-
-          <h1 className="mt-6 text-sm font-medium uppercase tracking-widest text-white/50">
-            Read this out
-          </h1>
-          {/* The signature: the code is the largest type on the page, because
-              saying it to someone is the only thing that happens here. */}
-          <p className="mt-2 font-mono text-6xl font-semibold tracking-[0.18em] text-white sm:text-7xl">
+          <p className="font-mono text-2xl font-semibold tracking-[0.18em]">
             {code}
           </p>
-
           <button
             type="button"
             onClick={copyLink}
-            className="mt-8 inline-flex items-center gap-2 rounded-xl bg-[#8A40CF] px-5 py-3 font-semibold text-white transition-colors hover:bg-[#7A35BC] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0]"
+            aria-label="Copy join link"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-white/75 transition-colors hover:bg-white/10"
           >
             {copied ? (
-              <>
-                <Check aria-hidden className="h-4 w-4" />
-                Link copied
-              </>
+              <Check aria-hidden className="h-3.5 w-3.5 text-emerald-300" />
             ) : (
-              <>
-                <Copy aria-hidden className="h-4 w-4" />
-                Copy join link
-              </>
+              <Copy aria-hidden className="h-3.5 w-3.5" />
             )}
+            {copied ? "Copied" : "Copy link"}
           </button>
           <p aria-live="polite" className="sr-only">
             {copied ? "Join link copied to clipboard" : ""}
           </p>
-        </section>
-
-        <section aria-labelledby="roster-heading">
-          <h2
-            id="roster-heading"
-            className="text-sm font-medium uppercase tracking-widest text-white/50"
+          <span className="text-sm text-white/50">
+            {memberCount} {memberCount === 1 ? "person" : "people"} here
+          </span>
+          <span className="flex-1" />
+          {round?.deadline_at && match?.status === "active" ? (
+            <Countdown deadlineAt={round.deadline_at} />
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void leave()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-sm font-semibold text-white/75 transition-colors hover:bg-white/10"
           >
-            In the room · {players.length}
-          </h2>
+            <LogOut aria-hidden className="h-4 w-4" />
+            Leave
+          </button>
+        </header>
 
-          {!online ? (
-            <Notice
-              icon={<WifiOff aria-hidden className="h-4 w-4" />}
-              title="You are offline"
-              body="The roster will fill in again once you reconnect."
-            />
-          ) : status === "error" ? (
-            <Notice
-              icon={<AlertTriangle aria-hidden className="h-4 w-4" />}
-              title="Could not reach the room"
-              body="This is a connection problem, not an empty room. Reload to try again."
-            />
-          ) : status === "connecting" || status === "idle" ? (
-            <ul className="mt-4 space-y-3" aria-busy="true">
-              {[0, 1].map((i) => (
-                <li
-                  key={i}
-                  className="flex items-center gap-3 rounded-xl border border-white/10 p-3"
-                >
-                  <span className="h-10 w-10 animate-pulse rounded-lg bg-white/10" />
-                  <span className="h-3 w-28 animate-pulse rounded bg-white/10" />
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <>
-              <ul className="mt-4 space-y-3">
-                {players.map((p) => (
-                  <li
-                    key={p.id}
-                    className="flex items-center gap-3 rounded-xl border border-white/10 p-3"
-                  >
-                    {/* Rounded SQUARE avatars — the repo's rule, never circles. */}
-                    {p.avatar ? (
-                      <img
-                        src={p.avatar}
-                        alt=""
-                        className="h-10 w-10 rounded-lg object-cover"
+        {!online ? (
+          <div
+            role="status"
+            className="mt-6 flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 p-4 text-sm"
+          >
+            <WifiOff aria-hidden className="h-4 w-4" />
+            You are offline — the table will catch up when you reconnect.
+          </div>
+        ) : null}
+
+        {status === "error" ? (
+          <div
+            role="alert"
+            className="mt-6 flex items-center gap-2 rounded-xl border border-[#F0A2A2]/40 bg-[#F0A2A2]/10 p-4 text-sm"
+          >
+            <AlertTriangle aria-hidden className="h-4 w-4 text-[#F0A2A2]" />
+            Could not reach the room{error ? `: ${error}` : ""}.
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="ml-2 font-semibold text-[#C9A2F0] underline"
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
+
+        <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_360px]">
+          <div className="space-y-8">
+            {status === "loading" || status === "idle" ? (
+              <div aria-busy="true" className="space-y-3">
+                <div className="h-40 animate-pulse rounded-2xl bg-white/5" />
+                <div className="h-24 animate-pulse rounded-2xl bg-white/5" />
+              </div>
+            ) : !state ? null : state.room.status === "ended" ? (
+              <EndedRoom />
+            ) : (
+              <>
+                {/* Prompt anchors the table whenever a round is live. */}
+                {round?.prompt ? (
+                  <section aria-label="Prompt">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <PromptCard
+                        text={round.prompt.text}
+                        pick={round.prompt.pick}
+                        label={
+                          match?.mode === "duel"
+                            ? `Duel · round ${round.round_no}`
+                            : `Round ${round.round_no}`
+                        }
                       />
-                    ) : (
-                      <span className="grid h-10 w-10 place-items-center rounded-lg bg-[#8A40CF]/25 font-semibold text-[#C9A2F0]">
-                        {(p.name ?? "?").charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <span className="font-medium">
-                      {p.name ?? "Someone"}
-                      {p.id === user?.id ? (
-                        <span className="text-white/40"> (you)</span>
-                      ) : null}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+                    </div>
+                  </section>
+                ) : null}
 
-              {others.length === 0 ? (
-                <p className="mt-4 rounded-xl border border-dashed border-white/15 p-4 text-sm text-white/55">
-                  Nobody else yet. Read the code out, or send the link — this
-                  list updates the moment they arrive.
-                </p>
-              ) : null}
-            </>
-          )}
-        </section>
+                {matchOver ? (
+                  <MatchEnd state={state} code={code} onChanged={refresh} />
+                ) : playing && round ? (
+                  match?.mode === "duel" ? (
+                    <DuelRound state={state} code={code} onChanged={refresh} />
+                  ) : (
+                    <ClassicRound
+                      state={state}
+                      code={code}
+                      onChanged={refresh}
+                    />
+                  )
+                ) : (
+                  <SeatGrid state={state} code={code} onChanged={refresh} />
+                )}
+
+                {watcherMode && playing ? (
+                  <p className="rounded-xl border border-white/15 bg-white/5 p-3 text-sm text-white/55">
+                    Watching this match — you can chat, react, and see
+                    everything on the table.
+                  </p>
+                ) : null}
+
+                {match ? (
+                  <Scoreboard
+                    state={state}
+                    highlightUserId={round?.winner_user_id}
+                  />
+                ) : null}
+
+                {state.me.is_host ? (
+                  <HostControls code={code} onChanged={refresh} />
+                ) : null}
+              </>
+            )}
+          </div>
+
+          {state ? <RoomChat state={state} /> : null}
+        </div>
       </div>
     </main>
   );
 }
 
-function Notice({
-  icon,
-  title,
-  body,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-}) {
+function EndedRoom() {
   return (
-    <div
-      role="status"
-      className="mt-4 rounded-xl border border-white/15 bg-white/5 p-4"
-    >
-      <p className="flex items-center gap-2 font-medium text-white">
-        {icon}
-        {title}
+    <section className="rounded-2xl border border-white/15 bg-white/5 p-6 text-center">
+      <h2 className="text-xl font-semibold text-white">This room has ended</h2>
+      <p className="mt-2 text-sm text-white/55">
+        Thanks for playing. Start a new table when you are ready for another.
       </p>
-      <p className="mt-1 text-sm text-white/55">{body}</p>
-    </div>
+      <Link
+        href="/game-night"
+        className="mt-4 inline-block rounded-xl bg-[#8A40CF] px-5 py-3 font-semibold text-white hover:bg-[#7A35BC]"
+      >
+        Back to Game Night
+      </Link>
+    </section>
+  );
+}
+
+function HostControls({
+  code,
+  onChanged,
+}: {
+  code: string;
+  onChanged: () => void;
+}) {
+  const cmd = useCommand();
+  return (
+    <section aria-label="Host controls">
+      <button
+        type="button"
+        disabled={cmd.pending}
+        onClick={() =>
+          cmd.run(async () => {
+            await endRoom(code);
+            onChanged();
+          })
+        }
+        className="rounded-xl border border-[#F0A2A2]/40 px-4 py-2 text-sm font-semibold text-[#F0A2A2] transition-colors hover:bg-[#F0A2A2]/10 disabled:opacity-40"
+      >
+        {cmd.pending ? "Ending…" : "End room"}
+      </button>
+      <CommandError message={cmd.error} />
+    </section>
   );
 }
 

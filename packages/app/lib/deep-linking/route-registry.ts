@@ -29,6 +29,7 @@ const idSchema = z.object({ id: z.string().min(1) });
 const postIdSchema = z.object({ postId: z.string().min(1) });
 const commentIdSchema = z.object({ commentId: z.string().min(1) });
 const roomIdSchema = z.object({ roomId: z.string().min(1) });
+const gameNightCodeSchema = z.object({ code: z.string().length(6) });
 const tokenSchema = z.object({ token: z.string().min(1) });
 
 // ── Route Registry ───────────────────────────────────────────────────
@@ -280,6 +281,15 @@ export const ROUTE_REGISTRY: RouteEntry[] = [
     routerPath: "/(video)/rooms",
     auth: "auth-required",
     label: getLynkDisplayName(),
+  },
+
+  // ── Game Night ────────────────────────────────────────────────────
+  {
+    urlPattern: "/game-night/room/:code",
+    routerPath: "/(protected)/game-night/room/:code",
+    auth: "auth-required",
+    paramsSchema: gameNightCodeSchema,
+    label: "Game Night room",
   },
 
   // ── Lynk Private Rooms ────────────────────────────────────────────
