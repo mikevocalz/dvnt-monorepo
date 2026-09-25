@@ -124,22 +124,25 @@ Deno.serve(async (req: Request) => {
     return json({ error: "room_code is required" }, 400, req);
   }
 
-  // 1. Resolve room by code. Only non-ended rooms are visible.
-  const { data: resolveRows, error: resolveErr } = await supabase.rpc(
-    "game_night_resolve_room",
-    { p_code: roomCode.toUpperCase() },
-  );
+  // 1. Resolve room by code. Only non-ended rooms are visible. Direct table
+  // read: game_night_resolve_room RPC requires user JWT claims, which the
+  // service role does not carry.
+  const { data: room, error: resolveErr } = await supabase
+    .from("game_night_rooms")
+    .select("id, room_code, status")
+    .ilike("room_code", roomCode)
+    .neq("status", "ended")
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   if (resolveErr) {
     console.error("[game-night-sync] resolve error:", resolveErr);
     return json({ error: "Failed to resolve room" }, 500, req);
   }
-  const room = (resolveRows as unknown[] | null)?.[0] as
-    | { room_id: number; room_code: string; status: string }
-    | undefined;
   if (!room) {
     return json({ error: "Room not found" }, 404, req);
   }
-  const roomId = room.room_id;
+  const roomId = room.id;
 
   // 2. Membership check using the authenticated Better Auth user id.
   const { data: memberRows, error: memberErr } = await supabase.rpc(

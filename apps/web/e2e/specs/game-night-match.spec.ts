@@ -174,4 +174,151 @@ test.describe("game night — two-client match", () => {
       await Promise.all(ctxs.map((c) => c.close()));
     }
   });
+
+  test("host removes a seated player before the match", async ({
+    page,
+    browser,
+  }) => {
+    test.skip(!fs.existsSync(PEER_STATE), "no peer identity");
+
+    const peerCtx = await browser.newContext({ storageState: PEER_STATE });
+    await suppressInstallPrompt(peerCtx);
+    const peer = await peerCtx.newPage();
+
+    try {
+      await page.goto("/game-night/join");
+      await page.getByRole("button", { name: "Start a room" }).click();
+      await page.waitForURL(/\/game-night\/room\/[A-Z0-9]{6}/, {
+        timeout: 20_000,
+      });
+      const code = page.url().match(/room\/([A-Z0-9]{6})/)?.[1];
+
+      await joinByCode(peer, code!);
+      await expect(
+        peer.getByRole("button", { name: /ready up|take a seat/i }),
+      ).toBeVisible({ timeout: 20_000 });
+      // Peer may land as watcher if a seat wasn't taken; sit them down.
+      const takeSeat = peer.getByRole("button", { name: /take a seat/i });
+      if (await takeSeat.isVisible()) await takeSeat.click();
+
+      const kickBtn = page.getByRole("button", { name: /remove .+ from the room/i });
+      await expect(kickBtn).toBeVisible({ timeout: 20_000 });
+      await kickBtn.click();
+
+      // Host sees the seat open again.
+      await expect(
+        page.getByText("Open seat").nth(1),
+      ).toBeVisible({ timeout: 20_000 });
+      // The removed player's next state read lands on the not-found view.
+      await expect(
+        peer.getByRole("heading", { name: /no room with that code/i }),
+      ).toBeVisible({ timeout: 30_000 });
+    } finally {
+      try {
+        await page.getByRole("button", { name: /^leave$/i }).click({ timeout: 5_000 });
+      } catch {
+        /* room may already be ended */
+      }
+      await peerCtx.close();
+    }
+  });
+
+  test("spectator watches, everyone chats, a player reloads mid-round", async ({
+    page,
+    browser,
+  }) => {
+    test.skip(
+      !fs.existsSync(PEER_STATE) || !fs.existsSync(GN3_STATE),
+      "needs peer.json + gn3.json storage states",
+    );
+
+    const peerCtx = await browser.newContext({ storageState: PEER_STATE });
+    const gn3Ctx = await browser.newContext({ storageState: GN3_STATE });
+    await Promise.all([peerCtx, gn3Ctx].map(suppressInstallPrompt));
+    const peer = await peerCtx.newPage();
+    const watcher = await gn3Ctx.newPage();
+
+    try {
+      await page.goto("/game-night/join");
+      await page.getByRole("button", { name: "Start a room" }).click();
+      await page.waitForURL(/\/game-night\/room\/[A-Z0-9]{6}/, {
+        timeout: 20_000,
+      });
+      const code = page.url().match(/room\/([A-Z0-9]{6})/)?.[1];
+
+      await joinByCode(peer, code!);
+      const ready = peer.getByRole("button", { name: /ready up|take a seat/i });
+      await expect(ready).toBeVisible({ timeout: 20_000 });
+      if ((await ready.textContent())?.match(/take a seat/i)) {
+        await ready.click();
+        await peer.getByRole("button", { name: /ready up/i }).click();
+      } else {
+        await ready.click();
+      }
+
+      const startBtn = page.getByRole("button", { name: /start game/i });
+      await expect(startBtn).toBeEnabled({ timeout: 35_000 });
+      await startBtn.click();
+      await expect(
+        page.getByRole("region", { name: "Duel round" }),
+      ).toBeVisible({ timeout: 25_000 });
+
+      // Third identity joins mid-match: lands as watcher, sees the round,
+      // never sees a hand or a seat action.
+      await joinByCode(watcher, code!);
+      await expect(
+        watcher.getByRole("region", { name: "Duel round" }),
+      ).toBeVisible({ timeout: 25_000 });
+      await expect(
+        watcher.getByRole("region", { name: "Your hand" }),
+      ).toHaveCount(0);
+      await expect(
+        watcher.getByRole("button", { name: /take a seat/i }),
+      ).toHaveCount(0);
+
+      // Chat: player and watcher both post; everyone sees both.
+      const peerChat = peer.getByRole("region", { name: "Room chat" });
+      const watcherChat = watcher.getByRole("region", { name: "Room chat" });
+      const hostChat = page.getByRole("region", { name: "Room chat" });
+
+      await peerChat.getByLabel("Chat message").fill("chat from a player");
+      await peerChat.getByLabel("Chat message").press("Enter");
+      await watcherChat.getByLabel("Chat message").fill("chat from the rail");
+      await watcherChat.getByLabel("Chat message").press("Enter");
+
+      for (const chat of [hostChat, peerChat, watcherChat]) {
+        await expect(chat.getByText("chat from a player")).toBeVisible({
+          timeout: 30_000,
+        });
+        await expect(chat.getByText("chat from the rail")).toBeVisible({
+          timeout: 30_000,
+        });
+      }
+
+      // GIF: open the picker, pick the first tile, see it post.
+      await peerChat.getByRole("button", { name: "Send a GIF" }).dispatchEvent("click");
+      await expect(peer.getByLabel("Search KLIPY gifs")).toBeVisible({
+        timeout: 10_000,
+      });
+      const gifTile = peer.locator("[aria-busy] button").first();
+      await expect(gifTile).toBeVisible({ timeout: 20_000 });
+      await gifTile.dispatchEvent("click");
+      await expect(
+        hostChat.locator("img").first(),
+      ).toBeVisible({ timeout: 30_000 });
+
+      // Reconnect: reload the player mid-round; the round comes back.
+      await peer.reload();
+      await expect(
+        peer.getByRole("region", { name: "Duel round" }),
+      ).toBeVisible({ timeout: 30_000 });
+    } finally {
+      try {
+        await page.getByRole("button", { name: /^leave$/i }).click({ timeout: 5_000 });
+      } catch {
+        /* room may already be ended */
+      }
+      await Promise.all([peerCtx.close(), gn3Ctx.close()]);
+    }
+  });
 });

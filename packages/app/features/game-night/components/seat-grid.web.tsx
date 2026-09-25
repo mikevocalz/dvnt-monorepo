@@ -6,7 +6,7 @@
  * for watchers while a chair is free.
  */
 
-import { setReady, startMatch, takeSeat } from "../rooms-api";
+import { kickMember, setReady, startMatch, takeSeat } from "../rooms-api";
 import { MAX_PLAYERS } from "../seats";
 import { Avatar } from "./avatar.web";
 import { CommandError, useCommand } from "./use-command";
@@ -45,9 +45,14 @@ export function SeatGrid({
   const readyCmd = useCommand();
   const startCmd = useCommand();
   const seatCmd = useCommand();
+  const kickCmd = useCommand();
 
   const me = state.me;
   const isWatcher = me.role === "watcher" || !me.member;
+  const canKick =
+    me.is_host &&
+    state.room.status === "open" &&
+    !state.match;
 
   return (
     <section aria-labelledby="seats-heading" className="w-full">
@@ -88,6 +93,22 @@ export function SeatGrid({
                     <span className="text-white/45">Not ready</span>
                   )}
                 </p>
+                {canKick && member.user_id !== state.room.host_id ? (
+                  <button
+                    type="button"
+                    disabled={kickCmd.pending}
+                    aria-label={`Remove ${member.name ?? "player"} from the room`}
+                    onClick={() =>
+                      kickCmd.run(async () => {
+                        await kickMember(code, member.user_id);
+                        onChanged();
+                      })
+                    }
+                    className="mt-2 rounded-lg px-2 py-1 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-400 disabled:opacity-40"
+                  >
+                    Remove
+                  </button>
+                ) : null}
               </>
             ) : (
               <p className="py-6 text-sm text-white/40">Open seat</p>
@@ -147,6 +168,7 @@ export function SeatGrid({
               <p className="mt-2 text-sm text-white/50">{startReason}</p>
             ) : null}
             <CommandError message={startCmd.error} />
+            <CommandError message={kickCmd.error} />
           </>
         ) : (
           <>

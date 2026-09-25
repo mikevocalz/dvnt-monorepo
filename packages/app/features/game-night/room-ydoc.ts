@@ -6,6 +6,8 @@ export interface RoomYDocEntry {
   listeners: Set<() => void>;
   synced: boolean;
   error: string | null;
+  /** Guard against overlapping syncEntry calls (interval + refresh + mount). */
+  syncing?: boolean;
 }
 
 const registry = new Map<string, RoomYDocEntry>();

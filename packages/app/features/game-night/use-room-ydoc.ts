@@ -33,6 +33,16 @@ export interface UseRoomYDocResult {
 }
 
 async function syncEntry(entry: RoomYDocEntry, roomCode: string) {
+  if (entry.syncing) return;
+  entry.syncing = true;
+  try {
+    await syncEntryInner(entry, roomCode);
+  } finally {
+    entry.syncing = false;
+  }
+}
+
+async function syncEntryInner(entry: RoomYDocEntry, roomCode: string) {
   const stateVector = Y.encodeStateVector(entry.doc);
   const stateVectorB64 = bytesToBase64(stateVector);
   const { data, error } = await invokeEdge<{

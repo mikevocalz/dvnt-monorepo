@@ -1,5 +1,11 @@
-import { useEffect, useMemo } from "react";
-import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import {
   Canvas,
   Circle,
@@ -10,6 +16,7 @@ import {
   TextAlign,
   vec,
   type SkParagraph,
+  type SkTypefaceFontProvider,
 } from "@shopify/react-native-skia";
 import {
   cancelAnimation,
@@ -27,22 +34,78 @@ const TABLE_HEIGHT = 620;
 const CARD_W = 126;
 const CARD_H = 164;
 
-function useParagraph(text: string, size: number, color = "#f7f4ff") {
+const FONT_FAMILY = "SpaceGrotesk";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const FONT_URL = require("../../../../assets/fonts/SpaceGrotesk-Regular.ttf");
+
+let fontProviderPromise: Promise<SkTypefaceFontProvider | null> | null = null;
+
+// CanvasKit requires an explicit TypefaceFontProvider; native uses the system
+// font manager and never needs one.
+function getFontProvider() {
+  if (!fontProviderPromise) {
+    fontProviderPromise = (async () => {
+      try {
+        const data = await Skia.Data.fromURI(FONT_URL as string);
+        const typeface = Skia.Typeface.MakeFreeTypeFaceFromData(data);
+        if (!typeface) return null;
+        const provider = Skia.TypefaceFontProvider.Make();
+        provider.registerFont(typeface, FONT_FAMILY);
+        return provider;
+      } catch {
+        return null;
+      }
+    })();
+  }
+  return fontProviderPromise;
+}
+
+function useFontProvider() {
+  const [provider, setProvider] = useState<SkTypefaceFontProvider | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    let alive = true;
+    void getFontProvider().then((v) => {
+      if (alive) setProvider(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return provider;
+}
+
+function useParagraph(
+  text: string,
+  size: number,
+  color: string | undefined,
+  provider: SkTypefaceFontProvider | null,
+) {
   const paragraph = useMemo(() => {
-    const builder = Skia.ParagraphBuilder.Make({ textAlign: TextAlign.Center });
-    builder.pushStyle({ fontSize: size, color: Skia.Color(color) });
+    if (Platform.OS === "web" && !provider) return null;
+    const builder = Skia.ParagraphBuilder.Make(
+      { textAlign: TextAlign.Center },
+      provider ?? undefined,
+    );
+    builder.pushStyle({
+      fontSize: size,
+      color: Skia.Color(color ?? "#f7f4ff"),
+      fontFamilies: provider ? [FONT_FAMILY] : undefined,
+    });
     builder.addText(text);
     return builder.build();
-  }, [text, size, color]);
-  useEffect(() => () => paragraph.dispose(), [paragraph]);
+  }, [text, size, color, provider]);
+  useEffect(() => () => paragraph?.dispose(), [paragraph]);
   return paragraph;
 }
 
 function Label({ text, x, y, width, size = 14, color }: {
   text: string; x: number; y: number; width: number; size?: number; color?: string;
 }) {
-  const paragraph = useParagraph(text, size, color);
-  useMemo(() => paragraph.layout(width), [paragraph, width]);
+  const provider = useFontProvider();
+  const paragraph = useParagraph(text, size, color, provider);
+  useMemo(() => paragraph?.layout(width), [paragraph, width]);
+  if (!paragraph) return null;
   return <Paragraph paragraph={paragraph} x={x} y={y} width={width} />;
 }
 
