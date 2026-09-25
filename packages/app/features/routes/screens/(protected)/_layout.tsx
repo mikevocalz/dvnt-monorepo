@@ -20,6 +20,7 @@ import {
   saveVoipTokenToBackend,
 } from "@dvnt/app/src/services/callkeep/voipPushService";
 import { useBootPrefetch } from "@dvnt/app/lib/hooks/use-boot-prefetch";
+import { useWidgetSync } from "@dvnt/app/lib/hooks/use-widget-sync";
 import { useEventsFeedRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useAppResume } from "@dvnt/app/lib/hooks/use-app-resume";
 import { useCartPaymentRecovery } from "@dvnt/app/lib/hooks/use-cart-payment-recovery";
@@ -154,6 +155,8 @@ export default function ProtectedLayout() {
   usePresenceManager();
   // CRITICAL: Prefetch all critical data in parallel on app launch
   useBootPrefetch();
+  // Keep the iOS home-screen widgets + Live Activity dataset in sync (SAFE-ONLY).
+  useWidgetSync();
   // Silent background refresh on app resume (throttled 30s)
   useAppResume();
   useCartPaymentRecovery();

@@ -4,6 +4,7 @@
  * filtering happens at the write layer (buildWidgetDataset / buildEventLive-
  * ActivityState), not merely hidden in the UI. See docs/widgets-fit.md.
  */
+import { describe, expect, it } from "vitest";
 import { buildWidgetDataset, buildEventLiveActivityState } from "../dataset";
 import { isWidgetSafe } from "../safety";
 import type { BlogSource, SocialSource, TicketSource } from "../types";
