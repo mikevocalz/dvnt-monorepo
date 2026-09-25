@@ -11,7 +11,7 @@ Date: 2026-09-25. Everything below distinguishes code that exists from evidence 
 | `cd packages/app && npx tsc --noEmit --ignoreDeprecations "6.0"` | clean, 0 errors (repo tsconfig uses deprecated `baseUrl` — pre-existing) |
 | `cd packages/app && npx tsx --test room-code seats room-ydoc table-render tests` | 17/17 pass |
 | `cd apps/web && pnpm build` (`tsc --noEmit && next build --webpack`) | pass; 114 routes incl. `/game-night`, `/game-night/join`, `/game-night/room/[id]` |
-| `cd apps/web && pnpm start -p 19006` + `npx playwright test e2e/specs/game-night-match.spec.ts --project=chromium-desktop-1440 --no-deps` | **2 pass** (2p duel ~27s, 4p classic full round ~53s), four real accounts, production Supabase |
+| `cd apps/web && pnpm start -p 19006` + `npx playwright test e2e/specs/game-night-match.spec.ts --project=chromium-desktop-1440 --no-deps` | **4 pass** (2p duel, 4p classic full round, host kick, spectator+chat+GIF+reload), four real accounts, production Supabase |
 | `npx supabase functions deploy game-night-sync` | deployed to `npfjanxturvmjyevoyfo` |
 | Live prod match via PostgREST (earlier session) | full duel+classic flow driven with real minted JWTs: create idempotent, seats, hands private, anonymous reveal, score-once, watcher join, chat, code release |
 
@@ -24,8 +24,8 @@ Date: 2026-09-25. Everything below distinguishes code that exists from evidence 
 | Duel mode (2p) | ✓ | ✓ | ✓ prompt + duel round visible to peer | code only | on prod |
 | Classic mode (3-4p) | ✓ | ✓ | ✓ 4p full round: submit→reveal→judge pick→results | code only | on prod |
 | Private hands / stranger isolation / anonymous reveal | ✓ | ✓ | ✓ submit + judge pick driven in 4p | — | on prod |
-| Chat text/GIF/reactions + rate limit + moderation base | ✓ | ✓ rate limit, member-only | chips/composer render; send unexercised | code only (Gorhom sheet) | on prod |
-| KLIPY search/send + attribution | ✓ | ✓ gif message type | picker unopened | — | client code only |
+| Chat text/GIF/reactions + rate limit + moderation base | ✓ | ✓ rate limit, member-only | ✓ player + watcher text posts visible on all 3 clients | code only (Gorhom sheet) | on prod |
+| KLIPY search/send + attribution | ✓ | ✓ gif message type | ✓ picker opened, tile picked, gif posted to chat | — | client code only |
 | Scoring + Top 10 leaderboard | ✓ | ✓ | UI mounted (lobby + match end, universal RNW); live data render unexercised | mounted in native lobby | on prod |
 | Yjs authoritative projection | ✓ | deployed; diff round-trip unexercised | sync indicator only | — | fn + tables on prod |
 | Table renderer (Skia baseline / Three+TypeGPU native enhanced) | ✓ | 3/3 logic tests | mounted (match-active), not screenshotted | code only | client code only |
@@ -40,8 +40,10 @@ Date: 2026-09-25. Everything below distinguishes code that exists from evidence 
 2. peer account (independent browser context + storage state): `/game-night/join` → typed code → "Join room" → room screen, "Ready up" visible.
 3. peer readied → host "Start game" enabled → started → peer saw `region "Prompt"` + `region "Duel round"` with "Pick what App Review chose".
 4. 4p classic (audit host + peer + `gn3` + `gn4` storage states minted via `sign-up/email`): code-join ×3 → all ready → host starts → 3 writers each pick cards until "Play card" enables → submit → judge clicks "Pick winner" → `region "Round results"` on all four pages.
+5. Kick: host "Remove {name}" (web seat grid control added — it previously existed only on native) → seat opens on host → kicked player lands on "No room with that code".
+6. Spectator/chat/reconnect: third identity joins mid-duel → watcher (no "Your hand", no "Take a seat") → player and watcher post chat text, visible on all three pages → player opens KLIPY picker, picks a tile, gif posts → player reloads mid-round and the duel round returns.
 
-Bug found and fixed by this run: `game_night_players`/`game_night_rooms` were not in `supabase_realtime` nor subscribed by `use-game-state`, so host Start gating waited on the 20s poll. Migration `20260927000000` publishes both; the hook subscribes with room filters.
+Bugs found and fixed by these runs: `game_night_players`/`game_night_rooms` unpublished + unsubscribed (host Start waited on the 20s poll — migration `20260927000000` + hook subscribe); `game-night-sync` edge fn resolved rooms through `game_night_resolve_room`, which requires a user JWT the service role lacks → every sync 500'd in a loop (now reads `game_night_rooms` directly); CanvasKit paragraph text threw `SkTypefaceFontProvider required` on web (scene now registers SpaceGrotesk into a provider on web; native keeps the system font manager).
 
 Snapshots confirmed: seat grid, "Copy join link", "End room", chat region with reaction buttons (👍😂🔥💀) and "Send a GIF", gated start ("Need at least 2 seated players").
 
@@ -60,9 +62,10 @@ Snapshots confirmed: seat grid, "Copy join link", "End room", chat region with r
 
 ## Not verified (honest gaps)
 
-- Spectator joining mid-round, kick removal while connected, rematch, refresh during every phase.
-- Chat send/retry/moderation in browser; KLIPY picker and attribution.
-- Yjs client diff round-trip and compaction behavior.
+- Rematch flow and refresh during every phase (reload mid-round verified for a duel player).
+- Chat retry/moderation in browser (send + delivery verified, failure path not).
+- Yjs client diff round-trip correctness (sync now returns 200s; compaction unexercised).
 - Native builds (iOS/Android), Gorhom sheet behavior, device-loss/fallback rendering, performance numbers — no devices run this session.
 - `rooms-list.web.tsx` screen driven in a browser; leaderboard live-data render (RPC verified, UI mounted but not exercised with real scores).
+- gn3/gn4 test accounts have no app `users` profile row (getCurrentUserRow 406) — cosmetic for game-night e2e, but they'd need onboarding for real use.
 - Production deploy of the client — branch not pushed; no rollout performed.
