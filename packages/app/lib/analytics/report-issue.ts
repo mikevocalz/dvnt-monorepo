@@ -13,8 +13,8 @@
  * Write-only RLS for anon + authenticated, so this works before auth settles —
  * which matters, because the crashes worth catching happen at boot.
  *
- * Never throws, never blocks, never awaits. A dropped row is acceptable; a
- * dropped frame is not.
+ * Never throws or blocks the caller. The returned promise acknowledges Sentry
+ * delivery so persisted crash reports are only removed after acceptance.
  */
 
 /** Rows are diagnostics, not a data lake. Anything past this is truncated. */
@@ -53,54 +53,45 @@ export function safeMetadata(
  *                    without parsing jsonb.
  * @param detail      Anything useful. Truncated at 8k of JSON.
  */
-export function reportIssue(
+export async function reportIssue(
   featureArea: string,
   detail: Record<string, unknown>,
-): void {
+): Promise<boolean> {
   try {
     const metadata = safeMetadata(detail);
-    // Fire-and-forget. Callers are error paths and boot paths; none of them
-    // can afford to await a network round trip, and none of them has anything
-    // useful to do with a failure.
+    // Keep native dependencies lazy so this module is safe to import at boot
+    // and from pure node tests.
+    const { Platform } = await import("react-native");
+    const sentryDelivery = (async (): Promise<boolean> => {
+      try {
+        const { sendToSentry } = await import(
+          "@dvnt/app/lib/analytics/sentry-envelope"
+        );
+        const reason = detail.reason ?? detail.message ?? detail.error ?? featureArea;
+        return await sendToSentry(
+          {
+            name: typeof detail.name === "string" ? detail.name : null,
+            message: String(reason),
+            stack: typeof detail.stack === "string" ? detail.stack : null,
+            featureArea,
+            platform: Platform.OS,
+            timestamp: typeof detail.timestamp === "string" ? detail.timestamp : undefined,
+            level: detail.level === "fatal" || detail.level === "error" || detail.level === "warning"
+              ? detail.level : undefined,
+            handled: typeof detail.handled === "boolean" ? detail.handled : undefined,
+            extra: metadata,
+          },
+          process.env.EXPO_PUBLIC_SENTRY_DSN,
+        );
+      } catch {
+        return false;
+      }
+    })();
+
+    // This sink is independent. An analytics insert does not acknowledge a
+    // Sentry envelope, and a slow/failed database request must not block it.
     void (async () => {
       try {
-        // Required lazily so importing this module from a pure, node-testable
-        // module (lib/outbox/drain.ts, and this module's own test) does not
-        // drag in react-native or the Supabase client.
-        const { Platform } = await import("react-native");
-
-        // Sentry FIRST, and independently of the row insert.
-        //
-        // `analytics_events` is write-only by RLS, so nothing in the app can
-        // read a crash back — diagnosing one means opening the SQL editor, and
-        // a reporter you have to run a query against is a reporter nobody
-        // checks. This puts the same error in dvnt-mobile where it groups,
-        // dedupes and alerts. Sent with fetch rather than the native SDK so it
-        // ships OTA; see lib/analytics/sentry-envelope.ts for why.
-        try {
-          const { sendToSentry } = await import(
-            "@dvnt/app/lib/analytics/sentry-envelope"
-          );
-          const reason =
-            (detail.reason as string | undefined) ??
-            (detail.message as string | undefined) ??
-            (detail.error as string | undefined) ??
-            featureArea;
-          sendToSentry(
-            {
-              name: (detail.name as string | undefined) ?? null,
-              message: String(reason),
-              stack: (detail.stack as string | undefined) ?? null,
-              featureArea,
-              platform: Platform.OS,
-              extra: metadata,
-            },
-            process.env.EXPO_PUBLIC_SENTRY_DSN,
-          );
-        } catch {
-          // Never let the Sentry sink stop the row insert below.
-        }
-
         const { supabase } = await import("@dvnt/app/lib/supabase/client");
         await supabase.from("analytics_events").insert({
           event: "app_issue",
@@ -112,7 +103,8 @@ export function reportIssue(
         // Swallowed on purpose — see the module header.
       }
     })();
+    return await sentryDelivery;
   } catch {
-    // Swallowed on purpose — see the module header.
+    return false;
   }
 }

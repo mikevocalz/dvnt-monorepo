@@ -21,7 +21,7 @@
  *   2. If present, NSLogs it again so the current session's logs show
  *      what killed the prior session (visible in TestFlight feedback
  *      attached devicelogs) and reports it to `analytics_events`
- *   3. Deletes the file so the same crash isn't reported twice
+ *   3. Deletes the file only after Sentry accepts it; failed sends retry on boot
  *
  * Safe to call on every boot — defensive against missing / corrupted
  * file / wrong platform. NEVER throws.
@@ -31,7 +31,7 @@
  */
 
 import { Platform } from "react-native";
-import { readAndClearLastJSError } from "@dvnt/app/lib/global-error-handler";
+import { readLastJSError, clearLastJSError } from "@dvnt/app/lib/global-error-handler";
 import { mmkv } from "@dvnt/app/lib/mmkv-zustand";
 import { crashSignature } from "@dvnt/observability/capture";
 import { reportIssue } from "@dvnt/app/lib/analytics/report-issue";
@@ -48,8 +48,8 @@ interface NativeExceptionPayload {
 
 let _hasReportedThisSession = false;
 
-/** Signatures already reported, newest last. */
-const REPORTED_SIGNATURES_KEY = "DVNT_REPORTED_CRASH_SIGS";
+/** A receipt identifies an occurrence, not every future crash with this error. */
+const REPORTED_SIGNATURES_KEY = "DVNT_REPORTED_CRASH_RECEIPTS_V2";
 /** Bounded so a stream of distinct signatures cannot grow the record forever. */
 const MAX_TRACKED_SIGNATURES = 20;
 /** Frames kept on the event. The throwing class/selector is at the top of the
@@ -57,27 +57,33 @@ const MAX_TRACKED_SIGNATURES = 20;
 const STACK_FRAMES_ON_EVENT = 12;
 
 /**
- * 2.8: a crash loop relaunches, and the persisted record is re-read and
- * re-reported on every launch — multiplying billed fatal events during exactly
- * the incident that needs quota headroom. First launch after a given crash
- * reports it; later launches log and do not send.
- *
- * Fails OPEN: if MMKV is unreadable we report, because losing the first record
- * of a crash is worse than sending a duplicate.
+ * Only acknowledge accepted deliveries. The old claim-before-send logic
+ * permanently suppressed the error even when the first attempt was offline.
  */
-function claimCrashSignature(signature: string): boolean {
+function wasReported(receipt: string): boolean {
   try {
     const raw = mmkv.getString(REPORTED_SIGNATURES_KEY);
-    const seen: string[] = raw ? (JSON.parse(raw) as string[]) : [];
-    if (!Array.isArray(seen)) throw new Error("corrupt");
-    if (seen.includes(signature)) return false;
-    const next = [...seen, signature].slice(-MAX_TRACKED_SIGNATURES);
-    mmkv.set(REPORTED_SIGNATURES_KEY, JSON.stringify(next));
-    return true;
+    const seen: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(seen) && seen.includes(receipt);
   } catch {
-    return true;
+    return false;
   }
 }
+
+function rememberReceipt(receipt: string): void {
+  try {
+    const raw = mmkv.getString(REPORTED_SIGNATURES_KEY);
+    const stored: unknown = raw ? JSON.parse(raw) : [];
+    const seen = Array.isArray(stored) ? stored.filter((v) => typeof v === "string") : [];
+    mmkv.set(REPORTED_SIGNATURES_KEY, JSON.stringify(
+      [...seen.filter((v) => v !== receipt), receipt].slice(-MAX_TRACKED_SIGNATURES),
+    ));
+  } catch {
+    // The source record can still be cleared after a confirmed delivery.
+  }
+}
+
+const pendingDeliveries = new Map<string, Promise<boolean>>();
 
 /** Written by the `NSSetUncaughtExceptionHandler` block in AppDelegate.swift
  *  (installed by plugins/with-uncaught-exception-handler.js) into
@@ -162,7 +168,10 @@ function openReportFile(): ReportFile | null {
   }
 }
 
-async function readAndClearAsync(): Promise<NativeExceptionPayload | null> {
+async function readNativeReport(): Promise<{
+  report: NativeExceptionPayload;
+  clear: () => Promise<void>;
+} | null> {
   if (Platform.OS !== "ios") return null;
 
   const file = openReportFile();
@@ -196,15 +205,18 @@ async function readAndClearAsync(): Promise<NativeExceptionPayload | null> {
     return null;
   }
 
-  // Always clear AFTER successful parse so we don't double-report
-  // the same crash across sessions.
-  try {
-    await file.remove();
-  } catch {
-    /* ignore */
-  }
-
-  return parsed;
+  if (!parsed) return null;
+  return {
+    report: parsed,
+    clear: async () => {
+      try {
+        // Do not delete a newer native exception written during delivery.
+        if (await file.exists() && await file.read() === raw) await file.remove();
+      } catch {
+        // Receipt deduplication prevents resending if removal fails.
+      }
+    },
+  };
 }
 
 function logToConsole(report: NativeExceptionPayload): void {
@@ -242,20 +254,21 @@ function logToConsole(report: NativeExceptionPayload): void {
  * `EXUpdates/ErrorRecovery.crash()`. The `.crash` files carry only the
  * re-raise; the reason string lives in these records and nowhere else.
  *
- * `analytics_events` is the sink the Sentry removal named as the replacement.
- * Same table, same insert-only RLS, one row per distinct crash.
- * Never throws, never blocks boot.
+ * Never throws or blocks boot. The promise acknowledges Sentry acceptance;
+ * callers retain the persisted source when it resolves false.
  */
-export function reportPriorCrash(kind: string, payload: Record<string, unknown>): void {
+export async function reportPriorCrash(kind: string, payload: Record<string, unknown>): Promise<boolean> {
   try {
     const signature = crashSignature(kind, payload);
-    if (!claimCrashSignature(signature)) {
-      // Console only — a relaunch loop is still visible in device logs, and
-      // costs nothing. ponytail: no local repeat counter; if loop *frequency*
-      // ever needs to be reported, send one summary row on the Nth repeat.
-      console.error("[prior-session-crash] repeat, not re-sent:", signature);
-      return;
-    }
+    const date = typeof payload.timestamp === "string" || typeof payload.timestamp === "number"
+      ? new Date(payload.timestamp) : null;
+    const timestamp = date && Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+    // Re-reading one persisted report must not bill twice, but a new crash
+    // with the same error must remain visible (including after an upgrade).
+    const receipt = `${signature}|${timestamp ?? "legacy-unknown-time"}`;
+    if (wasReported(receipt)) return true;
+    const pending = pendingDeliveries.get(receipt);
+    if (pending) return await pending;
     // 2.8: the full callStackSymbols array rode along on every event. The
     // throwing frame is at the top; the tail is dispatch plumbing identical
     // across crashes. Keep the head, drop the payload weight.
@@ -271,15 +284,27 @@ export function reportPriorCrash(kind: string, payload: Record<string, unknown>)
         }
       : payload;
 
-    reportIssue("crash", {
-      kind,
-      signature,
-      name: payload.name ?? null,
-      reason: payload.message ?? payload.reason ?? null,
-      detail,
-    });
+    const delivery = (async () => {
+      const accepted = await reportIssue("crash", {
+        kind,
+        signature,
+        timestamp,
+        name: payload.name ?? null,
+        reason: payload.message ?? payload.reason ?? null,
+        // reportIssue reads this top-level field; burying it under detail
+        // discarded every persisted JS stack from Sentry's exception frames.
+        stack: typeof payload.stack === "string" ? payload.stack : null,
+        level: kind === "js" && payload.isFatal !== true ? "error" : "fatal",
+        handled: false,
+        detail,
+      });
+      if (accepted) rememberReceipt(receipt);
+      return accepted;
+    })().finally(() => pendingDeliveries.delete(receipt));
+    pendingDeliveries.set(receipt, delivery);
+    return await delivery;
   } catch {
-    /* never throw from boot path */
+    return false;
   }
 }
 
@@ -298,9 +323,10 @@ function readPriorNativeCrashReport(): void {
   // catch any uncaught JS error or unhandled promise rejection from
   // the prior session and stash it in MMKV. We surface it here.
   try {
-    const jsReport = readAndClearLastJSError();
+    const jsReport = readLastJSError();
     if (jsReport) {
-      reportPriorCrash("js", jsReport as unknown as Record<string, unknown>);
+      void reportPriorCrash("js", jsReport as unknown as Record<string, unknown>)
+        .then((accepted) => { if (accepted) clearLastJSError(jsReport); });
       console.error("╔══════════════════════════════════════════════════════════════╗");
       console.error("║  [PRIOR-JS-CRASH] Prior session ended with uncaught JS    ║");
       console.error("╚══════════════════════════════════════════════════════════════╝");
@@ -324,11 +350,12 @@ function readPriorNativeCrashReport(): void {
   // Only fires once the AppDelegate/RCTTurboModule patches ship in
   // a native binary. Until then this returns null and is a no-op.
   // Run async without awaiting — boot continues immediately.
-  readAndClearAsync()
-    .then((report) => {
-      if (!report) return;
-      reportPriorCrash("native", report as unknown as Record<string, unknown>);
-      logToConsole(report);
+  readNativeReport()
+    .then(async (pending) => {
+      if (!pending) return;
+      const accepted = await reportPriorCrash("native", pending.report as unknown as Record<string, unknown>);
+      if (accepted) await pending.clear();
+      logToConsole(pending.report);
     })
     .catch(() => {
       /* never throw from boot path */
