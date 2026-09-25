@@ -1,0 +1,75 @@
+# Game Night — Verification Report
+
+Branch: `game-night/impl` (base `origin/master`, audit SHA `a09b1dc9`).
+Date: 2026-09-25. Everything below distinguishes code that exists from evidence it works.
+
+## Commands run (verification lane)
+
+| Command | Result |
+|---|---|
+| `python3 apps/mobile/supabase/__tests__/game-night-engine.integration.py` | 72/72 checks pass (disposable local Postgres, real migrations, real role claims) |
+| `cd packages/app && npx tsc --noEmit --ignoreDeprecations "6.0"` | clean, 0 errors (repo tsconfig uses deprecated `baseUrl` — pre-existing) |
+| `cd packages/app && npx tsx --test room-code seats room-ydoc table-render tests` | 17/17 pass |
+| `cd apps/web && pnpm build` (`tsc --noEmit && next build --webpack`) | pass; 114 routes incl. `/game-night`, `/game-night/join`, `/game-night/room/[id]` |
+| `cd apps/web && pnpm start -p 19006` + `npx playwright test e2e/specs/game-night-match.spec.ts --project=chromium-desktop-1440 --no-deps` | **6 pass** (2p duel, 4p + 3p classic full rounds, host kick, spectator+chat+GIF+reload, lobby-reload/abandon/rejoin/rematch), four real accounts, production Supabase |
+| `npx supabase functions deploy game-night-sync` | deployed to `npfjanxturvmjyevoyfo` |
+| Live prod match via PostgREST (earlier session) | full duel+classic flow driven with real minted JWTs: create idempotent, seats, hands private, anonymous reveal, score-once, watcher join, chat, code release |
+
+## Acceptance matrix
+
+| Requirement | Implemented | Backend verified | Browser verified | Native verified | Rollout |
+|---|---|---|---|---|---|
+| Durable create/join/seats (2-4, watcher overflow) | ✓ | ✓ engine + prod RPC | ✓ create + code-join in spec | code only | migrations+RPCs on prod |
+| Match engine: lobby→…→results, deadlines, rematch | ✓ | ✓ 72 checks | partial (duel round live) | code only | on prod |
+| Duel mode (2p) | ✓ | ✓ | ✓ prompt + duel round visible to peer | code only | on prod |
+| Classic mode (3-4p) | ✓ | ✓ | ✓ 4p full round: submit→reveal→judge pick→results | code only | on prod |
+| Private hands / stranger isolation / anonymous reveal | ✓ | ✓ | ✓ submit + judge pick driven in 4p | — | on prod |
+| Chat text/GIF/reactions + rate limit + moderation base | ✓ | ✓ rate limit, member-only | ✓ player + watcher text posts visible on all 3 clients | code only (Gorhom sheet) | on prod |
+| KLIPY search/send + attribution | ✓ | ✓ gif message type | ✓ picker opened, tile picked, gif posted to chat | — | client code only |
+| Scoring + Top 10 leaderboard | ✓ | ✓ | UI mounted (lobby + match end, universal RNW); live data render unexercised | mounted in native lobby | on prod |
+| Yjs authoritative projection | ✓ | deployed; diff round-trip unexercised | sync indicator only | — | fn + tables on prod |
+| Table renderer (Skia baseline / Three+TypeGPU native enhanced) | ✓ | 3/3 logic tests | mounted (match-active), not screenshotted | code only | client code only |
+| Native routes + drawer + deep links | ✓ | 8 nav tests | — | not built | — |
+| Reconnect/resume, kick enforcement live | ✓ | ✓ engine | — | — | on prod |
+
+## Two-browser e2e evidence
+
+`apps/web/e2e/specs/game-night-match.spec.ts`, project `chromium-desktop-1440`, `--no-deps`, `E2E_BASE_URL=http://localhost:19006` against `next build`+`next start` (production bundle, not dev server):
+
+1. audit account: `/game-night/join` → "Start a room" → RPC `game_night_create_room` → navigated to `/game-night/room/{CODE}` (real code issued; first live room confirmed `EW2GCF` in manual diag).
+2. peer account (independent browser context + storage state): `/game-night/join` → typed code → "Join room" → room screen, "Ready up" visible.
+3. peer readied → host "Start game" enabled → started → peer saw `region "Prompt"` + `region "Duel round"` with "Pick what App Review chose".
+4. 4p classic (audit host + peer + `gn3` + `gn4` storage states minted via `sign-up/email`): code-join ×3 → all ready → host starts → 3 writers each pick cards until "Play card" enables → submit → judge clicks "Pick winner" → `region "Round results"` on all four pages.
+5. Kick: host "Remove {name}" (web seat grid control added — it previously existed only on native) → seat opens on host → kicked player lands on "No room with that code".
+6. Spectator/chat/reconnect: third identity joins mid-duel → watcher (no "Your hand", no "Take a seat") → player and watcher post chat text, visible on all three pages → player opens KLIPY picker, picks a tile, gif posts → player reloads mid-round and the duel round returns.
+7. 3p classic: two code-joins, all ready, one judge + two writers, results on all three pages.
+8. Lobby reload → mid-match leave → abandon → rejoin → rematch: peer reloads while seated pre-match and stays in the room; peer leaving mid-duel abandons the match ("Match result" on host); peer re-joins, readies from the seat grid kept under the result panel; host Rematch starts a fresh duel round on both pages.
+
+Bug found and fixed by run 8: after a match ended, `MatchEnd` replaced `SeatGrid`, so a rejoined player (`ready=false` on rejoin) had no UI to ready and `Rematch` deadlocked on `players_not_ready`. `SeatGrid` now stays mounted under the result (`hideHostStart` keeps Rematch the only start CTA).
+
+Bugs found and fixed by these runs: `game_night_players`/`game_night_rooms` unpublished + unsubscribed (host Start waited on the 20s poll — migration `20260927000000` + hook subscribe); `game-night-sync` edge fn resolved rooms through `game_night_resolve_room`, which requires a user JWT the service role lacks → every sync 500'd in a loop (now reads `game_night_rooms` directly); CanvasKit paragraph text threw `SkTypefaceFontProvider required` on web (scene now registers SpaceGrotesk into a provider on web; native keeps the system font manager).
+
+Snapshots confirmed: seat grid, "Copy join link", "End room", chat region with reaction buttons (👍😂🔥💀) and "Send a GIF", gated start ("Need at least 2 seated players").
+
+### Infra findings worth keeping
+
+- E2E must run on an origin allowed by `mint-supabase-jwt` CORS: `localhost:3000/8081/19006` or `127.0.0.1:3000`. `:5173` mints fail CORS → `not_authenticated` in the lobby.
+- `localhost:3000` and `:8081` were occupied by a different project (Moyo) on this machine — `:19006` used.
+- `audit.json`/`peer.json` storage states expire server-side; both were re-minted via `POST /api/auth/sign-in/email` during this run.
+
+## Deployed to production (verified)
+
+- Migrations `20260925000000` (match schema + RLS fix), `20260925010000` (match engine, ~30 RPCs), `20260925020000` (deck v1: 40 prompts/160 answers), `20260925030000` (Yjs snapshot/log), `20260926000000` (no-deck-recycle: spent prompt deck ends the match as completed — product rule from owner, verified by new engine checks), `20260927000000` (publish `game_night_players` + `game_night_rooms` to realtime). Ledger repaired/recorded via `migration repair`.
+- Edge function `game-night-sync`.
+- `supabase_realtime` publication on all five client-relevant game-night tables.
+- **Not deployed:** any web/native client (branch unpushed, no Vercel build of this feature).
+
+## Not verified (honest gaps)
+
+- Refresh during submitting/judging/results phases (lobby and mid-round duel reloads verified).
+- Chat retry/moderation in browser (send + delivery verified, failure path not).
+- Yjs client diff round-trip correctness (sync now returns 200s; compaction unexercised).
+- Native builds (iOS/Android), Gorhom sheet behavior, device-loss/fallback rendering, performance numbers — no devices run this session.
+- `rooms-list.web.tsx` screen driven in a browser; leaderboard live-data render (RPC verified, UI mounted but not exercised with real scores).
+- gn3/gn4 test accounts have no app `users` profile row (getCurrentUserRow 406) — cosmetic for game-night e2e, but they'd need onboarding for real use.
+- Production deploy of the client — branch not pushed; no rollout performed.

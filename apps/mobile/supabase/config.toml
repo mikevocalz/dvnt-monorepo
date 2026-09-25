@@ -495,3 +495,8 @@ verify_jwt = false
 
 [functions.terminal-token]
 verify_jwt = false
+
+# Game Night Yjs authoritative-projection sync. Authenticates via Better Auth
+# session token, not Supabase JWT, so the gateway JWT check must stay off.
+[functions.game-night-sync]
+verify_jwt = false
