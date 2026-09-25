@@ -32,11 +32,6 @@ export async function verifySessionDetailed(
     return { ok: false, reason: "missing" };
   }
 
-  console.log(
-    "[verify-session] Looking up token:",
-    token.substring(0, 12) + "...",
-  );
-
   // Direct DB lookup of session table (Better Auth uses camelCase columns)
   // Use .maybeSingle() to avoid PostgREST error when 0 or 2+ rows match
   const { data: session, error } = await supabase

@@ -138,16 +138,21 @@ export function RoomChat({ state }: { state: GameNightState }) {
           setRows((prev) => {
             // The sender's optimistic row already occupies this spot.
             if (prev.some((r) => r.id === row.id)) return prev;
-            const replaced = prev.map((r) =>
-              r.pending &&
-              r.userId === row.userId &&
-              r.kind === row.kind &&
-              r.body === row.body &&
-              r.reaction === row.reaction
-                ? row
-                : r,
+            // Claim exactly one matching pending row — rapid identical sends
+            // (same reaction tapped twice) must not share the server id.
+            const idx = prev.findIndex(
+              (r) =>
+                r.pending &&
+                r.userId === row.userId &&
+                r.kind === row.kind &&
+                r.body === row.body &&
+                r.reaction === row.reaction,
             );
-            if (replaced.some((r) => r.id === row.id)) return replaced;
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = row;
+              return next;
+            }
             return [...prev, row];
           });
           if (atBottom.current) requestAnimationFrame(scrollToBottom);

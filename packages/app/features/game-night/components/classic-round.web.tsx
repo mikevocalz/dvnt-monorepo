@@ -7,7 +7,6 @@
  */
 
 import { judgePick } from "../rooms-api";
-import { Avatar } from "./avatar.web";
 import { CommandError, useCommand } from "./use-command";
 import { nameFor, type GameNightState } from "./game-types";
 import { Hand } from "./hand.web";

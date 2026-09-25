@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -6,6 +6,8 @@ import { randomUUID } from "expo-crypto";
 import { useGameNightState } from "../use-game-state";
 import { useRoomPresence } from "../use-room-presence";
 import { duelPick, endRoom, fetchRoomMessages, judgePick, leaveRoom, sendRoomMessage, setReady, startMatch, submitCards, takeSeat, type GameNightMessage } from "../rooms-api";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
+import { supabase } from "@dvnt/app/lib/supabase/client";
 
 const Button = ({label, onPress, disabled = false}:{label:string;onPress:()=>void;disabled?:boolean}) => <Pressable disabled={disabled} onPress={onPress} className={`items-center rounded-full px-5 py-3 ${disabled ? "bg-secondary" : "bg-primary"}`}><Text className="font-bold text-white">{label}</Text></Pressable>;
 
@@ -20,9 +22,36 @@ export default function GameNightRoomScreen() {
   const [draft, setDraft] = useState("");
   const snapPoints = useMemo(() => [120, "60%"], []);
   useRoomPresence(code, state ? { id: state.me.user_id, name: state.members.find(m => m.user_id === state.me.user_id)?.name ?? null, avatar: state.members.find(m => m.user_id === state.me.user_id)?.avatar ?? null, joinedAt: Date.now() } : null);
+  const busy = useRef(false);
   const loadMessages = useCallback(async () => { if (state) setMessages(await fetchRoomMessages(state.room.id)); }, [state?.room.id]);
   useEffect(() => { void loadMessages(); }, [loadMessages]);
-  const act = async (fn:()=>Promise<unknown>) => { setCommandError(null); try { await fn(); await refresh(); } catch (e) { setCommandError(e instanceof Error ? e.message : "Command failed."); } };
+
+  // Live chat on native too — without a subscription the sheet only refreshes
+  // when the local user sends.
+  const roomId = state?.room.id ?? null;
+  useEffect(() => {
+    if (!roomId) return;
+    const channel = freshChannel(`game-night-chat-native:${roomId}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "game_night_messages",
+        filter: `room_id=eq.${roomId}`,
+      }, () => void loadMessages())
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [roomId, loadMessages]);
+
+  // Selection is per-round; stale card ids must not carry into the next deal.
+  const roundId = state?.round?.id ?? null;
+  useEffect(() => { setSelected([]); }, [roundId]);
+
+  const act = async (fn:()=>Promise<unknown>) => {
+    if (busy.current) return; // synchronous lock — a double tap is one command
+    busy.current = true;
+    setCommandError(null);
+    try { await fn(); await refresh(); } catch (e) { setCommandError(e instanceof Error ? e.message : "Command failed."); } finally { busy.current = false; }
+  };
   const leave = () => void act(async () => { await leaveRoom(code); router.replace("/(protected)/game-night" as never); });
   const send = () => void act(async () => { const body = draft.trim(); if (!body) return; await sendRoomMessage(code, "text", {body}); setDraft(""); await loadMessages(); });
 

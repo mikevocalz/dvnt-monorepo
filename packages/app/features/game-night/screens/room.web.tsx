@@ -359,6 +359,9 @@ export function GameNightRoomScreen() {
                         match?.mode === "duel" ? handleDuelPick : undefined
                       }
                       duelOptions={round.duel_options}
+                      // The hand/judging HTML controls below the scene own the
+                      // actions; canvas overlays would double-fire them.
+                      interactive={false}
                     />
                   </section>
                 ) : null}

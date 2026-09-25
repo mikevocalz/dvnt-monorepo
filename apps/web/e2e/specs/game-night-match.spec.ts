@@ -80,7 +80,9 @@ test.describe("game night — two-client match", () => {
     } finally {
       // best-effort cleanup: host leaves then ends the room via Leave
       try {
-        await page.getByRole("button", { name: /^leave$/i }).click({ timeout: 5_000 });
+        // Host "End room" actually releases the code; Leave just hands
+        // hosting to the next member and the room stays live forever.
+        await page.getByRole("button", { name: /end room/i }).click({ timeout: 5_000 });
       } catch {
         /* room may already be ended */
       }
@@ -167,7 +169,9 @@ test.describe("game night — two-client match", () => {
       }
     } finally {
       try {
-        await page.getByRole("button", { name: /^leave$/i }).click({ timeout: 5_000 });
+        // Host "End room" actually releases the code; Leave just hands
+        // hosting to the next member and the room stays live forever.
+        await page.getByRole("button", { name: /end room/i }).click({ timeout: 5_000 });
       } catch {
         /* room may already be ended */
       }
@@ -215,7 +219,9 @@ test.describe("game night — two-client match", () => {
       ).toBeVisible({ timeout: 30_000 });
     } finally {
       try {
-        await page.getByRole("button", { name: /^leave$/i }).click({ timeout: 5_000 });
+        // Host "End room" actually releases the code; Leave just hands
+        // hosting to the next member and the room stays live forever.
+        await page.getByRole("button", { name: /end room/i }).click({ timeout: 5_000 });
       } catch {
         /* room may already be ended */
       }
@@ -314,7 +320,9 @@ test.describe("game night — two-client match", () => {
       ).toBeVisible({ timeout: 30_000 });
     } finally {
       try {
-        await page.getByRole("button", { name: /^leave$/i }).click({ timeout: 5_000 });
+        // Host "End room" actually releases the code; Leave just hands
+        // hosting to the next member and the room stays live forever.
+        await page.getByRole("button", { name: /end room/i }).click({ timeout: 5_000 });
       } catch {
         /* room may already be ended */
       }
@@ -401,7 +409,9 @@ test.describe("game night — two-client match", () => {
       }
     } finally {
       try {
-        await page.getByRole("button", { name: /^leave$/i }).click({ timeout: 5_000 });
+        // Host "End room" actually releases the code; Leave just hands
+        // hosting to the next member and the room stays live forever.
+        await page.getByRole("button", { name: /end room/i }).click({ timeout: 5_000 });
       } catch {
         /* room may already be ended */
       }
@@ -472,7 +482,9 @@ test.describe("game night — two-client match", () => {
       ).toBeVisible({ timeout: 30_000 });
     } finally {
       try {
-        await page.getByRole("button", { name: /^leave$/i }).click({ timeout: 5_000 });
+        // Host "End room" actually releases the code; Leave just hands
+        // hosting to the next member and the room stays live forever.
+        await page.getByRole("button", { name: /end room/i }).click({ timeout: 5_000 });
       } catch {
         /* room may already be ended */
       }

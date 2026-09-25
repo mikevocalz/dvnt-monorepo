@@ -40,6 +40,10 @@ export function useGameNightState(
   const codeRef = useRef(code);
   const stateRef = useRef<GameNightState | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Generation counter: overlapping refreshes (initial + realtime + poll +
+  // visibility + post-command) must apply newest-first. A slow older response
+  // resolving last would otherwise roll the UI back.
+  const genRef = useRef(0);
 
   useEffect(() => {
     codeRef.current = code;
@@ -51,9 +55,10 @@ export function useGameNightState(
 
   const refresh = useCallback(async () => {
     if (!code) return;
+    const gen = ++genRef.current;
     try {
       const next = await fetchState(code);
-      if (codeRef.current !== code) return; // stale
+      if (codeRef.current !== code || gen !== genRef.current) return; // stale
       stateRef.current = next;
       setState(next);
       setError(null);
@@ -63,7 +68,7 @@ export function useGameNightState(
         setStatus("ready");
       }
     } catch (err) {
-      if (codeRef.current !== code) return;
+      if (codeRef.current !== code || gen !== genRef.current) return;
       const msg = err instanceof Error ? err.message : String(err);
       stateRef.current = null;
       setState(null);
@@ -104,7 +109,9 @@ export function useGameNightState(
     };
   }, [code, refresh]);
 
-  // Realtime: refresh on changes to matches, rounds, or messages for this room.
+  // Realtime: refresh on changes to the tables the state projection reads.
+  // Messages are deliberately excluded — RoomChat owns its own insert channel
+  // and chat traffic would otherwise trigger a full projection RPC per line.
   useEffect(() => {
     if (!code || status !== "ready") return;
     const roomId = stateRef.current?.room.id;
@@ -158,16 +165,6 @@ export function useGameNightState(
         },
         scheduleRefresh,
       )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "game_night_messages",
-          filter: `room_id=eq.${roomId}`,
-        },
-        scheduleRefresh,
-      )
       .subscribe();
 
     return () => {
@@ -185,10 +182,13 @@ export function useGameNightState(
 
     const tick = () => {
       if (typeof navigator !== "undefined" && navigator.onLine === false) return;
-      void ping(code).catch(() => {
-        // ping is best-effort; refresh below surfaces real errors.
-      });
-      void refresh();
+      // ping drives deadline advancement server-side; refreshing before it
+      // resolves can read the pre-advance projection.
+      void ping(code)
+        .catch(() => {
+          // ping is best-effort; the refresh below surfaces real errors.
+        })
+        .then(() => void refresh());
     };
 
     const id = window.setInterval(tick, 20_000);

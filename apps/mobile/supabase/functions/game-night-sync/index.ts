@@ -126,11 +126,12 @@ Deno.serve(async (req: Request) => {
 
   // 1. Resolve room by code. Only non-ended rooms are visible. Direct table
   // read: game_night_resolve_room RPC requires user JWT claims, which the
-  // service role does not carry.
+  // service role does not carry. Codes are uppercase-only, so an equality
+  // match suffices — ilike would let %/_ wildcards alias another room.
   const { data: room, error: resolveErr } = await supabase
     .from("game_night_rooms")
     .select("id, room_code, status")
-    .ilike("room_code", roomCode)
+    .eq("room_code", roomCode.trim().toUpperCase())
     .neq("status", "ended")
     .order("id", { ascending: false })
     .limit(1)
