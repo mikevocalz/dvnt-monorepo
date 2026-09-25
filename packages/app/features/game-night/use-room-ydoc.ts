@@ -33,10 +33,19 @@ export interface UseRoomYDocResult {
 }
 
 async function syncEntry(entry: RoomYDocEntry, roomCode: string) {
-  if (entry.syncing) return;
+  if (entry.dead) return;
+  if (entry.syncing) {
+    // Coalesce: one trailing sync after the in-flight request settles, so a
+    // server update captured mid-flight is not silently dropped.
+    entry.syncAgain = true;
+    return;
+  }
   entry.syncing = true;
   try {
-    await syncEntryInner(entry, roomCode);
+    do {
+      entry.syncAgain = false;
+      await syncEntryInner(entry, roomCode);
+    } while (entry.syncAgain && !entry.dead);
   } finally {
     entry.syncing = false;
   }
@@ -56,28 +65,30 @@ async function syncEntryInner(entry: RoomYDocEntry, roomCode: string) {
   if (error) {
     entry.synced = false;
     entry.error = error.message;
-    notifyRoomYDocListeners(entry);
+    if (!entry.dead) notifyRoomYDocListeners(entry);
     return;
   }
 
   if (!data) {
     entry.synced = false;
     entry.error = "No response from server";
-    notifyRoomYDocListeners(entry);
+    if (!entry.dead) notifyRoomYDocListeners(entry);
     return;
   }
-
-  entry.synced = true;
-  entry.error = null;
 
   try {
     const update = base64ToBytes(data.update_b64);
     // Yjs de-duplicates and orders updates internally; we never sequence them.
-    Y.applyUpdate(entry.doc, update);
+    if (!entry.dead) Y.applyUpdate(entry.doc, update);
+    // synced only after the update decoded and applied — a corrupt response
+    // must not report a healthy live sync.
+    entry.synced = true;
+    entry.error = null;
   } catch (e) {
+    entry.synced = false;
     entry.error = "Invalid update from server";
   }
-  notifyRoomYDocListeners(entry);
+  if (!entry.dead) notifyRoomYDocListeners(entry);
 }
 
 export function useRoomYDoc(

@@ -7,7 +7,7 @@ Date: 2026-09-25. Everything below distinguishes code that exists from evidence 
 
 | Command | Result |
 |---|---|
-| `python3 apps/mobile/supabase/__tests__/game-night-engine.integration.py` | 72/72 checks pass (disposable local Postgres, real migrations, real role claims) |
+| `python3 apps/mobile/supabase/__tests__/game-night-engine.integration.py` | **78/78** checks pass (disposable local Postgres, real migrations, real role claims) — incl. kick-ban, room cap, private-list filter, payload validation |
 | `cd packages/app && npx tsc --noEmit --ignoreDeprecations "6.0"` | clean, 0 errors (repo tsconfig uses deprecated `baseUrl` — pre-existing) |
 | `cd packages/app && npx tsx --test room-code seats room-ydoc table-render tests` | 17/17 pass |
 | `cd apps/web && pnpm build` (`tsc --noEmit && next build --webpack`) | pass; 114 routes incl. `/game-night`, `/game-night/join`, `/game-night/room/[id]` |
@@ -20,7 +20,7 @@ Date: 2026-09-25. Everything below distinguishes code that exists from evidence 
 | Requirement | Implemented | Backend verified | Browser verified | Native verified | Rollout |
 |---|---|---|---|---|---|
 | Durable create/join/seats (2-4, watcher overflow) | ✓ | ✓ engine + prod RPC | ✓ create + code-join in spec | code only | migrations+RPCs on prod |
-| Match engine: lobby→…→results, deadlines, rematch | ✓ | ✓ 72 checks | partial (duel round live) | code only | on prod |
+| Match engine: lobby→…→results, deadlines, rematch | ✓ | ✓ 78 checks | partial (duel round live) | code only | on prod |
 | Duel mode (2p) | ✓ | ✓ | ✓ prompt + duel round visible to peer | code only | on prod |
 | Classic mode (3-4p) | ✓ | ✓ | ✓ 4p full round: submit→reveal→judge pick→results | code only | on prod |
 | Private hands / stranger isolation / anonymous reveal | ✓ | ✓ | ✓ submit + judge pick driven in 4p | — | on prod |
@@ -63,6 +63,10 @@ Snapshots confirmed: seat grid, "Copy join link", "End room", chat region with r
 - Edge function `game-night-sync`.
 - `supabase_realtime` publication on all five client-relevant game-night tables.
 - **Not deployed:** any web/native client (branch unpushed, no Vercel build of this feature).
+
+## Post-merge hardening (migration `20260929000000`, deployed)
+
+Security-review fixes verified by the same 6/6 browser suite + 6 new engine checks: private rooms removed from the public browse list; kick is now a real ban (`banned_at`, rejoin refused); per-host cap of 8 live rooms; membership helpers clamp to the caller's JWT sub; gif/reaction payload validation; ping throttled 1.5s/member; submit replay scoped to non-ended rooms; `duel_over` search_path pinned; edge fn room lookup uses code equality (no ilike wildcards); session token prefixes no longer logged. Client: `useCommand` has a synchronous in-flight lock; state fetches serialize newest-first; ping resolves before refresh; Y.Doc sync sets `synced` only after a successful apply, runs one trailing sync when requested mid-flight, and ignores completions on released docs; canvas overlays are display-only on web (single control set); chat inserts no longer trigger full projection fetches; native room has the same command lock, per-round selection reset, and a realtime chat channel.
 
 ## Not verified (honest gaps)
 

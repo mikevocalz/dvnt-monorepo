@@ -38,4 +38,8 @@ export interface GameTableProps {
   onPickWinner(submissionId: number): void;
   onDuelPick?(cardId: string): void;
   duelOptions?: TableCard[];
+  /** When false the canvas is display-only — callers that render semantic
+      HTML controls alongside the scene (the web room) pass false so each
+      action has exactly one interactive surface. */
+  interactive?: boolean;
 }

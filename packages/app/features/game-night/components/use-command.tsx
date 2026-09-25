@@ -23,6 +23,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   match_active: "A match is already running",
   room_closed: "This room has ended",
   rate_limited: "Slow down — try again in a moment",
+  banned_from_room: "The host removed you from this room",
+  room_limit: "End one of your open rooms before starting another",
 };
 
 export function friendlyError(err: unknown): string {
@@ -44,27 +46,38 @@ export function useCommand() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
 
   useEffect(
     () => () => {
+      mounted.current = false;
       if (timer.current !== null) window.clearTimeout(timer.current);
     },
     [],
   );
 
   const run = useCallback(async (fn: () => Promise<unknown>) => {
+    // Synchronous lock: two clicks in the same frame must not both fire —
+    // each caller mints a fresh command UUID, so the server cannot dedupe.
+    if (inFlight.current) return false;
+    inFlight.current = true;
     setPending(true);
     setError(null);
     try {
       await fn();
       return true;
     } catch (err) {
+      if (!mounted.current) return false;
       setError(friendlyError(err));
       if (timer.current !== null) window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => setError(null), 6000);
+      timer.current = window.setTimeout(() => {
+        if (mounted.current) setError(null);
+      }, 6000);
       return false;
     } finally {
-      setPending(false);
+      inFlight.current = false;
+      if (mounted.current) setPending(false);
     }
   }, []);
 

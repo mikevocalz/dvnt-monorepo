@@ -183,10 +183,10 @@ export function GameTableScene(props: GameTableProps) {
           <Card key={card.card_id} x={handStart + i * gap} y={handY} text={card.text} selected={props.selected.includes(card.card_id)} opacity={handOpacity} />
         ))}
       </Canvas>
-      {displayCards.map((card, i) => (
+      {props.interactive !== false ? displayCards.map((card, i) => (
         <Pressable key={card.card_id} accessibilityRole="button" accessibilityLabel={card.text} onPress={() => props.state === "duel" ? props.onDuelPick?.(card.card_id) : props.onSelectCard(card.card_id)} style={[styles.hit, { left: handStart + i * gap, top: handY, width: CARD_W, height: CARD_H }]} />
-      ))}
-      {props.state === "judging" ? reveals.slice(0, 5).map((entry, i) => (
+      )) : null}
+      {props.interactive !== false && props.state === "judging" ? reveals.slice(0, 5).map((entry, i) => (
         <Pressable key={entry.submission_id} accessibilityRole="button" accessibilityLabel={`Pick submission ${i + 1}`} onPress={() => props.onPickWinner(entry.submission_id)} style={[styles.hit, { left: width / 2 - (Math.min(reveals.length, 5) * 142) / 2 + i * 142 + 8, top: 165, width: CARD_W, height: CARD_H }]} />
       )) : null}
     </View>

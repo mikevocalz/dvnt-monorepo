@@ -8,6 +8,11 @@ export interface RoomYDocEntry {
   error: string | null;
   /** Guard against overlapping syncEntry calls (interval + refresh + mount). */
   syncing?: boolean;
+  /** A sync arrived while one was in flight — run one trailing sync after. */
+  syncAgain?: boolean;
+  /** Set when the final ref released and the doc was destroyed. An in-flight
+      syncEntry must not apply updates or notify a dead entry. */
+  dead?: boolean;
 }
 
 const registry = new Map<string, RoomYDocEntry>();
@@ -52,6 +57,7 @@ export function releaseRoomYDoc(roomId: string): void {
   entry.refs--;
   if (entry.refs <= 0) {
     registry.delete(roomId);
+    entry.dead = true;
     entry.doc.destroy();
   }
 }

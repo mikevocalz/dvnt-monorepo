@@ -30,9 +30,18 @@ export function SeatGrid({
     .sort((a, b) => (a.seat_no ?? 99) - (b.seat_no ?? 99));
   const watchers = state.members.filter((m) => m.role === "watcher");
 
+  // Seat numbers are authoritative; the index fallback exists only for
+  // malformed states and must never render one member in two seats.
+  const claimed = new Set<string>();
   const seats = Array.from({ length: MAX_PLAYERS }, (_, i) => {
-    const member = seated.find((m) => m.seat_no === i) ?? seated[i] ?? null;
-    return { index: i, member };
+    const bySeat = seated.find((m) => m.seat_no === i && !claimed.has(m.user_id));
+    if (bySeat) {
+      claimed.add(bySeat.user_id);
+      return { index: i, member: bySeat };
+    }
+    const fallback = seated.find((m) => !claimed.has(m.user_id)) ?? null;
+    if (fallback) claimed.add(fallback.user_id);
+    return { index: i, member: fallback };
   });
 
   const seatsFree = seated.length < MAX_PLAYERS;

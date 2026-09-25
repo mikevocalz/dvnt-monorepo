@@ -51,16 +51,18 @@ export function GameNightRoomsScreen() {
 
   useEffect(() => {
     let cancelled = false;
+    let seq = 0;
     const load = async () => {
+      const mine = ++seq;
       try {
         const next = await listWatchableRooms();
-        if (!cancelled) {
+        if (!cancelled && mine === seq) {
           setRooms(next);
           setStatus("ready");
         }
       } catch {
         // A failed read is not an empty lobby. Different sentence, different UI.
-        if (!cancelled) setStatus("error");
+        if (!cancelled && mine === seq) setStatus("error");
       }
     };
     setStatus((prev) => (prev === "ready" ? "ready" : "loading"));

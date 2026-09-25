@@ -25,6 +25,7 @@ MIGRATIONS = [
     "migrations/20260925020000_game_night_deck_v1.sql",
     "migrations/20260926000000_game_night_no_deck_recycle.sql",
     "migrations/20260927000000_game_night_realtime_players_rooms.sql",
+    "migrations/20260929000000_game_night_hardening.sql",
 ]
 
 USERS = ["userAlpha", "userBravo", "userCarol", "userDave", "userErin", "userFred"]
@@ -431,6 +432,53 @@ def main():
             # ended room released its code: a fresh create can reuse it
             re1 = pg.rpc(D, "game_night_create_room('reuse-1', true)").split("|")
             check("create after release works", re1[1] != hcode or True, re1)
+
+            print("\n== hardening: ban / cap / private list / payloads ==")
+            # kick is a ban: kicked member cannot clear left_at by rejoining
+            bn = pg.rpc(E, "game_night_create_room('ban-1', true)").split("|")
+            bcode = bn[1]
+            pg.rpc(F, f"game_night_join_room('{bcode}')")
+            pg.rpc(E, f"game_night_kick('{bcode}', '{F}')")
+            rejoin = subprocess.run(
+                ["psql", "-X", "-h", tmp, "-U", "postgres", "-d", "postgres",
+                 "-v", "ON_ERROR_STOP=1", "-At", "-c",
+                 f"SET ROLE authenticated; SELECT set_config('request.jwt.claims','{{\"sub\":\"{F}\"}}',false); "
+                 f"SELECT * FROM game_night_join_room('{bcode}');"],
+                text=True, capture_output=True)
+            check("kicked member cannot rejoin", "banned_from_room" in rejoin.stderr, rejoin.stderr)
+
+            # private rooms stay off the public browse list; public ones show
+            pub = pg.rpc(E, "game_night_create_room('pub-1', false)").split("|")
+            listed = j(pg.sql(D, "SELECT coalesce(jsonb_agg(room_code),'[]'::jsonb) FROM game_night_list_rooms()"))
+            check("public room listed", pub[1] in listed, listed)
+            check("private room not listed", bcode not in listed and ccode not in listed, listed)
+
+            # per-host live-room cap: 8 live rooms, the 9th refused
+            for i in range(6):  # E already owns ban-1 + pub-1
+                pg.rpc(E, f"game_night_create_room('cap-{i}', true)")
+            caperr = subprocess.run(
+                ["psql", "-X", "-h", tmp, "-U", "postgres", "-d", "postgres",
+                 "-v", "ON_ERROR_STOP=1", "-At", "-c",
+                 f"SET ROLE authenticated; SELECT set_config('request.jwt.claims','{{\"sub\":\"{E}\"}}',false); "
+                 "SELECT * FROM game_night_create_room('cap-over', true);"],
+                text=True, capture_output=True)
+            check("room cap fires", "room_limit" in caperr.stderr, caperr.stderr)
+
+            # gif payload validation + reaction length cap
+            big_gif = subprocess.run(
+                ["psql", "-X", "-h", tmp, "-U", "postgres", "-d", "postgres",
+                 "-v", "ON_ERROR_STOP=1", "-At", "-c",
+                 f"SET ROLE authenticated; SELECT set_config('request.jwt.claims','{{\"sub\":\"{B}\"}}',false); "
+                 f"SELECT game_night_send_message('{ccode}', 'gif', null, jsonb_build_object('pad', repeat('x', 5000)), null);"],
+                text=True, capture_output=True)
+            check("oversize gif refused", "bad_gif" in big_gif.stderr, big_gif.stderr)
+            big_react = subprocess.run(
+                ["psql", "-X", "-h", tmp, "-U", "postgres", "-d", "postgres",
+                 "-v", "ON_ERROR_STOP=1", "-At", "-c",
+                 f"SET ROLE authenticated; SELECT set_config('request.jwt.claims','{{\"sub\":\"{B}\"}}',false); "
+                 f"SELECT game_night_send_message('{ccode}', 'reaction', null, null, repeat('x', 40));"],
+                text=True, capture_output=True)
+            check("oversize reaction refused", "bad_reaction" in big_react.stderr, big_react.stderr)
 
             failed = [n for n, ok in CHECKS if not ok]
             print(f"\n{len(CHECKS) - len(failed)}/{len(CHECKS)} checks passed")
