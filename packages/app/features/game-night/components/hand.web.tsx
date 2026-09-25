@@ -15,19 +15,29 @@ export function Hand({
   state,
   code,
   onSubmitted,
+  controlledSelected,
+  onToggleCard,
 }: {
   state: GameNightState;
   code: string;
   onSubmitted: () => void;
+  /** When provided, the parent owns selection state (for the table scene). */
+  controlledSelected?: string[];
+  onToggleCard?: (cardId: string) => void;
 }) {
   const pick = state.round?.prompt?.pick ?? 1;
-  const [selected, setSelected] = useState<string[]>([]);
+  const [localSelected, setLocalSelected] = useState<string[]>([]);
+  const selected = controlledSelected ?? localSelected;
   const cmd = useCommand();
 
   const submitted = Boolean(state.round?.my_submission);
 
   const toggle = (cardId: string) => {
-    setSelected((prev) => {
+    if (onToggleCard) {
+      onToggleCard(cardId);
+      return;
+    }
+    setLocalSelected((prev) => {
       if (prev.includes(cardId)) return prev.filter((id) => id !== cardId);
       if (prev.length >= pick) return prev;
       return [...prev, cardId];
@@ -37,7 +47,7 @@ export function Hand({
   const play = () =>
     cmd.run(async () => {
       await submitCards(code, selected, crypto.randomUUID());
-      setSelected([]);
+      if (!controlledSelected) setLocalSelected([]);
       onSubmitted();
     });
 

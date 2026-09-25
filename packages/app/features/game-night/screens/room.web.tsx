@@ -15,7 +15,7 @@
  * Web laws: semantic HTML + Tailwind, no <View>/<Text>. State is Zustand.
  */
 
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { Link } from "solito/link";
 import {
@@ -31,7 +31,8 @@ import { useGameNightStore } from "../store";
 import { useRoomPresence } from "../use-room-presence";
 import { normalizeRoomCode, isCompleteRoomCode } from "../room-code";
 import { useGameNightState } from "../use-game-state";
-import { leaveRoom, endRoom } from "../rooms-api";
+import { useRoomYDoc } from "../use-room-ydoc";
+import { leaveRoom, endRoom, judgePick, duelPick } from "../rooms-api";
 import { SeatGrid } from "../components/seat-grid.web";
 import { ClassicRound } from "../components/classic-round.web";
 import { DuelRound } from "../components/duel-round.web";
@@ -40,6 +41,8 @@ import { Scoreboard } from "../components/scoreboard.web";
 import { RoomChat } from "../components/room-chat.web";
 import { Countdown, PromptCard } from "../components/prompt-card.web";
 import { CommandError, useCommand } from "../components/use-command";
+import { TableRenderer } from "../components/table";
+import type { GameTableProps, TableMember } from "../components/table/types";
 
 const subscribeOnline = (cb: () => void) => {
   window.addEventListener("online", cb);
@@ -124,6 +127,61 @@ export function GameNightRoomScreen() {
     }
     router.push("/game-night");
   }, [code, router]);
+
+  // ---- Yjs doc (read-only projection mirror) ----
+  const yDoc = useRoomYDoc(
+    state?.room.id ?? null,
+    valid ? code : null,
+    state?.server_time,
+  );
+
+  useEffect(() => {
+    if (yDoc.error) console.warn("[game-night] ydoc sync error:", yDoc.error);
+  }, [yDoc.error]);
+
+  // ---- Shared card-selection state (Hand + TableRenderer) ----
+  const [tableSelected, setTableSelected] = useState<string[]>([]);
+  const pick = state?.round?.prompt?.pick ?? 1;
+
+  const toggleCard = useCallback(
+    (cardId: string) => {
+      setTableSelected((prev) => {
+        if (prev.includes(cardId)) return prev.filter((id) => id !== cardId);
+        if (prev.length >= pick) return prev;
+        return [...prev, cardId];
+      });
+    },
+    [pick],
+  );
+
+  // Reset selection when the round changes.
+  const roundId = state?.round?.id;
+  useEffect(() => {
+    setTableSelected([]);
+  }, [roundId]);
+
+  // ---- Table command wrappers (judge pick, duel pick) ----
+  const tableCmd = useCommand();
+
+  const handlePickWinner = useCallback(
+    (submissionId: number) => {
+      void tableCmd.run(async () => {
+        await judgePick(code, submissionId, crypto.randomUUID());
+        refresh();
+      });
+    },
+    [code, refresh, tableCmd],
+  );
+
+  const handleDuelPick = useCallback(
+    (cardId: string) => {
+      void tableCmd.run(async () => {
+        await duelPick(code, cardId, crypto.randomUUID());
+        refresh();
+      });
+    },
+    [code, refresh, tableCmd],
+  );
 
   if (!valid) {
     return (
@@ -241,6 +299,24 @@ export function GameNightRoomScreen() {
           </div>
         ) : null}
 
+        {yDoc.error ? (
+          <div
+            role="status"
+            className="mt-2 flex items-center gap-2 text-xs text-white/40"
+          >
+            <AlertTriangle aria-hidden className="h-3 w-3" />
+            Live sync unavailable
+          </div>
+        ) : yDoc.synced ? (
+          <div
+            role="status"
+            className="mt-2 flex items-center gap-2 text-xs text-white/30"
+          >
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            Synced
+          </div>
+        ) : null}
+
         <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_360px]">
           <div className="space-y-8">
             {status === "loading" || status === "idle" ? (
@@ -252,6 +328,41 @@ export function GameNightRoomScreen() {
               <EndedRoom />
             ) : (
               <>
+                {/* 3-D table scene: visible only during an active match. */}
+                {playing && round && !matchOver && round.prompt ? (
+                  <section aria-label="Table scene">
+                    <TableRenderer
+                      state={deriveTableState(round.phase, match?.mode)}
+                      prompt={{
+                        text: round.prompt.text,
+                        pick: round.prompt.pick,
+                      }}
+                      myHand={state.me.hand}
+                      selected={tableSelected}
+                      submissionsIn={round.submissions_in}
+                      submissionsExpected={round.submissions_expected}
+                      reveal={
+                        round.reveal.length > 0
+                          ? round.reveal.map((r) => ({
+                              submission_id: r.submission_id,
+                              texts: r.texts,
+                              is_winner: r.is_winner,
+                            }))
+                          : null
+                      }
+                      members={buildTableMembers(state.members)}
+                      myUserId={state.me.user_id}
+                      judgeUserId={round.judge_user_id ?? undefined}
+                      onSelectCard={toggleCard}
+                      onPickWinner={handlePickWinner}
+                      onDuelPick={
+                        match?.mode === "duel" ? handleDuelPick : undefined
+                      }
+                      duelOptions={round.duel_options}
+                    />
+                  </section>
+                ) : null}
+
                 {/* Prompt anchors the table whenever a round is live. */}
                 {round?.prompt ? (
                   <section aria-label="Prompt">
@@ -278,7 +389,12 @@ export function GameNightRoomScreen() {
                     <ClassicRound
                       state={state}
                       code={code}
-                      onChanged={refresh}
+                      onChanged={() => {
+                        setTableSelected([]);
+                        refresh();
+                      }}
+                      controlledSelected={tableSelected}
+                      onToggleCard={toggleCard}
                     />
                   )
                 ) : (
@@ -312,6 +428,45 @@ export function GameNightRoomScreen() {
     </main>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Table-renderer helpers (pure, no hooks)
+// ---------------------------------------------------------------------------
+
+function deriveTableState(
+  phase: string | undefined,
+  mode: string | undefined,
+): GameTableProps["state"] {
+  if (mode === "duel") return "duel";
+  switch (phase) {
+    case "judging":
+      return "judging";
+    case "round_results":
+    case "duel_results":
+      return "results";
+    case "submitting":
+    case "dealing":
+    case "duel_lock":
+      return "submitting";
+    default:
+      return "lobby";
+  }
+}
+
+function buildTableMembers(
+  members: { user_id: string; name: string | null; seat_no: number | null; avatar: string | null }[],
+): TableMember[] {
+  return members
+    .filter((m): m is typeof m & { seat_no: number } => m.seat_no != null)
+    .map((m, i) => ({
+      user_id: m.user_id,
+      name: m.name ?? `Player ${i + 1}`,
+      avatar: m.avatar ?? "",
+      seat_no: m.seat_no,
+    }));
+}
+
+// ---------------------------------------------------------------------------
 
 function EndedRoom() {
   return (

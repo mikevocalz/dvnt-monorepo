@@ -103,3 +103,27 @@ one route that draws a table.
   performance claim. CanvasKit runs on WebGL in the browser; if the table turns
   out to need more than that, this decision gets re-opened with a measurement
   attached rather than an assumption.
+
+## Implementation update, 2026-09-17
+
+The table implementation now lives in
+`packages/app/features/game-night/components/table/`. Native and web use one
+Skia scene. Web loads `/canvaskit.wasm` through `WithSkiaWeb` only when the
+component mounts. This preserves the measured payload and lazy-loading findings
+above.
+
+A native enhancement also landed beside the baseline. It passes the singleton
+`GpuRuntime` device and the component's canvas context to Three's
+`WebGPURenderer`. Three owns the dimensional table, card meshes, camera, and
+lights. TypeGPU owns a bounded 48-instance winner-particle buffer on that same
+device. Component cleanup destroys only its own buffers, geometries, materials,
+renderer, and animation frame. It does not dispose `GpuRuntime` or resources
+owned by other GPU surfaces.
+
+The web enhanced entry currently returns the CanvasKit baseline and reports
+`canUseEnhanced()` as false. `react-native-webgpu` 0.10.2 contains web
+compatibility code, but its public `Canvas` remains an RN View/native-component
+wrapper rather than a verified Next DOM canvas contract for this renderer. No
+WebGPU path is claimed without a browser integration measurement. Native
+Three/WebGPU and device-loss behavior also remain unverified on physical
+hardware.

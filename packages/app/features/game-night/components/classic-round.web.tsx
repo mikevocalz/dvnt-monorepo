@@ -16,10 +16,14 @@ export function ClassicRound({
   state,
   code,
   onChanged,
+  controlledSelected,
+  onToggleCard,
 }: {
   state: GameNightState;
   code: string;
   onChanged: () => void;
+  controlledSelected?: string[];
+  onToggleCard?: (cardId: string) => void;
 }) {
   const round = state.round;
   if (!round) return null;
@@ -162,7 +166,13 @@ export function ClassicRound({
         )
       ) : isPlayer && !isJudge ? (
         <div className="mt-5">
-          <Hand state={state} code={code} onSubmitted={onChanged} />
+          <Hand
+            state={state}
+            code={code}
+            onSubmitted={onChanged}
+            controlledSelected={controlledSelected}
+            onToggleCard={onToggleCard}
+          />
         </div>
       ) : isJudge ? (
         <p className="mt-5 rounded-xl border border-[#8A40CF]/40 bg-[#8A40CF]/10 p-4 text-sm text-[#C9A2F0]">
