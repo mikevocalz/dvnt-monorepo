@@ -109,6 +109,7 @@ import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog } from "@dvnt/ui";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 import { GuestRsvpSheet } from "./guest-rsvp-sheet.web";
+import { InviteGuestsSheet } from "./ui/invite-guests-sheet.web";
 import { TicketsOpeningSoonCard } from "@dvnt/app/components/event/TicketsOpeningSoonCard.web";
 import { useSaleNotifyStore } from "@dvnt/app/lib/stores/sale-notify-store";
 import { useGuestRsvpStore } from "@dvnt/app/lib/stores/guest-rsvp-store";
@@ -375,6 +376,8 @@ export function EventDetailScreen() {
   const openGuestCheckout = useGuestCheckoutStore((s) => s.openSheet);
   const menuOpen = useEventDetailUiStore((s) => s.menuOpen);
   const setMenuOpen = useEventDetailUiStore((s) => s.setMenuOpen);
+  const inviteOpen = useEventDetailUiStore((s) => s.inviteOpen);
+  const setInviteOpen = useEventDetailUiStore((s) => s.setInviteOpen);
   const openAt = useLightboxStore((s) => s.openAt);
   const showToast = useUIStore((s) => s.showToast);
 
@@ -889,6 +892,21 @@ export function EventDetailScreen() {
 
   const share = async () => {
     setMenuOpen(false);
+    // A private event has no shareable link: can_view_event refuses anyone
+    // without an event_invites row, so a copied URL opens a refusal for every
+    // recipient. The host shares by inviting guests instead.
+    if (e?.visibility === "private") {
+      if (isHost) {
+        setInviteOpen(true);
+      } else {
+        showToast(
+          "info",
+          "Private event",
+          "Only the host can invite guests to this event.",
+        );
+      }
+      return;
+    }
     const url = `https://dvntapp.live/events/${slug}`;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1116,7 +1134,15 @@ export function EventDetailScreen() {
                 className="fixed inset-0 z-40 cursor-default"
               />
               <div className="absolute right-3 top-14 z-50 w-48 rounded-xl border border-white/12 bg-[#0b0d16] py-1 shadow-2xl">
-                <MenuItem Icon={Share2} label="Share event" onClick={share} />
+                <MenuItem
+                  Icon={Share2}
+                  label={
+                    e?.visibility === "private" && isHost
+                      ? "Invite guests"
+                      : "Share event"
+                  }
+                  onClick={share}
+                />
                 {/* 5. TRANSLATION — toggle the About copy via useContentTranslation. */}
                 {showTranslate ? (
                   <MenuItem
@@ -2495,6 +2521,17 @@ export function EventDetailScreen() {
       <Lightbox />
       <GuestRsvpSheet />
       <GuestCheckoutSheet />
+      {/* Private events: "Share" becomes the guest invite — a copied link
+          cannot open one (can_view_event gates on event_invites). */}
+      <InviteGuestsSheet
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        eventId={Number(e?.id) || 0}
+        eventTitle={e?.title ?? "Event"}
+        eventDate={e?.fullDate || e?.date || undefined}
+        eventImage={e?.image || undefined}
+        eventLocation={e?.location || undefined}
+      />
       {/* B3: age-gate interstitial (Didit hosted capture). */}
       <VerificationInterstitial
         open={verifyOpen}

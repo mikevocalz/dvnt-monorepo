@@ -59,3 +59,24 @@ test("a stranger and an anonymous viewer are still refused", async () => {
   assert.equal(await canAccessEvent(pendingStaff, 87, "stranger"), false);
   assert.equal(await canAccessEvent(pendingStaff, 87, null), false);
 });
+
+// Regression: a shared link to a private event opened "event not found" for
+// every recipient. Sharing mints /e/<id> but writes nothing; access needs an
+// event_invites row, which only event-invite-guests creates. The share path
+// (Share sheet on native, InviteGuestsSheet on web) now calls it — this pins
+// the access rule that makes the invite, not the link, the thing that works.
+const guestListInvite = database({
+  events: [privateEvent],
+  event_invites: [{ event_id: 87, invited_user_id: "invitee", status: "pending" }],
+});
+
+test("a guest-list invite opens a private event for the invitee", async () => {
+  assert.equal(await canAccessEvent(guestListInvite, 87, "invitee"), true);
+  const relations = await eventRelationships(guestListInvite, privateEvent, "invitee");
+  assert.deepEqual(relations, { organizer: false, ticket: false, invited: true });
+});
+
+test("the same link opens nothing for a guest who was never invited", async () => {
+  assert.equal(await canAccessEvent(guestListInvite, 87, "stranger"), false);
+  assert.equal(await canAccessEvent(guestListInvite, 87, null), false);
+});

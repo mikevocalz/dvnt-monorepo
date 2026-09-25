@@ -11,6 +11,10 @@ interface EventDetailUiState {
   menuOpen: boolean;
   setMenuOpen: (open: boolean) => void;
 
+  // Guest-invite sheet (private events — a copied link cannot open one)
+  inviteOpen: boolean;
+  setInviteOpen: (open: boolean) => void;
+
   // Ticket checkout sheet
   checkoutOpen: boolean;
   setCheckoutOpen: (open: boolean) => void;
@@ -85,6 +89,9 @@ export const useEventDetailUiStore = create<EventDetailUiState>((set) => ({
   menuOpen: false,
   setMenuOpen: (menuOpen) => set({ menuOpen }),
 
+  inviteOpen: false,
+  setInviteOpen: (inviteOpen) => set({ inviteOpen }),
+
   checkoutOpen: false,
   setCheckoutOpen: (checkoutOpen) => set({ checkoutOpen }),
 
@@ -138,6 +145,7 @@ export const useEventDetailUiStore = create<EventDetailUiState>((set) => ({
   reset: () =>
     set({
       menuOpen: false,
+      inviteOpen: false,
       verifyOpen: false,
       checkoutOpen: false,
       selectedTierId: null,

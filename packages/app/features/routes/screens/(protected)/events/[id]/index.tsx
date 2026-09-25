@@ -1374,6 +1374,23 @@ function EventDetailScreenContent() {
   }, [eventData, router]);
 
   const handleShare = useCallback(async () => {
+    // A private event has no shareable link: can_view_event refuses anyone
+    // without an event_invites row, so a copied URL opens a refusal for every
+    // recipient. The only share that works is a guest-list invite — which the
+    // edge fn restricts to the owner/admin co-organizer, so a non-host invitee
+    // gets an explanation instead of a sheet that can only fail.
+    if (eventData?.visibility === "private") {
+      if (isHost) {
+        setShowShareSheet(true);
+      } else {
+        showToast(
+          "info",
+          "Private event",
+          "Only the host can invite guests to this event.",
+        );
+      }
+      return;
+    }
     try {
       // visibility + shareSlug decide the URL: a link_only event is shared by
       // its random token, because after 20260917100000 that token is the only
@@ -1387,7 +1404,7 @@ function EventDetailScreenContent() {
       console.error("[EventDetail] Share error:", error);
       showToast("error", "Share Failed", "Unable to share event link.");
     }
-  }, [eventId, eventData?.title, eventData?.visibility, eventData?.shareSlug, showToast]);
+  }, [eventId, eventData?.title, eventData?.visibility, eventData?.shareSlug, showToast, setShowShareSheet, isHost]);
 
   const handleAddToCalendar = useCallback(async () => {
     if (!eventData) return;
@@ -2915,7 +2932,8 @@ function EventDetailScreenContent() {
         isPending={isUpgradePending}
       />
 
-      {/* Share Event to DM Inbox */}
+      {/* Share Event to DM Inbox — private events use it as the guest-list
+          invite sheet, because a copied link cannot open a private event. */}
       <ShareEventSheet
         visible={showShareSheet}
         onClose={() => setShowShareSheet(false)}
@@ -2924,6 +2942,7 @@ function EventDetailScreenContent() {
         eventDate={eventData?.fullDate || eventData?.date || undefined}
         eventImage={eventData?.image || undefined}
         eventLocation={eventData?.location || undefined}
+        visibility={eventData?.visibility}
       />
 
       {/* Header overflow — calendar / share / edit / delete / promote */}
@@ -2933,6 +2952,9 @@ function EventDetailScreenContent() {
         isHost={isHost}
         isLiked={isLiked}
         eventStatus={(eventData as any)?.status}
+        shareLabel={
+          eventData?.visibility === "private" ? "Invite guests" : undefined
+        }
         onShare={handleShare}
         onToggleLike={handleToggleLike}
         onAddToCalendar={handleAddToCalendar}
