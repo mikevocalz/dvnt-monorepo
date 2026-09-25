@@ -16,10 +16,14 @@ export function SeatGrid({
   state,
   code,
   onChanged,
+  hideHostStart = false,
 }: {
   state: GameNightState;
   code: string;
   onChanged: () => void;
+  /** Post-match: MatchEnd owns the start CTA ("Rematch"), so the host's
+      "Start game" button here is suppressed while ready/seat controls stay. */
+  hideHostStart?: boolean;
 }) {
   const seated = state.members
     .filter((m) => m.role === "player")
@@ -151,6 +155,7 @@ export function SeatGrid({
           )
         ) : me.is_host ? (
           <>
+            {hideHostStart ? null : (
             <button
               type="button"
               disabled={!canStart || startCmd.pending}
@@ -164,6 +169,7 @@ export function SeatGrid({
             >
               {startCmd.pending ? "Starting…" : "Start game"}
             </button>
+            )}
             {startReason ? (
               <p className="mt-2 text-sm text-white/50">{startReason}</p>
             ) : null}

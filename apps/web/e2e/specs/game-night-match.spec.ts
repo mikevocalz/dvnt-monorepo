@@ -321,4 +321,162 @@ test.describe("game night — two-client match", () => {
       await Promise.all([peerCtx.close(), gn3Ctx.close()]);
     }
   });
+
+  test("three players play a classic round end to end", async ({
+    page,
+    browser,
+  }) => {
+    test.skip(
+      !fs.existsSync(PEER_STATE) || !fs.existsSync(GN3_STATE),
+      "needs peer.json + gn3.json storage states",
+    );
+
+    const ctxs = await Promise.all(
+      [PEER_STATE, GN3_STATE].map((s) =>
+        browser.newContext({ storageState: s }),
+      ),
+    );
+    for (const c of ctxs) await suppressInstallPrompt(c);
+    const players = await Promise.all(ctxs.map((c) => c.newPage()));
+
+    try {
+      await page.goto("/game-night/join");
+      await page.getByRole("button", { name: "Start a room" }).click();
+      await page.waitForURL(/\/game-night\/room\/[A-Z0-9]{6}/, {
+        timeout: 20_000,
+      });
+      const code = page.url().match(/room\/([A-Z0-9]{6})/)?.[1];
+      expect(code, "room code in URL").toBeTruthy();
+
+      for (const p of players) await joinByCode(p, code!);
+      for (const p of players) {
+        const ready = p.getByRole("button", { name: /ready up/i });
+        await expect(ready).toBeVisible({ timeout: 20_000 });
+        await ready.click();
+      }
+
+      const startBtn = page.getByRole("button", { name: /start game/i });
+      await expect(startBtn).toBeEnabled({ timeout: 35_000 });
+      await startBtn.click();
+
+      // 3 players => classic mode: one judge, two writers.
+      const all = [page, ...players];
+      const writers: typeof all = [];
+      let judge: (typeof all)[number] | null = null;
+      for (const p of all) {
+        const hand = p.getByRole("region", { name: "Your hand" });
+        const judgeCue = p.getByText(/you are (the )?judg/i);
+        const which = await Promise.race([
+          hand.waitFor({ timeout: 25_000 }).then(() => "hand" as const),
+          judgeCue
+            .waitFor({ timeout: 25_000 })
+            .then(() => "judge" as const),
+        ]).catch(() => null);
+        if (which === "hand") writers.push(p);
+        else if (which === "judge") judge = p;
+      }
+      expect(judge, "exactly one judge").toBeTruthy();
+      expect(writers.length, "two writers").toBe(2);
+
+      for (const w of writers) {
+        const hand = w.getByRole("region", { name: "Your hand" });
+        const play = hand.getByRole("button", { name: /play card/i });
+        const cards = hand.locator("li button");
+        for (let i = 0; i < (await cards.count()); i++) {
+          if (await play.isEnabled()) break;
+          await cards.nth(i).click();
+        }
+        await expect(play).toBeEnabled();
+        await play.click();
+      }
+
+      const pickBtn = judge!.getByRole("button", { name: /pick winner/i }).first();
+      await expect(pickBtn).toBeVisible({ timeout: 30_000 });
+      await pickBtn.click();
+
+      for (const p of all) {
+        await expect(
+          p.getByRole("region", { name: "Round results" }),
+        ).toBeVisible({ timeout: 20_000 });
+      }
+    } finally {
+      try {
+        await page.getByRole("button", { name: /^leave$/i }).click({ timeout: 5_000 });
+      } catch {
+        /* room may already be ended */
+      }
+      await Promise.all(ctxs.map((c) => c.close()));
+    }
+  });
+
+  test("lobby reload, mid-match leave abandons, host rematches", async ({
+    page,
+    browser,
+  }) => {
+    test.skip(!fs.existsSync(PEER_STATE), "no peer identity");
+
+    const peerCtx = await browser.newContext({ storageState: PEER_STATE });
+    await suppressInstallPrompt(peerCtx);
+    const peer = await peerCtx.newPage();
+
+    try {
+      await page.goto("/game-night/join");
+      await page.getByRole("button", { name: "Start a room" }).click();
+      await page.waitForURL(/\/game-night\/room\/[A-Z0-9]{6}/, {
+        timeout: 20_000,
+      });
+      const code = page.url().match(/room\/([A-Z0-9]{6})/)?.[1];
+
+      await joinByCode(peer, code!);
+
+      // Lobby-phase reload: peer refreshes while seated, still in the room.
+      await peer.reload();
+      const ready = peer.getByRole("button", { name: /ready up/i });
+      await expect(ready).toBeVisible({ timeout: 30_000 });
+      await ready.click();
+
+      const startBtn = page.getByRole("button", { name: /start game/i });
+      await expect(startBtn).toBeEnabled({ timeout: 35_000 });
+      await startBtn.click();
+      await expect(
+        page.getByRole("region", { name: "Duel round" }),
+      ).toBeVisible({ timeout: 25_000 });
+
+      // Peer leaves mid-match: 2p drops below the floor, match abandons.
+      await peer.getByRole("button", { name: /^leave$/i }).click();
+      await expect(
+        page.getByRole("region", { name: "Match result" }),
+      ).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText(/abandoned/i).first()).toBeVisible();
+
+      // Rematch needs two seated, ready players. The peer re-joins the open
+      // room, lands seated but unready, and readies from the seat grid that
+      // stays mounted under the match result.
+      await joinByCode(peer, code!);
+      const reReady = peer.getByRole("button", { name: /ready up/i });
+      await expect(reReady).toBeVisible({ timeout: 30_000 });
+      await reReady.click();
+      await expect(
+        page.getByText("Ready", { exact: true }).first(),
+      ).toBeVisible({ timeout: 30_000 });
+
+      // Host rematches from the result screen: fresh duel round starts.
+      const rematch = page.getByRole("button", { name: /rematch/i });
+      await expect(rematch).toBeVisible({ timeout: 30_000 });
+      await rematch.click();
+      await expect(
+        page.getByRole("region", { name: "Duel round" }),
+      ).toBeVisible({ timeout: 30_000 });
+      await expect(
+        peer.getByRole("region", { name: "Duel round" }),
+      ).toBeVisible({ timeout: 30_000 });
+    } finally {
+      try {
+        await page.getByRole("button", { name: /^leave$/i }).click({ timeout: 5_000 });
+      } catch {
+        /* room may already be ended */
+      }
+      await peerCtx.close();
+    }
+  });
 });

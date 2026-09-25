@@ -381,7 +381,18 @@ export function GameNightRoomScreen() {
                 ) : null}
 
                 {matchOver ? (
-                  <MatchEnd state={state} code={code} onChanged={refresh} />
+                  <>
+                    <MatchEnd state={state} code={code} onChanged={refresh} />
+                    {/* Ready/seat controls stay reachable after the match:
+                        a rejoined player lands unready and would otherwise
+                        block Rematch with no way to fix it. */}
+                    <SeatGrid
+                      state={state}
+                      code={code}
+                      onChanged={refresh}
+                      hideHostStart
+                    />
+                  </>
                 ) : playing && round ? (
                   match?.mode === "duel" ? (
                     <DuelRound state={state} code={code} onChanged={refresh} />
