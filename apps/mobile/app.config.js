@@ -29,6 +29,46 @@ const appSecurityPlugin = [
   },
 ];
 
+// App Group shared between the app, the widget extension, and the watch. Reused
+// (not forked) — the widget store + Live Activity read a SAFE-ONLY dataset the
+// app writes here. See packages/app/lib/widgets/* and docs/widgets-fit.md.
+const APP_GROUP = "group.com.dvnt.app";
+
+// DVNT home-screen widgets (expo-widgets, SDK 56). Each `name` MUST match a
+// createWidget(...) registration in apps/mobile/widgets/*. Three pillars:
+// tickets, blog, social. Accessory families power the Lock Screen glance.
+const dvntWidgets = [
+  {
+    name: "DVNTTickets",
+    displayName: "DVNT Tickets",
+    description:
+      "Your next ticket with a live door countdown and tier badge. Safe events only.",
+    supportedFamilies: [
+      "systemSmall",
+      "systemMedium",
+      "systemLarge",
+      "accessoryCircular",
+      "accessoryRectangular",
+      "accessoryInline",
+    ],
+    contentMarginsDisabled: false,
+  },
+  {
+    name: "DVNTBlog",
+    displayName: "DVNT Blog",
+    description: "Latest DVNT stories, cycling through recent posts.",
+    supportedFamilies: ["systemSmall", "systemMedium", "systemLarge"],
+    contentMarginsDisabled: false,
+  },
+  {
+    name: "DVNTSocial",
+    displayName: "DVNT Social",
+    description: "Your activity glance — notifications and new followers.",
+    supportedFamilies: ["systemSmall", "systemMedium", "systemLarge"],
+    contentMarginsDisabled: false,
+  },
+];
+
 export default {
   expo: {
     name: "DVNT",
@@ -174,6 +214,11 @@ export default {
       },
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
+        // Live Activities (Lock Screen + Dynamic Island) run on expo-widgets
+        // (SDK 56). Required so ActivityKit can start the DVNT event Live
+        // Activity — see apps/mobile/widgets/live-activity.tsx.
+        NSSupportsLiveActivities: true,
+        NSSupportsLiveActivitiesFrequentUpdates: true,
         NSCameraUsageDescription:
           "DVNT uses your camera to capture photos and videos for posts, stories, and live video rooms. Your camera is only active while you are creating content.",
         NSPhotoLibraryUsageDescription:
@@ -384,6 +429,19 @@ export default {
       "./plugins/with-voip-push",
       "./plugins/with-custom-ringtone",
       "./plugins/with-live-activity",
+      // iOS home-screen widgets + Live Activities (stable expo-widgets, SDK 56).
+      // Generates the widget extension, wires the App Group, and enables the
+      // ActivityKit push channel used for host-broadcast Live Activity updates.
+      [
+        "expo-widgets",
+        {
+          groupIdentifier: APP_GROUP,
+          bundleIdentifier: "com.dvnt.app.widgets",
+          enablePushNotifications: true,
+          frequentUpdates: true,
+          widgets: dvntWidgets,
+        },
+      ],
       ["./plugins/with-development-team", { teamId: "436WA3W63V" }],
       "expo-secure-store",
       "react-native-compressor",
@@ -418,9 +476,11 @@ export default {
       reactCompiler: !isProd,
     },
     extra: {
+      // The App Group the widgets/Live Activity share with the app. The widget
+      // extension itself is generated + registered by the expo-widgets plugin
+      // above (no hand-written extension target / EAS appExtensions block).
       ios: {
-        widgetBundleIdentifier: "com.dvnt.app.DVNTHomeWidgetExtension",
-        appGroupIdentifier: "group.com.dvnt.app",
+        appGroupIdentifier: APP_GROUP,
       },
       router: {
         origin: routerOrigin,
@@ -431,24 +491,6 @@ export default {
         fishjamAppIdFallback,
       eas: {
         projectId: "5c0d13a3-c544-4ffc-ae8f-8e897dda2663",
-        build: {
-          // Widget extension disabled — re-enable when live activity crash is fixed
-          // experimental: {
-          //   ios: {
-          //     appExtensions: [
-          //       {
-          //         targetName: "DVNTHomeWidgetExtension",
-          //         bundleIdentifier: "com.dvnt.app.DVNTHomeWidgetExtension",
-          //         entitlements: {
-          //           "com.apple.security.application-groups": [
-          //             "group.com.dvnt.app",
-          //           ],
-          //         },
-          //       },
-          //     ],
-          //   },
-          // },
-        },
       },
     },
   },
