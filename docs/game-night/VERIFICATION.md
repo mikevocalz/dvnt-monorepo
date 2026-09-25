@@ -11,7 +11,7 @@ Date: 2026-09-25. Everything below distinguishes code that exists from evidence 
 | `cd packages/app && npx tsc --noEmit --ignoreDeprecations "6.0"` | clean, 0 errors (repo tsconfig uses deprecated `baseUrl` — pre-existing) |
 | `cd packages/app && npx tsx --test room-code seats room-ydoc table-render tests` | 17/17 pass |
 | `cd apps/web && pnpm build` (`tsc --noEmit && next build --webpack`) | pass; 114 routes incl. `/game-night`, `/game-night/join`, `/game-night/room/[id]` |
-| `cd apps/web && pnpm start -p 19006` + `npx playwright test e2e/specs/game-night-match.spec.ts --project=chromium-desktop-1440 --no-deps` | **4 pass** (2p duel, 4p classic full round, host kick, spectator+chat+GIF+reload), four real accounts, production Supabase |
+| `cd apps/web && pnpm start -p 19006` + `npx playwright test e2e/specs/game-night-match.spec.ts --project=chromium-desktop-1440 --no-deps` | **6 pass** (2p duel, 4p + 3p classic full rounds, host kick, spectator+chat+GIF+reload, lobby-reload/abandon/rejoin/rematch), four real accounts, production Supabase |
 | `npx supabase functions deploy game-night-sync` | deployed to `npfjanxturvmjyevoyfo` |
 | Live prod match via PostgREST (earlier session) | full duel+classic flow driven with real minted JWTs: create idempotent, seats, hands private, anonymous reveal, score-once, watcher join, chat, code release |
 
@@ -42,6 +42,10 @@ Date: 2026-09-25. Everything below distinguishes code that exists from evidence 
 4. 4p classic (audit host + peer + `gn3` + `gn4` storage states minted via `sign-up/email`): code-join ×3 → all ready → host starts → 3 writers each pick cards until "Play card" enables → submit → judge clicks "Pick winner" → `region "Round results"` on all four pages.
 5. Kick: host "Remove {name}" (web seat grid control added — it previously existed only on native) → seat opens on host → kicked player lands on "No room with that code".
 6. Spectator/chat/reconnect: third identity joins mid-duel → watcher (no "Your hand", no "Take a seat") → player and watcher post chat text, visible on all three pages → player opens KLIPY picker, picks a tile, gif posts → player reloads mid-round and the duel round returns.
+7. 3p classic: two code-joins, all ready, one judge + two writers, results on all three pages.
+8. Lobby reload → mid-match leave → abandon → rejoin → rematch: peer reloads while seated pre-match and stays in the room; peer leaving mid-duel abandons the match ("Match result" on host); peer re-joins, readies from the seat grid kept under the result panel; host Rematch starts a fresh duel round on both pages.
+
+Bug found and fixed by run 8: after a match ended, `MatchEnd` replaced `SeatGrid`, so a rejoined player (`ready=false` on rejoin) had no UI to ready and `Rematch` deadlocked on `players_not_ready`. `SeatGrid` now stays mounted under the result (`hideHostStart` keeps Rematch the only start CTA).
 
 Bugs found and fixed by these runs: `game_night_players`/`game_night_rooms` unpublished + unsubscribed (host Start waited on the 20s poll — migration `20260927000000` + hook subscribe); `game-night-sync` edge fn resolved rooms through `game_night_resolve_room`, which requires a user JWT the service role lacks → every sync 500'd in a loop (now reads `game_night_rooms` directly); CanvasKit paragraph text threw `SkTypefaceFontProvider required` on web (scene now registers SpaceGrotesk into a provider on web; native keeps the system font manager).
 
@@ -62,7 +66,7 @@ Snapshots confirmed: seat grid, "Copy join link", "End room", chat region with r
 
 ## Not verified (honest gaps)
 
-- Rematch flow and refresh during every phase (reload mid-round verified for a duel player).
+- Refresh during submitting/judging/results phases (lobby and mid-round duel reloads verified).
 - Chat retry/moderation in browser (send + delivery verified, failure path not).
 - Yjs client diff round-trip correctness (sync now returns 200s; compaction unexercised).
 - Native builds (iOS/Android), Gorhom sheet behavior, device-loss/fallback rendering, performance numbers — no devices run this session.
