@@ -23,6 +23,7 @@ MIGRATIONS = [
     "migrations/20260925000000_game_night_match_schema.sql",
     "migrations/20260925010000_game_night_match_engine.sql",
     "migrations/20260925020000_game_night_deck_v1.sql",
+    "migrations/20260926000000_game_night_no_deck_recycle.sql",
 ]
 
 USERS = ["userAlpha", "userBravo", "userCarol", "userDave", "userErin", "userFred"]
@@ -282,6 +283,38 @@ def main():
             mid2 = pg.rpc(A, f"game_night_start_match('{code}','cmd-rematch-1')")
             check("rematch creates new match", mid2.isdigit() and mid2 != mid, mid2)
             pg.rpc(A, f"game_night_end_room('{code}')")
+
+            print("\n== deck exhaustion: no recycling ==")
+            x1 = pg.rpc(A, "game_night_create_room('deck-1', true)").split("|")
+            xcode = x1[1]
+            pg.rpc(B, f"game_night_join_room('{xcode}')")
+            pg.rpc(C, f"game_night_join_room('{xcode}')")
+            for p in [B, C]:
+                pg.rpc(p, f"game_night_set_ready('{xcode}', true)")
+            xmid = pg.rpc(A, f"game_night_start_match('{xcode}','cmd-x-1')")
+            check("exhaustion match started", xmid.isdigit(), xmid)
+
+            # Spend the prompt deck: the current round already drew one, so the
+            # next open_round must COMPLETE the match rather than reshuffle.
+            pg.admin(f"UPDATE game_night_decks SET prompt_deck='[]'::jsonb WHERE match_id={xmid};")
+            xst = j(pg.rpc(A, f"game_night_state('{xcode}')"))
+            xjudge = xst["round"]["judge_user_id"]
+            xpick = xst["round"]["prompt"]["pick"]
+            for i, p in enumerate([p for p in [A, B, C] if p != xjudge]):
+                stp = j(pg.rpc(p, f"game_night_state('{xcode}')"))
+                mine = [c["card_id"] for c in stp["me"]["hand"]][:xpick]
+                pg.rpc(p, f"game_night_submit('{xcode}', ARRAY{mine}, 'cmd-xsub-{i}')")
+            xst2 = j(pg.rpc(A, f"game_night_state('{xcode}')"))
+            xsub = xst2["round"]["reveal"][0]["submission_id"]
+            pg.rpc(xjudge, f"game_night_judge_pick('{xcode}', {xsub}, 'cmd-xj-1')")
+
+            # Advance past round-results: prompt deck is empty -> match completed.
+            pg.admin(f"""UPDATE game_night_rounds SET deadline_at = now() - interval '1s'
+                         WHERE match_id={xmid} AND round_no=(SELECT current_round_no FROM game_night_matches WHERE id={xmid});""")
+            xst3 = j(pg.rpc(A, f"game_night_state('{xcode}')"))
+            check("spent prompt deck completes match", xst3["match"]["status"] == "completed", xst3["match"])
+            check("no reshuffled round opened", xst3["match"]["status"] == "completed" or xst3["round"]["round_no"] == 1, xst3)
+            pg.rpc(A, f"game_night_end_room('{xcode}')")
 
             print("\n== duel (2 players) ==")
             d1 = pg.rpc(C, "game_night_create_room('duel-1', true)").split("|")

@@ -7,7 +7,7 @@ Date: 2026-09-25. Everything below distinguishes code that exists from evidence 
 
 | Command | Result |
 |---|---|
-| `python3 apps/mobile/supabase/__tests__/game-night-engine.integration.py` | 69/69 checks pass (disposable local Postgres, real migrations, real role claims) |
+| `python3 apps/mobile/supabase/__tests__/game-night-engine.integration.py` | 72/72 checks pass (disposable local Postgres, real migrations, real role claims) |
 | `cd packages/app && npx tsc --noEmit --ignoreDeprecations "6.0"` | clean, 0 errors (repo tsconfig uses deprecated `baseUrl` — pre-existing) |
 | `cd packages/app && npx tsx --test room-code seats room-ydoc table-render tests` | 17/17 pass |
 | `cd apps/web && pnpm build` (`tsc --noEmit && next build --webpack`) | pass; 114 routes incl. `/game-night`, `/game-night/join`, `/game-night/room/[id]` |
@@ -20,7 +20,7 @@ Date: 2026-09-25. Everything below distinguishes code that exists from evidence 
 | Requirement | Implemented | Backend verified | Browser verified | Native verified | Rollout |
 |---|---|---|---|---|---|
 | Durable create/join/seats (2-4, watcher overflow) | ✓ | ✓ engine + prod RPC | ✓ create + code-join in spec | code only | migrations+RPCs on prod |
-| Match engine: lobby→…→results, deadlines, rematch | ✓ | ✓ 69 checks | partial (duel round live) | code only | on prod |
+| Match engine: lobby→…→results, deadlines, rematch | ✓ | ✓ 72 checks | partial (duel round live) | code only | on prod |
 | Duel mode (2p) | ✓ | ✓ | ✓ prompt + duel round visible to peer | code only | on prod |
 | Classic mode (3-4p) | ✓ | ✓ | — | code only | on prod |
 | Private hands / stranger isolation / anonymous reveal | ✓ | ✓ | — | — | on prod |
@@ -50,7 +50,7 @@ Snapshots confirmed: seat grid, "Copy join link", "End room", chat region with r
 
 ## Deployed to production (verified)
 
-- Migrations `20260925000000` (match schema + RLS fix), `20260925010000` (match engine, ~30 RPCs), `20260925020000` (deck v1: 40 prompts/160 answers), `20260925030000` (Yjs snapshot/log). Ledger repaired/recorded via `migration repair`.
+- Migrations `20260925000000` (match schema + RLS fix), `20260925010000` (match engine, ~30 RPCs), `20260925020000` (deck v1: 40 prompts/160 answers), `20260925030000` (Yjs snapshot/log), `20260926000000` (no-deck-recycle: spent prompt deck ends the match as completed — product rule from owner, verified by new engine checks). Ledger repaired/recorded via `migration repair`.
 - Edge function `game-night-sync`.
 - `supabase_realtime` publication on game-night tables.
 - **Not deployed:** any web/native client (branch unpushed, no Vercel build of this feature).
