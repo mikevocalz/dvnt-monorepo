@@ -74,7 +74,21 @@ export function RoomChat({ state }: { state: GameNightState }) {
   const roomId = state.room.id;
   const myId = state.me.user_id;
 
-  const [open, setOpen] = useState(true);
+  // Collapse preference persists; below lg the panel starts closed so the
+  // table owns the screen.
+  const [open, setOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const saved = window.localStorage.getItem("gn-chat-open");
+    if (saved != null) return saved === "1";
+    return window.innerWidth >= 1024;
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("gn-chat-open", open ? "1" : "0");
+    } catch {
+      /* private mode — pref just won't persist */
+    }
+  }, [open]);
   const [rows, setRows] = useState<ChatRow[]>([]); // oldest -> newest
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -250,7 +264,9 @@ export function RoomChat({ state }: { state: GameNightState }) {
   return (
     <section
       aria-label="Room chat"
-      className="flex w-full flex-col rounded-2xl border border-white/10 bg-white/4"
+      className={`flex flex-col rounded-2xl border border-white/10 bg-white/4 ${
+        open ? "w-full lg:w-[360px]" : "w-full lg:w-48"
+      }`}
     >
       <button
         type="button"

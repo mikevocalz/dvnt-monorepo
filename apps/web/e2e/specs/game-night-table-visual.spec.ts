@@ -61,6 +61,41 @@ test.describe("game night — cookout table visuals", () => {
         fullPage: true,
       });
 
+      // The 3D table is clickable: tapping a fanned card locks the duel pick,
+      // same action as the HTML option buttons.
+      const box = await canvas.boundingBox();
+      expect(box).toBeTruthy();
+      const hits: Array<[number, number]> = [
+        [0.2, 0.6],
+        [0.8, 0.6],
+        [0.35, 0.75],
+        [0.65, 0.75],
+      ];
+      for (const [fx, fy] of hits) {
+        await page.mouse.click(box!.x + box!.width * fx, box!.y + box!.height * fy);
+        if (
+          await page
+            .getByRole("region", { name: "Duel round" })
+            .getByText(/locked in/i)
+            .isVisible()
+            .catch(() => false)
+        )
+          break;
+      }
+      await expect(
+        page.getByRole("region", { name: "Duel round" }).getByText(/locked in/i),
+      ).toBeVisible({ timeout: 10_000 });
+
+      // Chat toggles out of the table's way and reopens on demand — initial
+      // state depends on viewport (open on lg+, collapsed below it).
+      const chatInput = page.getByPlaceholder(/say something/i);
+      const wasOpen = await chatInput.isVisible().catch(() => false);
+      await page
+        .getByRole("button", { name: /chat\s*(hide|show)/i })
+        .click();
+      if (wasOpen) await expect(chatInput).toBeHidden();
+      else await expect(chatInput).toBeVisible();
+
       // Peer locks a pick so the submissions row + flip can be captured.
       const option = peer
         .getByRole("region", { name: "Duel round" })
@@ -131,6 +166,11 @@ test.describe("game night — cookout table visuals", () => {
       // The scene must not push the page wider than the viewport.
       const docW = await page.evaluate(() => document.documentElement.scrollWidth);
       expect(docW).toBeLessThanOrEqual(376);
+
+      // On a phone the chat starts collapsed — it must never cover the table.
+      await expect(page.getByPlaceholder(/say something/i)).toBeHidden();
+      await page.getByRole("button", { name: /chat\s*(hide|show)/i }).click();
+      await expect(page.getByPlaceholder(/say something/i)).toBeVisible();
 
       await table.screenshot({ path: "e2e/results/cookout-table-mobile.png" });
     } finally {

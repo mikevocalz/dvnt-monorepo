@@ -5,11 +5,10 @@
  *
  * Real card meshes on a felt table: RoundedBox bodies with genuine thickness,
  * front faces rasterized live in the printed Cookout anatomy (cookout-face.ts)
- * and backs carrying the actual printed back art. Cards deal from the deck
- * stack, fan into the player's hand, flip face-up on reveal, and the winner
- * card rises with a gold keyline. Selection/judging raycasts straight off the
- * meshes when `interactive` — the web room passes false because its semantic
- * HTML controls own the actions (one surface per action).
+ * and backs carrying the actual printed back art. Motion is GSAP: cards arc
+ * off the deck stack, stagger into the player's hand, bounce-land on the
+ * felt, and flip face-up on reveal. Selection/judging raycasts straight off
+ * the meshes when `interactive`; the HTML controls call the same actions.
  *
  * Falls back to the Skia scene when WebGL2 is unavailable or the module fails.
  */
@@ -70,8 +69,8 @@ class FaceCache {
 
 // ---------------------------------------------------------------------------
 // The scene. A small imperative island: three owns the canvas, React owns the
-// props. Every mesh eases toward its target transform, so state changes deal,
-// fan and flip cards without a timeline system.
+// props, GSAP owns the motion. Every rig remembers its last tweened target so
+// realtime re-syncs only animate cards whose destination actually changed.
 // ---------------------------------------------------------------------------
 
 interface CardRig {
@@ -82,6 +81,10 @@ interface CardRig {
   targetScale: number;
   key: string;
   faceKey: string;
+  /** Spawned this sync — next retarget gets a staggered deal delay. */
+  fresh?: boolean;
+  /** Hover lift folded into the y/scale tween targets. */
+  hoverLift?: boolean;
 }
 
 class CookoutTable3D {
@@ -104,7 +107,9 @@ class CookoutTable3D {
   private hovered: string | null = null;
   private ro: ResizeObserver | null = null;
   private winnerGlow!: import("three").Mesh;
-  private scratchPos!: import("three").Vector3;
+  private gsap!: typeof import("gsap").gsap;
+  /** Fresh-card count for the current sync — drives the deal stagger. */
+  private dealOrder = 0;
   /** Horizontal spread squeeze on narrow/portrait viewports (1 = full). */
   private layoutScale = 1;
 
@@ -113,6 +118,7 @@ class CookoutTable3D {
     const { RoundedBoxGeometry } = await import(
       "three/examples/jsm/geometries/RoundedBoxGeometry.js"
     );
+    this.gsap = (await import("gsap")).gsap;
     if (this.disposed) return;
     await cookoutFontsReady();
     if (this.disposed) return;
@@ -173,7 +179,6 @@ class CookoutTable3D {
 
     this.raycaster = new THREE.Raycaster();
     this.clock = new THREE.Clock();
-    this.scratchPos = new THREE.Vector3();
 
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointermove", this.onPointerMove);
@@ -389,9 +394,10 @@ class CookoutTable3D {
       targetRot: { x: -FLAT, y: 0 },
       targetScale: 1,
     };
-    // Spawn face-down on the deck stack — the damped lerp in the frame loop
-    // turns every first sync into a real deal out of the pile.
-    group.position.set(-5.3 * this.layoutScale, 0.3, -2.3);
+    // Spawn face-down on the deck stack — the first retarget tweens it out of
+    // the pile, staggered by creation order so a fresh hand deals card by card.
+    group.position.set(-6.0 * this.layoutScale, 0.3, 1.9);
+    rig.fresh = true;
     group.rotation.x = FLAT;
     group.userData.rigKey = key;
     this.cards.set(key, rig);
@@ -424,7 +430,113 @@ class CookoutTable3D {
     if (this.renderer) this.sync(props);
   }
 
+  /**
+   * Write a rig's destination. Nothing tweens unless the destination actually
+   * moved — realtime refreshes re-run sync constantly, and restarting every
+   * tween each time would jitter the whole table.
+   */
+  private setTarget(
+    rig: CardRig,
+    x: number,
+    y: number,
+    z: number,
+    rx: number,
+    ry: number,
+    scale: number,
+  ) {
+    const moved =
+      Math.abs(rig.targetPos.x - x) > 1e-3 ||
+      Math.abs(rig.targetPos.y - y) > 1e-3 ||
+      Math.abs(rig.targetPos.z - z) > 1e-3 ||
+      Math.abs(rig.targetRot.x - rx) > 1e-3 ||
+      Math.abs(rig.targetRot.y - ry) > 1e-3 ||
+      Math.abs(rig.targetScale - scale) > 1e-3;
+    if (!moved) return;
+    rig.targetPos.set(x, y, z);
+    rig.targetRot.x = rx;
+    rig.targetRot.y = ry;
+    rig.targetScale = scale;
+    const delay = rig.fresh ? (this.dealOrder++ * 0.06) : 0;
+    rig.fresh = false;
+    this.dealTo(rig, delay);
+  }
+
+  /**
+   * Fly a card to its target. Long hops get an arc: x/z ease out while y
+   * climbs then bounce-lands on the felt — deals, submissions and reveals all
+   * read as cards being laid on the table. Short hops are a quick settle.
+   */
+  private dealTo(rig: CardRig, delay: number) {
+    const g = rig.group;
+    const gsap = this.gsap;
+    const dist = g.position.distanceTo(rig.targetPos);
+    const flying = dist > 0.9;
+    const dur = Math.min(0.65, 0.3 + dist * 0.06);
+    gsap.killTweensOf(g.position);
+    gsap.killTweensOf(g.rotation);
+    gsap.killTweensOf(g.scale);
+    const lift = rig.hoverLift ? 0.3 : 0;
+    gsap.to(g.position, {
+      x: rig.targetPos.x,
+      z: rig.targetPos.z,
+      duration: dur,
+      delay,
+      ease: "power2.out",
+    });
+    if (flying) {
+      gsap.to(g.position, {
+        keyframes: [
+          {
+            y: rig.targetPos.y + Math.min(1.4, dist * 0.4),
+            duration: dur * 0.45,
+            ease: "power2.out",
+          },
+          { y: rig.targetPos.y + lift, duration: dur * 0.55, ease: "bounce.out" },
+        ],
+        delay,
+      });
+    } else {
+      gsap.to(g.position, {
+        y: rig.targetPos.y + lift,
+        duration: 0.3,
+        delay,
+        ease: "power3.out",
+      });
+    }
+    gsap.to(g.rotation, {
+      x: rig.targetRot.x,
+      y: rig.targetRot.y,
+      duration: Math.max(dur, 0.45),
+      delay,
+      ease: "power2.inOut",
+    });
+    const s = rig.targetScale * (rig.hoverLift ? 1.06 : 1);
+    gsap.to(g.scale, { x: s, y: s, z: s, duration: 0.3, delay, ease: "power2.out" });
+  }
+
+  /** Hover affordance — lift + grow without re-flying the card. */
+  private hoverTo(rig: CardRig, on: boolean) {
+    rig.hoverLift = on;
+    const gsap = this.gsap;
+    gsap.to(rig.group.position, {
+      y: rig.targetPos.y + (on ? 0.3 : 0),
+      duration: 0.18,
+      ease: "power2.out",
+      overwrite: "auto",
+    });
+    const s = rig.targetScale * (on ? 1.06 : 1);
+    gsap.to(rig.group.scale, {
+      x: s,
+      y: s,
+      z: s,
+      duration: 0.18,
+      ease: "power2.out",
+      overwrite: "auto",
+    });
+  }
+
   private sync(props: GameTableProps) {
+    this.dealOrder = 0;
     const used = new Set<string>();
     const inDuel = props.state === "duel";
     const hand: TableCard[] = inDuel ? props.duelOptions ?? [] : props.myHand;
@@ -439,10 +551,7 @@ class CookoutTable3D {
         body: props.prompt.text,
         footnote: props.prompt.pick > 1 ? `Pick ${props.prompt.pick}` : undefined,
       });
-      rig.targetPos.set(0, 0.07, -2.4);
-      rig.targetRot.x = -FLAT;
-      rig.targetRot.y = 0;
-      rig.targetScale = 1.12;
+      this.setTarget(rig, 0, 0.07, -2.4, -FLAT, 0, 1.12);
       used.add("prompt");
     }
 
@@ -457,10 +566,17 @@ class CookoutTable3D {
         mat.map = null;
         mat.needsUpdate = true;
       }
-      rig.targetPos.set(-5.3 * sx, 0.03 + i * CARD_D, -2.3);
-      rig.targetRot.x = FLAT; // back art up
-      rig.targetRot.y = (i - 1) * 0.05;
-      rig.targetScale = 1;
+      // Dealer's-left pocket — clear of the prompt/submission lane and the
+      // seat rail so it never crowds the play area on squeezed layouts.
+      this.setTarget(
+        rig,
+        -6.0 * sx,
+        0.03 + i * CARD_D,
+        1.9,
+        FLAT, // back art up
+        (i - 1) * 0.05,
+        1,
+      );
       used.add(key);
     }
 
@@ -472,14 +588,15 @@ class CookoutTable3D {
         const key = `sub-${i}`;
         const rig = this.cardAt(key, { kind: "answer", body: "" });
         const spread = props.submissionsIn - 1;
-        rig.targetPos.set(
+        this.setTarget(
+          rig,
           (i * 0.9 - (spread * 0.9) / 2) * sx,
           0.03 + i * 0.004,
           0.6,
+          FLAT,
+          (i - spread / 2) * 0.14,
+          1,
         );
-        rig.targetRot.x = FLAT;
-        rig.targetRot.y = (i - spread / 2) * 0.14;
-        rig.targetScale = 1;
         used.add(key);
       }
     }
@@ -493,14 +610,15 @@ class CookoutTable3D {
           body: entry.texts.join("  ·  "),
           accent: entry.is_winner ? "gold" : undefined,
         });
-        rig.targetPos.set(
+        this.setTarget(
+          rig,
           (i - (n - 1) / 2) * 3.1 * sx,
           entry.is_winner ? 0.5 : 0.06,
           0.6,
+          -FLAT,
+          0,
+          entry.is_winner ? 1.1 : 1,
         );
-        rig.targetRot.x = -FLAT;
-        rig.targetRot.y = 0;
-        rig.targetScale = entry.is_winner ? 1.1 : 1;
         used.add(key);
         if (entry.is_winner) {
           this.winnerGlow.position.set(rig.targetPos.x, 0.05, 0.6);
@@ -526,16 +644,17 @@ class CookoutTable3D {
         accent: selected ? "gold" : undefined,
       });
       const arcX = t * Math.min(n * 1.35, 6.8) * sx;
-      rig.targetPos.set(
+      this.setTarget(
+        rig,
         arcX,
         HAND_LIFT + Math.abs(t) * -0.12 + (selected ? 0.45 : 0),
         // Each card sits slightly behind its left neighbour — without the
         // stagger, overlapping reclined cards z-fight where they intersect.
         3.6 + Math.abs(t) * 0.35 - i * 0.05,
+        -FLAT + HAND_TILT,
+        t * 0.28,
+        selected ? 1.07 : 1,
       );
-      rig.targetRot.x = -FLAT + HAND_TILT;
-      rig.targetRot.y = t * 0.28;
-      rig.targetScale = selected ? 1.07 : 1;
       rig.group.userData.cardId = card.card_id;
       rig.group.userData.zone = "hand";
       used.add(key);
@@ -575,6 +694,7 @@ class CookoutTable3D {
     // cleared reveals).
     for (const [key, rig] of this.cards) {
       if (!used.has(key)) {
+        this.killRigTweens(rig);
         this.scene.remove(rig.group);
         (rig.front.material as import("three").Material).dispose();
         ((rig.group.children[2] as import("three").Mesh)
@@ -582,6 +702,13 @@ class CookoutTable3D {
         this.cards.delete(key);
       }
     }
+  }
+
+  private killRigTweens(rig: CardRig) {
+    if (!this.gsap) return;
+    this.gsap.killTweensOf(rig.group.position);
+    this.gsap.killTweensOf(rig.group.rotation);
+    this.gsap.killTweensOf(rig.group.scale);
   }
 
   private makeChip(name: string, judge: boolean) {
@@ -639,7 +766,11 @@ class CookoutTable3D {
     );
     this.raycaster.setFromCamera(ndc, this.camera);
     const groups = [...this.cards.values()]
-      .filter((r) => r.key.startsWith("hand-") || r.key.startsWith("rev-"))
+      .filter(
+        (r) =>
+          r.key.startsWith("hand-") ||
+          (r.key.startsWith("rev-") && this.props?.state === "judging"),
+      )
       .map((r) => r.group);
     const hit = this.raycaster.intersectObjects(groups, true)[0];
     if (!hit) return null;
@@ -659,13 +790,18 @@ class CookoutTable3D {
     const rig = this.pickZone(e.clientX, e.clientY);
     const id = rig?.key ?? null;
     if (id !== this.hovered) {
+      const prev = this.hovered ? this.cards.get(this.hovered) : null;
       this.hovered = id;
+      if (prev) this.hoverTo(prev, false);
+      if (rig) this.hoverTo(rig, true);
       this.renderer.domElement.style.cursor = id ? "pointer" : "default";
     }
   };
 
   private onPointerLeave = () => {
+    const prev = this.hovered ? this.cards.get(this.hovered) : null;
     this.hovered = null;
+    if (prev) this.hoverTo(prev, false);
     if (this.renderer) this.renderer.domElement.style.cursor = "default";
   };
 
@@ -686,22 +822,7 @@ class CookoutTable3D {
   private loop = () => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min(this.clock.getDelta(), 0.05);
-    const k = 1 - Math.exp(-dt * 9);
-    for (const rig of this.cards.values()) {
-      const g = rig.group;
-      const hover = this.hovered === rig.key && rig.key.startsWith("hand-");
-      // The lift goes into the lerp target — offsetting position post-lerp
-      // would accumulate the 0.3 every frame.
-      this.scratchPos.copy(rig.targetPos);
-      if (hover) this.scratchPos.y += 0.3;
-      g.position.lerp(this.scratchPos, k);
-      const s = rig.targetScale * (hover ? 1.06 : 1);
-      this.scratchPos.set(s, s, s);
-      g.scale.lerp(this.scratchPos, k);
-      g.rotation.x += (rig.targetRot.x - g.rotation.x) * k;
-      g.rotation.y += (rig.targetRot.y - g.rotation.y) * k;
-    }
+    this.clock.getDelta(); // keep elapsedTime advancing for the glow pulse
     if (this.winnerGlow.visible) {
       const t = this.clock.elapsedTime;
       (this.winnerGlow.material as import("three").MeshBasicMaterial).opacity =
@@ -720,6 +841,7 @@ class CookoutTable3D {
     canvas.removeEventListener("pointerleave", this.onPointerLeave);
     canvas.removeEventListener("click", this.onClick);
     for (const [, rig] of this.cards) {
+      this.killRigTweens(rig);
       (rig.front.material as import("three").Material).dispose();
       ((rig.group.children[2] as import("three").Mesh)
         .material as import("three").Material).dispose();

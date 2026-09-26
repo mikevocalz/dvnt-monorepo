@@ -329,7 +329,7 @@ export function GameNightRoomScreen() {
           </div>
         ) : null}
 
-        <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_360px]">
+        <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_auto]">
           <div className="space-y-8">
             {status === "loading" || status === "idle" ? (
               <div aria-busy="true" className="space-y-3">
@@ -371,9 +371,10 @@ export function GameNightRoomScreen() {
                         match?.mode === "duel" ? handleDuelPick : undefined
                       }
                       duelOptions={round.duel_options}
-                      // The hand/judging HTML controls below the scene own the
-                      // actions; canvas overlays would double-fire them.
-                      interactive={false}
+                      // Table clicks and the HTML controls both route to the
+                      // same actions — the canvas raycast only fires for real
+                      // pointer hits, so there's no double-fire.
+                      interactive
                     />
                   </section>
                 ) : null}

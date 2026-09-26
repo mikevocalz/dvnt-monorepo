@@ -19,7 +19,10 @@ set search_path = public
 as $$
 begin
   -- No-op write: still emits a postgres_changes UPDATE for the round.
-  update public.game_night_rounds set id = id where id = new.round_id;
+  -- deadline_at not id — `id` is GENERATED ALWAYS and Postgres rejects even
+  -- a same-value assignment to it (428C9), which would abort the insert.
+  update public.game_night_rounds set deadline_at = deadline_at
+    where id = new.round_id;
   return new;
 end;
 $$;

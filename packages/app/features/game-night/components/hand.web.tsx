@@ -66,8 +66,13 @@ export function Hand({
   return (
     <section aria-label="Your hand" className="w-full">
       <h3 className="text-xs font-medium uppercase tracking-widest text-white/50">
-        Your hand · pick {pick}
+        Your hand · select {pick} card{pick > 1 ? "s" : ""} to play
       </h3>
+      <p aria-live="polite" className="mt-1 text-xs text-white/60">
+        {selected.length === 0
+          ? "Tap a card — on the table below or in this list — to select it."
+          : `${selected.length} of ${pick} selected`}
+      </p>
       <ul className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
         {state.me.hand.map((card) => {
           const isSel = selectedSet.has(card.card_id);
