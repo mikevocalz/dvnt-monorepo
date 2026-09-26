@@ -12,7 +12,7 @@
  * Mirrors the private branch of share-event-sheet.tsx on native.
  */
 import { useEffect, useRef, useState } from "react";
-import { Check, Search } from "lucide-react";
+import { Check, Link2, Search } from "lucide-react";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 import { useDebounce } from "@dvnt/app/lib/hooks/use-debounce";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -147,24 +147,49 @@ export function InviteGuestsSheet({
     }
   };
 
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        `https://dvntapp.live/e/${eventId}`,
+      );
+      showToast(
+        "success",
+        "Link copied",
+        "Only invited guests can open it.",
+      );
+    } catch {
+      showToast("error", "Copy failed", "Copy the URL from the address bar.");
+    }
+  };
+
   return (
     <BottomSheet
       open={open}
       onClose={onClose}
       title="Invite guests"
       footer={
-        <button
-          type="button"
-          onClick={invite}
-          disabled={inviting || selected.size === 0}
-          className="w-full rounded-xl bg-[#3FDCFF] py-3.5 text-sm font-bold text-[#0b0d16] transition-opacity disabled:opacity-40"
-        >
-          {inviting
-            ? "Inviting…"
-            : selected.size === 0
-              ? "Select guests to invite"
-              : `Invite ${selected.size} guest${selected.size === 1 ? "" : "s"}`}
-        </button>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={invite}
+            disabled={inviting || selected.size === 0}
+            className="w-full rounded-xl bg-[#3FDCFF] py-3.5 text-sm font-bold text-[#0b0d16] transition-opacity disabled:opacity-40"
+          >
+            {inviting
+              ? "Inviting…"
+              : selected.size === 0
+                ? "Select guests to invite"
+                : `Invite ${selected.size} guest${selected.size === 1 ? "" : "s"}`}
+          </button>
+          <button
+            type="button"
+            onClick={copyLink}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/12 py-3 text-sm font-semibold text-white/70 transition-colors hover:bg-white/[0.05]"
+          >
+            <Link2 size={15} />
+            Copy event link
+          </button>
+        </div>
       }
     >
       <p className="mb-3 text-xs text-white/45">

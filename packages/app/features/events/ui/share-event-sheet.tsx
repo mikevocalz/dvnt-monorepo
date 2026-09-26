@@ -26,8 +26,9 @@ import BottomSheet, {
   BottomSheetTextInput,
 } from "@gorhom/bottom-sheet";
 import type { BottomSheetBackdropProps } from "@gorhom/bottom-sheet";
-import { Check, Send, Search, X } from "lucide-react-native";
+import { Check, Link2, Send, Search, X } from "lucide-react-native";
 import { Image } from "expo-image";
+import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { messagesApi } from "@dvnt/app/lib/api/messages-impl";
 import { inviteEventGuests } from "@dvnt/app/lib/api/privileged";
@@ -349,25 +350,48 @@ export function ShareEventSheet({
         />
 
         {isPrivate && (
-          <Pressable
-            onPress={handleInvite}
-            disabled={inviting || selected.size === 0}
-            style={({ pressed }) => [
-              styles.inviteButton,
-              (inviting || selected.size === 0) && { opacity: 0.45 },
-              pressed && { opacity: 0.8 },
-            ]}
-          >
-            {inviting ? (
-              <ActivityIndicator size="small" color="#0b0d16" />
-            ) : (
-              <Text style={styles.inviteButtonText}>
-                {selected.size === 0
-                  ? "Select guests to invite"
-                  : `Invite ${selected.size} guest${selected.size === 1 ? "" : "s"}`}
-              </Text>
-            )}
-          </Pressable>
+          <>
+            {/* The link only opens for people already on the guest list —
+                copying it here is for sending TO guests, not around them. */}
+            <Pressable
+              onPress={handleInvite}
+              disabled={inviting || selected.size === 0}
+              style={({ pressed }) => [
+                styles.inviteButton,
+                (inviting || selected.size === 0) && { opacity: 0.45 },
+                pressed && { opacity: 0.8 },
+              ]}
+            >
+              {inviting ? (
+                <ActivityIndicator size="small" color="#0b0d16" />
+              ) : (
+                <Text style={styles.inviteButtonText}>
+                  {selected.size === 0
+                    ? "Select guests to invite"
+                    : `Invite ${selected.size} guest${selected.size === 1 ? "" : "s"}`}
+                </Text>
+              )}
+            </Pressable>
+            <Pressable
+              onPress={async () => {
+                await Clipboard.setStringAsync(
+                  `https://dvntapp.live/e/${eventId}`,
+                );
+                showToast(
+                  "success",
+                  "Link copied",
+                  "Only invited guests can open it.",
+                );
+              }}
+              style={({ pressed }) => [
+                styles.copyButton,
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Link2 size={15} color="rgba(255,255,255,0.7)" />
+              <Text style={styles.copyButtonText}>Copy event link</Text>
+            </Pressable>
+          </>
         )}
       </BottomSheetView>
     </BottomSheet>
@@ -474,11 +498,27 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 24,
+    marginBottom: 10,
   },
   inviteButtonText: {
     color: "#0b0d16",
     fontSize: 15,
     fontWeight: "700",
+  },
+  copyButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 14,
+    paddingVertical: 12,
+    marginBottom: 24,
+  },
+  copyButtonText: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 14,
+    fontWeight: "600",
   },
 });

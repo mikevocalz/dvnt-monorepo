@@ -777,6 +777,29 @@ export function EventDetailScreen() {
 
   if (!e && resolving) return <Centered>Loading…</Centered>;
   if (!e) {
+    // A signed-out invitee hitting a private event's link must not read
+    // "not found" — their invite only works once they're signed in. Showing
+    // a sign-in prompt to every anonymous miss leaks nothing: the same copy
+    // renders for ids that never existed.
+    if (!userId) {
+      return (
+        <Centered>
+          <span className="flex flex-col items-center gap-3 text-center">
+            <span>
+              This event is private or invite-only. Sign in to see if you have
+              access.
+            </span>
+            <button
+              type="button"
+              onClick={() => router.push(loginPathWithReturn(pathname))}
+              className="rounded-xl bg-[#a855f7] px-6 py-3 text-sm font-semibold text-white"
+            >
+              Sign in
+            </button>
+          </span>
+        </Centered>
+      );
+    }
     // A cancelled event is deliberately unreachable by slug now, but "not
     // found" is the wrong answer for the person most likely to arrive here —
     // someone who bookmarked the link or holds a ticket. Name what happened,
