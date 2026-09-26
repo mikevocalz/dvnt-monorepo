@@ -265,7 +265,7 @@ export function RoomChat({ state }: { state: GameNightState }) {
     <section
       aria-label="Room chat"
       className={`flex flex-col rounded-2xl border border-white/10 bg-white/4 ${
-        open ? "w-full lg:w-[360px]" : "w-full lg:w-48"
+        open ? "w-full lg:w-90" : "w-full lg:w-48"
       }`}
     >
       <button
