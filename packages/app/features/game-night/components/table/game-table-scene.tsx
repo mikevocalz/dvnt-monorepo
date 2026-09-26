@@ -11,6 +11,7 @@ import {
   Circle,
   Group,
   Paragraph,
+  Rect,
   RoundedRect,
   Skia,
   TextAlign,
@@ -113,12 +114,29 @@ function Card({ x, y, text, selected = false, concealed = false, winner = false,
   x: number; y: number; text: string; selected?: boolean; concealed?: boolean;
   winner?: boolean; opacity?: number | { value: number };
 }) {
+  const r = 13;
+  const bandH = CARD_H * 0.09;
+  const clip = Skia.RRectXY(Skia.XYWHRect(x, y, CARD_W, CARD_H), r, r);
   return (
     <Group opacity={opacity as number}>
-      {winner ? <RoundedRect x={x - 7} y={y - 7} width={CARD_W + 14} height={CARD_H + 14} r={18} color="#f4c95d55" /> : null}
-      <RoundedRect x={x} y={y} width={CARD_W} height={CARD_H} r={13} color={concealed ? "#4a276e" : selected ? "#d9c6ff" : "#f5f0ff"} />
-      <RoundedRect x={x + 5} y={y + 5} width={CARD_W - 10} height={CARD_H - 10} r={9} color={concealed ? "#21122f" : "#241932"} />
-      <Label text={concealed ? "DVNT\nGAME NIGHT" : text} x={x + 11} y={y + 24} width={CARD_W - 22} size={concealed ? 13 : 15} />
+      {winner ? <RoundedRect x={x - 7} y={y - 7} width={CARD_W + 14} height={CARD_H + 14} r={18} color="#d9a41955" /> : null}
+      <RoundedRect x={x} y={y} width={CARD_W} height={CARD_H} r={r} color="#ffffff" />
+      <Group clip={clip}>
+        <Rect x={x} y={y + CARD_H - bandH} width={CARD_W} height={bandH} color="#283C81" />
+      </Group>
+      {selected ? <RoundedRect x={x + 4} y={y + 4} width={CARD_W - 8} height={CARD_H - 8} r={10} style="stroke" strokeWidth={3} color="#d9a419" /> : null}
+      {concealed ? (
+        <>
+          <Label text="KEEP IT 100" x={x + 11} y={y + 30} width={CARD_W - 22} size={17} color="#283C81" />
+          <Label text="THE COOKOUT" x={x + 11} y={y + 58} width={CARD_W - 22} size={13} color="#283C81" />
+        </>
+      ) : (
+        <>
+          <Label text="KEEP IT 100" x={x + 11} y={y + 10} width={CARD_W - 22} size={9} color="#283C81" />
+          <Label text="THE COOKOUT" x={x + 11} y={y + 21} width={CARD_W - 22} size={11} color="#283C81" />
+          <Label text={text} x={x + 11} y={y + 44} width={CARD_W - 22} size={12} color="#141414" />
+        </>
+      )}
     </Group>
   );
 }
@@ -163,8 +181,12 @@ export function GameTableScene(props: GameTableProps) {
         <RoundedRect x={0} y={0} width={width} height={height} r={34} color="#120b1b" />
         <RoundedRect x={12} y={12} width={width - 24} height={height - 24} r={27} color="#253c37" />
         <RoundedRect x={24} y={24} width={width - 48} height={height - 48} r={23} color="#172e2a" />
-        <RoundedRect x={width / 2 - 150} y={28} width={300} height={112} r={14} color="#6b2ea1" />
-        <Label text={`PICK ${props.prompt.pick}\n${props.prompt.text}`} x={width / 2 - 138} y={45} width={276} size={17} />
+        <RoundedRect x={width / 2 - 150} y={28} width={300} height={112} r={14} color="#ffffff" />
+        <Group clip={Skia.RRectXY(Skia.XYWHRect(width / 2 - 150, 28, 300, 112), 14, 14)}>
+          <Rect x={width / 2 - 150} y={28 + 112 - 14} width={300} height={14} color="#283C81" />
+        </Group>
+        <Label text="KEEP IT 100  ·  THE COOKOUT" x={width / 2 - 138} y={36} width={276} size={10} color="#283C81" />
+        <Label text={`PICK ${props.prompt.pick}\n${props.prompt.text}`} x={width / 2 - 138} y={52} width={276} size={14} color="#141414" />
         {seats.map((seat) => (
           <Group key={seat.user_id}>
             <Circle cx={seat.x} cy={seat.y} r={seat.user_id === props.judgeUserId ? 29 : 25} color={seat.user_id === props.judgeUserId ? "#f4c95d" : "#8f63c6"} />

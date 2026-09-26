@@ -112,6 +112,12 @@ export function useGameNightState(
   // Realtime: refresh on changes to the tables the state projection reads.
   // Messages are deliberately excluded — RoomChat owns its own insert channel
   // and chat traffic would otherwise trigger a full projection RPC per line.
+  // Submissions and duel choices stay service-role only (un-revealed picks
+  // must never be client-readable); migration
+  // 20260930000000_game_night_realtime_submission_touch bumps the parent
+  // round row on each insert, which this rounds subscription then picks up.
+  // Rounds are match-scoped — the table has match_id, not room_id.
+  const matchId = state?.match?.id ?? null;
   useEffect(() => {
     if (!code || status !== "ready") return;
     const roomId = stateRef.current?.room.id;
@@ -124,7 +130,7 @@ export function useGameNightState(
       }, 300);
     };
 
-    const channel = freshChannel(`game-night-state:${code}`)
+    let channel = freshChannel(`game-night-state:${code}`)
       .on(
         "postgres_changes",
         {
@@ -154,18 +160,25 @@ export function useGameNightState(
           filter: `room_id=eq.${roomId}`,
         },
         scheduleRefresh,
-      )
-      .on(
+      );
+
+    // game_night_rounds has no room_id column — the old room_id filter could
+    // never match, which silently killed mid-round realtime. Scope to the
+    // live match instead; before a match exists there are no rounds worth
+    // hearing about anyway (and an unfiltered binding would fire globally).
+    if (matchId != null) {
+      channel = channel.on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "game_night_rounds",
-          filter: `room_id=eq.${roomId}`,
+          filter: `match_id=eq.${matchId}`,
         },
         scheduleRefresh,
-      )
-      .subscribe();
+      );
+    }
+    channel.subscribe();
 
     return () => {
       if (debounceRef.current) {
@@ -174,7 +187,7 @@ export function useGameNightState(
       }
       void supabase.removeChannel(channel);
     };
-  }, [code, status, refresh]);
+  }, [code, status, refresh, matchId]);
 
   // Poll: ping advances deadlines, then refresh the projection.
   useEffect(() => {

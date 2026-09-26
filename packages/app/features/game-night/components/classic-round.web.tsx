@@ -52,28 +52,30 @@ export function ClassicRound({
             return (
               <li
                 key={r.submission_id}
-                className={`rounded-xl border p-4 ${
-                  won
-                    ? "border-[#8A40CF]/60 bg-[#8A40CF]/15"
-                    : "border-white/10 bg-white/4"
+                className={`relative overflow-hidden rounded-xl p-4 pb-6 shadow-[0_6px_20px_rgba(40,60,129,0.18)] ${
+                  won ? "bg-white ring-2 ring-[#d9a419]" : "bg-white"
                 }`}
               >
+                <p aria-hidden className="mb-1.5 text-[8px] font-bold uppercase tracking-[0.2em] text-[#283C81]">
+                  Keep It 100
+                </p>
                 <div className="space-y-1">
                   {r.texts.map((t, i) => (
-                    <p key={i} className="font-medium text-white">
+                    <p key={i} className="font-semibold text-[#141414]">
                       {t}
                     </p>
                   ))}
                 </div>
-                <p className="mt-2 flex items-center gap-2 text-xs text-white/55">
+                <p className="mt-2 flex items-center gap-2 text-xs text-[#283C81]/80">
                   {won ? (
-                    <span className="font-semibold text-[#C9A2F0]">
+                    <span className="font-bold text-[#8a6d00]">
                       Winner · {r.name ?? nameFor(state, r.user_id)}
                     </span>
                   ) : (
                     (r.name ?? nameFor(state, r.user_id))
                   )}
                 </p>
+                <span aria-hidden className="absolute inset-x-0 bottom-0 h-2 bg-[#283C81]" />
               </li>
             );
           })}
@@ -114,18 +116,22 @@ export function ClassicRound({
                         onChanged();
                       })
                     }
-                    className="w-full rounded-xl border border-white/15 bg-white/4 p-4 text-left transition-colors hover:border-[#8A40CF]/70 hover:bg-[#8A40CF]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#C9A2F0] disabled:opacity-50"
+                    className="relative w-full overflow-hidden rounded-xl bg-white p-4 pb-6 text-left shadow-[0_6px_20px_rgba(40,60,129,0.18)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_26px_rgba(40,60,129,0.3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d9a419] disabled:opacity-50"
                   >
+                    <span aria-hidden className="mb-1.5 block text-[8px] font-bold uppercase tracking-[0.2em] text-[#283C81]">
+                      Keep It 100
+                    </span>
                     <span className="space-y-1">
                       {r.texts.map((t, i) => (
-                        <span key={i} className="block font-medium text-white">
+                        <span key={i} className="block font-semibold text-[#141414]">
                           {t}
                         </span>
                       ))}
                     </span>
-                    <span className="mt-2 block text-xs font-semibold text-[#C9A2F0]">
+                    <span className="mt-2 block text-xs font-semibold text-[#283C81]">
                       Pick winner
                     </span>
+                    <span aria-hidden className="absolute inset-x-0 bottom-0 h-2 bg-[#283C81]" />
                   </button>
                 </li>
               ))}
@@ -141,18 +147,22 @@ export function ClassicRound({
               {round.reveal.map((r) => (
                 <li
                   key={r.submission_id}
-                  className="rounded-xl border border-white/10 bg-white/4 p-4"
+                  className="relative overflow-hidden rounded-xl bg-white p-4 pb-6 shadow-[0_6px_20px_rgba(40,60,129,0.18)]"
                 >
+                  <p aria-hidden className="mb-1.5 text-[8px] font-bold uppercase tracking-[0.2em] text-[#283C81]">
+                    Keep It 100
+                  </p>
                   {r.texts.map((t, i) => (
-                    <p key={i} className="font-medium text-white">
+                    <p key={i} className="font-semibold text-[#141414]">
                       {t}
                     </p>
                   ))}
                   {r.name ? (
-                    <p className="mt-2 flex items-center gap-2 text-xs text-white/55">
+                    <p className="mt-2 flex items-center gap-2 text-xs text-[#283C81]/80">
                       {r.name}
                     </p>
                   ) : null}
+                  <span aria-hidden className="absolute inset-x-0 bottom-0 h-2 bg-[#283C81]" />
                 </li>
               ))}
             </ul>

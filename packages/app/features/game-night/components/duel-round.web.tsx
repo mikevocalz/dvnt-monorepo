@@ -113,9 +113,13 @@ export function DuelRound({
                       onChanged();
                     })
                   }
-                  className="h-full min-h-24 w-full rounded-xl border border-white/15 bg-white/90 p-3 text-left text-sm font-medium text-[#0c0e18] transition-colors hover:border-[#8A40CF] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#C9A2F0] disabled:opacity-50"
+                  className="relative h-full min-h-24 w-full overflow-hidden rounded-xl bg-white p-3 pb-5 text-left text-sm font-semibold text-[#141414] shadow-[0_6px_20px_rgba(40,60,129,0.18)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_26px_rgba(40,60,129,0.3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d9a419] disabled:opacity-50"
                 >
+                  <span aria-hidden className="mb-1.5 block text-[8px] font-bold uppercase tracking-[0.2em] text-[#283C81]">
+                    Keep It 100
+                  </span>
                   {o.text}
+                  <span aria-hidden className="absolute inset-x-0 bottom-0 h-2 bg-[#283C81]" />
                 </button>
               </li>
             ))}
@@ -127,9 +131,13 @@ export function DuelRound({
           {options.map((o) => (
             <li
               key={o.card_id}
-              className="rounded-xl border border-white/10 bg-white/4 p-3 text-sm text-white/70"
+              className="relative overflow-hidden rounded-xl bg-white p-3 pb-5 text-sm font-semibold text-[#141414] shadow-[0_6px_20px_rgba(40,60,129,0.18)]"
             >
+              <span aria-hidden className="mb-1.5 block text-[8px] font-bold uppercase tracking-[0.2em] text-[#283C81]">
+                Keep It 100
+              </span>
               {o.text}
+              <span aria-hidden className="absolute inset-x-0 bottom-0 h-2 bg-[#283C81]" />
             </li>
           ))}
         </ul>

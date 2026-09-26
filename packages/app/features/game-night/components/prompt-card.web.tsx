@@ -42,6 +42,11 @@ export function Countdown({ deadlineAt }: { deadlineAt: string | null }) {
   );
 }
 
+/**
+ * The prompt card in the printed Cookout anatomy: white face, navy header
+ * stack ("KEEP IT 100 / THE COOKOUT / section"), PROMPT: label over a navy
+ * rule, and the deck's navy footer band.
+ */
 export function PromptCard({
   text,
   pick,
@@ -52,20 +57,33 @@ export function PromptCard({
   label?: string;
 }) {
   return (
-    <div className="w-full max-w-xs rounded-2xl border border-[#8A40CF]/50 bg-[#0c0e18] p-5 shadow-[0_8px_30px_rgba(138,64,207,0.15)]">
-      {label ? (
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-[#C9A2F0]">
-          {label}
+    <div className="w-full max-w-xs overflow-hidden rounded-xl bg-white shadow-[0_10px_34px_rgba(40,60,129,0.28)]">
+      <div className="px-5 pb-4 pt-4 text-center">
+        <p className="text-[9px] font-semibold uppercase tracking-[0.22em] text-[#283C81]">
+          Keep It 100
         </p>
-      ) : null}
-      <p className="mt-2 text-lg font-semibold leading-snug text-white">
-        {text}
-      </p>
-      {pick > 1 ? (
-        <p className="mt-3 text-xs font-medium text-white/50">
-          Pick {pick} cards
+        <p className="text-[15px] font-bold uppercase tracking-[0.08em] text-[#283C81]">
+          The Cookout
         </p>
-      ) : null}
+        {label ? (
+          <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#283C81]/80">
+            {label}
+          </p>
+        ) : null}
+        <p className="mt-3 text-[11px] font-bold uppercase tracking-widest text-[#283C81]">
+          Prompt:
+        </p>
+        <div aria-hidden className="mx-auto mt-1 h-0.75 w-2/3 bg-[#283C81]" />
+        <p className="mt-3 text-[15px] font-semibold leading-snug text-[#141414]">
+          {text}
+        </p>
+        {pick > 1 ? (
+          <p className="mt-3 text-[11px] font-semibold uppercase tracking-widest text-[#283C81]">
+            Pick {pick} cards
+          </p>
+        ) : null}
+      </div>
+      <div aria-hidden className="h-3 bg-[#283C81]" />
     </div>
   );
 }

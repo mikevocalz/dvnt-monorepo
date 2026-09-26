@@ -78,15 +78,19 @@ export function Hand({
                 type="button"
                 aria-pressed={isSel}
                 onClick={() => toggle(card.card_id)}
-                className={`relative h-full min-h-28 w-full rounded-xl border p-3 text-left text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0] ${
+                className={`relative h-full min-h-28 w-full overflow-hidden rounded-xl bg-white p-3 pb-5 text-left text-sm font-semibold text-[#141414] shadow-[0_6px_20px_rgba(40,60,129,0.18)] transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d9a419] ${
                   isSel
-                    ? "border-[#8A40CF] bg-white text-[#0c0e18] shadow-[0_0_0_2px_#8A40CF]"
-                    : "border-white/15 bg-white/90 text-[#0c0e18] hover:border-[#8A40CF]/60"
+                    ? "-translate-y-1 ring-2 ring-[#d9a419]"
+                    : "hover:-translate-y-0.5 hover:shadow-[0_10px_26px_rgba(40,60,129,0.3)]"
                 }`}
               >
+                <span aria-hidden className="mb-1.5 block text-[8px] font-bold uppercase tracking-[0.2em] text-[#283C81]">
+                  Keep It 100
+                </span>
                 {card.text}
+                <span aria-hidden className="absolute inset-x-0 bottom-0 h-2 bg-[#283C81]" />
                 {isSel && pick > 1 ? (
-                  <span className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-[#8A40CF] text-[10px] font-bold text-white">
+                  <span className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-[#d9a419] text-[10px] font-bold text-white">
                     {order + 1}
                   </span>
                 ) : null}

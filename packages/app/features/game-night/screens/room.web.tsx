@@ -23,6 +23,7 @@ import {
   Check,
   Copy,
   LogOut,
+  ScrollText,
   WifiOff,
   AlertTriangle,
 } from "lucide-react";
@@ -41,6 +42,7 @@ import { Scoreboard } from "../components/scoreboard.web";
 import { RoomChat } from "../components/room-chat.web";
 import { Countdown, PromptCard } from "../components/prompt-card.web";
 import { CommandError, useCommand } from "../components/use-command";
+import { RulesSheet } from "../components/rules-sheet.web";
 import { TableRenderer } from "../components/table";
 import type { GameTableProps, TableMember } from "../components/table/types";
 
@@ -73,6 +75,7 @@ export function GameNightRoomScreen() {
   const copied = useGameNightStore((s) => s.copied);
   const setCopied = useGameNightStore((s) => s.setCopied);
   const online = useIsOnline();
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   const { state, status, error, refresh } = useGameNightState(
     valid ? code : undefined,
@@ -258,6 +261,15 @@ export function GameNightRoomScreen() {
           <span className="text-sm text-white/50">
             {memberCount} {memberCount === 1 ? "person" : "people"} here
           </span>
+          <button
+            type="button"
+            onClick={() => setRulesOpen(true)}
+            aria-label="How to play"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-white/75 transition-colors hover:bg-white/10"
+          >
+            <ScrollText aria-hidden className="h-3.5 w-3.5" />
+            Rules
+          </button>
           <span className="flex-1" />
           {round?.deadline_at && match?.status === "active" ? (
             <Countdown deadlineAt={round.deadline_at} />
@@ -439,6 +451,11 @@ export function GameNightRoomScreen() {
           {state ? <RoomChat state={state} /> : null}
         </div>
       </div>
+      <RulesSheet
+        open={rulesOpen}
+        onClose={() => setRulesOpen(false)}
+        targetScore={match?.target_score}
+      />
     </main>
   );
 }
