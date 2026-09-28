@@ -32,6 +32,7 @@ import {
 import {
   useEvents,
   useForYouEvents,
+  usePastEvents,
   useToggleEventLike,
   type Event,
 } from "@dvnt/app/lib/hooks/use-events";
@@ -117,6 +118,9 @@ export function EventsListScreen() {
   const { data: events, isLoading } = useEvents();
   // Personalized "For You" feed — separate query (15min cache native-side).
   const { data: forYouEvents, isLoading: forYouLoading } = useForYouEvents();
+  // Past tab needs its own query: get_events_home drops anything >24h old,
+  // so filtering `all` client-side could only ever surface yesterday.
+  const { data: pastEvents, isLoading: pastLoading } = usePastEvents();
   const { data: spotlight } = useSpotlightFeed();
   // Promoted/sponsored event IDs — boost to top + badge them.
   const { data: promotedIds } = usePromotedEventIds();
@@ -203,8 +207,13 @@ export function EventsListScreen() {
   const filtered = useMemo(() => {
     // For You tab (index 1): use the personalized feed unless the user is
     // actively searching/filtering — then fall back to the filtered set.
+    // Past tab (index 3) pulls the dedicated past-events query.
     const base =
-      activeTab === 1 && !hasActiveFilters ? forYou : all;
+      activeTab === 3
+        ? ((pastEvents ?? []) as Event[]).filter((e) => e.title)
+        : activeTab === 1 && !hasActiveFilters
+          ? forYou
+          : all;
     return base.filter((e) => {
       if (q) {
         const hay = `${e.title} ${e.location ?? ""} ${e.host?.username ?? ""}`.toLowerCase();
@@ -227,7 +236,7 @@ export function EventsListScreen() {
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [all, forYou, hasActiveFilters, q, activeTab, activeFilters]);
+  }, [all, forYou, pastEvents, hasActiveFilters, q, activeTab, activeFilters]);
 
   const collections = useMemo(() => {
     const weekend = all.filter((e) => {
@@ -400,7 +409,9 @@ export function EventsListScreen() {
 
         {/* Content */}
         <div className="mt-5">
-          {(isLoading || (activeTab === 1 && forYouLoading)) &&
+          {(isLoading ||
+            (activeTab === 1 && forYouLoading) ||
+            (activeTab === 3 && pastLoading)) &&
           filtered.length === 0 ? (
             <p className="text-white/45 py-16 text-center">Loading events…</p>
           ) : (
