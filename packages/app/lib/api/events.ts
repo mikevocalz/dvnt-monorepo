@@ -11,7 +11,10 @@ import {
   getCurrentUserAuthId,
 } from "./auth-helper";
 import { invokeEdge } from "./invoke-edge";
-import { filterDiscoverableEvents } from "../events/event-discovery";
+import {
+  filterDiscoverableEvents,
+  filterPubliclyListableEvents,
+} from "../events/event-discovery";
 import { eventSalesClosed } from "../events/event-time";
 import type { TicketTypeCategory } from "./ticket-types";
 import type { TierType, TierVisibility } from "../tickets/pricing";
@@ -539,10 +542,11 @@ export const eventsApi = {
       if (error) throw error;
 
       // Public discovery surface (the host's profile), so it takes the full
-      // discovery gate, not just the cancelled check: a cancelled, suspended or
-      // draft event must not advertise itself on a profile anyone can open.
-      // JS-side for the same NULL-status reason as getMyEvents.
-      const mapped = filterDiscoverableEvents(data || [])
+      // public-list gate, not just the status check: a cancelled, suspended,
+      // draft, private or link_only event must not advertise itself on a
+      // profile anyone can open. JS-side for the same NULL reason as
+      // getMyEvents — `.neq()` would drop the legacy NULL rows too.
+      const mapped = filterPubliclyListableEvents(data || [])
         .map((event: any) => {
         const dateParts = formatEventDate(event[DB.events.startDate]);
         return {
@@ -586,11 +590,12 @@ export const eventsApi = {
 
       if (error) throw error;
 
-      // Same discovery gate as every other list — a cancelled event does not
-      // reappear once its date passes. JS-side, not `.neq()`: `status <>
-      // 'cancelled'` is NULL for the legacy rows whose status is NULL and
-      // PostgREST would drop those too.
-      const rows = filterDiscoverableEvents(data || []);
+      // Same public-list gate as the get_events_* RPCs — a cancelled event
+      // does not reappear once its date passes, and a private or link_only
+      // event must never sit in a browse list. JS-side, not `.neq()`: the
+      // legacy rows carry NULL status/visibility and PostgREST would drop
+      // those too.
+      const rows = filterPubliclyListableEvents(data || []);
 
       // Fetch host data separately
       const hostIds = [
