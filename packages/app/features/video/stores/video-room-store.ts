@@ -78,6 +78,12 @@ interface VideoRoomStoreState {
   callType: CallType;
   callRole: CallRole;
   callDirection: CallDirection;
+  /**
+   * A group call ends when the CALLER leaves or the room ends — a member
+   * hanging up must not tear the room down for everyone still on it. Drives
+   * who may end signals, whether a peer drain auto-ends, and rejoin policy.
+   */
+  isGroupCall: boolean;
   chatId: string | null;
   callEnded: boolean;
   callDuration: number;
@@ -132,6 +138,7 @@ interface VideoRoomStoreActions {
   setCallType: (type: CallType) => void;
   setCallRole: (role: CallRole) => void;
   setCallDirection: (direction: CallDirection) => void;
+  setIsGroupCall: (isGroup: boolean) => void;
   setRecipientInfo: (info: RecipientInfo | null) => void;
   setChatId: (chatId: string | null) => void;
   setCallEnded: (duration: number) => void;
@@ -186,6 +193,7 @@ const initialState: VideoRoomStoreState = {
   callType: "video",
   callRole: "caller",
   callDirection: "outgoing",
+  isGroupCall: false,
   chatId: null,
   callEnded: false,
   callDuration: 0,
@@ -291,6 +299,7 @@ export const useVideoRoomStore = create<VideoRoomStore>((set, get) => ({
   setCallType: (callType) => set({ callType }),
   setCallRole: (callRole) => set({ callRole }),
   setCallDirection: (callDirection) => set({ callDirection }),
+  setIsGroupCall: (isGroupCall) => set({ isGroupCall }),
   setRecipientInfo: (recipientInfo) => set({ recipientInfo }),
   setChatId: (chatId) => set({ chatId }),
   setCallEnded: (duration) =>

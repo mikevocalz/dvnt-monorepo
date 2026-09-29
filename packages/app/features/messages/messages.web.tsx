@@ -539,21 +539,44 @@ export function MessagesScreen() {
             currentUserIntId != null &&
             String(newMsg.sender_id) === String(currentUserIntId);
 
-          queryClient.setQueriesData<any[]>(
-            { queryKey: [...messageKeys.all(viewerId), "filtered"] },
-            (old) => {
-              if (!Array.isArray(old)) return old;
-              return old.map((conv: any) => {
-                if (String(conv.id) !== convId) return conv;
-                return {
-                  ...conv,
-                  lastMessage: content,
-                  timestamp: "Just now",
-                  unread: !isMine ? true : conv.unread,
-                };
-              });
-            },
+          // An INSERT for a conversation this member has never loaded — the
+          // shape every NEW group chat takes for everyone but its creator.
+          // Patching maps over what is cached, so the conv simply never
+          // appeared until a full refetch; check membership first and let the
+          // query refetch bring the unknown conversation in.
+          const cached = queryClient.getQueriesData<any[]>({
+            queryKey: [...messageKeys.all(viewerId), "filtered"],
+          });
+          const isKnown = cached.some(
+            ([, data]) =>
+              Array.isArray(data) &&
+              data.some((c: any) => String(c.id) === convId),
           );
+
+          if (!isKnown) {
+            queryClient.invalidateQueries({
+              queryKey: [...messageKeys.all(viewerId), "filtered"],
+            });
+            queryClient.invalidateQueries({
+              queryKey: messageKeys.conversations(viewerId),
+            });
+          } else {
+            queryClient.setQueriesData<any[]>(
+              { queryKey: [...messageKeys.all(viewerId), "filtered"] },
+              (old) => {
+                if (!Array.isArray(old)) return old;
+                return old.map((conv: any) => {
+                  if (String(conv.id) !== convId) return conv;
+                  return {
+                    ...conv,
+                    lastMessage: content,
+                    timestamp: "Just now",
+                    unread: !isMine ? true : conv.unread,
+                  };
+                });
+              },
+            );
+          }
 
           if (!isMine) {
             queryClient.invalidateQueries({

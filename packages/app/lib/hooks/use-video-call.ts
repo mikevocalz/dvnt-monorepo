@@ -115,10 +115,13 @@ export function useVideoCall() {
   const reportedConnectedRef = useRef(false);
   const leaveCallRef = useRef<() => void>(() => {});
   const joinCallRef = useRef<
-    (roomId: string, callType?: CallType) => Promise<void>
+    (roomId: string, callType?: CallType, isGroup?: boolean) => Promise<void>
   >(async () => {});
   const micStartedRef = useRef(false);
   const ringTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A rejoin sequence is in flight — the peerStatus effect must not stack
+  // another one on the same error burst.
+  const rejoinInFlightRef = useRef(false);
 
   // Ring timeout duration (30s like Facebook/Instagram)
   const RING_TIMEOUT_MS = 30_000;
@@ -170,6 +173,47 @@ export function useVideoCall() {
       s.setConnectionStatus("error", "Peer connection failed");
       if (phase === "connecting_peer") {
         s.setError("WebRTC peer connection failed", "peer_error");
+      } else if (
+        phase === "connected" &&
+        !userInitiatedLeaveRef.current &&
+        !rejoinInFlightRef.current
+      ) {
+        // Our peer dropped out of a live call. admit_call_participant treats
+        // an active reconnect as a re-admit that consumes no seat, so going
+        // back through call_join is safe; the 5-minute ends_at that used to
+        // refuse this is now call-exempt in video_join_room.
+        rejoinInFlightRef.current = true;
+        void (async () => {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+            const st = getStore();
+            if (
+              userInitiatedLeaveRef.current ||
+              st.callPhase !== "connected" ||
+              !st.roomId
+            ) {
+              rejoinInFlightRef.current = false;
+              return;
+            }
+            try {
+              log(`[REJOIN] attempt ${attempt + 1} for room ${st.roomId}`);
+              await joinCallRef.current(st.roomId, st.callType, st.isGroupCall);
+              log("[REJOIN] rejoined call");
+              rejoinInFlightRef.current = false;
+              return;
+            } catch (e) {
+              logWarn(`[REJOIN] attempt ${attempt + 1} failed:`, e);
+            }
+          }
+          rejoinInFlightRef.current = false;
+          const st = getStore();
+          if (st.callPhase === "connected") {
+            st.setError(
+              "Connection lost — could not rejoin the call",
+              "rejoin_failed",
+            );
+          }
+        })();
       }
     }
   }, [peerStatus, getStore]);
@@ -379,6 +423,11 @@ export function useVideoCall() {
     if (
       hadPeersRef.current &&
       participants.length === 0 &&
+      // A group call does not end because MY view lost everyone — a blip on
+      // my own connection drains remotePeers to zero and this used to hang up
+      // the whole call (another "bumped out" path). The caller's End button
+      // or an 'ended' signal ends a group call, not a peer drain.
+      !s.isGroupCall &&
       (currentPhase === "connected" || currentPhase === "outgoing_ringing")
     ) {
       log("All remote peers left — auto-ending call in 2s");
@@ -386,6 +435,7 @@ export function useVideoCall() {
       setTimeout(() => {
         const current = getStore();
         if (
+          !current.isGroupCall &&
           current.participants.length === 0 &&
           (current.callPhase === "connected" ||
             current.callPhase === "outgoing_ringing")
@@ -557,6 +607,7 @@ export function useVideoCall() {
       s.setCallType(callType);
       s.setCallRole("caller");
       s.setCallDirection("outgoing");
+      s.setIsGroupCall(isGroup);
       s.setChatId(chatId || null);
       micStartedRef.current = false;
       hadPeersRef.current = false;
@@ -873,13 +924,19 @@ export function useVideoCall() {
 
   // ── Join an existing call (incoming) ───────────────────────────────
   const joinCall = useCallback(
-    async (roomId: string, callType: CallType = "video") => {
+    async (roomId: string, callType: CallType = "video", isGroup = false) => {
       const watchCallGeneration = useWatchSessionStore.getState().accountGen;
       const s = getStore();
       s.clearError();
       s.setCallType(callType);
-      s.setCallRole("callee");
-      s.setCallDirection("incoming");
+      // A rejoin through auto-rejoin arrives with callPhase "connected" — keep
+      // whatever role this member already had. A bumped CALLER who came back
+      // as "callee" could never end the call they started.
+      s.setCallRole(s.callPhase === "connected" ? s.callRole : "callee");
+      s.setCallDirection(
+        s.callPhase === "connected" ? s.callDirection : "incoming",
+      );
+      s.setIsGroupCall(isGroup);
       s.setRoomId(roomId);
       micStartedRef.current = false;
       hadPeersRef.current = false;
@@ -1087,10 +1144,23 @@ export function useVideoCall() {
     });
     log(`Leaving ${mode} call, roomId:`, currentRoomId, "duration:", duration);
 
-    // End call signals
+    // End call signals — but on a GROUP call only the caller may end them.
+    // This used to run unconditionally, so any member hanging up stamped
+    // "ended" on every signal in the room and subscribeToRoomEnded tore the
+    // call down for the people still on it: the "bumped out" report. A group
+    // call survives one member leaving; a 1:1 or the caller leaving ends it.
     if (currentRoomId) {
-      callSignalsApi.endCallSignals(currentRoomId).catch((e) => {
-        logWarn("Failed to end call signals:", e);
+      if (!s.isGroupCall || s.callRole === "caller") {
+        callSignalsApi.endCallSignals(currentRoomId).catch((e) => {
+          logWarn("Failed to end call signals:", e);
+        });
+      }
+
+      // Mark MY membership left regardless of role. Call admission consumes a
+      // seat out of 4 and nothing else ever writes status='left' — skipping
+      // this is how a room hit call_full with ghosts and refused rejoins.
+      callRoomsApi.leaveCall(currentRoomId).catch((e) => {
+        logWarn("Failed to mark call membership left:", e);
       });
 
       CT.guard("CALLKEEP", "endCall", () => {

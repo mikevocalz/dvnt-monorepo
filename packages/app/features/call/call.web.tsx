@@ -149,12 +149,14 @@ function CallRoom({
   participantIds,
   callType,
   recipientUsername,
+  isGroup,
 }: {
   roomId: string;
   isOutgoing: boolean;
   participantIds: string[];
   callType: "audio" | "video";
   recipientUsername: string;
+  isGroup: boolean;
 }) {
   const router = useRouter();
 
@@ -200,6 +202,12 @@ function CallRoom({
       // Was hardcoded to "video", so an audio call from chat still opened the
       // camera UI. The chat screen has always passed `callType` in the query.
       s.setCallType(callType);
+      // Role and group-ness drive who may end the call: a web callee used to
+      // stay on the store's "caller" default, so their hang-up would have
+      // stamped 'ended' on every signal — the same teardown bug native had.
+      s.setCallRole(isOutgoing ? "caller" : "callee");
+      s.setCallDirection(isOutgoing ? "outgoing" : "incoming");
+      s.setIsGroupCall(isGroup);
       s.setRoomId(roomId);
 
       // 1) Resolve the Fishjam peer token through the PERSONAL CALLS stack
@@ -348,6 +356,84 @@ function CallRoom({
     }
   }, [peerStatus, getStore]);
 
+  // ── Auto-rejoin: a bumped caller gets back in without pressing anything ───
+  // peerStatus "error" while the call was connected means OUR peer dropped —
+  // everyone else keeps talking. Re-admit (call_join handles an active
+  // reconnect without consuming a seat) then re-publish media. Bounded to
+  // three tries with 1s/2s/4s backoff; intentional leave cancels everything.
+  // The whole backoff sequence lives in one cancelled-flag async run because
+  // peerStatus stays "error" between attempts — the effect cannot be its own
+  // retry trigger.
+  useEffect(() => {
+    if (peerStatus === "connected") return;
+    if (peerStatus !== "error") return;
+    const s = getStore();
+    if (s.callPhase !== "connected") return;
+    if (intentionalLeaveRef.current || rejoinAttemptRef.current > 0) return;
+    rejoinAttemptRef.current = 1;
+
+    let cancelled = false;
+    void (async () => {
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+        const st = getStore();
+        const targetRoomId = st.roomId;
+        if (
+          cancelled ||
+          intentionalLeaveRef.current ||
+          !targetRoomId ||
+          st.callPhase !== "connected"
+        ) {
+          return;
+        }
+        st.setConnectionStatus("connecting");
+        try {
+          const joinResult = await callRoomsApi.joinCall(targetRoomId);
+          const token = joinResult.ok ? joinResult.data?.token : null;
+          const joinedUser = joinResult.data?.user;
+          if (!token || !joinedUser) {
+            throw new Error(joinResult.error?.message || "rejoin refused");
+          }
+          await joinRoomRef.current({
+            peerToken: token,
+            peerMetadata: {
+              userId: joinedUser.id,
+              username: joinedUser.username,
+              avatar: joinedUser.avatar,
+            },
+          });
+          // Re-publish what was on. Guarded the same way the first join is:
+          // toggle* is a true toggle, so only start what is actually off.
+          if (!micRef.current.isMicrophoneOn) {
+            await micRef.current.toggleMicrophone();
+          }
+          if (!cameraRef.current.isCameraOn) {
+            await cameraRef.current.toggleCamera();
+          }
+          st.setConnectionStatus("connected");
+          rejoinAttemptRef.current = 0;
+          return;
+        } catch (rejoinErr) {
+          console.warn(
+            `[call.web] auto-rejoin attempt ${attempt + 1} failed:`,
+            rejoinErr,
+          );
+        }
+      }
+      if (!cancelled && !intentionalLeaveRef.current) {
+        getStore().setError(
+          "Connection lost — could not rejoin the call",
+          "rejoin_failed",
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      rejoinAttemptRef.current = 0;
+    };
+  }, [peerStatus, getStore]);
+
   // ── Sync local camera stream → store ──────────────────────────────────────
   useEffect(() => {
     const stream = camera.cameraStream ?? null;
@@ -408,9 +494,17 @@ function CallRoom({
     })();
   }, []);
 
+  // Set before any teardown so the rejoin effect knows a disconnect after
+  // this point is the user's own choice, not a bump to recover from.
+  const intentionalLeaveRef = useRef(false);
+  // >0 while a rejoin sequence is in flight — guards against re-entry.
+  const rejoinAttemptRef = useRef(0);
+
   const leave = useCallback(() => {
+    intentionalLeaveRef.current = true;
     const s = getStore();
     const duration = s.callDuration;
+    const roomIdToLeave = s.roomId;
     try {
       leaveRoomRef.current();
     } catch {
@@ -422,6 +516,18 @@ function CallRoom({
     } catch {
       // ignore
     }
+    if (roomIdToLeave) {
+      // Free my seat — without this the room accumulates 'active' ghosts and
+      // hits call_full. Non-fatal: a stuck seat is bad, a stuck leave is
+      // survivable.
+      callRoomsApi.leaveCall(roomIdToLeave).catch(() => {});
+      // Only the caller ends a group call; anyone ends a 1:1. A member's
+      // hang-up used to stamp 'ended' on every signal (native side), kicking
+      // the rest of the room — same rule here so a web member doesn't.
+      if (!s.isGroupCall || s.callRole === "caller") {
+        callSignalsApi.endCallSignals(roomIdToLeave).catch(() => {});
+      }
+    }
     s.setCallEnded(duration);
     router.back();
   }, [getStore, router]);
@@ -429,11 +535,14 @@ function CallRoom({
   // ── Remote hangup: the OTHER side left, so this screen must go too ────────
   // Only the person who pressed the button ran `leave()`; the remote party was
   // left sitting on a live-looking call screen until they navigated away by
-  // hand.
+  // hand. On a group call a single member's declined/missed is NOT the room
+  // ending — it used to be, which is how one person saying no hung up on
+  // three people. Only "ended" (caller out / room closed) is terminal there.
   useEffect(() => {
     if (!roomId) return;
-    return callSignalsApi.subscribeToRoomEnded(roomId, () => {
+    return callSignalsApi.subscribeToRoomEnded(roomId, (signal) => {
       const s = getStore();
+      if (s.isGroupCall && signal.status !== "ended") return;
       if (s.callPhase === "call_ended" || s.callPhase === "error") return;
       leave();
     });
@@ -453,10 +562,8 @@ function CallRoom({
   }, [getStore]);
 
   const localStream = camera.cameraStream;
-  const remote = participants[0];
-  const remoteStream: MediaStream | null =
-    (remote?.videoTrack as any)?.stream ?? null;
-  const remoteName = remote?.username || "Connecting…";
+  const remoteName =
+    participants[0]?.username || recipientUsername || "Connecting…";
 
   const connecting =
     callPhase === "joining_room" ||
@@ -466,13 +573,24 @@ function CallRoom({
   const statusLabel =
     callPhase === "error"
       ? errorMsg || "Call failed"
-      : connectionStatus === "connected" && remote
-        ? remoteName
-        : connecting
-          ? "Connecting…"
-          : remote
-            ? remoteName
+      : participants.length > 1
+        ? `Group call · ${participants.length + 1}`
+        : participants.length === 1
+          ? remoteName
+          : connecting
+            ? "Connecting…"
             : "Waiting for others…";
+
+  // Every remote gets a tile, not just the first — the old layout rendered
+  // participants[0] and left the rest as audio-only ghosts. 1 fills the
+  // screen, 2 splits (stacked on a phone, side-by-side wider), 3–4 go 2x2 —
+  // four is the call_max, so nothing larger needs a layout.
+  const gridClass =
+    participants.length <= 1
+      ? "grid-cols-1"
+      : participants.length === 2
+        ? "grid-cols-1 sm:grid-cols-2"
+        : "grid-cols-2";
 
   return (
     // FIXED and above the app chrome. Two things were covering the controls:
@@ -486,17 +604,11 @@ function CallRoom({
     // navigate out of the call you are on. z-2000 sits above the tab bar and
     // below the incoming-call overlay (3000), which must still interrupt.
     <main className="fixed inset-x-0 top-0 z-[2000] flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d]">
-      {/* Remote tile fills the screen */}
+      {/* Remote participants — one tile each */}
       <div className="absolute inset-0">
-        {remoteStream ? (
-          <VideoTile
-            stream={remoteStream}
-            muted={false}
-            className="h-full w-full object-cover"
-          />
-        ) : (
+        {participants.length === 0 ? (
           <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-black">
-            <AvatarFallback name={remoteName} avatar={remote?.avatar} />
+            <AvatarFallback name={remoteName} />
             <p
               role="status"
               aria-live="polite"
@@ -505,6 +617,40 @@ function CallRoom({
             >
               {statusLabel}
             </p>
+          </div>
+        ) : (
+          <div className={`grid h-full w-full ${gridClass}`}>
+            {participants.map((p) => {
+              const vStream: MediaStream | null =
+                (p.videoTrack as any)?.stream ?? null;
+              return (
+                <div
+                  key={p.odId}
+                  className="relative min-h-0 min-w-0 overflow-hidden bg-black"
+                >
+                  {vStream ? (
+                    <VideoTile
+                      stream={vStream}
+                      muted={false}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-3">
+                      <AvatarFallback name={p.username ?? "?"} avatar={p.avatar} />
+                    </div>
+                  )}
+                  <div
+                    className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1 backdrop-blur"
+                    aria-label={`${p.username}${p.isMicOn ? "" : ", muted"}`}
+                  >
+                    {!p.isMicOn && <MicOff size={12} className="text-white/70" />}
+                    <span className="max-w-40 truncate text-xs text-white">
+                      {p.username}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -616,6 +762,10 @@ export function CallScreen() {
     .filter(Boolean);
   const callType = search?.get("callType") === "audio" ? "audio" : "video";
   const recipientUsername = search?.get("recipientUsername") ?? "";
+  // Explicit flag from the caller's query, or inferred: a call with more than
+  // one callee is a group call either way.
+  const isGroup =
+    search?.get("isGroup") === "true" || participantIds.length > 1;
 
   return (
     <FishjamProvider fishjamId={resolveFishjamAppId()}>
@@ -625,6 +775,7 @@ export function CallScreen() {
         participantIds={participantIds}
         callType={callType}
         recipientUsername={recipientUsername}
+        isGroup={isGroup}
       />
     </FishjamProvider>
   );

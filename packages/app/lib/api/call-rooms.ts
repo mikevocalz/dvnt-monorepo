@@ -28,7 +28,7 @@ export interface CallJoinResponse {
 }
 
 async function callEdgeFunction<T>(
-  functionName: "call_create" | "call_join",
+  functionName: "call_create" | "call_join" | "video_leave_room",
   body: Record<string, unknown>,
 ): Promise<ApiResponse<T>> {
   try {
@@ -81,5 +81,19 @@ export const callRoomsApi = {
       };
     }
     return res;
+  },
+
+  /**
+   * Mark MY membership left. Call admission lives in video_room_members
+   * (admit_call_participant) but nothing ever wrote 'left' — rows stayed
+   * 'active' forever, so a call went call_full after four people had ever
+   * joined and nobody could get back in. video_leave_room is room-kind
+   * agnostic: marks the member left, decrements the count, and ends the
+   * room itself when the host or the last participant walks out.
+   */
+  async leaveCall(
+    roomId: string,
+  ): Promise<ApiResponse<{ left: boolean; roomEnded: boolean }>> {
+    return callEdgeFunction("video_leave_room", { roomId });
   },
 };
