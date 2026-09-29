@@ -407,7 +407,9 @@ export function UserProfileScreen() {
             <p className="mt-1.5 flex items-center gap-1 text-sm text-white/55">
               <MapPin size={14} className="shrink-0" aria-hidden />
               <span>
-                {[user?.location, proximity].filter(Boolean).join(" · ")}
+                {[user?.location, proximity ? `(${proximity})` : null]
+                  .filter(Boolean)
+                  .join(" ")}
               </span>
             </p>
           ) : null}
