@@ -137,6 +137,7 @@ import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
 import "react-lite-youtube-embed/dist/LiteYouTubeEmbed.css";
 import {
+  eventSharePath,
   isEventShareToken,
   resolveEventByPathSegment,
   slugResolvesOnlyToHiddenEvent,
@@ -930,7 +931,16 @@ export function EventDetailScreen() {
       }
       return;
     }
-    const url = `https://dvntapp.live/events/${slug}`;
+    // Canonical path, not the route we happen to be mounted on: this screen
+    // serves BOTH /events/[slug] and /feed/events/[id], and on the id route
+    // `slug` is "" — the old template minted a bare /events/ link that opened
+    // the list, not this event. link_only keeps its token lane; everything
+    // else shares /e/<id>, matching shareUrls.event and already-shared links.
+    const url = `https://dvntapp.live${eventSharePath({
+      id: e.id,
+      visibility: e.visibility,
+      shareSlug: e.shareSlug,
+    })}`;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ((navigator as any).share) {
