@@ -191,6 +191,36 @@ export function UserProfileScreen() {
   const viewerDeviceLat = useEventsLocationStore((s) => s.deviceLat);
   const viewerDeviceLng = useEventsLocationStore((s) => s.deviceLng);
   const viewerActiveCity = useEventsLocationStore((s) => s.activeCity);
+
+  // Web never boot-locates like native does, so a viewer who granted the
+  // browser geolocation at some point still had deviceLat/Lng empty and the
+  // proximity badge had nothing to measure from. Read the fix ONLY when the
+  // permission is already granted — same no-prompt rule useBootLocation
+  // follows; anything else would pop a permission sheet on a profile view.
+  useEffect(() => {
+    if (viewerDeviceLat && viewerDeviceLng) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    let cancelled = false;
+    void navigator.permissions
+      ?.query({ name: "geolocation" as PermissionName })
+      .then((status) => {
+        if (cancelled || status.state !== "granted") return;
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (cancelled) return;
+            useEventsLocationStore
+              .getState()
+              .setDeviceLocation(pos.coords.latitude, pos.coords.longitude);
+          },
+          () => {},
+          { enableHighAccuracy: false, timeout: 8000 },
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [viewerDeviceLat, viewerDeviceLng]);
   const profileCity = matchCity(user?.location, cities ?? []);
   const proximity = useMemo(() => {
     if (!profileCity) return null;

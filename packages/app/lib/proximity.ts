@@ -31,6 +31,36 @@ export interface ViewerPosition {
 
 const KM_PER_MILE = 0.621371;
 
+/**
+ * Well-known names members actually type for a city in the table —
+ * "NYC", "Harlem", "ATL" are not guesses, they are the city. Only entries
+ * that cannot honestly mean somewhere else belong here: "DC"/"DMV" point at
+ * no city row today, so they stay out rather than landing on the wrong pin.
+ */
+const CITY_ALIASES: Record<string, string> = {
+  nyc: "New York",
+  "new york city": "New York",
+  manhattan: "New York",
+  harlem: "New York",
+  soho: "New York",
+  tribeca: "New York",
+  chelsea: "New York",
+  midtown: "New York",
+  brooklyn: "Brooklyn",
+  bk: "Brooklyn",
+  williamsburg: "Brooklyn",
+  bushwick: "Brooklyn",
+  bedstuy: "Brooklyn",
+  greenpoint: "Brooklyn",
+  atl: "Atlanta",
+  la: "Los Angeles",
+  sf: "San Francisco",
+  chi: "Chicago",
+  philly: "Philadelphia",
+  htx: "Houston",
+  mia: "Miami",
+};
+
 /** "Atlanta, GA" -> "atlanta", "Washington D.C." -> "washington dc". */
 export function normalizeLocationText(text: string): string {
   return text
@@ -57,9 +87,14 @@ export function matchCity(
     normalizeLocationText(locationText),
   ].filter(Boolean);
   for (const norm of candidates) {
+    const aliasTarget = CITY_ALIASES[norm];
     const hit = cities.find((c) => {
       const name = normalizeLocationText(c.name);
-      return norm === name || norm.startsWith(`${name} `);
+      return (
+        norm === name ||
+        norm.startsWith(`${name} `) ||
+        (aliasTarget != null && name === normalizeLocationText(aliasTarget))
+      );
     });
     if (hit) return hit;
   }

@@ -109,3 +109,12 @@ test("resolveViewerPosition falls back to activeCity then own location text", ()
     null,
   );
 });
+
+test("metro aliases resolve to their city row", () => {
+  assert.equal(matchCity("NYC", CITIES)?.name, "New York");
+  assert.equal(matchCity("Harlem, NY", CITIES)?.name, "New York");
+  assert.equal(matchCity("ATL", CITIES)?.name, "Atlanta");
+  assert.equal(matchCity("BK", CITIES)?.name, "Brooklyn");
+  // Still no fabricated city: "DMV" has no alias and no row.
+  assert.equal(matchCity("DMV", CITIES), undefined);
+});

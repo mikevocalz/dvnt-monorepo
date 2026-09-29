@@ -35,6 +35,7 @@ import { inviteEventGuests } from "@dvnt/app/lib/api/privileged";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useDebounce } from "@dvnt/app/lib/hooks/use-debounce";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { eventSharePath } from "@dvnt/app/lib/events/event-discovery";
 import { LegendList } from "@dvnt/app/components/list";
 import {
   useDetachedSheetMetrics,
@@ -375,7 +376,10 @@ export function ShareEventSheet({
             <Pressable
               onPress={async () => {
                 await Clipboard.setStringAsync(
-                  `https://dvntapp.live/e/${eventId}`,
+                  `https://dvntapp.live${eventSharePath({
+                    id: eventId,
+                    visibility: visibility ?? undefined,
+                  })}`,
                 );
                 showToast(
                   "success",

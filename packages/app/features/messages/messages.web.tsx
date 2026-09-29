@@ -318,6 +318,7 @@ function GroupAvatarStack({ members }: { members: ConversationMember[] }) {
 
 function ConversationRow({
   item,
+  currentUser,
   isDeleting,
   onChatPress,
   onProfilePress,
@@ -325,6 +326,7 @@ function ConversationRow({
   onDelete,
 }: {
   item: ConversationItem;
+  currentUser: ReturnType<typeof useAuthStore.getState>["user"];
   isDeleting: boolean;
   onChatPress: (item: ConversationItem) => void;
   onProfilePress: (username: string) => void;
@@ -332,7 +334,34 @@ function ConversationRow({
   onDelete: (item: ConversationItem) => void;
 }) {
   const isGroup = !!item.isGroup;
-  const memberCount = isGroup ? Math.max(item.members?.length ?? 1, 1) : 0;
+  // `item.members` is the OTHER members — the API excludes the viewer, so a
+  // raw count reads one short. Native already folds the viewer in for the
+  // count; this mirrors it. The names list stays others-only.
+  const stackMembers =
+    isGroup && item.members
+      ? (() => {
+          const currentUserAuthId = currentUser?.authId || currentUser?.id;
+          const alreadyIncludesCurrentUser = item.members.some(
+            (member) =>
+              (currentUserAuthId &&
+                (member.authId === currentUserAuthId ||
+                  member.id === currentUserAuthId)) ||
+              (!!currentUser?.username &&
+                member.username === currentUser.username),
+          );
+          if (!currentUser || alreadyIncludesCurrentUser) return item.members;
+          return [
+            ...item.members,
+            {
+              id: String(currentUser.id || currentUser.authId || "me"),
+              authId: currentUser.authId || currentUser.id,
+              username: currentUser.username || "you",
+              avatar: currentUser.avatar || "",
+            },
+          ];
+        })()
+      : item.members || [];
+  const memberCount = isGroup ? Math.max(stackMembers.length, 1) : 0;
 
   return (
     <div
@@ -347,8 +376,8 @@ function ConversationRow({
       } ${isDeleting ? "opacity-60" : "active:bg-white/6"}`}
     >
       {/* Avatar */}
-      {isGroup && (item.members?.length ?? 0) > 1 ? (
-        <GroupAvatarStack members={item.members!} />
+      {isGroup && stackMembers.length > 1 ? (
+        <GroupAvatarStack members={stackMembers} />
       ) : (
         <button
           type="button"
@@ -933,6 +962,7 @@ export function MessagesScreen() {
                   >
                     <ConversationRow
                       item={item}
+                      currentUser={currentUser}
                       isDeleting={deletingId === item.id}
                       onChatPress={handleChatPress}
                       onProfilePress={handleProfilePress}
