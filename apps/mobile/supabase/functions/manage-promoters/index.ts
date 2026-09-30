@@ -124,7 +124,8 @@ async function notifyPromoterAdded(
       actor_id: actor.id,
       type: "event_promoter_added",
       entity_type: "event",
-      entity_id: params.promoterId,
+      entity_id: String(params.eventId),
+      entity_payload: { promoter_id: params.promoterId },
     });
 
     const { data: tokens } = await supabase
@@ -143,7 +144,8 @@ async function notifyPromoterAdded(
       data: {
         type: "event_promoter_added",
         entityType: "event",
-        entityId: params.promoterId,
+        entityId: String(params.eventId),
+        promoterId: params.promoterId,
         eventId: String(params.eventId),
         // Lands on the promoter dashboard — payout setup is the first thing
         // a newly-added promoter needs to do.

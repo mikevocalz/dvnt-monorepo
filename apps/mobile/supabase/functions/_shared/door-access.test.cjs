@@ -160,8 +160,13 @@ for (const scenario of [
     eventDates: closedEvent, status: 400 },
   { name: 'quote past end refused', action: 'quote',
     eventDates: { end_date: new Date(Date.now() - 60_000).toISOString() }, status: 400 },
-  { name: 'quote start_date-only inside cutoff refused', action: 'quote',
+  // No end_date → assumed start+6h run, so doors in 10 min still sells
+  // (the old rule refused card-not-present sales 30 min before doors).
+  { name: 'quote start_date-only just before doors allowed', action: 'quote',
     eventDates: { start_date: new Date(Date.now() + 10 * 60_000).toISOString() },
+    status: 200 },
+  { name: 'quote start_date-only past assumed end refused', action: 'quote',
+    eventDates: { start_date: new Date(Date.now() - 7 * 3600_000).toISOString() },
     status: 400 },
   { name: 'quote 2h before end allowed', action: 'quote',
     eventDates: { end_date: new Date(Date.now() + 2 * 3600_000).toISOString() },

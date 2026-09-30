@@ -241,6 +241,13 @@ export const ROUTE_REGISTRY: RouteEntry[] = [
     label: "Ticket Scanner",
   },
   {
+    urlPattern: "/feed/events/:id/promoter",
+    routerPath: "/(protected)/events/:id/promoter",
+    auth: "auth-required",
+    paramsSchema: idSchema,
+    label: "Promoter Dashboard",
+  },
+  {
     urlPattern: "/organizer-setup",
     routerPath: "/(protected)/events/organizer-setup",
     auth: "auth-required",

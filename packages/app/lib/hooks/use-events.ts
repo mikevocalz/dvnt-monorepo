@@ -376,6 +376,12 @@ function buildEventCachePatch(updates: any): Record<string, unknown> {
     patch.end_date = updates.endDate || null;
     patch.endDate = updates.endDate || null;
   }
+  // IANA display zone — same pass-through updateEvent just gained, so the
+  // optimistic cache doesn't flash the old zone until the refetch lands.
+  if (updates.eventTz !== undefined) {
+    patch.event_tz = updates.eventTz || null;
+    patch.eventTz = updates.eventTz || null;
+  }
 
   return patch;
 }

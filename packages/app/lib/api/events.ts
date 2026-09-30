@@ -581,10 +581,18 @@ export const eventsApi = {
   async getPastEvents(limit: number = 20) {
     try {
       const now = new Date().toISOString();
+      // "Past" is end-aware: events with no end_date are assumed to run
+      // start + 6h (the get_events_home convention) — an 8pm event must not
+      // land in Past at 8:01pm while it is still running.
+      const assumedEndBefore = new Date(
+        Date.now() - 6 * 60 * 60 * 1000,
+      ).toISOString();
       const { data, error } = await supabase
         .from(DB.events.table)
         .select("*")
-        .lt(DB.events.startDate, now)
+        .or(
+          `end_date.lt.${now},and(end_date.is.null,start_date.lt.${assumedEndBefore})`,
+        )
         .order(DB.events.startDate, { ascending: false })
         .limit(limit);
 
@@ -1045,6 +1053,11 @@ export const eventsApi = {
       // V2 fields
       if (updates.endDate !== undefined)
         updateData.end_date = updates.endDate || null;
+      // IANA display zone (America/Los_Angeles). There was no write path for
+      // it before, so an event created under the wrong zone could never be
+      // corrected — display fell back to UTC or the viewer's zone forever.
+      if (updates.eventTz !== undefined)
+        updateData.event_tz = updates.eventTz || null;
       if (updates.category !== undefined)
         updateData.category = updates.category || null;
       if (updates.visibility !== undefined)

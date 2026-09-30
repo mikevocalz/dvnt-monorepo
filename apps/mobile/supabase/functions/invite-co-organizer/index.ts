@@ -312,7 +312,10 @@ Deno.serve(async (req: Request) => {
           notificationType: autoAccept
             ? "event_staff_added"
             : "event_co_organizer_invited",
-          entityId: inviteId,
+          // entity_type is "event", so entity_id must be the event id —
+          // except for the pending invite, whose activity row needs the
+          // invite uuid for the accept/decline buttons.
+          entityId: autoAccept ? String(eventId) : inviteId,
           eventId,
         });
       }

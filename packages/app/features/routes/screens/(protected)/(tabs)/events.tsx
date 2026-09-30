@@ -57,6 +57,7 @@ import { useBootstrapEvents } from "@dvnt/app/lib/hooks/use-bootstrap-events";
 import { useDeviceLocation } from "@dvnt/app/lib/hooks/use-device-location";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import { eventEnded } from "@dvnt/app/lib/events/event-time";
 import { EventCollectionRow } from "@dvnt/app/features/events";
 import { EventsMapSheet } from "@dvnt/app/features/events";
 import { EventFilterSheet } from "@dvnt/app/features/events";
@@ -550,21 +551,19 @@ function EventsScreenContent() {
   // "All Events" so pills + sort + search always apply.
   const getFilteredEvents = useCallback(
     (tabIndex: number) => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
       switch (tabIndex) {
         case 0: // Upcoming — default landing tab
+          // End-aware: an event with no end_date is assumed to run
+          // start+6h (event-time.ts), so a live event stays in Upcoming
+          // instead of dropping out at doors or at viewer-local midnight.
           return eventsWithPromotion.filter(
-            (event: Event) =>
-              event.fullDate && new Date(event.fullDate) >= today,
+            (event: Event) => event.fullDate && !eventEnded(event),
           );
         case 1: // For You — use filtered results when any filter/search is active
           return hasActiveFilters ? eventsWithPromotion : forYouEvents;
         case 3: // past_events
           return eventsWithPromotion.filter(
-            (event: Event) =>
-              event.fullDate && new Date(event.fullDate) < today,
+            (event: Event) => event.fullDate && eventEnded(event),
           );
         default: // All Events (2)
           return eventsWithPromotion;

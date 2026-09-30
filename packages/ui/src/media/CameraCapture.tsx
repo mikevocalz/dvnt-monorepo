@@ -1,9 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { View, Pressable } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { View, Pressable , Text } from "react-native";
 import { CameraView, useCameraPermissions, type CameraType } from "expo-camera";
-import { Text } from "react-native";
 
 export interface CameraCaptureProps {
   /** Called with the captured photo URI (data URL on web, file URI on native). */
@@ -24,8 +23,27 @@ export function CameraCapture({ onCapture, facing = "back", onCancel }: CameraCa
   const [permission, requestPermission] = useCameraPermissions();
   const ref = useRef<CameraView>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const autoRequested = useRef(false);
 
-  if (!permission) return <View style={{ flex: 1, backgroundColor: "#000" }} />;
+  // On web the permissions query can stall or throw (Safari/Firefox lack the
+  // `camera` descriptor), leaving `permission` null forever — which rendered a
+  // dead black screen. Ask once instead; the web request path probes
+  // getUserMedia directly and still prompts the user.
+  useEffect(() => {
+    if (permission === null && !autoRequested.current) {
+      autoRequested.current = true;
+      requestPermission().catch(() => setError("Camera access could not be started."));
+    }
+  }, [permission, requestPermission]);
+
+  if (!permission) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000", padding: 24 }}>
+        <Text style={{ color: "rgba(255,255,255,0.6)" }}>{error ?? "Starting camera…"}</Text>
+      </View>
+    );
+  }
 
   if (!permission.granted) {
     return (
@@ -41,9 +59,12 @@ export function CameraCapture({ onCapture, facing = "back", onCancel }: CameraCa
   const shoot = async () => {
     if (busy || !ref.current) return;
     setBusy(true);
+    setError(null);
     try {
       const photo = await ref.current.takePictureAsync({ quality: 0.9 });
       if (photo?.uri) onCapture(photo.uri);
+    } catch {
+      setError("Couldn't take the photo. Try again.");
     } finally {
       setBusy(false);
     }
@@ -52,6 +73,11 @@ export function CameraCapture({ onCapture, facing = "back", onCancel }: CameraCa
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
       <CameraView ref={ref} style={{ flex: 1 }} facing={facing} />
+      {error ? (
+        <View style={{ position: "absolute", left: 0, right: 0, bottom: 140, alignItems: "center" }}>
+          <Text style={{ color: "#fff", backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 }}>{error}</Text>
+        </View>
+      ) : null}
       <View style={{ position: "absolute", left: 0, right: 0, bottom: 36, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 28 }}>
         {onCancel ? (
           <Pressable onPress={onCancel} style={{ position: "absolute", left: 24, width: 48, height: 48, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" }}>

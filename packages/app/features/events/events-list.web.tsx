@@ -221,8 +221,11 @@ export function EventsListScreen() {
       }
       const d = dateOf(e);
       const valid = !Number.isNaN(d.getTime());
-      if (activeTab === 0 && valid && d < now) return false; // Upcoming
-      if (activeTab === 3 && valid && d >= now) return false; // Past
+      // Past/upcoming classification is end-aware: an event with no
+      // end_date runs an assumed start+6h (event-time.ts), so it stays in
+      // Upcoming while it is still running rather than vanishing at doors.
+      if (activeTab === 0 && eventEnded(e)) return false; // Upcoming
+      if (activeTab === 3 && !eventEnded(e)) return false; // Past
       for (const f of activeFilters) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         if (f === "online" && !(e as any).isOnline) return false;

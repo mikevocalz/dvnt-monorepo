@@ -175,6 +175,11 @@ function webRouteForActivity(activity: Activity): string {
   const { type, entityType, entityId, post, postId, event, user } = activity;
   const detailPostId = post?.id || postId || (entityType === "post" ? entityId : undefined);
 
+  // Promoter taps land on the promoter dashboard, not the public event
+  // page — must run before the generic entityType "event" branch below.
+  if (type === "event_promoter_added" && entityId)
+    return `/feed/events/${entityId}/promoter`;
+
   if (entityType === "event" && entityId) return `/events/${entityId}`;
   if (entityType === "room" && entityId) return `/sneaky-lynk/room/${entityId}`;
 
@@ -253,6 +258,9 @@ function ActivityIcon({ type }: { type: Activity["type"] }) {
     case "room_invite":
     case "sneaky_lynk":
       return <Radio size={14} color="#38BDF8" />;
+    // Megaphone = the promoter screen's accent purple (#8A40CF).
+    case "event_promoter_added":
+      return <Megaphone size={14} color="#8A40CF" />;
     case "system":
       return <Megaphone size={14} color="#FF5BFC" />;
     default:
@@ -297,6 +305,8 @@ function getActivityText(activity: Activity): string {
       return ` updated details for ${activity.event?.title || "your event"}.`;
     case "event_broadcast":
       return ` sent a message to attendees of ${activity.event?.title || "an event"}.`;
+    case "event_promoter_added":
+      return ` added you as a promoter for ${activity.event?.title || "an event"}.`;
     case "ticket_transfer_initiated":
       return ` sent you a ticket transfer. Tap to accept or decline.`;
     case "ticket_transfer_accepted":

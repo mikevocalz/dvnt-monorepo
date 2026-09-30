@@ -47,6 +47,11 @@ export async function canAccessEvent(db: any, eventId: number, userId: string | 
   return access.organizer || access.ticket || access.invited;
 }
 
+/** Assumed run-time when events.end_date is NULL — same convention as
+ *  COALESCE(end_date, start_date + interval '6 hours') in the RPCs and
+ *  _shared/sales-cutoff.ts. */
+const ASSUMED_EVENT_LENGTH_MS = 6 * 60 * 60 * 1000;
+
 export type EventRoomAccess =
   | { ok: true; linked: boolean; endsAt: string | null }
   | { ok: false; code: "forbidden" | "conflict"; message: string; detail: Record<string, unknown> };
@@ -78,8 +83,20 @@ export function decideEventRoomAccess(
   const roomCreated = Date.parse(room.created_at ?? "");
   const durationEnd = Number.isFinite(roomEnd) && Number.isFinite(roomCreated)
     ? Math.max(start, roomCreated) + Math.max(0, roomEnd - roomCreated) : roomEnd;
-  const candidates = [end, durationEnd].filter(Number.isFinite);
-  const effectiveEnd = candidates.length ? Math.min(...candidates) : null;
+  let effectiveEnd: number | null;
+  if (Number.isFinite(end)) {
+    const candidates = [end, durationEnd].filter(Number.isFinite);
+    effectiveEnd = Math.min(...candidates);
+  } else {
+    // end_date NULL → the event is assumed to run start+6h. That bound is a
+    // floor, not a cap: the plan-shifted window (start+5min for a free room
+    // created before doors) must not report the session as ended while the
+    // event is still running. A longer plan window still wins.
+    effectiveEnd = Math.max(
+      start + ASSUMED_EVENT_LENGTH_MS,
+      ...[durationEnd].filter(Number.isFinite),
+    );
+  }
   if (effectiveEnd !== null && now >= effectiveEnd)
     return deny("session_expired", "This event's live session has ended", "conflict");
   return { ok: true, linked: true, endsAt: effectiveEnd === null ? null : new Date(effectiveEnd).toISOString() };

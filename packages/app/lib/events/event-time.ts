@@ -128,9 +128,17 @@ export function isPast(
 // ── Sales cutoff ────────────────────────────────────────────────────────────
 // Client mirror of apps/mobile/supabase/functions/_shared/sales-cutoff.ts —
 // the anchor chain and the 30-minute lead MUST stay identical or the UI will
-// offer a "Buy" button the server then refuses. Anchor: end → start → date.
+// offer a "Buy" button the server then refuses. Anchor: end → start+6h → date.
 
 export const SALES_CUTOFF_MINUTES = 30;
+
+/**
+ * Assumed run-time when the row has no end_date — most rows don't carry
+ * one. Same convention as get_events_home
+ * (COALESCE(end_date, start_date + interval '6 hours')) and
+ * ticket-library's ASSUMED_EVENT_LENGTH_MS; must match _shared/sales-cutoff.ts.
+ */
+export const ASSUMED_EVENT_LENGTH_MS = 6 * 60 * 60 * 1000;
 
 interface EventTimingFields {
   endDate?: string | null;
@@ -150,11 +158,11 @@ export function eventEndAt(
   const rawDate = event?.date;
   const dateMs =
     rawDate && /[-/T]/.test(rawDate) ? ms(rawDate) : null;
-  return (
-    ms(event?.endDate ?? event?.end_date) ??
-    ms(event?.startDate ?? event?.start_date ?? event?.fullDate) ??
-    dateMs
-  );
+  const end = ms(event?.endDate ?? event?.end_date);
+  if (end != null) return end;
+  // No stored end → assume a six-hour event rather than ending at doors.
+  const start = ms(event?.startDate ?? event?.start_date ?? event?.fullDate);
+  return start != null ? start + ASSUMED_EVENT_LENGTH_MS : dateMs;
 }
 
 /** Event is over (past its end anchor). */

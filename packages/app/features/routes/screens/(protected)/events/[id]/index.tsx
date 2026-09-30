@@ -113,6 +113,7 @@ import {
 } from "@dvnt/app/features/events/ui";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { canScanTickets } from "@dvnt/app/lib/events/event-role";
+import { eventEnded } from "@dvnt/app/lib/events/event-time";
 import type {
   TicketTier,
   EventAttendee,
@@ -832,19 +833,13 @@ function EventDetailScreenContent() {
       );
       return;
     }
-    // Block ticket purchase for past events
-    const now = new Date();
-    if (eventData.endDate && new Date(eventData.endDate) < now) {
+    // Block ticket purchase for ended events. End-aware via eventEnded:
+    // a missing end_date means the event is assumed to run start+6h
+    // (the get_events_home convention) — an 8pm event is still live at
+    // 8:30pm, not "Ended" at doors or at viewer-local midnight.
+    if (eventEnded(eventData)) {
       showToast("warning", "Event Ended", "This event has already ended.");
       return;
-    }
-    if (!eventData.endDate && eventData.fullDate) {
-      const dayEnd = new Date(eventData.fullDate);
-      dayEnd.setHours(23, 59, 59, 999);
-      if (dayEnd < now) {
-        showToast("warning", "Event Ended", "This event has already ended.");
-        return;
-      }
     }
 
     // B3: the FIRST age-gated action triggers the verify interstitial —
@@ -1709,17 +1704,12 @@ function EventDetailScreenContent() {
     shouldShowTranslateButton(safeEvent?.dressCode || "", _targetLang) ||
     shouldShowTranslateButton(safeEvent?.doorPolicy || "", _targetLang);
 
+  // End-aware: no end_date → assumed start+6h run (event-time.ts), not the
+  // old viewer-local end-of-day check that marked live events "past".
   const isPast = useMemo(() => {
     if (!eventData) return false;
     try {
-      const now = new Date();
-      if (eventData.endDate) return new Date(eventData.endDate) < now;
-      if (eventData.fullDate) {
-        const start = new Date(eventData.fullDate);
-        start.setHours(23, 59, 59, 999);
-        return start < now;
-      }
-      return false;
+      return eventEnded(eventData);
     } catch {
       return false;
     }

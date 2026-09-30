@@ -16,13 +16,14 @@
  * Camera links to /feed/camera. Avatars / media tiles are rounded SQUARES, no pills.
  */
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "solito/navigation";
 import {
   Hash,
   X,
   ImagePlus,
   Camera,
+  MapPin,
   Trash2,
   Plus,
   Type as TypeIcon,
@@ -42,12 +43,15 @@ import {
   TEXT_POST_MAX_SLIDES,
 } from "@dvnt/app/lib/posts/text-post";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
+import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
 // Resolves to `use-responsive-grid.web.ts` (webpack `.web.ts` extension order):
 // a `resize` listener instead of react-native's `useWindowDimensions`, feeding
 // the same `resolveResponsiveGrid` the native composer calls.
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import type { MediaKind, TextPostThemeKey } from "@dvnt/app/lib/types";
 import { useCreatePostUIStore } from "./create-post-ui-store";
+import { usePlacesAutocomplete } from "@dvnt/app/lib/hooks/use-places-autocomplete";
+import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 
 const MAX_PHOTOS = 10;
 const MAX_ANIMATED_VIDEO_DURATION = 15; // seconds
@@ -90,6 +94,7 @@ export function CreatePostScreen() {
     addTextSlide,
     removeTextSlide,
     location,
+    setLocation,
     setLocationData,
     isNSFW,
     setIsNSFW,
@@ -107,6 +112,48 @@ export function CreatePostScreen() {
   const showToast = useUIStore((s) => s.showToast);
   const publishPost = usePublishPost();
   const submittingRef = useRef(false);
+
+  // Same hand-off as native `(tabs)/create.tsx`: the /feed/camera screen writes
+  // `useCameraResultStore` before routing back here; consume it into the
+  // composer. Subscribing (not a one-shot mount read) covers the case where
+  // this page stays mounted across the camera route hop.
+  const cameraResult = useCameraResultStore((s) => s.result);
+  useEffect(() => {
+    if (!cameraResult) return;
+    const media: MediaAsset = {
+      id: `cam-${Date.now()}`,
+      uri: cameraResult.uri,
+      type: cameraResult.type,
+      kind: cameraResult.type === "video" ? "video" : "image",
+      width: cameraResult.width,
+      height: cameraResult.height,
+      duration: cameraResult.duration,
+    };
+    const current = useCreatePostStore.getState().selectedMedia;
+    if (current.length < MAX_PHOTOS) {
+      setSelectedMedia([...current, media]);
+    } else {
+      showToast("warning", "Photo limit", `Maximum ${MAX_PHOTOS} photos per post.`);
+    }
+    useCameraResultStore.getState().clear();
+  }, [cameraResult, setSelectedMedia, showToast]);
+
+  // Location — same autocomplete stack as event create: usePlacesAutocomplete →
+  // places-autocomplete / places-details edge fns, biased by activeCity then
+  // device coords then IP. The "current location" row mirrors the native
+  // composer's quick-pick and the events feed's auto-detected city.
+  const activeCity = useEventsLocationStore((s) => s.activeCity);
+  const places = usePlacesAutocomplete({
+    value: location,
+    onLocationSelect: (loc) => {
+      setLocationData({
+        name: loc.name,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        placeId: loc.placeId,
+      });
+    },
+  });
 
   const isTextPost = postKind === "text";
   const activeTextSlide = textSlides[activeTextSlideIndex] ?? textSlides[0];
@@ -345,18 +392,83 @@ export function CreatePostScreen() {
           </div>
         ) : null}
 
-        {/* Location */}
-        <div className="mt-3">
+        {/* Location — autocomplete biased to the member's city, like events */}
+        <div className="relative mt-3">
           <input
-            value={location}
+            value={places.input}
             onChange={(e) => {
               const text = e.target.value;
-              setLocationData(text ? { name: text } : null);
+              places.setInput(text);
+              setLocation(text);
+              if (!text.trim()) setLocationData(null);
             }}
+            onFocus={() => places.setShowDropdown(true)}
+            onBlur={() => setTimeout(() => places.setShowDropdown(false), 150)}
             placeholder="Add location"
             maxLength={100}
             className={inputCls}
+            aria-label="Add location"
           />
+          {places.showDropdown ? (
+            <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-white/12 bg-[#10121B] shadow-xl">
+              {!places.input.trim() && activeCity ? (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setLocationData({
+                      name: activeCity.state
+                        ? `${activeCity.name}, ${activeCity.state}`
+                        : activeCity.name,
+                      latitude: activeCity.lat,
+                      longitude: activeCity.lng,
+                    });
+                    places.setShowDropdown(false);
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left hover:bg-cyan-500/10"
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/15">
+                    <MapPin size={15} className="text-cyan-300" />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-bold text-white">Current location</span>
+                    <span className="block text-xs text-white/55">
+                      {activeCity.state ? `${activeCity.name}, ${activeCity.state}` : activeCity.name}
+                    </span>
+                  </span>
+                </button>
+              ) : null}
+              {places.input.trim().length >= 2 ? (
+                places.error ? (
+                  <p className="px-3 py-2.5 text-[13px] text-white/60">{places.error}</p>
+                ) : places.predictions.length > 0 ? (
+                  places.predictions.map((p) => (
+                    <button
+                      key={p.placeId}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => places.selectPrediction(p)}
+                      className="flex w-full items-center gap-2.5 border-t border-white/6 px-3 py-2.5 text-left hover:bg-cyan-500/10"
+                    >
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-500/12">
+                        <MapPin size={14} className="text-cyan-300" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-bold text-white">{p.mainText}</span>
+                        {p.secondaryText || p.fullText ? (
+                          <span className="block truncate text-xs text-white/55">
+                            {p.secondaryText || p.fullText}
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                  ))
+                ) : places.isLoading ? null : (
+                  <p className="px-3 py-2.5 text-[13px] text-white/60">No places found</p>
+                )
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         {/* Text-post composer */}
