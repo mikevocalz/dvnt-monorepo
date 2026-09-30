@@ -582,15 +582,23 @@ function CallRoom({
             : "Waiting for others…";
 
   // Every remote gets a tile, not just the first — the old layout rendered
-  // participants[0] and left the rest as audio-only ghosts. 1 fills the
-  // screen, 2 splits (stacked on a phone, side-by-side wider), 3–4 go 2x2 —
-  // four is the call_max, so nothing larger needs a layout.
+  // participants[0] and left the rest as audio-only ghosts. FaceTime-style
+  // density: 1 fills the screen, 2 splits (stacked on a phone), 3–4 go 2x2,
+  // 5–6 go three-up on wider screens, and a full house (up to 9 remote)
+  // packs three-up on phones, four-up on desktop — scrolling when rows
+  // exceed the viewport instead of squashing tiles.
+  const remoteCount = participants.length;
+  const dense = remoteCount > 4;
   const gridClass =
-    participants.length <= 1
+    remoteCount <= 1
       ? "grid-cols-1"
-      : participants.length === 2
+      : remoteCount === 2
         ? "grid-cols-1 sm:grid-cols-2"
-        : "grid-cols-2";
+        : remoteCount <= 4
+          ? "grid-cols-2"
+          : remoteCount <= 6
+            ? "grid-cols-2 sm:grid-cols-3"
+            : "grid-cols-3 sm:grid-cols-4";
 
   return (
     // FIXED and above the app chrome. Two things were covering the controls:
@@ -619,14 +627,22 @@ function CallRoom({
             </p>
           </div>
         ) : (
-          <div className={`grid h-full w-full ${gridClass}`}>
+          <div
+            className={
+              dense
+                ? `grid h-full w-full content-start gap-1.5 overflow-y-auto px-1.5 pb-28 pt-20 ${gridClass}`
+                : `grid h-full w-full ${gridClass}`
+            }
+          >
             {participants.map((p) => {
               const vStream: MediaStream | null =
                 (p.videoTrack as any)?.stream ?? null;
               return (
                 <div
                   key={p.odId}
-                  className="relative min-h-0 min-w-0 overflow-hidden bg-black"
+                  className={`relative min-h-0 min-w-0 overflow-hidden bg-black ${
+                    dense ? "aspect-video rounded-xl" : ""
+                  }`}
                 >
                   {vStream ? (
                     <VideoTile
