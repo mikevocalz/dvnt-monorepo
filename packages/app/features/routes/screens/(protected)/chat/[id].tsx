@@ -1558,7 +1558,22 @@ function ChatScreenContent() {
               {/* Group Audio Call */}
               <Pressable
                 onPress={() => {
+                  const viewerKeys = new Set(
+                    [
+                      currentUser?.id,
+                      currentUser?.authId,
+                      currentUser?.username,
+                    ]
+                      .filter(Boolean)
+                      .map(String),
+                  );
                   const ids = safeGroupMembers
+                    .filter(
+                      (m) =>
+                        !viewerKeys.has(String(m.id || "")) &&
+                        !viewerKeys.has(String(m.authId || "")) &&
+                        !viewerKeys.has(String(m.username || "")),
+                    )
                     .map((m) => m.id || m.authId || "")
                     .filter(Boolean)
                     .join(",");
@@ -1586,7 +1601,22 @@ function ChatScreenContent() {
               {/* Group Video Call */}
               <Pressable
                 onPress={() => {
+                  const viewerKeys = new Set(
+                    [
+                      currentUser?.id,
+                      currentUser?.authId,
+                      currentUser?.username,
+                    ]
+                      .filter(Boolean)
+                      .map(String),
+                  );
                   const ids = safeGroupMembers
+                    .filter(
+                      (m) =>
+                        !viewerKeys.has(String(m.id || "")) &&
+                        !viewerKeys.has(String(m.authId || "")) &&
+                        !viewerKeys.has(String(m.username || "")),
+                    )
                     .map((m) => m.id || m.authId || "")
                     .filter(Boolean)
                     .join(",");

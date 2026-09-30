@@ -140,7 +140,7 @@ Deno.serve(async (req) => {
           // "Sneaky Lynk invite", which is the wrong product.
           roomKind: "call",
           hasVideo,
-          maxParticipants: 4,
+          maxParticipants: 10,
           invitedUserIds: inviteeAuthIds,
           appOnly: false,
         }),

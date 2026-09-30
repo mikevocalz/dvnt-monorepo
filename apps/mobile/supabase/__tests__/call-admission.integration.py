@@ -38,6 +38,8 @@ with tempfile.TemporaryDirectory(prefix="dvnt-call-db-", dir="/tmp") as tmp:
         migration = (ROOT / "migrations/20260905121000_call_admission.sql").read_text()
         sql(migration)
         sql(migration)  # repeatable migration definition / grants
+        # Seat admission now reads the room's own cap rather than a literal.
+        sql((ROOT / "migrations/20261001120000_call_capacity_ten.sql").read_text())
 
         def create(kind="call"):
             return sql(f"INSERT INTO video_rooms(created_by,title,room_kind,max_participants) VALUES ('host','test','{kind}',4) RETURNING uuid;").splitlines()[0]
@@ -75,6 +77,12 @@ with tempfile.TemporaryDirectory(prefix="dvnt-call-db-", dir="/tmp") as tmp:
         sql(f"UPDATE video_rooms SET status='ended' WHERE uuid='{room}';")
         assert admit(room, "host")["reason"] == "call_ended"
         assert admit("00000000-0000-0000-0000-000000000000", "host")["reason"] == "not_found"
+        # A room written with the ten-seat cap admits every invited seat.
+        wide = sql("INSERT INTO video_rooms(created_by,title,room_kind,max_participants) VALUES ('host','test','call',10) RETURNING uuid;").splitlines()[0]
+        invite(wide, [f"w{i}" for i in range(1, 11)])
+        for i in range(1, 10):
+            assert admit(wide, f"w{i}")["ok"], i
+        assert admit(wide, "w10")["reason"] == "call_full"
         lynk = create("lynk")
         assert admit(lynk, "host")["reason"] == "not_found"
         sql(f"INSERT INTO video_room_members(room_id,user_id) SELECT id,'lynk-' || n FROM video_rooms CROSS JOIN generate_series(1,8) n WHERE uuid='{lynk}';")

@@ -7,10 +7,13 @@ export const CallCreateSchema = z.object({
       (id) => Number.isSafeInteger(Number(id)),
       "Invalid participant ID",
     ),
-  ).min(1).max(3),
+  ).min(1).max(9),
   hasVideo: z.boolean().default(true),
   // Released phone builds send 10; the hint never changes call capacity.
+  // Calls seat the caller plus up to nine invitees (10 total), the cap every
+  // layer below agrees on: admit_call_participant, call-media maxPeers, and
+  // the client validator.
   maxParticipants: z.number().int().min(2).max(50).optional().transform(() =>
-    4
+    10
   ),
 });

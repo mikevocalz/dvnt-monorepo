@@ -76,8 +76,8 @@ async function scenario(options: {
       }
       if (url.pathname === "/room" && method === "POST") {
         assert(
-          JSON.parse(String(init?.body)).maxPeers === 4,
-          "Provider must cap peers at four",
+          JSON.parse(String(init?.body)).maxPeers === 10,
+          "Provider must cap peers at ten",
         );
         return json({ data: { room: { id: "new-room" } } });
       }
@@ -97,7 +97,7 @@ async function scenario(options: {
   }
 }
 
-Deno.test("first call join provisions one four-peer room and persists its peer before returning token", async () => {
+Deno.test("first call join provisions one ten-peer room and persists its peer before returning token", async () => {
   const { result, calls, released } = await scenario({});
   assert(
     result.ok && result.token === "test-peer-token",

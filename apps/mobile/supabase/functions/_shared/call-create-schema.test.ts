@@ -1,16 +1,22 @@
 import { CallCreateSchema } from "./call-create-schema.ts";
 
-Deno.test("calls accept one to three invitees and default to four total", () => {
-  for (const participantIds of [["1"], ["1", "2"], ["1", "2", "3"]]) {
+Deno.test("calls accept one to nine invitees and default to ten total", () => {
+  for (const count of [1, 2, 4, 9]) {
+    const participantIds = Array.from({ length: count }, (_, i) => String(i + 1));
     const parsed = CallCreateSchema.parse({ title: "Crew", participantIds });
-    if (parsed.maxParticipants !== 4) {
-      throw new Error("Call capacity must default to four");
+    if (parsed.maxParticipants !== 10) {
+      throw new Error("Call capacity must default to ten");
     }
   }
 });
 
 Deno.test("calls reject empty and oversized recipient sets", () => {
-  for (const participantIds of [[], ["1", "2", "3", "4"]]) {
+  for (
+    const participantIds of [[], Array.from(
+      { length: 10 },
+      (_, i) => String(i + 1),
+    )]
+  ) {
     if (CallCreateSchema.safeParse({ title: "Crew", participantIds }).success) {
       throw new Error("Invalid recipient count accepted");
     }
@@ -50,14 +56,14 @@ Deno.test("calls reject invalid IDs and capacity escalation", () => {
   }
 });
 
-Deno.test("legacy participant hints normalize to four without breaking released phone clients", () => {
+Deno.test("legacy participant hints normalize to ten without breaking released phone clients", () => {
   for (const maxParticipants of [2, 3, 4, 5, 10, 50]) {
     const parsed = CallCreateSchema.parse({
       title: "Crew",
       participantIds: ["1"],
       maxParticipants,
     });
-    if (parsed.maxParticipants !== 4) {
+    if (parsed.maxParticipants !== 10) {
       throw new Error("Legacy hint changed call capacity");
     }
   }

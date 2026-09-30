@@ -72,6 +72,7 @@ export async function provisionCallMedia(params: {
         ok: false as const,
         reason: String(admission.reason),
         current: admission.current,
+        max: admission.max,
       };
     }
     held = true;
@@ -120,7 +121,7 @@ export async function provisionCallMedia(params: {
     }
     if (!providerRoomId) {
       const created = await provider("/room", "POST", {
-        maxPeers: 4,
+        maxPeers: 10,
         videoCodec: "h264",
       });
       if (!created.ok) throw new Error("Call media room could not be created");

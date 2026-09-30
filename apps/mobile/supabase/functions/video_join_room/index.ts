@@ -267,7 +267,7 @@ Deno.serve(async (req) => {
           ? "internal_error"
           : "forbidden";
         const message = reason === "call_full"
-          ? "This call has four people"
+          ? "This call is full"
           : reason === "call_ended"
           ? "This call has ended"
           : reason === "call_join_pending"
@@ -280,7 +280,7 @@ Deno.serve(async (req) => {
         return errorResponse(code, message, {
           reason,
           ...(reason === "call_full"
-            ? { max: 4, current: result.current }
+            ? { max: result.max ?? 10, current: result.current }
             : {}),
         });
       }
@@ -493,7 +493,7 @@ Deno.serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          maxPeers: isCall ? 4 : room.max_participants,
+          maxPeers: room.max_participants,
           videoCodec: "h264",
         }),
       });

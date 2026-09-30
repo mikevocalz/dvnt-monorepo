@@ -970,7 +970,21 @@ export function ChatScreen() {
         chatId: String(chatId ?? ""),
       });
       if (isGroupChat) {
+        // Callees only: call_create refuses a list containing the caller, and
+        // safeGroupMembers can already carry the viewer (some conversation
+        // sources fold them in). Same match the header fold uses.
+        const viewerKeys = new Set(
+          [currentUser?.id, currentUser?.authId, currentUser?.username]
+            .filter(Boolean)
+            .map(String),
+        );
         const ids = safeGroupMembers
+          .filter(
+            (m) =>
+              !viewerKeys.has(String(m.id || "")) &&
+              !viewerKeys.has(String((m as any).authId || "")) &&
+              !viewerKeys.has(String(m.username || "")),
+          )
           .map((m) => m.id || (m as any).authId || "")
           .filter(Boolean)
           .join(",");
@@ -987,7 +1001,15 @@ export function ChatScreen() {
       }
       router.push(`/feed/call/${roomId}?${query.toString()}`);
     },
-    [chatId, isGroupChat, safeGroupMembers, groupName, recipient, router],
+    [
+      chatId,
+      currentUser,
+      isGroupChat,
+      safeGroupMembers,
+      groupName,
+      recipient,
+      router,
+    ],
   );
 
   const handlePickMedia = useCallback(

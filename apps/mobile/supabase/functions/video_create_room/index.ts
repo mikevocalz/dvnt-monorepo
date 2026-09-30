@@ -225,13 +225,13 @@ Deno.serve(async (req) => {
     if (roomKind === "call") {
       const invitees = new Set(invitedUserIds);
       if (
-        isPublic || appOnly || invitees.size < 1 || invitees.size > 3 ||
+        isPublic || appOnly || invitees.size < 1 || invitees.size > 9 ||
         invitees.size !== invitedUserIds.length || invitees.has(userId) ||
         invitedUserIds.some((id) => id !== id.trim())
       ) {
         return errorResponse(
           "validation_error",
-          "Calls require one to three distinct invitees and a private room",
+          "Calls require one to nine distinct invitees and a private room",
         );
       }
       const { data: resolved, error: resolveError } = await supabase
@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
           "Every participant must be a valid user",
         );
       }
-      maxParticipants = 4;
+      maxParticipants = 10;
     } else {
       // ── Subscription-aware participant cap ────────────────────
       // A DVNT Membership supersedes a standalone Sneaky Lynk subscription. We
