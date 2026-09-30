@@ -30,6 +30,9 @@ const CreateRoomSchema = z.object({
    * room's blackout/watermark/shortcut handling is deterrence + attribution.
    */
   appOnly: z.boolean().default(false),
+  // Links a call room to its group conversation so the chat header can offer
+  // Join/Rejoin while the room is open.
+  conversationId: z.number().int().positive().optional(),
 });
 
 type ErrorCode =
@@ -213,6 +216,7 @@ Deno.serve(async (req) => {
       invitedUserIds,
       appOnly,
       roomKind,
+      conversationId,
     } = parsed.data;
     let { maxParticipants } = parsed.data;
     console.log("[video_create_room] Parsed data:", {
@@ -422,6 +426,7 @@ Deno.serve(async (req) => {
       status: "open",
       uuid: roomUuid,
       ends_at: endsAt,
+      conversation_id: conversationId ?? null,
     };
 
     let roomQuery = supabase.from("video_rooms").insert(roomInsert).select();
@@ -451,6 +456,19 @@ Deno.serve(async (req) => {
       );
       const fallbackInsert = { ...roomInsert };
       delete (fallbackInsert as { app_only?: boolean }).app_only;
+      roomQuery = supabase.from("video_rooms").insert(fallbackInsert).select();
+      const retry = await roomQuery.single();
+      room = retry.data;
+      roomError = retry.error;
+    }
+
+    if (roomError && isMissingColumnError(roomError, "conversation_id")) {
+      console.error(
+        "[video_create_room] conversation_id missing on video_rooms — creating room WITHOUT the chat link. Run 20261001130000_call_room_conversation.sql.",
+      );
+      const fallbackInsert = { ...roomInsert };
+      delete (fallbackInsert as { conversation_id?: number | null })
+        .conversation_id;
       roomQuery = supabase.from("video_rooms").insert(fallbackInsert).select();
       const retry = await roomQuery.single();
       room = retry.data;

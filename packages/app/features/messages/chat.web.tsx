@@ -678,6 +678,15 @@ export function ChatScreen() {
     ];
   }, [currentUser, isGroupChat, safeGroupMembers, viewerIsMember]);
   const [showMembers, setShowMembers] = useState(false);
+
+  // Live call attached to this group chat — powers the header Join button.
+  // video_rooms.conversation_id is set by call_create when the caller launched
+  // from this chat. RLS keeps the row invisible to anyone not invited.
+  const [liveCallRoom, setLiveCallRoom] = useState<{
+    uuid: string;
+    hasVideo: boolean;
+    participantCount: number;
+  } | null>(null);
   useEffect(() => {
     if (!showMembers) return;
     const onKey = (e: KeyboardEvent) => {
@@ -899,6 +908,98 @@ export function ChatScreen() {
       supabase.removeChannel(channel);
     };
   }, [activeConvId, mergeRealtimeMessage, refreshMessageCounts]);
+
+  // ── Live call in this group ──
+  // A call started from this chat carries conversation_id on its video_rooms
+  // row. Initial fetch covers a call already in progress when you open the
+  // chat; the realtime subscription covers one starting (INSERT), ending
+  // (UPDATE status), or a stale room being swept while you watch.
+  useEffect(() => {
+    if (!isGroupChat || !activeConvId || !/^\d+$/.test(activeConvId)) {
+      setLiveCallRoom(null);
+      return;
+    }
+    const convId = Number(activeConvId);
+    let cancelled = false;
+
+    const applyRow = (row: {
+      uuid: string;
+      status: string;
+      has_video: boolean | null;
+      participant_count: number | null;
+    } | null) => {
+      if (!row || row.status !== "open") {
+        setLiveCallRoom(null);
+        return;
+      }
+      setLiveCallRoom({
+        uuid: row.uuid,
+        hasVideo: row.has_video === true,
+        participantCount: row.participant_count ?? 0,
+      });
+    };
+
+    const fetchLiveCall = () =>
+      supabase
+        .from("video_rooms")
+        .select("uuid, status, has_video, participant_count, created_at")
+        .eq("conversation_id", convId)
+        .eq("room_kind", "call")
+        .eq("status", "open")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (!cancelled) applyRow(data);
+        });
+
+    void fetchLiveCall();
+
+    const channel = freshChannel(`chat-live-call-${activeConvId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "video_rooms",
+          filter: `conversation_id=eq.${convId}`,
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (payload: any) => {
+          if (cancelled) return;
+          const row = payload.new;
+          // DELETE carries only `old` (and only the PK unless the replica
+          // identity is FULL) — re-query rather than trusting the event.
+          if (!row || !row.uuid) {
+            void fetchLiveCall();
+            return;
+          }
+          if (row.room_kind !== "call") return;
+          applyRow(row);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [isGroupChat, activeConvId]);
+
+  // Rejoin the live call — navigates INTO the existing room (no isOutgoing,
+  // no participantIds), so the call screen takes its join path on the room
+  // uuid instead of minting a second call.
+  const joinLiveCall = useCallback(() => {
+    if (!liveCallRoom) return;
+    const query = new URLSearchParams({
+      callType: liveCallRoom.hasVideo ? "video" : "audio",
+      isGroup: "true",
+      chatId: String(chatId ?? ""),
+      recipientUsername: groupName || "Group",
+      recipientAvatar: safeGroupMembers[0]?.avatar || "",
+    });
+    router.push(`/feed/call/${liveCallRoom.uuid}?${query.toString()}`);
+  }, [liveCallRoom, chatId, groupName, safeGroupMembers, router]);
 
   // ── Cleanup on unmount ──
   useEffect(() => {
@@ -1199,6 +1300,19 @@ export function ChatScreen() {
               </div>
               <ChevronRight size={18} className="shrink-0 text-white/35" />
             </button>
+            {liveCallRoom && (
+              <button
+                onClick={joinLiveCall}
+                aria-label="Join the live call"
+                className="flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-black"
+                style={{ backgroundColor: "#3FDCFF" }}
+              >
+                <Video size={14} />
+                Join
+                {liveCallRoom.participantCount > 0 &&
+                  ` · ${liveCallRoom.participantCount}`}
+              </button>
+            )}
             <button
               onClick={() => startCall("audio")}
               aria-label="Audio call"

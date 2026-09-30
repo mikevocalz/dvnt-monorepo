@@ -68,3 +68,32 @@ Deno.test("legacy participant hints normalize to ten without breaking released p
     }
   }
 });
+
+Deno.test("chatId links a call to its conversation and rejects junk", () => {
+  const linked = CallCreateSchema.parse({
+    title: "Crew",
+    participantIds: ["1"],
+    chatId: "116",
+  });
+  if (linked.chatId !== "116") {
+    throw new Error("chatId not carried through");
+  }
+  const unlinked = CallCreateSchema.parse({
+    title: "Crew",
+    participantIds: ["1"],
+  });
+  if (unlinked.chatId !== undefined) {
+    throw new Error("chatId must stay optional for direct calls");
+  }
+  for (const chatId of ["0", "-1", "1.5", "abc", " 1", "1 "]) {
+    if (
+      CallCreateSchema.safeParse({
+        title: "Crew",
+        participantIds: ["1"],
+        chatId,
+      }).success
+    ) {
+      throw new Error(`Invalid chatId accepted: ${chatId}`);
+    }
+  }
+});

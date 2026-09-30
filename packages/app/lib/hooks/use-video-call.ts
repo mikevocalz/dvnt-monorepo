@@ -673,8 +673,9 @@ export function useVideoCall() {
       const createResult = await callRoomsApi.createCall({
         title,
         participantIds,
-        maxParticipants: 4,
+        maxParticipants: 10,
         hasVideo: callType === "video",
+        chatId,
       });
 
       if (!createResult.ok || !createResult.data) {
@@ -1602,6 +1603,30 @@ export function useVideoCall() {
                 }
               }, 1000);
             }
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "video_rooms",
+          filter: `uuid=eq.${currentRoomId}`,
+        },
+        // endCallSignals only fires on explicit hangs — a server-side end
+        // (room sweep, last-member-out, video_end_room) leaves status='ended'
+        // on the row with no signal, stranding this screen on a dead call.
+        (payload) => {
+          const status = (payload.new as { status?: string })?.status;
+          if (!status || status === "open") return;
+          const current = getStore();
+          if (
+            current.callPhase === "connected" ||
+            current.callPhase === "outgoing_ringing"
+          ) {
+            log("[ROOM_SUB] Room row ended server-side — leaving");
+            leaveCallRef.current();
           }
         },
       )

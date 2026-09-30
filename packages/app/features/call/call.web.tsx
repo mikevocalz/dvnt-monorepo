@@ -50,6 +50,8 @@ import { useVideoRoomStore } from "@dvnt/app/features/video";
 import type { Participant } from "@dvnt/app/features/video/types";
 import { color } from "@dvnt/app/lib/theme";
 import { callSignalsApi } from "@dvnt/app/lib/api/call-signals";
+import { supabase } from "@dvnt/app/lib/supabase/client";
+import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { useCallUIStore } from "./call-ui-store";
 
 const ACCENT = color.cyan;
@@ -150,6 +152,7 @@ function CallRoom({
   callType,
   recipientUsername,
   isGroup,
+  chatId,
 }: {
   roomId: string;
   isOutgoing: boolean;
@@ -157,6 +160,7 @@ function CallRoom({
   callType: "audio" | "video";
   recipientUsername: string;
   isGroup: boolean;
+  chatId: string;
 }) {
   const router = useRouter();
 
@@ -232,6 +236,7 @@ function CallRoom({
           title: recipientUsername || "Call",
           participantIds,
           hasVideo: callType === "video",
+          chatId: chatId || undefined,
         });
         if (cancelled) return;
         if (!created.ok || !created.data?.room?.id) {
@@ -538,23 +543,60 @@ function CallRoom({
   // hand. On a group call a single member's declined/missed is NOT the room
   // ending — it used to be, which is how one person saying no hung up on
   // three people. Only "ended" (caller out / room closed) is terminal there.
+  //
+  // Subscribed on the STORE roomId, not the route param: an outgoing call
+  // arrives with a placeholder `call-<ts>` id and the real room uuid only
+  // exists after call_create returns. Signals are written against the uuid,
+  // so a prop-keyed subscription could never fire for the caller.
+  const liveRoomId = useVideoRoomStore((s) => s.roomId);
   useEffect(() => {
-    if (!roomId) return;
-    return callSignalsApi.subscribeToRoomEnded(roomId, (signal) => {
+    if (!liveRoomId || liveRoomId.startsWith("call-")) return;
+    return callSignalsApi.subscribeToRoomEnded(liveRoomId, (signal) => {
       const s = getStore();
       if (s.isGroupCall && signal.status !== "ended") return;
       if (s.callPhase === "call_ended" || s.callPhase === "error") return;
       leave();
     });
-  }, [roomId, getStore, leave]);
+  }, [liveRoomId, getStore, leave]);
 
-  // ── Last one in a group call ──────────────────────────────────────────────
+  // ── Room closed without a signal ──────────────────────────────────────────
+  // endCallSignals only fires on explicit hangs. A server-side end — the room
+  // sweep, last-member-out, or video_end_room — leaves status='ended' on the
+  // video_rooms row with no signal at all, and the screen used to sit on
+  // "Waiting for others…" forever. Watch the room row itself.
+  useEffect(() => {
+    if (!liveRoomId || liveRoomId.startsWith("call-")) return;
+    const channel = freshChannel(`call_room_row:${liveRoomId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "video_rooms",
+          filter: `uuid=eq.${liveRoomId}`,
+        },
+        (payload) => {
+          const status = (payload.new as { status?: string })?.status;
+          if (status === "open") return;
+          const s = getStore();
+          if (s.callPhase === "call_ended" || s.callPhase === "error") return;
+          leave();
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [liveRoomId, getStore, leave]);
+
+  // ── Last one on the call ──────────────────────────────────────────────────
   // The last remote leaving used to strand the screen on "Waiting for
-  // others…" indefinitely. Once at least one remote has joined and the room
-  // drops back to zero, count down a grace window: a rejoin cancels it, the
-  // Stay button cancels it, and zero ends the call the same way End call does.
-  // A call still ringing its first invitees is untouched — the clock only
-  // arms after someone was actually on.
+  // others…" indefinitely — same on 1:1 when the other side drops without a
+  // signal (crash, closed tab). Once at least one remote has joined and the
+  // room drops back to zero, count down a grace window: a rejoin cancels it,
+  // the Stay button cancels it, and zero ends the call the same way End call
+  // does. A call still ringing its first invitees is untouched — the clock
+  // only arms after someone was actually on.
   const ALONE_GRACE_SECONDS = 60;
   const hadRemoteRef = useRef(false);
   const aloneTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -566,7 +608,7 @@ function CallRoom({
   }, []);
 
   useEffect(() => {
-    if (!isGroup || callPhase !== "connected") return;
+    if (callPhase !== "connected") return;
 
     if (participants.length > 0) {
       hadRemoteRef.current = true;
@@ -589,7 +631,7 @@ function CallRoom({
         setAloneSecondsLeft(left);
       }
     }, 1000);
-  }, [isGroup, callPhase, participants.length, cancelAloneTimer, leave]);
+  }, [callPhase, participants.length, cancelAloneTimer, leave]);
 
   // Leave Fishjam on unmount (mirrors native cleanup effect).
   useEffect(() => {
@@ -618,7 +660,7 @@ function CallRoom({
     callPhase === "error"
       ? errorMsg || "Call failed"
       : aloneSecondsLeft !== null
-        ? `Everyone left · ending in ${aloneSecondsLeft}s`
+        ? `${isGroup ? "Everyone left" : "The other person left"} · ending in ${aloneSecondsLeft}s`
       : participants.length > 1
         ? `Group call · ${participants.length + 1}`
         : participants.length === 1
@@ -837,6 +879,9 @@ export function CallScreen() {
   // one callee is a group call either way.
   const isGroup =
     search?.get("isGroup") === "true" || participantIds.length > 1;
+  // The group chat the call was started from — lands on video_rooms so the
+  // chat header can offer Join/Rejoin while the room is open.
+  const chatId = search?.get("chatId") ?? "";
 
   return (
     <FishjamProvider fishjamId={resolveFishjamAppId()}>
@@ -847,6 +892,7 @@ export function CallScreen() {
         callType={callType}
         recipientUsername={recipientUsername}
         isGroup={isGroup}
+        chatId={chatId}
       />
     </FishjamProvider>
   );

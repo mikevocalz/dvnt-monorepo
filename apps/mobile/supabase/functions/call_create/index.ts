@@ -85,7 +85,7 @@ Deno.serve(async (req) => {
     if (!parsed.success) {
       return errorResponse("validation_error", parsed.error.errors[0].message);
     }
-    const { title, participantIds, hasVideo } = parsed.data;
+    const { title, participantIds, hasVideo, chatId } = parsed.data;
     if (new Set(participantIds).size !== participantIds.length) {
       return errorResponse("validation_error", "Choose distinct participants");
     }
@@ -141,6 +141,7 @@ Deno.serve(async (req) => {
           roomKind: "call",
           hasVideo,
           maxParticipants: 10,
+          ...(chatId ? { conversationId: Number(chatId) } : {}),
           invitedUserIds: inviteeAuthIds,
           appOnly: false,
         }),

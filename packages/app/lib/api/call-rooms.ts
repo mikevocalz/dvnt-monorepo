@@ -58,6 +58,8 @@ export const callRoomsApi = {
     participantIds: string[];
     hasVideo?: boolean;
     maxParticipants?: number;
+    /** Group chat this call was started from — the header shows Join/Rejoin. */
+    chatId?: string;
   }): Promise<ApiResponse<CallCreateResponse>> {
     if (params.participantIds.length < 1 || params.participantIds.length > 9 ||
         new Set(params.participantIds).size !== params.participantIds.length) {
