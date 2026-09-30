@@ -34,12 +34,14 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
   Camera,
+  ChevronRight,
   Copy,
   ImageIcon,
   MessageCircle,
@@ -644,6 +646,43 @@ export function ChatScreen() {
   const conversationActionId = activeConvId || resolvedConvIdRef.current || "";
 
   const safeGroupMembers = useMemo(() => groupMembers || [], [groupMembers]);
+  // `groupMembers` is the OTHER members — getConversationById excludes the
+  // viewer, so a raw count reads one short. The native header already folds
+  // the viewer in; this mirrors it so header count = everyone in the group.
+  const headerGroupMembers = useMemo(() => {
+    if (!isGroupChat) return safeGroupMembers;
+
+    const currentUserAuthId = currentUser?.authId || currentUser?.id;
+    const includesCurrentUser = safeGroupMembers.some(
+      (member) =>
+        (currentUserAuthId &&
+          (member.authId === currentUserAuthId ||
+            member.id === currentUserAuthId)) ||
+        (!!currentUser?.username && member.username === currentUser.username),
+    );
+
+    if (!currentUser || includesCurrentUser) return safeGroupMembers;
+
+    return [
+      ...safeGroupMembers,
+      {
+        id: String(currentUser.id || currentUser.authId || "me"),
+        authId: currentUser.authId || currentUser.id,
+        username: currentUser.username || "you",
+        name: currentUser.name || currentUser.username || "You",
+        avatar: currentUser.avatar || "",
+      },
+    ];
+  }, [currentUser, isGroupChat, safeGroupMembers]);
+  const [showMembers, setShowMembers] = useState(false);
+  useEffect(() => {
+    if (!showMembers) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowMembers(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showMembers]);
   const groupMemberLookup = useMemo(() => {
     const lookup = new Map<
       string,
@@ -1096,10 +1135,15 @@ export function ChatScreen() {
 
         {isGroupChat ? (
           <>
-            <div className="flex flex-1 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowMembers(true)}
+              aria-label="View group members"
+              className="group flex flex-1 items-center gap-3 rounded-xl px-1 py-0.5 text-left transition-colors hover:bg-white/5"
+            >
               {/* Group avatar — 2×2 member stack (parity with native header). */}
               <div className="grid h-10 w-10 shrink-0 grid-cols-2 grid-rows-2 gap-px overflow-hidden rounded-2xl bg-white/10">
-                {safeGroupMembers.slice(0, 4).map((m, i) =>
+                {headerGroupMembers.slice(0, 4).map((m, i) =>
                   m.avatar ? (
                     <img
                       key={m.id || i}
@@ -1123,11 +1167,12 @@ export function ChatScreen() {
                     safeGroupMembers.map((m) => m.username).join(", ") ||
                     "Group"}
                 </p>
-                <p className="truncate text-xs text-white/55">
-                  {safeGroupMembers.length} members
+                <p className="truncate text-xs text-white/55 underline-offset-2 group-hover:underline">
+                  {headerGroupMembers.length} members
                 </p>
               </div>
-            </div>
+              <ChevronRight size={18} className="shrink-0 text-white/35" />
+            </button>
             <button
               onClick={() => startCall("audio")}
               aria-label="Audio call"
@@ -1471,6 +1516,77 @@ export function ChatScreen() {
                   <span className="text-base text-[#ef4444]">Unsend</span>
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Group members — opened from the header count. Same pattern as the
+          message-action overlay: centered panel, backdrop tap or Esc closes. */}
+      {showMembers && isGroupChat && (
+        <div
+          role="presentation"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowMembers(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Group members"
+            className="w-full max-w-sm overflow-hidden rounded-2xl bg-[#14151a] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+              <p className="text-base font-semibold">
+                {headerGroupMembers.length}{" "}
+                {headerGroupMembers.length === 1 ? "member" : "members"}
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowMembers(false)}
+                aria-label="Close"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-white/55 hover:bg-white/10"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="max-h-80 overflow-y-auto py-1">
+              {headerGroupMembers.map((m) => {
+                const isYou =
+                  (!!currentUser?.username &&
+                    m.username === currentUser.username) ||
+                  (!!currentUser?.authId && m.authId === currentUser.authId);
+                return (
+                  <button
+                    key={m.authId || m.id || m.username}
+                    type="button"
+                    onClick={() => {
+                      setShowMembers(false);
+                      if (m.username) router.push(`/feed/${m.username}`);
+                    }}
+                    className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-white/5"
+                  >
+                    <Avatar
+                      uri={m.avatar || ""}
+                      username={m.username || ""}
+                      size={40}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-white">
+                        {m.name || m.username}
+                        {isYou ? (
+                          <span className="ml-1.5 font-normal text-white/45">
+                            (You)
+                          </span>
+                        ) : null}
+                      </p>
+                      <p className="truncate text-xs text-white/50">
+                        @{m.username}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

@@ -223,7 +223,8 @@ export function UserProfileScreen() {
   }, [viewerDeviceLat, viewerDeviceLng]);
   const profileCity = matchCity(user?.location, cities ?? []);
   const proximity = useMemo(() => {
-    if (!profileCity) return null;
+    // Distance to yourself is always "In your city" — not worth a line.
+    if (!profileCity || isOwnProfile) return null;
     const viewer = resolveViewerPosition({
       deviceLat: viewerDeviceLat,
       deviceLng: viewerDeviceLng,
@@ -234,6 +235,7 @@ export function UserProfileScreen() {
     return viewer ? proximityLabel(viewer, profileCity) : null;
   }, [
     profileCity,
+    isOwnProfile,
     viewerDeviceLat,
     viewerDeviceLng,
     viewerActiveCity,
@@ -404,14 +406,15 @@ export function UserProfileScreen() {
             <p className="mt-1 text-sm text-white/90 whitespace-pre-line">{user.bio}</p>
           ) : null}
           {user?.location || proximity ? (
-            <p className="mt-1.5 flex items-center gap-1 text-sm text-white/55">
-              <MapPin size={14} className="shrink-0" aria-hidden />
-              <span>
-                {[user?.location, proximity ? `(${proximity})` : null]
-                  .filter(Boolean)
-                  .join(" ")}
-              </span>
-            </p>
+            <div className="mt-1.5 flex items-start gap-1 text-sm text-white/55">
+              <MapPin size={14} className="mt-0.5 shrink-0" aria-hidden />
+              <div className="min-w-0">
+                {user?.location ? <p>{user.location}</p> : null}
+                {proximity ? (
+                  <p className="text-xs text-white/45">{proximity}</p>
+                ) : null}
+              </div>
+            </div>
           ) : null}
         </div>
 
