@@ -144,7 +144,7 @@ function MediaGrid({
   const cols = visible.length === 1 ? 1 : 2;
   return (
     <div
-      className="grid gap-[3px]"
+      className="grid gap-0.75"
       style={{
         gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
         width: 220,
@@ -165,7 +165,7 @@ function MediaGrid({
                 {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                 <video src={m.uri} className="h-full w-full object-cover" />
                 <span className="absolute inset-0 flex items-center justify-center bg-black/30">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-[#34a2df] to-[#ff5bfc] text-white">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-linear-to-br from-[#34a2df] to-[#ff5bfc] text-white">
                     ▶
                   </span>
                 </span>
@@ -1081,7 +1081,7 @@ export function ChatScreen() {
   /* ── Guard states ── */
   if (!hasValidRouteId) {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#06070d] p-6 text-white">
+      <div className="flex min-h-dvh flex-col items-center justify-center bg-[#06070d] p-6 text-white">
         <MessageCircle size={64} color="#666" strokeWidth={1.5} />
         <p className="mt-4 text-lg font-semibold">Invalid chat link</p>
         <p className="mt-2 text-sm text-white/55">
@@ -1093,7 +1093,7 @@ export function ChatScreen() {
 
   if (resolutionError && !activeConvId) {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#06070d] p-6 text-white">
+      <div className="flex min-h-dvh flex-col items-center justify-center bg-[#06070d] p-6 text-white">
         <MessageCircle size={64} color="#666" strokeWidth={1.5} />
         <p className="mt-4 text-lg font-semibold">Couldn&apos;t load chat</p>
         <p className="mt-2 text-sm text-white/55">
@@ -1119,7 +1119,7 @@ export function ChatScreen() {
   }
 
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-[#06070d] text-white">
+    <div className="flex min-h-dvh flex-col bg-[#06070d] text-white">
       {/* ── Header ── */}
       <header
         className="sticky top-0 z-20 mx-auto flex w-full max-w-3xl items-center gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 py-3 backdrop-blur"
@@ -1261,7 +1261,7 @@ export function ChatScreen() {
 
         {/* Mention suggestions */}
         {showMentions && filteredUsers.length > 0 && (
-          <div className="max-h-[200px] border-t border-white/8 bg-white/5">
+          <div className="max-h-50 border-t border-white/8 bg-white/5">
             <p className="px-4 pb-2 pt-3 text-xs text-white/55">
               Mention a user
             </p>
@@ -1382,7 +1382,7 @@ export function ChatScreen() {
                     }
                   }}
                   placeholder="Message... (use @ to mention)"
-                  className="min-h-[40px] flex-1 rounded-[18px] bg-white/8 px-4 py-2.5 text-[15px] text-white outline-none placeholder:text-white/40"
+                  className="min-h-10 flex-1 rounded-[18px] bg-white/8 px-4 py-2.5 text-[15px] text-white outline-none placeholder:text-white/40"
                 />
               </>
             )}

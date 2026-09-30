@@ -1454,7 +1454,7 @@ function RoomInner({
         data-can-publish={canPublish ? "true" : "false"}
         data-camera-on={isCameraOn ? "true" : "false"}
         data-has-local-stream={lynk.localStream ? "true" : "false"}
-        className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white"
+        className="relative flex h-dvh w-full flex-col overflow-hidden bg-[#06070d] text-white"
       >
       {/* The session machine is the single source now — it is what knows a
           first join from a reconnect, and what is driving the retries. */}
@@ -1816,7 +1816,7 @@ function RoomShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-[#06070d] text-white">
+    <div className="flex min-h-dvh flex-col bg-[#06070d] text-white">
       <div
         className="flex items-center px-4 py-3 border-b border-white/8"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
@@ -2121,7 +2121,7 @@ export function SneakyLynkRoomScreen() {
 
   if (phase === "looking-up") {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 bg-[#06070d] text-white">
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[#06070d] text-white">
         <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
         <p className="text-white/60">Loading Lynk…</p>
       </div>
