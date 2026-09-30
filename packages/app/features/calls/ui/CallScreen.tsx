@@ -11,7 +11,7 @@
  * Controls are rendered by CallControls, which is mode-aware.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { startPIP, stopPIP } from "@fishjam-cloud/react-native-client";
@@ -205,6 +205,59 @@ export function CallScreen({
     leaveCall();
   }, [leaveCall, isPiPActive, setIsPiPActive]);
 
+  // ── Last one in a group call ─────────────────────────────────────────
+  // Mirrors the web screen: after the last remote leaves, count down a
+  // grace window instead of sitting on "Waiting for others" forever. A
+  // rejoin or the Stay button cancels; zero ends the call like End call.
+  const ALONE_GRACE_SECONDS = 60;
+  const hadRemoteRef = useRef(false);
+  const aloneTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [aloneSecondsLeft, setAloneSecondsLeft] = useState<number | null>(
+    null,
+  );
+  const cancelAloneTimer = useCallback(() => {
+    if (aloneTimerRef.current) clearInterval(aloneTimerRef.current);
+    aloneTimerRef.current = null;
+    setAloneSecondsLeft(null);
+  }, []);
+  const inCall = mode === "IN_CALL_VIDEO" || mode === "IN_CALL_AUDIO";
+
+  useEffect(() => {
+    if (!effectiveIsGroupCall || !inCall) return;
+    if (participants.length > 0) {
+      hadRemoteRef.current = true;
+      cancelAloneTimer();
+      return;
+    }
+    if (!hadRemoteRef.current || aloneTimerRef.current) return;
+    const deadline = Date.now() + ALONE_GRACE_SECONDS * 1000;
+    setAloneSecondsLeft(ALONE_GRACE_SECONDS);
+    aloneTimerRef.current = setInterval(() => {
+      const left = Math.ceil((deadline - Date.now()) / 1000);
+      if (left <= 0) {
+        if (aloneTimerRef.current) clearInterval(aloneTimerRef.current);
+        aloneTimerRef.current = null;
+        setAloneSecondsLeft(null);
+        handleEndCall();
+      } else {
+        setAloneSecondsLeft(left);
+      }
+    }, 1000);
+  }, [
+    effectiveIsGroupCall,
+    inCall,
+    participants.length,
+    cancelAloneTimer,
+    handleEndCall,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (aloneTimerRef.current) clearInterval(aloneTimerRef.current);
+    },
+    [],
+  );
+
   const handleToggleMute = useCallback(() => {
     if (muteDebounceRef.current) return;
     muteDebounceRef.current = true;
@@ -311,6 +364,8 @@ export function CallScreen({
               callType="video"
               callDuration={callDuration}
               onOpenParticipants={handleOpenParticipants}
+              aloneSecondsLeft={aloneSecondsLeft}
+              onStayAlone={cancelAloneTimer}
             />
           );
         }
@@ -339,6 +394,8 @@ export function CallScreen({
               callType="audio"
               callDuration={callDuration}
               onOpenParticipants={handleOpenParticipants}
+              aloneSecondsLeft={aloneSecondsLeft}
+              onStayAlone={cancelAloneTimer}
             />
           );
         }

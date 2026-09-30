@@ -36,6 +36,9 @@ export interface GroupCallStageProps {
   callType: "audio" | "video";
   callDuration: number;
   onOpenParticipants?: () => void;
+  /** Seconds left on the last-one-in countdown; null when nobody armed it. */
+  aloneSecondsLeft?: number | null;
+  onStayAlone?: () => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -52,6 +55,8 @@ export function GroupCallStage({
   callType,
   callDuration,
   onOpenParticipants,
+  aloneSecondsLeft = null,
+  onStayAlone,
 }: GroupCallStageProps) {
   const insets = useSafeAreaInsets();
 
@@ -201,15 +206,33 @@ export function GroupCallStage({
         ))}
       </ScrollView>
 
-      {participants.length === 0 && (
-        <View style={styles.waitingBanner}>
-          <Text style={styles.waitingTitle}>Waiting for others to join</Text>
-          <Text style={styles.waitingText}>
-            Your room is live. We’ll keep this session warm while invitees
-            connect.
-          </Text>
-        </View>
-      )}
+      {participants.length === 0 &&
+        (aloneSecondsLeft !== null ? (
+          <View style={styles.waitingBanner}>
+            <Text style={styles.waitingTitle}>Everyone left</Text>
+            <Text style={styles.waitingText}>
+              Ending the call in {aloneSecondsLeft}s if nobody rejoins.
+            </Text>
+            {onStayAlone && (
+              <Pressable
+                style={styles.stayButton}
+                onPress={onStayAlone}
+                accessibilityRole="button"
+                accessibilityLabel="Stay on call"
+              >
+                <Text style={styles.stayButtonText}>Stay on call</Text>
+              </Pressable>
+            )}
+          </View>
+        ) : (
+          <View style={styles.waitingBanner}>
+            <Text style={styles.waitingTitle}>Waiting for others to join</Text>
+            <Text style={styles.waitingText}>
+              Your room is live. We’ll keep this session warm while invitees
+              connect.
+            </Text>
+          </View>
+        ))}
     </View>
   );
 }
@@ -401,5 +424,20 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.62)",
     fontSize: 13,
     lineHeight: 18,
+  },
+  stayButton: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: "rgba(142,219,255,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(142,219,255,0.35)",
+  },
+  stayButtonText: {
+    color: "#8EDBFF",
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

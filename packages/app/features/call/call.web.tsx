@@ -26,7 +26,7 @@
  *   - Navigation via solito useRouter; leave → router.back().
  */
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "solito/navigation";
 import {
   FishjamProvider,
@@ -548,9 +548,53 @@ function CallRoom({
     });
   }, [roomId, getStore, leave]);
 
+  // ── Last one in a group call ──────────────────────────────────────────────
+  // The last remote leaving used to strand the screen on "Waiting for
+  // others…" indefinitely. Once at least one remote has joined and the room
+  // drops back to zero, count down a grace window: a rejoin cancels it, the
+  // Stay button cancels it, and zero ends the call the same way End call does.
+  // A call still ringing its first invitees is untouched — the clock only
+  // arms after someone was actually on.
+  const ALONE_GRACE_SECONDS = 60;
+  const hadRemoteRef = useRef(false);
+  const aloneTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [aloneSecondsLeft, setAloneSecondsLeft] = useState<number | null>(null);
+  const cancelAloneTimer = useCallback(() => {
+    if (aloneTimerRef.current) clearInterval(aloneTimerRef.current);
+    aloneTimerRef.current = null;
+    setAloneSecondsLeft(null);
+  }, []);
+
+  useEffect(() => {
+    if (!isGroup || callPhase !== "connected") return;
+
+    if (participants.length > 0) {
+      hadRemoteRef.current = true;
+      cancelAloneTimer();
+      return;
+    }
+
+    if (!hadRemoteRef.current || aloneTimerRef.current) return;
+
+    const deadline = Date.now() + ALONE_GRACE_SECONDS * 1000;
+    setAloneSecondsLeft(ALONE_GRACE_SECONDS);
+    aloneTimerRef.current = setInterval(() => {
+      const left = Math.ceil((deadline - Date.now()) / 1000);
+      if (left <= 0) {
+        if (aloneTimerRef.current) clearInterval(aloneTimerRef.current);
+        aloneTimerRef.current = null;
+        setAloneSecondsLeft(null);
+        leave();
+      } else {
+        setAloneSecondsLeft(left);
+      }
+    }, 1000);
+  }, [isGroup, callPhase, participants.length, cancelAloneTimer, leave]);
+
   // Leave Fishjam on unmount (mirrors native cleanup effect).
   useEffect(() => {
     return () => {
+      if (aloneTimerRef.current) clearInterval(aloneTimerRef.current);
       try {
         leaveRoomRef.current();
       } catch {
@@ -573,6 +617,8 @@ function CallRoom({
   const statusLabel =
     callPhase === "error"
       ? errorMsg || "Call failed"
+      : aloneSecondsLeft !== null
+        ? `Everyone left · ending in ${aloneSecondsLeft}s`
       : participants.length > 1
         ? `Group call · ${participants.length + 1}`
         : participants.length === 1
@@ -625,6 +671,15 @@ function CallRoom({
             >
               {statusLabel}
             </p>
+            {aloneSecondsLeft !== null && (
+              <button
+                type="button"
+                onClick={cancelAloneTimer}
+                className="rounded-full border border-white/20 bg-white/10 px-5 py-2 text-sm text-white backdrop-blur transition-colors hover:bg-white/20"
+              >
+                Stay on call
+              </button>
+            )}
           </div>
         ) : (
           <div
