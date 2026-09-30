@@ -620,6 +620,7 @@ export function ChatScreen() {
   const isLoadingRecipient = useChatScreenStore((s) => s.isLoadingRecipient);
   const isGroupChat = useChatScreenStore((s) => s.isGroupChat);
   const groupMembers = useChatScreenStore((s) => s.groupMembers);
+  const viewerIsMember = useChatScreenStore((s) => s.viewerIsMember);
   const groupName = useChatScreenStore((s) => s.groupName);
   const selectedMessage = useChatScreenStore((s) => s.selectedMessage);
   const showMessageActions = useChatScreenStore((s) => s.showMessageActions);
@@ -661,7 +662,9 @@ export function ChatScreen() {
         (!!currentUser?.username && member.username === currentUser.username),
     );
 
-    if (!currentUser || includesCurrentUser) return safeGroupMembers;
+    if (!currentUser || !viewerIsMember || includesCurrentUser) {
+      return safeGroupMembers;
+    }
 
     return [
       ...safeGroupMembers,
@@ -673,7 +676,7 @@ export function ChatScreen() {
         avatar: currentUser.avatar || "",
       },
     ];
-  }, [currentUser, isGroupChat, safeGroupMembers]);
+  }, [currentUser, isGroupChat, safeGroupMembers, viewerIsMember]);
   const [showMembers, setShowMembers] = useState(false);
   useEffect(() => {
     if (!showMembers) return;
@@ -760,6 +763,7 @@ export function ChatScreen() {
             true,
             conversation.members,
             conversation.groupName || "",
+            conversation.viewerIsMember,
           );
         }
         const otherUser = conversation.user;

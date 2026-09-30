@@ -385,16 +385,20 @@ export const messagesApi = {
         supabase
           .from(DB.conversationsRels.table)
           .select(DB.conversationsRels.usersId)
-          .eq(DB.conversationsRels.parentId, convIdInt)
-          .neq(DB.conversationsRels.usersId, authId),
+          .eq(DB.conversationsRels.parentId, convIdInt),
       ]);
 
       if (convResult.error || !convResult.data) return null;
 
       const isGroup = !!convResult.data[DB.conversations.isGroup];
-      const otherAuthIds = (participantsResult.data || [])
+      const allAuthIds = (participantsResult.data || [])
         .map((p: any) => p[DB.conversationsRels.usersId])
         .filter(Boolean);
+      // Callers fold the viewer into the displayed member count only when the
+      // viewer actually sits in this conversation — a non-member peeking at a
+      // group must not count themselves.
+      const viewerIsMember = allAuthIds.includes(authId);
+      const otherAuthIds = allAuthIds.filter((id: string) => id !== authId);
 
       // Fetch all other participants' user data
       let members: Array<{
@@ -436,6 +440,7 @@ export const messagesApi = {
         user: firstMember,
         members,
         isGroup,
+        viewerIsMember,
         groupName: convResult.data[DB.conversations.groupName] || "",
       };
     } catch (error) {
