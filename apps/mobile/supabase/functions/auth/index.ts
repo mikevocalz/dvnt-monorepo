@@ -14,7 +14,6 @@
  */
 
 import {
-  welcome as welcomeEmail,
   resetPassword as resetPasswordEmail,
   verifyEmailLink,
   accountLinked as accountLinkedEmail,
@@ -415,30 +414,14 @@ async function getAuth() {
             // Canonical welcome trigger after successful age-gated creation.
             // The legacy /auth/send-welcome route stays a no-op to avoid duplicates.
             after: async (user: any) => {
+              // Public DVNT profile provisioning happens after Better Auth user
+              // creation. auth-sync is therefore the reliable point for
+              // exactly-once welcome DM/email + DeviantEvents follow wiring.
+              // Sending here raced the users row and previously made onboarding
+              // delivery dependent on client timing.
               console.log(
-                `[Auth] New user created: ${user.email}, sending welcome email`,
+                `[Auth] New user created: ${user.email}; onboarding deferred to auth-sync`,
               );
-              const name = user.name || user.email.split("@")[0];
-              const { subject, html } = welcomeEmail(name);
-              await sendEmail(user.email, subject, html);
-
-              // Queue the welcome DM for the brand outbox. Insert only — the
-              // worker decides whether anything sends, and it stays silent
-              // until the canonical sender is configured and enabled. The
-              // unique key (campaign_version, recipient_id, channel) makes a
-              // repeat call a no-op, and a missing users row is skipped
-              // because the worker's backlog sweep picks it up later.
-              // Best-effort: a queue failure must never block signup.
-              try {
-                await pool.query("select public.enqueue_brand_welcome($1)", [
-                  user.id,
-                ]);
-              } catch (err) {
-                console.error(
-                  "[Auth] welcome DM enqueue failed (non-blocking):",
-                  err,
-                );
-              }
             },
           },
         },
