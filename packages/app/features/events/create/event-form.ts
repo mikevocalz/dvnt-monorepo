@@ -105,6 +105,8 @@ export interface EventFormDraft {
   maxAttendees: string;
   ticketTiers: TicketTierLike[];
   agreementAccepted: boolean;
+  /** Duplicated events must get an explicit new schedule before publish. */
+  scheduleNeedsReview?: boolean;
 }
 
 // ── Ticketing helpers ────────────────────────────────────────────────────────
@@ -152,7 +154,9 @@ export function validateEventDraft(d: EventFormDraft): {
   if (!d.eventType) errors.eventType = "Pick an event type.";
 
   const start = d.eventDate ? new Date(d.eventDate) : null;
-  if (!start || Number.isNaN(start.getTime())) {
+  if (d.scheduleNeedsReview) {
+    errors.date = "Choose a new start date and time for this duplicated event.";
+  } else if (!start || Number.isNaN(start.getTime())) {
     errors.date = "Choose when it starts.";
   } else if (d.endDate) {
     const end = new Date(d.endDate);
