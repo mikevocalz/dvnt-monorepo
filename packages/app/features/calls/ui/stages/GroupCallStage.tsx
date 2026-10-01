@@ -384,6 +384,23 @@ export function GroupCallStage({
 
   const isCountingDown = aloneSecondsLeft !== null;
 
+  // FaceTime/WhatsApp both drop the grid at low headcount: alone, your own
+  // camera fills the stage; one remote, the remote fills the stage and your
+  // camera floats as a PiP. Three or more keep the paged grid.
+  const remoteTiles = useMemo(
+    () => tiles.filter((tile) => !tile.isLocal),
+    [tiles],
+  );
+  const localTile = tiles[0];
+  const stageMode =
+    remoteTiles.length === 0
+      ? "solo"
+      : remoteTiles.length === 1
+        ? "duo"
+        : "grid";
+  const pipWidth = Math.min(128, Math.round(availableWidth * 0.3));
+  const pipHeight = Math.round((pipWidth * 4) / 3);
+
   return (
     <View style={styles.container}>
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
@@ -419,18 +436,56 @@ export function GroupCallStage({
         {/* The short last row centres and the rows above keep their size: a
             grow-to-fill would make a page turn read as a zoom, and would
             re-lay-out every RTCView on the page. */}
-        <View style={[styles.grid, { paddingHorizontal: padX, gap: GAP }]}>
-          {pageModel.visibleTiles.map((tile) => (
+        {stageMode === "grid" ? (
+          <View style={[styles.grid, { paddingHorizontal: padX, gap: GAP }]}>
+            {pageModel.visibleTiles.map((tile) => (
+              <ParticipantTile
+                key={tile.id}
+                tile={tile}
+                width={tileWidth}
+                height={tileHeight}
+                callType={callType}
+                isSpeaking={speakingSet.has(tile.id)}
+              />
+            ))}
+          </View>
+        ) : stageMode === "duo" ? (
+          <>
             <ParticipantTile
-              key={tile.id}
-              tile={tile}
-              width={tileWidth}
-              height={tileHeight}
+              tile={remoteTiles[0]}
+              width={availableWidth}
+              height={availableHeight}
               callType={callType}
-              isSpeaking={speakingSet.has(tile.id)}
+              isSpeaking={speakingSet.has(remoteTiles[0].id)}
             />
-          ))}
-        </View>
+            {/* PiP self-view, top-right inside the stage — below the top bar,
+                clear of the remote tile's name pill and mute chip. */}
+            <View
+              style={[
+                styles.pip,
+                { right: padX + 4, top: 8, width: pipWidth, height: pipHeight },
+              ]}
+            >
+              <ParticipantTile
+                tile={{ ...localTile, label: "You" }}
+                width={pipWidth}
+                height={pipHeight}
+                callType={callType}
+                isSpeaking={false}
+              />
+            </View>
+          </>
+        ) : (
+          <View style={[styles.grid, { paddingHorizontal: padX }]}>
+            <ParticipantTile
+              tile={localTile}
+              width={availableWidth}
+              height={availableHeight}
+              callType={callType}
+              isSpeaking={false}
+            />
+          </View>
+        )}
       </View>
 
       {speakerChip && (
@@ -629,6 +684,18 @@ const styles = StyleSheet.create({
   },
   tileLocal: {
     borderColor: "rgba(142,219,255,0.42)",
+  },
+  pip: {
+    position: "absolute",
+    zIndex: 10,
+    borderRadius: 14,
+    overflow: "hidden",
+    // Lift the PiP off the full-bleed remote video underneath it.
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
   },
   fallback: {
     flex: 1,

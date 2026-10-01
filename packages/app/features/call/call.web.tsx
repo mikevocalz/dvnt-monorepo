@@ -876,6 +876,16 @@ function CallRoom({
     });
     return pages;
   }, [participantPageModel.pageSize, speakingSet, tileIds]);
+
+  // ── Adaptive stage: solo / duo / grid ─────────────────────────────────────
+  // FaceTime and WhatsApp both drop the grid entirely at low headcount: alone,
+  // your own camera fills the stage; one remote, the remote fills the stage and
+  // your camera is a floating PiP. A four-column grid with one face in a cell
+  // reads as empty, not as a call. Three or more remotes keep the paged grid.
+  const remoteTiles = groupTiles.filter((tile) => !tile.isLocal);
+  const localTile = groupTiles[0];
+  const stageMode =
+    remoteTiles.length === 0 ? "solo" : remoteTiles.length === 1 ? "duo" : "grid";
   const offPageSpeakerNames = groupTiles
     .filter(
       (tile, index) =>
@@ -911,6 +921,101 @@ function CallRoom({
       ? `Ending the call in ${aloneSecondsLeft}s.`
       : "";
 
+  // One tile face in three sizes. "cell" is a grid member with the 16:9 cap;
+  // "fill" owns the whole stage (solo preview, duo remote); "pip" is the small
+  // floating self-view on a duo call — no name pill, since a PiP is always you
+  // and the pill would cover half the tile.
+  const renderTile = (tile: CallTile, mode: "cell" | "fill" | "pip") => {
+    const isSpeaking = speakingSet.has(tile.id);
+    // Five separate labels per face is five stops to walk past on a
+    // twelve-person call, so the badges stay visual and the container says the
+    // whole thing in one phrase.
+    const tileLabel = [
+      tile.isLocal ? "You" : tile.name,
+      tile.isMicOn ? null : "muted",
+      tile.hasVideo ? null : "camera off",
+      isSpeaking ? "speaking" : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    return (
+      <div
+        key={tile.id}
+        role="img"
+        aria-label={tileLabel}
+        className={`relative min-h-0 min-w-0 overflow-hidden border border-white/15 bg-[#15171c] ${
+          mode === "pip" ? "h-full w-full rounded-xl shadow-2xl" : "h-full rounded-2xl"
+        }`}
+        style={{
+          ...(mode === "cell"
+            ? {
+                // The 16:9 cap, in CSS rather than JS. The browser already
+                // sized the 1fr cell; a tile wider than that is a letterbox
+                // slit with a face in it, so the aspect ratio caps the width
+                // and `place-items-center` centres what is left of the track.
+                width: "auto",
+                maxWidth: "100%",
+                aspectRatio: "16 / 9",
+              }
+            : { width: "100%" }),
+          // A ring, never a resize. Growing the speaker's tile relays out every
+          // other video on the page and moves the face you were already looking
+          // at. Inset so the 2px sits over the video instead of pushing the grid.
+          boxShadow: isSpeaking ? `inset 0 0 0 2px ${CALL_ACCENT}` : undefined,
+        }}
+      >
+        {tile.hasVideo && tile.stream ? (
+          <VideoTile
+            stream={tile.stream}
+            muted={tile.isLocal}
+            mirror={tile.isLocal}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-[#15171c]">
+            <AvatarFallback name={tile.name} avatar={tile.avatar} />
+          </div>
+        )}
+
+        {/* Camera off reads once, in the corner. */}
+        {!tile.hasVideo && mode !== "pip" && (
+          <span
+            className="absolute left-2 top-2 flex h-6 items-center rounded-lg border border-white/15 bg-[rgba(4,8,16,0.72)] px-2"
+            style={{ color: color.textDim }}
+          >
+            <VideoOff size={11} />
+          </span>
+        )}
+
+        {/* Solid scrim, no blur. A blurred white video frame is still white, so
+            blur buys no contrast floor; rgba(0,0,0,0.70) under white text
+            measures 9.2:1 over the worst case. The right inset reserves the
+            mute chip's 26px whether or not the chip is there, so the pill does
+            not resize mid-sentence when someone toggles their mic. */}
+        {mode !== "pip" && (
+          <div className="absolute bottom-2 left-2 right-10 flex min-h-[28px] min-w-0 items-center rounded-xl bg-black/70 px-[9px]">
+            <span className="min-w-0 truncate text-[13px] font-bold text-white">
+              {tile.isLocal ? "You" : tile.name}
+            </span>
+          </div>
+        )}
+
+        {/* White glyph on a dark scrim, red as a border. White text on a
+            #FC253A fill measures 3.84:1 and fails AA at this size, which is why
+            the red carries no text at all. */}
+        {!tile.isMicOn && (
+          <span
+            className="absolute bottom-[9px] right-[9px] flex h-[26px] w-[26px] items-center justify-center rounded-[9px] border bg-[rgba(4,8,16,0.72)] text-white"
+            style={{ borderColor: "rgba(252,37,58,0.55)" }}
+          >
+            <MicOff size={12} />
+          </span>
+        )}
+      </div>
+    );
+  };
+
   return (
     // FIXED and above the app chrome. Two things were covering the controls:
     //   1. `h-screen` is 100vh = the LARGE viewport (mobile toolbars retracted),
@@ -936,108 +1041,46 @@ function CallRoom({
             holds the pages, and a listener on either arrow would stop working
             the moment that arrow went disabled at the end of the range. It is a
             focus stop only while there is somewhere to page to. */}
-        <div
-          role="group"
-          tabIndex={hasPager ? 0 : -1}
-          aria-label="Call participants"
-          aria-roledescription="participant pages"
-          onKeyDown={onGridKeyDown}
-          className={`grid h-full w-full place-items-center gap-2 rounded-2xl ${FOCUS_RING}`}
-          style={{
-            gridTemplateColumns: `repeat(${gridLayout.columns}, minmax(0, 1fr))`,
-            gridTemplateRows: `repeat(${gridLayout.rows}, minmax(0, 1fr))`,
-          }}
-        >
-          {participantPageModel.visibleTiles.map((tile) => {
-            const isSpeaking = speakingSet.has(tile.id);
-            // One node per tile. Five separate labels per face is five stops to
-            // walk past on a twelve-person call, so the badges stay visual and
-            // the container says the whole thing in one phrase.
-            const tileLabel = [
-              tile.isLocal ? "You" : tile.name,
-              tile.isMicOn ? null : "muted",
-              tile.hasVideo ? null : "camera off",
-              isSpeaking ? "speaking" : null,
-            ]
-              .filter(Boolean)
-              .join(", ");
-
-            return (
-              <div
-                key={tile.id}
-                role="img"
-                aria-label={tileLabel}
-                className="relative h-full min-h-0 min-w-0 overflow-hidden rounded-2xl border border-white/15 bg-[#15171c]"
-                style={{
-                  // The 16:9 cap, in CSS rather than JS. The browser already
-                  // sized the 1fr cell; a tile taller than 16:9 is fine, a tile
-                  // wider than that is a letterbox slit with a face in it, so
-                  // the aspect ratio caps the width and `place-items-center`
-                  // centres what is left of the track.
-                  width: "auto",
-                  maxWidth: "100%",
-                  aspectRatio: "16 / 9",
-                  // A ring, never a resize. Growing the speaker's tile relays
-                  // out every other video on the page and moves the face you
-                  // were already looking at. Inset so the 2px sits over the
-                  // video instead of pushing the grid.
-                  boxShadow: isSpeaking
-                    ? `inset 0 0 0 2px ${CALL_ACCENT}`
-                    : undefined,
-                }}
-              >
-                {tile.hasVideo && tile.stream ? (
-                  <VideoTile
-                    stream={tile.stream}
-                    muted={tile.isLocal}
-                    mirror={tile.isLocal}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-[#15171c]">
-                    <AvatarFallback name={tile.name} avatar={tile.avatar} />
-                  </div>
-                )}
-
-                {/* Camera off reads once, in the corner. The centred "Camera
-                    off" pill that used to sit here restated what the avatar
-                    already says, and it landed on top of the face. */}
-                {!tile.hasVideo && (
-                  <span
-                    className="absolute left-2 top-2 flex h-6 items-center rounded-lg border border-white/15 bg-[rgba(4,8,16,0.72)] px-2"
-                    style={{ color: color.textDim }}
-                  >
-                    <VideoOff size={11} />
-                  </span>
-                )}
-
-                {/* Solid scrim, no blur. A blurred white video frame is still
-                    white, so blur buys no contrast floor; rgba(0,0,0,0.70)
-                    under white text measures 9.2:1 over the worst case. The
-                    right inset reserves the mute chip's 26px whether or not the
-                    chip is there, so the pill does not resize mid-sentence when
-                    someone toggles their mic. */}
-                <div className="absolute bottom-2 left-2 right-10 flex min-h-[28px] min-w-0 items-center rounded-xl bg-black/70 px-[9px]">
-                  <span className="min-w-0 truncate text-[13px] font-bold text-white">
-                    {tile.isLocal ? "You" : tile.name}
-                  </span>
-                </div>
-
-                {/* White glyph on a dark scrim, red as a border. White text on a
-                    #FC253A fill measures 3.84:1 and fails AA at this size, which
-                    is why the red carries no text at all. */}
-                {!tile.isMicOn && (
-                  <span
-                    className="absolute bottom-[9px] right-[9px] flex h-[26px] w-[26px] items-center justify-center rounded-[9px] border bg-[rgba(4,8,16,0.72)] text-white"
-                    style={{ borderColor: "rgba(252,37,58,0.55)" }}
-                  >
-                    <MicOff size={12} />
-                  </span>
-                )}
+        {stageMode === "grid" ? (
+          // The wrapper, not the arrows, owns paging keys: it is the thing that
+          // holds the pages, and a listener on either arrow would stop working
+          // the moment that arrow went disabled at the end of the range. It is a
+          // focus stop only while there is somewhere to page to.
+          <div
+            role="group"
+            tabIndex={hasPager ? 0 : -1}
+            aria-label="Call participants"
+            aria-roledescription="participant pages"
+            onKeyDown={onGridKeyDown}
+            className={`grid h-full w-full place-items-center gap-2 rounded-2xl ${FOCUS_RING}`}
+            style={{
+              gridTemplateColumns: `repeat(${gridLayout.columns}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${gridLayout.rows}, minmax(0, 1fr))`,
+            }}
+          >
+            {participantPageModel.visibleTiles.map((tile) =>
+              renderTile(tile, "cell"),
+            )}
+          </div>
+        ) : (
+          // Solo: your own camera fills the stage while the room waits (FaceTime
+          // ringing preview). Duo: the remote fills the stage and your camera is
+          // a floating PiP top-right, clear of the name pill and mute chip.
+          <div
+            role="group"
+            aria-label="Call participants"
+            className="relative h-full w-full"
+          >
+            {stageMode === "duo" ? renderTile(remoteTiles[0], "fill") : null}
+            {stageMode === "duo" ? (
+              <div className="absolute right-3 top-3 aspect-[3/4] w-[clamp(96px,26vw,190px)]">
+                {renderTile(localTile, "pip")}
               </div>
-            );
-          })}
-        </div>
+            ) : (
+              renderTile(localTile, "fill")
+            )}
+          </div>
+        )}
 
         {hasPager && (
           <nav
