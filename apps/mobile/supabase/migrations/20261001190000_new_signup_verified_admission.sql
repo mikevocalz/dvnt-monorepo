@@ -9,8 +9,8 @@ BEGIN;
 UPDATE public.verified_admission_policy
 SET
   enforce = true,
-  cohort_created_after = COALESCE(cohort_created_after, now()),
-  grace_deadline = COALESCE(grace_deadline, now()),
+  cohort_created_after = now(),
+  grace_deadline = now(),
   updated_at = now()
 WHERE id = 1;
 
