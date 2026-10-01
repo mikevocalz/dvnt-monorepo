@@ -994,7 +994,7 @@ function CallRoom({
             mute chip's 26px whether or not the chip is there, so the pill does
             not resize mid-sentence when someone toggles their mic. */}
         {mode !== "pip" && (
-          <div className="absolute bottom-2 left-2 right-10 flex min-h-[28px] min-w-0 items-center rounded-xl bg-black/70 px-[9px]">
+          <div className="absolute bottom-2 left-2 right-10 flex min-h-7 min-w-0 items-center rounded-xl bg-black/70 px-2.25">
             <span className="min-w-0 truncate text-[13px] font-bold text-white">
               {tile.isLocal ? "You" : tile.name}
             </span>
@@ -1006,7 +1006,7 @@ function CallRoom({
             the red carries no text at all. */}
         {!tile.isMicOn && (
           <span
-            className="absolute bottom-[9px] right-[9px] flex h-[26px] w-[26px] items-center justify-center rounded-[9px] border bg-[rgba(4,8,16,0.72)] text-white"
+            className="absolute bottom-2.25 right-2.25 flex h-6.5 w-6.5 items-center justify-center rounded-[9px] border bg-[rgba(4,8,16,0.72)] text-white"
             style={{ borderColor: "rgba(252,37,58,0.55)" }}
           >
             <MicOff size={12} />
@@ -1073,7 +1073,7 @@ function CallRoom({
           >
             {stageMode === "duo" ? renderTile(remoteTiles[0], "fill") : null}
             {stageMode === "duo" ? (
-              <div className="absolute right-3 top-3 aspect-[3/4] w-[clamp(96px,26vw,190px)]">
+              <div className="absolute right-3 top-3 aspect-3/4 w-[clamp(96px,26vw,190px)]">
                 {renderTile(localTile, "pip")}
               </div>
             ) : (
