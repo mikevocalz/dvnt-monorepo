@@ -49,7 +49,6 @@ import {
 } from "lucide-react";
 import { tickets, ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
-import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 
@@ -244,6 +243,7 @@ export function EventOrganizerScreen() {
     if (!Number.isSafeInteger(numericId) || numericId <= 0 || duplicateLock.current) return;
     duplicateLock.current = true;
     try {
+      const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
       await eventDraftsApi.duplicateEvent(numericId);
       showToast(
         "success",
