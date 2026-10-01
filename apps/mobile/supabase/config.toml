@@ -503,3 +503,6 @@ verify_jwt = false
 
 [functions.event-reminders]
 verify_jwt = false
+
+[functions.event-drafts]
+verify_jwt = false
