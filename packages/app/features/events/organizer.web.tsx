@@ -36,7 +36,6 @@ import {
   CheckCircle,
   Clock,
   CloudUpload,
-  CopyPlus,
   Megaphone,
   QrCode,
   Settings,
@@ -567,7 +566,7 @@ export function EventOrganizerScreen() {
               onClick={() => void handleDuplicateEvent()}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/6 py-3 text-[13px] font-semibold text-white active:bg-white/8"
             >
-              <CopyPlus size={16} color="#3FDCFF" />
+              <span aria-hidden className="text-base leading-none text-[#3FDCFF]">＋</span>
               Duplicate Event
             </button>
           </div>
