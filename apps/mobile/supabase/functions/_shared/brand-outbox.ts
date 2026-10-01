@@ -92,11 +92,15 @@ export function transition(
 export const BRAND_ANNOUNCEMENT_LABEL = "Deviant announcement — automated";
 
 export const WELCOME_DM = [
-  "Welcome to the cookout! The Black Queer cookout. DVNT is an 18+ community for Black, Brown and Queer people to connect through culture, expression and events — online and in person.",
+  "Welcome to the cookout — the Black, Brown & Queer cookout (B.B.Q.).",
   "",
-  "Start with a photo and a little about yourself, then make your first post when you're ready. Bought a ticket? You can turn that moment into your first DVNT post.",
+  "DVNT is an 18+ community for real people to connect online and IRL. Post freely, build your profile, create your own events, and support the creators and curators who keep our community connected.",
   "",
-  "Be kind. Be considerate. No hate, harassment, transphobia, homophobia, biphobia, racism, anti-Blackness, xenophobia or sexism. No body-shaming or slut-shaming. Leave your hangups at home. Read our Community Standards, and report anything that makes this space unsafe.",
+  "Our expression, culture, community and events belong here without hate or harassment. No transphobia, homophobia, biphobia, racism, anti-Blackness, xenophobia, sexism, ableism, body-shaming or slut-shaming.",
+  "",
+  "Be bold. Be sexy. Mind the business that pays you. Be kind and considerate. Leave your hangups at home.",
+  "",
+  "Start with a photo and a little about yourself. Bought your first DVNT ticket? You can turn that moment into your first post.",
 ].join("\n");
 
 export const WELCOME_BROADCAST =
@@ -116,18 +120,21 @@ export function campaignMessage(
   campaignVersion: string,
   unsubscribeUrl?: string | null,
 ): CampaignMessage | null {
-  const copy =
-    campaignVersion === "welcome_dm_v1"
-      ? WELCOME_DM
-      : campaignVersion === "first_post_v1"
-        ? WELCOME_BROADCAST
-        : null;
+  const isWelcome =
+    campaignVersion === "welcome_dm_v1" ||
+    campaignVersion === "welcome_dm_v2" ||
+    campaignVersion === "welcome_email_v2";
+  const copy = isWelcome
+    ? WELCOME_DM
+    : campaignVersion === "first_post_v1"
+      ? WELCOME_BROADCAST
+      : null;
   if (!copy) return null;
   const footer = unsubscribeUrl
     ? `\n\nStop these messages: ${unsubscribeUrl}`
     : "";
   return {
-    subject: "Welcome to the cookout — DVNT",
+    subject: isWelcome ? "Welcome to the cookout — DVNT" : "Make your first DVNT post",
     body: `${BRAND_ANNOUNCEMENT_LABEL}\n\n${copy}${footer}`,
   };
 }
