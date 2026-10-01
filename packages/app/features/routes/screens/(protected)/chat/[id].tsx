@@ -85,7 +85,7 @@ import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useFeedPostUIStore } from "@dvnt/app/lib/stores/feed-post-store";
 import * as ImagePicker from "expo-image-picker";
 import { MediaPreviewModal } from "@dvnt/app/components/media-preview-modal";
-import { AddMemberSheet } from "@dvnt/app/features/messages/ui/add-member-sheet";
+import { AddMemberSheet } from "@dvnt/app/features/messages/add-member-sheet";
 import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 // expo-video-thumbnails removed — hangs on iOS 26.3
 import { LinearGradient } from "expo-linear-gradient";
