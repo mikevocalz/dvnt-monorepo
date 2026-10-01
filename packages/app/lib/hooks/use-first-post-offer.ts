@@ -6,7 +6,6 @@ import {
   findAdmissionEventId,
 } from "@dvnt/app/lib/posts/first-post-draft";
 import { createTextPostSlide } from "@dvnt/app/lib/posts/text-post";
-import { firstPostOfferApi } from "@dvnt/app/lib/api/first-post-offer";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
 
@@ -45,7 +44,10 @@ export function useFirstPostOffer(
 
   const offerQuery = useQuery({
     queryKey: ["first-post-offer", cartId],
-    queryFn: () => firstPostOfferApi.resolve(cartId),
+    queryFn: async () => {
+      const { firstPostOfferApi } = await import("@dvnt/app/lib/api/first-post-offer");
+      return firstPostOfferApi.resolve(cartId);
+    },
     enabled: Boolean(cartId && eventId != null),
     staleTime: 0,
     refetchOnMount: "always",
@@ -71,6 +73,7 @@ export function useFirstPostOffer(
       // consume the server offer until the composer is actually available.
       if (composerHasDraft()) return "kept-existing";
 
+      const { firstPostOfferApi } = await import("@dvnt/app/lib/api/first-post-offer");
       const result = await firstPostOfferApi.accept();
       if (!result.offer || result.offer.state !== "accepted") {
         void queryClient.invalidateQueries({
@@ -97,6 +100,7 @@ export function useFirstPostOffer(
 
   const skip = useCallback(async () => {
     try {
+      const { firstPostOfferApi } = await import("@dvnt/app/lib/api/first-post-offer");
       await firstPostOfferApi.dismiss();
       skipLocal();
       queryClient.setQueryData(["first-post-offer", cartId], {
