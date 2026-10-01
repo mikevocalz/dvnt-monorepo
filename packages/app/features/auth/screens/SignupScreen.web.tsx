@@ -9,7 +9,7 @@ import { signUp } from '../../../lib/auth-client';
 import { useAuthStore } from '../../../lib/stores/auth-store';
 import { syncAuthUser } from '../../../lib/api/privileged';
 import { auth } from '../../../lib/api/auth';
-import { Check, Mail } from 'lucide-react';
+import { Check, Mail, ShieldCheck, Camera } from 'lucide-react';
 import { Dialog } from '@dvnt/ui';
 import {
   TERMS_OF_SERVICE_MD,
@@ -17,6 +17,7 @@ import {
 } from '../../../lib/legal/content.generated';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
 import { validateDateOfBirth } from '../../../lib/utils/age-verification';
+import { useStartVerification, useVerificationState } from '../../../lib/hooks/use-age-verification';
 
 /** Tiny markdown-to-DOM renderer for the legal popovers (headings/bullets/bold). */
 function LegalDocBody({ md }: { md: string }) {
@@ -35,7 +36,7 @@ function LegalDocBody({ md }: { md: string }) {
   );
 }
 
-const STEPS = ['User Info', 'Terms', 'Verification'] as const;
+const STEPS = ['User Info', 'Terms', 'Identity', 'Email'] as const;
 const signupBirthDateError = (value: string) =>
   !/^\d{4}-\d{2}-\d{2}$/.test(value)
     ? 'Enter your date of birth in YYYY-MM-DD format.'
@@ -47,6 +48,8 @@ export function SignupScreen() {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [legalDoc, setLegalDoc] = useState<null | 'terms' | 'privacy'>(null);
   const { setUser } = useAuthStore();
+  const verification = useVerificationState();
+  const startVerification = useStartVerification();
   // Next app uses Solito/Next routing (no TanStack RouterProvider).
   const router = useRouter();
   const navigate = ({ to }: { to: string }) => router.push(to);
@@ -80,8 +83,11 @@ export function SignupScreen() {
             let profile: any;
             try { profile = await syncAuthUser(); } catch { profile = await auth.getProfile(data.user.id, data.user.email); }
             if (profile) setUser({ id: profile.id, authId: profile.authId, email: profile.email, username: profile.username, name: profile.name, avatar: profile.avatar || '', bio: profile.bio || '', website: (profile as any).website || '', location: profile.location || '', hashtags: (profile as any).hashtags || [], isVerified: profile.isVerified, postsCount: profile.postsCount, followersCount: profile.followersCount, followingCount: profile.followingCount });
+            // Account exists so the authenticated Didit session can be minted,
+            // but signup is not considered complete until identity verification
+            // passes. New-account participation is server-gated by the rollout
+            // policy even if this screen is bypassed.
             setActiveStep(2);
-            navigate({ to: '/auth/verify-email' });
           }
         } catch (err: any) {
           const isExisting =
@@ -163,14 +169,79 @@ export function SignupScreen() {
         )}
         {activeStep === 2 && (
           <View style={{ marginTop: 24, alignItems: 'center', gap: 12 }}>
+            <ShieldCheck size={42} color={P} />
+            <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800', textAlign: 'center' }}>Verify you're an adult</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, textAlign: 'center', lineHeight: 21 }}>
+              DVNT is 18+. Complete the secure ID check before your account can participate in the community.
+            </Text>
+            {verification.data?.state === 'pending' && (
+              <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 13, textAlign: 'center' }}>
+                Your verification is processing. You can check again after returning from the verification window.
+              </Text>
+            )}
+            {(verification.data?.state === 'retry_required' || verification.data?.state === 'expired') && (
+              <Text style={{ color: '#fb7185', fontSize: 13, textAlign: 'center' }}>
+                {verification.data?.message || 'Verification needs another attempt.'}
+              </Text>
+            )}
+            {verification.data?.state === 'rejected' && (
+              <Text style={{ color: '#fb7185', fontSize: 13, textAlign: 'center' }}>
+                {verification.data?.message || 'This account is not eligible for DVNT.'}
+              </Text>
+            )}
+            {verification.data?.state === 'approved' && (
+              <Text style={{ color: '#86efac', fontSize: 13, fontWeight: '700', textAlign: 'center' }}>
+                Identity verified. You're ready to finish signup.
+              </Text>
+            )}
+          </View>
+        )}
+        {activeStep === 3 && (
+          <View style={{ marginTop: 24, alignItems: 'center', gap: 12 }}>
             <Mail size={40} color={P} />
             <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800', textAlign: 'center' }}>Check your email</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, textAlign: 'center' }}>We sent a verification link. Tap it to confirm your account.</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, textAlign: 'center' }}>We sent a verification link. Tap it to confirm your email and finish account setup.</Text>
           </View>
         )}
         <View style={{ marginTop: 24, gap: 12 }}>
           {activeStep < 2 && <Button onPress={form.handleSubmit} disabled={isSubmitting} loading={isSubmitting}>{activeStep === 0 ? 'Continue' : 'Create account'}</Button>}
-          {activeStep === 2 && <Button onPress={() => navigate({ to: '/auth/login' })}>Go to sign in</Button>}
+          {activeStep === 2 && verification.data?.state !== 'approved' && verification.data?.state !== 'rejected' && (
+            <Button
+              loading={startVerification.isPending}
+              disabled={startVerification.isPending}
+              onPress={async () => {
+                try {
+                  const result = await startVerification.mutateAsync({ returnUrl: window.location.href });
+                  if (result.status === 'passed') {
+                    await verification.refetch();
+                    return;
+                  }
+                  if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
+                } catch (error: any) {
+                  toast.error('Verification unavailable', { description: error?.message || 'Try again in a moment.' });
+                }
+              }}
+            >
+              <Camera size={16} /> Start secure ID verification
+            </Button>
+          )}
+          {activeStep === 2 && verification.data?.state !== 'rejected' && (
+            <Button
+              variant="secondary"
+              onPress={async () => {
+                const refreshed = await verification.refetch();
+                if (refreshed.data?.state === 'approved') {
+                  setActiveStep(3);
+                  navigate({ to: '/auth/verify-email' });
+                } else {
+                  toast.message('Verification not finished yet');
+                }
+              }}
+            >
+              {verification.data?.state === 'approved' ? 'Continue' : 'Check verification status'}
+            </Button>
+          )}
+          {activeStep === 3 && <Button onPress={() => navigate({ to: '/auth/verify-email' })}>Open email verification</Button>}
         </View>
         {/* Readable legal popovers — you can read what you're agreeing to. */}
         <Dialog
