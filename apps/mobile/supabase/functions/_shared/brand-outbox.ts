@@ -92,7 +92,7 @@ export function transition(
 export const BRAND_ANNOUNCEMENT_LABEL = "Deviant announcement — automated";
 
 export const WELCOME_DM = [
-  "Welcome to the cookout — the Black, Brown & Queer cookout (B.B.Q.).",
+  "Welcome to the cookout! (The Black, Brown & Queer cookout aka B.B.Q.)",
   "",
   "DVNT is an 18+ community for real people to connect online and IRL. Post freely, build your profile, create your own events, and support the creators and curators who keep our community connected.",
   "",
