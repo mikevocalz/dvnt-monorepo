@@ -23,7 +23,12 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { brandSendGate, brandUnsubscribeUrl, verifyBrandSender } from "../_shared/brand-sender.ts";
+import {
+  brandSendGate,
+  brandUnsubscribeUrl,
+  resolveBrandSender,
+  verifyBrandSender,
+} from "../_shared/brand-sender.ts";
 import { campaignMessage, transition } from "../_shared/brand-outbox.ts";
 import {
   ensureDirectConversation,
@@ -67,7 +72,12 @@ Deno.serve(async (req: Request) => {
       global: { headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } },
     });
 
-    let body: { limit?: number; cap?: number; lookback_days?: number } = {};
+    let body: {
+      limit?: number;
+      cap?: number;
+      lookback_days?: number;
+      follow_backfill_limit?: number;
+    } = {};
     try {
       body = await req.json();
     } catch {
@@ -79,15 +89,39 @@ Deno.serve(async (req: Request) => {
       Math.max(Number(body.lookback_days) || 7, 1),
       90,
     );
+    const followBackfillLimit = Math.min(
+      Math.max(Number(body.follow_backfill_limit) || 250, 1),
+      1000,
+    );
 
     // Enqueue runs whether or not sending is enabled: the outbox can fill up
     // safely, and nothing leaves until an operator turns it on.
     const { data: enqueued, error: enqueueError } = await supabase.rpc(
-      "enqueue_brand_welcome",
-      { p_auth_id: null, p_lookback: `${lookbackDays} days` },
+      "enqueue_brand_onboarding",
+      {
+        p_auth_id: null,
+        p_lookback: `${lookbackDays} days`,
+        p_first_post_delay: "24 hours",
+      },
     );
     if (enqueueError) {
       console.error("[brand-outbox-worker] enqueue failed:", enqueueError);
+    }
+
+    // Relationship backfill does not depend on growth-message sending being
+    // enabled, but it DOES depend on proving the configured immutable ID pair.
+    const resolved = resolveBrandSender();
+    const identity = resolved.ok
+      ? await verifyBrandSender(supabase, resolved.sender)
+      : resolved;
+    let relationshipsBackfilled: unknown = null;
+    if (identity.ok) {
+      const { data, error } = await supabase.rpc("backfill_brand_relationships", {
+        p_brand_id: identity.sender.userId,
+        p_bidirectional: true,
+        p_limit: followBackfillLimit,
+      });
+      relationshipsBackfilled = error ? { error: error.message } : data;
     }
 
     const configured = brandSendGate();
@@ -103,7 +137,13 @@ Deno.serve(async (req: Request) => {
       );
       return json({
         ok: true,
-        data: { enqueued: enqueued ?? 0, claimed: 0, sent: 0, disabled: gate.reason },
+        data: {
+          enqueued: enqueued ?? 0,
+          relationshipsBackfilled,
+          claimed: 0,
+          sent: 0,
+          disabled: gate.reason,
+        },
       });
     }
 
@@ -126,7 +166,15 @@ Deno.serve(async (req: Request) => {
 
     const rows = (claimed || []) as Array<Record<string, any>>;
     if (rows.length === 0) {
-      return json({ ok: true, data: { enqueued: enqueued ?? 0, claimed: 0, sent: 0 } });
+      return json({
+        ok: true,
+        data: {
+          enqueued: enqueued ?? 0,
+          relationshipsBackfilled,
+          claimed: 0,
+          sent: 0,
+        },
+      });
     }
 
     const recipientIds = rows.map((r) => r.recipient_id);
@@ -226,6 +274,7 @@ Deno.serve(async (req: Request) => {
       ok: true,
       data: {
         enqueued: enqueued ?? 0,
+        relationshipsBackfilled,
         claimed: rows.length,
         sent,
         failed,
