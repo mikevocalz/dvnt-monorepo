@@ -53,7 +53,7 @@ export function useFirstPostOffer(
 
   const draft = useMemo(
     () =>
-      offerQuery.data?.offer
+      offerQuery.data?.offer?.event
         ? buildFirstPostDraft({
             event: offerQuery.data.offer.event,
             lines: tickets,
