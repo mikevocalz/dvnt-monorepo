@@ -72,6 +72,8 @@ import {
 } from "@dvnt/app/components/ui/location-autocomplete-v3";
 import { useCreateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { eventsApi } from "@dvnt/app/lib/api/events";
+import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import {
   ticketTypesApi,
@@ -213,6 +215,9 @@ function CreateEventScreenContent() {
   const setAttachLynkRoom = useCreateEventStore((s) => s.setAttachLynkRoom);
   const isSubmitting = useCreateEventStore((s) => s.isSubmitting);
   const setIsSubmitting = useCreateEventStore((s) => s.setIsSubmitting);
+  const isSavingDraft = useCreateEventStore((s) => s.isSavingDraft);
+  const setIsSavingDraft = useCreateEventStore((s) => s.setIsSavingDraft);
+  const scheduleNeedsReview = useCreateEventStore((s) => s.scheduleNeedsReview);
   const uploadProgress = useCreateEventStore((s) => s.uploadProgress);
   const setUploadProgress = useCreateEventStore((s) => s.setUploadProgress);
   const ticketingEnabled = useCreateEventStore((s) => s.ticketingEnabled);
@@ -298,6 +303,29 @@ function CreateEventScreenContent() {
   const setFlyerImage = useCreateEventStore((s) => s.setFlyerImage);
   const flyerMediaType = useCreateEventStore((s) => s.flyerMediaType);
   const setFlyerMediaType = useCreateEventStore((s) => s.setFlyerMediaType);
+
+  const handleSaveDraft = useCallback(async () => {
+    if (useCreateEventStore.getState().isSavingDraft) return;
+    setIsSavingDraft(true);
+    try {
+      const saved = await eventDraftsApi.saveCurrent();
+      showToast(
+        "success",
+        "Draft saved",
+        saved.revision > 1
+          ? "Your draft was updated."
+          : "You can resume it from Host Dashboard.",
+      );
+    } catch (error) {
+      showToast(
+        "error",
+        "Couldn't save draft",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    } finally {
+      setIsSavingDraft(false);
+    }
+  }, [setIsSavingDraft, showToast]);
 
   // Convert ISO strings to Date objects for pickers
   const eventDate = useMemo(() => new Date(eventDateISO), [eventDateISO]);
@@ -480,6 +508,14 @@ function CreateEventScreenContent() {
       }
       if (!eventType) {
         showToast("error", "Pick a type", "Choose what kind of event this is");
+        return;
+      }
+      if (scheduleNeedsReview) {
+        showToast(
+          "error",
+          "Choose a new date",
+          "Duplicated events need a new start date and time before publishing.",
+        );
         return;
       }
       // Honor virtual events — an online event doesn't need a typed location.
@@ -748,7 +784,13 @@ function CreateEventScreenContent() {
 
       const data = await createEvent.mutateAsync(eventData);
       if (data?.replayed && data.id) {
+        const replayedDraftId = useCreateEventStore.getState().serverDraftId;
         resetDraft();
+        if (replayedDraftId) {
+          void eventDraftsApi.delete(replayedDraftId).catch((error) =>
+            console.warn("[CreateEvent] replayed draft cleanup failed", error),
+          );
+        }
         showToast("warning", "Event already published", "Review tickets and add-ons in Edit before sharing it.");
         if (screenMounted.current) router.replace(`/(protected)/events/${data.id}/edit` as any);
         return;
@@ -875,6 +917,36 @@ function CreateEventScreenContent() {
         }
       }
 
+      // Promoter configuration copied by Duplicate Event is recreated as a
+      // fresh invitation. Earnings, attributions and historical payout state
+      // never enter the draft.
+      const promoterTemplates = useCreateEventStore.getState().promoterTemplates;
+      if (promoterTemplates.length > 0 && data?.id) {
+        const failed: string[] = [];
+        for (const promoter of promoterTemplates) {
+          try {
+            await promotersApi.add({
+              eventId: Number(data.id),
+              username: promoter.username || undefined,
+              displayName: promoter.displayName || undefined,
+              code: promoter.code || undefined,
+              customerDiscountBps: promoter.customerDiscountBps,
+              promoterCommissionBps: promoter.promoterCommissionBps,
+            });
+          } catch (promoterErr) {
+            console.warn("[CreateEvent] promoter recreation failed", promoterErr);
+            failed.push(promoter.displayName || promoter.username || "Promoter");
+          }
+        }
+        if (failed.length) {
+          showToast(
+            "warning",
+            "Some promoters weren't recreated",
+            failed.join(", "),
+          );
+        }
+      }
+
       // Guest list. Same write-after-publish shape as the co-organizer block
       // above and for the same reason: there was no event id to attach an
       // invite to until now. One batched call; a guest who can't be added
@@ -905,7 +977,13 @@ function CreateEventScreenContent() {
 
       setUploadProgress(100);
       showToast("success", "Success", "Event created successfully!");
+      const publishedDraftId = useCreateEventStore.getState().serverDraftId;
       resetDraft();
+      if (publishedDraftId) {
+        void eventDraftsApi.delete(publishedDraftId).catch((error) =>
+          console.warn("[CreateEvent] published draft cleanup failed", error),
+        );
+      }
       if (screenMounted.current) router.back();
     } catch (error: any) {
       setIsSubmitting(false);
@@ -3285,6 +3363,18 @@ function CreateEventScreenContent() {
         ) : (
           <View />
         )}
+
+        <Pressable
+          onPress={() => void handleSaveDraft()}
+          disabled={isSavingDraft || isSubmitting || !useCreateEventStore.getState().hasDraft()}
+          className="px-3 py-3 rounded-full border border-border bg-card"
+          accessibilityRole="button"
+          accessibilityLabel="Save event draft"
+        >
+          <Text className="text-xs font-semibold text-foreground">
+            {isSavingDraft ? "Saving…" : "Save Draft"}
+          </Text>
+        </Pressable>
 
         {/* Next / Create button */}
         {currentStep < totalSteps - 1 ? (
