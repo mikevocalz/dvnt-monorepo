@@ -200,13 +200,22 @@ export default function CheckoutSuccessScreen() {
   // confirmed. Nothing is posted from here — accepting fills the composer.
   const firstPost = useFirstPostOffer(effectiveCartId, tickets);
 
-  const handleMakeFirstPost = useCallback(() => {
+  const handleMakeFirstPost = useCallback(async () => {
     if (!firstPost.draft) return;
-    if (firstPost.accept(firstPost.draft) === "kept-existing") {
-      toast.info("You already have a post in progress. We kept it.");
-      return;
+    try {
+      const result = await firstPost.accept(firstPost.draft);
+      if (result === "kept-existing") {
+        toast.info("You already have a post in progress. We kept it.");
+        return;
+      }
+      if (result === "unavailable") {
+        toast.info("Your first-post offer has already been resolved.");
+        return;
+      }
+      router.push("/(protected)/(tabs)/create" as never);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start your post.");
     }
-    router.push("/(protected)/(tabs)/create" as never);
   }, [firstPost, router]);
 
   const renderTicket = useCallback(
@@ -228,7 +237,7 @@ export default function CheckoutSuccessScreen() {
       </Text>
       <View style={styles.firstPostActions}>
         <Pressable
-          onPress={firstPost.skip}
+          onPress={() => void firstPost.skip()}
           accessibilityRole="button"
           style={[styles.secondaryButton, styles.firstPostAction]}
         >
