@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { layoutSeats, orderReveal, toggleSelection } from "./table-logic";
+import { layoutSeats, orderReveal, toggleSelection } from "./table-logic.ts";
 
 const members = [
   { user_id: "b", name: "B", avatar: "", seat_no: 2 },

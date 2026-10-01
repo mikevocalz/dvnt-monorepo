@@ -1,4 +1,9 @@
 import { provisionCallMedia } from "./call-media.ts";
+import {
+  CALL_HUMAN_CAPACITY,
+  CALL_PROVIDER_MAX_PEERS,
+  pendingWaitMs,
+} from "./call-capacity.ts";
 
 const params = {
   supabaseUrl: "https://database.invalid",
@@ -25,25 +30,40 @@ async function scenario(options: {
   peerFailure?: boolean;
   finishFailure?: boolean;
   deleteFailure?: boolean;
+  pendingCount?: number;
 }) {
   const original = globalThis.fetch;
   const calls: string[] = [];
   let released = false;
+  let beginAttempts = 0;
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
     calls.push(`${method} ${url.pathname}`);
     if (url.hostname === "database.invalid") {
       if (url.pathname.endsWith("/begin_call_media")) {
+        beginAttempts++;
+        if (
+          options.pendingCount && beginAttempts <= options.pendingCount
+        ) {
+          return json({ ok: false, reason: "call_join_pending" });
+        }
         return json(
-          options.capacity ? { ok: false, reason: "call_full", current: 4 } : {
-            ok: true,
-            role: "participant",
-            roomId: 1,
-            fishjamRoomId: options.previous ? "existing-room" : null,
-            previousPeerId: options.previous ? "old-peer" : null,
-            previousFishjamRoomId: options.previous ? "existing-room" : null,
-          },
+          options.capacity
+            ? {
+              ok: false,
+              reason: "call_full",
+              current: CALL_HUMAN_CAPACITY,
+              max: CALL_HUMAN_CAPACITY,
+            }
+            : {
+              ok: true,
+              role: "participant",
+              roomId: 1,
+              fishjamRoomId: options.previous ? "existing-room" : null,
+              previousPeerId: options.previous ? "old-peer" : null,
+              previousFishjamRoomId: options.previous ? "existing-room" : null,
+            },
         );
       }
       if (url.pathname.endsWith("/finish_call_media")) {
@@ -76,8 +96,8 @@ async function scenario(options: {
       }
       if (url.pathname === "/room" && method === "POST") {
         assert(
-          JSON.parse(String(init?.body)).maxPeers === 10,
-          "Provider must cap peers at ten",
+          JSON.parse(String(init?.body)).maxPeers === CALL_PROVIDER_MAX_PEERS,
+          "Provider must cap peers at human capacity plus headroom",
         );
         return json({ data: { room: { id: "new-room" } } });
       }
@@ -97,7 +117,7 @@ async function scenario(options: {
   }
 }
 
-Deno.test("first call join provisions one ten-peer room and persists its peer before returning token", async () => {
+Deno.test("first call join provisions one capped provider room and persists its peer before returning token", async () => {
   const { result, calls, released } = await scenario({});
   assert(
     result.ok && result.token === "test-peer-token",
@@ -128,9 +148,14 @@ Deno.test("reconnect removes old peer before replacement and reuses provider roo
   );
 });
 
-Deno.test("full call never touches media provider", async () => {
+Deno.test("full call never touches media provider and reports human capacity", async () => {
   const { result, calls } = await scenario({ capacity: true });
   assert(!result.ok && result.reason === "call_full", "Expected call_full");
+  assert(
+    (result as any).current === CALL_HUMAN_CAPACITY &&
+      (result as any).max === CALL_HUMAN_CAPACITY,
+    "Capacity details must reflect human capacity",
+  );
   assert(
     calls.length === 1,
     "Capacity rejection must stop before provider traffic",
@@ -195,5 +220,24 @@ Deno.test("legacy caller peers are removed without disturbing another participan
   assert(
     !calls.includes("DELETE /room/existing-room/peer/other-peer"),
     "Preserve another participant",
+  );
+});
+
+Deno.test("pending-join poll uses bounded exponential backoff", () => {
+  // Base curve: 250, 500, 1000, 2000, 4000, 8000, then capped.
+  const expected = [250, 500, 1000, 2000, 4000, 8000, 8000];
+  const observed = [0, 1, 2, 3, 4, 5, 6].map((i) => pendingWaitMs(i, 8_000));
+  assert(
+    observed.every((ms, i) => ms >= expected[i] && ms < expected[i] + 200),
+    "Each delay equals the base plus bounded jitter",
+  );
+});
+
+Deno.test("waits through a pending lease with bounded backoff then succeeds", async () => {
+  const { result, calls } = await scenario({ pendingCount: 3 });
+  assert(result.ok, "Should succeed once the pending lease clears");
+  assert(
+    calls.filter((call) => call.endsWith("/begin_call_media")).length >= 4,
+    "Must retry begin_call_media while the lease is pending",
   );
 });

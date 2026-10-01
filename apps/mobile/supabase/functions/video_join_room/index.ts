@@ -9,6 +9,7 @@ import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { CALL_HUMAN_CAPACITY } from "../_shared/call-capacity.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -280,7 +281,7 @@ Deno.serve(async (req) => {
         return errorResponse(code, message, {
           reason,
           ...(reason === "call_full"
-            ? { max: result.max ?? 10, current: result.current }
+            ? { max: result.max ?? CALL_HUMAN_CAPACITY, current: result.current }
             : {}),
         });
       }

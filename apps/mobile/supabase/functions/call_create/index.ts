@@ -9,6 +9,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { CallCreateSchema } from "../_shared/call-create-schema.ts";
+import { CALL_HUMAN_CAPACITY } from "../_shared/call-capacity.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -140,7 +141,7 @@ Deno.serve(async (req) => {
           // "Sneaky Lynk invite", which is the wrong product.
           roomKind: "call",
           hasVideo,
-          maxParticipants: 10,
+          maxParticipants: CALL_HUMAN_CAPACITY,
           ...(chatId ? { conversationId: Number(chatId) } : {}),
           invitedUserIds: inviteeAuthIds,
           appOnly: false,

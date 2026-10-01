@@ -6,6 +6,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import {
+  CALL_HUMAN_CAPACITY,
+  CALL_MAX_INVITEES,
+} from "../_shared/call-capacity.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -229,13 +233,14 @@ Deno.serve(async (req) => {
     if (roomKind === "call") {
       const invitees = new Set(invitedUserIds);
       if (
-        isPublic || appOnly || invitees.size < 1 || invitees.size > 9 ||
-        invitees.size !== invitedUserIds.length || invitees.has(userId) ||
-        invitedUserIds.some((id) => id !== id.trim())
+        isPublic || appOnly || invitees.size < 1 ||
+          invitees.size > CALL_MAX_INVITEES ||
+          invitees.size !== invitedUserIds.length || invitees.has(userId) ||
+          invitedUserIds.some((id) => id !== id.trim())
       ) {
         return errorResponse(
           "validation_error",
-          "Calls require one to nine distinct invitees and a private room",
+          `Calls require one to ${CALL_MAX_INVITEES} distinct invitees and a private room`,
         );
       }
       const { data: resolved, error: resolveError } = await supabase
@@ -255,7 +260,7 @@ Deno.serve(async (req) => {
           "Every participant must be a valid user",
         );
       }
-      maxParticipants = 10;
+      maxParticipants = CALL_HUMAN_CAPACITY;
     } else {
       // ── Subscription-aware participant cap ────────────────────
       // A DVNT Membership supersedes a standalone Sneaky Lynk subscription. We

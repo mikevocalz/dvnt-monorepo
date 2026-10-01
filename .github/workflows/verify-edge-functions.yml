@@ -2,8 +2,14 @@ name: verify edge functions
 
 # Guards the two silent-production-outage modes documented in
 # scripts/verify-edge-functions.mjs: verify_jwt drift on unpinned functions,
-# and the beta signup gate coming back. Static only — no secrets, no network.
+# and the beta signup gate coming back. Static only, no secrets, no network.
 # Run the --live variant manually after a deploy (see package.json).
+#
+# The two jobs below were added because nothing ran them. The Deno suites
+# under functions/_shared are the only tests covering call capacity and the
+# media-lease backoff, and no npm script or workflow executed them; the SQL
+# harness is the only thing that exercises twelve concurrent joiners, which
+# is the failure a two-client test cannot reach.
 
 on:
   pull_request:
@@ -29,3 +35,30 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/verify-edge-functions.mjs
+
+  deno-shared-suites:
+    # 138 Deno.test cases under apps/mobile/supabase/functions/_shared that no
+    # npm script reached before. They own the capacity constants.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno test --no-lock --allow-net --allow-env --allow-read apps/mobile/supabase/functions/_shared/
+
+  call-admission-concurrency:
+    # Boots a throwaway cluster from the runner's own Postgres and drives
+    # twelve parallel connections through admit_call_participant and the media
+    # lease. Fails loudly rather than skipping: --allow-skip is deliberately
+    # NOT passed, so a runner without Postgres breaks the build instead of
+    # reporting a green that proves nothing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-call-capacity.mjs

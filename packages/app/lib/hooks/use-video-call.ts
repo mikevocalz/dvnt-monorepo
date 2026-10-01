@@ -673,7 +673,6 @@ export function useVideoCall() {
       const createResult = await callRoomsApi.createCall({
         title,
         participantIds,
-        maxParticipants: 10,
         hasVideo: callType === "video",
         chatId,
       });

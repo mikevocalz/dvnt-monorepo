@@ -361,6 +361,7 @@ export function CallScreen({
               participants={participants}
               localStream={localStream}
               hasLocalVideo={hasLocalVideo}
+              isLocalMicOn={!isMuted}
               callType="video"
               callDuration={callDuration}
               onOpenParticipants={handleOpenParticipants}
@@ -391,6 +392,7 @@ export function CallScreen({
               participants={participants}
               localStream={localStream}
               hasLocalVideo={hasLocalVideo}
+              isLocalMicOn={!isMuted}
               callType="audio"
               callDuration={callDuration}
               onOpenParticipants={handleOpenParticipants}

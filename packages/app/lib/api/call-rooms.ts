@@ -10,6 +10,10 @@
 import { supabase } from "../supabase/client";
 import { requireBetterAuthToken } from "../auth/identity";
 import { callErrorMessage } from "./call-error-message";
+import {
+  CALL_HUMAN_CAPACITY,
+  CALL_MAX_INVITEES,
+} from "../constants/call-capacity";
 
 interface ApiResponse<T> {
   ok: boolean;
@@ -61,11 +65,23 @@ export const callRoomsApi = {
     /** Group chat this call was started from — the header shows Join/Rejoin. */
     chatId?: string;
   }): Promise<ApiResponse<CallCreateResponse>> {
-    if (params.participantIds.length < 1 || params.participantIds.length > 9 ||
-        new Set(params.participantIds).size !== params.participantIds.length) {
-      return { ok: false, error: { code: "validation_error", message: "Choose one to nine people to call" } };
+    if (
+      params.participantIds.length < 1 ||
+      params.participantIds.length > CALL_MAX_INVITEES ||
+      new Set(params.participantIds).size !== params.participantIds.length
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "validation_error",
+          message: `Choose 1 to ${CALL_MAX_INVITEES} people to call`,
+        },
+      };
     }
-    return callEdgeFunction<CallCreateResponse>("call_create", { ...params, maxParticipants: 10 });
+    return callEdgeFunction<CallCreateResponse>("call_create", {
+      ...params,
+      maxParticipants: CALL_HUMAN_CAPACITY,
+    });
   },
 
   async joinCall(

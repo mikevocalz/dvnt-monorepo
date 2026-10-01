@@ -500,3 +500,6 @@ verify_jwt = false
 # session token, not Supabase JWT, so the gateway JWT check must stay off.
 [functions.game-night-sync]
 verify_jwt = false
+
+[functions.event-reminders]
+verify_jwt = false
