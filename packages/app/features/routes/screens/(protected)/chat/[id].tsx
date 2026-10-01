@@ -1762,16 +1762,20 @@ function ChatScreenContent() {
               >
                 <Video size={22} color="#3EA4E5" />
               </Pressable>
-              {headerGroupMembers.length < MAX_GROUP_CHAT_MEMBERS && (
-                <Pressable
-                  onPress={() => setShowAddMember(true)}
-                  accessibilityLabel="Add member"
-                  style={THREAD_ACTION_BUTTON_STYLE}
-                  hitSlop={12}
-                >
-                  <UserPlus size={22} color="#3EA4E5" />
-                </Pressable>
-              )}
+              <Pressable
+                onPress={() => {
+                  if (headerGroupMembers.length >= MAX_GROUP_CHAT_MEMBERS) {
+                    showToast("error", "12 MAX GROUP CHAT USERS");
+                    return;
+                  }
+                  setShowAddMember(true);
+                }}
+                accessibilityLabel="Add member"
+                style={THREAD_ACTION_BUTTON_STYLE}
+                hitSlop={12}
+              >
+                <UserPlus size={22} color="#3EA4E5" />
+              </Pressable>
             </>
           ) : (
             /* ── 1:1 chat header ── */

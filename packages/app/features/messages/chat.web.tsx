@@ -73,6 +73,7 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
+import { toast } from "sonner";
 import { SharedPostBubble } from "@dvnt/app/components/chat/shared-post-bubble";
 import { AddMemberDialog } from "./add-member.web";
 import { StoryReplyBubble } from "@dvnt/app/components/chat/story-reply-bubble";
@@ -1696,18 +1697,20 @@ export function ChatScreen() {
                 {headerGroupMembers.length === 1 ? "member" : "members"}
               </p>
               <div className="flex items-center gap-1">
-                {headerGroupMembers.length < MAX_GROUP_CHAT_MEMBERS && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowMembers(false);
-                      setShowAddMember(true);
-                    }}
-                    className="mr-2 rounded-full bg-cyan-400 px-3 py-1 text-xs font-semibold text-[#06070d]"
-                  >
-                    Add member
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (headerGroupMembers.length >= MAX_GROUP_CHAT_MEMBERS) {
+                      toast.error("12 MAX GROUP CHAT USERS");
+                      return;
+                    }
+                    setShowMembers(false);
+                    setShowAddMember(true);
+                  }}
+                  className="mr-2 rounded-full bg-cyan-400 px-3 py-1 text-xs font-semibold text-[#06070d]"
+                >
+                  Add member
+                </button>
                 <button
                   type="button"
                   onClick={() => setShowMembers(false)}
