@@ -171,6 +171,74 @@ export function CreateEventScreen() {
   const publishLock = useRef(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  useEffect(() => {
+    // Local MMKV persistence is instant; this adds a debounced server copy so
+    // the same draft can be resumed after a browser reset or on another device.
+    // Server metadata itself is deliberately excluded from the fingerprint so
+    // saving a revision cannot recursively schedule another save.
+    const fingerprint = (state: ReturnType<typeof useCreateEventStore.getState>) =>
+      JSON.stringify({
+        title: state.title,
+        description: state.description,
+        location: state.location,
+        locationData: state.locationData,
+        eventImages: state.eventImages,
+        tags: state.tags,
+        eventDate: state.eventDate,
+        endDate: state.endDate,
+        ticketPrice: state.ticketPrice,
+        maxAttendees: state.maxAttendees,
+        youtubeUrl: state.youtubeUrl,
+        attachLynkRoom: state.attachLynkRoom,
+        ticketingEnabled: state.ticketingEnabled,
+        visibility: state.visibility,
+        ageRestriction: state.ageRestriction,
+        isOnline: state.isOnline,
+        dressCode: state.dressCode,
+        doorPolicy: state.doorPolicy,
+        lineup: state.lineup,
+        perks: state.perks,
+        ticketTiers: state.ticketTiers,
+        addons: state.addons,
+        coOrganizers: state.coOrganizers,
+        guests: state.guests,
+        promoterTemplates: state.promoterTemplates,
+        flyerImage: state.flyerImage,
+        flyerMediaType: state.flyerMediaType,
+        flyerFallbackImage: state.flyerFallbackImage,
+        eventType: state.eventType,
+        disclaimers: state.disclaimers,
+        isNsfw: state.isNsfw,
+        currentStep: state.currentStep,
+        scheduleNeedsReview: state.scheduleNeedsReview,
+      });
+
+    let last = fingerprint(useCreateEventStore.getState());
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = useCreateEventStore.subscribe((state) => {
+      const next = fingerprint(state);
+      if (next === last) return;
+      last = next;
+      if (timer) clearTimeout(timer);
+      if (!state.hasDraft() || state.isSubmitting) return;
+
+      timer = setTimeout(() => {
+        const current = useCreateEventStore.getState();
+        if (!current.hasDraft() || current.isSubmitting || current.isSavingDraft) return;
+        current.setIsSavingDraft(true);
+        void import("@dvnt/app/lib/api/event-drafts")
+          .then(({ eventDraftsApi }) => eventDraftsApi.saveCurrent())
+          .catch((error) => console.warn("[event-drafts] autosave failed", error))
+          .finally(() => useCreateEventStore.getState().setIsSavingDraft(false));
+      }, 1500);
+    });
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
+  }, []);
+
   const saveDraft = async () => {
     if (s.isSavingDraft) return;
     s.setIsSavingDraft(true);
