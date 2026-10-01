@@ -127,11 +127,15 @@ test('growth email stays shut until an unsubscribe URL exists', () => {
 });
 
 test('brand copy is labelled automated and an unknown campaign version sends nothing', () => {
-  const welcome = outbox.campaignMessage('welcome_dm_v1');
+  const welcome = outbox.campaignMessage('welcome_dm_v2');
+  const welcomeEmail = outbox.campaignMessage('welcome_email_v2', 'https://dvntapp.live/u/x');
   assert.match(welcome.body, /^Deviant announcement — automated\n\n/);
+  assert.match(welcomeEmail.body, /^Deviant announcement — automated\n\n/);
+  assert.equal(welcomeEmail.subject, 'Welcome to the cookout — DVNT');
   assert.ok(welcome.body.includes('Welcome to the cookout! The Black Queer cookout.'));
   assert.ok(!welcome.body.includes('Stop these messages'));
   const withLink = outbox.campaignMessage('first_post_v1', 'https://dvntapp.live/u/x');
+  assert.equal(withLink.subject, 'Make your first DVNT post');
   assert.ok(withLink.body.includes('Stop these messages: https://dvntapp.live/u/x'));
   assert.equal(outbox.campaignMessage('welcome_dm_v9'), null);
 });
