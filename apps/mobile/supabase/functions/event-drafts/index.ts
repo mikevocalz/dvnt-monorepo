@@ -40,7 +40,7 @@ function safeClientPayload(input: unknown): Record<string, unknown> | null {
     "eventDate","endDate","ticketPrice","maxAttendees","youtubeUrl",
     "attachLynkRoom","ticketingEnabled","visibility","ageRestriction",
     "isOnline","dressCode","doorPolicy","lineup","perks","ticketTiers",
-    "addons","coOrganizers","flyerImage","flyerMediaType","flyerFallbackImage",
+    "addons","coOrganizers","guests","flyerImage","flyerMediaType","flyerFallbackImage",
     "eventType","disclaimers","isNsfw","currentStep","scheduleNeedsReview",
     "draftSourceEventId","promoterTemplates"
   ];
