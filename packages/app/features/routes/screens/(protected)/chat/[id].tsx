@@ -48,6 +48,7 @@ import {
   Trash2,
   Pencil,
   Copy,
+  UserPlus,
 } from "lucide-react-native";
 import { EmptyState } from "@dvnt/app/components/ui/empty-state";
 
@@ -84,6 +85,8 @@ import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useFeedPostUIStore } from "@dvnt/app/lib/stores/feed-post-store";
 import * as ImagePicker from "expo-image-picker";
 import { MediaPreviewModal } from "@dvnt/app/components/media-preview-modal";
+import { AddMemberSheet } from "@dvnt/app/features/messages/ui/add-member-sheet";
+import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 // expo-video-thumbnails removed — hangs on iOS 26.3
 import { LinearGradient } from "expo-linear-gradient";
 import { useTypingIndicator } from "@dvnt/app/lib/hooks/use-typing-indicator";
@@ -539,6 +542,7 @@ function ChatScreenContent() {
   // CRITICAL FIX #2: Track conversation validation state
   // Prevents markAsRead from firing before recipient load completes
   const [isConversationValid, setIsConversationValid] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
 
   // Refresh messages on focus to pick up read receipts from the other user
   // FIX: Removed unstable chatMessages.length dependency that caused infinite loop
@@ -1758,6 +1762,16 @@ function ChatScreenContent() {
               >
                 <Video size={22} color="#3EA4E5" />
               </Pressable>
+              {headerGroupMembers.length < MAX_GROUP_CHAT_MEMBERS && (
+                <Pressable
+                  onPress={() => setShowAddMember(true)}
+                  accessibilityLabel="Add member"
+                  style={THREAD_ACTION_BUTTON_STYLE}
+                  hitSlop={12}
+                >
+                  <UserPlus size={22} color="#3EA4E5" />
+                </Pressable>
+              )}
             </>
           ) : (
             /* ── 1:1 chat header ── */
@@ -2539,6 +2553,34 @@ function ChatScreenContent() {
             </View>
           </BottomSheetView>
         </BottomSheetModal>
+      {isGroupChat && activeConvId && (
+        <AddMemberSheet
+          visible={showAddMember}
+          onDismiss={() => setShowAddMember(false)}
+          conversationId={activeConvId}
+          currentCount={headerGroupMembers.length}
+          existingMembers={headerGroupMembers}
+          onAdded={() => {
+            // Reload the conversation so the new member shows in the header.
+            void (async () => {
+              try {
+                const conversation =
+                  await messagesApiClient.getConversationById(activeConvId);
+                if (conversation?.isGroup && conversation.members) {
+                  setGroupInfo(
+                    true,
+                    conversation.members,
+                    conversation.groupName || "",
+                    conversation.viewerIsMember,
+                  );
+                }
+              } catch (e) {
+                console.error("[Chat] refresh after add-member failed:", e);
+              }
+            })();
+          }}
+        />
+      )}
       </SafeAreaView>
     </KeyboardAvoidingView>
   );

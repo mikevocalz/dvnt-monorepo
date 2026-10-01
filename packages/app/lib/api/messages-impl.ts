@@ -14,6 +14,7 @@ import {
   getCurrentUserId as getCurrentUserIdAsync,
 } from "../auth/identity";
 import { useAuthStore } from "../stores/auth-store";
+import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 
 /**
  * Resilient visitor ID resolver — tries sync first, falls back to async.
@@ -813,6 +814,9 @@ export const messagesApi = {
    */
   async createGroupConversation(participantIds: string[], groupName: string) {
     try {
+      if (participantIds.length + 1 > MAX_GROUP_CHAT_MEMBERS) {
+        throw new Error("12 MAX GROUP CHAT USERS");
+      }
       const myAuthId = await getCurrentUserAuthId();
       if (!myAuthId) throw new Error("Not authenticated");
 

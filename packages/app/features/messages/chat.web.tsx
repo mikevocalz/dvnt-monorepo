@@ -72,7 +72,9 @@ import {
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
+import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 import { SharedPostBubble } from "@dvnt/app/components/chat/shared-post-bubble";
+import { AddMemberDialog } from "./add-member.web";
 import { StoryReplyBubble } from "@dvnt/app/components/chat/story-reply-bubble";
 import { EventShareBubble } from "@dvnt/app/components/chat/event-share-bubble";
 
@@ -269,6 +271,13 @@ function MessageRow({
   const isFailed = isMe && item.status === "failed";
   const isMsgSending = isMe && item.status === "sending";
 
+  // 1:1 threads feel oversized on desktop when bubbles stretch to 80% of a
+  // 768px container; cap them narrower in that layout while keeping group
+  // bubbles roomy for sender names.
+  const bubbleMaxWidth = isGroupChat
+    ? "max-w-[80%]"
+    : "max-w-[80%] md:max-w-[60%]";
+
   const onDoubleTap = useCallback(() => {
     const now = Date.now();
     if (now - lastTapRef.current < 300) {
@@ -387,7 +396,7 @@ function MessageRow({
         style={{ opacity: isMsgSending ? 0.6 : 1 }}
       >
         <div
-          className="flex max-w-[80%] flex-col items-end"
+          className={`flex ${bubbleMaxWidth} flex-col items-end`}
           style={{ flexShrink: 1 }}
         >
           {isFailed ? (
@@ -442,7 +451,7 @@ function MessageRow({
         size={28}
         variant="roundedSquare"
       />
-      <div className="flex max-w-[80%] flex-col" style={{ flexShrink: 1 }}>
+      <div className={`flex ${bubbleMaxWidth} flex-col`} style={{ flexShrink: 1 }}>
         {isGroupChat && (
           <p
             className="mb-1.5 ml-0.5 text-xs font-bold tracking-wide"
@@ -678,6 +687,7 @@ export function ChatScreen() {
     ];
   }, [currentUser, isGroupChat, safeGroupMembers, viewerIsMember]);
   const [showMembers, setShowMembers] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
 
   // Live call attached to this group chat — powers the header Join button.
   // video_rooms.conversation_id is set by call_create when the caller launched
@@ -1033,6 +1043,10 @@ export function ChatScreen() {
     !isSending &&
     !!activeConvId;
 
+  // 1:1 chats on desktop get a narrower, compact layout; groups still spread
+  // to the wider grid/cards they were designed for.
+  const chatMaxWidth = isGroupChat ? "max-w-3xl" : "max-w-2xl";
+
   // ── Handlers ──
   const handleSend = useCallback(() => {
     const store = useChatStore.getState();
@@ -1249,7 +1263,7 @@ export function ChatScreen() {
     <div className="flex min-h-dvh flex-col bg-[#06070d] text-white">
       {/* ── Header ── */}
       <header
-        className="sticky top-0 z-20 mx-auto flex w-full max-w-3xl items-center gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 py-3 backdrop-blur"
+        className={`sticky top-0 z-20 mx-auto flex w-full items-center gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 py-3 backdrop-blur ${chatMaxWidth}`}
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
         <button
@@ -1369,7 +1383,7 @@ export function ChatScreen() {
         )}
       </header>
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col">
+      <main className={`mx-auto flex w-full flex-1 flex-col ${chatMaxWidth}`}>
         {isLoadingRecipient || isResolvingConversation ? (
           <div className="flex flex-1 flex-col items-center justify-center py-24">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-cyan-400" />
@@ -1544,7 +1558,7 @@ export function ChatScreen() {
       {/* ── Edit bar ── */}
       {editingMessage && (
         <div
-          className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-3xl border-t border-white/12 bg-[#1a1a1a] px-4 pt-2.5"
+          className={`fixed inset-x-0 bottom-0 z-30 mx-auto w-full border-t border-white/12 bg-[#1a1a1a] px-4 pt-2.5 ${chatMaxWidth}`}
           style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 10px + var(--dvnt-tabbar-clearance))" }}
         >
           <div className="mb-2 flex items-center justify-between">
@@ -1681,14 +1695,28 @@ export function ChatScreen() {
                 {headerGroupMembers.length}{" "}
                 {headerGroupMembers.length === 1 ? "member" : "members"}
               </p>
-              <button
-                type="button"
-                onClick={() => setShowMembers(false)}
-                aria-label="Close"
-                className="flex h-8 w-8 items-center justify-center rounded-full text-white/55 hover:bg-white/10"
-              >
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-1">
+                {headerGroupMembers.length < MAX_GROUP_CHAT_MEMBERS && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMembers(false);
+                      setShowAddMember(true);
+                    }}
+                    className="mr-2 rounded-full bg-cyan-400 px-3 py-1 text-xs font-semibold text-[#06070d]"
+                  >
+                    Add member
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowMembers(false)}
+                  aria-label="Close"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-white/55 hover:bg-white/10"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
             <div className="max-h-80 overflow-y-auto py-1">
               {headerGroupMembers.map((m) => {
@@ -1730,6 +1758,21 @@ export function ChatScreen() {
             </div>
           </div>
         </div>
+      )}
+
+      {showAddMember && isGroupChat && activeConvId && (
+        <AddMemberDialog
+          conversationId={activeConvId}
+          currentCount={headerGroupMembers.length}
+          existingIds={new Set(
+            headerGroupMembers.map((m) => String(m.id || m.authId || "")),
+          )}
+          onClose={() => setShowAddMember(false)}
+          onAdded={() => {
+            // Rehydrate member list so the new person shows up.
+            loadedRecipientConvIdRef.current = null;
+          }}
+        />
       )}
     </div>
   );
