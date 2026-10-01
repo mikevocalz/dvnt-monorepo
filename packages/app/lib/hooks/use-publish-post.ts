@@ -15,6 +15,8 @@ import {
   persistLocalMediaSelection,
 } from "@dvnt/app/lib/media/persist-local-selection";
 import { storage } from "@dvnt/app/lib/utils/storage";
+import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
+import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
 
 type Draft = ReturnType<typeof useCreatePostStore.getState>;
 
@@ -86,7 +88,15 @@ function usePublishTaskDeps(): PublishTaskDeps {
           : { error: result.error || "Media upload failed. Try again." },
       );
     },
-    createPost: (input) => createPost(input),
+    createPost: async (input) => {
+      // If this composer came from the ticket→first-post offer, re-check the
+      // event at the actual publish boundary (after any media/upload delay).
+      // The helper fails closed if visibility can no longer be proven public.
+      await assertFirstPostPublishable();
+      const post = await createPost(input);
+      if (post?.id) useFirstPostOfferStore.getState().clearPending();
+      return post;
+    },
     addPlacedTags: (postId, tags) => {
       void postTagsApi
         .addTags(postId, tags.map((tag) => ({
