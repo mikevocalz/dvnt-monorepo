@@ -75,6 +75,8 @@ import {
 import { inviteEventGuests } from "@dvnt/app/lib/api/privileged";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { eventsApi } from "@dvnt/app/lib/api/events";
+import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import {
   EVENT_TYPE_OPTIONS,
   SUGGESTED_TAGS,
@@ -170,6 +172,27 @@ export function CreateEventScreen() {
   const [busy, setBusy] = useState(false);
   const publishLock = useRef(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const saveDraft = async () => {
+    if (s.isSavingDraft) return;
+    s.setIsSavingDraft(true);
+    try {
+      const saved = await eventDraftsApi.saveCurrent();
+      showToast(
+        "success",
+        "Draft saved",
+        saved.revision > 1 ? "Your draft was updated." : "You can resume this draft from Host Dashboard.",
+      );
+    } catch (error) {
+      showToast(
+        "error",
+        "Couldn't save draft",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    } finally {
+      s.setIsSavingDraft(false);
+    }
+  };
 
   const places = usePlacesAutocomplete({
     value: s.location,
@@ -366,7 +389,13 @@ export function CreateEventScreen() {
       if (created?.replayed && id) {
         // A previous attempt already created this row. Setup may have partly
         // completed before the app closed; never duplicate ticket inventory.
+        const replayedDraftId = s.serverDraftId;
         s.resetDraft();
+        if (replayedDraftId) {
+          void eventDraftsApi.delete(replayedDraftId).catch((error) =>
+            console.warn("[create-event] replayed draft cleanup failed", error),
+          );
+        }
         showToast("warning", "Event already published", "Review tickets and add-ons in Edit before sharing it.");
         if (screenMounted.current) router.push(`/feed/events/${id}/edit`);
         return;
@@ -478,6 +507,31 @@ export function CreateEventScreen() {
         }
       }
 
+      // Promoters copied by Duplicate Event are fresh invitations/configuration.
+      // Historical earnings, attributed orders and acceptance state are never
+      // part of the draft.
+      if (id && s.promoterTemplates.length > 0) {
+        const failed: string[] = [];
+        for (const promoter of s.promoterTemplates) {
+          try {
+            await promotersApi.add({
+              eventId: Number(id),
+              username: promoter.username || undefined,
+              displayName: promoter.displayName || undefined,
+              code: promoter.code || undefined,
+              customerDiscountBps: promoter.customerDiscountBps,
+              promoterCommissionBps: promoter.promoterCommissionBps,
+            });
+          } catch (error) {
+            console.warn("[create-event] promoter template failed", promoter, error);
+            failed.push(promoter.displayName || promoter.username || "Promoter");
+          }
+        }
+        if (failed.length) {
+          showToast("warning", "Some promoters weren't recreated", failed.join(", "));
+        }
+      }
+
       // Guest list. Same shape as the co-organizer write-back and for the same
       // reason: there was no event id to attach an invite to until now. One
       // batched call, and a guest who can't be added never rolls back a
@@ -506,7 +560,13 @@ export function CreateEventScreen() {
         }
       }
 
+      const publishedDraftId = s.serverDraftId;
       s.resetDraft();
+      if (publishedDraftId) {
+        void eventDraftsApi.delete(publishedDraftId).catch((error) =>
+          console.warn("[create-event] published draft cleanup failed", error),
+        );
+      }
       if (ticketSetupFailed) {
         showToast(
           "warning",
@@ -598,13 +658,22 @@ export function CreateEventScreen() {
       <div className="mx-auto max-w-5xl px-4 pt-4 pb-28">
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-2xl font-extrabold">Create event</h1>
-          <button
-            onClick={publish}
-            disabled={publishing}
-            className="h-10 px-5 rounded-full bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-40"
-          >
-            {publishing ? "Publishing…" : "Publish"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void saveDraft()}
+              disabled={s.isSavingDraft || publishing || !s.hasDraft()}
+              className="h-10 px-4 rounded-full border border-white/15 bg-white/5 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              {s.isSavingDraft ? "Saving…" : s.serverDraftId ? "Update draft" : "Save draft"}
+            </button>
+            <button
+              onClick={publish}
+              disabled={publishing}
+              className="h-10 px-5 rounded-full bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-40"
+            >
+              {publishing ? "Publishing…" : "Publish"}
+            </button>
+          </div>
         </div>
         {publishing && (
           <div role="status" className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
