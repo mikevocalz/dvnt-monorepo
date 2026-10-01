@@ -146,13 +146,22 @@ export function CheckoutSuccessScreen() {
   const firstPost = useFirstPostOffer(effectiveCartId, tickets);
   const showToast = useUIStore((s) => s.showToast);
 
-  const handleMakeFirstPost = useCallback(() => {
+  const handleMakeFirstPost = useCallback(async () => {
     if (!firstPost.draft) return;
-    if (firstPost.accept(firstPost.draft) === "kept-existing") {
-      showToast("info", "Post in progress", "We kept the post you started.");
-      return;
+    try {
+      const result = await firstPost.accept(firstPost.draft);
+      if (result === "kept-existing") {
+        showToast("info", "Post in progress", "We kept the post you started.");
+        return;
+      }
+      if (result === "unavailable") {
+        showToast("info", "Offer already used", "Your first-post offer has already been resolved.");
+        return;
+      }
+      router.push("/feed/create");
+    } catch (error) {
+      showToast("error", "Couldn't start your post", error instanceof Error ? error.message : "Try again.");
     }
-    router.push("/feed/create");
   }, [firstPost, router, showToast]);
 
   return (
@@ -266,7 +275,7 @@ export function CheckoutSuccessScreen() {
             <div className="flex gap-2.5">
               <button
                 type="button"
-                onClick={firstPost.skip}
+                onClick={() => void firstPost.skip()}
                 className="flex h-11 flex-1 items-center justify-center rounded-xl bg-white/8 text-sm font-bold text-white active:bg-white/12"
               >
                 Skip
