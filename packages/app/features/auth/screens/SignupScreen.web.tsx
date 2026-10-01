@@ -179,7 +179,7 @@ export function SignupScreen() {
                 Your verification is processing. You can check again after returning from the verification window.
               </Text>
             )}
-            {(verification.data?.state === 'retry_required' || verification.data?.state === 'expired') && (
+            {(verification.data?.state === 'retry_required') && (
               <Text style={{ color: '#fb7185', fontSize: 13, textAlign: 'center' }}>
                 {verification.data?.message || 'Verification needs another attempt.'}
               </Text>
