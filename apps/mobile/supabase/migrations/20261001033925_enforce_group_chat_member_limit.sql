@@ -5,20 +5,24 @@ CREATE OR REPLACE FUNCTION enforce_group_chat_member_limit()
 RETURNS TRIGGER AS $$
 DECLARE
   current_count integer;
-  is_group boolean;
+  v_is_group boolean;
 BEGIN
   -- Only restrict participants on group conversations.
-  SELECT is_group INTO is_group
-  FROM public.conversations
+  SELECT c.is_group INTO v_is_group
+  FROM public.conversations c
   WHERE id = NEW.parent_id;
 
-  IF is_group IS DISTINCT FROM TRUE THEN
+  IF v_is_group IS DISTINCT FROM TRUE THEN
     RETURN NEW;
   END IF;
 
   IF NEW.path IS DISTINCT FROM 'participants' THEN
     RETURN NEW;
   END IF;
+
+  -- Lock the parent conversation row so concurrent inserts serialize on the
+  -- membership count instead of racing each other past the limit.
+  PERFORM 1 FROM public.conversations WHERE id = NEW.parent_id FOR UPDATE;
 
   SELECT COUNT(*) INTO current_count
   FROM public.conversations_rels
