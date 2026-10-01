@@ -75,8 +75,6 @@ import {
 import { inviteEventGuests } from "@dvnt/app/lib/api/privileged";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { eventsApi } from "@dvnt/app/lib/api/events";
-import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
-import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import {
   EVENT_TYPE_OPTIONS,
   SUGGESTED_TAGS,
@@ -177,6 +175,7 @@ export function CreateEventScreen() {
     if (s.isSavingDraft) return;
     s.setIsSavingDraft(true);
     try {
+      const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
       const saved = await eventDraftsApi.saveCurrent();
       showToast(
         "success",
@@ -392,7 +391,9 @@ export function CreateEventScreen() {
         const replayedDraftId = s.serverDraftId;
         s.resetDraft();
         if (replayedDraftId) {
-          void eventDraftsApi.delete(replayedDraftId).catch((error) =>
+          void import("@dvnt/app/lib/api/event-drafts")
+            .then(({ eventDraftsApi }) => eventDraftsApi.delete(replayedDraftId))
+            .catch((error) =>
             console.warn("[create-event] replayed draft cleanup failed", error),
           );
         }
@@ -514,6 +515,7 @@ export function CreateEventScreen() {
         const failed: string[] = [];
         for (const promoter of s.promoterTemplates) {
           try {
+            const { promotersApi } = await import("@dvnt/app/lib/api/promoters");
             await promotersApi.add({
               eventId: Number(id),
               username: promoter.username || undefined,
@@ -563,7 +565,9 @@ export function CreateEventScreen() {
       const publishedDraftId = s.serverDraftId;
       s.resetDraft();
       if (publishedDraftId) {
-        void eventDraftsApi.delete(publishedDraftId).catch((error) =>
+        void import("@dvnt/app/lib/api/event-drafts")
+          .then(({ eventDraftsApi }) => eventDraftsApi.delete(publishedDraftId))
+          .catch((error) =>
           console.warn("[create-event] published draft cleanup failed", error),
         );
       }
