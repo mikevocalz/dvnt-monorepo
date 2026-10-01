@@ -42,10 +42,7 @@ import {
   type HostDashboardEvent,
 } from "@dvnt/app/lib/api/privileged";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
-import {
-  eventDraftsApi,
-  type EventDraftSummary,
-} from "@dvnt/app/lib/api/event-drafts";
+import type { EventDraftSummary } from "@dvnt/app/lib/api/event-drafts";
 import { useHostSectionsStore } from "./host-sections-store";
 
 function formatMoney(cents: number): string {
@@ -303,12 +300,16 @@ export function HostScreen() {
   });
   const savedDrafts = useQuery({
     queryKey: ["event-drafts"],
-    queryFn: eventDraftsApi.list,
+    queryFn: async () => {
+      const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
+      return eventDraftsApi.list();
+    },
     staleTime: 10_000,
   });
 
   const openSavedDraft = useCallback(
     async (draftId: string) => {
+      const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
       await eventDraftsApi.open(draftId);
       router.push("/feed/events/create");
     },
@@ -320,6 +321,7 @@ export function HostScreen() {
       if (typeof window !== "undefined" && !window.confirm("Delete this saved event draft?")) {
         return;
       }
+      const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
       await eventDraftsApi.delete(draftId);
       await savedDrafts.refetch();
     },
