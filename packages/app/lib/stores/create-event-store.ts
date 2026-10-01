@@ -72,6 +72,14 @@ interface CoOrganizer {
  */
 export type EventGuestDraft = CoOrganizer;
 
+export interface PromoterTemplateDraft {
+  username: string | null;
+  displayName: string;
+  code: string;
+  customerDiscountBps: number;
+  promoterCommissionBps: number;
+}
+
 /** Editor row → `price_schedule` jsonb entry ("price changes to $X at T"). */
 export interface TierScheduleRow {
   effectiveAt: string; // ISO — when the new price takes effect
@@ -105,6 +113,13 @@ interface TicketTier {
 // Fields that persist as a draft
 interface DraftFields {
   clientRequestId: string | null;
+  /** Server-backed named draft identity; null means this is only the local autosave. */
+  serverDraftId: string | null;
+  serverDraftRevision: number | null;
+  /** Live event this draft was intentionally duplicated from. */
+  draftSourceEventId: number | null;
+  /** Duplicate Event cannot publish until the organizer explicitly picks a date. */
+  scheduleNeedsReview: boolean;
   title: string;
   description: string;
   location: string;
@@ -131,6 +146,8 @@ interface DraftFields {
   addons: DraftAddon[];
   coOrganizers: CoOrganizer[];
   guests: EventGuestDraft[];
+  /** Fresh promoter invitations to recreate after publishing a duplicated event. */
+  promoterTemplates: PromoterTemplateDraft[];
   flyerImage: string | null;
   flyerMediaType: "image" | "video";
   // Fallback still image shown when the primary flyer is a video and the
@@ -178,6 +195,14 @@ interface UIFields {
 
 interface CreateEventActions {
   getPublishRequestId: () => string;
+  setServerDraftMeta: (id: string | null, revision: number | null) => void;
+  setPromoterTemplates: (
+    v: PromoterTemplateDraft[] | ((prev: PromoterTemplateDraft[]) => PromoterTemplateDraft[]),
+  ) => void;
+  loadServerDraft: (
+    payload: Partial<DraftFields>,
+    meta: { id: string; revision: number },
+  ) => void;
   // Draft field setters
   setTitle: (v: string) => void;
   setDescription: (v: string) => void;
@@ -267,6 +292,10 @@ type CreateEventState = DraftFields & UIFields & CreateEventActions;
 
 const DRAFT_DEFAULTS: DraftFields = {
   clientRequestId: null,
+  serverDraftId: null,
+  serverDraftRevision: null,
+  draftSourceEventId: null,
+  scheduleNeedsReview: false,
   title: "",
   description: "",
   location: "",
@@ -291,6 +320,7 @@ const DRAFT_DEFAULTS: DraftFields = {
   addons: [],
   coOrganizers: [],
   guests: [],
+  promoterTemplates: [],
   flyerImage: null,
   flyerMediaType: "image",
   flyerFallbackImage: null,
@@ -340,7 +370,7 @@ export const useCreateEventStore = create<CreateEventState>()(
       setEventImages: (v) =>
         set((s) => ({ eventImages: resolve(v, s.eventImages) })),
       setTags: (v) => set((s) => ({ tags: resolve(v, s.tags) })),
-      setEventDate: (v) => set({ eventDate: v }),
+      setEventDate: (v) => set({ eventDate: v, scheduleNeedsReview: false }),
       setEndDate: (v) => set({ endDate: v }),
       setTicketPrice: (v) => set({ ticketPrice: v }),
       setMaxAttendees: (v) => set({ maxAttendees: v }),
@@ -363,6 +393,21 @@ export const useCreateEventStore = create<CreateEventState>()(
       setEventType: (v) => set({ eventType: v }),
       setDisclaimers: (v) => set({ disclaimers: v }),
       setIsNsfw: (v) => set({ isNsfw: v }),
+      setServerDraftMeta: (id, revision) =>
+        set({ serverDraftId: id, serverDraftRevision: revision }),
+      setPromoterTemplates: (v) =>
+        set((s) => ({ promoterTemplates: resolve(v, s.promoterTemplates) })),
+      loadServerDraft: (payload, meta) =>
+        set({
+          ...DRAFT_DEFAULTS,
+          ...UI_DEFAULTS,
+          ...payload,
+          // A server draft is configuration, never a continuation of a live
+          // publish idempotency operation from another device.
+          clientRequestId: null,
+          serverDraftId: meta.id,
+          serverDraftRevision: meta.revision,
+        }),
 
       getPublishRequestId: () => {
         const existing = get().clientRequestId;
@@ -528,6 +573,10 @@ export const useCreateEventStore = create<CreateEventState>()(
       },
       partialize: (state) => ({
         clientRequestId: state.clientRequestId,
+        serverDraftId: state.serverDraftId,
+        serverDraftRevision: state.serverDraftRevision,
+        draftSourceEventId: state.draftSourceEventId,
+        scheduleNeedsReview: state.scheduleNeedsReview,
         title: state.title,
         description: state.description,
         location: state.location,
@@ -552,6 +601,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         addons: state.addons,
         coOrganizers: state.coOrganizers,
         guests: state.guests,
+        promoterTemplates: state.promoterTemplates,
         flyerImage: state.flyerImage,
         flyerMediaType: state.flyerMediaType,
         flyerFallbackImage: state.flyerFallbackImage,
