@@ -132,7 +132,7 @@ test('brand copy is labelled automated and an unknown campaign version sends not
   assert.match(welcome.body, /^Deviant announcement — automated\n\n/);
   assert.match(welcomeEmail.body, /^Deviant announcement — automated\n\n/);
   assert.equal(welcomeEmail.subject, 'Welcome to the cookout — DVNT');
-  assert.ok(welcome.body.includes('Welcome to the cookout! The Black Queer cookout.'));
+  assert.ok(welcome.body.includes('Welcome to the cookout! (The Black, Brown & Queer cookout aka B.B.Q.)'));
   assert.ok(!welcome.body.includes('Stop these messages'));
   const withLink = outbox.campaignMessage('first_post_v1', 'https://dvntapp.live/u/x');
   assert.equal(withLink.subject, 'Make your first DVNT post');
