@@ -279,6 +279,16 @@ export function CreateEventScreen() {
   const errors: EventFormErrors = attempted ? validation.errors : {};
 
   const publish = async () => {
+    if (s.scheduleNeedsReview) {
+      setAttempted(true);
+      showToast(
+        "error",
+        "Choose a new event date",
+        "This is a duplicated event. Review the schedule before publishing so the copy cannot reuse the original event time.",
+      );
+      return;
+    }
+
     // DIAGNOSTIC: label every awaited step so an infinite "Publishing…" becomes
     // a 20s error naming the exact stalling call (upload / create-event / ticket).
     // Also a hard backstop against any single hung network call.
@@ -747,6 +757,11 @@ export function CreateEventScreen() {
             </button>
           </div>
         </div>
+        {s.scheduleNeedsReview ? (
+          <div role="alert" className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-sm text-amber-100">
+            Duplicated event: choose and confirm a new date/time before publishing.
+          </div>
+        ) : null}
         {publishing && (
           <div role="status" className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
             {s.uploadProgress > 0 && s.uploadProgress < 100 ? "Uploading event media…" : "Publishing event…"}
