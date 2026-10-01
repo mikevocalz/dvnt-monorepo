@@ -1,6 +1,6 @@
 import { View, Text, Pressable, Platform, Alert, Linking } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -9,11 +9,6 @@ import Animated, {
 import * as Haptics from "expo-haptics";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { usePathname } from "expo-router";
-import {
-  useStartVerification,
-  useVerificationState,
-} from "@dvnt/app/lib/hooks/use-age-verification";
-import { canUseSpicyContent } from "@dvnt/app/lib/auth/verification-state";
 
 const TRACK_WIDTH = 84;
 const TRACK_HEIGHT = 42;
@@ -39,8 +34,7 @@ export function SpicyToggleFAB({ accessoryPlacement }: SpicyToggleFABProps) {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const isAccessory = accessoryPlacement !== undefined;
-  const verification = useVerificationState();
-  const startVerification = useStartVerification();
+  const verificationInFlight = useRef(false);
 
   // Reanimated shared value — survives OTA reloads correctly
   const thumbX = useSharedValue(nsfwEnabled ? THUMB_ON : THUMB_OFF);
@@ -56,18 +50,6 @@ export function SpicyToggleFAB({ accessoryPlacement }: SpicyToggleFABProps) {
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: thumbX.value }],
   }));
-
-  // A stale persisted toggle cannot keep SPICY enabled after account switch,
-  // verification expiry, or a failed/rejected identity decision.
-  useEffect(() => {
-    if (
-      nsfwEnabled &&
-      verification.data &&
-      !canUseSpicyContent(verification.data)
-    ) {
-      useAppStore.getState().setNsfwEnabled(false, "verification_required");
-    }
-  }, [nsfwEnabled, verification.data]);
 
   useEffect(() => {
     console.log("[SpicyToggle] mount", {
@@ -99,10 +81,14 @@ export function SpicyToggleFAB({ accessoryPlacement }: SpicyToggleFABProps) {
     });
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    if (nextEnabled && !canUseSpicyContent(verification.data)) {
-      if (verification.isLoading || startVerification.isPending) return;
+    if (nextEnabled) {
+      if (verificationInFlight.current) return;
+      verificationInFlight.current = true;
       try {
-        const result = await startVerification.mutateAsync();
+        const { startSpicyVerification } = await import(
+          "@dvnt/app/lib/auth/start-spicy-verification"
+        );
+        const result = await startSpicyVerification();
         if (result.status === "passed") {
           store.setNsfwEnabled(true, source);
           return;
@@ -118,21 +104,18 @@ export function SpicyToggleFAB({ accessoryPlacement }: SpicyToggleFABProps) {
       } catch (error) {
         Alert.alert(
           "Verification unavailable",
-          error instanceof Error ? error.message : "Try verification again in a moment.",
+          error instanceof Error
+            ? error.message
+            : "Try verification again in a moment.",
         );
+      } finally {
+        verificationInFlight.current = false;
       }
       return;
     }
 
-    store.setNsfwEnabled(nextEnabled, source);
-  }, [
-    accessoryPlacement,
-    isAccessory,
-    pathname,
-    startVerification,
-    verification.data,
-    verification.isLoading,
-  ]);
+    store.setNsfwEnabled(false, source);
+  }, [accessoryPlacement, isAccessory, pathname]);
 
   const pressable = (
     <Pressable
@@ -147,10 +130,7 @@ export function SpicyToggleFAB({ accessoryPlacement }: SpicyToggleFABProps) {
       hitSlop={12}
       accessibilityRole="switch"
       accessibilityLabel="Spicy toggle"
-      accessibilityState={{
-        checked: nsfwEnabled,
-        busy: startVerification.isPending || verification.isLoading,
-      }}
+      accessibilityState={{ checked: nsfwEnabled }}
       testID="feed-spicy-toggle"
       style={
         isAccessory
