@@ -4,7 +4,9 @@ import type { ConfirmedEvent } from "@dvnt/app/lib/posts/first-post-draft";
 
 export interface FirstPostServerOffer {
   id: string;
-  event: ConfirmedEvent;
+  state?: "offered" | "accepted" | "dismissed" | "invalidated" | string;
+  event?: ConfirmedEvent;
+  event_id?: number;
 }
 
 interface OfferResponse {
