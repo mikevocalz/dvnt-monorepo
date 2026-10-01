@@ -1413,7 +1413,7 @@ function MessagesScreenContent() {
             Inbox
           </Text>
           {inboxUnreadCount > 0 && (
-            <View className="bg-primary rounded-full px-1.5 py-0.5 min-w-[18px] items-center">
+            <View className="bg-primary rounded-full px-1.5 py-0.5 min-w-4.5 items-center">
               <Text className="text-[10px] text-white font-bold">
                 {inboxUnreadCount}
               </Text>
@@ -1440,7 +1440,7 @@ function MessagesScreenContent() {
             Requests
           </Text>
           {spamUnreadCount > 0 && (
-            <View className="bg-muted-foreground rounded-full px-1.5 py-0.5 min-w-[18px] items-center">
+            <View className="bg-muted-foreground rounded-full px-1.5 py-0.5 min-w-4.5 items-center">
               <Text className="text-[10px] text-white font-bold">
                 {spamUnreadCount}
               </Text>
