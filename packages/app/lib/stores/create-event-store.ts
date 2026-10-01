@@ -166,6 +166,7 @@ interface UIFields {
   showEndDatePicker: boolean;
   showEndTimePicker: boolean;
   isSubmitting: boolean;
+  isSavingDraft: boolean;
   uploadProgress: number;
   customTag: string;
   lineupInput: string;
@@ -241,6 +242,7 @@ interface CreateEventActions {
   setShowEndDatePicker: (v: boolean) => void;
   setShowEndTimePicker: (v: boolean) => void;
   setIsSubmitting: (v: boolean) => void;
+  setIsSavingDraft: (v: boolean) => void;
   setUploadProgress: (v: number) => void;
   setCustomTag: (v: string) => void;
   setLineupInput: (v: string) => void;
@@ -335,6 +337,7 @@ const UI_DEFAULTS: UIFields = {
   showEndDatePicker: false,
   showEndTimePicker: false,
   isSubmitting: false,
+  isSavingDraft: false,
   uploadProgress: 0,
   customTag: "",
   lineupInput: "",
@@ -423,6 +426,7 @@ export const useCreateEventStore = create<CreateEventState>()(
       setShowEndDatePicker: (v) => set({ showEndDatePicker: v }),
       setShowEndTimePicker: (v) => set({ showEndTimePicker: v }),
       setIsSubmitting: (v) => set({ isSubmitting: v }),
+      setIsSavingDraft: (v) => set({ isSavingDraft: v }),
       setUploadProgress: (v) => set({ uploadProgress: v }),
       setCustomTag: (v) => set({ customTag: v }),
       setLineupInput: (v) => set({ lineupInput: v }),
