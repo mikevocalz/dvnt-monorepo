@@ -32,8 +32,6 @@ import {
   Calendar,
   ChevronDown,
   ChevronRight,
-  FilePenLine,
-  Trash2,
   Ticket,
   TrendingUp,
 } from "lucide-react";
@@ -263,7 +261,7 @@ function SavedDrafts({
               className="flex min-w-0 flex-1 items-center gap-3 text-left"
             >
               <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[#3FDCFF]/18 bg-[#3FDCFF]/8">
-                <FilePenLine size={18} color="#3FDCFF" />
+                <Calendar size={18} color="#3FDCFF" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[15px] font-semibold text-white">
@@ -282,7 +280,7 @@ function SavedDrafts({
               onClick={() => onDelete(draft.id)}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/35 hover:bg-red-500/10 hover:text-red-300"
             >
-              <Trash2 size={16} />
+              <span aria-hidden className="text-lg leading-none">×</span>
             </button>
           </div>
         ))}
