@@ -246,12 +246,54 @@ Deno.serve(async (req) => {
       roomsById.set(room.id, room);
     }
 
-    const rooms = [...roomsById.values()].sort((a, b) => {
+    let rooms = [...roomsById.values()].sort((a, b) => {
       if (a.status !== b.status) return a.status === "open" ? -1 : 1;
       return (
         new Date(b.created_at || 0).getTime() -
         new Date(a.created_at || 0).getTime()
       );
+    });
+
+    // Linked event rooms can be pre-created hours/days before doors. They must
+    // never leak into the "live" Lynk list simply because video_rooms.status is
+    // open. Event schedule/status is the authoritative visibility gate.
+    const roomUuids = rooms.map((room: any) => room.uuid).filter(Boolean);
+    const eventByRoom = new Map<string, any>();
+    if (roomUuids.length > 0) {
+      const { data: linkedEvents, error: linkedError } = await supabase
+        .from("events")
+        .select("id, lynk_room_id, start_date, end_date, status")
+        .in("lynk_room_id", roomUuids);
+      if (linkedError) {
+        console.error("[video_list_rooms] Linked event lookup failed:", linkedError);
+        return errorResponse("internal_error", "Could not verify scheduled rooms");
+      }
+      for (const event of linkedEvents || []) {
+        if (event.lynk_room_id) eventByRoom.set(String(event.lynk_room_id), event);
+      }
+    }
+
+    rooms = rooms.filter((room: any) => {
+      const event = eventByRoom.get(String(room.uuid || ""));
+      if (!event) return true;
+      if (["cancelled", "deleted"].includes(String(event.status || ""))) return false;
+
+      const start = Date.parse(event.start_date || "");
+      if (!Number.isFinite(start)) return false;
+      if (nowMs < start) return false;
+
+      const explicitEnd = Date.parse(event.end_date || "");
+      const end = Number.isFinite(explicitEnd)
+        ? explicitEnd
+        : start + 6 * 60 * 60 * 1000;
+
+      // Once an event ends, retain its ended-card history for no more than 24h.
+      // An "open" row past event end is stale and must not look live.
+      if (nowMs >= end) {
+        if (room.status !== "ended") return false;
+        return nowMs - end <= 24 * 60 * 60 * 1000;
+      }
+      return room.status === "open";
     });
 
     const creatorIds = [
@@ -326,6 +368,13 @@ Deno.serve(async (req) => {
             listeners: audience.listeners,
             maxParticipants: room.max_participants || 50,
             fishjamRoomId: room.fishjam_room_id || undefined,
+            ...(eventByRoom.has(String(room.uuid || ""))
+              ? {
+                  eventId: eventByRoom.get(String(room.uuid || ""))?.id,
+                  scheduledStart: eventByRoom.get(String(room.uuid || ""))?.start_date,
+                  scheduledEnd: eventByRoom.get(String(room.uuid || ""))?.end_date,
+                }
+              : {}),
           };
         }),
       },
