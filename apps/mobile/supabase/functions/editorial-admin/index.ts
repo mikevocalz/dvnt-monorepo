@@ -3,6 +3,15 @@ import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-s
 const URL=Deno.env.get("SUPABASE_URL")||""; const KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
 function json(req:Request,b:unknown,s=200){return new Response(JSON.stringify(b),{status:s,headers:{...corsHeaders(req),"Content-Type":"application/json"}})}
 function adminIds(){return new Set((Deno.env.get("DVNT_ADMIN_AUTH_IDS")||"").split(",").map(x=>x.trim()).filter(Boolean))}
+function isAdultDob(value:unknown){
+ const dob=new Date(`${String(value||"")}T00:00:00Z`); if(!Number.isFinite(dob.getTime())) return false;
+ const cutoff=new Date(); cutoff.setUTCFullYear(cutoff.getUTCFullYear()-18);
+ return dob.getTime()<=cutoff.getTime();
+}
+async function verifiedAdultTarget(db:any,userId:string){
+ const {data}=await db.from("identity_verifications").select("status,date_of_birth").eq("user_id",userId).maybeSingle();
+ return data?.status==="passed" && isAdultDob(data?.date_of_birth);
+}
 function sourcesValid(profile:any,sources:any[]){
  const p=profile?.source_policy||{};
  if((p.citations_required||p.current_sources_required||p.citations_required_for_news) && sources.length===0) return false;
@@ -37,9 +46,32 @@ Deno.serve(async(req)=>{
    if(!profile.account_auth_id) return json(req,{ok:false,error:"Bind the profile to a real DVNT editorial account before scheduling"},409);
    const sources=Array.isArray(body.sources)?body.sources:[];
    if(!sourcesValid(profile,sources)) return json(req,{ok:false,error:"This editorial lane requires source provenance"},400);
+   const jobType=body.job_type==="engagement"?"engagement":"content";
+   const engagementAction=jobType==="engagement"?String(body.engagement_action||""):null;
+   const targetUserId=jobType==="engagement"?String(body.target_user_id||""):null;
+   const targetPostId=jobType==="engagement"&&body.target_post_id!=null?Number(body.target_post_id):null;
+   if(jobType==="engagement"){
+     if(!["like","follow","comment"].includes(engagementAction||"")||!targetUserId){
+       return json(req,{ok:false,error:"Engagement jobs require a valid action and target_user_id"},400);
+     }
+     // Editorial automation never engages an account until DVNT has positive
+     // 18+ identity evidence. This is intentionally stricter than the general
+     // rollout cohort so a service-role bot cannot reach a minor through a
+     // path the client gate would otherwise hide.
+     if(!(await verifiedAdultTarget(db,targetUserId))){
+       await db.from("editorial_engagement_audit").insert({
+         profile_id:profile.id,action:engagementAction,target_user_id:targetUserId,
+         target_post_id:Number.isFinite(targetPostId)?targetPostId:null,
+         reason:"Target is not a verified adult",status:"blocked",
+       });
+       return json(req,{ok:false,error:"Editorial engagement target is not verified 18+"},403);
+     }
+   }
    const key=String(body.idempotency_key||crypto.randomUUID());
    const row={
-     profile_id:profile.id,idempotency_key:key,job_type:"content",stage:"intake",
+     profile_id:profile.id,idempotency_key:key,job_type:jobType,
+     engagement_action:engagementAction,target_user_id:targetUserId,
+     target_post_id:Number.isFinite(targetPostId)?targetPostId:null,stage:"intake",
      idea:String(body.idea||"").trim().slice(0,5000),source_snapshot:sources,
      scheduled_for:body.scheduled_for||null,prompt_version:profile.prompt_version,created_by:actor,
    };
