@@ -48,6 +48,7 @@ import {
   ticketConfirmation,
 } from "../_shared/send-resend-email.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
+import { sendTicketSms } from "../_shared/ticket-sms-delivery.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -264,13 +265,17 @@ Deno.serve(async (req: Request) => {
     };
     const resolved: Resolved[] = [];
     const guests: { raw: string; email: string }[] = [];
+    const phoneGuests: { raw: string; phone: string }[] = [];
     const guestSeen = new Set<string>();
+    const phoneSeen = new Set<string>();
     for (const p of validParsed) {
       const n = p.norm!;
       const u =
         n.kind === "username"
           ? userByUsername.get(n.value)
-          : userByEmail.get(n.value);
+          : n.kind === "email"
+            ? userByEmail.get(n.value)
+            : null;
       const route = routeCompRecipient(p.raw, u ?? null);
       if (route.route === "skip") {
         skipped.push({ recipient: p.raw, reason: route.reason });
@@ -285,12 +290,21 @@ Deno.serve(async (req: Request) => {
         guests.push({ raw: p.raw, email: route.email });
         continue;
       }
+      if (route.route === "phone_guest") {
+        if (phoneSeen.has(route.phone)) {
+          skipped.push({ recipient: p.raw, reason: "Same phone already included in this batch" });
+          continue;
+        }
+        phoneSeen.add(route.phone);
+        phoneGuests.push({ raw: p.raw, phone: route.phone });
+        continue;
+      }
       resolved.push({ raw: p.raw, authId: u!.authId, intId: u!.intId });
     }
 
-    if (resolved.length === 0 && guests.length === 0) {
+    if (resolved.length === 0 && guests.length === 0 && phoneGuests.length === 0) {
       return json(
-        { ok: true, data: { issued: 0, guest_issued: 0, skipped, delivery: [] } },
+        { ok: true, data: { issued: 0, guest_issued: 0, phone_guest_issued: 0, skipped, delivery: [] } },
         200,
         req,
       );
@@ -363,6 +377,40 @@ Deno.serve(async (req: Request) => {
         const mintedEmails = new Set(guestIssued.map((t) => t.guest_email));
         for (const g of guests) {
           if (!mintedEmails.has(g.email)) skipped.push({
+            recipient: g.raw, reason: "Already holds a ticket in this tier",
+          });
+        }
+      }
+    }
+
+    // ── Phone guest comps: issue first, deliver separately via SMS ──────────
+    let phoneIssued: { id: string; guest_phone_e164: string; guest_lookup_token: string }[] = [];
+    if (phoneGuests.length > 0) {
+      const { data: phoneIssuance, error: phoneIssueError } = await supabase.rpc(
+        "issue_guest_phone_comp_tickets_atomic",
+        {
+          p_event_id: eventId,
+          p_tier_id: tierId,
+          p_actor_id: authId,
+          p_guest_phones: phoneGuests.map((g) => g.phone),
+        },
+      );
+      if (phoneIssueError) {
+        console.error("[bulk-comp-tickets] phone issuance failed:", phoneIssueError);
+        return err("Could not issue phone guest tickets. Try again.", 500, req);
+      }
+      if (!phoneIssuance?.ok) {
+        const reason = phoneIssuance?.would_exceed === true
+          ? `Tier capacity reached — ${phoneIssuance?.remaining ?? 0} left, no phone guest tickets issued`
+          : phoneIssuance?.error || "Could not issue phone guest ticket";
+        for (const g of phoneGuests) skipped.push({ recipient: g.raw, reason });
+      } else {
+        phoneIssued = (phoneIssuance.tickets || []) as {
+          id: string; guest_phone_e164: string; guest_lookup_token: string;
+        }[];
+        const minted = new Set(phoneIssued.map((t) => t.guest_phone_e164));
+        for (const g of phoneGuests) {
+          if (!minted.has(g.phone)) skipped.push({
             recipient: g.raw, reason: "Already holds a ticket in this tier",
           });
         }
@@ -494,7 +542,50 @@ Deno.serve(async (req: Request) => {
         console.warn("[bulk-comp-tickets] delivery stamp failed:", stampError);
       }
     }
-    const delivery = summarizeCompDelivery(sends);
+    const emailDelivery = summarizeCompDelivery(sends);
+
+    const rawByPhone = new Map(phoneGuests.map((g) => [g.phone, g.raw]));
+    const phoneDelivery = await Promise.all(phoneIssued.map(async (ticket) => {
+      const recipient = rawByPhone.get(ticket.guest_phone_e164) || ticket.guest_phone_e164;
+      const { data: pref } = await supabase
+        .from("sms_recipient_preferences")
+        .select("state")
+        .eq("phone_e164", ticket.guest_phone_e164)
+        .maybeSingle();
+      if (pref?.state === "opted_out") {
+        await supabase.from("tickets").update({
+          guest_sms_status: "suppressed",
+          guest_sms_last_error: "Recipient opted out",
+        }).eq("id", ticket.id);
+        return { recipient, status: "suppressed", error: "Recipient opted out" };
+      }
+
+      const result = await sendTicketSms({
+        to: ticket.guest_phone_e164,
+        eventTitle: event.title || "an event",
+        hostLabel: "A DVNT host",
+        lookupToken: ticket.guest_lookup_token,
+      });
+      await supabase.from("tickets").update({
+        guest_sms_status: result.state,
+        guest_sms_provider_id: result.providerMessageId || null,
+        guest_sms_last_error: result.ok ? null : result.error || "SMS delivery failed",
+        ...(result.ok ? { guest_sms_sent_at: new Date().toISOString() } : {}),
+      }).eq("id", ticket.id);
+      await supabase.from("ticket_sms_delivery_events").insert({
+        ticket_id: ticket.id,
+        provider_message_id: result.providerMessageId || null,
+        phone_e164: ticket.guest_phone_e164,
+        status: result.state,
+        retryable: result.retryable === true,
+        error: result.ok ? null : result.error || "SMS delivery failed",
+      });
+      return {
+        recipient,
+        status: result.state,
+        ...(result.ok ? {} : { error: result.error || "SMS delivery failed" }),
+      };
+    }));
 
     return json(
       {
@@ -502,8 +593,10 @@ Deno.serve(async (req: Request) => {
         data: {
           issued: inserted?.length || 0,
           guest_issued: guestIssued.length,
+          phone_guest_issued: phoneIssued.length,
           skipped,
-          delivery: delivery.results,
+          delivery: emailDelivery.results,
+          sms_delivery: phoneDelivery,
           tier: tier.name,
         },
       },
