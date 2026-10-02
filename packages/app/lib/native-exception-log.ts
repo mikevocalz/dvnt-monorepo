@@ -83,6 +83,46 @@ function rememberReceipt(receipt: string): void {
   }
 }
 
+/** Attempts per receipt, so a build that can never deliver stops re-billing.
+ *  Retention is keyed on acceptance, which is right, but it means a build with
+ *  no EXPO_PUBLIC_SENTRY_DSN never clears the source and re-reads it on every
+ *  relaunch — and reportIssue writes an analytics_events row each pass. That
+ *  turns one crash into one row per source per launch, worst during the crash
+ *  loop this reporting exists to diagnose. */
+const DELIVERY_ATTEMPTS_KEY = "DVNT_REPORTED_CRASH_ATTEMPTS_V2";
+const MAX_DELIVERY_ATTEMPTS = 5;
+
+function readAttempts(): Record<string, number> {
+  try {
+    const raw = mmkv.getString(DELIVERY_ATTEMPTS_KEY);
+    const stored: unknown = raw ? JSON.parse(raw) : {};
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+    const counts: Record<string, number> = {};
+    for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
+      if (typeof value === "number" && Number.isFinite(value)) counts[key] = value;
+    }
+    return counts;
+  } catch {
+    return {};
+  }
+}
+
+function attemptCount(receipt: string): number {
+  return readAttempts()[receipt] ?? 0;
+}
+
+function recordAttempt(receipt: string): void {
+  try {
+    const counts = readAttempts();
+    counts[receipt] = (counts[receipt] ?? 0) + 1;
+    mmkv.set(DELIVERY_ATTEMPTS_KEY, JSON.stringify(
+      Object.fromEntries(Object.entries(counts).slice(-MAX_TRACKED_SIGNATURES)),
+    ));
+  } catch {
+    // Losing a counter costs one extra attempt, not correctness.
+  }
+}
+
 const pendingDeliveries = new Map<string, Promise<boolean>>();
 
 /** Written by the `NSSetUncaughtExceptionHandler` block in AppDelegate.swift
@@ -284,7 +324,13 @@ export async function reportPriorCrash(kind: string, payload: Record<string, unk
         }
       : payload;
 
+    // Resolve false without sending once the cap is hit: false means the
+    // caller retains the source, so a crash survives for a build that can
+    // actually deliver it, while costing nothing further per launch.
+    if (attemptCount(receipt) >= MAX_DELIVERY_ATTEMPTS) return false;
+
     const delivery = (async () => {
+      recordAttempt(receipt);
       const accepted = await reportIssue("crash", {
         kind,
         signature,

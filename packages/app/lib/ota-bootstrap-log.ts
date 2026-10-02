@@ -108,11 +108,21 @@ function safeGet<T>(fn: () => T, fallback: T): T {
           const first = recoveryEntries[0] as { message?: string; timestamp?: number };
           // eslint-disable-next-line @typescript-eslint/no-var-requires
           const { reportPriorCrash } = require("@dvnt/app/lib/native-exception-log");
+          // reportPriorCrash resolves false when the report was NOT delivered.
+          // This is the only path carrying ErrorRecovery.crash()'s reason
+          // string, so a silent false here means the sole evidence for the
+          // iOS startup crash is gone with nothing in the log to say so.
           void reportPriorCrash("expo-updates-recovery", {
             name: "ErrorRecovery",
             timestamp: first.timestamp,
             message: first?.message ?? "(no message)",
             entries: recoveryEntries.slice(0, 5),
+          }).then((accepted: boolean) => {
+            if (!accepted) {
+              console.warn(
+                "[ota-bootstrap] ErrorRecovery crash report was not accepted; retained for the next boot",
+              );
+            }
           });
         }
       } catch {
