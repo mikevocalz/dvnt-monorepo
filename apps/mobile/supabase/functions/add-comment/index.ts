@@ -7,6 +7,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { checkRateLimit, WRITE_LIMIT } from "../_shared/rate-limit.ts";
+import {
+  admissionRefusal,
+  resolveVerifiedAdmission,
+} from "../_shared/verified-admission.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -72,6 +76,22 @@ Deno.serve(async (req) => {
     }
 
     const authUserId = sessionResult.userId;
+
+    // Comments are a participation rail too. The same server-owned adult
+    // admission decision used by posts/messages/tickets applies here, so a
+    // client or automation cannot bypass the 18+ boundary by calling this
+    // function directly.
+    const admission = await resolveVerifiedAdmission(supabaseAdmin, authUserId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return jsonResponse(
+        {
+          ok: false,
+          error: { code: refusal.code, message: refusal.message },
+        },
+        403,
+      );
+    }
 
     // Rate limit check
     const rl = checkRateLimit(authUserId, "add-comment", WRITE_LIMIT);
