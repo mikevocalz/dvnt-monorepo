@@ -503,3 +503,10 @@ verify_jwt = false
 
 [functions.event-reminders]
 verify_jwt = false
+
+
+[functions.event-followup-settings]
+verify_jwt = false
+
+[functions.process-event-followups]
+verify_jwt = false
