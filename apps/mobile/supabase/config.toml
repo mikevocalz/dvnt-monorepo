@@ -503,3 +503,8 @@ verify_jwt = false
 
 [functions.event-reminders]
 verify_jwt = false
+
+# Member proximity authenticates with the Better Auth session and returns only
+# rounded distance/city labels; the raw presence table is service-role only.
+[functions.member-proximity]
+verify_jwt = false
