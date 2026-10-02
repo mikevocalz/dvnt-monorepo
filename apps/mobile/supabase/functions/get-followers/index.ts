@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
     }
 
     const visibleIds = (data || [])
-      .map((row: any) => Number(f?.follower?.id))
+      .map((row: any) => Number(row?.follower?.id))
       .filter((id: number) => Number.isFinite(id));
     let followsViewerIds = new Set<number>();
     if (viewerUserId && visibleIds.length > 0) {
