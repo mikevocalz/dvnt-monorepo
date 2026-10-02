@@ -186,6 +186,150 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
     }
     const action = String(body.action || "");
 
+    // ── reusable promoter library (organizer-scoped) ─────────────
+    if (action === "library-list") {
+      const { data: entries, error: libraryError } = await supabase
+        .from("promoter_library_entries")
+        .select("id, promoter_auth_id, display_name, preferred_code, customer_discount_bps, promoter_commission_bps, created_at, updated_at")
+        .eq("organizer_auth_id", authId)
+        .order("updated_at", { ascending: false });
+      if (libraryError) {
+        console.error("[manage-promoters] library list failed:", libraryError);
+        return json({ error: "Could not load promoter library" }, 500, req);
+      }
+
+      const authIds = (entries || []).map((entry: any) => entry.promoter_auth_id);
+      const usersByAuth = new Map<string, any>();
+      if (authIds.length > 0) {
+        const { data: users } = await supabase
+          .from("users")
+          .select("auth_id, username, first_name, last_name, avatar_id(url)")
+          .in("auth_id", authIds);
+        for (const user of users || []) usersByAuth.set(user.auth_id, user);
+      }
+
+      return json({
+        ok: true,
+        entries: (entries || []).map((entry: any) => {
+          const user = usersByAuth.get(entry.promoter_auth_id);
+          const avatarRaw = user?.avatar_id;
+          return {
+            id: entry.id,
+            promoterAuthId: entry.promoter_auth_id,
+            username: user?.username ?? null,
+            displayName:
+              entry.display_name ||
+              [user?.first_name, user?.last_name].filter(Boolean).join(" ") ||
+              user?.username ||
+              "Promoter",
+            avatarUrl:
+              (Array.isArray(avatarRaw) ? avatarRaw[0]?.url : avatarRaw?.url) ??
+              null,
+            preferredCode: entry.preferred_code,
+            customerDiscountBps: entry.customer_discount_bps,
+            promoterCommissionBps: entry.promoter_commission_bps,
+            createdAt: entry.created_at,
+            updatedAt: entry.updated_at,
+          };
+        }),
+      }, 200, req);
+    }
+
+    if (action === "library-save") {
+      const username =
+        typeof body.username === "string"
+          ? body.username.trim().toLowerCase().replace(/^@/, "")
+          : "";
+      let promoterAuthId =
+        typeof body.promoter_auth_id === "string"
+          ? body.promoter_auth_id.trim()
+          : "";
+      let displayName =
+        typeof body.display_name === "string" ? body.display_name.trim() : "";
+
+      if (username) {
+        const { data: target } = await supabase
+          .from("users")
+          .select("auth_id, username, first_name, last_name")
+          .eq("username", username)
+          .maybeSingle();
+        if (!target?.auth_id) {
+          return json({ error: `No user @${username}` }, 404, req);
+        }
+        promoterAuthId = target.auth_id;
+        if (!displayName) {
+          displayName =
+            [target.first_name, target.last_name].filter(Boolean).join(" ").trim() ||
+            target.username ||
+            `@${username}`;
+        }
+      }
+
+      if (!promoterAuthId) {
+        return json({ error: "username or promoter_auth_id required" }, 400, req);
+      }
+
+      const preferredCode =
+        typeof body.preferred_code === "string" &&
+        body.preferred_code.trim().length > 0
+          ? body.preferred_code.trim().toUpperCase()
+          : null;
+      if (preferredCode && !CODE_RE.test(preferredCode)) {
+        return json(
+          { error: "preferred_code must be 2–32 letters, numbers, - or _" },
+          400,
+          req,
+        );
+      }
+
+      const customerDiscountBps = Number(body.customer_discount_bps ?? 0);
+      const promoterCommissionBps = Number(body.promoter_commission_bps ?? 0);
+      for (const [name, value] of [
+        ["customer_discount_bps", customerDiscountBps],
+        ["promoter_commission_bps", promoterCommissionBps],
+      ] as const) {
+        if (!Number.isInteger(value) || value < 0 || value > 10000) {
+          return json({ error: `${name} must be an integer 0–10000` }, 400, req);
+        }
+      }
+
+      const { data: saved, error: saveError } = await supabase
+        .from("promoter_library_entries")
+        .upsert(
+          {
+            organizer_auth_id: authId,
+            promoter_auth_id: promoterAuthId,
+            display_name: (displayName || "Promoter").slice(0, 80),
+            preferred_code: preferredCode,
+            customer_discount_bps: customerDiscountBps,
+            promoter_commission_bps: promoterCommissionBps,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "organizer_auth_id,promoter_auth_id" },
+        )
+        .select("id")
+        .single();
+      if (saveError || !saved) {
+        console.error("[manage-promoters] library save failed:", saveError);
+        return json({ error: "Could not save promoter" }, 500, req);
+      }
+      return json({ ok: true, id: saved.id }, 200, req);
+    }
+
+    if (action === "library-remove") {
+      const libraryId = String(body.library_id || "");
+      if (!libraryId) return json({ error: "library_id required" }, 400, req);
+      const { error: removeLibraryError } = await supabase
+        .from("promoter_library_entries")
+        .delete()
+        .eq("id", libraryId)
+        .eq("organizer_auth_id", authId);
+      if (removeLibraryError) {
+        return json({ error: "Could not remove saved promoter" }, 500, req);
+      }
+      return json({ ok: true }, 200, req);
+    }
+
     // ── Resolve the event + permission gate ─────────────────────
     // list/add/leaderboard carry event_id; update/remove carry
     // promoter_id (event derived from the row).
@@ -454,6 +598,26 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
       if (!inserted) {
         console.error("[manage-promoters] insert failed:", lastError);
         return json({ error: "Could not add promoter" }, 500, req);
+      }
+
+      if (userId && body.save_to_library !== false) {
+        const { error: librarySaveError } = await supabase
+          .from("promoter_library_entries")
+          .upsert(
+            {
+              organizer_auth_id: authId,
+              promoter_auth_id: userId,
+              display_name: displayName,
+              preferred_code: suppliedCode || null,
+              customer_discount_bps: customerDiscountBps,
+              promoter_commission_bps: promoterCommissionBps,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "organizer_auth_id,promoter_auth_id" },
+          );
+        if (librarySaveError) {
+          console.warn("[manage-promoters] library autosave failed (non-fatal):", librarySaveError);
+        }
       }
 
       // Linked promoter → they've been added to the event; tell them.
