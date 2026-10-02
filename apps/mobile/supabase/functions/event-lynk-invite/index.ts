@@ -1,11 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
-const URL=Deno.env.get("SUPABASE_URL")||""; const KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
+const SUPABASE_URL=Deno.env.get("SUPABASE_URL")||""; const SERVICE_KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
 function json(req:Request,b:unknown,s=200){return new Response(JSON.stringify(b),{status:s,headers:{...corsHeaders(req),"Content-Type":"application/json"}})}
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS") return optionsResponse();
  if(req.method!=="POST") return json(req,{ok:false,error:"Method not allowed"},405);
- const db=createClient(URL,KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+ const db=createClient(SUPABASE_URL, SERVICE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
  const actor=await verifySession(db,req); if(!actor) return json(req,{ok:false,error:"Unauthorized"},401);
  const body=await req.json().catch(()=>({})); const eventId=Number(body.event_id);
  const targets=Array.isArray(body.user_ids)?[...new Set(body.user_ids.map(String))].slice(0,50):[];

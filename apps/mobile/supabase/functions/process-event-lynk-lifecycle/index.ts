@@ -1,9 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-const URL=Deno.env.get("SUPABASE_URL")||""; const KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
+const SUPABASE_URL=Deno.env.get("SUPABASE_URL")||""; const SERVICE_KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
 Deno.serve(async(req)=>{
  const secret=Deno.env.get("CRON_SECRET")||"";
- if(secret && req.headers.get("authorization")!==`Bearer ${secret}`) return new Response("Unauthorized",{status:401});
- const s=createClient(URL,KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+ if(!secret){ console.error("[process-event-lynk-lifecycle] CRON_SECRET not set — rejecting request"); return new Response("Misconfigured",{status:500}); }
+ if(req.headers.get("authorization")!==`Bearer ${secret}`) return new Response("Unauthorized",{status:401});
+ const s=createClient(SUPABASE_URL, SERVICE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
  const {data:events,error}=await s.from("events").select("id,lynk_room_id,start_date,end_date,status")
    .not("lynk_room_id","is",null).limit(500);
  if(error) return new Response(JSON.stringify({ok:false,error:error.message}),{status:500});
