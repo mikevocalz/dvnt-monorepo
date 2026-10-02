@@ -8,10 +8,12 @@ ALTER TABLE public.tickets
   ADD COLUMN IF NOT EXISTS guest_sms_sent_at timestamptz,
   ADD COLUMN IF NOT EXISTS guest_sms_delivered_at timestamptz;
 
-CREATE UNIQUE INDEX IF NOT EXISTS tickets_active_guest_phone_tier_uidx
-  ON public.tickets(event_id, ticket_type_id, guest_phone_e164)
-  WHERE guest_phone_e164 IS NOT NULL
-    AND status IN ('active', 'scanned', 'transfer_pending');
+-- tickets_active_guest_phone_tier_uidx is built by the next migration
+-- (20261002190100). public.tickets is the hottest write table in the schema and
+-- a unique index build takes a SHARE lock on it for the whole build, blocking
+-- every INSERT and UPDATE. Isolating it in its own file keeps that lock window
+-- to one statement an operator can pre-create out of band, instead of holding
+-- it for the duration of this whole DDL batch.
 
 CREATE TABLE IF NOT EXISTS public.sms_recipient_preferences (
   phone_e164 text PRIMARY KEY,
@@ -39,9 +41,14 @@ CREATE TABLE IF NOT EXISTS public.ticket_sms_delivery_events (
 ALTER TABLE public.ticket_sms_delivery_events ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.ticket_sms_delivery_events FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.ticket_sms_delivery_events TO service_role;
+-- No WHERE predicate, deliberately. ticket-sms-webhook upserts here with
+-- onConflict "provider_message_id,status", and PostgREST cannot emit an index
+-- predicate, so Postgres refuses to infer a partial index and raises 42P10 on
+-- every provider callback. The predicate bought nothing anyway: a multi-column
+-- unique index treats NULLs as distinct, so rows with no provider id never
+-- conflict with each other either way.
 CREATE UNIQUE INDEX IF NOT EXISTS ticket_sms_provider_event_uidx
-  ON public.ticket_sms_delivery_events(provider_message_id, status)
-  WHERE provider_message_id IS NOT NULL;
+  ON public.ticket_sms_delivery_events(provider_message_id, status);
 
 CREATE OR REPLACE FUNCTION public.issue_guest_phone_comp_tickets_atomic(
   p_event_id integer, p_tier_id uuid, p_actor_id text, p_guest_phones text[]
@@ -61,8 +68,12 @@ BEGIN
      OR cardinality(p_guest_phones) NOT BETWEEN 1 AND 100 THEN
     RETURN jsonb_build_object('ok', false, 'error', 'Invalid comp request');
   END IF;
+  -- One backslash, not two. This body is dollar-quoted, so there is no escape
+  -- processing: '\\+' reaches the regex engine as "a literal backslash, then
+  -- one or more of them" and matches no E.164 number at all, which rejected
+  -- every valid phone. The sibling email RPC has always used one backslash.
   IF EXISTS (SELECT 1 FROM unnest(p_guest_phones) p
-    WHERE p IS NULL OR btrim(p) !~ '^\\+[1-9][0-9]{7,14}$') THEN
+    WHERE p IS NULL OR btrim(p) !~ '^\+[1-9][0-9]{7,14}$') THEN
     RETURN jsonb_build_object('ok', false, 'error', 'Recipient phone is invalid');
   END IF;
   SELECT COALESCE(array_agg(DISTINCT btrim(p)), '{}'::text[]) INTO v_phones
