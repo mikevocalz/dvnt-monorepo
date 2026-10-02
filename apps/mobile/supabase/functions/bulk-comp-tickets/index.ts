@@ -323,7 +323,7 @@ Deno.serve(async (req: Request) => {
         p_user_ids: accounts.unique.map((recipient) => recipient.authId),
       });
       if (issueError) {
-        console.error("[bulk-comp-tickets] atomic issuance failed:", issueError);
+        console.error("[bulk-comp-tickets] atomic issuance failed:", issueError.code);
         return err("Could not issue tickets. Try again.", 500, req);
       }
       if (!issuance?.ok) {
@@ -359,7 +359,7 @@ Deno.serve(async (req: Request) => {
         },
       );
       if (guestError) {
-        console.error("[bulk-comp-tickets] guest issuance failed:", guestError);
+        console.error("[bulk-comp-tickets] guest issuance failed:", guestError.code);
         return err("Could not issue guest tickets. Try again.", 500, req);
       }
       if (!guestIssuance?.ok) {
@@ -396,7 +396,7 @@ Deno.serve(async (req: Request) => {
         },
       );
       if (phoneIssueError) {
-        console.error("[bulk-comp-tickets] phone issuance failed:", phoneIssueError);
+        console.error("[bulk-comp-tickets] phone issuance failed:", phoneIssueError.code);
         return err("Could not issue phone guest tickets. Try again.", 500, req);
       }
       if (!phoneIssuance?.ok) {
@@ -521,7 +521,7 @@ Deno.serve(async (req: Request) => {
           }
           return { recipient, delivered: true, email: ticket.guest_email };
         } catch (sendErr: any) {
-          console.error("[bulk-comp-tickets] guest email failed:", sendErr);
+          console.error("[bulk-comp-tickets] guest email failed:", sendErr?.name || "send error");
           return { recipient, delivered: false, error: "Email delivery failed" };
         }
       }),
@@ -539,7 +539,7 @@ Deno.serve(async (req: Request) => {
         .eq("ticket_type_id", tierId)
         .in("guest_email", deliveredEmails);
       if (stampError) {
-        console.warn("[bulk-comp-tickets] delivery stamp failed:", stampError);
+        console.warn("[bulk-comp-tickets] delivery stamp failed:", stampError.code);
       }
     }
     const emailDelivery = summarizeCompDelivery(sends);
@@ -547,24 +547,21 @@ Deno.serve(async (req: Request) => {
     const rawByPhone = new Map(phoneGuests.map((g) => [g.phone, g.raw]));
     const phoneDelivery = await Promise.all(phoneIssued.map(async (ticket) => {
       const recipient = rawByPhone.get(ticket.guest_phone_e164) || ticket.guest_phone_e164;
-      const { data: pref } = await supabase
-        .from("sms_recipient_preferences")
-        .select("state")
-        .eq("phone_e164", ticket.guest_phone_e164)
-        .maybeSingle();
-      if (pref?.state === "opted_out") {
-        await supabase.from("tickets").update({
-          guest_sms_status: "suppressed",
-          guest_sms_last_error: "Recipient opted out",
-        }).eq("id", ticket.id);
-        return { recipient, status: "suppressed", error: "Recipient opted out" };
-      }
-
+      // No opt-out lookup here any more. sendTicketSms owns the consent gate and
+      // the consent record, so it cannot be skipped by a caller and a read
+      // failure there comes back as a retryable failure instead of a send.
+      // authId is the organizer who typed the number in: that is the
+      // attestation the audit row stores.
       const result = await sendTicketSms({
+        supabase,
         to: ticket.guest_phone_e164,
         eventTitle: event.title || "an event",
         hostLabel: "A DVNT host",
         lookupToken: ticket.guest_lookup_token,
+        actorId: authId,
+        eventId,
+        ticketId: ticket.id,
+        source: "bulk-comp-tickets",
       });
       await supabase.from("tickets").update({
         guest_sms_status: result.state,
