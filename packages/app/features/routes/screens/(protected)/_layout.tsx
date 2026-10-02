@@ -25,6 +25,7 @@ import { useEventsFeedRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useAppResume } from "@dvnt/app/lib/hooks/use-app-resume";
 import { useCartPaymentRecovery } from "@dvnt/app/lib/hooks/use-cart-payment-recovery";
 import { useBootLocation } from "@dvnt/app/lib/hooks/use-boot-location";
+import { useSyncMemberProximityPresence } from "@dvnt/app/lib/hooks/use-member-proximity";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { refreshWeather } from "@dvnt/app/features/weatherfx/WeatherDecisionEngine";
 import { useWeatherFXStore } from "@dvnt/app/features/weatherfx/WeatherFXStore";
@@ -312,6 +313,9 @@ export default function ProtectedLayout() {
   useCartPaymentRecovery();
   // Silently resolve device location → nearest city on boot (if already permitted)
   useBootLocation();
+  // Mirror ONLY an explicit, time-bounded member-visibility grant to the
+  // private server presence table. This never turns on from event discovery.
+  useSyncMemberProximityPresence();
   // Track Events tab focus → drives WeatherGPUEngine visibility + audio fade
   useEventsTabVisibility();
   // App-wide realtime UPDATE subscription on the events table — patches
