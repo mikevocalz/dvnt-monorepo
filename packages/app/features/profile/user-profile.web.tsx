@@ -50,7 +50,6 @@ import {
 } from "@dvnt/app/lib/utils/safe-profile-mappers";
 import { ProfileMasonryGrid } from "./ProfileMasonryGrid.web";
 import { ProfilePronounsPill } from "./ProfilePronounsPill.web";
-import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { useMemberProximity } from "@dvnt/app/lib/hooks/use-member-proximity";
 
 function formatCount(n: number): string {
@@ -179,41 +178,14 @@ export function UserProfileScreen() {
 
   const user = userData as any;
 
-  // Real member proximity is server-computed from the target member's
-  // explicitly shared, expiring presence. The target coordinates never reach
-  // this component. If the target has not opted in, we show their existing
-  // public location text only — never a city-centroid number.
-  const viewerDeviceLat = useEventsLocationStore((s) => s.deviceLat);
-  const viewerDeviceLng = useEventsLocationStore((s) => s.deviceLng);
-
-  // Web never boot-locates like native does. Reuse a location permission that
-  // was already granted, but never prompt merely because somebody opened a
-  // profile.
-  useEffect(() => {
-    if (viewerDeviceLat && viewerDeviceLng) return;
-    if (typeof navigator === "undefined" || !navigator.geolocation) return;
-    let cancelled = false;
-    void navigator.permissions
-      ?.query({ name: "geolocation" as PermissionName })
-      .then((status) => {
-        if (cancelled || status.state !== "granted") return;
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            if (cancelled) return;
-            useEventsLocationStore
-              .getState()
-              .setDeviceLocation(pos.coords.latitude, pos.coords.longitude);
-          },
-          () => {},
-          { enableHighAccuracy: false, timeout: 8000 },
-        );
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [viewerDeviceLat, viewerDeviceLng]);
-
+  // Member proximity is server-computed from both members' explicitly shared,
+  // expiring presence rows. Neither side's coordinates reach this component,
+  // and this component sends none: it used to read device GPS here to pass as
+  // the viewer position, which let a caller choose it. The server reads the
+  // caller's own row instead, so there is nothing to collect and the
+  // geolocation call that fed it is gone. Without a live grant on both sides
+  // the answer is the target's existing public location text, never a
+  // city-centroid number.
   const { data: proximityResult } = useMemberProximity(safeUsername);
   const proximity =
     !isOwnProfile && proximityResult?.kind === "distance"

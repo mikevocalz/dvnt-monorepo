@@ -5,17 +5,26 @@
  *
  * POST { action: "publish", latitude, longitude, cityId?, accuracyMeters?, shareUntil }
  * POST { action: "revoke" }
- * POST { action: "distance", targetUsername, viewerLatitude?, viewerLongitude? }
+ * POST { action: "distance", targetUsername }
  *
  * Publishing requires an approved adult identity verification. Distance reads
- * are session-authenticated, blocked/private-aware, rate-limited, and return
- * only a rounded distance or a city-only fallback.
+ * are session-authenticated, blocked/private-aware, rate-limited, and return a
+ * coarse band or a city-only fallback.
+ *
+ * Both endpoints of a distance read come from the server. The viewer's own
+ * position is their `member_proximity_presence` row, never a number in the
+ * request body: a caller who can choose their own coordinates can move it,
+ * and a reviewer recovered a target's stored coordinate exactly in 16 calls by
+ * trilaterating the 0.1-mile figure this used to return. Both sides therefore
+ * need a live grant, and the answer is a band rather than a measurement,
+ * because bands cannot be intersected.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { resolveVerifiedAdmission } from "../_shared/verified-admission.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
+import { checkAdultBirthDate } from "../_shared/age-policy.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -35,6 +44,11 @@ function json(body: unknown, status = 200) {
 }
 
 function finiteCoord(value: unknown, min: number, max: number): number | null {
+  // Only a number or a numeric string is a coordinate. `Number()` turns null,
+  // "" and [] into 0 — a real position off the coast of Africa — and true into
+  // 1, so the type is checked before the range rather than after coercion.
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && value.trim() === "") return null;
   const n = Number(value);
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
 }
@@ -57,10 +71,27 @@ function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number) 
   return 3958.7613 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function roundedMiles(miles: number) {
-  if (miles < 0.25) return 0.2;
-  if (miles < 10) return Math.round(miles * 10) / 10;
-  return Math.round(miles);
+/**
+ * The whole answer a viewer gets. A band has no sub-band structure to solve
+ * for, so repeated reads from different positions cannot narrow the target
+ * down the way a 0.1-mile figure could.
+ */
+type ProximityBand = "under_1" | "1_5" | "5_15" | "15_50" | "far";
+
+const BAND_LABELS: Record<ProximityBand, string> = {
+  under_1: "Less than a mile away",
+  "1_5": "A few miles away",
+  "5_15": "Across town",
+  "15_50": "Nearby area",
+  far: "Far away",
+};
+
+function bandForMiles(miles: number): ProximityBand {
+  if (miles < 1) return "under_1";
+  if (miles < 5) return "1_5";
+  if (miles < 15) return "5_15";
+  if (miles < 50) return "15_50";
+  return "far";
 }
 
 async function hasAdultVerification(db: any, userId: string) {
@@ -70,11 +101,10 @@ async function hasAdultVerification(db: any, userId: string) {
     .eq("user_id", userId)
     .maybeSingle();
   if (error || data?.status !== "passed" || !data?.date_of_birth) return false;
-  const dob = new Date(`${data.date_of_birth}T00:00:00Z`);
-  if (!Number.isFinite(dob.getTime())) return false;
-  const cutoff = new Date();
-  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 18);
-  return dob.getTime() <= cutoff.getTime();
+  // The canonical boundary helper, not local date math. Subtracting 18 from
+  // getUTCFullYear() rolls a nonexistent 29 Feb forward, which on 2028-02-29
+  // admitted a 2010-03-01 date of birth: age 17.
+  return checkAdultBirthDate(data.date_of_birth).allowed;
 }
 
 Deno.serve(async (req: Request) => {
@@ -237,19 +267,19 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  let viewerLatitude = finiteCoord(body?.viewerLatitude, -90, 90);
-  let viewerLongitude = finiteCoord(body?.viewerLongitude, -180, 180);
-  if (viewerLatitude === null || viewerLongitude === null) {
-    const { data: ownPresence } = await db
-      .from("member_proximity_presence")
-      .select("latitude, longitude")
-      .eq("user_id", authUserId)
-      .gt("share_until", new Date().toISOString())
-      .maybeSingle();
-    viewerLatitude = ownPresence?.latitude ?? null;
-    viewerLongitude = ownPresence?.longitude ?? null;
-  }
+  // The viewer's position is read, not accepted. `viewerLatitude` and
+  // `viewerLongitude` in the body are ignored; a viewer without a live grant of
+  // their own gets the city-level answer, which also makes the read reciprocal:
+  // the target needed a live row above, and so does the viewer.
+  const { data: ownPresence } = await db
+    .from("member_proximity_presence")
+    .select("latitude, longitude")
+    .eq("user_id", authUserId)
+    .gt("share_until", new Date().toISOString())
+    .maybeSingle();
 
+  const viewerLatitude = finiteCoord(ownPresence?.latitude, -90, 90);
+  const viewerLongitude = finiteCoord(ownPresence?.longitude, -180, 180);
   if (viewerLatitude === null || viewerLongitude === null) {
     return json({
       ok: true,
@@ -257,7 +287,7 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const miles = roundedMiles(
+  const band = bandForMiles(
     haversineMiles(
       viewerLatitude,
       viewerLongitude,
@@ -265,13 +295,12 @@ Deno.serve(async (req: Request) => {
       Number(targetPresence.longitude),
     ),
   );
-  const label = miles <= 0.2 ? "Nearby" : `${miles} miles away`;
   return json({
     ok: true,
     data: {
       kind: "distance",
-      miles,
-      label,
+      band,
+      label: BAND_LABELS[band],
     },
   });
 });
