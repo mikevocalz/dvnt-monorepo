@@ -22,7 +22,6 @@ import {
   Hash,
   X,
   ImagePlus,
-  Camera,
   MapPin,
   Trash2,
   Plus,
@@ -372,22 +371,16 @@ export function CreatePostScreen() {
           ) : null}
         </div>
 
-        {/* Media intake buttons */}
+        {/* One coherent media entry. The dedicated camera route remains
+            available to other product surfaces without duplicating controls here. */}
         {!isTextPost && selectedMedia.length === 0 ? (
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex">
             <button
               onClick={() => fileRef.current?.click()}
               className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-500 py-3.5 font-semibold text-white"
             >
               <ImagePlus size={20} />
-              Add Photos
-            </button>
-            <button
-              onClick={() => router.push("/feed/camera")}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/15 bg-[#1a1a1a] py-3.5 font-semibold text-white"
-            >
-              <Camera size={20} />
-              Camera
+              Add Media
             </button>
           </div>
         ) : null}
