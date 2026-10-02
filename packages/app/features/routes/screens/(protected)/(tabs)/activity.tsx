@@ -98,13 +98,6 @@ const ActivityIcon = memo(({ type }: { type: Activity["type"] }) => {
     case "event_time_changed":
     case "event_venue_changed":
       return <Calendar size={16} color="#10B981" />;
-    case "ticket_claim_required":
-    case "ticket_delivery_failed":
-    case "ticket_voided":
-    case "event_postponed":
-    case "event_time_changed":
-    case "event_venue_changed":
-      return ticketActivityCopy(activity.type) || " updated your ticket.";
     case "room_invite":
     case "sneaky_lynk":
       return <Radio size={16} color="#38BDF8" />;
