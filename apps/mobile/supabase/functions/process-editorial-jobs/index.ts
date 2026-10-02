@@ -4,6 +4,15 @@ function hasSources(profile:any,job:any){
  const p=profile?.source_policy||{}; const s=Array.isArray(job.source_snapshot)?job.source_snapshot:[];
  return !(p.citations_required||p.current_sources_required||p.citations_required_for_news) || s.length>0;
 }
+function isAdultDob(value:unknown){
+ const dob=new Date(`${String(value||"")}T00:00:00Z`); if(!Number.isFinite(dob.getTime())) return false;
+ const cutoff=new Date(); cutoff.setUTCFullYear(cutoff.getUTCFullYear()-18);
+ return dob.getTime()<=cutoff.getTime();
+}
+async function verifiedAdultTarget(db:any,userId:string){
+ const {data}=await db.from("identity_verifications").select("status,date_of_birth").eq("user_id",userId).maybeSingle();
+ return data?.status==="passed" && isAdultDob(data?.date_of_birth);
+}
 function basicModeration(payload:any,profile:any){
  const text=JSON.stringify(payload||{}).toLowerCase();
  const blocked=["child sexual","minor nude","non-consensual"];
@@ -24,6 +33,22 @@ Deno.serve(async(req)=>{
    const profile=Array.isArray(job.profile)?job.profile[0]:job.profile;
    if(!profile||!profile.enabled||profile.paused||!profile.account_auth_id) continue;
    try{
+     if(job.job_type==="engagement"){
+       const action=String(job.engagement_action||"");
+       const targetUserId=String(job.target_user_id||"");
+       if(!["like","follow","comment"].includes(action)||!targetUserId||!(await verifiedAdultTarget(db,targetUserId))){
+         await db.from("editorial_engagement_audit").insert({
+           profile_id:profile.id,job_id:job.id,action:["like","follow","comment"].includes(action)?action:"comment",
+           target_user_id:targetUserId||null,target_post_id:job.target_post_id||null,
+           reason:"Execution blocked: target is not a verified adult",status:"blocked",
+         });
+         await db.from("editorial_jobs").update({
+           stage:"rejected",last_error:"Editorial engagement target is not verified 18+",
+           updated_at:new Date().toISOString(),
+         }).eq("id",job.id);
+         continue;
+       }
+     }
      if(job.stage==="intake"){
        if(!hasSources(profile,job)){
          await db.from("editorial_jobs").update({stage:"failed",last_error:"Required source provenance is missing",updated_at:new Date().toISOString()}).eq("id",job.id);
