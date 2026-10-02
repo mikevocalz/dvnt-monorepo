@@ -49,6 +49,12 @@ export type ActivityType =
   | "ticket_transfer_cancelled"
   | "ticket_comped"
   | "ticket_refunded"
+  | "ticket_claim_required"
+  | "ticket_delivery_failed"
+  | "ticket_voided"
+  | "event_postponed"
+  | "event_time_changed"
+  | "event_venue_changed"
   | "room_invite"
   | "sneaky_lynk"
   // App-wide announcement. No actor and no entity — the copy travels in
