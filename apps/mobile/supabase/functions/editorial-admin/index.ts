@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
-const URL=Deno.env.get("SUPABASE_URL")||""; const KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
+const SUPABASE_URL=Deno.env.get("SUPABASE_URL")||""; const SERVICE_KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
 function json(req:Request,b:unknown,s=200){return new Response(JSON.stringify(b),{status:s,headers:{...corsHeaders(req),"Content-Type":"application/json"}})}
 function adminIds(){return new Set((Deno.env.get("DVNT_ADMIN_AUTH_IDS")||"").split(",").map(x=>x.trim()).filter(Boolean))}
 function isAdultDob(value:unknown){
@@ -20,7 +20,7 @@ function sourcesValid(profile:any,sources:any[]){
 }
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS") return optionsResponse();
- const db=createClient(URL,KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+ const db=createClient(SUPABASE_URL, SERVICE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
  const actor=await verifySession(db,req); if(!actor) return json(req,{ok:false,error:"Unauthorized"},401);
  if(!adminIds().has(String(actor))) return json(req,{ok:false,error:"Forbidden"},403);
  if(req.method==="GET"){

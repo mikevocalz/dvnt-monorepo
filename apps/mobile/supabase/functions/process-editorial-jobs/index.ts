@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-const URL=Deno.env.get("SUPABASE_URL")||""; const KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
+const SUPABASE_URL=Deno.env.get("SUPABASE_URL")||""; const SERVICE_KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
 function hasSources(profile:any,job:any){
  const p=profile?.source_policy||{}; const s=Array.isArray(job.source_snapshot)?job.source_snapshot:[];
  return !(p.citations_required||p.current_sources_required||p.citations_required_for_news) || s.length>0;
@@ -22,8 +22,9 @@ function basicModeration(payload:any,profile:any){
 }
 Deno.serve(async(req)=>{
  const secret=Deno.env.get("CRON_SECRET")||"";
- if(secret && req.headers.get("authorization")!==`Bearer ${secret}`) return new Response("Unauthorized",{status:401});
- const db=createClient(URL,KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+ if(!secret){ console.error("[process-editorial-jobs] CRON_SECRET not set — rejecting request"); return new Response("Misconfigured",{status:500}); }
+ if(req.headers.get("authorization")!==`Bearer ${secret}`) return new Response("Unauthorized",{status:401});
+ const db=createClient(SUPABASE_URL, SERVICE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
  const {data:jobs,error}=await db.from("editorial_jobs")
    .select("*, profile:editorial_profiles(*)").in("stage",["intake","generated","approved","scheduled"])
    .order("created_at").limit(50);
