@@ -10,10 +10,11 @@
  * The grant carries a city and an end time. No coordinates, no event id, no
  * ticket id — there is nowhere in this shape to put one, which is the point.
  *
- * ponytail: the grant is device-local. Nothing publishes it to other members
- * yet, so today the switch only records the member's answer. Whatever server
- * surface consumes it later must read through `readCityVisibility` rather than
- * the raw `cityVisibility` field, and must send the city id alone.
+ * `useSyncMemberProximityPresence` is the one consumer. It reads through
+ * `readCityVisibility` rather than the raw `cityVisibility` field, and it may
+ * send the city id alone. It read the raw field once and published device
+ * GPS under this grant; `PRECISE_PROXIMITY_GRANT_DEFAULT` below is why it
+ * cannot any more.
  *
  * Expiry is enforced on read. A phone that slept through the end time, had its
  * clock moved, or was reinstalled from a backup still reads an old grant as
@@ -77,6 +78,27 @@ export function readCityVisibility(
   }
   if (g.expiresAt <= now) return null;
   return { cityId: g.cityId, cityName: g.cityName, expiresAt: g.expiresAt };
+}
+
+/**
+ * Precise-location consent. A different question again, with its own answer.
+ *
+ * The city grant above consents to a city name and has nowhere to put a
+ * coordinate. Publishing device GPS is a separate ask, so it needs a separate
+ * yes, and this flag is the only thing that counts as one. It is OFF by
+ * default and there is no setter: no screen in the app can turn it on today.
+ *
+ * That is deliberate, not unfinished. Writing a precise-location consent
+ * surface is a product decision, so until one ships the precise publish path
+ * stays inert and `useSyncMemberProximityPresence` revokes rather than send a
+ * coordinate the member never agreed to. Whoever builds that screen adds the
+ * setter next to it, so the switch and the explanation ship together.
+ */
+export const PRECISE_PROXIMITY_GRANT_DEFAULT = false;
+
+/** Only a literal `true` is consent. A truthy leftover from storage is not. */
+export function readPreciseProximityGrant(value: unknown): boolean {
+  return value === true;
 }
 
 /** State the two settings share, so their independence is testable on its own. */

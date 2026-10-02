@@ -6,6 +6,7 @@ import {
   applyFindEventsMode,
   applyRevokeCityVisibility,
   DEFAULT_VISIBILITY_DURATION_ID,
+  PRECISE_PROXIMITY_GRANT_DEFAULT,
   readCityVisibility,
   visibilityDurationMs,
   type CityVisibilityGrant,
@@ -39,6 +40,13 @@ interface EventsLocationState {
    * grant is off even if nothing was running to expire it.
    */
   cityVisibility: CityVisibilityGrant | null;
+  /**
+   * Whether this member consented to publishing device coordinates, which
+   * `cityVisibility` does not cover. Off by default and settable by nothing:
+   * see `PRECISE_PROXIMITY_GRANT_DEFAULT` for why, and add a setter here
+   * alongside the consent screen that earns it.
+   */
+  preciseProximityGrant: boolean;
   /** How long the next grant lasts. Remembered so the member picks once. */
   visibilityDurationId: VisibilityDurationId;
   weatherData: WeatherDay[] | null;
@@ -79,6 +87,7 @@ export const useEventsLocationStore = create<EventsLocationState>()(
       deviceLng: null,
       recentCities: [],
       cityVisibility: null,
+      preciseProximityGrant: PRECISE_PROXIMITY_GRANT_DEFAULT,
       visibilityDurationId: DEFAULT_VISIBILITY_DURATION_ID,
       weatherData: null,
       weatherCityId: null,
@@ -143,6 +152,7 @@ export const useEventsLocationStore = create<EventsLocationState>()(
         deviceLng: state.deviceLng,
         recentCities: state.recentCities,
         cityVisibility: state.cityVisibility,
+        preciseProximityGrant: state.preciseProximityGrant,
         visibilityDurationId: state.visibilityDurationId,
         weatherData: state.weatherData,
         weatherCityId: state.weatherCityId,
