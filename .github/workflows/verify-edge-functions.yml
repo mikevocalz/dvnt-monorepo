@@ -45,7 +45,17 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - run: deno test --no-lock --allow-net --allow-env --allow-read apps/mobile/supabase/functions/_shared/
+      # --node-modules-dir=auto is REQUIRED here and must stay. This job runs
+      # checkout + setup-deno with no pnpm install, so there is no node_modules
+      # and Deno cannot resolve npm:@types/node on its own:
+      #   error: Could not find a matching package for 'npm:@types/node'
+      # The flag lets Deno materialise just what it needs on the runner.
+      #
+      # Do NOT copy this command into a local pnpm checkout. There the flag is
+      # both unnecessary (pnpm already supplies @types/node, which is why this
+      # passes locally without it) and harmful, because Deno would flatten
+      # pnpm's symlink layout. Locally, drop the flag.
+      - run: deno test --node-modules-dir=auto --no-lock --allow-net --allow-env --allow-read apps/mobile/supabase/functions/_shared/
 
   call-admission-concurrency:
     # Boots a throwaway cluster from the runner's own Postgres and drives
