@@ -45,7 +45,7 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - run: deno test --no-lock --allow-net --allow-env --allow-read apps/mobile/supabase/functions/_shared/
+      - run: deno test --node-modules-dir=auto --no-lock --allow-net --allow-env --allow-read apps/mobile/supabase/functions/_shared/
 
   call-admission-concurrency:
     # Boots a throwaway cluster from the runner's own Postgres and drives
