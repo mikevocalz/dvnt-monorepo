@@ -433,8 +433,8 @@ export function UserProfileScreen() {
             {isFollowPending
               ? followVars?.action === "follow"
                 ? "Following…"
-                : "Not Following…"
-              : followButtonLabel({ isFollowing })}
+                : "Unfollowing…"
+              : followButtonLabel({ isFollowing, followsYou: Boolean(user?.followsYou) })}
           </button>
           <button
             onClick={handleMessagePress}
