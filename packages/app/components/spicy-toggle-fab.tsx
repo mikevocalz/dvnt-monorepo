@@ -1,6 +1,6 @@
-import { View, Text, Pressable, Platform } from "react-native";
+import { View, Text, Pressable, Platform, Alert, Linking } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -34,6 +34,7 @@ export function SpicyToggleFAB({ accessoryPlacement }: SpicyToggleFABProps) {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const isAccessory = accessoryPlacement !== undefined;
+  const verificationInFlight = useRef(false);
 
   // Reanimated shared value — survives OTA reloads correctly
   const thumbX = useSharedValue(nsfwEnabled ? THUMB_ON : THUMB_OFF);
@@ -64,7 +65,7 @@ export function SpicyToggleFAB({ accessoryPlacement }: SpicyToggleFABProps) {
     };
   }, [pathname, accessoryPlacement]);
 
-  const doToggle = useCallback(() => {
+  const doToggle = useCallback(async () => {
     const store = useAppStore.getState();
     const currentEnabled = store.nsfwEnabled;
     const nextEnabled = !currentEnabled;
@@ -79,7 +80,41 @@ export function SpicyToggleFAB({ accessoryPlacement }: SpicyToggleFABProps) {
       nextEnabled,
     });
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    store.setNsfwEnabled(nextEnabled, source);
+
+    if (nextEnabled) {
+      if (verificationInFlight.current) return;
+      verificationInFlight.current = true;
+      try {
+        const { startSpicyVerification } = await import(
+          "@dvnt/app/lib/auth/start-spicy-verification"
+        );
+        const result = await startSpicyVerification();
+        if (result.status === "passed") {
+          store.setNsfwEnabled(true, source);
+          return;
+        }
+        if (result.url) {
+          await Linking.openURL(result.url);
+          return;
+        }
+        Alert.alert(
+          "Verification required",
+          "Verify that you're 18 or older before turning on SPICY.",
+        );
+      } catch (error) {
+        Alert.alert(
+          "Verification unavailable",
+          error instanceof Error
+            ? error.message
+            : "Try verification again in a moment.",
+        );
+      } finally {
+        verificationInFlight.current = false;
+      }
+      return;
+    }
+
+    store.setNsfwEnabled(false, source);
   }, [accessoryPlacement, isAccessory, pathname]);
 
   const pressable = (
