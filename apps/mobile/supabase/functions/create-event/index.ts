@@ -11,6 +11,10 @@ import {
 } from "../_shared/verify-session.ts";
 import { checkRateLimit, WRITE_LIMIT } from "../_shared/rate-limit.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
+import {
+  creatorStandingRefusal,
+  resolveCreatorStanding,
+} from "../_shared/creator-standing.ts";
 
 interface ApiResponse<T = unknown> {
   ok: boolean;
@@ -130,6 +134,17 @@ Deno.serve(async (req) => {
     const admission = await resolveVerifiedAdmission(supabaseAdmin, authUserId);
     if (admission.state === "blocked") {
       const refusal = admissionRefusal(admission);
+      return errorResponse(req, refusal.code, refusal.message, 403);
+    }
+
+    // A suspended, paused or rejected creator cannot host an event either.
+    // Before this, creator_hosts was consulted only by creator-program's
+    // `schedule` action, so the normal publish rail ignored the suspension
+    // entirely. Runs before the insert and before the idempotent replay
+    // lookup, so a refusal publishes nothing.
+    const standing = await resolveCreatorStanding(supabaseAdmin, authUserId);
+    if (standing.state === "refused") {
+      const refusal = creatorStandingRefusal(standing);
       return errorResponse(req, refusal.code, refusal.message, 403);
     }
 
