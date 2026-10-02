@@ -38,6 +38,19 @@ export interface EventPromoter {
   createdAt: string;
 }
 
+export interface PromoterLibraryEntry {
+  id: string;
+  promoterAuthId: string;
+  username: string | null;
+  displayName: string;
+  avatarUrl: string | null;
+  preferredCode: string | null;
+  customerDiscountBps: number;
+  promoterCommissionBps: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PromoterLeaderboardRow {
   promoterId: string;
   displayName: string;
@@ -83,6 +96,7 @@ export const promotersApi = {
     customerDiscountBps?: number;
     promoterCommissionBps?: number;
     code?: string;
+    saveToLibrary?: boolean;
   }): Promise<EventPromoter> {
     const customerDiscountBps = params.customerDiscountBps ?? params.revShareBps;
     const promoterCommissionBps = params.promoterCommissionBps ??
@@ -106,6 +120,7 @@ export const promotersApi = {
       customer_discount_bps: customerDiscountBps,
       promoter_commission_bps: promoterCommissionBps,
       ...(params.code ? { code: params.code } : {}),
+      save_to_library: params.saveToLibrary ?? true,
     });
     if (error) throw new Error(error.message);
     if (!data?.ok || !data.promoter) {
@@ -154,6 +169,58 @@ export const promotersApi = {
     );
     if (error) throw new Error(error.message);
     if (!data?.ok) throw new Error(data?.error || "Could not remove promoter");
+  },
+
+  async library(): Promise<PromoterLibraryEntry[]> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      entries: PromoterLibraryEntry[];
+      error?: string;
+    }>("manage-promoters", { action: "library-list" });
+    if (error) throw new Error(error.message);
+    if (!data?.ok) throw new Error(data?.error || "Could not load promoter library");
+    return data.entries ?? [];
+  },
+
+  async saveLibrary(params: {
+    promoterAuthId?: string;
+    username?: string;
+    displayName?: string;
+    preferredCode?: string | null;
+    customerDiscountBps: number;
+    promoterCommissionBps: number;
+  }): Promise<string> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      id: string;
+      error?: string;
+    }>("manage-promoters", {
+      action: "library-save",
+      ...(params.promoterAuthId
+        ? { promoter_auth_id: params.promoterAuthId }
+        : {}),
+      ...(params.username ? { username: params.username } : {}),
+      ...(params.displayName ? { display_name: params.displayName } : {}),
+      preferred_code: params.preferredCode ?? null,
+      customer_discount_bps: params.customerDiscountBps,
+      promoter_commission_bps: params.promoterCommissionBps,
+    });
+    if (error) throw new Error(error.message);
+    if (!data?.ok || !data.id) {
+      throw new Error(data?.error || "Could not save promoter");
+    }
+    return data.id;
+  },
+
+  async removeLibrary(libraryId: string): Promise<void> {
+    const { data, error } = await invokeEdge<{ ok: boolean; error?: string }>(
+      "manage-promoters",
+      { action: "library-remove", library_id: libraryId },
+    );
+    if (error) throw new Error(error.message);
+    if (!data?.ok) {
+      throw new Error(data?.error || "Could not remove saved promoter");
+    }
   },
 
   /** Ranked by net ledger earnings — single ledger query server-side. */
