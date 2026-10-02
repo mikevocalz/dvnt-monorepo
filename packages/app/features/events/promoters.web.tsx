@@ -68,6 +68,7 @@ interface PromotersUIState {
   selectedUser: { id: string; username: string; name: string; avatar: string } | null;
   customerDiscountInput: string;
   promoterCommissionInput: string;
+  codeInput: string;
   editTarget: EventPromoter | null;
   editCustomerDiscountInput: string;
   editPromoterCommissionInput: string;
@@ -78,6 +79,7 @@ interface PromotersUIState {
   setSelectedUser: (u: PromotersUIState["selectedUser"]) => void;
   setCustomerDiscountInput: (v: string) => void;
   setPromoterCommissionInput: (v: string) => void;
+  setCodeInput: (v: string) => void;
   setEditTarget: (p: EventPromoter | null) => void;
   setEditCustomerDiscountInput: (v: string) => void;
   setEditPromoterCommissionInput: (v: string) => void;
@@ -91,6 +93,7 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   selectedUser: null,
   customerDiscountInput: "10",
   promoterCommissionInput: "10",
+  codeInput: "",
   editTarget: null,
   editCustomerDiscountInput: "",
   editPromoterCommissionInput: "",
@@ -101,6 +104,7 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   setSelectedUser: (u) => set({ selectedUser: u }),
   setCustomerDiscountInput: (v) => set({ customerDiscountInput: v }),
   setPromoterCommissionInput: (v) => set({ promoterCommissionInput: v }),
+  setCodeInput: (v) => set({ codeInput: v.toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 32) }),
   setEditTarget: (p) =>
     set({
       editTarget: p,
@@ -118,6 +122,7 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
       selectedUser: null,
       customerDiscountInput: "10",
       promoterCommissionInput: "10",
+      codeInput: "",
     }),
 }));
 
@@ -259,6 +264,7 @@ export function EventPromotersScreen() {
   const selectedUser = usePromotersUIStore((s) => s.selectedUser);
   const customerDiscountInput = usePromotersUIStore((s) => s.customerDiscountInput);
   const promoterCommissionInput = usePromotersUIStore((s) => s.promoterCommissionInput);
+  const codeInput = usePromotersUIStore((s) => s.codeInput);
   const editTarget = usePromotersUIStore((s) => s.editTarget);
   const editCustomerDiscountInput = usePromotersUIStore((s) => s.editCustomerDiscountInput);
   const editPromoterCommissionInput = usePromotersUIStore((s) => s.editPromoterCommissionInput);
@@ -269,6 +275,7 @@ export function EventPromotersScreen() {
   const setSelectedUser = usePromotersUIStore((s) => s.setSelectedUser);
   const setCustomerDiscountInput = usePromotersUIStore((s) => s.setCustomerDiscountInput);
   const setPromoterCommissionInput = usePromotersUIStore((s) => s.setPromoterCommissionInput);
+  const setCodeInput = usePromotersUIStore((s) => s.setCodeInput);
   const setEditTarget = usePromotersUIStore((s) => s.setEditTarget);
   const setEditCustomerDiscountInput = usePromotersUIStore(
     (s) => s.setEditCustomerDiscountInput,
@@ -278,6 +285,12 @@ export function EventPromotersScreen() {
   );
   const setRemoveTarget = usePromotersUIStore((s) => s.setRemoveTarget);
   const resetAdd = usePromotersUIStore((s) => s.resetAdd);
+
+  const libraryQuery = useQuery({
+    queryKey: ["promoter-library"],
+    queryFn: () => promotersApi.library(),
+    staleTime: 30_000,
+  });
 
   const promotersQuery = useQuery({
     queryKey: ["event-promoters", eventId],
@@ -295,7 +308,8 @@ export function EventPromotersScreen() {
       displayName?: string;
       customerDiscountBps: number;
       promoterCommissionBps: number;
-    }) => promotersApi.add({ eventId, ...input }),
+      code?: string;
+    }) => promotersApi.add({ eventId, ...input, saveToLibrary: true }),
     onSuccess: (promoter) => {
       // Secondary confirmation — the event_promoters row + the
       // notification are the record; the toast is the "done" flash.
@@ -304,6 +318,7 @@ export function EventPromotersScreen() {
       });
       resetAdd();
       invalidate();
+      queryClient.invalidateQueries({ queryKey: ["promoter-library"] });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (err: any) => {
@@ -397,6 +412,7 @@ export function EventPromotersScreen() {
       username: selectedUser.username,
       customerDiscountBps,
       promoterCommissionBps,
+      ...(codeInput.trim() ? { code: codeInput.trim() } : {}),
     });
   };
 
@@ -551,6 +567,43 @@ export function EventPromotersScreen() {
           </>
         }
       >
+        {(libraryQuery.data?.length ?? 0) > 0 ? (
+          <div className="mb-4">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-white/40">
+              Saved promoters
+            </p>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {libraryQuery.data!.map((saved) => (
+                <button
+                  key={saved.id}
+                  type="button"
+                  disabled={addMutation.isPending || !saved.username}
+                  onClick={() => {
+                    if (!saved.username) return;
+                    setSelectedUser({
+                      id: saved.promoterAuthId,
+                      username: saved.username,
+                      name: saved.displayName,
+                      avatar: saved.avatarUrl || "",
+                    });
+                    setCustomerDiscountInput(String(saved.customerDiscountBps / 100));
+                    setPromoterCommissionInput(String(saved.promoterCommissionBps / 100));
+                    setCodeInput(saved.preferredCode || "");
+                  }}
+                  className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left disabled:opacity-40"
+                >
+                  <span className="block text-sm font-semibold text-white">
+                    {saved.displayName}
+                  </span>
+                  <span className="block text-[11px] text-white/45">
+                    {saved.username ? `@${saved.username}` : "Unavailable"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <UserPicker
           query={pickerQuery}
           onQueryChange={setPickerQuery}
@@ -564,6 +617,22 @@ export function EventPromotersScreen() {
           They&apos;re added to the event right away and notified — no
           accept step.
         </p>
+
+        <label className="mt-4 block">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
+            Custom promoter code (optional)
+          </span>
+          <input
+            value={codeInput}
+            onChange={(e) => setCodeInput(e.target.value)}
+            placeholder="MIKEVIP"
+            disabled={addMutation.isPending}
+            className="mt-1.5 w-full rounded-xl bg-white/6 px-3 py-2.5 font-mono text-[15px] uppercase text-white outline-none placeholder:text-white/30 disabled:opacity-50"
+          />
+          <p className="mt-1 text-[11px] text-white/35">
+            Leave blank to generate a unique event code.
+          </p>
+        </label>
 
         <label className="mt-4 block">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
