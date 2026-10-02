@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS public.editorial_jobs (
   idempotency_key text UNIQUE NOT NULL,
   job_type text NOT NULL DEFAULT 'content'
     CHECK (job_type IN ('content','engagement','correction','unpublish')),
+  engagement_action text CHECK (engagement_action IS NULL OR engagement_action IN ('like','follow','comment')),
+  target_user_id text,
+  target_post_id bigint,
   stage text NOT NULL DEFAULT 'intake'
     CHECK (stage IN ('intake','validated','generated','moderated','awaiting_approval','approved','scheduled','published','rejected','failed','unpublished')),
   idea text,
