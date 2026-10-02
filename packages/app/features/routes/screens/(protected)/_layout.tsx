@@ -6,6 +6,8 @@ import { Settings, X } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { TabHeaderLogo, TabHeaderRight } from "@dvnt/app/components/tab-header";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { AdultPlatformGate } from "@dvnt/app/components/adult-platform-gate";
+import { useVerifiedAdmission } from "@dvnt/app/lib/hooks/use-verified-admission";
 import { useCreateHeaderStore } from "@dvnt/app/lib/stores/create-header-store";
 import { useCallKeepCoordinator } from "@dvnt/app/features/services/callkeep";
 import { NotificationListener } from "@dvnt/app/features/services/callkeep/NotificationListener";
@@ -300,6 +302,21 @@ function TabsHeader() {
 }
 
 export default function ProtectedLayout() {
+  const { data: adultAdmission, isLoading } = useVerifiedAdmission();
+
+  // Do not mount the application shell, realtime, presence, calls, push or
+  // location side effects until this account is allowed onto the platform.
+  // New in-scope accounts verify here; a proven under-18 account cannot pass.
+  if (isLoading) {
+    return <View style={{ flex: 1, backgroundColor: "#000" }} />;
+  }
+  if (adultAdmission?.state === "blocked") {
+    return <AdultPlatformGate verdict={adultAdmission} />;
+  }
+  return <ProtectedAppLayout />;
+}
+
+function ProtectedAppLayout() {
   const { colors } = useColorScheme();
   const motionTier = useMotionTier();
   // Initialize CallKeep native call UI — registers listeners ONCE
