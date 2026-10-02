@@ -503,3 +503,7 @@ verify_jwt = false
 
 [functions.event-reminders]
 verify_jwt = false
+
+
+[functions.creator-program]
+verify_jwt = false
