@@ -98,6 +98,8 @@ function hydrateFromBootstrap(
           kind === "text" ? textPresentation.textSlides.length : undefined,
         createdAt: p.createdAt,
         isNSFW: p.isNSFW,
+        editorialJobId: p.editorialJobId,
+        disclosureLabel: p.disclosureLabel,
         location: p.location,
         likes: p.likes,
         comments: p.commentsCount,

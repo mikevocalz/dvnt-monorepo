@@ -1644,6 +1644,21 @@ function PostDetailScreenContent() {
                     {safePost.location}
                   </Text>
                 )}
+                {/*
+                  AI-editorial disclosure. Both fields are required: the label
+                  is a plain text column an author could write on their own
+                  post, while editorial_job_id is a FK into editorial_jobs,
+                  which no client role can read.
+                */}
+                {safePost.editorialJobId &&
+                safePost.disclosureLabel?.trim() ? (
+                  <Text
+                    className="text-xs font-semibold text-muted-foreground"
+                    accessibilityLabel={`${safePost.disclosureLabel.trim()}. This post was produced by DVNT editorial automation.`}
+                  >
+                    ✦ {safePost.disclosureLabel.trim()}
+                  </Text>
+                ) : null}
               </View>
             </View>
           </View>

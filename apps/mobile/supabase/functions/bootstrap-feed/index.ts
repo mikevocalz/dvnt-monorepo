@@ -288,7 +288,7 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
       .select(
         `
           id, content, post_kind, text_theme, created_at, visibility, is_nsfw, location,
-          likes_count, comments_count,
+          likes_count, comments_count, editorial_job_id, disclosure_label,
           author:users!posts_author_id_users_id_fk(
             id, username, first_name, verified,
             avatar:avatar_id(url)
@@ -439,6 +439,10 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
         textSlides,
         createdAt: p.created_at,
         isNSFW: p.is_nsfw || false,
+        // The AI-editorial disclosure, carried so the feed can render the
+        // badge without reading the admin-only editorial tables.
+        editorialJobId: p.editorial_job_id || undefined,
+        disclosureLabel: p.disclosure_label || undefined,
         location: p.location || null,
         likes: p.likes_count || 0,
         commentsCount: p.comments_count || 0,

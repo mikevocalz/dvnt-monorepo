@@ -28,6 +28,10 @@ export interface BootstrapPost {
   textSlides?: TextPostSlide[];
   createdAt: string;
   isNSFW: boolean;
+  /** posts.editorial_job_id — present only on AI-editorial posts. */
+  editorialJobId?: string;
+  /** posts.disclosure_label, rendered in the post header. */
+  disclosureLabel?: string;
   location: string | null;
   likes: number;
   commentsCount: number;

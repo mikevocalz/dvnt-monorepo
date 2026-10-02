@@ -5,6 +5,7 @@
  *   Article (borderRadius: 12, overflow hidden)
  *     ├─ Media block (video | carousel | single image)
  *     │    ├─ OVERLAY top-left:    [Avatar + username] liquid glass
+ *     │    ├─ OVERLAY under that:  [✦ disclosure] liquid glass (editorial only)
  *     │    ├─ OVERLAY top-right:   carousel dots (any post with 2+ items)
  *     │    ├─ OVERLAY top-right:   [⋮] liquid glass icon button
  *     │    ├─ OVERLAY bottom-left: [❤ n] [💬 n] [→] [🔖] liquid glass pill
@@ -33,6 +34,7 @@ import {
   Maximize2,
   Minimize2,
   Play,
+  Sparkles,
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
@@ -129,12 +131,68 @@ interface FeedPostProps {
   timeAgo: string;
   location?: string;
   isNSFW?: boolean;
+  /** posts.editorial_job_id — present only on an AI-editorial post. */
+  editorialJobId?: string;
+  /** posts.disclosure_label, e.g. "DVNT Editorial · AI-assisted". */
+  disclosureLabel?: string;
   onShowLikes?: (postId: string) => void;
   guestMode?: boolean;
   onGuestGate?: (reason: PublicGateReason) => void;
 }
 
 // ─────────────────────────────── helpers ────────────────────────────────────
+
+/**
+ * The AI-editorial disclosure a lane publishes under.
+ *
+ * Both fields are required. `disclosureLabel` alone is a plain text column a
+ * member could write on a post they own; `editorialJobId` is a FK into
+ * editorial_jobs, which anon and authenticated have no grant to read, so a
+ * client cannot supply a real one. Requiring the pair means the badge appears
+ * on editorial output and nowhere else.
+ */
+function EditorialDisclosure({
+  editorialJobId,
+  disclosureLabel,
+}: {
+  editorialJobId?: string;
+  disclosureLabel?: string;
+}) {
+  const label = disclosureLabel?.trim();
+  if (!editorialJobId || !label) return null;
+  return (
+    <View
+      style={{
+        position: "absolute",
+        top: 48,
+        left: 6,
+        zIndex: 50,
+        maxWidth: 220,
+      }}
+      pointerEvents="none"
+    >
+      <DVNTLiquidGlass paddingH={8} paddingV={4} radius={8}>
+        <Sparkles size={11} color="#fff" />
+        <Text
+          numberOfLines={1}
+          accessibilityRole="text"
+          accessibilityLabel={`${label}. This post was produced by DVNT editorial automation.`}
+          style={{
+            color: "#fff",
+            fontSize: 10,
+            fontWeight: "600",
+            letterSpacing: 0.2,
+            textShadowColor: "rgba(0,0,0,0.8)",
+            textShadowOffset: { width: 0, height: 1 },
+            textShadowRadius: 3,
+          }}
+        >
+          {label}
+        </Text>
+      </DVNTLiquidGlass>
+    </View>
+  );
+}
 
 /**
  * Carousel dots, in brand gradient colors, overlaid top-right of the media.
@@ -429,6 +487,8 @@ function FeedPostComponent({
   timeAgo,
   location,
   isNSFW,
+  editorialJobId,
+  disclosureLabel,
   onShowLikes: _onShowLikes,
   guestMode = false,
   onGuestGate,
@@ -1247,6 +1307,12 @@ function FeedPostComponent({
                 </View>
               </DVNTLiquidGlass>
             </Pressable>
+
+            {/* BELOW THE AUTHOR CHIP: AI-editorial disclosure */}
+            <EditorialDisclosure
+              editorialJobId={editorialJobId}
+              disclosureLabel={disclosureLabel}
+            />
 
             {/* TOP-RIGHT: Carousel dots (multi-image) */}
             {showsCarouselDots(mediaMode) && (
