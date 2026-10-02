@@ -111,7 +111,7 @@ export function useEventMediaPreupload() {
     };
     void run();
     return () => { cancelled = true; };
-  }, [desired, jobs, patch, setFlyer, setGallery, setPoster, setProgress]);
+  }, [desired, patch, setFlyer, setGallery, setPoster, setProgress]);
 
   const active = Object.values(jobs).filter((job) =>
     desired.some((item) => item.uri === job.localUri) &&
