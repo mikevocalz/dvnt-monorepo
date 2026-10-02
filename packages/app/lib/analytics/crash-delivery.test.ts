@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, beforeEach, test, mock } from "node:test";
 import { createRequire, registerHooks } from "node:module";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const native = require("./test-support/native-runtime.cjs");
@@ -25,7 +26,10 @@ const hooks = registerHooks({
     // Metro resolves extensionless relative imports in the shared package.
     if (specifier.startsWith(".") && context.parentURL?.startsWith("file:")) {
       const candidate = new URL(`${specifier}.ts`, context.parentURL);
-      if (existsSync(candidate)) return { url: candidate.href, shortCircuit: true };
+      // Convert via the href string. existsSync accepts a URL at runtime, but
+      // this resolves to the DOM URL, which is assignable to neither node:fs
+      // PathLike nor node:url's own URL, so both forms fail the typecheck.
+      if (existsSync(fileURLToPath(candidate.href))) return { url: candidate.href, shortCircuit: true };
     }
     return next(specifier, context);
   },
