@@ -13,7 +13,6 @@ import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVi
 import {
   X,
   Image as ImageIcon,
-  Camera,
   Trash2,
   Plus,
   Hash,
@@ -240,17 +239,6 @@ function CreateScreenContent() {
     }, [consumeCameraResult, validateMedia, selectedMedia, setSelectedMedia]),
   );
 
-  const handleOpenCamera = () => {
-    if (selectedMedia.length >= MAX_PHOTOS) {
-      showToast("warning", "Photo limit", `Maximum ${MAX_PHOTOS} photos per post.`);
-      return;
-    }
-    router.push({
-      pathname: "/(protected)/camera",
-      params: { mode: "photo", source: "post" },
-    });
-  };
-
   const handleRemoveMedia = (id: string) => {
     setSelectedMedia(selectedMedia.filter((m) => m.id !== id));
   };
@@ -460,7 +448,7 @@ function CreateScreenContent() {
           </View>
         </View>
 
-        {/* Meta block — Add tag, Add Photos/Camera, Add location.
+        {/* Meta block — Add tag, Add Media, Add location.
             Lifted above the per-mode content (text composer / media
             preview / caption) so this stays in the same spot whether
             the user is on the Media tab or the Text tab. */}
@@ -572,18 +560,10 @@ function CreateScreenContent() {
         </View>
 
         {!isTextPost && selectedMedia.length === 0 && (
-          <View
-            style={{
-              flexDirection: "row",
-              paddingHorizontal: 16,
-              paddingTop: 12,
-              gap: 8,
-            }}
-          >
+          <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
             <Pressable
               onPress={handlePickLibrary}
               style={{
-                flex: 1,
                 flexDirection: "row",
                 alignItems: "center",
                 justifyContent: "center",
@@ -595,26 +575,8 @@ function CreateScreenContent() {
             >
               <ImageIcon size={20} color="#fff" />
               <Text style={{ color: "#fff", fontWeight: "600" }}>
-                Add Photos
+                Add Media
               </Text>
-            </Pressable>
-            <Pressable
-              onPress={handleOpenCamera}
-              style={{
-                flex: 1,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                backgroundColor: "#1a1a1a",
-                borderWidth: 1,
-                borderColor: "#333",
-                paddingVertical: 14,
-                borderRadius: 12,
-              }}
-            >
-              <Camera size={20} color="#fff" />
-              <Text style={{ color: "#fff", fontWeight: "600" }}>Camera</Text>
             </Pressable>
           </View>
         )}
