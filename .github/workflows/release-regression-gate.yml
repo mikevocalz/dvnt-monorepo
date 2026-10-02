@@ -1,0 +1,29 @@
+name: release regression gate
+
+on:
+  pull_request:
+    paths:
+      - "packages/app/**"
+      - "apps/mobile/supabase/**"
+      - "scripts/**"
+      - ".github/workflows/release-regression-gate.yml"
+      - "docs/workstreams/17-release-regression-gate.md"
+  workflow_dispatch:
+
+jobs:
+  release-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm verify:release
+      - run: pnpm verify:functions
+      - run: pnpm verify:routes
+      - run: pnpm verify:issuance
+      - run: pnpm test:community
+      - run: pnpm test:tickets
+      - run: pnpm test:lynk-session
