@@ -25,14 +25,25 @@ Deno.serve(async (req) => {
     return json(req, { ok:false, error:"Valid source_event_id and destination_event_id are required" }, 400);
   }
 
-  const { data: sourceEvent } = await supabase.from("events")
-    .select("host_id").eq("id", source).maybeSingle();
-  const ownsSource = String(sourceEvent?.host_id || "") === String(authId);
-  if (!ownsSource) {
+  // Both events, not just the source. Authorizing only the source let any host
+  // consolidate a throwaway event into a stranger's event by integer id, which
+  // rewrote the victim's quantity_sold and put QRs they never sold on their
+  // door list. The RPC re-checks this; neither check is load-bearing alone.
+  const administers = async (eventId: number) => {
+    const { data: event } = await supabase.from("events")
+      .select("host_id").eq("id", eventId).maybeSingle();
+    if (!event) return false;
+    if (String(event.host_id || "") === String(authId)) return true;
     const { data: admin } = await supabase.from("event_co_organizers")
-      .select("user_id").eq("event_id", source).eq("user_id", authId)
+      .select("user_id").eq("event_id", eventId).eq("user_id", authId)
       .eq("accepted", true).eq("role", "admin").maybeSingle();
-    if (!admin) return json(req, { ok:false, error:"Forbidden" }, 403);
+    return Boolean(admin);
+  };
+  if (!(await administers(source))) {
+    return json(req, { ok:false, error:"Forbidden" }, 403);
+  }
+  if (!(await administers(destination))) {
+    return json(req, { ok:false, error:"Forbidden on destination event" }, 403);
   }
 
   if (body.mode === "preflight") {

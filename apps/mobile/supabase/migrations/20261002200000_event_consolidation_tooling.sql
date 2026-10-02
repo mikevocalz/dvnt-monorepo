@@ -122,8 +122,13 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'Source or destination event not found');
   END IF;
 
-  -- Only source owner or an accepted admin may execute. Service-role callers
-  -- still supply the human actor id so the immutable ledger is attributable.
+  -- The actor must own, or be an accepted admin of, BOTH events. Checking only
+  -- the source let any host mint comps on a throwaway event and push them into
+  -- a stranger's event by integer id: the victim's quantity_sold was rewritten,
+  -- their guest list gained attendees they never sold to, and the door admitted
+  -- those QRs because ticket-scan resolves the event from the ticket row.
+  -- Service-role callers still supply the human actor id so the immutable
+  -- ledger is attributable.
   IF v_source.host_id IS DISTINCT FROM p_actor_auth_id AND NOT EXISTS (
     SELECT 1 FROM public.event_co_organizers
     WHERE event_id = p_source_event_id AND user_id = p_actor_auth_id
@@ -132,18 +137,36 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'Actor cannot consolidate source event');
   END IF;
 
+  IF v_destination.host_id IS DISTINCT FROM p_actor_auth_id AND NOT EXISTS (
+    SELECT 1 FROM public.event_co_organizers
+    WHERE event_id = p_destination_event_id AND user_id = p_actor_auth_id
+      AND accepted = true AND role = 'admin'
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Actor cannot consolidate into destination event');
+  END IF;
+
   v_before := public.event_consolidation_snapshot(p_source_event_id, p_destination_event_id);
   IF v_before->>'fingerprint' IS DISTINCT FROM p_expected_preflight_hash THEN
     RETURN jsonb_build_object('ok', false, 'error', 'Preflight is stale; run it again');
   END IF;
 
+  -- tickets.ticket_type_id is nullable on purpose, so free RSVP tickets can
+  -- exist without a tier (20260334_tickets_nullable_ticket_type.sql). The
+  -- original predicate was `NOT (map ? t.ticket_type_id::text)`, and
+  -- `jsonb ? NULL` evaluates to NULL rather than true, so a NULL-tier row was
+  -- never flagged. The UPDATE below has no tier filter, so those tickets did
+  -- move, with `map->>NULL` giving them a NULL destination tier — invisible to
+  -- the per-tier quantity_sold recompute and to the capacity check above.
+  -- Refuse the whole operation instead: moving untracked admissions silently
+  -- is the defect, and a caller that wants them moved has to say where to.
   IF EXISTS (
     SELECT 1 FROM public.tickets t
     WHERE t.event_id = p_source_event_id
       AND t.status IN ('active','scanned','transfer_pending')
-      AND NOT (p_ticket_type_map ? t.ticket_type_id::text)
+      AND (t.ticket_type_id IS NULL
+           OR NOT (p_ticket_type_map ? t.ticket_type_id::text))
   ) THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'Every active source ticket tier needs a destination tier mapping');
+    RETURN jsonb_build_object('ok', false, 'error', 'Every active source ticket needs a destination tier mapping, including tier-less RSVP tickets');
   END IF;
 
   IF EXISTS (
@@ -154,6 +177,29 @@ BEGIN
     WHERE tt.id IS NULL
   ) THEN
     RETURN jsonb_build_object('ok', false, 'error', 'Ticket type map contains a tier outside destination event');
+  END IF;
+
+  -- Capacity. Both sibling issuance RPCs guard quantity_total; the move did
+  -- not reference it at all, so 200 source tickets could land in a 50-capacity
+  -- tier. quantity_sold then reads over quantity_total: the tier shows sold out
+  -- to buyers while the door admits every holder, with no way to unwind it.
+  -- NULL quantity_total means unlimited, so it is skipped rather than treated
+  -- as zero.
+  IF EXISTS (
+    SELECT 1
+    FROM (
+      SELECT (p_ticket_type_map->>t.ticket_type_id::text)::uuid AS dest_tier,
+             count(*) AS incoming
+      FROM public.tickets t
+      WHERE t.event_id = p_source_event_id
+        AND t.status IN ('active','scanned','transfer_pending')
+      GROUP BY 1
+    ) m
+    JOIN public.ticket_types tt ON tt.id = m.dest_tier
+    WHERE tt.quantity_total IS NOT NULL
+      AND COALESCE(tt.quantity_sold, 0) + m.incoming > tt.quantity_total
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Destination tier capacity would be exceeded');
   END IF;
 
   INSERT INTO public.event_consolidation_operations(
@@ -190,6 +236,21 @@ BEGIN
       AND t.status IN ('active','scanned','transfer_pending')
   )
   WHERE tt.event_id IN (p_source_event_id, p_destination_event_id);
+
+  -- events.total_attendees has to be recomputed here too. Its maintaining
+  -- trigger is AFTER INSERT OR UPDATE OF status OR DELETE, so changing
+  -- tickets.event_id never fires it, and the body only branches on status
+  -- transitions. Left alone, the source keeps counting every moved ticket and
+  -- the destination never counts any, which both get-host-dashboard and
+  -- get_event_detail read. The drift is also self-sealing: a later refund
+  -- decrements the destination, which was never incremented, and GREATEST(,0)
+  -- floors it, so the source's inflation could never be worked off.
+  UPDATE public.events e
+  SET total_attendees = (
+    SELECT count(*)::integer FROM public.tickets t
+    WHERE t.event_id = e.id AND t.status = 'active'
+  )
+  WHERE e.id IN (p_source_event_id, p_destination_event_id);
 
   v_after := public.event_consolidation_snapshot(p_source_event_id, p_destination_event_id);
   UPDATE public.event_consolidation_operations
