@@ -210,15 +210,14 @@ function webRouteForActivity(activity: Activity): string {
     case "ticket_transfer_cancelled":
     case "ticket_comped":
     case "ticket_refunded":
-      if (event?.id || entityId) return `/events/${event?.id || entityId}`;
-      return `/events`;
     case "ticket_claim_required":
     case "ticket_delivery_failed":
     case "ticket_voided":
     case "event_postponed":
     case "event_time_changed":
     case "event_venue_changed":
-      return ticketActivityCopy(activity.type) || " updated your ticket.";
+      if (event?.id || entityId) return `/events/${event?.id || entityId}`;
+      return `/events`;
     case "room_invite":
     case "sneaky_lynk":
       if (entityId) return `/sneaky-lynk/room/${entityId}`;
@@ -334,6 +333,13 @@ function getActivityText(activity: Activity): string {
       return ` comped you a ticket to ${activity.event?.title || "an event"}.`;
     case "ticket_refunded":
       return ` issued a refund for your ${activity.event?.title || "event"} ticket.`;
+    case "ticket_claim_required":
+    case "ticket_delivery_failed":
+    case "ticket_voided":
+    case "event_postponed":
+    case "event_time_changed":
+    case "event_venue_changed":
+      return ticketActivityCopy(activity.type) || " updated your ticket.";
     case "room_invite":
     case "sneaky_lynk":
       return " invited you to a Sneaky Lynk.";
@@ -733,6 +739,7 @@ export function ActivityScreen() {
       Likes: activities.filter((a) => a.type === "like").length,
       Comments: activities.filter((a) => a.type === "comment").length,
       Mentions: activities.filter((a) => a.type === "mention").length,
+      Tickets: activities.filter((a) => isTicketActivityType(a.type)).length,
       Liked: likedActivities.length,
     }),
     [activities, likedActivities],
