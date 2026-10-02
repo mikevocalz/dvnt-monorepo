@@ -1,5 +1,5 @@
 import { useColorScheme as useNativewindColorScheme } from "nativewind"
-import { Platform } from "react-native"
+import { Appearance } from "react-native"
 import { COLORS } from "@dvnt/app/theme/colors"
 
 /**
@@ -20,9 +20,11 @@ function useColorScheme() {
   const resolvedColorScheme = "dark" as const
 
   function applyDarkScheme() {
-    // DVNT-WEB-S: NativeWind calls Appearance.setColorScheme, which is not
-    // implemented by react-native-web. Web already renders the dark palette.
-    if (Platform.OS !== "web") setColorScheme("dark")
+    // DVNT-WEB-S: NativeWind calls Appearance.setColorScheme, which
+    // react-native-web does not implement. Guard the capability rather than
+    // the platform, so any runtime missing the API is covered by one rule
+    // instead of a list of platforms to keep up to date.
+    if (typeof Appearance?.setColorScheme === "function") setColorScheme("dark")
   }
 
   return {
