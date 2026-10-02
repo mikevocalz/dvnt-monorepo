@@ -34,12 +34,14 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
   Camera,
+  ChevronRight,
   Copy,
   ImageIcon,
   MessageCircle,
@@ -70,7 +72,10 @@ import {
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
+import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
+import { toast } from "sonner";
 import { SharedPostBubble } from "@dvnt/app/components/chat/shared-post-bubble";
+import { AddMemberDialog } from "./add-member.web";
 import { StoryReplyBubble } from "@dvnt/app/components/chat/story-reply-bubble";
 import { EventShareBubble } from "@dvnt/app/components/chat/event-share-bubble";
 
@@ -142,7 +147,7 @@ function MediaGrid({
   const cols = visible.length === 1 ? 1 : 2;
   return (
     <div
-      className="grid gap-[3px]"
+      className="grid gap-0.75"
       style={{
         gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
         width: 220,
@@ -163,7 +168,7 @@ function MediaGrid({
                 {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                 <video src={m.uri} className="h-full w-full object-cover" />
                 <span className="absolute inset-0 flex items-center justify-center bg-black/30">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-[#34a2df] to-[#ff5bfc] text-white">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-linear-to-br from-[#34a2df] to-[#ff5bfc] text-white">
                     ▶
                   </span>
                 </span>
@@ -266,6 +271,13 @@ function MessageRow({
 
   const isFailed = isMe && item.status === "failed";
   const isMsgSending = isMe && item.status === "sending";
+
+  // 1:1 threads feel oversized on desktop when bubbles stretch to 80% of a
+  // 768px container; cap them narrower in that layout while keeping group
+  // bubbles roomy for sender names.
+  const bubbleMaxWidth = isGroupChat
+    ? "max-w-[80%]"
+    : "max-w-[80%] md:max-w-[60%]";
 
   const onDoubleTap = useCallback(() => {
     const now = Date.now();
@@ -385,7 +397,7 @@ function MessageRow({
         style={{ opacity: isMsgSending ? 0.6 : 1 }}
       >
         <div
-          className="flex max-w-[80%] flex-col items-end"
+          className={`flex ${bubbleMaxWidth} flex-col items-end`}
           style={{ flexShrink: 1 }}
         >
           {isFailed ? (
@@ -440,7 +452,7 @@ function MessageRow({
         size={28}
         variant="roundedSquare"
       />
-      <div className="flex max-w-[80%] flex-col" style={{ flexShrink: 1 }}>
+      <div className={`flex ${bubbleMaxWidth} flex-col`} style={{ flexShrink: 1 }}>
         {isGroupChat && (
           <p
             className="mb-1.5 ml-0.5 text-xs font-bold tracking-wide"
@@ -618,6 +630,7 @@ export function ChatScreen() {
   const isLoadingRecipient = useChatScreenStore((s) => s.isLoadingRecipient);
   const isGroupChat = useChatScreenStore((s) => s.isGroupChat);
   const groupMembers = useChatScreenStore((s) => s.groupMembers);
+  const viewerIsMember = useChatScreenStore((s) => s.viewerIsMember);
   const groupName = useChatScreenStore((s) => s.groupName);
   const selectedMessage = useChatScreenStore((s) => s.selectedMessage);
   const showMessageActions = useChatScreenStore((s) => s.showMessageActions);
@@ -644,6 +657,55 @@ export function ChatScreen() {
   const conversationActionId = activeConvId || resolvedConvIdRef.current || "";
 
   const safeGroupMembers = useMemo(() => groupMembers || [], [groupMembers]);
+  // `groupMembers` is the OTHER members — getConversationById excludes the
+  // viewer, so a raw count reads one short. The native header already folds
+  // the viewer in; this mirrors it so header count = everyone in the group.
+  const headerGroupMembers = useMemo(() => {
+    if (!isGroupChat) return safeGroupMembers;
+
+    const currentUserAuthId = currentUser?.authId || currentUser?.id;
+    const includesCurrentUser = safeGroupMembers.some(
+      (member) =>
+        (currentUserAuthId &&
+          (member.authId === currentUserAuthId ||
+            member.id === currentUserAuthId)) ||
+        (!!currentUser?.username && member.username === currentUser.username),
+    );
+
+    if (!currentUser || !viewerIsMember || includesCurrentUser) {
+      return safeGroupMembers;
+    }
+
+    return [
+      ...safeGroupMembers,
+      {
+        id: String(currentUser.id || currentUser.authId || "me"),
+        authId: currentUser.authId || currentUser.id,
+        username: currentUser.username || "you",
+        name: currentUser.name || currentUser.username || "You",
+        avatar: currentUser.avatar || "",
+      },
+    ];
+  }, [currentUser, isGroupChat, safeGroupMembers, viewerIsMember]);
+  const [showMembers, setShowMembers] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
+
+  // Live call attached to this group chat — powers the header Join button.
+  // video_rooms.conversation_id is set by call_create when the caller launched
+  // from this chat. RLS keeps the row invisible to anyone not invited.
+  const [liveCallRoom, setLiveCallRoom] = useState<{
+    uuid: string;
+    hasVideo: boolean;
+    participantCount: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!showMembers) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowMembers(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showMembers]);
   const groupMemberLookup = useMemo(() => {
     const lookup = new Map<
       string,
@@ -721,6 +783,7 @@ export function ChatScreen() {
             true,
             conversation.members,
             conversation.groupName || "",
+            conversation.viewerIsMember,
           );
         }
         const otherUser = conversation.user;
@@ -857,6 +920,98 @@ export function ChatScreen() {
     };
   }, [activeConvId, mergeRealtimeMessage, refreshMessageCounts]);
 
+  // ── Live call in this group ──
+  // A call started from this chat carries conversation_id on its video_rooms
+  // row. Initial fetch covers a call already in progress when you open the
+  // chat; the realtime subscription covers one starting (INSERT), ending
+  // (UPDATE status), or a stale room being swept while you watch.
+  useEffect(() => {
+    if (!isGroupChat || !activeConvId || !/^\d+$/.test(activeConvId)) {
+      setLiveCallRoom(null);
+      return;
+    }
+    const convId = Number(activeConvId);
+    let cancelled = false;
+
+    const applyRow = (row: {
+      uuid: string;
+      status: string;
+      has_video: boolean | null;
+      participant_count: number | null;
+    } | null) => {
+      if (!row || row.status !== "open") {
+        setLiveCallRoom(null);
+        return;
+      }
+      setLiveCallRoom({
+        uuid: row.uuid,
+        hasVideo: row.has_video === true,
+        participantCount: row.participant_count ?? 0,
+      });
+    };
+
+    const fetchLiveCall = () =>
+      supabase
+        .from("video_rooms")
+        .select("uuid, status, has_video, participant_count, created_at")
+        .eq("conversation_id", convId)
+        .eq("room_kind", "call")
+        .eq("status", "open")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (!cancelled) applyRow(data);
+        });
+
+    void fetchLiveCall();
+
+    const channel = freshChannel(`chat-live-call-${activeConvId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "video_rooms",
+          filter: `conversation_id=eq.${convId}`,
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (payload: any) => {
+          if (cancelled) return;
+          const row = payload.new;
+          // DELETE carries only `old` (and only the PK unless the replica
+          // identity is FULL) — re-query rather than trusting the event.
+          if (!row || !row.uuid) {
+            void fetchLiveCall();
+            return;
+          }
+          if (row.room_kind !== "call") return;
+          applyRow(row);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [isGroupChat, activeConvId]);
+
+  // Rejoin the live call — navigates INTO the existing room (no isOutgoing,
+  // no participantIds), so the call screen takes its join path on the room
+  // uuid instead of minting a second call.
+  const joinLiveCall = useCallback(() => {
+    if (!liveCallRoom) return;
+    const query = new URLSearchParams({
+      callType: liveCallRoom.hasVideo ? "video" : "audio",
+      isGroup: "true",
+      chatId: String(chatId ?? ""),
+      recipientUsername: groupName || "Group",
+      recipientAvatar: safeGroupMembers[0]?.avatar || "",
+    });
+    router.push(`/feed/call/${liveCallRoom.uuid}?${query.toString()}`);
+  }, [liveCallRoom, chatId, groupName, safeGroupMembers, router]);
+
   // ── Cleanup on unmount ──
   useEffect(() => {
     return () => {
@@ -888,6 +1043,10 @@ export function ChatScreen() {
     (currentMessage.trim() || pendingMedia.length > 0) &&
     !isSending &&
     !!activeConvId;
+
+  // 1:1 chats on desktop get a narrower, compact layout; groups still spread
+  // to the wider grid/cards they were designed for.
+  const chatMaxWidth = isGroupChat ? "max-w-3xl" : "max-w-2xl";
 
   // ── Handlers ──
   const handleSend = useCallback(() => {
@@ -931,7 +1090,21 @@ export function ChatScreen() {
         chatId: String(chatId ?? ""),
       });
       if (isGroupChat) {
+        // Callees only: call_create refuses a list containing the caller, and
+        // safeGroupMembers can already carry the viewer (some conversation
+        // sources fold them in). Same match the header fold uses.
+        const viewerKeys = new Set(
+          [currentUser?.id, currentUser?.authId, currentUser?.username]
+            .filter(Boolean)
+            .map(String),
+        );
         const ids = safeGroupMembers
+          .filter(
+            (m) =>
+              !viewerKeys.has(String(m.id || "")) &&
+              !viewerKeys.has(String((m as any).authId || "")) &&
+              !viewerKeys.has(String(m.username || "")),
+          )
           .map((m) => m.id || (m as any).authId || "")
           .filter(Boolean)
           .join(",");
@@ -948,7 +1121,15 @@ export function ChatScreen() {
       }
       router.push(`/feed/call/${roomId}?${query.toString()}`);
     },
-    [chatId, isGroupChat, safeGroupMembers, groupName, recipient, router],
+    [
+      chatId,
+      currentUser,
+      isGroupChat,
+      safeGroupMembers,
+      groupName,
+      recipient,
+      router,
+    ],
   );
 
   const handlePickMedia = useCallback(
@@ -1042,7 +1223,7 @@ export function ChatScreen() {
   /* ── Guard states ── */
   if (!hasValidRouteId) {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#06070d] p-6 text-white">
+      <div className="flex min-h-dvh flex-col items-center justify-center bg-[#06070d] p-6 text-white">
         <MessageCircle size={64} color="#666" strokeWidth={1.5} />
         <p className="mt-4 text-lg font-semibold">Invalid chat link</p>
         <p className="mt-2 text-sm text-white/55">
@@ -1054,7 +1235,7 @@ export function ChatScreen() {
 
   if (resolutionError && !activeConvId) {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#06070d] p-6 text-white">
+      <div className="flex min-h-dvh flex-col items-center justify-center bg-[#06070d] p-6 text-white">
         <MessageCircle size={64} color="#666" strokeWidth={1.5} />
         <p className="mt-4 text-lg font-semibold">Couldn&apos;t load chat</p>
         <p className="mt-2 text-sm text-white/55">
@@ -1080,10 +1261,10 @@ export function ChatScreen() {
   }
 
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-[#06070d] text-white">
+    <div className="flex min-h-dvh flex-col bg-[#06070d] text-white">
       {/* ── Header ── */}
       <header
-        className="sticky top-0 z-20 mx-auto flex w-full max-w-3xl items-center gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 py-3 backdrop-blur"
+        className={`sticky top-0 z-20 mx-auto flex w-full items-center gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 py-3 backdrop-blur ${chatMaxWidth}`}
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
         <button
@@ -1096,10 +1277,15 @@ export function ChatScreen() {
 
         {isGroupChat ? (
           <>
-            <div className="flex flex-1 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowMembers(true)}
+              aria-label="View group members"
+              className="group flex flex-1 items-center gap-3 rounded-xl px-1 py-0.5 text-left transition-colors hover:bg-white/5"
+            >
               {/* Group avatar — 2×2 member stack (parity with native header). */}
               <div className="grid h-10 w-10 shrink-0 grid-cols-2 grid-rows-2 gap-px overflow-hidden rounded-2xl bg-white/10">
-                {safeGroupMembers.slice(0, 4).map((m, i) =>
+                {headerGroupMembers.slice(0, 4).map((m, i) =>
                   m.avatar ? (
                     <img
                       key={m.id || i}
@@ -1123,11 +1309,25 @@ export function ChatScreen() {
                     safeGroupMembers.map((m) => m.username).join(", ") ||
                     "Group"}
                 </p>
-                <p className="truncate text-xs text-white/55">
-                  {safeGroupMembers.length} members
+                <p className="truncate text-xs text-white/55 underline-offset-2 group-hover:underline">
+                  {headerGroupMembers.length} members
                 </p>
               </div>
-            </div>
+              <ChevronRight size={18} className="shrink-0 text-white/35" />
+            </button>
+            {liveCallRoom && (
+              <button
+                onClick={joinLiveCall}
+                aria-label="Join the live call"
+                className="flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-black"
+                style={{ backgroundColor: "#3FDCFF" }}
+              >
+                <Video size={14} />
+                Join
+                {liveCallRoom.participantCount > 0 &&
+                  ` · ${liveCallRoom.participantCount}`}
+              </button>
+            )}
             <button
               onClick={() => startCall("audio")}
               aria-label="Audio call"
@@ -1184,7 +1384,7 @@ export function ChatScreen() {
         )}
       </header>
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col">
+      <main className={`mx-auto flex w-full flex-1 flex-col ${chatMaxWidth}`}>
         {isLoadingRecipient || isResolvingConversation ? (
           <div className="flex flex-1 flex-col items-center justify-center py-24">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-cyan-400" />
@@ -1216,7 +1416,7 @@ export function ChatScreen() {
 
         {/* Mention suggestions */}
         {showMentions && filteredUsers.length > 0 && (
-          <div className="max-h-[200px] border-t border-white/8 bg-white/5">
+          <div className="max-h-50 border-t border-white/8 bg-white/5">
             <p className="px-4 pb-2 pt-3 text-xs text-white/55">
               Mention a user
             </p>
@@ -1337,7 +1537,7 @@ export function ChatScreen() {
                     }
                   }}
                   placeholder="Message... (use @ to mention)"
-                  className="min-h-[40px] flex-1 rounded-[18px] bg-white/8 px-4 py-2.5 text-[15px] text-white outline-none placeholder:text-white/40"
+                  className="min-h-10 flex-1 rounded-[18px] bg-white/8 px-4 py-2.5 text-[15px] text-white outline-none placeholder:text-white/40"
                 />
               </>
             )}
@@ -1359,7 +1559,7 @@ export function ChatScreen() {
       {/* ── Edit bar ── */}
       {editingMessage && (
         <div
-          className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-3xl border-t border-white/12 bg-[#1a1a1a] px-4 pt-2.5"
+          className={`fixed inset-x-0 bottom-0 z-30 mx-auto w-full border-t border-white/12 bg-[#1a1a1a] px-4 pt-2.5 ${chatMaxWidth}`}
           style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 10px + var(--dvnt-tabbar-clearance))" }}
         >
           <div className="mb-2 flex items-center justify-between">
@@ -1474,6 +1674,108 @@ export function ChatScreen() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Group members — opened from the header count. Same pattern as the
+          message-action overlay: centered panel, backdrop tap or Esc closes. */}
+      {showMembers && isGroupChat && (
+        <div
+          role="presentation"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowMembers(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Group members"
+            className="w-full max-w-sm overflow-hidden rounded-2xl bg-[#14151a] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+              <p className="text-base font-semibold">
+                {headerGroupMembers.length}{" "}
+                {headerGroupMembers.length === 1 ? "member" : "members"}
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (headerGroupMembers.length >= MAX_GROUP_CHAT_MEMBERS) {
+                      toast.error("12 MAX GROUP CHAT USERS");
+                      return;
+                    }
+                    setShowMembers(false);
+                    setShowAddMember(true);
+                  }}
+                  className="mr-2 rounded-full bg-cyan-400 px-3 py-1 text-xs font-semibold text-[#06070d]"
+                >
+                  Add member
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowMembers(false)}
+                  aria-label="Close"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-white/55 hover:bg-white/10"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="max-h-80 overflow-y-auto py-1">
+              {headerGroupMembers.map((m) => {
+                const isYou =
+                  (!!currentUser?.username &&
+                    m.username === currentUser.username) ||
+                  (!!currentUser?.authId && m.authId === currentUser.authId);
+                return (
+                  <button
+                    key={m.authId || m.id || m.username}
+                    type="button"
+                    onClick={() => {
+                      setShowMembers(false);
+                      if (m.username) router.push(`/feed/${m.username}`);
+                    }}
+                    className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-white/5"
+                  >
+                    <Avatar
+                      uri={m.avatar || ""}
+                      username={m.username || ""}
+                      size={40}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-white">
+                        {m.name || m.username}
+                        {isYou ? (
+                          <span className="ml-1.5 font-normal text-white/45">
+                            (You)
+                          </span>
+                        ) : null}
+                      </p>
+                      <p className="truncate text-xs text-white/50">
+                        @{m.username}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddMember && isGroupChat && activeConvId && (
+        <AddMemberDialog
+          conversationId={activeConvId}
+          currentCount={headerGroupMembers.length}
+          existingIds={new Set(
+            headerGroupMembers.map((m) => String(m.id || m.authId || "")),
+          )}
+          onClose={() => setShowAddMember(false)}
+          onAdded={() => {
+            // Rehydrate member list so the new person shows up.
+            loadedRecipientConvIdRef.current = null;
+          }}
+        />
       )}
     </div>
   );

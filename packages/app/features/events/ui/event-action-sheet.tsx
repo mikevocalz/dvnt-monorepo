@@ -34,6 +34,8 @@ interface EventActionSheetProps {
   /** events.status — drives Postpone vs Resume + hides lifecycle
    * actions once the event is cancelled. */
   eventStatus?: string;
+  /** e.g. "Invite guests" on private events, where a link cannot open it. */
+  shareLabel?: string;
   onShare: () => void;
   onToggleLike: () => void;
   onAddToCalendar: () => void;
@@ -64,6 +66,7 @@ export function EventActionSheet({
   isHost,
   isLiked,
   eventStatus,
+  shareLabel,
   onShare,
   onToggleLike,
   onAddToCalendar,
@@ -318,7 +321,7 @@ export function EventActionSheet({
             <Share2 size={20} color="#fff" />
           </View>
           <View style={styles.rowTextWrap}>
-            <Text style={styles.rowText}>Share Event</Text>
+            <Text style={styles.rowText}>{shareLabel ?? "Share Event"}</Text>
           </View>
         </Pressable>
 

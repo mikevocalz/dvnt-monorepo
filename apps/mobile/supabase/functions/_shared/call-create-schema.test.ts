@@ -1,16 +1,23 @@
 import { CallCreateSchema } from "./call-create-schema.ts";
+import { CALL_HUMAN_CAPACITY, CALL_MAX_INVITEES } from "./call-capacity.ts";
 
-Deno.test("calls accept one to three invitees and default to four total", () => {
-  for (const participantIds of [["1"], ["1", "2"], ["1", "2", "3"]]) {
+Deno.test("calls accept one to eleven invitees and default to twelve total", () => {
+  for (const count of [1, 2, 4, 9, CALL_MAX_INVITEES]) {
+    const participantIds = Array.from({ length: count }, (_, i) => String(i + 1));
     const parsed = CallCreateSchema.parse({ title: "Crew", participantIds });
-    if (parsed.maxParticipants !== 4) {
-      throw new Error("Call capacity must default to four");
+    if (parsed.maxParticipants !== CALL_HUMAN_CAPACITY) {
+      throw new Error("Call capacity must default to twelve");
     }
   }
 });
 
 Deno.test("calls reject empty and oversized recipient sets", () => {
-  for (const participantIds of [[], ["1", "2", "3", "4"]]) {
+  for (
+    const participantIds of [[], Array.from(
+      { length: CALL_HUMAN_CAPACITY },
+      (_, i) => String(i + 1),
+    )]
+  ) {
     if (CallCreateSchema.safeParse({ title: "Crew", participantIds }).success) {
       throw new Error("Invalid recipient count accepted");
     }
@@ -50,15 +57,44 @@ Deno.test("calls reject invalid IDs and capacity escalation", () => {
   }
 });
 
-Deno.test("legacy participant hints normalize to four without breaking released phone clients", () => {
+Deno.test("legacy participant hints normalize to twelve without breaking released phone clients", () => {
   for (const maxParticipants of [2, 3, 4, 5, 10, 50]) {
     const parsed = CallCreateSchema.parse({
       title: "Crew",
       participantIds: ["1"],
       maxParticipants,
     });
-    if (parsed.maxParticipants !== 4) {
+    if (parsed.maxParticipants !== CALL_HUMAN_CAPACITY) {
       throw new Error("Legacy hint changed call capacity");
+    }
+  }
+});
+
+Deno.test("chatId links a call to its conversation and rejects junk", () => {
+  const linked = CallCreateSchema.parse({
+    title: "Crew",
+    participantIds: ["1"],
+    chatId: "116",
+  });
+  if (linked.chatId !== "116") {
+    throw new Error("chatId not carried through");
+  }
+  const unlinked = CallCreateSchema.parse({
+    title: "Crew",
+    participantIds: ["1"],
+  });
+  if (unlinked.chatId !== undefined) {
+    throw new Error("chatId must stay optional for direct calls");
+  }
+  for (const chatId of ["0", "-1", "1.5", "abc", " 1", "1 "]) {
+    if (
+      CallCreateSchema.safeParse({
+        title: "Crew",
+        participantIds: ["1"],
+        chatId,
+      }).success
+    ) {
+      throw new Error(`Invalid chatId accepted: ${chatId}`);
     }
   }
 });

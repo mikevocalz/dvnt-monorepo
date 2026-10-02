@@ -10,6 +10,10 @@
 import { supabase } from "../supabase/client";
 import { requireBetterAuthToken } from "../auth/identity";
 import { callErrorMessage } from "./call-error-message";
+import {
+  CALL_HUMAN_CAPACITY,
+  CALL_MAX_INVITEES,
+} from "../constants/call-capacity";
 
 interface ApiResponse<T> {
   ok: boolean;
@@ -28,7 +32,7 @@ export interface CallJoinResponse {
 }
 
 async function callEdgeFunction<T>(
-  functionName: "call_create" | "call_join",
+  functionName: "call_create" | "call_join" | "video_leave_room",
   body: Record<string, unknown>,
 ): Promise<ApiResponse<T>> {
   try {
@@ -58,12 +62,26 @@ export const callRoomsApi = {
     participantIds: string[];
     hasVideo?: boolean;
     maxParticipants?: number;
+    /** Group chat this call was started from — the header shows Join/Rejoin. */
+    chatId?: string;
   }): Promise<ApiResponse<CallCreateResponse>> {
-    if (params.participantIds.length < 1 || params.participantIds.length > 3 ||
-        new Set(params.participantIds).size !== params.participantIds.length) {
-      return { ok: false, error: { code: "validation_error", message: "Choose one to three people to call" } };
+    if (
+      params.participantIds.length < 1 ||
+      params.participantIds.length > CALL_MAX_INVITEES ||
+      new Set(params.participantIds).size !== params.participantIds.length
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "validation_error",
+          message: `Choose 1 to ${CALL_MAX_INVITEES} people to call`,
+        },
+      };
     }
-    return callEdgeFunction<CallCreateResponse>("call_create", { ...params, maxParticipants: 4 });
+    return callEdgeFunction<CallCreateResponse>("call_create", {
+      ...params,
+      maxParticipants: CALL_HUMAN_CAPACITY,
+    });
   },
 
   async joinCall(
@@ -81,5 +99,19 @@ export const callRoomsApi = {
       };
     }
     return res;
+  },
+
+  /**
+   * Mark MY membership left. Call admission lives in video_room_members
+   * (admit_call_participant) but nothing ever wrote 'left' — rows stayed
+   * 'active' forever, so a call went call_full after four people had ever
+   * joined and nobody could get back in. video_leave_room is room-kind
+   * agnostic: marks the member left, decrements the count, and ends the
+   * room itself when the host or the last participant walks out.
+   */
+  async leaveCall(
+    roomId: string,
+  ): Promise<ApiResponse<{ left: boolean; roomEnded: boolean }>> {
+    return callEdgeFunction("video_leave_room", { roomId });
   },
 };

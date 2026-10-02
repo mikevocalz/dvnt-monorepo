@@ -77,7 +77,7 @@ export default function VideoCallScreen() {
           const ids = participantIds.split(",");
           await createCall(ids, ids.length > 1, initialCallType, chatId);
         } else if (roomId) {
-          await joinCall(roomId, initialCallType);
+          await joinCall(roomId, initialCallType, isGroupCall);
         } else {
           CT.error("LIFECYCLE", "callScreen_no_params", {
             roomId: roomId ?? "null",

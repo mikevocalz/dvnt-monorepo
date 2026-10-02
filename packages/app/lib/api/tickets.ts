@@ -396,6 +396,7 @@ export const ticketsApi = {
     quantity: number;
     userId?: string; // deprecated — server derives from session
     promoCode?: string;
+    idempotencyKey?: string;
   }): Promise<{
     url?: string;
     tickets?: any[];
@@ -417,6 +418,9 @@ export const ticketsApi = {
             quantity: params.quantity,
             ...(params.promoCode ? { promo_code: params.promoCode } : {}),
             ...(promoterCode ? { promoter_code: promoterCode } : {}),
+            ...(params.idempotencyKey
+              ? { idempotency_key: params.idempotencyKey }
+              : {}),
           },
           headers: { Authorization: `Bearer ${token}` },
         },
@@ -442,6 +446,7 @@ export const ticketsApi = {
     guestEmail: string;
     guestName?: string;
     promoCode?: string;
+    idempotencyKey?: string;
   }): Promise<{
     url?: string;
     tickets?: any[];
@@ -463,6 +468,9 @@ export const ticketsApi = {
             ...(params.guestName ? { guest_name: params.guestName } : {}),
             ...(params.promoCode ? { promo_code: params.promoCode } : {}),
             ...(promoterCode ? { promoter_code: promoterCode } : {}),
+            ...(params.idempotencyKey
+              ? { idempotency_key: params.idempotencyKey }
+              : {}),
           },
           // No Authorization header — the server only checks for it
           // when guest_email is missing, so this routes to the guest

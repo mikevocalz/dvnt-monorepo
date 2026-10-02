@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 
 export interface NewGroupSelectedUser {
   id: string;
@@ -15,7 +16,7 @@ interface NewGroupState {
   setIsCreating: (value: boolean) => void;
   setSearchQuery: (query: string) => void;
   setGroupName: (name: string) => void;
-  toggleUser: (user: NewGroupSelectedUser, max?: number) => boolean;
+  toggleUser: (user: NewGroupSelectedUser, max?: number) => boolean | string;
   removeUser: (id: string) => void;
   isSelected: (id: string) => boolean;
   reset: () => void;
@@ -34,15 +35,16 @@ export const useNewGroupStore = create<NewGroupState>((set, get) => ({
   setIsCreating: (value) => set({ isCreating: value }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setGroupName: (name) => set({ groupName: name }),
-  toggleUser: (user, max) => {
+  toggleUser: (user, max = MAX_GROUP_CHAT_MEMBERS) => {
     const prev = get().selectedUsers;
     const exists = prev.some((u) => u.id === user.id);
     if (exists) {
       set({ selectedUsers: prev.filter((u) => u.id !== user.id) });
       return true;
     }
-    if (max !== undefined && prev.length >= max - 1) {
-      return false;
+    // Hard ceiling: creator + selected users must fit inside the group limit.
+    if (max !== undefined && prev.length + 1 > max - 1) {
+      return "12 MAX GROUP CHAT USERS";
     }
     set({ selectedUsers: [...prev, user] });
     return true;

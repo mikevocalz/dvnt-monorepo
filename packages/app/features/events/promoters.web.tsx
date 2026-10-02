@@ -43,6 +43,8 @@ import {
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { toast } from "sonner";
+import { UserPicker } from "./ui/user-picker.web";
 import { Dialog } from "@dvnt/ui";
 
 const ACCENT = "#8A40CF"; // promoter violet — cyan is staff, purple tag is promo codes
@@ -62,54 +64,60 @@ function parsePercentToBps(raw: string): number | null {
 // --- Local UI state (Zustand, never useState) -----------------------------
 interface PromotersUIState {
   addOpen: boolean;
-  addMode: "linked" | "external";
-  usernameInput: string;
-  nameInput: string;
-  percentInput: string;
+  pickerQuery: string;
+  selectedUser: { id: string; username: string; name: string; avatar: string } | null;
+  customerDiscountInput: string;
+  promoterCommissionInput: string;
   editTarget: EventPromoter | null;
-  editPercentInput: string;
+  editCustomerDiscountInput: string;
+  editPromoterCommissionInput: string;
   removeTarget: EventPromoter | null;
   openAdd: () => void;
   closeAdd: () => void;
-  setAddMode: (m: "linked" | "external") => void;
-  setUsernameInput: (v: string) => void;
-  setNameInput: (v: string) => void;
-  setPercentInput: (v: string) => void;
+  setPickerQuery: (v: string) => void;
+  setSelectedUser: (u: PromotersUIState["selectedUser"]) => void;
+  setCustomerDiscountInput: (v: string) => void;
+  setPromoterCommissionInput: (v: string) => void;
   setEditTarget: (p: EventPromoter | null) => void;
-  setEditPercentInput: (v: string) => void;
+  setEditCustomerDiscountInput: (v: string) => void;
+  setEditPromoterCommissionInput: (v: string) => void;
   setRemoveTarget: (p: EventPromoter | null) => void;
   resetAdd: () => void;
 }
 
 const usePromotersUIStore = create<PromotersUIState>((set) => ({
   addOpen: false,
-  addMode: "linked",
-  usernameInput: "",
-  nameInput: "",
-  percentInput: "10",
+  pickerQuery: "",
+  selectedUser: null,
+  customerDiscountInput: "10",
+  promoterCommissionInput: "10",
   editTarget: null,
-  editPercentInput: "",
+  editCustomerDiscountInput: "",
+  editPromoterCommissionInput: "",
   removeTarget: null,
   openAdd: () => set({ addOpen: true }),
   closeAdd: () => set({ addOpen: false }),
-  setAddMode: (m) => set({ addMode: m }),
-  setUsernameInput: (v) => set({ usernameInput: v }),
-  setNameInput: (v) => set({ nameInput: v }),
-  setPercentInput: (v) => set({ percentInput: v }),
+  setPickerQuery: (v) => set({ pickerQuery: v }),
+  setSelectedUser: (u) => set({ selectedUser: u }),
+  setCustomerDiscountInput: (v) => set({ customerDiscountInput: v }),
+  setPromoterCommissionInput: (v) => set({ promoterCommissionInput: v }),
   setEditTarget: (p) =>
     set({
       editTarget: p,
-      editPercentInput: p ? String(p.revShareBps / 100) : "",
+      editCustomerDiscountInput: p ? String(p.customerDiscountBps / 100) : "",
+      editPromoterCommissionInput: p ? String(p.promoterCommissionBps / 100) : "",
     }),
-  setEditPercentInput: (v) => set({ editPercentInput: v }),
+  setEditCustomerDiscountInput: (v) => set({ editCustomerDiscountInput: v }),
+  setEditPromoterCommissionInput: (v) =>
+    set({ editPromoterCommissionInput: v }),
   setRemoveTarget: (p) => set({ removeTarget: p }),
   resetAdd: () =>
     set({
       addOpen: false,
-      addMode: "linked",
-      usernameInput: "",
-      nameInput: "",
-      percentInput: "10",
+      pickerQuery: "",
+      selectedUser: null,
+      customerDiscountInput: "10",
+      promoterCommissionInput: "10",
     }),
 }));
 
@@ -158,7 +166,7 @@ function PromoterRow({
             {promoter.code}
           </span>
           <span className="font-mono text-[11px] text-white/50">
-            {bpsLabel(promoter.revShareBps)} share
+            {bpsLabel(promoter.customerDiscountBps)} off · {bpsLabel(promoter.promoterCommissionBps)} commission
             {paused ? " · PAUSED" : ""}
           </span>
         </div>
@@ -247,21 +255,27 @@ export function EventPromotersScreen() {
   const showToast = useUIStore((s) => s.showToast);
 
   const addOpen = usePromotersUIStore((s) => s.addOpen);
-  const addMode = usePromotersUIStore((s) => s.addMode);
-  const usernameInput = usePromotersUIStore((s) => s.usernameInput);
-  const nameInput = usePromotersUIStore((s) => s.nameInput);
-  const percentInput = usePromotersUIStore((s) => s.percentInput);
+  const pickerQuery = usePromotersUIStore((s) => s.pickerQuery);
+  const selectedUser = usePromotersUIStore((s) => s.selectedUser);
+  const customerDiscountInput = usePromotersUIStore((s) => s.customerDiscountInput);
+  const promoterCommissionInput = usePromotersUIStore((s) => s.promoterCommissionInput);
   const editTarget = usePromotersUIStore((s) => s.editTarget);
-  const editPercentInput = usePromotersUIStore((s) => s.editPercentInput);
+  const editCustomerDiscountInput = usePromotersUIStore((s) => s.editCustomerDiscountInput);
+  const editPromoterCommissionInput = usePromotersUIStore((s) => s.editPromoterCommissionInput);
   const removeTarget = usePromotersUIStore((s) => s.removeTarget);
   const openAdd = usePromotersUIStore((s) => s.openAdd);
   const closeAdd = usePromotersUIStore((s) => s.closeAdd);
-  const setAddMode = usePromotersUIStore((s) => s.setAddMode);
-  const setUsernameInput = usePromotersUIStore((s) => s.setUsernameInput);
-  const setNameInput = usePromotersUIStore((s) => s.setNameInput);
-  const setPercentInput = usePromotersUIStore((s) => s.setPercentInput);
+  const setPickerQuery = usePromotersUIStore((s) => s.setPickerQuery);
+  const setSelectedUser = usePromotersUIStore((s) => s.setSelectedUser);
+  const setCustomerDiscountInput = usePromotersUIStore((s) => s.setCustomerDiscountInput);
+  const setPromoterCommissionInput = usePromotersUIStore((s) => s.setPromoterCommissionInput);
   const setEditTarget = usePromotersUIStore((s) => s.setEditTarget);
-  const setEditPercentInput = usePromotersUIStore((s) => s.setEditPercentInput);
+  const setEditCustomerDiscountInput = usePromotersUIStore(
+    (s) => s.setEditCustomerDiscountInput,
+  );
+  const setEditPromoterCommissionInput = usePromotersUIStore(
+    (s) => s.setEditPromoterCommissionInput,
+  );
   const setRemoveTarget = usePromotersUIStore((s) => s.setRemoveTarget);
   const resetAdd = usePromotersUIStore((s) => s.resetAdd);
 
@@ -279,14 +293,15 @@ export function EventPromotersScreen() {
     mutationFn: (input: {
       username?: string;
       displayName?: string;
-      revShareBps: number;
+      customerDiscountBps: number;
+      promoterCommissionBps: number;
     }) => promotersApi.add({ eventId, ...input }),
     onSuccess: (promoter) => {
-      showToast(
-        "success",
-        "Promoter added",
-        `Code ${promoter.code} — copy their link to share.`,
-      );
+      // Secondary confirmation — the event_promoters row + the
+      // notification are the record; the toast is the "done" flash.
+      toast.success(`${promoter.displayName} added as promoter`, {
+        description: `Code ${promoter.code} — they've been notified.`,
+      });
       resetAdd();
       invalidate();
     },
@@ -299,11 +314,25 @@ export function EventPromotersScreen() {
   const updateMutation = useMutation({
     mutationFn: (input: {
       promoterId: string;
-      revShareBps?: number;
+      customerDiscountBps?: number;
+      promoterCommissionBps?: number;
       status?: "active" | "paused";
     }) => promotersApi.update(input),
-    onSuccess: () => {
+    onSuccess: (_data, input) => {
       setEditTarget(null);
+      if (
+        input.customerDiscountBps !== undefined ||
+        input.promoterCommissionBps !== undefined
+      ) {
+        // The organizer just approved new money terms — say them back so the
+        // confirmation is unambiguous (discount off for buyers / commission
+        // to the promoter). Locked for future orders; history is untouched.
+        toast.success("Promoter terms updated", {
+          description:
+            `${input.customerDiscountBps !== undefined ? bpsLabel(input.customerDiscountBps) : "—"} buyer discount · ` +
+            `${input.promoterCommissionBps !== undefined ? bpsLabel(input.promoterCommissionBps) : "—"} commission. Applies to new orders.`,
+        });
+      }
       invalidate();
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -354,36 +383,36 @@ export function EventPromotersScreen() {
   };
 
   const onAddSubmit = () => {
-    const bps = parsePercentToBps(percentInput);
-    if (bps == null) {
-      showToast("error", "Invalid share", "Enter a percent from 0 to 100.");
+    const customerDiscountBps = parsePercentToBps(customerDiscountInput);
+    const promoterCommissionBps = parsePercentToBps(promoterCommissionInput);
+    if (customerDiscountBps == null || promoterCommissionBps == null) {
+      toast.error("Enter a percent from 0 to 100.");
       return;
     }
-    if (addMode === "linked") {
-      const u = usernameInput.trim().replace(/^@/, "");
-      if (!u) {
-        showToast("error", "Username required", "");
-        return;
-      }
-      addMutation.mutate({ username: u, revShareBps: bps });
-    } else {
-      const n = nameInput.trim();
-      if (!n) {
-        showToast("error", "Name required", "");
-        return;
-      }
-      addMutation.mutate({ displayName: n, revShareBps: bps });
+    if (!selectedUser) {
+      toast.error("Pick a person first");
+      return;
     }
+    addMutation.mutate({
+      username: selectedUser.username,
+      customerDiscountBps,
+      promoterCommissionBps,
+    });
   };
 
   const onEditSubmit = () => {
     if (!editTarget) return;
-    const bps = parsePercentToBps(editPercentInput);
-    if (bps == null) {
+    const customerDiscountBps = parsePercentToBps(editCustomerDiscountInput);
+    const promoterCommissionBps = parsePercentToBps(editPromoterCommissionInput);
+    if (customerDiscountBps == null || promoterCommissionBps == null) {
       showToast("error", "Invalid share", "Enter a percent from 0 to 100.");
       return;
     }
-    updateMutation.mutate({ promoterId: editTarget.id, revShareBps: bps });
+    updateMutation.mutate({
+      promoterId: editTarget.id,
+      customerDiscountBps,
+      promoterCommissionBps,
+    });
   };
 
   return (
@@ -512,7 +541,7 @@ export function EventPromotersScreen() {
               Cancel
             </button>
             <button
-              disabled={addMutation.isPending}
+              disabled={addMutation.isPending || !selectedUser}
               onClick={onAddSubmit}
               className="flex-1 rounded-xl py-3 font-semibold text-white disabled:opacity-60"
               style={{ backgroundColor: ACCENT }}
@@ -522,72 +551,45 @@ export function EventPromotersScreen() {
           </>
         }
       >
-        <div className="flex gap-2">
-          {(
-            [
-              { value: "linked", label: "DVNT user" },
-              { value: "external", label: "External" },
-            ] as const
-          ).map((opt) => {
-            const selected = addMode === opt.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setAddMode(opt.value)}
-                className="flex-1 rounded-xl border py-2.5 text-sm font-semibold"
-                style={
-                  selected
-                    ? {
-                        borderColor: ACCENT,
-                        backgroundColor: `${ACCENT}22`,
-                        color: "#C084FC",
-                      }
-                    : {
-                        borderColor: "rgba(255,255,255,0.08)",
-                        color: "#fff",
-                      }
-                }
-              >
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {addMode === "linked" ? (
-          <div className="mt-3 flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
-            <span className="text-[17px] font-semibold text-white/50">@</span>
-            <input
-              value={usernameInput}
-              onChange={(e) => setUsernameInput(e.target.value)}
-              placeholder="username"
-              autoCapitalize="none"
-              autoCorrect="off"
-              disabled={addMutation.isPending}
-              className="flex-1 bg-transparent text-[17px] text-white placeholder:text-white/35 outline-none disabled:opacity-50"
-            />
-          </div>
-        ) : (
-          <div className="mt-3 rounded-xl bg-white/6 px-3 py-2">
-            <input
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              placeholder="Promoter name (no DVNT account)"
-              disabled={addMutation.isPending}
-              className="w-full bg-transparent text-[17px] text-white placeholder:text-white/35 outline-none disabled:opacity-50"
-            />
-          </div>
-        )}
+        <UserPicker
+          query={pickerQuery}
+          onQueryChange={setPickerQuery}
+          selected={selectedUser}
+          onSelect={(u) => setSelectedUser(u)}
+          onClear={() => setSelectedUser(null)}
+          placeholder="Search DVNT members…"
+          disabled={addMutation.isPending}
+        />
+        <p className="mt-2 text-[11px] text-white/35">
+          They&apos;re added to the event right away and notified — no
+          accept step.
+        </p>
 
         <label className="mt-4 block">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
-            Rev share — % of the organizer payout per attributed order
+            Customer discount — % off for guests who use this code
           </span>
           <div className="mt-1.5 flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
             <input
-              value={percentInput}
-              onChange={(e) => setPercentInput(e.target.value)}
+              value={customerDiscountInput}
+              onChange={(e) => setCustomerDiscountInput(e.target.value)}
+              inputMode="decimal"
+              placeholder="10"
+              disabled={addMutation.isPending}
+              className="flex-1 bg-transparent font-mono text-[17px] text-white placeholder:text-white/35 outline-none disabled:opacity-50"
+            />
+            <span className="font-mono text-[15px] text-white/50">%</span>
+          </div>
+        </label>
+
+        <label className="mt-4 block">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
+            Promoter commission — % of eligible ticket sales
+          </span>
+          <div className="mt-1.5 flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
+            <input
+              value={promoterCommissionInput}
+              onChange={(e) => setPromoterCommissionInput(e.target.value)}
               inputMode="decimal"
               placeholder="10"
               disabled={addMutation.isPending}
@@ -597,12 +599,12 @@ export function EventPromotersScreen() {
           </div>
         </label>
         <p className="mt-2 text-[11px] leading-4 text-white/35">
-          The share locks per order at purchase time — changing it later never
-          re-prices past orders.
+          Both values lock per order at purchase time — changing them later
+          never re-prices past orders.
         </p>
       </Dialog>
 
-      {/* Edit rev share — kit Dialog. */}
+      {/* Edit discount / commission — kit Dialog. */}
       <Dialog
         open={!!editTarget}
         onClose={() => {
@@ -631,12 +633,27 @@ export function EventPromotersScreen() {
       >
         <label className="block">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
-            Rev share %
+            Customer discount %
           </span>
           <div className="mt-1.5 flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
             <input
-              value={editPercentInput}
-              onChange={(e) => setEditPercentInput(e.target.value)}
+              value={editCustomerDiscountInput}
+              onChange={(e) => setEditCustomerDiscountInput(e.target.value)}
+              inputMode="decimal"
+              disabled={updateMutation.isPending}
+              className="flex-1 bg-transparent font-mono text-[17px] text-white outline-none disabled:opacity-50"
+            />
+            <span className="font-mono text-[15px] text-white/50">%</span>
+          </div>
+        </label>
+        <label className="mt-4 block">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
+            Promoter commission %
+          </span>
+          <div className="mt-1.5 flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
+            <input
+              value={editPromoterCommissionInput}
+              onChange={(e) => setEditPromoterCommissionInput(e.target.value)}
               inputMode="decimal"
               disabled={updateMutation.isPending}
               className="flex-1 bg-transparent font-mono text-[17px] text-white outline-none disabled:opacity-50"
@@ -645,7 +662,7 @@ export function EventPromotersScreen() {
           </div>
         </label>
         <p className="mt-2 text-[11px] leading-4 text-white/35">
-          Applies to future orders only — past orders keep their locked share.
+          Applies to future orders only — past orders keep their locked values.
         </p>
       </Dialog>
 

@@ -6,6 +6,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import {
+  CALL_HUMAN_CAPACITY,
+  CALL_MAX_INVITEES,
+} from "../_shared/call-capacity.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,6 +34,9 @@ const CreateRoomSchema = z.object({
    * room's blackout/watermark/shortcut handling is deterrence + attribution.
    */
   appOnly: z.boolean().default(false),
+  // Links a call room to its group conversation so the chat header can offer
+  // Join/Rejoin while the room is open.
+  conversationId: z.number().int().positive().optional(),
 });
 
 type ErrorCode =
@@ -213,6 +220,7 @@ Deno.serve(async (req) => {
       invitedUserIds,
       appOnly,
       roomKind,
+      conversationId,
     } = parsed.data;
     let { maxParticipants } = parsed.data;
     console.log("[video_create_room] Parsed data:", {
@@ -225,13 +233,14 @@ Deno.serve(async (req) => {
     if (roomKind === "call") {
       const invitees = new Set(invitedUserIds);
       if (
-        isPublic || appOnly || invitees.size < 1 || invitees.size > 3 ||
-        invitees.size !== invitedUserIds.length || invitees.has(userId) ||
-        invitedUserIds.some((id) => id !== id.trim())
+        isPublic || appOnly || invitees.size < 1 ||
+          invitees.size > CALL_MAX_INVITEES ||
+          invitees.size !== invitedUserIds.length || invitees.has(userId) ||
+          invitedUserIds.some((id) => id !== id.trim())
       ) {
         return errorResponse(
           "validation_error",
-          "Calls require one to three distinct invitees and a private room",
+          `Calls require one to ${CALL_MAX_INVITEES} distinct invitees and a private room`,
         );
       }
       const { data: resolved, error: resolveError } = await supabase
@@ -251,7 +260,7 @@ Deno.serve(async (req) => {
           "Every participant must be a valid user",
         );
       }
-      maxParticipants = 4;
+      maxParticipants = CALL_HUMAN_CAPACITY;
     } else {
       // ── Subscription-aware participant cap ────────────────────
       // A DVNT Membership supersedes a standalone Sneaky Lynk subscription. We
@@ -422,6 +431,7 @@ Deno.serve(async (req) => {
       status: "open",
       uuid: roomUuid,
       ends_at: endsAt,
+      conversation_id: conversationId ?? null,
     };
 
     let roomQuery = supabase.from("video_rooms").insert(roomInsert).select();
@@ -451,6 +461,19 @@ Deno.serve(async (req) => {
       );
       const fallbackInsert = { ...roomInsert };
       delete (fallbackInsert as { app_only?: boolean }).app_only;
+      roomQuery = supabase.from("video_rooms").insert(fallbackInsert).select();
+      const retry = await roomQuery.single();
+      room = retry.data;
+      roomError = retry.error;
+    }
+
+    if (roomError && isMissingColumnError(roomError, "conversation_id")) {
+      console.error(
+        "[video_create_room] conversation_id missing on video_rooms — creating room WITHOUT the chat link. Run 20261001130000_call_room_conversation.sql.",
+      );
+      const fallbackInsert = { ...roomInsert };
+      delete (fallbackInsert as { conversation_id?: number | null })
+        .conversation_id;
       roomQuery = supabase.from("video_rooms").insert(fallbackInsert).select();
       const retry = await roomQuery.single();
       room = retry.data;

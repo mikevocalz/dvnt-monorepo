@@ -1,5 +1,6 @@
 import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { canScanTickets, canViewFullRoster } from "@dvnt/app/lib/events/event-role";
 /**
  * Event detail — WEB (@dvnt/app/features/events/event-detail). URL /events/{slug}.
@@ -14,7 +15,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter, usePathname } from "solito/navigation";
 import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
 import { computeFees } from "@dvnt/app/lib/stripe/fee-calculator";
-import { formatEventTime } from "@dvnt/app/lib/events/event-time";
+import {
+  formatEventTime,
+  eventEnded,
+  eventSalesClosed,
+} from "@dvnt/app/lib/events/event-time";
 import {
   ArrowLeft,
   ArrowUpCircle,
@@ -53,7 +58,7 @@ import {
   Users,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
@@ -104,6 +109,7 @@ import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog } from "@dvnt/ui";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 import { GuestRsvpSheet } from "./guest-rsvp-sheet.web";
+import { InviteGuestsSheet } from "./ui/invite-guests-sheet.web";
 import { TicketsOpeningSoonCard } from "@dvnt/app/components/event/TicketsOpeningSoonCard.web";
 import { useSaleNotifyStore } from "@dvnt/app/lib/stores/sale-notify-store";
 import { useGuestRsvpStore } from "@dvnt/app/lib/stores/guest-rsvp-store";
@@ -131,6 +137,7 @@ import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
 import "react-lite-youtube-embed/dist/LiteYouTubeEmbed.css";
 import {
+  eventSharePath,
   isEventShareToken,
   resolveEventByPathSegment,
   slugResolvesOnlyToHiddenEvent,
@@ -370,6 +377,8 @@ export function EventDetailScreen() {
   const openGuestCheckout = useGuestCheckoutStore((s) => s.openSheet);
   const menuOpen = useEventDetailUiStore((s) => s.menuOpen);
   const setMenuOpen = useEventDetailUiStore((s) => s.setMenuOpen);
+  const inviteOpen = useEventDetailUiStore((s) => s.inviteOpen);
+  const setInviteOpen = useEventDetailUiStore((s) => s.setInviteOpen);
   const openAt = useLightboxStore((s) => s.openAt);
   const showToast = useUIStore((s) => s.showToast);
 
@@ -702,6 +711,19 @@ export function EventDetailScreen() {
   const mayScan = canScanTickets(doorRole);
   const mayManage = isHost || canViewFullRoster(doorRole);
 
+  // Promoters get their own door back to the promoter dashboard — the
+  // payout-setup screen must always be reachable, not just from the push
+  // notification that says they were added.
+  const promoterEventId = parseInt(eventId || "0", 10);
+  const promoterSelfQuery = useQuery({
+    queryKey: ["promoter-self", promoterEventId],
+    queryFn: () => promotersApi.me(promoterEventId),
+    enabled: isAuthenticated && Number.isFinite(promoterEventId) && promoterEventId > 0,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const isPromoter = promoterSelfQuery.data?.isPromoter === true;
+
   /**
    * Open the event's Lynk — and make sure there is a live one to open.
    *
@@ -756,6 +778,29 @@ export function EventDetailScreen() {
 
   if (!e && resolving) return <Centered>Loading…</Centered>;
   if (!e) {
+    // A signed-out invitee hitting a private event's link must not read
+    // "not found" — their invite only works once they're signed in. Showing
+    // a sign-in prompt to every anonymous miss leaks nothing: the same copy
+    // renders for ids that never existed.
+    if (!userId) {
+      return (
+        <Centered>
+          <span className="flex flex-col items-center gap-3 text-center">
+            <span>
+              This event is private or invite-only. Sign in to see if you have
+              access.
+            </span>
+            <button
+              type="button"
+              onClick={() => router.push(loginPathWithReturn(pathname))}
+              className="rounded-xl bg-[#a855f7] px-6 py-3 text-sm font-semibold text-white"
+            >
+              Sign in
+            </button>
+          </span>
+        </Centered>
+      );
+    }
     // A cancelled event is deliberately unreachable by slug now, but "not
     // found" is the wrong answer for the person most likely to arrive here —
     // someone who bookmarked the link or holds a ticket. Name what happened,
@@ -871,7 +916,31 @@ export function EventDetailScreen() {
 
   const share = async () => {
     setMenuOpen(false);
-    const url = `https://dvntapp.live/events/${slug}`;
+    // A private event has no shareable link: can_view_event refuses anyone
+    // without an event_invites row, so a copied URL opens a refusal for every
+    // recipient. The host shares by inviting guests instead.
+    if (e?.visibility === "private") {
+      if (isHost) {
+        setInviteOpen(true);
+      } else {
+        showToast(
+          "info",
+          "Private event",
+          "Only the host can invite guests to this event.",
+        );
+      }
+      return;
+    }
+    // Canonical path, not the route we happen to be mounted on: this screen
+    // serves BOTH /events/[slug] and /feed/events/[id], and on the id route
+    // `slug` is "" — the old template minted a bare /events/ link that opened
+    // the list, not this event. link_only keeps its token lane; everything
+    // else shares /e/<id>, matching shareUrls.event and already-shared links.
+    const url = `https://dvntapp.live${eventSharePath({
+      id: e.id,
+      visibility: e.visibility,
+      shareSlug: e.shareSlug,
+    })}`;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ((navigator as any).share) {
@@ -1098,7 +1167,15 @@ export function EventDetailScreen() {
                 className="fixed inset-0 z-40 cursor-default"
               />
               <div className="absolute right-3 top-14 z-50 w-48 rounded-xl border border-white/12 bg-[#0b0d16] py-1 shadow-2xl">
-                <MenuItem Icon={Share2} label="Share event" onClick={share} />
+                <MenuItem
+                  Icon={Share2}
+                  label={
+                    e?.visibility === "private" && isHost
+                      ? "Invite guests"
+                      : "Share event"
+                  }
+                  onClick={share}
+                />
                 {/* 5. TRANSLATION — toggle the About copy via useContentTranslation. */}
                 {showTranslate ? (
                   <MenuItem
@@ -1296,6 +1373,22 @@ export function EventDetailScreen() {
             </div>
           ) : null}
 
+          {/* Promoter door — code, earnings, payout setup. Always reachable
+              here for a linked promoter, not only via the "you were added"
+              notification. */}
+          {isPromoter ? (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => router.push(`/feed/events/${eventId}/promoter`)}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#8A40CF]/60 text-[15px] font-semibold text-white active:bg-white/10"
+              >
+                <Megaphone size={17} color="#C084FC" />
+                My promoter dashboard
+              </button>
+            </div>
+          ) : null}
+
           {/* CTA — drives the real checkout / view-ticket / waitlist flow. */}
           {(() => {
             // Buyer-visible only: hidden tiers never sell here, locked tiers
@@ -1371,6 +1464,19 @@ export function EventDetailScreen() {
               );
             }
 
+            // Sales window closed — every checkout/RSVP rail enforces the
+            // same cutoff server-side (end − 30 min), so a live button here
+            // would only click through to a sales_closed error. Ticket
+            // holders still get "View ticket" above; everyone else sees the
+            // honest state instead of Buy/RSVP/Waitlist on a dead event.
+            if (eventSalesClosed(e)) {
+              return (
+                <div className="w-full mt-4 h-12 rounded-xl bg-white/5 text-white/50 font-bold flex items-center justify-center">
+                  {eventEnded(e) ? "Event ended" : "Ticket sales ended"}
+                </div>
+              );
+            }
+
             if (allSoldOut) {
               // 2. WAITLIST — sold out → join/leave waitlist.
               return (
@@ -1407,11 +1513,17 @@ export function EventDetailScreen() {
                 onClick={() => {
                   // Public events, logged out → guest flow, NEVER /login.
                   if (!isAuthenticated) {
-                    if (!e.price) {
+                    // The guest-RSVP sheet only serves truly tier-less free
+                    // events (ticketing_enabled=false → rsvp-issue-guest). A
+                    // TICKETED event whose cheapest tier is $0 still needs
+                    // tier inventory, so it goes through guest-checkout's
+                    // free branch — the RSVP rail rejects ticketed events.
+                    if (!e.price && sellableTiers.length === 0) {
                       openGuestRsvp(eventId, e.title ?? "Event");
                       return;
                     }
                     const tier =
+                      sellableTiers.find((t) => t.price_cents === 0) ??
                       sellableTiers.find((t) => t.price_cents > 0) ??
                       sellableTiers[0];
                     if (tier) {
@@ -1686,8 +1798,17 @@ export function EventDetailScreen() {
                               tierName: live.name ?? t.name ?? "Ticket",
                               priceCents: live.price_cents,
                             });
-                          } else if (priceCents === 0) {
-                            openGuestRsvp(eventId, e.title ?? "Event");
+                          } else if (priceCents === 0 && live) {
+                            // $0 tier on a TICKETED event → guest-checkout's
+                            // free branch (tier inventory + order + email).
+                            // The RSVP sheet only fits tier-less free events.
+                            openGuestCheckout({
+                              eventId,
+                              eventTitle: e.title ?? "Event",
+                              tierId: String(live.id),
+                              tierName: live.name ?? t.name ?? "Ticket",
+                              priceCents: 0,
+                            });
                           } else {
                             router.push(loginPathWithReturn(pathname));
                           }
@@ -2433,6 +2554,17 @@ export function EventDetailScreen() {
       <Lightbox />
       <GuestRsvpSheet />
       <GuestCheckoutSheet />
+      {/* Private events: "Share" becomes the guest invite — a copied link
+          cannot open one (can_view_event gates on event_invites). */}
+      <InviteGuestsSheet
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        eventId={Number(e?.id) || 0}
+        eventTitle={e?.title ?? "Event"}
+        eventDate={e?.fullDate || e?.date || undefined}
+        eventImage={e?.image || undefined}
+        eventLocation={e?.location || undefined}
+      />
       {/* B3: age-gate interstitial (Didit hosted capture). */}
       <VerificationInterstitial
         open={verifyOpen}

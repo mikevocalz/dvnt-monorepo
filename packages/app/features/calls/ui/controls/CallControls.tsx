@@ -144,12 +144,15 @@ export function CallControls({
   if (!visible && isInCallVideo) {
     return (
       <>
-        {/* Full-screen tap target to bring controls back */}
-        <Pressable style={styles.tapOverlay} onPress={showControls}>
-          {/* Small chevron hint at bottom center */}
-          <View style={[styles.chevronHint, { bottom: insets.bottom + 80 }]}>
-            <ChevronUp size={16} color="rgba(255,255,255,0.4)" />
-          </View>
+        {/* A compact restore target leaves the stage free for page swipes. */}
+        <Pressable
+          style={[styles.restoreControls, { bottom: insets.bottom + 24 }]}
+          onPress={showControls}
+          accessibilityRole="button"
+          accessibilityLabel="Show call controls"
+        >
+          <ChevronUp size={16} color="#fff" />
+          <Text style={styles.restoreControlsText}>Controls</Text>
         </Pressable>
 
         {/* ALWAYS-VISIBLE: Persistent floating End button (small pill) */}
@@ -364,21 +367,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-  // ── Tap overlay to bring controls back ──────────────────────────────
-  tapOverlay: {
+  restoreControls: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 40,
+    left: 20,
+    zIndex: 50,
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
   },
-  chevronHint: {
-    position: "absolute",
-    alignSelf: "center",
-    backgroundColor: "rgba(0,0,0,0.3)",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+  restoreControlsText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

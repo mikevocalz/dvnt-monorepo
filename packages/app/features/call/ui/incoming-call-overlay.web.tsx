@@ -169,7 +169,15 @@ export function IncomingCallOverlay() {
       // call audio-only (Whereby "join with cam off"). Audio when the call is
       // audio OR the receiver chose audio-only; video otherwise.
       const asAudio = audioOnly || incomingCall.call_type === "audio";
-      router.push(`/feed/call/${roomId}${asAudio ? "?callType=audio" : ""}`);
+      // isGroup rides along so the room treats a member's declined/missed as
+      // non-terminal and shows the participant grid, same as native.
+      const query = [
+        asAudio ? "callType=audio" : "",
+        incomingCall.is_group ? "isGroup=true" : "",
+      ]
+        .filter(Boolean)
+        .join("&");
+      router.push(`/feed/call/${roomId}${query ? `?${query}` : ""}`);
     },
     [incomingCall, router, dispatch],
   );

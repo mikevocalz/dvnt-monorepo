@@ -14,3 +14,14 @@ const OWNS_HEADER_PREFIXES = [
 export function routeOwnsHeader(pathname: string): boolean {
   return OWNS_HEADER_PREFIXES.some((p) => pathname.startsWith(p));
 }
+
+// Full-screen surfaces that own the entire viewport and carry their own
+// controls on the bottom edge — no WebTopBar/WebTabBar from SiteChrome and no
+// shell clearance padding from WebAppShell.
+const IMMERSIVE_PREFIXES = ["/feed/call", "/feed/camera", "/feed/story"];
+
+export function routeIsImmersive(pathname: string): boolean {
+  return IMMERSIVE_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(p + "/"),
+  );
+}

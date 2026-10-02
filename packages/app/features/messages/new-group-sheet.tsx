@@ -36,6 +36,7 @@ import {
 } from "@dvnt/app/lib/ui/sheet-metrics";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useNewGroupStore } from "@dvnt/app/lib/stores/new-group-store";
+import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -128,6 +129,10 @@ export const NewGroupSheet: React.FC<NewGroupSheetProps> = ({
       showToast("error", "Error", "Select at least 2 users for a group chat");
       return;
     }
+    if (selectedUsers.length + 1 > MAX_GROUP_CHAT_MEMBERS) {
+      showToast("error", "12 MAX GROUP CHAT USERS");
+      return;
+    }
     if (!groupName.trim()) {
       showToast("error", "Error", "Please enter a group name");
       return;
@@ -177,7 +182,10 @@ export const NewGroupSheet: React.FC<NewGroupSheetProps> = ({
         <Pressable
           onPress={() => {
             void Haptics.selectionAsync();
-            toggleUser(item);
+            const result = toggleUser(item, MAX_GROUP_CHAT_MEMBERS);
+            if (result === "12 MAX GROUP CHAT USERS") {
+              showToast("error", "12 MAX GROUP CHAT USERS");
+            }
           }}
           className="flex-row items-center gap-3 px-4 py-3"
           accessibilityRole="checkbox"
@@ -268,7 +276,7 @@ export const NewGroupSheet: React.FC<NewGroupSheetProps> = ({
           />
         </View>
         <Text className="text-xs text-muted-foreground mt-2 ml-1">
-          Select at least 2 people
+          Select at least 2 people · {MAX_GROUP_CHAT_MEMBERS} max
         </Text>
       </View>
 

@@ -32,6 +32,7 @@ import {
 import {
   useEvents,
   useForYouEvents,
+  usePastEvents,
   useToggleEventLike,
   type Event,
 } from "@dvnt/app/lib/hooks/use-events";
@@ -47,6 +48,7 @@ import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import { slugify } from "@dvnt/app/lib/slug";
 import { EVENT_VISIBILITY_COPY } from "@dvnt/app/lib/events/event-visibility-copy";
+import { eventEnded } from "@dvnt/app/lib/events/event-time";
 import { EVENT_CARD_ASPECT } from "@dvnt/app/components/event/feed-event-card-shape";
 import {
   resolvePosterUrl,
@@ -116,6 +118,9 @@ export function EventsListScreen() {
   const { data: events, isLoading } = useEvents();
   // Personalized "For You" feed — separate query (15min cache native-side).
   const { data: forYouEvents, isLoading: forYouLoading } = useForYouEvents();
+  // Past tab needs its own query: get_events_home drops anything >24h old,
+  // so filtering `all` client-side could only ever surface yesterday.
+  const { data: pastEvents, isLoading: pastLoading } = usePastEvents();
   const { data: spotlight } = useSpotlightFeed();
   // Promoted/sponsored event IDs — boost to top + badge them.
   const { data: promotedIds } = usePromotedEventIds();
@@ -202,8 +207,13 @@ export function EventsListScreen() {
   const filtered = useMemo(() => {
     // For You tab (index 1): use the personalized feed unless the user is
     // actively searching/filtering — then fall back to the filtered set.
+    // Past tab (index 3) pulls the dedicated past-events query.
     const base =
-      activeTab === 1 && !hasActiveFilters ? forYou : all;
+      activeTab === 3
+        ? ((pastEvents ?? []) as Event[]).filter((e) => e.title)
+        : activeTab === 1 && !hasActiveFilters
+          ? forYou
+          : all;
     return base.filter((e) => {
       if (q) {
         const hay = `${e.title} ${e.location ?? ""} ${e.host?.username ?? ""}`.toLowerCase();
@@ -211,8 +221,11 @@ export function EventsListScreen() {
       }
       const d = dateOf(e);
       const valid = !Number.isNaN(d.getTime());
-      if (activeTab === 0 && valid && d < now) return false; // Upcoming
-      if (activeTab === 3 && valid && d >= now) return false; // Past
+      // Past/upcoming classification is end-aware: an event with no
+      // end_date runs an assumed start+6h (event-time.ts), so it stays in
+      // Upcoming while it is still running rather than vanishing at doors.
+      if (activeTab === 0 && eventEnded(e)) return false; // Upcoming
+      if (activeTab === 3 && !eventEnded(e)) return false; // Past
       for (const f of activeFilters) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         if (f === "online" && !(e as any).isOnline) return false;
@@ -226,7 +239,7 @@ export function EventsListScreen() {
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [all, forYou, hasActiveFilters, q, activeTab, activeFilters]);
+  }, [all, forYou, pastEvents, hasActiveFilters, q, activeTab, activeFilters]);
 
   const collections = useMemo(() => {
     const weekend = all.filter((e) => {
@@ -399,7 +412,9 @@ export function EventsListScreen() {
 
         {/* Content */}
         <div className="mt-5">
-          {(isLoading || (activeTab === 1 && forYouLoading)) &&
+          {(isLoading ||
+            (activeTab === 1 && forYouLoading) ||
+            (activeTab === 3 && pastLoading)) &&
           filtered.length === 0 ? (
             <p className="text-white/45 py-16 text-center">Loading events…</p>
           ) : (
@@ -678,9 +693,15 @@ function LargeEventCard({
             {e.price ? `$${e.price}` : "Free"}
             {e.totalAttendees ? ` · ${e.totalAttendees} going` : ""}
           </span>
-          <span className="px-5 py-1.5 rounded-lg bg-[#3EA4E5] text-white text-sm font-bold">
-            RSVP
-          </span>
+          {eventEnded(e) ? (
+            <span className="px-5 py-1.5 rounded-lg bg-white/10 text-white/60 text-sm font-bold">
+              Ended
+            </span>
+          ) : (
+            <span className="px-5 py-1.5 rounded-lg bg-[#3EA4E5] text-white text-sm font-bold">
+              RSVP
+            </span>
+          )}
         </div>
       </div>
     </div>

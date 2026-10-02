@@ -51,6 +51,9 @@ interface ChatScreenState {
   isGroupChat: boolean;
   groupMembers: GroupMember[];
   groupName: string;
+  // Whether the signed-in viewer is a participant of this conversation. The
+  // header folds the viewer into the count only when this is true.
+  viewerIsMember: boolean;
 
   // Mount state machine
   mountPhase: "idle" | "resolving" | "loading" | "ready" | "error";
@@ -68,6 +71,7 @@ interface ChatScreenState {
     isGroup: boolean,
     members: GroupMember[],
     name: string,
+    viewerIsMember?: boolean,
   ) => void;
   setMountPhase: (phase: ChatScreenState["mountPhase"]) => void;
   setSelectedMessage: (message: Message | null) => void;
@@ -85,6 +89,7 @@ const initialState = {
   isGroupChat: false,
   groupMembers: [],
   groupName: "",
+  viewerIsMember: false,
   mountPhase: "idle" as const,
   selectedMessage: null,
   showMessageActions: false,
@@ -99,11 +104,12 @@ export const useChatScreenStore = create<ChatScreenState>((set) => ({
 
   setIsLoadingRecipient: (loading) => set({ isLoadingRecipient: loading }),
 
-  setGroupInfo: (isGroup, members, name) =>
+  setGroupInfo: (isGroup, members, name, viewerIsMember = false) =>
     set({
       isGroupChat: isGroup,
       groupMembers: members,
       groupName: name,
+      viewerIsMember,
     }),
 
   setMountPhase: (phase) => set({ mountPhase: phase }),

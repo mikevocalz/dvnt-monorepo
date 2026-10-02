@@ -38,8 +38,15 @@ import {
   validateAndApplyPromo,
   incrementPromoUsage,
 } from "../_shared/apply-promo-code.ts";
+import {
+  validateAndApplyPromoterCode,
+} from "../_shared/apply-promoter-code.ts";
 import { maybeFireCapacityAlerts } from "../_shared/capacity-alerts.ts";
+import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
+import { checkoutTicketLines } from "../_shared/checkout-line-items.ts";
+import { withSentry } from "../_shared/sentry.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -69,7 +76,7 @@ async function stripeRequest(
   return data;
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -115,16 +122,15 @@ Deno.serve(async (req: Request) => {
       unlock_code,
       guest_email,
       guest_name,
+      idempotency_key,
     } = await req.json();
 
-    // ── Promoter attribution code (WS-4) ──────────────────────
+    // ── Promoter attribution code (WS-4 / Phase 2) ─────────────
     // Arrives from a tracked share link (?ref=CODE) or manual entry.
-    // Distinct from promo codes: it never changes the price — it only
-    // attributes the order to an event promoter for rev-share. We
-    // validate shape here and stash it in Stripe metadata; the
-    // stripe-webhook records the attribution when the order flips paid
-    // (record_promoter_attribution is idempotent + validates the code
-    // against event_promoters server-side).
+    // A valid promoter code now BOTH attributes the order AND gives the
+    // buyer a customer discount. The discount is computed server-side and
+    // locked on the order; the Stripe webhook records attribution + the
+    // commission ledger entry when the order flips paid.
     const trimmedPromoterCode =
       typeof promoter_code === "string"
         ? promoter_code.trim().toUpperCase().slice(0, 32)
@@ -151,6 +157,40 @@ Deno.serve(async (req: Request) => {
 
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedGuestEmail);
     const isGuest = !user_id && !!trimmedGuestEmail && isValidEmail;
+    // Idempotency: one key per checkout attempt — double-tap/retry returns
+    // the SAME order+tickets instead of minting a duplicate set.
+    const idemKey =
+      typeof idempotency_key === "string" &&
+      idempotency_key.length <= 128 &&
+      /^[A-Za-z0-9:_-]+$/.test(idempotency_key)
+        ? idempotency_key
+        : null;
+
+    // Replay short-circuit BEFORE any cap/inventory checks: a retried
+    // request would otherwise trip max_per_user on the tickets it already
+    // minted. Returns the SAME order's tickets, never a second issuance.
+    if (idemKey) {
+      const { data: existing } = await supabase
+        .from("orders")
+        .select("id")
+        .eq("idempotency_key", idemKey)
+        .maybeSingle();
+      if (existing) {
+        const { data: existingTickets } = await supabase
+          .from("tickets")
+          .select("id, qr_token")
+          .eq("order_id", existing.id);
+        return new Response(
+          JSON.stringify({
+            tickets: existingTickets || [],
+            free: true,
+            order_id: existing.id,
+            idempotent: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+    }
 
     if (!user_id && !isGuest) {
       return new Response(
@@ -212,6 +252,20 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Event not found or invitation required" }), {
         status: 404, headers: { "Content-Type": "application/json" },
       });
+    }
+
+    // Sales cutoff: card-not-present sales stop 30 min before event end —
+    // Tap to Pay is the only exception after that.
+    const { data: cutoffEvent } = await supabase
+      .from("events")
+      .select("end_date, start_date")
+      .eq("id", Number(event_id))
+      .maybeSingle();
+    if (isSalesClosed(cutoffEvent)) {
+      return new Response(
+        JSON.stringify({ error: "Ticket sales have ended for this event." }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
     }
 
     // Fetch ticket type (scoped to event to prevent cross-event manipulation)
@@ -325,16 +379,41 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── Promo code validation (before free/paid branching) ────
+    // ── Promoter + promo code validation (before free/paid branching) ────
+    const rawSubtotal = ticketType.price_cents * quantity;
     let promoResult: any = null;
+    let promoterResult: any = null;
     let discountCents = 0;
+
+    // Promoter discount is applied first; the post-promoter subtotal is the
+    // commission basis and also the base for any additional promo code.
+    if (validPromoterCode) {
+      const { result, error: promoterErr } = await validateAndApplyPromoterCode(
+        supabase,
+        parseInt(event_id),
+        validPromoterCode,
+        rawSubtotal,
+        quantity,
+      );
+      if (promoterErr) {
+        return new Response(JSON.stringify({ error: promoterErr }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      promoterResult = result;
+      discountCents += promoterResult?.discount_cents || 0;
+    }
+
+    const subtotalAfterPromoter = Math.max(0, rawSubtotal - discountCents);
+
     if (promo_code) {
       const { result, error: promoErr } = await validateAndApplyPromo(
         supabase,
         parseInt(event_id),
         promo_code,
         ticket_type_id,
-        ticketType.price_cents * quantity,
+        subtotalAfterPromoter,
       );
       if (promoErr) {
         return new Response(JSON.stringify({ error: promoErr }), {
@@ -343,14 +422,77 @@ Deno.serve(async (req: Request) => {
         });
       }
       promoResult = result;
-      discountCents = promoResult?.discount_cents || 0;
+      discountCents += promoResult?.discount_cents || 0;
     }
 
-    const rawSubtotal = ticketType.price_cents * quantity;
     const effectiveSubtotal = Math.max(0, rawSubtotal - discountCents);
 
     // Free tickets (or fully discounted): issue directly without Stripe
     if (effectiveSubtotal === 0) {
+      // ── Order row FIRST — it carries the idempotency key, so a losing
+      // racer fails here before any tickets exist, and the winner's rows
+      // are returned below. Tickets then stamp order_id directly.
+      const { data: freeOrder, error: freeOrderErr } = await supabase
+        .from("orders")
+        .insert({
+          user_id: isGuest ? null : user_id,
+          guest_email: isGuest ? trimmedGuestEmail : null,
+          type: "event_ticket",
+          status: "paid",
+          subtotal_cents: 0,
+          total_cents: 0,
+          event_id: parseInt(event_id),
+          paid_at: new Date().toISOString(),
+          quantity,
+          ...(promoResult
+            ? {
+                promo_code_id: promoResult.promo_code_id,
+                discount_cents: discountCents,
+              }
+            : {}),
+          ...(promoterResult
+            ? {
+                promoter_policy_version: "v2_eligible_subtotal_after_discount",
+                promoter_original_amount_cents: rawSubtotal,
+                promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+                promoter_discount_amount_cents: promoterResult.discount_cents,
+                promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+                promoter_code: promoterResult.code,
+                promoter_commission_bps: promoterResult.promoter_commission_bps,
+                promoter_commission_amount_cents: 0,
+              }
+            : {}),
+          ...(idemKey ? { idempotency_key: idemKey } : {}),
+        })
+        .select("id")
+        .single();
+
+      // Lost the same-key race → return the winner's tickets. No tickets
+      // were minted on this attempt, so nothing is orphaned or doubled.
+      if (freeOrderErr?.code === "23505" && idemKey) {
+        const { data: won } = await supabase
+          .from("orders")
+          .select("id")
+          .eq("idempotency_key", idemKey)
+          .maybeSingle();
+        if (won) {
+          const { data: wonTickets } = await supabase
+            .from("tickets")
+            .select("id, qr_token")
+            .eq("order_id", won.id);
+          return new Response(
+            JSON.stringify({
+              tickets: wonTickets || [],
+              free: true,
+              order_id: won.id,
+              idempotent: true,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+      }
+      if (freeOrderErr) throw freeOrderErr;
+
       const tickets = [];
       const eventIdInt = parseInt(event_id);
       for (let i = 0; i < quantity; i++) {
@@ -371,6 +513,7 @@ Deno.serve(async (req: Request) => {
           qr_token: qrToken,
           qr_payload: qrPayload,
           purchase_amount_cents: 0,
+          order_id: freeOrder?.id ?? null,
         });
       }
 
@@ -379,7 +522,12 @@ Deno.serve(async (req: Request) => {
         .insert(tickets)
         .select("id, qr_token");
 
-      if (issueError) throw issueError;
+      if (issueError) {
+        // Order exists but no tickets — drop it so a retry starts clean
+        // rather than replaying an empty order off the idempotency key.
+        await supabase.from("orders").delete().eq("id", freeOrder?.id);
+        throw issueError;
+      }
 
       // Increment sold count
       await supabase
@@ -399,28 +547,6 @@ Deno.serve(async (req: Request) => {
       if (promoResult) {
         await incrementPromoUsage(supabase, promoResult.promo_code_id);
       }
-
-      // ── Create order row for free ticket ─────────────────
-      const { data: freeOrder } = await supabase
-        .from("orders")
-        .insert({
-          user_id: isGuest ? null : user_id,
-          guest_email: isGuest ? trimmedGuestEmail : null,
-          type: "event_ticket",
-          status: "paid",
-          subtotal_cents: 0,
-          total_cents: 0,
-          event_id: parseInt(event_id),
-          paid_at: new Date().toISOString(),
-          ...(promoResult
-            ? {
-                promo_code_id: promoResult.promo_code_id,
-                discount_cents: discountCents,
-              }
-            : {}),
-        })
-        .select("id")
-        .single();
 
       // Promoter attribution for free orders — no Stripe webhook will
       // fire, so record it here. Earning is 0 (organizer nets $0 on a
@@ -452,6 +578,15 @@ Deno.serve(async (req: Request) => {
               : "Free ticket issued",
           },
         ]);
+        // Guests have no account/My Tickets — the bundle email IS their
+        // delivery. Authed free orders have no guest_email; the delivery
+        // helper returns no_recipient and skips cleanly.
+        if (isGuest) {
+          await deliverTicketBundleEmail(supabase, freeOrder.id, {
+            kind: "fulfillment",
+            logPrefix: "[ticket-checkout]",
+          });
+        }
       }
 
       return new Response(JSON.stringify({ tickets: issued, free: true }), {
@@ -491,10 +626,17 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── Fee structure (v1_250_1pt) — fee_mode-aware (absorb|pass) ──
+    // Stripe, fees and the order must use the same exact subtotal after
+    // BOTH discounts. Split remainder cents across ticket lines instead
+    // of rounding every ticket to the same price.
     const subtotalCents = effectiveSubtotal;
     const fees = computeFeesWithMode(subtotalCents, quantity, event.fee_mode);
 
     const currency = ticketType.currency || "usd";
+    const ticketLines = checkoutTicketLines(
+      subtotalCents, quantity, currency, ticketType.name,
+    );
+    const feeLine = ticketLines.count;
 
     // ── Async settlement (ACH + US bank transfer), high-ticket only ──
     // At/above the threshold, offer us_bank_account + customer_balance
@@ -525,24 +667,19 @@ Deno.serve(async (req: Request) => {
             customer_creation: "always",
           }
         : {}),
-      // Line 0: base ticket price
-      "line_items[0][price_data][currency]": currency,
-      "line_items[0][price_data][unit_amount]":
-        ticketType.price_cents.toString(),
-      "line_items[0][price_data][product_data][name]": ticketType.name,
-      "line_items[0][quantity]": quantity.toString(),
-      // Line 1: DVNT buyer service fee (one lump item) — only in 'pass'
+      ...ticketLines.params,
+      // DVNT buyer service fee follows the ticket lines — only in 'pass'
       // mode; in 'absorb' the organizer eats it and the buyer pays just
       // the ticket price.
       ...(fees.fee_mode !== "absorb"
         ? {
-            "line_items[1][price_data][currency]": currency,
-            "line_items[1][price_data][unit_amount]": fees.buyer_fee.toString(),
-            "line_items[1][price_data][product_data][name]":
+            [`line_items[${feeLine}][price_data][currency]`]: currency,
+            [`line_items[${feeLine}][price_data][unit_amount]`]: fees.buyer_fee.toString(),
+            [`line_items[${feeLine}][price_data][product_data][name]`]:
               "DVNT Service Fee",
-            "line_items[1][price_data][product_data][description]":
+            [`line_items[${feeLine}][price_data][product_data][description]`]:
               "2.5% + $1/ticket • Non-refundable",
-            "line_items[1][quantity]": "1",
+            [`line_items[${feeLine}][quantity]`]: "1",
           }
         : {}),
       // Destination charge: DVNT keeps application_fee_amount, rest goes to organizer
@@ -603,17 +740,25 @@ Deno.serve(async (req: Request) => {
     const holdExpiresAt = asyncSettlement
       ? asyncSettlementHoldExpiresAt()
       : new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    await supabase.from("ticket_holds").insert({
-      user_id: isGuest ? null : user_id,
-      guest_email: isGuest ? trimmedGuestEmail : null,
-      ticket_type_id,
-      event_id: parseInt(event_id),
-      quantity,
-      status: "active",
-      hold_kind: asyncSettlement ? "async_settlement" : "checkout",
-      expires_at: holdExpiresAt,
-      payment_intent_id: session.id,
+    const { data: hold, error: holdError } = await supabase.rpc("ticket_hold_create_atomic", {
+      p_user_id: isGuest ? null : user_id,
+      p_guest_email: isGuest ? trimmedGuestEmail : null,
+      p_ticket_type_id: ticket_type_id,
+      p_quantity: quantity,
+      p_hold_kind: asyncSettlement ? "async_settlement" : "checkout",
+      p_hold_seconds: Math.max(60, Math.ceil((Date.parse(holdExpiresAt) - Date.now()) / 1000)),
+      p_payment_intent_id: session.id,
     });
+    if (holdError || !hold?.ok) {
+      try {
+        await stripeRequest(`/checkout/sessions/${session.id}/expire`, {});
+      } catch (expireError) {
+        console.error("[ticket-checkout] failed to expire unallocated session", expireError);
+      }
+      return new Response(JSON.stringify({ error: "Not enough tickets available", code: "sold_out" }), {
+        status: 409, headers: { "Content-Type": "application/json" },
+      });
+    }
 
     // NOTE: Promo usage is intentionally NOT incremented here.
     // Incrementing at checkout creation would inflate counts for sessions that are never paid.
@@ -645,6 +790,18 @@ Deno.serve(async (req: Request) => {
             discount_cents: discountCents,
           }
         : {}),
+      ...(promoterResult
+        ? {
+            promoter_policy_version: "v2_eligible_subtotal_after_discount",
+            promoter_original_amount_cents: rawSubtotal,
+            promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+            promoter_discount_amount_cents: promoterResult.discount_cents,
+            promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+            promoter_code: promoterResult.code,
+            promoter_commission_bps: promoterResult.promoter_commission_bps,
+            promoter_commission_amount_cents: promoterResult.commission_cents,
+          }
+        : {}),
     });
 
     return new Response(
@@ -658,4 +815,4 @@ Deno.serve(async (req: Request) => {
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
-});
+}));

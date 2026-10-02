@@ -60,9 +60,9 @@ import { useFocusEffect } from "expo-router";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useScreenTrace } from "@dvnt/app/lib/perf/screen-trace";
 import { useBootstrapMessages } from "@dvnt/app/lib/hooks/use-bootstrap-messages";
-import { NewMessageSheet } from "@dvnt/app/features/messages/ui/new-message-sheet";
+import { NewMessageSheet } from "@dvnt/app/features/messages/new-message-sheet";
 import { useMessagesSheetsStore } from "@dvnt/app/lib/stores/messages-sheets-store";
-import { NewGroupSheet } from "@dvnt/app/features/messages/ui/new-group-sheet";
+import { NewGroupSheet } from "@dvnt/app/features/messages/new-group-sheet";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
 import { useChatStore } from "@dvnt/app/lib/stores/chat-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
@@ -1413,7 +1413,7 @@ function MessagesScreenContent() {
             Inbox
           </Text>
           {inboxUnreadCount > 0 && (
-            <View className="bg-primary rounded-full px-1.5 py-0.5 min-w-[18px] items-center">
+            <View className="bg-primary rounded-full px-1.5 py-0.5 min-w-4.5 items-center">
               <Text className="text-[10px] text-white font-bold">
                 {inboxUnreadCount}
               </Text>
@@ -1440,7 +1440,7 @@ function MessagesScreenContent() {
             Requests
           </Text>
           {spamUnreadCount > 0 && (
-            <View className="bg-muted-foreground rounded-full px-1.5 py-0.5 min-w-[18px] items-center">
+            <View className="bg-muted-foreground rounded-full px-1.5 py-0.5 min-w-4.5 items-center">
               <Text className="text-[10px] text-white font-bold">
                 {spamUnreadCount}
               </Text>

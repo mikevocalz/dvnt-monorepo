@@ -12,7 +12,7 @@ import {
   TextInput,
 } from "react-native";
 // Galeria → MediaLightbox temporary swap (iOS 26 gesture issue, no native dep)
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
+import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { MediaLightbox as Galeria } from "@dvnt/app/components/media/MediaLightbox";
 import { LegendList } from "@dvnt/app/components/list";
 import React, { useEffect, useCallback, useMemo } from "react";
@@ -113,6 +113,7 @@ import {
 } from "@dvnt/app/features/events/ui";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { canScanTickets } from "@dvnt/app/lib/events/event-role";
+import { eventEnded } from "@dvnt/app/lib/events/event-time";
 import type {
   TicketTier,
   EventAttendee,
@@ -832,19 +833,13 @@ function EventDetailScreenContent() {
       );
       return;
     }
-    // Block ticket purchase for past events
-    const now = new Date();
-    if (eventData.endDate && new Date(eventData.endDate) < now) {
+    // Block ticket purchase for ended events. End-aware via eventEnded:
+    // a missing end_date means the event is assumed to run start+6h
+    // (the get_events_home convention) — an 8pm event is still live at
+    // 8:30pm, not "Ended" at doors or at viewer-local midnight.
+    if (eventEnded(eventData)) {
       showToast("warning", "Event Ended", "This event has already ended.");
       return;
-    }
-    if (!eventData.endDate && eventData.fullDate) {
-      const dayEnd = new Date(eventData.fullDate);
-      dayEnd.setHours(23, 59, 59, 999);
-      if (dayEnd < now) {
-        showToast("warning", "Event Ended", "This event has already ended.");
-        return;
-      }
     }
 
     // B3: the FIRST age-gated action triggers the verify interstitial —
@@ -1374,6 +1369,23 @@ function EventDetailScreenContent() {
   }, [eventData, router]);
 
   const handleShare = useCallback(async () => {
+    // A private event has no shareable link: can_view_event refuses anyone
+    // without an event_invites row, so a copied URL opens a refusal for every
+    // recipient. The only share that works is a guest-list invite — which the
+    // edge fn restricts to the owner/admin co-organizer, so a non-host invitee
+    // gets an explanation instead of a sheet that can only fail.
+    if (eventData?.visibility === "private") {
+      if (isHost) {
+        setShowShareSheet(true);
+      } else {
+        showToast(
+          "info",
+          "Private event",
+          "Only the host can invite guests to this event.",
+        );
+      }
+      return;
+    }
     try {
       // visibility + shareSlug decide the URL: a link_only event is shared by
       // its random token, because after 20260917100000 that token is the only
@@ -1387,7 +1399,7 @@ function EventDetailScreenContent() {
       console.error("[EventDetail] Share error:", error);
       showToast("error", "Share Failed", "Unable to share event link.");
     }
-  }, [eventId, eventData?.title, eventData?.visibility, eventData?.shareSlug, showToast]);
+  }, [eventId, eventData?.title, eventData?.visibility, eventData?.shareSlug, showToast, setShowShareSheet, isHost]);
 
   const handleAddToCalendar = useCallback(async () => {
     if (!eventData) return;
@@ -1692,17 +1704,12 @@ function EventDetailScreenContent() {
     shouldShowTranslateButton(safeEvent?.dressCode || "", _targetLang) ||
     shouldShowTranslateButton(safeEvent?.doorPolicy || "", _targetLang);
 
+  // End-aware: no end_date → assumed start+6h run (event-time.ts), not the
+  // old viewer-local end-of-day check that marked live events "past".
   const isPast = useMemo(() => {
     if (!eventData) return false;
     try {
-      const now = new Date();
-      if (eventData.endDate) return new Date(eventData.endDate) < now;
-      if (eventData.fullDate) {
-        const start = new Date(eventData.fullDate);
-        start.setHours(23, 59, 59, 999);
-        return start < now;
-      }
-      return false;
+      return eventEnded(eventData);
     } catch {
       return false;
     }
@@ -2915,7 +2922,8 @@ function EventDetailScreenContent() {
         isPending={isUpgradePending}
       />
 
-      {/* Share Event to DM Inbox */}
+      {/* Share Event to DM Inbox — private events use it as the guest-list
+          invite sheet, because a copied link cannot open a private event. */}
       <ShareEventSheet
         visible={showShareSheet}
         onClose={() => setShowShareSheet(false)}
@@ -2924,6 +2932,7 @@ function EventDetailScreenContent() {
         eventDate={eventData?.fullDate || eventData?.date || undefined}
         eventImage={eventData?.image || undefined}
         eventLocation={eventData?.location || undefined}
+        visibility={eventData?.visibility}
       />
 
       {/* Header overflow — calendar / share / edit / delete / promote */}
@@ -2933,6 +2942,9 @@ function EventDetailScreenContent() {
         isHost={isHost}
         isLiked={isLiked}
         eventStatus={(eventData as any)?.status}
+        shareLabel={
+          eventData?.visibility === "private" ? "Invite guests" : undefined
+        }
         onShare={handleShare}
         onToggleLike={handleToggleLike}
         onAddToCalendar={handleAddToCalendar}

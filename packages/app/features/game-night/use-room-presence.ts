@@ -36,6 +36,8 @@ interface Entry {
   channel: RealtimeChannel;
   listeners: Set<Listener>;
   refs: number;
+  /** Deferred removal timer — see release below. */
+  closing?: ReturnType<typeof setTimeout>;
 }
 
 const rooms = new Map<string, Entry>();
@@ -52,8 +54,19 @@ function rosterOf(channel: RealtimeChannel): RoomPlayer[] {
   return [...byId.values()].sort((a, b) => a.joinedAt - b.joinedAt);
 }
 
-function acquire(topic: string, me: RoomPlayer, listener: Listener): () => void {
+function acquire(
+  topic: string,
+  me: RoomPlayer,
+  listener: Listener,
+): () => boolean {
   let entry = rooms.get(topic);
+
+  // A release defers removeChannel briefly; an immediate remount/StrictMode
+  // reacquire cancels it and keeps the already-joined channel.
+  if (entry?.closing) {
+    clearTimeout(entry.closing);
+    entry.closing = undefined;
+  }
 
   if (!entry) {
     const channel = supabase.channel(topic, {
@@ -90,12 +103,20 @@ function acquire(topic: string, me: RoomPlayer, listener: Listener): () => void 
 
   return () => {
     const e = rooms.get(topic);
-    if (!e) return;
+    if (!e) return false;
     e.listeners.delete(listener);
     e.refs--;
-    if (e.refs > 0) return;
-    rooms.delete(topic);
-    void supabase.removeChannel(e.channel);
+    if (e.refs > 0) return false;
+    // Defer removal: removeChannel is async and a same-topic subscribe while
+    // the old channel is still leaving reproduces the joined-channel race this
+    // registry exists to prevent.
+    e.closing = setTimeout(() => {
+      if (rooms.get(topic) === e && e.refs <= 0) {
+        rooms.delete(topic);
+        void supabase.removeChannel(e.channel);
+      }
+    }, 250);
+    return true;
   };
 }
 
@@ -121,9 +142,12 @@ export function useRoomPresence(code: string | null, me: RoomPlayer | null): voi
     );
 
     return () => {
-      release();
-      setPlayers([]);
-      setStatus("idle");
+      // Only the final release owns the shared roster — an earlier consumer
+      // unmounting must not blank the list for whoever is still subscribed.
+      if (release()) {
+        setPlayers([]);
+        setStatus("idle");
+      }
     };
   }, [code, myId, myName, myAvatar, setPlayers, setStatus]);
 }

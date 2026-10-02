@@ -79,18 +79,38 @@ function fixEmailUrl(url: string): string {
  * Returns null for native requests (callbackURL is a `dvnt://` deep link, not
  * https) so those keep the existing `fixEmailUrl` behavior untouched.
  */
-function webFirstPartyEmailLink(url: string): string | null {
+function webFirstPartyEmailLink(url: string, req?: Request | null): string | null {
   try {
     const u = new URL(url);
-    const callbackURL = u.searchParams.get("callbackURL");
-    if (!callbackURL || !/^https?:\/\//i.test(callbackURL)) return null;
     const token =
       u.searchParams.get("token") ||
       u.pathname.match(/\/(?:reset-password|verify-email)\/([^/?]+)/)?.[1] ||
       null;
     if (!token) return null;
-    const sep = callbackURL.includes("?") ? "&" : "?";
-    return `${callbackURL}${sep}token=${encodeURIComponent(token)}`;
+    const callbackURL = u.searchParams.get("callbackURL");
+    // Web callers pass their own page URL — first-party link lands there.
+    if (callbackURL && /^https?:\/\//i.test(callbackURL)) {
+      const sep = callbackURL.includes("?") ? "&" : "?";
+      return `${callbackURL}${sep}token=${encodeURIComponent(token)}`;
+    }
+    // App-scheme callbacks (dvnt://, exp://) keep the legacy edge link: the
+    // endpoint 302s onto the deep link and hands the user back to the app.
+    if (callbackURL && callbackURL !== "/") return null;
+    // No usable callback — signup/resend callers pass none, so Better Auth
+    // emits "/" and the post-verify 302 would dump the user on the Supabase
+    // origin's 404 root at the exact moment verification SUCCEEDED. That
+    // was the "verification fails" report: the email verified, the page
+    // died. Synthesize the first-party page link on the requesting origin
+    // (falling back to the production web origin) so the click lands on the
+    // app's own verify screen, which completes the token exchange and shows
+    // the success state.
+    const page = u.pathname.includes("reset-password")
+      ? "/auth/reset-password"
+      : "/auth/verify-email";
+    const origin = req?.headers.get("origin");
+    const base =
+      origin && /^https?:\/\//i.test(origin) ? origin : "https://dvntapp.live";
+    return `${base}${page}?token=${encodeURIComponent(token)}`;
   } catch {
     return null;
   }
@@ -327,17 +347,20 @@ async function getAuth() {
         minPasswordLength: 8,
         maxPasswordLength: 128,
         requireEmailVerification: false,
-        sendResetPassword: async ({
-          user,
-          url,
-        }: {
-          user: any;
-          url: string;
-        }) => {
+        sendResetPassword: async (
+          {
+            user,
+            url,
+          }: {
+            user: any;
+            url: string;
+          },
+          req?: Request,
+        ) => {
           console.log(`[Auth] Password reset requested for ${user.email}`);
           console.log(`[Auth] Original reset URL: ${url}`);
           // Web → first-party token link (cookie-independent); native → legacy.
-          const resetUrl = webFirstPartyEmailLink(url) ?? fixEmailUrl(url);
+          const resetUrl = webFirstPartyEmailLink(url, req) ?? fixEmailUrl(url);
           console.log(`[Auth] Fixed reset URL: ${resetUrl}`);
           const { subject, html } = resetPasswordEmail(resetUrl);
           await sendEmail(user.email, subject, html);
@@ -354,16 +377,20 @@ async function getAuth() {
         sendOnSignUp: true,
         autoSignInAfterVerification: true,
         expiresIn: 60 * 60 * 24,
-        sendVerificationEmail: async ({
-          user,
-          url,
-        }: {
-          user: any;
-          url: string;
-        }) => {
+        sendVerificationEmail: async (
+          {
+            user,
+            url,
+          }: {
+            user: any;
+            url: string;
+          },
+          req?: Request,
+        ) => {
           console.log(`[Auth] Email verification requested for ${user.email}`);
           // Web → first-party token link (cookie-independent); native → legacy.
-          const verifyUrl = webFirstPartyEmailLink(url) ?? fixEmailUrl(url);
+          const verifyUrl =
+            webFirstPartyEmailLink(url, req) ?? fixEmailUrl(url);
           const name = user.name || user.email.split("@")[0];
           const { subject, html } = verifyEmailLink(verifyUrl, name);
           await sendEmail(user.email, subject, html);

@@ -48,6 +48,7 @@ import {
   Trash2,
   Pencil,
   Copy,
+  UserPlus,
 } from "lucide-react-native";
 import { EmptyState } from "@dvnt/app/components/ui/empty-state";
 
@@ -84,6 +85,8 @@ import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useFeedPostUIStore } from "@dvnt/app/lib/stores/feed-post-store";
 import * as ImagePicker from "expo-image-picker";
 import { MediaPreviewModal } from "@dvnt/app/components/media-preview-modal";
+import { AddMemberSheet } from "@dvnt/app/features/messages/add-member-sheet";
+import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 // expo-video-thumbnails removed — hangs on iOS 26.3
 import { LinearGradient } from "expo-linear-gradient";
 import { useTypingIndicator } from "@dvnt/app/lib/hooks/use-typing-indicator";
@@ -539,6 +542,7 @@ function ChatScreenContent() {
   // CRITICAL FIX #2: Track conversation validation state
   // Prevents markAsRead from firing before recipient load completes
   const [isConversationValid, setIsConversationValid] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
 
   // Refresh messages on focus to pick up read receipts from the other user
   // FIX: Removed unstable chatMessages.length dependency that caused infinite loop
@@ -809,6 +813,7 @@ function ChatScreenContent() {
   const isLoadingRecipient = useChatScreenStore((s) => s.isLoadingRecipient);
   const isGroupChat = useChatScreenStore((s) => s.isGroupChat);
   const groupMembers = useChatScreenStore((s) => s.groupMembers);
+  const viewerIsMember = useChatScreenStore((s) => s.viewerIsMember);
   const groupName = useChatScreenStore((s) => s.groupName);
   const selectedMessage = useChatScreenStore((s) => s.selectedMessage);
   const showMessageActions = useChatScreenStore((s) => s.showMessageActions);
@@ -840,7 +845,9 @@ function ChatScreenContent() {
         (!!currentUser?.username && member.username === currentUser.username),
     );
 
-    if (!currentUser || includesCurrentUser) return safeGroupMembers;
+    if (!currentUser || !viewerIsMember || includesCurrentUser) {
+      return safeGroupMembers;
+    }
 
     return [
       ...safeGroupMembers,
@@ -852,7 +859,7 @@ function ChatScreenContent() {
         avatar: currentUser.avatar || "",
       },
     ];
-  }, [currentUser, isGroupChat, safeGroupMembers]);
+  }, [currentUser, isGroupChat, safeGroupMembers, viewerIsMember]);
   const groupMemberLookup = useMemo(() => {
     const lookup = new Map<string, (typeof safeGroupMembers)[number]>();
     for (const member of safeGroupMembers) {
@@ -861,6 +868,104 @@ function ChatScreenContent() {
     }
     return lookup;
   }, [safeGroupMembers]);
+
+  // Live call attached to this group chat — powers the header Join button.
+  // call_create stamps conversation_id on the video_rooms row when the caller
+  // launched from this chat; RLS keeps the row invisible to non-invitees.
+  const [liveCallRoom, setLiveCallRoom] = useState<{
+    uuid: string;
+    hasVideo: boolean;
+    participantCount: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isGroupChat || !activeConvId || !/^\d+$/.test(activeConvId)) {
+      setLiveCallRoom(null);
+      return;
+    }
+    const convId = Number(activeConvId);
+    let cancelled = false;
+
+    const applyRow = (row: {
+      uuid: string;
+      status: string;
+      has_video: boolean | null;
+      participant_count: number | null;
+    } | null) => {
+      if (!row || row.status !== "open") {
+        setLiveCallRoom(null);
+        return;
+      }
+      setLiveCallRoom({
+        uuid: row.uuid,
+        hasVideo: row.has_video === true,
+        participantCount: row.participant_count ?? 0,
+      });
+    };
+
+    const fetchLiveCall = () =>
+      supabase
+        .from("video_rooms")
+        .select("uuid, status, has_video, participant_count, created_at")
+        .eq("conversation_id", convId)
+        .eq("room_kind", "call")
+        .eq("status", "open")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (!cancelled) applyRow(data);
+        });
+
+    void fetchLiveCall();
+
+    const channel = freshChannel(`chat-live-call-${activeConvId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "video_rooms",
+          filter: `conversation_id=eq.${convId}`,
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (payload: any) => {
+          if (cancelled) return;
+          const row = payload.new;
+          // DELETE carries only `old` — re-query rather than trust the event.
+          if (!row || !row.uuid) {
+            void fetchLiveCall();
+            return;
+          }
+          if (row.room_kind !== "call") return;
+          applyRow(row);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [isGroupChat, activeConvId]);
+
+  // Rejoin the live call — routes into the EXISTING room (no isOutgoing /
+  // participantIds), so the call screen joins on the room uuid instead of
+  // minting a second call.
+  const joinLiveCall = useCallback(() => {
+    if (!liveCallRoom) return;
+    router.push({
+      pathname: "/(protected)/call/[roomId]",
+      params: {
+        roomId: liveCallRoom.uuid,
+        callType: liveCallRoom.hasVideo ? "video" : "audio",
+        isGroup: "true",
+        chatId: chatId,
+        recipientUsername: groupName || "Group",
+        recipientAvatar: safeGroupMembers[0]?.avatar || "",
+      },
+    });
+  }, [liveCallRoom, chatId, groupName, safeGroupMembers, router]);
 
   // Initialize recipient from route params on mount (instant render)
   useEffect(() => {
@@ -918,6 +1023,7 @@ function ChatScreenContent() {
               true,
               conversation.members,
               conversation.groupName || "",
+              conversation.viewerIsMember,
             );
             console.log(
               "[Chat] Group with",
@@ -1555,10 +1661,40 @@ function ChatScreenContent() {
                   </Text>
                 </View>
               </View>
+              {liveCallRoom && (
+                <Pressable
+                  onPress={joinLiveCall}
+                  accessibilityLabel="Join the live call"
+                  className="flex-row items-center gap-1.5 rounded-full bg-primary px-3 py-2"
+                  hitSlop={8}
+                >
+                  <Video size={14} color="#06070d" />
+                  <Text className="text-xs font-semibold text-primary-foreground">
+                    Join
+                    {liveCallRoom.participantCount > 0 &&
+                      ` · ${liveCallRoom.participantCount}`}
+                  </Text>
+                </Pressable>
+              )}
               {/* Group Audio Call */}
               <Pressable
                 onPress={() => {
+                  const viewerKeys = new Set(
+                    [
+                      currentUser?.id,
+                      currentUser?.authId,
+                      currentUser?.username,
+                    ]
+                      .filter(Boolean)
+                      .map(String),
+                  );
                   const ids = safeGroupMembers
+                    .filter(
+                      (m) =>
+                        !viewerKeys.has(String(m.id || "")) &&
+                        !viewerKeys.has(String(m.authId || "")) &&
+                        !viewerKeys.has(String(m.username || "")),
+                    )
                     .map((m) => m.id || m.authId || "")
                     .filter(Boolean)
                     .join(",");
@@ -1586,7 +1722,22 @@ function ChatScreenContent() {
               {/* Group Video Call */}
               <Pressable
                 onPress={() => {
+                  const viewerKeys = new Set(
+                    [
+                      currentUser?.id,
+                      currentUser?.authId,
+                      currentUser?.username,
+                    ]
+                      .filter(Boolean)
+                      .map(String),
+                  );
                   const ids = safeGroupMembers
+                    .filter(
+                      (m) =>
+                        !viewerKeys.has(String(m.id || "")) &&
+                        !viewerKeys.has(String(m.authId || "")) &&
+                        !viewerKeys.has(String(m.username || "")),
+                    )
                     .map((m) => m.id || m.authId || "")
                     .filter(Boolean)
                     .join(",");
@@ -1610,6 +1761,20 @@ function ChatScreenContent() {
                 hitSlop={12}
               >
                 <Video size={22} color="#3EA4E5" />
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (headerGroupMembers.length >= MAX_GROUP_CHAT_MEMBERS) {
+                    showToast("error", "12 MAX GROUP CHAT USERS");
+                    return;
+                  }
+                  setShowAddMember(true);
+                }}
+                accessibilityLabel="Add member"
+                style={THREAD_ACTION_BUTTON_STYLE}
+                hitSlop={12}
+              >
+                <UserPlus size={22} color="#3EA4E5" />
               </Pressable>
             </>
           ) : (
@@ -2392,6 +2557,34 @@ function ChatScreenContent() {
             </View>
           </BottomSheetView>
         </BottomSheetModal>
+      {isGroupChat && activeConvId && (
+        <AddMemberSheet
+          visible={showAddMember}
+          onDismiss={() => setShowAddMember(false)}
+          conversationId={activeConvId}
+          currentCount={headerGroupMembers.length}
+          existingMembers={headerGroupMembers}
+          onAdded={() => {
+            // Reload the conversation so the new member shows in the header.
+            void (async () => {
+              try {
+                const conversation =
+                  await messagesApiClient.getConversationById(activeConvId);
+                if (conversation?.isGroup && conversation.members) {
+                  setGroupInfo(
+                    true,
+                    conversation.members,
+                    conversation.groupName || "",
+                    conversation.viewerIsMember,
+                  );
+                }
+              } catch (e) {
+                console.error("[Chat] refresh after add-member failed:", e);
+              }
+            })();
+          }}
+        />
+      )}
       </SafeAreaView>
     </KeyboardAvoidingView>
   );

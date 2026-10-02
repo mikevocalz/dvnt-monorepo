@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   Switch,
   AppState,
+  Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -776,7 +777,7 @@ function LocalRoom({
 
   const roomTitle = paramTitle || getLynkDisplayName();
 
-  const handleLeave = useCallback(async () => {
+  const doLeave = useCallback(async () => {
     // Local rooms are always hosted by the creator — end in DB too
     const result = await sneakyLynkApi.endRoom(id);
     if (!result.ok && !isClosedRoomError(result.error?.message)) {
@@ -805,6 +806,22 @@ function LocalRoom({
     endRoom(id, storeListeners.length);
     router.back();
   }, [router, id, endRoom, reset, storeListeners.length, showToast]);
+
+  // LocalRoom is always host — leaving ends it, so the tap asks first.
+  const handleLeave = useCallback(() => {
+    Alert.alert(
+      "End this Lynk?",
+      "You're hosting. Leaving ends the Lynk for everyone in it.",
+      [
+        { text: "Stay", style: "cancel" },
+        {
+          text: "End for everyone",
+          style: "destructive",
+          onPress: () => void doLeave(),
+        },
+      ],
+    );
+  }, [doLeave]);
 
   // Subscription check — determines if the host has a paid plan (timer hidden
   // for paid hosts; free hosts see the time-up paywall instead of being kicked).
@@ -1225,9 +1242,6 @@ function ServerRoom({
   const appStateRef = useRef(AppState.currentState);
   const isHostRef = useRef(isHost);
   isHostRef.current = isHost;
-  const hostDisconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
   const hostBackgroundTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1566,52 +1580,13 @@ function ServerRoom({
     // This caused talk animation to show constantly even when not speaking
   }, [effectiveMuted, setActiveSpeakerId]);
 
-  // Free-tier host disconnect guard: if the host's connection drops for >30s,
-  // auto-end to prevent ghost rooms. Paid hosts keep the room recoverable.
-  useEffect(() => {
-    if (!isHostRef.current) return;
-
-    if (isPaidHost || !hostPlanChecked) {
-      if (hostDisconnectTimerRef.current) {
-        clearTimeout(hostDisconnectTimerRef.current);
-        hostDisconnectTimerRef.current = null;
-      }
-      return;
-    }
-
-    if (connectionState === "disconnected") {
-      if (!hostDisconnectTimerRef.current) {
-        console.log(
-          "[SneakyLynk:Host] Disconnected — starting 30s grace period",
-        );
-        hostDisconnectTimerRef.current = setTimeout(() => {
-          hostDisconnectTimerRef.current = null;
-          if (!isHostRef.current) return;
-          console.log(
-            "[SneakyLynk:Host] Grace period expired — auto-ending room",
-          );
-          void sneakyLynkApi.endRoom(id);
-          reset();
-          router.back();
-        }, 30_000);
-      }
-    } else {
-      if (hostDisconnectTimerRef.current) {
-        console.log(
-          "[SneakyLynk:Host] Connection restored — cancelling grace timer",
-        );
-        clearTimeout(hostDisconnectTimerRef.current);
-        hostDisconnectTimerRef.current = null;
-      }
-    }
-
-    return () => {
-      if (hostDisconnectTimerRef.current) {
-        clearTimeout(hostDisconnectTimerRef.current);
-        hostDisconnectTimerRef.current = null;
-      }
-    };
-  }, [connectionState, hostPlanChecked, id, isPaidHost, reset, router]);
+  // Removed: the 30s disconnect auto-end. It treated any media-state error,
+  // end, or >30s flap as "host gone" and killed the room for everyone — a
+  // brand-new Lynk died ~1 minute in whenever the host's publish path hiccuped,
+  // and invitees hit "Lynk closed" while the host still saw themselves live.
+  // The server-side `end_expired_video_rooms` sweep owns real expiry now: a
+  // ghost free-tier room dies at its ends_at regardless, and a host whose
+  // transport flaps gets to recover like a paid host already did.
 
   // Free-tier host background guard. Paid hosts can recover from app switches
   // without closing the room for everyone.
@@ -1706,7 +1681,7 @@ function ServerRoom({
   const roomTitle =
     videoRoom.room?.title || roomSnapshot?.title || paramTitle || "Room";
 
-  const handleLeave = useCallback(async () => {
+  const doLeave = useCallback(async () => {
     // Optimistic leave — navigate + tear down local state IMMEDIATELY,
     // fire the backend call in the background. The user's tap feels
     // instant (Zoom/Meet parity) instead of waiting on a round-trip.
@@ -1740,14 +1715,8 @@ function ServerRoom({
           result.error?.message,
         );
       }
-
-      reset();
-      endRoomHistory(id, storeListeners.length);
-      router.push(LYNKS_LIST_ROUTE);
-      return;
     }
 
-    // Non-host: navigate first, then reconcile with the server.
     reset();
     endRoomHistory(id, storeListeners.length);
     router.push(LYNKS_LIST_ROUTE);
@@ -1756,7 +1725,9 @@ function ServerRoom({
     // log for ops; do NOT toast on failure because the user's already
     // on the previous screen and a "leave failed" toast post-leave is
     // confusing UX. The server will reconcile the participant count on
-    // its own (Fishjam disconnect + heartbeat).
+    // its own (Fishjam disconnect + heartbeat). Hosts skip this — they
+    // already ended the room above.
+    if (isHost) return;
     sneakyLynkApi
       .leaveRoom(id)
       .then((result) => {
@@ -1781,6 +1752,27 @@ function ServerRoom({
     isHost,
     showToast,
   ]);
+
+  // A host leaving ends the room for everyone, so the tap asks first —
+  // one stray press used to kill a live Lynk (and every invite sent from it).
+  const handleLeave = useCallback(() => {
+    if (isHost) {
+      Alert.alert(
+        "End this Lynk?",
+        "You're hosting. Leaving ends the Lynk for everyone in it — share the invite link instead of leaving to send it.",
+        [
+          { text: "Stay", style: "cancel" },
+          {
+            text: "End for everyone",
+            style: "destructive",
+            onPress: () => void doLeave(),
+          },
+        ],
+      );
+      return;
+    }
+    void doLeave();
+  }, [isHost, doLeave]);
 
   const timerStartedAt = parseRoomStartedAt(roomSnapshot?.createdAt);
 

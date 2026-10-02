@@ -27,7 +27,7 @@ import { useWindowScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-resto
 import { useCallback, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, MoreHorizontal, Share2, Grid, X, CalendarDays } from "lucide-react";
+import { ArrowLeft, MoreHorizontal, Share2, Grid, X, CalendarDays, MapPin } from "lucide-react";
 import { useUser } from "@dvnt/app/lib/hooks/use-user";
 import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
 import { useProfilePosts } from "@dvnt/app/lib/hooks/use-posts";
@@ -50,6 +50,13 @@ import {
 } from "@dvnt/app/lib/utils/safe-profile-mappers";
 import { ProfileMasonryGrid } from "./ProfileMasonryGrid.web";
 import { ProfilePronounsPill } from "./ProfilePronounsPill.web";
+import { useCities } from "@dvnt/app/lib/hooks/use-cities";
+import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import {
+  matchCity,
+  proximityLabel,
+  resolveViewerPosition,
+} from "@dvnt/app/lib/proximity";
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -176,6 +183,66 @@ export function UserProfileScreen() {
   }, [isOwnProfile, router, requestedTab, setOwnProfileTab]);
 
   const user = userData as any;
+
+  // "X miles away" — city-level only. The figure is the distance from the
+  // viewer's position (device fix, picked city, or own profile city) to the
+  // centroid of the city this member stated, never to them personally.
+  const { data: cities } = useCities();
+  const viewerDeviceLat = useEventsLocationStore((s) => s.deviceLat);
+  const viewerDeviceLng = useEventsLocationStore((s) => s.deviceLng);
+  const viewerActiveCity = useEventsLocationStore((s) => s.activeCity);
+
+  // Web never boot-locates like native does, so a viewer who granted the
+  // browser geolocation at some point still had deviceLat/Lng empty and the
+  // proximity badge had nothing to measure from. Read the fix ONLY when the
+  // permission is already granted — same no-prompt rule useBootLocation
+  // follows; anything else would pop a permission sheet on a profile view.
+  useEffect(() => {
+    if (viewerDeviceLat && viewerDeviceLng) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    let cancelled = false;
+    void navigator.permissions
+      ?.query({ name: "geolocation" as PermissionName })
+      .then((status) => {
+        if (cancelled || status.state !== "granted") return;
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (cancelled) return;
+            useEventsLocationStore
+              .getState()
+              .setDeviceLocation(pos.coords.latitude, pos.coords.longitude);
+          },
+          () => {},
+          { enableHighAccuracy: false, timeout: 8000 },
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [viewerDeviceLat, viewerDeviceLng]);
+  const profileCity = matchCity(user?.location, cities ?? []);
+  const proximity = useMemo(() => {
+    // Distance to yourself is always "In your city" — not worth a line.
+    if (!profileCity || isOwnProfile) return null;
+    const viewer = resolveViewerPosition({
+      deviceLat: viewerDeviceLat,
+      deviceLng: viewerDeviceLng,
+      activeCity: viewerActiveCity,
+      viewerLocationText: currentUser?.location,
+      cities: cities ?? [],
+    });
+    return viewer ? proximityLabel(viewer, profileCity) : null;
+  }, [
+    profileCity,
+    isOwnProfile,
+    viewerDeviceLat,
+    viewerDeviceLng,
+    viewerActiveCity,
+    currentUser?.location,
+    cities,
+  ]);
+
   const isFollowing = user?.isFollowing === true;
   const profileAvatarUrl = resolveAvatarUrl(user?.avatar);
   const displayName = user?.name || user?.username || safeUsername || "";
@@ -337,6 +404,17 @@ export function UserProfileScreen() {
           </div>
           {user?.bio ? (
             <p className="mt-1 text-sm text-white/90 whitespace-pre-line">{user.bio}</p>
+          ) : null}
+          {user?.location || proximity ? (
+            <div className="mt-1.5 flex items-start gap-1 text-sm text-white/55">
+              <MapPin size={14} className="mt-0.5 shrink-0" aria-hidden />
+              <div className="min-w-0">
+                {user?.location ? <p>{user.location}</p> : null}
+                {proximity ? (
+                  <p className="text-xs text-white/45">{proximity}</p>
+                ) : null}
+              </div>
+            </div>
           ) : null}
         </div>
 

@@ -215,6 +215,9 @@ verify_jwt = false
 [functions.create-payment-intent]
 verify_jwt = false
 
+[functions.door-sell]
+verify_jwt = false
+
 [functions.event-cancel]
 verify_jwt = false
 
@@ -422,6 +425,12 @@ verify_jwt = false
 [functions.organizer-connect]
 verify_jwt = false
 
+[functions.promoter-connect]
+verify_jwt = false
+
+[functions.promoter-self]
+verify_jwt = false
+
 [functions.organizer-refund]
 verify_jwt = false
 
@@ -482,4 +491,15 @@ verify_jwt = false
 # The body checks x-cron-secret against CRON_SECRET and fails closed when the
 # secret is unset, so verify_jwt = false does not make this reachable by anon.
 [functions.backfill-verification-emails]
+verify_jwt = false
+
+[functions.terminal-token]
+verify_jwt = false
+
+# Game Night Yjs authoritative-projection sync. Authenticates via Better Auth
+# session token, not Supabase JWT, so the gateway JWT check must stay off.
+[functions.game-night-sync]
+verify_jwt = false
+
+[functions.event-reminders]
 verify_jwt = false

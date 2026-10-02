@@ -12,6 +12,7 @@ import {
   payoutStatement,
 } from "../_shared/send-resend-email.ts";
 import { withHeartbeat, tryClaimJob, releaseJob } from "../_shared/heartbeat.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -234,7 +235,7 @@ async function settlePromoters(
 
 const CRON_SECRET = Deno.env.get("CRON_SECRET") || "";
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("payouts-release", async (req: Request) => {
   // ── Auth: require cron secret header ────────────────────
   if (CRON_SECRET) {
     const provided = req.headers.get("x-cron-secret") || "";
@@ -350,7 +351,7 @@ Deno.serve(async (req: Request) => {
 
         const allTickets = tickets || [];
         const activeTickets = allTickets.filter(
-          (t: any) => t.status !== "refunded",
+          (t: any) => t.status !== "refunded" && t.status !== "void",
         );
         const refundedTickets = allTickets.filter(
           (t: any) => t.status === "refunded",
@@ -373,10 +374,10 @@ Deno.serve(async (req: Request) => {
           Math.round(grossCents * 0.025) + 100 * ticketCount; // 2.5% + $1/ticket
         const dvntFeeCents = organizerFeeCents; // organizer's share of DVNT fee
         const stripeFeeCents = 0; // absorbed by the $2/ticket total
-        const netCents = Math.max(
-          0,
-          grossCents - organizerFeeCents - refundsCents,
-        );
+        // grossCents already excludes refunded tickets (they were filtered
+        // into refundedTickets above) — subtracting refundsCents again would
+        // take the same money out twice and underpay the organizer.
+        const netCents = Math.max(0, grossCents - organizerFeeCents);
 
         // Upsert financials
         await supabase.from("event_financials").upsert({
@@ -556,4 +557,4 @@ Deno.serve(async (req: Request) => {
   } finally {
     await releaseJob(JOB);
   }
-});
+}));

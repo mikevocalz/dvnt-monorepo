@@ -104,6 +104,9 @@ export default {
       // group over WCSession — App Group containers are per-device).
       entitlements: {
         "com.apple.security.application-groups": ["group.com.dvnt.app"],
+        // Tap to Pay on iPhone (Phase 5). Works in development now;
+        // distribution requires Apple's separate entitlement approval.
+        "com.apple.developer.proximity-reader.payment.acceptance": true,
       },
       privacyManifests: {
         NSPrivacyCollectedDataTypes: [
@@ -353,6 +356,25 @@ export default {
       "./plugins/disable-frame-processors",
       "./plugins/fix-visioncamera-barcode-scanner-swift",
       "expo-asset",
+      // Tap to Pay / Stripe Terminal (Phase 5). Beta SDK pinned in
+      // package.json; needs a dev-client build — never runs in Expo Go.
+      [
+        "@stripe/stripe-terminal-react-native",
+        {
+          // Required so the plugin wires AppDelegate for Tap to Pay on
+          // Android; enables the device compatibility check.
+          appDelegate: true,
+          tapToPayCheck: true,
+          locationWhenInUsePermission:
+            "Location is required to accept Tap to Pay at the door.",
+          bluetoothPeripheralPermission:
+            "Bluetooth is used to connect a supported card reader.",
+          bluetoothAlwaysUsagePermission:
+            "Bluetooth is used to connect a supported card reader.",
+          localNetworkUsagePermission:
+            "Local network access is used to connect a supported card reader.",
+        },
+      ],
       "expo-audio",
       "expo-font",
       "expo-image",

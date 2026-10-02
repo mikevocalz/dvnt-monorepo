@@ -1,0 +1,33 @@
+{
+  "sandbox_account": "acct_1UGumFCqSKa9QmBo",
+  "organizer": "acct_1UHSj8CYFZsttMGi",
+  "organizer_type": "custom",
+  "scope": "Actual local door-sell handler + real sandbox Stripe; auth/database are fixtures, no webhook fulfillment",
+  "checks": [
+    {
+      "scenario": "door_destination_charge",
+      "payment_intent": "pi_3UHSl0CqSKa9QmBo0V0M8Vbk",
+      "charge": "ch_3UHSl0CqSKa9QmBo0yCzqQqr",
+      "transfer": "tr_3UHSl0CqSKa9QmBo0ocZw18H",
+      "amount_received": 9425,
+      "application_fee": 850,
+      "organizer_net_before_own_fees": 8575,
+      "promoter_snapshot": 900,
+      "livemode": false
+    },
+    {
+      "scenario": "door_decline",
+      "payment_intent": "pi_3UHSl8CqSKa9QmBo0v9veENi",
+      "status": "requires_payment_method",
+      "amount_received": 0,
+      "livemode": false
+    },
+    {
+      "scenario": "lost_inventory_cancels_intent",
+      "payment_intent": "pi_3UHSlBCqSKa9QmBo0kldrFUj",
+      "status": "canceled",
+      "amount_received": 0,
+      "livemode": false
+    }
+  ]
+}

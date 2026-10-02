@@ -174,6 +174,7 @@ export function SignUpStep2() {
           firstName: formData.firstName,
           lastName: formData.lastName,
           dateOfBirth: formData.dateOfBirth,
+          callbackURL: "dvnt://auth/verify",
         } as any),
         25000,
         "Account creation",

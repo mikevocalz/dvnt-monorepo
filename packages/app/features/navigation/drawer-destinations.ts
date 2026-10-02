@@ -14,6 +14,7 @@ export type DrawerRowId =
   | "my-tickets"
   | "orders"
   | "sneaky-lynk"
+  | "game-night"
   | "host-dashboard"
   | "membership"
   | "settings"
@@ -24,6 +25,7 @@ export type DrawerRowIcon =
   | "ticket"
   | "receipt"
   | "lock"
+  | "gamepad"
   | "gauge"
   | "crown"
   | "settings"
@@ -71,42 +73,12 @@ export interface DrawerViewer {
  *   (`apps/web/src/app/(frontend)/(marketing)/blog`). No native route, so a
  *   native row would have to open a browser; that is a product call, not a
  *   navigation gap.
- * - **Game Night** — DEFERRED 2026-09-17. `docs/game-night/00-entry-points.md`
- *   specifies this row (lucide `Gamepad2`, label "Game Night", detail "Party
- *   card game", gated on `useFeatureAccess("game_night")`) and its web rail
- *   twin. None of it can land yet, because the destination does not exist:
- *   there is no `/game-night` route, no `useFeatureAccess` hook, no
- *   `game_night` gate, and no room or game-state tables in
- *   `apps/mobile/supabase/migrations`. The only `game_night` identifier in the
- *   repo is the event CATEGORY enum (`lib/constants/event-categories.ts:18`) —
- *   unrelated, and the thing to not mistake for progress.
- *
- *   Those dependency questions are now DECIDED, and the dependency half is
- *   APPLIED — see
- *   `docs/adr/002-game-night-dependency-baseline.md`: pin `three` 0.184.0 with
- *   `@types/three` 0.184.1, stay on `typegpu` 0.12.x, take
- *   `react-native-webgpu` to 0.10.2 in both manifests. The ADR's PENDING list
- *   needs a device build, and its first item — whether RN 0.86 works with
- *   rn-webgpu 0.10.2 at all, which upstream never tested — could reverse it.
- *
- *   Two things the spec assumed that do not exist, also settled in the ADR.
- *   Multiplayer needs no new dependency: Supabase Realtime already carries
- *   room-scoped events here (`sneaky-lynk/hooks/useRoomEvents.ts` via
- *   `lib/supabase/realtime`), and yjs would be a CRDT for a problem a
- *   server-authoritative card game does not have. And the gate cannot be
- *   `useFeatureAccess`: `lib/feature-flags.tsx:67` is a build-wide env var, and
- *   `allowlisted_emails` gates SIGNUP, so it is already true for every account.
- *   For two accounts the gate is room membership.
- *
- *   Add the row in the same change as the route, not before. Until then a
- *   member who taps it lands nowhere, which is the dead end this block exists
- *   to prevent.
+ * Game Night now has a native destination and is included in the primary rows.
  */
 export const STRUCK_DESTINATIONS = [
   "saved",
   "scan-tickets",
   "blog",
-  "game-night",
 ] as const;
 
 export function buildDrawerSections(
@@ -139,6 +111,13 @@ export function buildDrawerSections(
           icon: "lock",
           href: "/(protected)/sneaky-lynk",
           detail: "Private rooms",
+        },
+        {
+          id: "game-night",
+          label: "Game Night",
+          icon: "gamepad",
+          href: "/(protected)/game-night",
+          detail: "Party card game",
         },
       ],
     },

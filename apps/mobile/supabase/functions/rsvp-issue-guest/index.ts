@@ -17,6 +17,7 @@ import {
   sendResendEmail,
   ticketConfirmation,
 } from "../_shared/send-resend-email.ts";
+import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,7 +27,10 @@ const corsHeaders = {
 };
 // I6: fail CLOSED — no hardcoded fallback secret. A public default would let
 // anyone forge grants and mint tickets. Unset env = reject every request.
-const GRANT_SECRET = Deno.env.get("TICKET_HMAC_SECRET") || "";
+// RSVP_GRANT_SECRET is dedicated to this grant so rotating it never touches
+// the QR-signing key that hmac-qr shares with TICKET_HMAC_SECRET.
+const GRANT_SECRET = Deno.env.get("RSVP_GRANT_SECRET") ||
+  Deno.env.get("TICKET_HMAC_SECRET") || "";
 const SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live").replace(/\/$/, "");
 
 function json(data: unknown, status = 200): Response {
@@ -88,7 +92,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (!GRANT_SECRET) {
     console.error(
-      "[rsvp-issue-guest] TICKET_HMAC_SECRET not set — rejecting request",
+      "[rsvp-issue-guest] RSVP_GRANT_SECRET/TICKET_HMAC_SECRET not set — rejecting request",
     );
     return err("misconfigured", "Server misconfigured.", 500);
   }
@@ -106,10 +110,31 @@ Deno.serve(async (req) => {
       ? body.attendee_names.map((n: unknown) => (n == null ? "" : String(n)))
       : null;
 
-    const grant = await verifyGrant(String(body.grant || ""));
+    const grantRaw = String(body.grant || "");
+    const grant = await verifyGrant(grantRaw);
     if (!grant) return err("invalid_grant", "Verification expired. Confirm your email again.", 401);
     if (grant.event_id !== eventId)
       return err("grant_mismatch", "Verification doesn't match this event.", 401);
+
+    // Idempotency: the grant's hash is the order's dedupe key — a
+    // double-tap Confirm or a retried request with the same grant returns
+    // the SAME order's tickets instead of minting a second set.
+    const grantHashBuf = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(grantRaw),
+    );
+    const idempotencyKey = "rsvp:" + [...new Uint8Array(grantHashBuf)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    // RSVP cutoff: 30 min before event end — Tap to Pay is the only
+    // exception after that. The event row is also reused for the email below.
+    const { data: ev } = await supabase
+      .from("events")
+      .select("title, date, location, flyer_image_url, dominant_color, end_date, start_date")
+      .eq("id", eventId)
+      .single();
+    if (isSalesClosed(ev)) return err("sales_closed", "Ticket sales have ended for this event.");
 
     const { data, error } = await supabase.rpc("issue_guest_rsvp_tickets", {
       p_event_id: eventId,
@@ -117,6 +142,7 @@ Deno.serve(async (req) => {
       p_guest_name: guestName,
       p_attendee_names: attendeeNames,
       p_quantity: quantity,
+      p_idempotency_key: idempotencyKey,
     });
     if (error) {
       console.error("[rsvp-issue-guest] rpc error:", error);
@@ -124,19 +150,17 @@ Deno.serve(async (req) => {
     }
     const result = typeof data === "string" ? JSON.parse(data) : data;
     if (result?.error) return err(result.error, "Couldn't RSVP: " + result.error);
+    // Idempotent replay (same grant re-submitted): return the existing
+    // tickets but do NOT re-send the email — issuance emails are once.
+    const isIdempotentReplay = result?.idempotent === true;
 
     // Email the ticket(s) — one delivery, each with its own no-login view link.
-    const tickets: Array<{
+    const tickets: {
       guest_lookup_token: string;
       order_index: number;
       order_count: number;
       attendee_name: string | null;
-    }> = result.tickets || [];
-    const { data: ev } = await supabase
-      .from("events")
-      .select("title, date, location, flyer_image_url, dominant_color")
-      .eq("id", eventId)
-      .single();
+    }[] = result.tickets || [];
     const evTitle = ev?.title ?? "your event";
     const dateLine = ev?.date
       ? new Date(ev.date).toLocaleString("en-US", {
@@ -148,7 +172,7 @@ Deno.serve(async (req) => {
         })
       : null;
 
-    await sendResendEmail({
+    if (!isIdempotentReplay) await sendResendEmail({
       to: grant.destination,
       ...ticketConfirmation({
         eventTitle: evTitle,

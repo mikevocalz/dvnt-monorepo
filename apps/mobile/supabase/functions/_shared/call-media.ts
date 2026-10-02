@@ -4,6 +4,12 @@
  * Provider paths/shapes match video_join_room and video_kick_user.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  CALL_HUMAN_CAPACITY,
+  CALL_MEDIA_LEASE_SECONDS,
+  CALL_PROVIDER_MAX_PEERS,
+  pendingWaitMs,
+} from "./call-capacity.ts";
 
 export async function provisionCallMedia(params: {
   supabaseUrl: string;
@@ -50,7 +56,10 @@ export async function provisionCallMedia(params: {
 
   try {
     let admission;
-    const deadline = Date.now() + 15_000;
+    // Wait long enough for a valid lease to finish serial provisioning in a
+    // 12-way join storm, but never let a stale lease hang us forever.
+    const deadline = Date.now() + 80_000;
+    let waitAttempt = 0;
     do {
       const result = await supabase.rpc("begin_call_media", {
         p_room_uuid: roomId,
@@ -65,18 +74,22 @@ export async function provisionCallMedia(params: {
       if (Date.now() >= deadline) {
         return { ok: false as const, reason: "call_join_pending" };
       }
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await new Promise((resolve) =>
+        setTimeout(resolve, pendingWaitMs(waitAttempt++))
+      );
     } while (true);
     if (!admission.ok) {
       return {
         ok: false as const,
         reason: String(admission.reason),
         current: admission.current,
+        max: admission.max,
       };
     }
     held = true;
-    // Finish/cleanup have at least 40 seconds remaining on the SQL lease.
-    mediaDeadline = Date.now() + 45_000;
+    // Finish/cleanup must complete before the shorter SQL lease expires.
+    // The lease is 55s; provider HTTP calls each have a 5s timeout.
+    mediaDeadline = Date.now() + (CALL_MEDIA_LEASE_SECONDS * 1000) - 5_000;
     providerRoomId = admission.fishjamRoomId;
     const previousPeers: { roomId: string; peerId: string }[] = [];
     if (providerRoomId) {
@@ -119,8 +132,9 @@ export async function provisionCallMedia(params: {
       }
     }
     if (!providerRoomId) {
+      // Human capacity (12) plus provider headroom for transient peers.
       const created = await provider("/room", "POST", {
-        maxPeers: 4,
+        maxPeers: CALL_PROVIDER_MAX_PEERS,
         videoCodec: "h264",
       });
       if (!created.ok) throw new Error("Call media room could not be created");
@@ -217,7 +231,7 @@ export async function provisionCallMedia(params: {
         if (result.error) throw new Error("Admission cleanup failed");
       } catch {
         console.error(
-          "[call-media] Admission cleanup failed; lease expires after 90 seconds",
+          `[call-media] Admission cleanup failed; lease expires after ${CALL_MEDIA_LEASE_SECONDS} seconds`,
         );
       }
     }

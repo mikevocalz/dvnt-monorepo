@@ -22,6 +22,12 @@ interface GuestCheckoutState {
   refundDaysBefore: number | null;
   loading: boolean;
   error: string | null;
+  /** Set when a $0 tier issued directly (no Stripe redirect). */
+  done: boolean;
+  resultCount: number;
+  /** One UUID per sheet open — the order's idempotency key, so a
+      double-tapped Confirm returns the same tickets instead of dupes. */
+  requestKey: string;
 
   openSheet: (args: {
     eventId: string;
@@ -51,11 +57,23 @@ const base = {
   refundDaysBefore: null as number | null,
   loading: false,
   error: null as string | null,
+  done: false,
+  resultCount: 0,
+  requestKey: "",
 };
 
 export const useGuestCheckoutStore = create<GuestCheckoutState>((set) => ({
   ...base,
-  openSheet: (a) => set({ ...base, open: true, ...a }),
+  openSheet: (a) =>
+    set({
+      ...base,
+      open: true,
+      requestKey:
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `gc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      ...a,
+    }),
   close: () => set({ open: false }),
   patch: (p) => set(p),
   setAttendeeName: (i, v) =>

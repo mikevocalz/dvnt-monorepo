@@ -76,9 +76,10 @@ import {
   VolumeX,
   Smartphone,
   ShieldAlert,
+  Share2,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ConnectionBanner, RoomTimer } from "@dvnt/ui";
+import { ConnectionBanner, Dialog, RoomTimer } from "@dvnt/ui";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.web";
 import { useSpeakingDetection } from "@dvnt/app/lib/lynk/useSpeakingDetection.web";
 import { useSpeakingPresence } from "@dvnt/app/lib/lynk/useSpeakingPresence";
@@ -982,6 +983,12 @@ function RoomInner({
   // nothing about it — so once you were inside, the room was a video call with
   // a familiar name and no way back to the thing it was for. Read-only: no
   // event just means no chip.
+  // A host leaving ends the room for everyone. Without a confirm, the header
+  // back arrow was a one-tap room-killer — and there was no share control, so
+  // the only way to invite someone was a button that closed the Lynk they
+  // were inviting people to. That is the "Lynk closed" report: hosts backed
+  // out to DM the link, the room ended behind them, and the link went dead.
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [lynkEvent, setLynkEvent] = useState<{
     id: string;
     title: string;
@@ -1024,7 +1031,7 @@ function RoomInner({
     })();
   }, [id, isHandRaised, setIsHandRaised, showToast]);
 
-  const leave = useCallback(() => {
+  const doLeave = useCallback(() => {
     const isHost = isHostRef.current;
     void (async () => {
       try {
@@ -1059,6 +1066,44 @@ function RoomInner({
       }
     })();
   }, [id, endRoomHistory, resetRoomStore, router, showToast]);
+
+  // The leave buttons never end a room silently: a host confirming is a host
+  // who meant it. Everyone else still leaves instantly.
+  const requestLeave = useCallback(() => {
+    if (isHostRef.current) {
+      setShowEndConfirm(true);
+      return;
+    }
+    doLeave();
+  }, [doLeave]);
+
+  // Share without leaving the room — the gap that pushed hosts to the back
+  // arrow in the first place. System share sheet when the browser has one,
+  // clipboard otherwise.
+  const shareRoom = useCallback(() => {
+    const url = `https://dvntapp.live/sneaky-lynk/room/${id}${roomHasVideo ? "?hasVideo=1" : ""}`;
+    const title = roomSnapshot?.title || paramTitle || getLynkDisplayName();
+    const text = `Join "${title}" on DVNT`;
+    void (async () => {
+      try {
+        if (navigator.share) {
+          await navigator.share({ title, text, url });
+          return;
+        }
+        await navigator.clipboard.writeText(`${text}\n${url}`);
+        showToast("success", "Invite link copied", "Paste it anywhere to bring people in.");
+      } catch (err: any) {
+        // User dismissing the share sheet rejects with AbortError — not a failure.
+        if (err?.name === "AbortError") return;
+        try {
+          await navigator.clipboard.writeText(`${text}\n${url}`);
+          showToast("success", "Invite link copied", "Paste it anywhere to bring people in.");
+        } catch {
+          showToast("error", "Couldn't share", url);
+        }
+      }
+    })();
+  }, [id, roomHasVideo, roomSnapshot?.title, paramTitle, showToast]);
 
   // ── Free-host timer gate: entitlements + start time ───────────────────────
   // Mirrors the native room — a host on the free plan gets a 5-min countdown
@@ -1409,7 +1454,7 @@ function RoomInner({
         data-can-publish={canPublish ? "true" : "false"}
         data-camera-on={isCameraOn ? "true" : "false"}
         data-has-local-stream={lynk.localStream ? "true" : "false"}
-        className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#06070d] text-white"
+        className="relative flex h-dvh w-full flex-col overflow-hidden bg-[#06070d] text-white"
       >
       {/* The session machine is the single source now — it is what knows a
           first join from a reconnect, and what is driving the retries. */}
@@ -1423,7 +1468,7 @@ function RoomInner({
       >
         <button
           type="button"
-          onClick={leave}
+          onClick={requestLeave}
           aria-label="Back"
           className="w-9 h-9 shrink-0 rounded-xl bg-white/8 flex items-center justify-center active:scale-95"
         >
@@ -1483,6 +1528,15 @@ function RoomInner({
               <Hand size={13} /> {raisedHandCount}
             </button>
           ) : null}
+          <button
+            type="button"
+            onClick={shareRoom}
+            aria-label="Share invite link"
+            title="Share invite link"
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 text-white/90 hover:bg-white/15"
+          >
+            <Share2 size={16} />
+          </button>
           <button
             type="button"
             onClick={() => setParticipantsOpen(true)}
@@ -1651,7 +1705,7 @@ function RoomInner({
             <MessageCircle size={24} />
           </ControlButton>
 
-          <ControlButton onClick={leave} danger label="Leave Lynk">
+          <ControlButton onClick={requestLeave} danger label="Leave Lynk">
             <PhoneOff size={24} />
           </ControlButton>
         </div>
@@ -1700,7 +1754,41 @@ function RoomInner({
       />
 
       {/* Free-host duration-limit paywall */}
-      <TimeUpDialog open={showTimeUp} onUpgrade={onUpgrade} onLeave={leave} />
+      <TimeUpDialog open={showTimeUp} onUpgrade={onUpgrade} onLeave={doLeave} />
+
+      {/* Host exit = end for everyone — confirm instead of a one-tap kill. */}
+      <Dialog
+        open={showEndConfirm}
+        onClose={() => setShowEndConfirm(false)}
+        title="End this Lynk?"
+        maxWidth={400}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowEndConfirm(false)}
+              className="rounded-xl bg-white/8 px-4 py-2.5 text-sm font-semibold text-white/80 hover:bg-white/15"
+            >
+              Stay
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowEndConfirm(false);
+                doLeave();
+              }}
+              className="rounded-xl bg-[#F43F5E] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#E11D48]"
+            >
+              End for everyone
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-white/70">
+          You&apos;re hosting. Leaving ends the Lynk for everyone in it — to
+          bring more people in, use the share button instead.
+        </p>
+      </Dialog>
 
       {/* Eject banner (kicked / banned / room ended) */}
       {eject ? (
@@ -1728,7 +1816,7 @@ function RoomShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-[#06070d] text-white">
+    <div className="flex min-h-dvh flex-col bg-[#06070d] text-white">
       <div
         className="flex items-center px-4 py-3 border-b border-white/8"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
@@ -2033,7 +2121,7 @@ export function SneakyLynkRoomScreen() {
 
   if (phase === "looking-up") {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 bg-[#06070d] text-white">
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[#06070d] text-white">
         <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
         <p className="text-white/60">Loading Lynk…</p>
       </div>

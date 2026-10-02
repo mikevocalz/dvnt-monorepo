@@ -28,6 +28,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySignedQrPayload } from "../_shared/hmac-qr.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { verifySession } from "../_shared/verify-session.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -196,7 +197,7 @@ async function resolveDoorTier(
 }
 
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("ticket-scan", async (req: Request) => {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -436,7 +437,7 @@ Deno.serve(async (req: Request) => {
         const { data: ticket } = await supabase
           .from("tickets")
           .select(
-            "id, event_id, ticket_type_id, user_id, status, qr_token, checked_in_at, checked_in_by, purchase_amount_cents, cart_id, guest_name, attendee_name",
+            "id, event_id, ticket_type_id, user_id, status, qr_token, checked_in_at, checked_in_by, cart_id, guest_name, attendee_name",
           )
           .eq("id", rpcResult.ticketId)
           .single();
@@ -565,4 +566,4 @@ Deno.serve(async (req: Request) => {
     console.error("[ticket-scan] Error:", err);
     return json({ error: err.message || "Internal error" }, 500);
   }
-});
+}));

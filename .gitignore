@@ -42,3 +42,6 @@ apps/web/e2e/fixtures/
 .agents/
 .devin/
 skills-lock.json
+
+# Editor-local settings, not shared config
+.vscode/

@@ -30,6 +30,7 @@ import {
 } from "../_shared/verify-session.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { notifyNextWaitlister } from "../_shared/notify-waitlisters.ts";
+import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -55,7 +56,7 @@ async function stripeRefund(
   return res.json();
 }
 
-Deno.serve(async (req: Request) => {
+Deno.serve(withSentry("organizer-refund", async (req: Request) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST") return errorResponse("Method not allowed", 405);
 
@@ -134,13 +135,25 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Free tickets: no Stripe call, just void directly. The paid path
-    // flows through charge.refunded which handles inventory + waitlist
-    // promotion; do the same inline here.
-    if (!ticket.stripe_payment_intent_id) {
+    // Paid vs free is decided by what was CHARGED, not by whether a
+    // PaymentIntent happens to be linked. A paid ticket with no PI must
+    // never be silently voided — the guest is owed money.
+    const isPaid = (ticket.purchase_amount_cents ?? 0) > 0;
+    if (isPaid && !ticket.stripe_payment_intent_id) {
+      return errorResponse(
+        "Paid ticket has no payment record — refund it manually in Stripe.",
+        409,
+      );
+    }
+
+    // Free/RSVP tickets: nothing was charged, so nothing is refunded.
+    // Void directly — no Stripe call. The paid path flows through
+    // charge.refunded which handles inventory + waitlist promotion;
+    // do the same inline here.
+    if (!isPaid) {
       const { error: updateErr } = await supabase
         .from("tickets")
-        .update({ status: "refunded" })
+        .update({ status: "void" })
         .eq("id", ticketId);
       if (updateErr) {
         console.error("[organizer-refund] void error:", updateErr);
@@ -222,4 +235,4 @@ Deno.serve(async (req: Request) => {
     console.error("[organizer-refund] unexpected:", err);
     return errorResponse("Internal error", 500);
   }
-});
+}));

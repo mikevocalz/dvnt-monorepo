@@ -11,7 +11,11 @@ import {
   getCurrentUserAuthId,
 } from "./auth-helper";
 import { invokeEdge } from "./invoke-edge";
-import { filterDiscoverableEvents } from "../events/event-discovery";
+import {
+  filterDiscoverableEvents,
+  filterPubliclyListableEvents,
+} from "../events/event-discovery";
+import { eventSalesClosed } from "../events/event-time";
 import type { TicketTypeCategory } from "./ticket-types";
 import type { TierType, TierVisibility } from "../tickets/pricing";
 import type { DraftAddon } from "../../features/events/create/addon-form";
@@ -306,6 +310,9 @@ export const eventsApi = {
           title: event.title,
           description: event.description,
           ...dateParts,
+          // Cards need the real end instant to swap RSVP → Ended; the RPC
+          // already returns end_date, it just never reached the client.
+          endDate: event.end_date || undefined,
           location: event.location,
           image: resolveEventImage(event),
           // Video flyer routes through the resolver — null when the
@@ -401,6 +408,9 @@ export const eventsApi = {
           title: event.title,
           description: event.description,
           ...dateParts,
+          // Cards need the real end instant to swap RSVP → Ended; the RPC
+          // already returns end_date, it just never reached the client.
+          endDate: event.end_date || undefined,
           location: event.location,
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
@@ -495,6 +505,7 @@ export const eventsApi = {
           title: event[DB.events.title],
           description: event[DB.events.description],
           ...dateParts,
+          endDate: event[DB.events.endDate] || undefined,
           location: event[DB.events.location],
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
@@ -531,10 +542,11 @@ export const eventsApi = {
       if (error) throw error;
 
       // Public discovery surface (the host's profile), so it takes the full
-      // discovery gate, not just the cancelled check: a cancelled, suspended or
-      // draft event must not advertise itself on a profile anyone can open.
-      // JS-side for the same NULL-status reason as getMyEvents.
-      const mapped = filterDiscoverableEvents(data || [])
+      // public-list gate, not just the status check: a cancelled, suspended,
+      // draft, private or link_only event must not advertise itself on a
+      // profile anyone can open. JS-side for the same NULL reason as
+      // getMyEvents — `.neq()` would drop the legacy NULL rows too.
+      const mapped = filterPubliclyListableEvents(data || [])
         .map((event: any) => {
         const dateParts = formatEventDate(event[DB.events.startDate]);
         return {
@@ -542,6 +554,7 @@ export const eventsApi = {
           title: event[DB.events.title],
           description: event[DB.events.description],
           ...dateParts,
+          endDate: event[DB.events.endDate] || undefined,
           location: event[DB.events.location],
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
@@ -568,20 +581,29 @@ export const eventsApi = {
   async getPastEvents(limit: number = 20) {
     try {
       const now = new Date().toISOString();
+      // "Past" is end-aware: events with no end_date are assumed to run
+      // start + 6h (the get_events_home convention) — an 8pm event must not
+      // land in Past at 8:01pm while it is still running.
+      const assumedEndBefore = new Date(
+        Date.now() - 6 * 60 * 60 * 1000,
+      ).toISOString();
       const { data, error } = await supabase
         .from(DB.events.table)
         .select("*")
-        .lt(DB.events.startDate, now)
+        .or(
+          `end_date.lt.${now},and(end_date.is.null,start_date.lt.${assumedEndBefore})`,
+        )
         .order(DB.events.startDate, { ascending: false })
         .limit(limit);
 
       if (error) throw error;
 
-      // Same discovery gate as every other list — a cancelled event does not
-      // reappear once its date passes. JS-side, not `.neq()`: `status <>
-      // 'cancelled'` is NULL for the legacy rows whose status is NULL and
-      // PostgREST would drop those too.
-      const rows = filterDiscoverableEvents(data || []);
+      // Same public-list gate as the get_events_* RPCs — a cancelled event
+      // does not reappear once its date passes, and a private or link_only
+      // event must never sit in a browse list. JS-side, not `.neq()`: the
+      // legacy rows carry NULL status/visibility and PostgREST would drop
+      // those too.
+      const rows = filterPubliclyListableEvents(data || []);
 
       // Fetch host data separately
       const hostIds = [
@@ -612,6 +634,7 @@ export const eventsApi = {
           title: event[DB.events.title],
           description: event[DB.events.description],
           ...dateParts,
+          endDate: event[DB.events.endDate] || undefined,
           location: event[DB.events.location],
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
@@ -803,6 +826,20 @@ export const eventsApi = {
       if (!authId) throw new Error("Not authenticated");
 
       const eventIdInt = parseInt(eventId);
+
+      // Direct table write — no edge function guards this rail, so the
+      // sales cutoff has to live here (and in the DB trigger behind it).
+      // Cancelling (not_going) stays allowed on ended events.
+      if (status !== "not_going") {
+        const { data: ev } = await supabase
+          .from(DB.events.table)
+          .select(`${DB.events.startDate}, ${DB.events.endDate}, date`)
+          .eq(DB.events.id, eventIdInt)
+          .single();
+        if (ev && eventSalesClosed(ev)) {
+          throw new Error("This event has ended — RSVPs are closed.");
+        }
+      }
 
       // Check if RSVP exists (event_rsvps.user_id is text/auth_id)
       const { data: existing } = await supabase
@@ -1016,6 +1053,11 @@ export const eventsApi = {
       // V2 fields
       if (updates.endDate !== undefined)
         updateData.end_date = updates.endDate || null;
+      // IANA display zone (America/Los_Angeles). There was no write path for
+      // it before, so an event created under the wrong zone could never be
+      // corrected — display fell back to UTC or the viewer's zone forever.
+      if (updates.eventTz !== undefined)
+        updateData.event_tz = updates.eventTz || null;
       if (updates.category !== undefined)
         updateData.category = updates.category || null;
       if (updates.visibility !== undefined)

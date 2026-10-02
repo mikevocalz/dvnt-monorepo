@@ -1,0 +1,40 @@
+{
+  "runId": "dvnt-safety-1789840680077",
+  "scope": "Real Stripe test-mode payments; no Connect or DVNT database/webhook integration",
+  "pricing": {
+    "subtotal": 5000,
+    "discount": 500,
+    "commission": 450,
+    "charge": 4713
+  },
+  "checks": [
+    {
+      "scenario": "success",
+      "id": "pi_3UHSWSCqSKa9QmBo12F1bmFV",
+      "status": "succeeded",
+      "amount_received": 4713,
+      "livemode": false
+    },
+    {
+      "scenario": "decline",
+      "id": "pi_3UHSWUCqSKa9QmBo17a9PJAz",
+      "status": "requires_payment_method",
+      "amount_received": 0,
+      "error": "card_declined",
+      "livemode": false
+    },
+    {
+      "scenario": "cancel",
+      "id": "pi_3UHSWXCqSKa9QmBo1Rki5evu",
+      "status": "canceled",
+      "amount_received": 0,
+      "livemode": false
+    },
+    {
+      "scenario": "exact_checkout_line_total",
+      "id": "cs_test_b1JwolVmSh2VGHSh3QBpZpf7572uN2bmQJV9q0P0XF1U4qv1lC24IbBQzz",
+      "amount_total": 850,
+      "livemode": false
+    }
+  ]
+}

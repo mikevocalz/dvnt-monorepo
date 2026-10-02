@@ -42,8 +42,9 @@ export function CameraScreen() {
     const media: CapturedMedia = { uri, type: "image" };
     setResult(media);
     // Web equivalent of the native router.back() into the create composer,
-    // which consumes the result store.
-    router.push("/feed/create");
+    // which consumes the result store. back() (not a hardcoded push) returns to
+    // whichever composer opened the camera — /feed/create or /public/create.
+    router.back();
   };
 
   const handleClose = () => {

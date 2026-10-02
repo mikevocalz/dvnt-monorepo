@@ -11,12 +11,13 @@
  * Navigation via solito. bg #06070d, accent brand purple #8A40CF.
  */
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "solito/navigation";
 import { Gamepad2, ArrowRight } from "lucide-react";
 import { useGameNightStore } from "../store";
+import { createRoom, joinRoom as joinRoomByCode } from "../rooms-api";
+import { GameNightLeaderboard } from "../components/leaderboard";
 import {
-  generateRoomCode,
   normalizeRoomCode,
   isCompleteRoomCode,
   ROOM_CODE_LENGTH,
@@ -29,13 +30,43 @@ export function GameNightLobbyScreen() {
 
   const ready = isCompleteRoomCode(joinCode);
 
-  const startRoom = useCallback(() => {
-    router.push(`/game-night/room/${generateRoomCode()}`);
+  const [startPending, setStartPending] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [joinPending, setJoinPending] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+
+  const startRoom = useCallback(async () => {
+    setStartError(null);
+    setStartPending(true);
+    try {
+      const { roomCode } = await createRoom(
+        globalThis.crypto?.randomUUID?.() ?? String(Date.now()),
+        true,
+      );
+      router.push(`/game-night/room/${roomCode}`);
+    } catch (err) {
+      setStartError(
+        err instanceof Error ? err.message : "Couldn't start a room.",
+      );
+    } finally {
+      setStartPending(false);
+    }
   }, [router]);
 
-  const joinRoom = useCallback(() => {
+  const joinRoom = useCallback(async () => {
     if (!ready) return;
-    router.push(`/game-night/room/${normalizeRoomCode(joinCode)}`);
+    setJoinError(null);
+    setJoinPending(true);
+    try {
+      const normalized = normalizeRoomCode(joinCode);
+      const { roomCode } = await joinRoomByCode(normalized);
+      router.push(`/game-night/room/${roomCode}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Couldn't join the room.";
+      setJoinError(msg);
+    } finally {
+      setJoinPending(false);
+    }
   }, [ready, joinCode, router]);
 
   return (
@@ -55,12 +86,16 @@ export function GameNightLobbyScreen() {
 
         <button
           type="button"
+          disabled={startPending}
           onClick={startRoom}
-          className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-[#8A40CF] px-5 py-3.5 font-semibold text-white transition-colors hover:bg-[#7A35BC] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0]"
+          className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-[#8A40CF] px-5 py-3.5 font-semibold text-white transition-colors hover:bg-[#7A35BC] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0] disabled:cursor-not-allowed disabled:opacity-60"
         >
           Start a room
           <ArrowRight aria-hidden className="h-4 w-4" />
         </button>
+        {startError ? (
+          <p className="mt-2 text-sm text-red-400">{startError}</p>
+        ) : null}
 
         <div className="my-8 flex items-center gap-4 text-xs uppercase tracking-widest text-white/30">
           <span className="h-px flex-1 bg-white/10" />
@@ -99,12 +134,22 @@ export function GameNightLobbyScreen() {
 
           <button
             type="submit"
-            disabled={!ready}
+            disabled={!ready || joinPending}
             className="mt-4 w-full rounded-xl border border-white/15 px-5 py-3.5 font-semibold text-white transition-colors enabled:hover:border-[#8A40CF] enabled:hover:bg-[#8A40CF]/10 disabled:cursor-not-allowed disabled:text-white/35 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0]"
           >
             Join room
           </button>
+          {joinError ? (
+            <p className="mt-2 text-sm text-red-400">{joinError}</p>
+          ) : null}
         </form>
+
+        <h2 className="mt-12 text-sm font-medium uppercase tracking-widest text-[#C9A2F0]">
+          Top players
+        </h2>
+        <div className="mt-3">
+          <GameNightLeaderboard mode="classic" />
+        </div>
       </div>
     </main>
   );

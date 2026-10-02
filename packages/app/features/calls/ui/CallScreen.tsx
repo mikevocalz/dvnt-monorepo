@@ -11,7 +11,7 @@
  * Controls are rendered by CallControls, which is mode-aware.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { startPIP, stopPIP } from "@fishjam-cloud/react-native-client";
@@ -205,6 +205,59 @@ export function CallScreen({
     leaveCall();
   }, [leaveCall, isPiPActive, setIsPiPActive]);
 
+  // ── Last one on the call ─────────────────────────────────────────────
+  // Mirrors the web screen: after the last remote leaves, count down a
+  // grace window instead of sitting on "Waiting for others" forever. Same
+  // on 1:1 — a crash or closed app drops the peer with no signal. A rejoin
+  // or the Stay button cancels; zero ends the call like End call.
+  const ALONE_GRACE_SECONDS = 60;
+  const hadRemoteRef = useRef(false);
+  const aloneTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [aloneSecondsLeft, setAloneSecondsLeft] = useState<number | null>(
+    null,
+  );
+  const cancelAloneTimer = useCallback(() => {
+    if (aloneTimerRef.current) clearInterval(aloneTimerRef.current);
+    aloneTimerRef.current = null;
+    setAloneSecondsLeft(null);
+  }, []);
+  const inCall = mode === "IN_CALL_VIDEO" || mode === "IN_CALL_AUDIO";
+
+  useEffect(() => {
+    if (!inCall) return;
+    if (participants.length > 0) {
+      hadRemoteRef.current = true;
+      cancelAloneTimer();
+      return;
+    }
+    if (!hadRemoteRef.current || aloneTimerRef.current) return;
+    const deadline = Date.now() + ALONE_GRACE_SECONDS * 1000;
+    setAloneSecondsLeft(ALONE_GRACE_SECONDS);
+    aloneTimerRef.current = setInterval(() => {
+      const left = Math.ceil((deadline - Date.now()) / 1000);
+      if (left <= 0) {
+        if (aloneTimerRef.current) clearInterval(aloneTimerRef.current);
+        aloneTimerRef.current = null;
+        setAloneSecondsLeft(null);
+        handleEndCall();
+      } else {
+        setAloneSecondsLeft(left);
+      }
+    }, 1000);
+  }, [
+    inCall,
+    participants.length,
+    cancelAloneTimer,
+    handleEndCall,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (aloneTimerRef.current) clearInterval(aloneTimerRef.current);
+    },
+    [],
+  );
+
   const handleToggleMute = useCallback(() => {
     if (muteDebounceRef.current) return;
     muteDebounceRef.current = true;
@@ -308,9 +361,12 @@ export function CallScreen({
               participants={participants}
               localStream={localStream}
               hasLocalVideo={hasLocalVideo}
+              isLocalMicOn={!isMuted}
               callType="video"
               callDuration={callDuration}
               onOpenParticipants={handleOpenParticipants}
+              aloneSecondsLeft={aloneSecondsLeft}
+              onStayAlone={cancelAloneTimer}
             />
           );
         }
@@ -336,9 +392,12 @@ export function CallScreen({
               participants={participants}
               localStream={localStream}
               hasLocalVideo={hasLocalVideo}
+              isLocalMicOn={!isMuted}
               callType="audio"
               callDuration={callDuration}
               onOpenParticipants={handleOpenParticipants}
+              aloneSecondsLeft={aloneSecondsLeft}
+              onStayAlone={cancelAloneTimer}
             />
           );
         }
@@ -385,6 +444,26 @@ export function CallScreen({
         onEscalateToVideo={handleEscalateToVideo}
         onOpenParticipants={handleOpenParticipants}
       />
+
+      {/* 1:1 alone countdown — GroupCallStage renders its own banner for
+          group calls; the P2P stages have none, so the timer would tick
+          invisibly and hang up with no warning. */}
+      {aloneSecondsLeft !== null && !effectiveIsGroupCall && (
+        <View style={styles.bannerWrap}>
+          <View style={styles.aloneBanner}>
+            <Text style={styles.aloneBannerText}>
+              The other person left · ending in {aloneSecondsLeft}s
+            </Text>
+            <Pressable
+              onPress={cancelAloneTimer}
+              accessibilityLabel="Stay on call"
+              style={styles.aloneBannerButton}
+            >
+              <Text style={styles.aloneBannerButtonText}>Stay</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
 
       {connectionStatus !== "connected" && mode !== "RECONNECTING" && (
           <View style={styles.bannerWrap}>
@@ -477,6 +556,35 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     zIndex: 30,
+  },
+  aloneBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    backgroundColor: "rgba(14,14,18,0.92)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  aloneBannerText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
+    flex: 1,
+  },
+  aloneBannerButton: {
+    backgroundColor: "#3FDCFF",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  aloneBannerButtonText: {
+    color: "#06070d",
+    fontSize: 13,
+    fontWeight: "700",
   },
   sheetBackground: {
     backgroundColor: "#0E0E12",

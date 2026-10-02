@@ -52,7 +52,10 @@ type BetterAuthRecoveryClient = typeof authClient & {
   }) => Promise<{
     error?: { message?: string } | null;
   }>;
-  sendVerificationEmail?: (args: { email: string }) => Promise<{
+  sendVerificationEmail?: (args: {
+    email: string;
+    callbackURL?: string;
+  }) => Promise<{
     error?: { message?: string } | null;
   }>;
   verifyEmail?: (args: { query: { token: string } }) => Promise<{
@@ -118,6 +121,20 @@ export async function submitEmailVerification(token: string) {
   return recoveryClient.verifyEmail({ query: { token } });
 }
 
+/**
+ * Where the verify-email link should send the user back to. Web gets its own
+ * origin's verify page (first-party token link); native gets the dvnt://
+ * deep link the route registry maps to /(auth)/verify-email. Without a
+ * callbackURL the server emits "/" and the post-verify redirect dies on the
+ * Supabase origin's 404 root — the email verifies but looks broken.
+ */
+function verificationRedirect(): string {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}/auth/verify-email`;
+  }
+  return "dvnt://auth/verify";
+}
+
 export async function resendVerificationEmail(email: string) {
   if (!recoveryClient.sendVerificationEmail) {
     throw new Error(
@@ -125,7 +142,10 @@ export async function resendVerificationEmail(email: string) {
     );
   }
 
-  return recoveryClient.sendVerificationEmail({ email });
+  return recoveryClient.sendVerificationEmail({
+    email,
+    callbackURL: verificationRedirect(),
+  });
 }
 
 // Reference to the global query client (set by the app)

@@ -27,6 +27,14 @@ test("every row points at a route, and My Tickets is the first thing offered", (
   }
 });
 
+test("Game Night has a native drawer destination", () => {
+  const rows = buildDrawerSections({ canHost: false }, NONE).flatMap((s) => s.rows);
+  assert.deepEqual(
+    rows.find((row) => row.id === "game-night"),
+    { id: "game-night", label: "Game Night", icon: "gamepad", href: "/(protected)/game-night", detail: "Party card game" },
+  );
+});
+
 test("the ticket detail distinguishes events from passes and never shows a bare number", () => {
   const detail = (counts: typeof NONE) =>
     buildDrawerSections({ canHost: false }, counts)[0].rows[0].detail;

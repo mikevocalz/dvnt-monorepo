@@ -35,6 +35,7 @@ import {
   useNewGroupStore,
   type NewGroupSelectedUser,
 } from "@dvnt/app/lib/stores/new-group-store";
+import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 
 const CYAN = "#3FDCFF";
 const USER_ROW_HEIGHT = 70;
@@ -180,7 +181,12 @@ export function NewGroupScreen({ onClose }: { onClose?: () => void }) {
     [allUsersData, currentUser?.id],
   );
 
-  const handleToggle = (user: NewGroupSelectedUser) => { toggleUser(user); };
+  const handleToggle = (user: NewGroupSelectedUser) => {
+    const result = toggleUser(user, MAX_GROUP_CHAT_MEMBERS);
+    if (result === "12 MAX GROUP CHAT USERS") {
+      showToast("error", "12 MAX GROUP CHAT USERS");
+    }
+  };
 
   // SACRED — identical create-group call the native screen uses.
   const createGroup = useMutation({
@@ -202,6 +208,10 @@ export function NewGroupScreen({ onClose }: { onClose?: () => void }) {
   const handleCreateGroup = () => {
     if (selectedUsers.length < 2) {
       showToast("error", "Error", "Select at least 2 users for a group chat");
+      return;
+    }
+    if (selectedUsers.length + 1 > MAX_GROUP_CHAT_MEMBERS) {
+      showToast("error", "12 MAX GROUP CHAT USERS");
       return;
     }
     if (!groupName.trim()) {
@@ -261,7 +271,7 @@ export function NewGroupScreen({ onClose }: { onClose?: () => void }) {
             </div>
           </FormField>
           <p className="mt-2 text-xs text-white/40">
-            Select at least 2 people
+            Select at least 2 people · {MAX_GROUP_CHAT_MEMBERS} max
           </p>
         </div>
 
@@ -290,7 +300,7 @@ export function NewGroupScreen({ onClose }: { onClose?: () => void }) {
               ))}
             </div>
             <p className="mt-2 text-xs text-white/40">
-              {selectedUsers.length} selected · 2 minimum
+              {selectedUsers.length} of {MAX_GROUP_CHAT_MEMBERS - 1} selected · 2 minimum
             </p>
           </div>
         ) : null}

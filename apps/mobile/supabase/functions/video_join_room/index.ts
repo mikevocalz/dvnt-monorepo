@@ -9,6 +9,7 @@ import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { CALL_HUMAN_CAPACITY } from "../_shared/call-capacity.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -231,7 +232,15 @@ Deno.serve(async (req) => {
       return errorResponse(eventAccess.code, eventAccess.message, eventAccess.detail);
     }
     room.ends_at = eventAccess.endsAt;
-    if (room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
+    // Calls are exempt: a call room is created with the same +5min ends_at a
+    // free-tier Lynk gets, but a personal call has no session tier — it ends
+    // when the caller leaves, not on a timer. The gate used to sit in front of
+    // the isCall branch, so a member bumped out mid-call could never rejoin
+    // after minute five: session_expired ahead of admit_call_participant's
+    // reconnect path. The Lynk deadline is enforced again below for non-call
+    // rooms; this copy keeps eventAccess semantics identical without the
+    // call regression.
+    if (!isCall && room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
       return errorResponse("conflict", "This Lynk's session has ended", { reason: "session_expired" });
     }
 
@@ -259,7 +268,7 @@ Deno.serve(async (req) => {
           ? "internal_error"
           : "forbidden";
         const message = reason === "call_full"
-          ? "This call has four people"
+          ? "This call is full"
           : reason === "call_ended"
           ? "This call has ended"
           : reason === "call_join_pending"
@@ -272,7 +281,7 @@ Deno.serve(async (req) => {
         return errorResponse(code, message, {
           reason,
           ...(reason === "call_full"
-            ? { max: 4, current: result.current }
+            ? { max: result.max ?? CALL_HUMAN_CAPACITY, current: result.current }
             : {}),
         });
       }
@@ -485,7 +494,7 @@ Deno.serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          maxPeers: isCall ? 4 : room.max_participants,
+          maxPeers: room.max_participants,
           videoCodec: "h264",
         }),
       });

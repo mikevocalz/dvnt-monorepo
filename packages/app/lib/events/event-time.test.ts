@@ -11,6 +11,11 @@ import {
   doorsOpen,
   isLive,
   isPast,
+  eventEndAt,
+  eventEnded,
+  eventSalesClosed,
+  SALES_CUTOFF_MINUTES,
+  ASSUMED_EVENT_LENGTH_MS,
 } from "./event-time.ts";
 
 // LA event: absolute instant 04:00Z, venue zone America/Los_Angeles (summer → PDT).
@@ -73,4 +78,57 @@ test("time gates operate on the UTC instant (viewer/server tz irrelevant)", () =
   assert.equal(saleWindowOpen(start, end, start + 1), true);
   assert.equal(saleWindowOpen(start, end, end), false); // closed at end
   assert.equal(saleWindowOpen(null, null, Date.now()), true); // unbounded
+});
+
+test("eventEndAt: anchor chain mirrors the server — end → start+6h → date", () => {
+  const end = "2026-09-21T07:00:00Z";
+  const start = "2026-09-21T02:00:00Z";
+  const assumedEnd = Date.parse(start) + ASSUMED_EVENT_LENGTH_MS;
+  // endDate wins over start; camelCase and snake_case both read.
+  assert.equal(eventEndAt({ endDate: end, fullDate: start }), Date.parse(end));
+  assert.equal(eventEndAt({ end_date: end, start_date: start }), Date.parse(end));
+  // No end → assumed six-hour run from start (fullDate is the card's
+  // start stamp), the same COALESCE(end_date, start_date + 6h) the RPCs
+  // and _shared/sales-cutoff.ts apply.
+  assert.equal(eventEndAt({ fullDate: start }), assumedEnd);
+  assert.equal(eventEndAt({ start_date: start }), assumedEnd);
+  // ISO `date` is the last resort; day-of-month chips are NOT dates.
+  assert.equal(eventEndAt({ date: end }), Date.parse(end));
+  assert.equal(eventEndAt({ date: "05" }), null);
+  assert.equal(eventEndAt({ date: "--" }), null);
+  assert.equal(eventEndAt({}), null);
+  assert.equal(eventEndAt(null), null);
+});
+
+test("eventEnded: a NULL-end event stays live for six hours", () => {
+  const start = Date.parse("2026-09-21T02:00:00Z");
+  const ev = { start_date: "2026-09-21T02:00:00Z" };
+  assert.equal(eventEnded(ev, start), false); // doors
+  assert.equal(eventEnded(ev, start + 3 * 3600_000), false); // mid-event
+  assert.equal(eventEnded(ev, start + ASSUMED_EVENT_LENGTH_MS - 1), false);
+  assert.equal(eventEnded(ev, start + ASSUMED_EVENT_LENGTH_MS), true);
+  // Sales close 30 min before the assumed end, not 30 min before doors.
+  assert.equal(
+    eventSalesClosed(ev, start + ASSUMED_EVENT_LENGTH_MS - 31 * 60_000),
+    false,
+  );
+  assert.equal(
+    eventSalesClosed(ev, start + ASSUMED_EVENT_LENGTH_MS - 30 * 60_000),
+    true,
+  );
+});
+
+test("eventEnded / eventSalesClosed: cutoff is end anchor − 30 min", () => {
+  const end = Date.parse("2026-09-21T07:00:00Z");
+  const ev = { endDate: "2026-09-21T07:00:00Z" };
+  const cutoff = end - SALES_CUTOFF_MINUTES * 60_000;
+  assert.equal(eventEnded(ev, end - 1), false);
+  assert.equal(eventEnded(ev, end), true);
+  // Sales close 30 min BEFORE end — the CTA dies while the event runs.
+  assert.equal(eventSalesClosed(ev, cutoff - 1), false);
+  assert.equal(eventSalesClosed(ev, cutoff), true);
+  assert.equal(eventSalesClosed(ev, end - 1), true);
+  // No anchor → stays open (mirrors isSalesClosed).
+  assert.equal(eventSalesClosed({}, end + 999_000), false);
+  assert.equal(eventEnded({}, end + 999_000), false);
 });

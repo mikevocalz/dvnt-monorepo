@@ -1,0 +1,14 @@
+{
+  "event": "evt_3UHSl0CqSKa9QmBo0voP0iOp",
+  "payment_intent": "pi_3UHSl0CqSKa9QmBo0V0M8Vbk",
+  "livemode": false,
+  "scope": "Actual webhook code, real sandbox event; fixture database, signature, QR and email",
+  "deliveries": 2,
+  "tickets": 2,
+  "ticket_owner": "guest",
+  "seller_is_owner": false,
+  "ticket_amount_sum": 9425,
+  "order_status": "paid",
+  "ledger_entries": 1,
+  "promoter_earning": 900
+}

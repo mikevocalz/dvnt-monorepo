@@ -30,6 +30,7 @@ export type NotificationPayloadType =
   | "event"
   | "event_invite"
   | "event_update"
+  | "event_promoter_added"
   | "sneaky_lynk"
   | "room_invite"
   | "call"
@@ -154,6 +155,16 @@ export function routeFromNotification(
       const eventId = data.eventId || data.entityId;
       if (eventId) {
         return `/(protected)/events/${eventId}`;
+      }
+      return null;
+    }
+
+    case "event_promoter_added": {
+      // Newly-added promoters land on the promoter dashboard (payout setup).
+      // data.eventId is the event id; data.entityId now mirrors it.
+      const eventId = data.eventId || data.entityId;
+      if (eventId) {
+        return `/(protected)/events/${eventId}/promoter`;
       }
       return null;
     }

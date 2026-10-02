@@ -86,6 +86,23 @@ export function filterDiscoverableEvents<T extends DiscoveryEvent>(rows: T[] | n
 }
 
 /**
+ * May this event appear in a browse list for anyone — status AND visibility.
+ * The get_events_* RPCs already gate `COALESCE(visibility,'public')='public'`
+ * server-side; raw-table readers (past events, host profile) must apply the
+ * same rule or private/link_only rows leak to every signed-in member, whose
+ * SELECT policy is USING true.
+ */
+export function isPubliclyListableEvent(event: DiscoveryEvent | null | undefined): boolean {
+  if (!event) return false;
+  return isDiscoverableEvent(event) && isTitleResolvable(event);
+}
+
+/** Drop rows that must never appear in a public browse list. */
+export function filterPubliclyListableEvents<T extends DiscoveryEvent>(rows: T[] | null | undefined): T[] {
+  return (rows ?? []).filter(isPubliclyListableEvent);
+}
+
+/**
  * Resolve a title-derived slug to one event. Events have no populated slug
  * column (`share_slug` is NULL on every production row), so two events with
  * the same title collide on the same URL.

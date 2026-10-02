@@ -40,6 +40,9 @@ export type ActivityType =
   | "event_cancelled"
   | "event_changed"
   | "event_broadcast"
+  // Promoter added to an event — entity_id is the EVENT id (fixed in
+  // manage-promoters; the promoter row uuid lives in entity_payload).
+  | "event_promoter_added"
   | "ticket_transfer_initiated"
   | "ticket_transfer_accepted"
   | "ticket_transfer_declined"
@@ -268,6 +271,13 @@ export function getRouteForActivity(activity: Activity): string {
 
   if ((type === "comment" || type === "mention") && commentsPostId) {
     return getPostDetailCommentsRoute(commentsPostId, commentId);
+  }
+
+  // Promoter taps land on the promoter self-service dashboard, not the
+  // public event page — must run before the generic entityType "event"
+  // branch which would send them to the event detail.
+  if (type === "event_promoter_added" && entityId) {
+    return `/(protected)/events/${entityId}/promoter`;
   }
 
   // Use entityType/entityId if available (preferred routing)

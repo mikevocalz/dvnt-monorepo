@@ -21,6 +21,7 @@ import { useEffect, useState } from 'react';
 import { usePathname } from 'solito/navigation';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
 import { AppShell } from '@dvnt/app/components/app-shell';
+import { routeIsImmersive } from '@dvnt/app/lib/web-chrome';
 import { ChromeErrorBoundary } from '@/components/chrome-error-boundary';
 
 const GlassHeader = dynamic(
@@ -57,6 +58,12 @@ const APP_SURFACES = [
 const isAppSurface = (path: string) =>
   APP_SURFACES.some((p) => path === p || path.startsWith(p + '/'));
 
+// Full-screen surfaces that own the whole viewport and render their own
+// controls along the bottom edge — the phone tab bar and top bar must not
+// overlay them. Calls were the reported case: WebTabBar sat on top of the
+// mute/camera/end row on every phone-width call. The list itself lives in
+// web-chrome so WebAppShell drops its tab-bar clearance on the same routes.
+
 export function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? '/';
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -88,6 +95,11 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
 
   // Auth flow renders without site chrome.
   if (pathname.startsWith('/auth')) return <>{children}</>;
+
+  // Immersive app surfaces (call, camera, story) render chrome-free at every
+  // breakpoint — including logged out, where marketing chrome must not wrap a
+  // guest checkout-to-camera style flow either.
+  if (routeIsImmersive(pathname)) return <>{children}</>;
 
   // App surfaces show the app chrome once we know the visitor is authed.
   // (WebAppShell still redirects logged-out users away from auth-only surfaces;

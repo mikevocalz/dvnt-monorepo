@@ -16,7 +16,7 @@ import { View, StyleSheet } from "react-native";
 import { Main } from "@dvnt/app/components/ui/html";
 import { useRouter, usePathname } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { routeOwnsHeader } from "@dvnt/app/lib/web-chrome";
+import { routeIsImmersive, routeOwnsHeader } from "@dvnt/app/lib/web-chrome";
 
 export function WebAppShell({
   children,
@@ -35,6 +35,9 @@ export function WebAppShell({
   // Sub-screens that render their own top header get no global header from
   // SiteChrome, so they need no header-clearance padding either.
   const ownsHeader = routeOwnsHeader(pathname);
+  // Immersive surfaces (call, camera, story) get no chrome at all — the tab-bar
+  // clearance would be dead space pushing the controls band off the viewport.
+  const immersive = routeIsImmersive(pathname);
 
   useEffect(() => {
     if (requireAuth && hasHydrated && !isAuthenticated) {
@@ -68,10 +71,10 @@ export function WebAppShell({
           // because the desktop rail is a sidebar, not a bottom bar, and the
           // safe-area term carries the home indicator on notched phones.
           [
-            ownsHeader || publicChrome
+            ownsHeader || publicChrome || immersive
               ? ""
               : "pt-[env(safe-area-inset-top)] md:pt-0",
-            "pb-[calc(env(safe-area-inset-bottom)+88px)] lg:pb-10",
+            immersive ? "" : "pb-[calc(env(safe-area-inset-bottom)+88px)] lg:pb-10",
           ]
             .filter(Boolean)
             .join(" ") || undefined
