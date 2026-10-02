@@ -1,11 +1,22 @@
 const PHONE_LIKE = /^\+?[\d\s().-]{7,}$/;
 
-export function normalizeCompRecipient(raw: unknown): { kind: "email" | "username"; value: string } | null {
+export function normalizePhoneE164(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const text = raw.trim();
-  // Phone numbers are not usernames. The current users schema has no verified
-  // phone identity; never route a comp to a guessed account from a phone input.
-  if (!text.startsWith("@") && PHONE_LIKE.test(text)) return null;
+  if (/^\+[1-9]\d{7,14}$/.test(text)) return text;
+  const digits = text.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return null;
+}
+
+export function normalizeCompRecipient(raw: unknown): { kind: "email" | "username" | "phone"; value: string } | null {
+  if (typeof raw !== "string") return null;
+  const text = raw.trim();
+  if (!text.startsWith("@") && PHONE_LIKE.test(text)) {
+    const phone = normalizePhoneE164(text);
+    return phone ? { kind: "phone", value: phone } : null;
+  }
   if (text.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text))
     return { kind: "email", value: text.toLowerCase() };
   const username = text.replace(/^@/, "");
@@ -16,6 +27,7 @@ export function normalizeCompRecipient(raw: unknown): { kind: "email" | "usernam
 export type CompRoute =
   | { route: "member" }
   | { route: "guest"; email: string }
+  | { route: "phone_guest"; phone: string }
   | { route: "skip"; reason: string };
 
 /**
@@ -35,15 +47,16 @@ export function routeCompRecipient(
       route: "skip",
       reason:
         !text.startsWith("@") && PHONE_LIKE.test(text)
-          ? "Phone numbers aren't supported — DVNT has no SMS consent record or delivery path. Use an email address"
-          : "Not a DVNT username or a valid email address",
+          ? "Phone number must be a valid US number or E.164 international number"
+          : "Not a DVNT username, valid email address, or valid phone number",
     };
   }
   if (account?.authId) return { route: "member" };
   if (norm.kind === "email") return { route: "guest", email: norm.value };
+  if (norm.kind === "phone") return { route: "phone_guest", phone: norm.value };
   return {
     route: "skip",
-    reason: "No DVNT account with that username; use their email to send a guest ticket",
+    reason: "No DVNT account with that username; use their email or phone to send a guest ticket",
   };
 }
 
