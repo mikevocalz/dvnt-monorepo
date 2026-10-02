@@ -251,53 +251,6 @@ export function LocationAutocompleteInstagram({
   }, [value]);
 
   useEffect(() => {
-    setIsLoadingLocation(true);
-
-    const loadCurrentLocation = async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") return;
-
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        const [reverse] = await Location.reverseGeocodeAsync({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-
-        const locationName =
-          reverse?.name ||
-          [reverse?.city, reverse?.region].filter(Boolean).join(", ") ||
-          "Current Location";
-
-        setCurrentLocation({
-          name: locationName,
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          formattedAddress: [
-            reverse?.street,
-            reverse?.city,
-            reverse?.region,
-            reverse?.postalCode,
-          ]
-            .filter(Boolean)
-            .join(", "),
-        });
-      } catch (error) {
-        console.warn(
-          "[LocationAutocompleteInstagram] Failed to resolve current location:",
-          error,
-        );
-      } finally {
-        setIsLoadingLocation(false);
-      }
-    };
-
-    void loadCurrentLocation();
-  }, []);
-
-  useEffect(() => {
     if (query.trim().length < 2) {
       setPredictions([]);
       return;
@@ -552,10 +505,49 @@ export function LocationAutocompleteInstagram({
     [commitSelection],
   );
 
-  const handleSelectCurrentLocation = useCallback(() => {
-    if (!currentLocation) return;
-    commitSelection(currentLocation);
-  }, [commitSelection, currentLocation]);
+  const handleSelectCurrentLocation = useCallback(async () => {
+    setIsLoadingLocation(true);
+    try {
+      // Location permission is intentionally requested ONLY after this explicit
+      // tap. Opening Create Post or the place picker must never trigger an OS
+      // permission prompt.
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") return;
+
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const [reverse] = await Location.reverseGeocodeAsync({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+      const nextLocation: LocationData = {
+        name:
+          reverse?.name ||
+          [reverse?.city, reverse?.region].filter(Boolean).join(", ") ||
+          "Current Location",
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        formattedAddress: [
+          reverse?.street,
+          reverse?.city,
+          reverse?.region,
+          reverse?.postalCode,
+        ]
+          .filter(Boolean)
+          .join(", "),
+      };
+      setCurrentLocation(nextLocation);
+      commitSelection(nextLocation);
+    } catch (error) {
+      console.warn(
+        "[LocationAutocompleteInstagram] Failed to resolve current location:",
+        error,
+      );
+    } finally {
+      setIsLoadingLocation(false);
+    }
+  }, [commitSelection]);
 
   const handleManualSubmit = useCallback(() => {
     const trimmed = query.trim();
@@ -718,14 +710,15 @@ export function LocationAutocompleteInstagram({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {query.trim().length < 2 && currentLocation ? (
+            {query.trim().length < 2 ? (
               <View style={styles.sectionWrap}>
                 {renderSectionHeader(
                   "Use Current Location",
                   <Navigation size={16} color={colors.mutedForeground} />,
                 )}
                 <TouchableOpacity
-                  onPress={handleSelectCurrentLocation}
+                  onPress={() => void handleSelectCurrentLocation()}
+                  disabled={isLoadingLocation}
                   activeOpacity={0.8}
                   style={[styles.row, { backgroundColor: colors.card }]}
                 >
@@ -734,18 +727,16 @@ export function LocationAutocompleteInstagram({
                   </View>
                   <View style={styles.rowTextWrap}>
                     <Text style={[styles.rowTitle, { color: colors.foreground }]}>
-                      {currentLocation.name}
+                      {isLoadingLocation
+                        ? "Finding your location…"
+                        : currentLocation?.name || "Use my current location"}
                     </Text>
-                    {currentLocation.formattedAddress ? (
-                      <Text
-                        style={[
-                          styles.rowSubtitle,
-                          { color: colors.mutedForeground },
-                        ]}
-                      >
-                        {currentLocation.formattedAddress}
-                      </Text>
-                    ) : null}
+                    <Text
+                      style={[styles.rowSubtitle, { color: colors.mutedForeground }]}
+                    >
+                      {currentLocation?.formattedAddress ||
+                        "Location permission is requested only when you tap here."}
+                    </Text>
                   </View>
                 </TouchableOpacity>
               </View>
