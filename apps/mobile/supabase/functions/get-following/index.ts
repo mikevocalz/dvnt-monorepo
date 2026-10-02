@@ -21,6 +21,7 @@ interface FollowingDoc {
   avatar: string;
   verified: boolean;
   isFollowing: boolean;
+  followsYou: boolean;
 }
 
 Deno.serve(async (req) => {
@@ -70,6 +71,7 @@ Deno.serve(async (req) => {
     });
 
     let viewerFollowingIds: number[] = [];
+    let viewerUserId: number | null = null;
     // Optional viewer auth via shared helper (failure = anonymous, not an error)
     const viewerAuthId = await verifySession(supabaseAdmin, req);
     if (viewerAuthId) {
@@ -79,6 +81,7 @@ Deno.serve(async (req) => {
         "id",
       );
       if (userData) {
+        viewerUserId = Number(userData.id);
         const { data: followingData } = await supabaseAdmin
           .from("follows")
           .select("following_id")
@@ -108,6 +111,25 @@ Deno.serve(async (req) => {
       });
     }
 
+    const visibleIds = (data || [])
+      .map((row: any) => Number(f?.following?.id))
+      .filter((id: number) => Number.isFinite(id));
+    let followsViewerIds = new Set<number>();
+    if (viewerUserId && visibleIds.length > 0) {
+      const { data: inboundRows, error: inboundError } = await supabaseAdmin
+        .from("follows")
+        .select("follower_id")
+        .eq("following_id", viewerUserId)
+        .in("follower_id", visibleIds);
+      if (inboundError) {
+        console.error("[Edge:get-following] inbound relationship lookup failed:", inboundError);
+      } else {
+        followsViewerIds = new Set(
+          (inboundRows || []).map((row: any) => Number(row.follower_id)),
+        );
+      }
+    }
+
     const docs: FollowingDoc[] = (data || []).map((f: any) => {
       const following = f.following;
       const followingId = following?.id;
@@ -118,6 +140,7 @@ Deno.serve(async (req) => {
         avatar: following?.avatar?.url || "",
         verified: following?.verified || false,
         isFollowing: followingId ? viewerFollowingIds.includes(followingId) : false,
+        followsYou: followingId ? followsViewerIds.has(Number(followingId)) : false,
       };
     });
 
