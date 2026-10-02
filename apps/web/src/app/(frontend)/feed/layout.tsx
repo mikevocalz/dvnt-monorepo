@@ -4,7 +4,9 @@ import { PwaInstallPrompt } from '@dvnt/app/components/pwa-install.web';
 import { IncomingCallOverlay } from '@dvnt/app/features/call/ui/incoming-call-overlay.web';
 import { useEffect } from 'react';
 import { registerWebPushIfGranted } from '@dvnt/app/lib/web-push';
+import { useSyncMemberProximityPresence } from '@dvnt/app/lib/hooks/use-member-proximity';
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
+  useSyncMemberProximityPresence();
   // Web push: silently (re)subscribe when permission was already granted.
   useEffect(() => {
     void registerWebPushIfGranted();
