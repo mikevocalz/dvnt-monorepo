@@ -1,16 +1,17 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendResendEmail } from "../_shared/send-resend-email.ts";
 
-const URL=Deno.env.get("SUPABASE_URL")||"";
-const KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
+const SUPABASE_URL=Deno.env.get("SUPABASE_URL")||"";
+const SERVICE_KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
 const SITE=(Deno.env.get("PUBLIC_SITE_URL")||"https://dvntapp.live").replace(/\/$/,"");
 
 function escapeHtml(v:string){return v.replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]||c));}
 
 Deno.serve(async(req)=>{
   const secret=Deno.env.get("CRON_SECRET")||"";
-  if(secret && req.headers.get("authorization")!==`Bearer ${secret}`) return new Response("Unauthorized",{status:401});
-  const s=createClient(URL,KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+  if(!secret){ console.error("[process-event-followups] CRON_SECRET not set — rejecting request"); return new Response("Misconfigured",{status:500}); }
+  if(req.headers.get("authorization")!==`Bearer ${secret}`) return new Response("Unauthorized",{status:401});
+  const s=createClient(SUPABASE_URL, SERVICE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
   const now=new Date().toISOString();
   const {data:campaigns,error}=await s.from("event_followup_campaigns")
     .select("*, event:events(id,title,status)")

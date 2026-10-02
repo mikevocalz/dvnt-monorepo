@@ -1,8 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
 
-const URL=Deno.env.get("SUPABASE_URL")||"";
-const KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
+const SUPABASE_URL=Deno.env.get("SUPABASE_URL")||"";
+const SERVICE_KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
 function json(req:Request,body:unknown,status=200){return new Response(JSON.stringify(body),{status,headers:{...corsHeaders(req),"Content-Type":"application/json"}})}
 
 async function canManage(s:any,eventId:number,authId:string){
@@ -24,7 +24,7 @@ function canonicalEnd(event:any):Date|null{
 
 Deno.serve(async(req)=>{
   if(req.method==="OPTIONS") return optionsResponse();
-  const s=createClient(URL,KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+  const s=createClient(SUPABASE_URL, SERVICE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
   const authId=await verifySession(s,req);
   if(!authId) return json(req,{ok:false,error:"Unauthorized"},401);
   const body=req.method==="POST"?await req.json().catch(()=>({})):{};
