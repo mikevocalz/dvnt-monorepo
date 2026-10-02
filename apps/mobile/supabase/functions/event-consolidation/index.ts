@@ -1,8 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
 
-const URL = Deno.env.get("SUPABASE_URL") || "";
-const KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 function json(req: Request, body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -14,7 +14,7 @@ function json(req: Request, body: unknown, status = 200) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST") return json(req, { ok:false, error:"Method not allowed" }, 405);
-  const supabase = createClient(URL, KEY, { auth:{ persistSession:false, autoRefreshToken:false }});
+  const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth:{ persistSession:false, autoRefreshToken:false }});
   const authId = await verifySession(supabase, req);
   if (!authId) return json(req, { ok:false, error:"Unauthorized" }, 401);
 
