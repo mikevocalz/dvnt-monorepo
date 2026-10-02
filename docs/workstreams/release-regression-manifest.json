@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "criticalScenarios": [
+    {"id":"age-under-18","owner":"identity","automation":"packages/app/lib/auth/age-admission.integration.test.ts"},
+    {"id":"age-account-switch","owner":"identity","automation":"packages/app/lib/auth/account-token-cache.test.ts"},
+    {"id":"private-event-access","owner":"events","automation":"packages/app/lib/events"},
+    {"id":"ticket-exactly-once","owner":"tickets","automation":"scripts/verify-issuance-invariants.mjs"},
+    {"id":"queued-post-recovery","owner":"posts","automation":"packages/app/lib/posts/publish-queue.test.ts"},
+    {"id":"location-consent","owner":"location","automation":"packages/app/lib/stores/city-discovery-visibility.test.ts"},
+    {"id":"lynk-session-lifecycle","owner":"lynk","automation":"pnpm test:lynk-session"},
+    {"id":"edge-auth-config","owner":"platform","automation":"pnpm verify:functions"}
+  ],
+  "releaseCandidateManual": [
+    "iOS device smoke",
+    "Android device smoke",
+    "large media transfer",
+    "camera and permission flows",
+    "door scanner",
+    "verification provider sandbox",
+    "scheduled Lynk timing"
+  ]
+}
