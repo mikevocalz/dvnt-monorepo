@@ -7,7 +7,7 @@ import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { TabHeaderLogo, TabHeaderRight } from "@dvnt/app/components/tab-header";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { AdultPlatformGate } from "@dvnt/app/components/adult-platform-gate";
-import { useVerifiedAdmission } from "@dvnt/app/lib/hooks/use-verified-admission";
+import { useAdultAdmissionGate } from "@dvnt/app/lib/hooks/use-verified-admission";
 import { useCreateHeaderStore } from "@dvnt/app/lib/stores/create-header-store";
 import { useCallKeepCoordinator } from "@dvnt/app/features/services/callkeep";
 import { NotificationListener } from "@dvnt/app/features/services/callkeep/NotificationListener";
@@ -302,16 +302,21 @@ function TabsHeader() {
 }
 
 export default function ProtectedLayout() {
-  const { data: adultAdmission, isLoading } = useVerifiedAdmission();
+  const admission = useAdultAdmissionGate();
 
   // Do not mount the application shell, realtime, presence, calls, push or
   // location side effects until this account is allowed onto the platform.
   // New in-scope accounts verify here; a proven under-18 account cannot pass.
-  if (isLoading) {
-    return <View style={{ flex: 1, backgroundColor: "#000" }} />;
+  //
+  // Only `admitted` mounts the shell. Pending, errored and signed-out all hold
+  // here, so a failed admission read cannot open the adult app. `signedOut`
+  // waits on the root layout's auth-group guard, which replaces the route with
+  // /(auth)/login once auth settles.
+  if (admission.status === "blocked") {
+    return <AdultPlatformGate verdict={admission.verdict} />;
   }
-  if (adultAdmission?.state === "blocked") {
-    return <AdultPlatformGate verdict={adultAdmission} />;
+  if (admission.status !== "admitted") {
+    return <View style={{ flex: 1, backgroundColor: "#000" }} />;
   }
   return <ProtectedAppLayout />;
 }

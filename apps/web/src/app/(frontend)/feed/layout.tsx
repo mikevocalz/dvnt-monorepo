@@ -1,7 +1,8 @@
 'use client';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'solito/navigation';
 import { WebAppShell } from '@dvnt/app/components/web-app-shell';
-import { useVerifiedAdmission } from '@dvnt/app/lib/hooks/use-verified-admission';
+import { useAdultAdmissionGate } from '@dvnt/app/lib/hooks/use-verified-admission';
 import { useEffect } from 'react';
 import { registerWebPushIfGranted } from '@dvnt/app/lib/web-push';
 
@@ -54,15 +55,32 @@ function ProtectedShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * A signed-out visitor on /feed used to reach the redirect inside WebAppShell.
+ * The shell no longer mounts for them, so the redirect lives here instead.
+ */
+function SignedOutRedirect() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace('/');
+  }, [router]);
+  return <main className="min-h-dvh bg-black" />;
+}
+
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
-  const { data: adultAdmission, isLoading } = useVerifiedAdmission();
+  const admission = useAdultAdmissionGate();
 
   // Keep blocked/newly in-scope accounts outside the app shell entirely. This
   // prevents a content flash and avoids starting realtime/push/location work
   // before the adult-admission boundary is satisfied.
-  if (isLoading) return <main className="min-h-dvh bg-black" />;
-  if (adultAdmission?.state === 'blocked') {
-    return <AdultPlatformGate verdict={adultAdmission} />;
+  //
+  // Only `admitted` mounts the shell. A pending or errored admission read holds
+  // here rather than falling through, so a failed read cannot open the adult
+  // app on a cold start or an offline device.
+  if (admission.status === 'blocked') {
+    return <AdultPlatformGate verdict={admission.verdict} />;
   }
+  if (admission.status === 'signedOut') return <SignedOutRedirect />;
+  if (admission.status !== 'admitted') return <main className="min-h-dvh bg-black" />;
   return <ProtectedShell>{children}</ProtectedShell>;
 }
