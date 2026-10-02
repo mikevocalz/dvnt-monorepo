@@ -1,15 +1,45 @@
 'use client';
+import dynamic from 'next/dynamic';
 import { WebAppShell } from '@dvnt/app/components/web-app-shell';
-import { PwaInstallPrompt } from '@dvnt/app/components/pwa-install.web';
-import { IncomingCallOverlay } from '@dvnt/app/features/call/ui/incoming-call-overlay.web';
-import { AdultPlatformGate } from '@dvnt/app/components/adult-platform-gate.web';
 import { useVerifiedAdmission } from '@dvnt/app/lib/hooks/use-verified-admission';
 import { useEffect } from 'react';
 import { registerWebPushIfGranted } from '@dvnt/app/lib/web-push';
-import { useSyncMemberProximityPresence } from '@dvnt/app/lib/hooks/use-member-proximity';
+
+const AdultPlatformGate = dynamic(
+  () =>
+    import('@dvnt/app/components/adult-platform-gate.web').then(
+      (module) => module.AdultPlatformGate,
+    ),
+  { ssr: false },
+);
+
+const MemberProximitySync = dynamic(
+  () =>
+    import('@dvnt/app/components/member-proximity-sync.web').then(
+      (module) => module.MemberProximitySync,
+    ),
+  { ssr: false },
+);
+
+const PwaInstallPrompt = dynamic(
+  () =>
+    import('@dvnt/app/components/pwa-install.web').then(
+      (module) => module.PwaInstallPrompt,
+    ),
+  { ssr: false },
+);
+
+const IncomingCallOverlay = dynamic(
+  () =>
+    import('@dvnt/app/features/call/ui/incoming-call-overlay.web').then(
+      (module) => module.IncomingCallOverlay,
+    ),
+  { ssr: false },
+);
 
 function ProtectedShell({ children }: { children: React.ReactNode }) {
-  useSyncMemberProximityPresence();
+  // Proximity publication is a post-mount side effect and must not inflate the
+  // protected shell's first-load bundle.
   // Web push: silently (re)subscribe when permission was already granted.
   useEffect(() => {
     void registerWebPushIfGranted();
@@ -17,6 +47,7 @@ function ProtectedShell({ children }: { children: React.ReactNode }) {
   return (
     <WebAppShell>
       {children}
+      <MemberProximitySync />
       <PwaInstallPrompt />
       <IncomingCallOverlay />
     </WebAppShell>
