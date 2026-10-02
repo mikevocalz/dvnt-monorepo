@@ -34,6 +34,7 @@
     "@payloadcms/ui": "4.0.0-canary.26",
     "@tanstack/react-pacer": "^0.22.1",
     "@tanstack/react-query": "^5.69.0",
+    "@tanstack/react-start": "^1.168.60",
     "@tanstack/react-table": "^9.1.0",
     "@tanstack/react-virtual": "^3.14.2",
     "clsx": "^2.1.1",
