@@ -7,8 +7,9 @@ policy whose USING or WITH CHECK expression is the literal `true`, applied to
 is in every app bundle, so each row is writable by anyone on the internet,
 limited only by column constraints.
 
-`users` is closed by `20261003150000_users_anon_write_lockdown.sql` (not yet
-applied to production). The other 26 are unchanged.
+`users` is closed by `20261003150000_users_anon_write_lockdown.sql` and
+`posts` by `20261003150100_posts_client_write_lockdown.sql` (neither is
+applied to production yet). The other 25 are unchanged.
 
 Most of these policies exist because clients reach PostgREST as anon, so an
 ownership predicate has no `sub` to compare against. The mint-supabase-jwt
@@ -46,7 +47,7 @@ Commands: a = INSERT, w = UPDATE, d = DELETE, * = ALL.
 | conversations | a, w | I U | messaging | `packages/app/lib/api/messages-impl.ts:838` insert |
 | call_signals | a, d, w | I U D | messaging | `packages/app/lib/api/call-signals.ts:63` insert, `:83`-`:140` update |
 | notifications | a, w | I U | messaging | `packages/app/lib/api/notifications.ts:810` update, `:831` update |
-| posts | a, w | I U | content | none |
+| posts | a, w | I U | content | none (fixed in this branch; `pnpm verify:content-lockdown`) |
 | posts_media | a, d | I D | content | none |
 | stories | a, w | I U | content | `packages/app/lib/api/stories.ts:468` update |
 | comments | a, w | I U | content | none |
@@ -73,11 +74,38 @@ Commands: a = INSERT, w = UPDATE, d = DELETE, * = ALL.
 - **conversations_rels**: INSERT `true` lets anyone add a user to any
   conversation. Not checked here: whether the messages SELECT policy trusts
   conversations_rels membership. If it does, this is a read path into DMs.
-- **video_room_tokens**, **rate_limit_attempts**, **posts**, **comments**,
+- **video_room_tokens**, **rate_limit_attempts**, **comments**,
   **likes**, **bookmarks**, **follows**, **posts_media**,
   **event_comment_tags**: no client writer found. Dropping the anon write
   policies (as this branch does for users) should not break the app; confirm
   each with a scan that also covers dynamic table names.
+
+## Read leaks
+
+The table above covers writes. One read leak is closed in this branch too.
+
+**video_room_members.user_id (S08).** authenticated held table-wide SELECT,
+and `video_room_members_select_participant` shows every row of a room to
+every member and to the host. For an anonymous Sneaky Lynk member, user_id is
+their Better Auth id and `users.auth_id` is public, so any co-member could
+put a real name to "Anon 3". Realtime `postgres_changes` on the table carried
+the same column. `20261003150200_video_room_members_user_id_private.sql`
+removes SELECT on user_id (and only user_id) from authenticated and adds
+`lynk_room_roster(room_id [, member_id])`, which returns `member:<row id>` for
+every anonymous member other than the caller, the host included. The
+moderation functions (video_kick_user, video_ban_user, video_mute_peer,
+video_change_role) resolve that handle with service_role; lynk-cohost-invite
+refuses it. `pnpm verify:content-lockdown` proves the co-member read before
+and the 42501 after.
+
+Still open, same leak through other tables:
+
+- **room_comments.author_id** is the author's auth id, readable by anyone who
+  can read the room's chat. An anonymous member who types in chat is still
+  identifiable. Fix: write room comments through an edge function that stores
+  an anonymity snapshot and stop exposing author_id for anonymous authors.
+- **lynk_cohost_invites.invitee_id**: why the cohost-invite function refuses
+  member handles instead of resolving them.
 
 ## Query
 
