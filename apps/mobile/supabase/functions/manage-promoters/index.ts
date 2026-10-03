@@ -247,21 +247,27 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
       let displayName =
         typeof body.display_name === "string" ? body.display_name.trim() : "";
 
-      if (username) {
+      // Resolve by username or by auth id, but always through a users row.
+      // A raw promoter_auth_id from the client is never written unchecked.
+      if (username || promoterAuthId) {
         const { data: target } = await supabase
           .from("users")
           .select("auth_id, username, first_name, last_name")
-          .eq("username", username)
+          .eq(username ? "username" : "auth_id", username || promoterAuthId)
           .maybeSingle();
         if (!target?.auth_id) {
-          return json({ error: `No user @${username}` }, 404, req);
+          return json(
+            { error: username ? `No user @${username}` : "No such user" },
+            404,
+            req,
+          );
         }
         promoterAuthId = target.auth_id;
         if (!displayName) {
           displayName =
             [target.first_name, target.last_name].filter(Boolean).join(" ").trim() ||
             target.username ||
-            `@${username}`;
+            "Promoter";
         }
       }
 
