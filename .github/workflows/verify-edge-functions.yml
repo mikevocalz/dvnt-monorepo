@@ -24,6 +24,7 @@ on:
       - "apps/mobile/lib/api/**"
       - "scripts/verify-admission-gate.mjs"
       - "scripts/verify-checkout-profile.mjs"
+      - "scripts/verify-event-publication.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -41,6 +42,7 @@ on:
       - "apps/mobile/lib/api/**"
       - "scripts/verify-admission-gate.mjs"
       - "scripts/verify-checkout-profile.mjs"
+      - "scripts/verify-event-publication.mjs"
 
 jobs:
   verify:
@@ -154,3 +156,18 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-checkout-profile.mjs
+
+  event-publication:
+    # Boots a throwaway cluster from the runner's own Postgres and runs the
+    # hide / publish_at rule through can_view_event (behind the RESTRICTIVE
+    # events policy), the listing RPCs, the share-token lookup and guest RSVP.
+    # No --allow-skip: a runner without Postgres fails instead of passing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-event-publication.mjs

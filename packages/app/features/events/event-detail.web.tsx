@@ -21,6 +21,11 @@ import {
   eventSalesClosed,
 } from "@dvnt/app/lib/events/event-time";
 import {
+  deviceTimeZone,
+  normalizeTimeZone,
+  zonedIsoToLocalIso,
+} from "@dvnt/app/lib/events/event-zone";
+import {
   ArrowLeft,
   ArrowUpCircle,
   Ban,
@@ -56,7 +61,9 @@ import {
   Ticket,
   Trash2,
   Users,
+  EyeOff,
 } from "lucide-react";
+import { publicationBadge } from "@dvnt/app/lib/events/event-publication";
 import { useQueryClient } from "@tanstack/react-query";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { eventsApi } from "@dvnt/app/lib/api/events";
@@ -210,10 +217,10 @@ function timeAgo(iso?: string): string {
 
 const VIDEO_RE = /post-video|flyer-video|\.(mp4|mov|webm)(\?|$)/i;
 
-// Timezone-correct: physical events with a known venue zone render event-local
-// (same door time for everyone); otherwise viewer-local. Always shows a zone
-// abbreviation so "9:00 PM PDT" is never ambiguous. Falls back gracefully when
-// event_tz isn't present yet (older events) → viewer-local.
+// Timezone-correct: physical events render event-local (same door time for
+// everyone, "9:00 PM PDT"); online events render in the viewer's zone. A
+// physical event with no recorded zone (older rows) renders in the viewer's
+// zone with no abbreviation, since nobody picked one.
 function fmt(
   iso?: string,
   eventTz?: string | null,
@@ -222,7 +229,7 @@ function fmt(
   if (!iso) return "Date TBA";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Date TBA";
-  const mode = !isOnline && eventTz ? "event-local" : "viewer-local";
+  const mode = isOnline ? "viewer-local" : "event-local";
   return formatEventTime(d, eventTz ?? null, mode);
 }
 
@@ -1008,8 +1015,13 @@ export function EventDetailScreen() {
       // to an unbookable date.
       const srcDate = e.fullDate || e.date ? new Date(e.fullDate || e.date) : null;
       if (srcDate && !Number.isNaN(srcDate.getTime()) && srcDate.getTime() > Date.now()) {
-        store.setEventDate(srcDate.toISOString());
-        if (e.endDate) store.setEndDate(e.endDate);
+        // The create store holds the wall clock; reopen it in the source
+        // event's zone so a 9 PM Pacific event copies as 9 PM Pacific.
+        const srcTz =
+          normalizeTimeZone((e as any).event_tz ?? (e as any).eventTz) ?? deviceTimeZone();
+        store.setEventTz(srcTz);
+        store.setEventDate(zonedIsoToLocalIso(srcDate.toISOString(), srcTz));
+        if (e.endDate) store.setEndDate(zonedIsoToLocalIso(e.endDate, srcTz) || null);
       }
       if (e.maxAttendees) store.setMaxAttendees(String(e.maxAttendees));
       if (e.visibility) store.setVisibility(e.visibility);
@@ -1284,6 +1296,14 @@ export function EventDetailScreen() {
             )}
           </div>
           <h1 className="text-2xl font-extrabold mt-1 leading-tight">{e.title}</h1>
+          {/* Host-only: hidden, or not public until publish_at. Nobody else
+              can open the event, so nobody else needs telling. */}
+          {isHost && publicationBadge(e as any) ? (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#C084FC]/40 bg-[#C084FC]/10 px-3 py-1 text-[13px] font-semibold text-[#C084FC]">
+              <EyeOff size={14} aria-hidden />
+              {publicationBadge(e as any)}
+            </div>
+          ) : null}
           {e.location ? (
             <div className="flex items-center gap-1.5 text-white/60 text-sm mt-2">
               <MapPin size={15} />

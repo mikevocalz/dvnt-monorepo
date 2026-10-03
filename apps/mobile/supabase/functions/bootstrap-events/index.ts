@@ -54,6 +54,9 @@ Deno.serve(async (req: Request) => {
       .select("*")
       .eq("visibility", "public")
       .eq("status", "active")
+      // Publication rule (20261003110000): not hidden, publish_at passed.
+      .eq("is_hidden", false)
+      .or(`publish_at.is.null,publish_at.lte.${new Date().toISOString()}`)
       .gte("start_date", new Date().toISOString())
       .not("start_date", "is", null)
       .order("start_date", { ascending: true })

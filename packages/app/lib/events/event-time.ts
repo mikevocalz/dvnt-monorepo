@@ -10,9 +10,12 @@
  *   - physical  (is_online=false) → event-local  (venue zone = event_tz)
  *   - streamed  (is_online=true)  → viewer-local (device zone)
  *
- * Formatting uses Intl.DateTimeFormat (Hermes-native, no deps) and always shows
- * a zone abbreviation so "9:00 PM PDT" is never ambiguous.
+ * Formatting uses Intl.DateTimeFormat (Hermes-native, no deps) and shows a
+ * zone abbreviation ("9:00 PM PDT") whenever the zone is known. A row with no
+ * recorded zone renders in the viewer's zone without a label (displayZone).
  */
+
+import { normalizeTimeZone } from "./event-zone.ts";
 
 export type EventDisplayMode = "event-local" | "viewer-local";
 
@@ -41,31 +44,136 @@ export function formatEventTime(
 ): string {
   const d = startsAtUtc instanceof Date ? startsAtUtc : new Date(startsAtUtc);
   if (isNaN(d.getTime())) return "";
-
-  // event-local → the venue's zone; viewer-local → viewerTz or the device zone
-  // (undefined lets Intl use the runtime default = the viewer's device).
-  const tzRaw =
-    mode === "event-local" ? eventTz || "UTC" : viewerTz || undefined;
-  // Guard: an invalid/garbage timeZone makes Intl.DateTimeFormat THROW a
-  // RangeError, which would crash the event screen. Fall back to the device
-  // zone (no timeZone option) rather than throw.
-  const opts: Intl.DateTimeFormatOptions = {
+  const zone = displayZone(eventTz, mode, viewerTz);
+  return formatIn(d, zone, {
     weekday: "short",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-    timeZoneName: "short", // "PDT" / "EDT" — never ambiguous
-  };
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      ...opts,
-      ...(tzRaw ? { timeZone: tzRaw } : {}),
-    }).format(d);
-  } catch {
-    return new Intl.DateTimeFormat("en-US", opts).format(d);
-  }
+  });
 }
+
+/**
+ * Which zone to render in, and whether to label it.
+ *
+ * event-local with a real zone: that zone, labelled ("9:00 PM PDT").
+ * event-local with no zone (null, "", garbage): the viewer's device zone with
+ * NO label. These are older rows whose creator zone was never recorded;
+ * labelling them "UTC" (the old fallback) printed a zone nobody chose.
+ * viewer-local: the viewer's zone, labelled, since it is the viewer's own.
+ */
+export function displayZone(
+  eventTz: string | null | undefined,
+  mode: EventDisplayMode,
+  viewerTz?: string,
+): { timeZone: string | undefined; label: boolean } {
+  if (mode === "event-local") {
+    const tz = normalizeTimeZone(eventTz);
+    return tz ? { timeZone: tz, label: true } : { timeZone: undefined, label: false };
+  }
+  return { timeZone: normalizeTimeZone(viewerTz) ?? undefined, label: true };
+}
+
+function formatIn(
+  d: Date,
+  zone: { timeZone: string | undefined; label: boolean },
+  opts: Intl.DateTimeFormatOptions,
+): string {
+  return new Intl.DateTimeFormat("en-US", {
+    ...opts,
+    ...(zone.label ? { timeZoneName: "short" as const } : {}),
+    ...(zone.timeZone ? { timeZone: zone.timeZone } : {}),
+  }).format(d);
+}
+
+/** Event fields the display helpers read. Accepts DB rows and client shapes. */
+export interface EventZoneFields {
+  event_tz?: string | null;
+  eventTz?: string | null;
+  is_online?: boolean | null;
+  isOnline?: boolean | null;
+}
+
+/**
+ * Zone fields for a get_events_home / get_events_for_you row. Those return
+ * event_tz and location_type but not is_online; location_type 'virtual' is the
+ * same flag (every live row agrees). An unknown zone becomes null so the card
+ * keeps the unlabelled viewer-local output.
+ */
+export function listRowZoneFields(row: {
+  event_tz?: unknown;
+  location_type?: unknown;
+} | null | undefined): { event_tz: string | null; is_online: boolean } {
+  return {
+    event_tz: normalizeTimeZone(row?.event_tz),
+    is_online: row?.location_type === "virtual",
+  };
+}
+
+function zoneFor(event: EventZoneFields | null | undefined, viewerTz?: string) {
+  return displayZone(
+    event?.event_tz ?? event?.eventTz,
+    resolveDisplayMode(event ?? {}),
+    viewerTz,
+  );
+}
+
+/** Time of day with the zone: "8:00 PM PDT". No label when the zone is unknown. */
+export function formatEventClock(
+  instant: string | number | Date | null | undefined,
+  event: EventZoneFields | null | undefined,
+  viewerTz?: string,
+): string {
+  if (instant == null) return "";
+  const d = instant instanceof Date ? instant : new Date(instant);
+  if (isNaN(d.getTime())) return "";
+  return formatIn(d, zoneFor(event, viewerTz), { hour: "numeric", minute: "2-digit" });
+}
+
+/**
+ * Calendar day in the same zone as formatEventClock, so a 10 PM Pacific event
+ * is not shown on the next day to someone in New York.
+ */
+export function formatEventDay(
+  instant: string | number | Date | null | undefined,
+  event: EventZoneFields | null | undefined,
+  opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" },
+  viewerTz?: string,
+): string {
+  if (instant == null) return "";
+  const d = instant instanceof Date ? instant : new Date(instant);
+  if (isNaN(d.getTime())) return "";
+  const zone = zoneFor(event, viewerTz);
+  return formatIn(d, { timeZone: zone.timeZone, label: false }, opts);
+}
+
+/** "Fri, Jul 10 at 8:00 PM PDT": day and time, both in the event's zone. */
+export function formatEventWhen(
+  instant: string | number | Date | null | undefined,
+  event: EventZoneFields | null | undefined,
+  viewerTz?: string,
+): string {
+  const day = formatEventDay(instant, event, undefined, viewerTz);
+  const clock = formatEventClock(instant, event, viewerTz);
+  return day && clock ? `${day} at ${clock}` : "";
+}
+
+/**
+ * True when both instants parse and the end is strictly before the start.
+ * Same rule create-event enforces on the server.
+ */
+export function endsBeforeStart(
+  start: string | number | Date | null | undefined,
+  end: string | number | Date | null | undefined,
+): boolean {
+  const s = ms(start);
+  const e = ms(end);
+  return s != null && e != null && e < s;
+}
+
+export const END_BEFORE_START_ERROR =
+  "The event ends before it starts. Set an end time after the start.";
 
 // ── Time gates — operate PURELY on UTC instants (never formatted strings) ──
 // Used by the event/ticket lifecycle state machines so a transition fires at

@@ -8,6 +8,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
+import { deviceTimeZone } from "@dvnt/app/lib/events/event-zone";
 import type { DraftAddon } from "@dvnt/app/features/events/create/addon-form";
 
 type VisibilityOption = "public" | "private" | "link_only";
@@ -113,12 +114,25 @@ interface DraftFields {
   tags: string[];
   eventDate: string; // ISO string — Date can't be serialized
   endDate: string | null;
+  /**
+   * IANA zone the picked date/time belongs to. eventDate/endDate hold the
+   * wall clock as a device-local ISO; event-form.ts re-reads that wall clock
+   * in this zone when it builds the stored instant.
+   */
+  eventTz: string;
   ticketPrice: string;
   maxAttendees: string;
   youtubeUrl: string;
   attachLynkRoom: boolean;
   ticketingEnabled: boolean;
   visibility: VisibilityOption;
+  /** E06: hidden from everyone but host, co-hosts, invitees, ticket holders. */
+  isHidden: boolean;
+  /**
+   * E06: when the event goes public, as a device-local ISO holding the typed
+   * wall clock (like eventDate); "" = as soon as it is published.
+   */
+  publishAt: string;
   ageRestriction: AgeRestriction;
   isOnline: boolean;
   dressCode: string;
@@ -187,12 +201,15 @@ interface CreateEventActions {
   setTags: (v: string[] | ((prev: string[]) => string[])) => void;
   setEventDate: (v: string) => void;
   setEndDate: (v: string | null) => void;
+  setEventTz: (v: string) => void;
   setTicketPrice: (v: string) => void;
   setMaxAttendees: (v: string) => void;
   setYoutubeUrl: (v: string) => void;
   setAttachLynkRoom: (v: boolean) => void;
   setTicketingEnabled: (v: boolean) => void;
   setVisibility: (v: VisibilityOption) => void;
+  setIsHidden: (v: boolean) => void;
+  setPublishAt: (v: string) => void;
   setAgeRestriction: (v: AgeRestriction) => void;
   setIsOnline: (v: boolean) => void;
   setDressCode: (v: string) => void;
@@ -275,12 +292,15 @@ const DRAFT_DEFAULTS: DraftFields = {
   tags: [],
   eventDate: new Date().toISOString(),
   endDate: null,
+  eventTz: deviceTimeZone(),
   ticketPrice: "",
   maxAttendees: "",
   youtubeUrl: "",
   attachLynkRoom: false,
   ticketingEnabled: false,
   visibility: "public",
+  isHidden: false,
+  publishAt: "",
   ageRestriction: "none",
   isOnline: false,
   dressCode: "",
@@ -342,12 +362,15 @@ export const useCreateEventStore = create<CreateEventState>()(
       setTags: (v) => set((s) => ({ tags: resolve(v, s.tags) })),
       setEventDate: (v) => set({ eventDate: v }),
       setEndDate: (v) => set({ endDate: v }),
+      setEventTz: (v) => set({ eventTz: v }),
       setTicketPrice: (v) => set({ ticketPrice: v }),
       setMaxAttendees: (v) => set({ maxAttendees: v }),
       setYoutubeUrl: (v) => set({ youtubeUrl: v }),
       setAttachLynkRoom: (v) => set({ attachLynkRoom: v }),
       setTicketingEnabled: (v) => set({ ticketingEnabled: v }),
       setVisibility: (v) => set({ visibility: v }),
+      setIsHidden: (v) => set({ isHidden: v }),
+      setPublishAt: (v) => set({ publishAt: v }),
       setAgeRestriction: (v) => set({ ageRestriction: v }),
       setIsOnline: (v) => set({ isOnline: v }),
       setDressCode: (v) => set({ dressCode: v }),
@@ -499,7 +522,8 @@ export const useCreateEventStore = create<CreateEventState>()(
         );
       },
 
-      resetDraft: () => set({ ...DRAFT_DEFAULTS, ...UI_DEFAULTS }),
+      resetDraft: () =>
+        set({ ...DRAFT_DEFAULTS, eventTz: deviceTimeZone(), ...UI_DEFAULTS }),
     }),
     {
       name: "create-event-draft",
@@ -536,12 +560,15 @@ export const useCreateEventStore = create<CreateEventState>()(
         tags: state.tags,
         eventDate: state.eventDate,
         endDate: state.endDate,
+        eventTz: state.eventTz,
         ticketPrice: state.ticketPrice,
         maxAttendees: state.maxAttendees,
         youtubeUrl: state.youtubeUrl,
         attachLynkRoom: state.attachLynkRoom,
         ticketingEnabled: state.ticketingEnabled,
         visibility: state.visibility,
+        isHidden: state.isHidden,
+        publishAt: state.publishAt,
         ageRestriction: state.ageRestriction,
         isOnline: state.isOnline,
         dressCode: state.dressCode,

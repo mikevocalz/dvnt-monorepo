@@ -105,7 +105,21 @@ type AgeRestriction = "none" | "18+" | "21+";
 // Canonical Event Type taxonomy lives in the shared form core (one schema,
 // two layouts). Imported for local use here and re-exported for existing
 // importers of this screen.
-import { EVENT_TYPE_LABELS } from "@dvnt/app/features/events/create/event-form";
+import {
+  EVENT_TYPE_LABELS,
+  resolveEventSchedule,
+} from "@dvnt/app/features/events/create/event-form";
+import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
+import { EventPublicationField } from "@dvnt/app/features/events/ui/event-publication-field";
+import {
+  publishAtError,
+  publishAtLocalToInstant,
+} from "@dvnt/app/lib/events/event-publication";
+import { zoneDisplayName } from "@dvnt/app/lib/events/event-zone";
+import {
+  saleWindowLabel,
+  saleWindowLocalToInstant,
+} from "@dvnt/app/lib/events/sale-window";
 export { EVENT_TYPE_LABELS };
 
 interface TicketTier {
@@ -203,6 +217,8 @@ function CreateEventScreenContent() {
   const setEventDateISO = useCreateEventStore((s) => s.setEventDate);
   const endDateISO = useCreateEventStore((s) => s.endDate);
   const setEndDateISO = useCreateEventStore((s) => s.setEndDate);
+  const eventTz = useCreateEventStore((s) => s.eventTz);
+  const setEventTz = useCreateEventStore((s) => s.setEventTz);
   const ticketPrice = useCreateEventStore((s) => s.ticketPrice);
   const setTicketPrice = useCreateEventStore((s) => s.setTicketPrice);
   const maxAttendees = useCreateEventStore((s) => s.maxAttendees);
@@ -235,6 +251,10 @@ function CreateEventScreenContent() {
   );
   const visibility = useCreateEventStore((s) => s.visibility);
   const setVisibility = useCreateEventStore((s) => s.setVisibility);
+  const isHidden = useCreateEventStore((s) => s.isHidden);
+  const setIsHidden = useCreateEventStore((s) => s.setIsHidden);
+  const publishAt = useCreateEventStore((s) => s.publishAt);
+  const setPublishAt = useCreateEventStore((s) => s.setPublishAt);
   const ageRestriction = useCreateEventStore((s) => s.ageRestriction);
   const setAgeRestriction = useCreateEventStore((s) => s.setAgeRestriction);
   const isNsfw = useCreateEventStore((s) => s.isNsfw);
@@ -304,6 +324,17 @@ function CreateEventScreenContent() {
   const endDate = useMemo(
     () => (endDateISO ? new Date(endDateISO) : null),
     [endDateISO],
+  );
+  // The pickers hold a wall clock; this is that wall clock read in the
+  // event's zone, i.e. what gets stored, plus the end-before-start check.
+  const schedule = useMemo(
+    () =>
+      resolveEventSchedule({
+        eventDate: eventDateISO,
+        endDate: endDateISO,
+        eventTz,
+      }),
+    [eventDateISO, endDateISO, eventTz],
   );
 
   useEffect(() => {
@@ -480,6 +511,16 @@ function CreateEventScreenContent() {
       }
       if (!eventType) {
         showToast("error", "Pick a type", "Choose what kind of event this is");
+        return;
+      }
+      if (schedule.error) {
+        showToast("error", "Check the time", schedule.error);
+        return;
+      }
+      const publishAtIso = publishAtLocalToInstant(publishAt, schedule.eventTz);
+      const publishError = publishAtError(publishAtIso, schedule.startIso);
+      if (publishError) {
+        showToast("error", "Check the go-public time", publishError);
         return;
       }
       // Honor virtual events — an online event doesn't need a typed location.
@@ -711,8 +752,9 @@ function CreateEventScreenContent() {
         expectedAuthId: publishingAuthId,
         title: title.trim(),
         description: description.trim(),
-        date: eventDateISO,
+        date: schedule.startIso,
         time: formatTime(eventDate),
+        eventTz: schedule.eventTz,
         location: location.trim(),
         price: ticketPrice ? parseFloat(ticketPrice) : 0,
         image: mainEventImageUrl,
@@ -734,8 +776,10 @@ function CreateEventScreenContent() {
         event_type: eventType || undefined,
         disclaimers: disclaimers.trim() || undefined,
         // V2 fields — new
-        endDate: endDateISO || undefined,
+        endDate: schedule.endIso || undefined,
         visibility,
+        isHidden,
+        publishAt: publishAtIso ?? undefined,
         ageRestriction: ageRestriction !== "none" ? ageRestriction : undefined,
         dressCode: dressCode.trim() || undefined,
         doorPolicy: doorPolicy.trim() || undefined,
@@ -772,8 +816,10 @@ function CreateEventScreenContent() {
               priceCents: tier.priceCents,
               quantityTotal: tier.quantity,
               maxPerUser: tier.maxPerUser,
-              saleStart: tier.saleStart || undefined,
-              saleEnd: tier.saleEnd || undefined,
+              // The picker holds the typed wall clock; store it as that
+              // time in the event's zone.
+              saleStart: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz) ?? undefined,
+              saleEnd: saleWindowLocalToInstant(tier.saleEnd, schedule.eventTz) ?? undefined,
               // v2 tier model — visibility, type, early-bird pricing.
               tierType: tier.tierType,
               tierVisibility: tier.visibility,
@@ -1265,6 +1311,25 @@ function CreateEventScreenContent() {
                   )}
                 </>
               )}
+
+              {schedule.error && endDate ? (
+                <Text
+                  className="text-xs text-destructive mt-2 px-1"
+                  accessibilityRole="alert"
+                  accessibilityLiveRegion="polite"
+                  selectable
+                >
+                  {schedule.error}
+                </Text>
+              ) : null}
+
+              <EventZonePicker
+                value={eventTz}
+                onChange={setEventTz}
+                at={schedule.startIso}
+                accent={colors.primary}
+                muted={colors.mutedForeground}
+              />
             </View>
           </>
         )}
@@ -1495,6 +1560,20 @@ function CreateEventScreenContent() {
                   </Text>
                 </View>
               </View>
+
+              <EventPublicationField
+                isHidden={isHidden}
+                onHiddenChange={setIsHidden}
+                publishAt={publishAt}
+                onPublishAtChange={setPublishAt}
+                eventTz={schedule.eventTz}
+                error={publishAtError(
+                  publishAtLocalToInstant(publishAt, schedule.eventTz),
+                  schedule.startIso,
+                )}
+                accent={colors.primary}
+                muted={colors.mutedForeground}
+              />
 
               {/* Guest list — private only. A link-only event lets anyone
                   holding the URL in, so a list there would grant a permission
@@ -2443,16 +2522,7 @@ function CreateEventScreenContent() {
                           </Text>
                           <Text className="text-sm font-semibold text-foreground">
                             {tier.saleStart
-                              ? new Date(tier.saleStart).toLocaleString(
-                                  "en-US",
-                                  {
-                                    weekday: "short",
-                                    month: "short",
-                                    day: "numeric",
-                                    hour: "numeric",
-                                    minute: "2-digit",
-                                  },
-                                )
+                              ? saleWindowLabel(tier.saleStart, eventTz)
                               : "Immediately on publish"}
                           </Text>
                         </View>
@@ -3178,6 +3248,9 @@ function CreateEventScreenContent() {
                 {endDate
                   ? ` — ${formatDate(endDate)} at ${formatTime(endDate)}`
                   : ""}
+              </Text>
+              <Text className="text-xs text-muted-foreground mt-1">
+                {zoneDisplayName(eventTz, schedule.startIso ? Date.parse(schedule.startIso) : Date.now())}
               </Text>
             </View>
 

@@ -39,6 +39,7 @@ import { useProfilePosts } from "@dvnt/app/lib/hooks/use-posts";
 import { useMyProfile } from "@dvnt/app/lib/hooks/use-profile";
 import { useBookmarks, useBookmarkedPosts } from "@dvnt/app/lib/hooks/use-bookmarks";
 import { useMyEvents, useLikedEvents } from "@dvnt/app/lib/hooks/use-events";
+import { publicationBadge } from "@dvnt/app/lib/events/event-publication";
 import { useTaggedPosts } from "@dvnt/app/lib/hooks/use-post-tags";
 import { useScreenTrace } from "@dvnt/app/lib/perf/screen-trace";
 import { useBootstrapProfile } from "@dvnt/app/lib/hooks/use-bootstrap-profile";
@@ -1167,6 +1168,15 @@ function ProfileScreenContent() {
                                 })}
                               </Text>
                             )}
+                            {event.isHost && publicationBadge(event) ? (
+                              <Text
+                                className="text-xs font-semibold mt-0.5"
+                                style={{ color: "#C084FC" }}
+                                numberOfLines={1}
+                              >
+                                {publicationBadge(event)}
+                              </Text>
+                            ) : null}
                             {event.location && (
                               <Text
                                 className="text-muted-foreground text-xs mt-0.5"

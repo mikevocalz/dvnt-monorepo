@@ -53,6 +53,15 @@ function hostedUrl(value: unknown): string | null {
   return t && /^https?:\/\//i.test(t) ? t : null;
 }
 
+function isIanaZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function textList(value: unknown): string | null {
   if (Array.isArray(value)) {
     const lines = value
@@ -241,12 +250,61 @@ Deno.serve(async (req) => {
     if (ageRestriction === "18+" || ageRestriction === "21+" || ageRestriction === "none") {
       insertPayload.age_restriction = ageRestriction;
     }
-    if (text(body.endDate)) insertPayload.end_date = text(body.endDate);
+    // An end before the start is the "ended before it began" event. The
+    // create forms check this too, but a client is not a gate. There is no DB
+    // CHECK on purpose: a constraint on the events insert once broke every
+    // publish, so this rule lives in app code.
+    const endDate = text(body.endDate);
+    if (endDate) {
+      const endMs = new Date(endDate).getTime();
+      if (Number.isNaN(endMs)) {
+        return errorResponse(req, "validation_error", "End date is not a valid date");
+      }
+      if (endMs < new Date(startDate).getTime()) {
+        return errorResponse(
+          req,
+          "validation_error",
+          "The event ends before it starts. Set an end time after the start.",
+        );
+      }
+      insertPayload.end_date = endDate;
+    }
+    // Hide the event, or schedule when it goes public (E06). Validated here,
+    // not by a DB CHECK, for the same reason as the end date above.
+    if (body.isHidden !== undefined && body.isHidden !== null && typeof body.isHidden !== "boolean") {
+      return errorResponse(req, "validation_error", "isHidden must be true or false");
+    }
+    insertPayload.is_hidden = body.isHidden === true;
+    const publishAt = text(body.publishAt);
+    if (publishAt) {
+      const publishMs = new Date(publishAt).getTime();
+      if (Number.isNaN(publishMs)) {
+        return errorResponse(req, "validation_error", "Go-public time is not a valid date");
+      }
+      if (publishMs > new Date(startDate).getTime()) {
+        return errorResponse(
+          req,
+          "validation_error",
+          "Set the go-public time before the event starts.",
+        );
+      }
+      insertPayload.publish_at = new Date(publishMs).toISOString();
+    } else {
+      insertPayload.publish_at = null;
+    }
     // Venue timezone (IANA name). The client always sends it; physical events
     // render start/end in this zone (event-time.ts) — dropping it made every
     // event display in the viewer's local zone instead of the venue's.
     const eventTz = text(body.eventTz);
-    if (eventTz && /^[A-Za-z_+-]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(eventTz) && eventTz.length <= 64) {
+    // Shape check, then ask Intl: "legacy_unknown" passes the regex but is not
+    // a zone, and every client would fall back to an unlabelled time for it.
+    // A bad zone is dropped (NULL), never a reason to refuse the event.
+    if (
+      eventTz &&
+      /^[A-Za-z_+-]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(eventTz) &&
+      eventTz.length <= 64 &&
+      isIanaZone(eventTz)
+    ) {
       insertPayload.event_tz = eventTz;
     }
     if (typeof body.ticketingEnabled === "boolean") {
