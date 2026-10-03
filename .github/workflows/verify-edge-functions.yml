@@ -16,6 +16,8 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-call-capacity.mjs"
+      - "scripts/verify-editorial-identity.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -25,6 +27,8 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-call-capacity.mjs"
+      - "scripts/verify-editorial-identity.mjs"
 
 jobs:
   verify:
@@ -72,3 +76,18 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-call-capacity.mjs
+
+  editorial-identity:
+    # Replays the editorial migrations on a throwaway cluster with the live
+    # public.users grants, then writes as anon, authenticated and service_role:
+    # clients must not set users.is_editorial, and a lane must stop once its
+    # account loses the flag. No --allow-skip, for the same reason as above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-editorial-identity.mjs
