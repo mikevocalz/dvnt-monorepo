@@ -1,5 +1,4 @@
 import { canAccessEvent } from "../_shared/event-access.ts";
-import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 /**
  * Ticket Checkout Edge Function
  *
@@ -203,17 +202,9 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       );
     }
 
-    // Verified-only admission for signed-in buyers. A client that skips the
-    // banner is still refused. Guest checkout keeps its own identity rules.
-    if (user_id) {
-      const admission = await resolveVerifiedAdmission(supabase, user_id);
-      if (admission.state === "blocked") {
-        return new Response(
-          JSON.stringify({ error: admissionRefusal(admission).message }),
-          { status: 403, headers: { "Content-Type": "application/json" } },
-        );
-      }
-    }
+    // No verified-admission check here. Buying a ticket is open to unverified
+    // and guest buyers (checklist A01/A03); the adult gate sits on what the
+    // ticket is used for (joining a Lynk room, posting), not on the purchase.
 
     const buyerKey = user_id || `guest:${trimmedGuestEmail}`;
 
