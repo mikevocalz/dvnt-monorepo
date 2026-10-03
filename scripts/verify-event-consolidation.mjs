@@ -24,6 +24,9 @@
  *   6. order_addons and checkins of moved tickets move with them.
  *   7. a before/after snapshot that does not reconcile raises, and the whole
  *      move rolls back.
+ *   8. moved add-on purchases are re-pointed at the destination catalog item
+ *      named in p_addon_map and quantity_sold moves with them; an unmapped
+ *      add-on refuses the move; destination add-on capacity is enforced.
  *
  *   node scripts/verify-event-consolidation.mjs
  *   node scripts/verify-event-consolidation.mjs --allow-skip   # no Postgres
@@ -149,11 +152,22 @@ CREATE TABLE public.orders (
 -- order_addons and checkins as production has them (20260613145014,
 -- 20260313_catchup_all, 20260806100200, 20260806300000; checked live with
 -- information_schema). Live has no FK from checkins to tickets or events.
+CREATE TABLE public.ticket_addons (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id INTEGER NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
+  name TEXT NOT NULL DEFAULT 'drink',
+  price_cents INTEGER NOT NULL DEFAULT 0,
+  quantity_total INTEGER,
+  quantity_sold INTEGER NOT NULL DEFAULT 0,
+  quantity_held INTEGER NOT NULL DEFAULT 0,
+  CONSTRAINT ticket_addons_qty_nonneg CHECK (quantity_sold >= 0 AND quantity_held >= 0)
+);
 CREATE TABLE public.order_addons (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID REFERENCES public.orders(id) ON DELETE SET NULL,
   event_id INTEGER NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
-  addon_id UUID NOT NULL,
+  addon_id UUID NOT NULL REFERENCES public.ticket_addons(id) ON DELETE RESTRICT,
+  variant_id UUID,
   ticket_id UUID REFERENCES public.tickets(id) ON DELETE SET NULL,
   user_id TEXT,
   guest_email TEXT,
@@ -176,7 +190,9 @@ CREATE TABLE public.event_rsvps (
 );
 CREATE TABLE public.cart_holds (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tier_id UUID NOT NULL,
+  tier_id UUID,
+  addon_id UUID,
+  variant_id UUID,
   qty INTEGER NOT NULL,
   released BOOLEAN NOT NULL DEFAULT false,
   expires_at TIMESTAMPTZ NOT NULL
@@ -228,13 +244,29 @@ const ticket = async (eventId, tierId, user) =>
   )[0].id;
 const hash = async (src, dst) =>
   (await sql(`SELECT event_consolidation_snapshot($1,$2)->>'fingerprint' AS f`, [src, dst]))[0].f;
-const consolidate = async (src, dst, actor, map, client = pool) =>
+const consolidate = async (src, dst, actor, map, client = pool, addonMap = {}) =>
   (
     await client.query(
-      `SELECT execute_event_consolidation($1,$2,$3,gen_random_uuid(),$4,$5::jsonb) AS r`,
-      [src, dst, actor, await hash(src, dst), JSON.stringify(map)],
+      `SELECT execute_event_consolidation($1,$2,$3,gen_random_uuid(),$4,$5::jsonb,$6::jsonb) AS r`,
+      [src, dst, actor, await hash(src, dst), JSON.stringify(map), JSON.stringify(addonMap)],
     )
   ).rows[0].r;
+const catalogAddon = async (eventId, total = null, sold = 0, held = 0) =>
+  (
+    await sql(
+      `INSERT INTO ticket_addons (event_id, quantity_total, quantity_sold, quantity_held) VALUES ($1,$2,$3,$4) RETURNING id`,
+      [eventId, total, sold, held],
+    )
+  )[0].id;
+const buyAddon = async (eventId, addonId, ticketId, user, quantity = 1) =>
+  (
+    await sql(
+      `INSERT INTO order_addons (event_id, addon_id, ticket_id, user_id, quantity) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      [eventId, addonId, ticketId, user, quantity],
+    )
+  )[0].id;
+const addonRow = async (id) =>
+  (await sql(`SELECT event_id, quantity_sold FROM ticket_addons WHERE id = $1`, [id]))[0];
 const countOn = async (eventId) =>
   Number((await sql(`SELECT count(*) AS n FROM tickets WHERE event_id = $1`, [eventId]))[0].n);
 const attendees = async (eventId) =>
@@ -487,24 +519,18 @@ const attendees = async (eventId) =>
   const voided = await ticket(src, srcTier, "v");
   await sql(`UPDATE tickets SET status = 'void' WHERE id = $1`, [voided]);
 
-  const addon = (
-    await sql(
-      `INSERT INTO order_addons (event_id, addon_id, ticket_id, user_id) VALUES ($1, gen_random_uuid(), $2, 'm') RETURNING id`,
-      [src, moving],
-    )
-  )[0].id;
+  const srcDrink = await catalogAddon(src, null, 2);
+  const dstDrink = await catalogAddon(dst);
+  const addon = await buyAddon(src, srcDrink, moving, "m");
   // An add-on on the void ticket stays: that ticket does not move.
-  await sql(
-    `INSERT INTO order_addons (event_id, addon_id, ticket_id, user_id) VALUES ($1, gen_random_uuid(), $2, 'v')`,
-    [src, voided],
-  );
+  await buyAddon(src, srcDrink, voided, "v");
   await sql(`INSERT INTO checkins (ticket_id, event_id, result) VALUES ($1, $2, 'valid')`, [moving, src]);
   // An add-on scan with no ticket_id follows the add-on.
   await sql(`INSERT INTO checkins (event_id, result, order_addon_id) VALUES ($1, 'valid', $2)`, [src, addon]);
   // Scanned at another event's door: that audit row belongs to that door.
   await sql(`INSERT INTO checkins (ticket_id, event_id, result) VALUES ($1, $2, 'wrong_event')`, [moving, other]);
 
-  const moved = await consolidate(src, dst, "host", { [srcTier]: dstTier });
+  const moved = await consolidate(src, dst, "host", { [srcTier]: dstTier }, pool, { [srcDrink]: dstDrink });
   assert.equal(moved.ok, true, JSON.stringify(moved));
   assert.equal(moved.moved_addon_count, 1);
   assert.equal(moved.moved_checkin_count, 2);
@@ -540,7 +566,9 @@ const attendees = async (eventId) =>
   const srcTier = await tier(src);
   const dstTier = await tier(dst);
   const t = await ticket(src, srcTier, "s");
-  await sql(`INSERT INTO order_addons (event_id, addon_id, ticket_id, user_id) VALUES ($1, gen_random_uuid(), $2, 's')`, [src, t]);
+  const srcItem = await catalogAddon(src, null, 1);
+  const dstItem = await catalogAddon(dst);
+  await buyAddon(src, srcItem, t, "s");
   await sql(`INSERT INTO checkins (ticket_id, event_id, result) VALUES ($1, $2, 'valid')`, [t, src]);
 
   const client = await pool.connect();
@@ -549,8 +577,9 @@ const attendees = async (eventId) =>
     await client.query(`SET harness.interfere = 'on'`);
     await assert.rejects(
       client.query(
-        `SELECT execute_event_consolidation($1,$2,'host',$3,$4,$5::jsonb) AS r`,
-        [src, dst, opId, await hash(src, dst), JSON.stringify({ [srcTier]: dstTier })],
+        `SELECT execute_event_consolidation($1,$2,'host',$3,$4,$5::jsonb,$6::jsonb) AS r`,
+        [src, dst, opId, await hash(src, dst), JSON.stringify({ [srcTier]: dstTier }),
+         JSON.stringify({ [srcItem]: dstItem })],
       ),
       /event_consolidation_snapshot_mismatch/,
     );
@@ -570,7 +599,101 @@ const attendees = async (eventId) =>
   assert.equal(ops, 0, "a rolled-back move left an operation row, blocking a retry");
   const [{ n: ledger }] = await sql(`SELECT count(*)::int AS n FROM event_consolidation_ticket_ledger WHERE operation_id = $1`, [opId]);
   assert.equal(ledger, 0);
+  assert.equal((await addonRow(srcItem)).quantity_sold, 1, "a rolled-back move still shifted add-on stock");
+  assert.equal((await addonRow(dstItem)).quantity_sold, 0);
   console.log("-. OK: a snapshot mismatch raises and nothing moves");
+}
+
+// ── 8. add-ons are remapped onto the destination catalog ─────────────────────
+{
+  const addonsOn = async (e) =>
+    (await sql(`SELECT addon_id FROM order_addons WHERE event_id = $1 ORDER BY id`, [e])).map((r) => r.addon_id);
+
+  // 8a. A moved purchase points at the mapped destination item, and the sold
+  // quantity leaves the source item and lands on the destination item.
+  {
+    const src = await event("host");
+    const dst = await event("host");
+    const srcTier = await tier(src);
+    const dstTier = await tier(dst);
+    const t = await ticket(src, srcTier, "buyer");
+    const srcDrink = await catalogAddon(src, 10, 3); // 3 sold: this buyer's 3
+    const dstDrink = await catalogAddon(dst, 10, 1);
+    await buyAddon(src, srcDrink, t, "buyer", 3);
+
+    const r = await consolidate(src, dst, "host", { [srcTier]: dstTier }, pool, { [srcDrink]: dstDrink });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.moved_addon_quantity, 3);
+    assert.deepEqual(await addonsOn(dst), [dstDrink], "moved purchase still points at the source catalog item");
+    assert.equal((await addonRow(srcDrink)).quantity_sold, 0, "source add-on kept counting moved stock");
+    assert.equal((await addonRow(dstDrink)).quantity_sold, 4, "destination add-on never counted moved stock");
+    const [{ n }] = await sql(
+      `SELECT count(*)::int AS n FROM event_consolidation_addon_ledger WHERE source_addon_id = $1 AND destination_addon_id = $2 AND quantity = 3`,
+      [srcDrink, dstDrink],
+    );
+    assert.equal(n, 1);
+    console.log("-. OK: a moved add-on points at the mapped destination item and its sold count moves");
+  }
+
+  // 8b. No mapping for a moved add-on: the whole move refuses.
+  {
+    const src = await event("host");
+    const dst = await event("host");
+    const srcTier = await tier(src);
+    const dstTier = await tier(dst);
+    const t = await ticket(src, srcTier, "buyer");
+    const srcDrink = await catalogAddon(src, null, 1);
+    await catalogAddon(dst);
+    await buyAddon(src, srcDrink, t, "buyer");
+
+    await assert.rejects(
+      consolidate(src, dst, "host", { [srcTier]: dstTier }),
+      /event_consolidation_addon_unmapped/,
+    );
+    assert.equal(await countOn(dst), 0, "an unmapped add-on still let tickets move");
+    assert.deepEqual(await addonsOn(src), [srcDrink]);
+    assert.equal((await addonRow(srcDrink)).quantity_sold, 1);
+    // A map entry pointing at an item outside the destination is also refused.
+    const elsewhere = await catalogAddon(await event("host"));
+    await assert.rejects(
+      consolidate(src, dst, "host", { [srcTier]: dstTier }, pool, { [srcDrink]: elsewhere }),
+      /event_consolidation_addon_map_invalid/,
+    );
+    assert.equal(await countOn(dst), 0);
+    console.log("-. OK: an unmapped add-on refuses the move and nothing moves");
+  }
+
+  // 8c. Destination add-on capacity: 5 total, 2 sold, 1 held, 1 in a live
+  // cart hold leaves 1. Bringing 2 is refused; bringing 1 fits.
+  {
+    const src = await event("host");
+    const dst = await event("host");
+    const srcTier = await tier(src);
+    const dstTier = await tier(dst);
+    const a = await ticket(src, srcTier, "a");
+    const b = await ticket(src, srcTier, "b");
+    const srcDrink = await catalogAddon(src, null, 2);
+    const dstDrink = await catalogAddon(dst, 5, 2, 1);
+    await sql(`INSERT INTO cart_holds (addon_id, qty, expires_at) VALUES ($1, 1, now() + interval '10 min')`, [dstDrink]);
+    // Dead holds must not count.
+    await sql(`INSERT INTO cart_holds (addon_id, qty, released, expires_at) VALUES ($1, 9, true, now() + interval '10 min')`, [dstDrink]);
+    await sql(`INSERT INTO cart_holds (addon_id, qty, expires_at) VALUES ($1, 9, now() - interval '1 min')`, [dstDrink]);
+    await buyAddon(src, srcDrink, a, "a");
+    await buyAddon(src, srcDrink, b, "b");
+
+    const over = await consolidate(src, dst, "host", { [srcTier]: dstTier }, pool, { [srcDrink]: dstDrink });
+    assert.equal(over.ok, false, JSON.stringify(over));
+    assert.equal(over.error, "Destination add-on capacity would be exceeded");
+    assert.equal(await countOn(dst), 0);
+    assert.equal((await addonRow(dstDrink)).quantity_sold, 2);
+
+    await sql(`UPDATE tickets SET status = 'void' WHERE id = $1`, [b]);
+    const fits = await consolidate(src, dst, "host", { [srcTier]: dstTier }, pool, { [srcDrink]: dstDrink });
+    assert.equal(fits.ok, true, JSON.stringify(fits));
+    assert.equal((await addonRow(dstDrink)).quantity_sold, 3);
+    assert.equal((await addonRow(srcDrink)).quantity_sold, 1, "the void ticket's add-on stock left the source");
+    console.log("-. OK: destination add-on capacity counts sold + held + live cart holds and refuses an oversell");
+  }
 }
 
 await pool.end();

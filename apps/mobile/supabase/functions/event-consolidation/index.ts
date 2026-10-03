@@ -59,6 +59,9 @@ Deno.serve(async (req) => {
     if (!body.operation_id || !body.expected_preflight_hash || !body.ticket_type_map) {
       return json(req, { ok:false, error:"operation_id, expected_preflight_hash and ticket_type_map are required" }, 400);
     }
+    if (body.addon_map != null && (typeof body.addon_map !== "object" || Array.isArray(body.addon_map))) {
+      return json(req, { ok:false, error:"addon_map must be an object of source add-on id to destination add-on id" }, 400);
+    }
     const { data, error } = await supabase.rpc("execute_event_consolidation", {
       p_source_event_id: source,
       p_destination_event_id: destination,
@@ -66,6 +69,10 @@ Deno.serve(async (req) => {
       p_operation_id: body.operation_id,
       p_expected_preflight_hash: body.expected_preflight_hash,
       p_ticket_type_map: body.ticket_type_map,
+      // Source add-on id -> destination add-on id, same shape as
+      // ticket_type_map. Optional: the RPC refuses the move if any moved
+      // add-on purchase has no entry.
+      p_addon_map: body.addon_map ?? {},
     });
     if (error) return json(req, { ok:false, error:error.message }, 500);
     return json(req, data, data?.ok ? 200 : 409);

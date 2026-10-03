@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS public.event_consolidation_operations (
   actor_auth_id text NOT NULL,
   preflight_hash text NOT NULL,
   ticket_type_map jsonb NOT NULL DEFAULT '{}'::jsonb,
+  addon_map jsonb NOT NULL DEFAULT '{}'::jsonb,
   moved_count integer NOT NULL DEFAULT 0,
   before_snapshot jsonb NOT NULL,
   after_snapshot jsonb,
@@ -32,6 +33,21 @@ CREATE TABLE IF NOT EXISTS public.event_consolidation_ticket_ledger (
 ALTER TABLE public.event_consolidation_ticket_ledger ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.event_consolidation_ticket_ledger FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT ON public.event_consolidation_ticket_ledger TO service_role;
+
+-- One row per order_addons row the move re-pointed, so the catalog remap and
+-- the quantity shifted between the two add-on items can be read back or undone.
+CREATE TABLE IF NOT EXISTS public.event_consolidation_addon_ledger (
+  operation_id uuid NOT NULL REFERENCES public.event_consolidation_operations(operation_id),
+  order_addon_id uuid NOT NULL REFERENCES public.order_addons(id),
+  source_addon_id uuid NOT NULL,
+  destination_addon_id uuid NOT NULL,
+  quantity integer NOT NULL,
+  moved_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (operation_id, order_addon_id)
+);
+ALTER TABLE public.event_consolidation_addon_ledger ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.event_consolidation_addon_ledger FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT ON public.event_consolidation_addon_ledger TO service_role;
 
 CREATE OR REPLACE FUNCTION public.event_consolidation_snapshot(
   p_source_event_id integer,
@@ -68,6 +84,13 @@ SELECT jsonb_build_object(
   'destination_order_count', (SELECT count(*) FROM destination_orders),
   'source_order_addon_count', (SELECT count(*) FROM public.order_addons WHERE event_id = p_source_event_id),
   'destination_order_addon_count', (SELECT count(*) FROM public.order_addons WHERE event_id = p_destination_event_id),
+  'source_addon_sold', (SELECT COALESCE(sum(quantity_sold),0) FROM public.ticket_addons WHERE event_id = p_source_event_id),
+  'destination_addon_sold', (SELECT COALESCE(sum(quantity_sold),0) FROM public.ticket_addons WHERE event_id = p_destination_event_id),
+  -- order_addons rows on the destination whose catalog item belongs to some
+  -- other event. A move must never add to this.
+  'destination_foreign_addon_count', (SELECT count(*) FROM public.order_addons oa
+    JOIN public.ticket_addons a ON a.id = oa.addon_id
+    WHERE oa.event_id = p_destination_event_id AND a.event_id <> p_destination_event_id),
   'source_checkin_count', (SELECT count(*) FROM public.checkins WHERE event_id = p_source_event_id),
   'destination_checkin_count', (SELECT count(*) FROM public.checkins WHERE event_id = p_destination_event_id),
   'fingerprint', md5(COALESCE((
@@ -114,13 +137,22 @@ CREATE TRIGGER trg_maintain_event_total_attendees
   AFTER INSERT OR UPDATE OF status, event_id OR DELETE ON public.tickets
   FOR EACH ROW EXECUTE FUNCTION public.maintain_event_total_attendees();
 
+-- The six-argument form never shipped; drop it so the seven-argument form is
+-- the only overload PostgREST can resolve.
+DROP FUNCTION IF EXISTS public.execute_event_consolidation(integer, integer, text, uuid, text, jsonb);
+
+-- p_addon_map mirrors p_ticket_type_map: a JSON object keyed by source
+-- ticket_addons.id, valued by the destination ticket_addons.id each moved
+-- add-on purchase should point at. It defaults to {} because most events sell
+-- no add-ons; a move that does carry add-ons and lacks a mapping raises.
 CREATE OR REPLACE FUNCTION public.execute_event_consolidation(
   p_source_event_id integer,
   p_destination_event_id integer,
   p_actor_auth_id text,
   p_operation_id uuid,
   p_expected_preflight_hash text,
-  p_ticket_type_map jsonb
+  p_ticket_type_map jsonb,
+  p_addon_map jsonb DEFAULT '{}'::jsonb
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
 SET search_path TO public, extensions, pg_temp
 AS $$
@@ -132,6 +164,7 @@ DECLARE
   v_moved integer := 0;
   v_moved_addons integer := 0;
   v_moved_checkins integer := 0;
+  v_moved_addon_qty bigint := 0;
   v_attendees integer;
   v_existing public.event_consolidation_operations%ROWTYPE;
 BEGIN
@@ -288,12 +321,99 @@ BEGIN
     END IF;
   END IF;
 
+  -- Add-ons. A moved purchase used to keep addon_id pointing at the SOURCE
+  -- event's catalog item, so the destination door showed an item it never
+  -- sold and neither event's quantity_sold changed: the source stayed
+  -- oversold-looking, the destination could sell the same stock again.
+  -- The add-ons that move are exactly those on the source attached to a
+  -- ticket that moves (the active set pinned above). Lock them, then every
+  -- catalog row on either side, in id order, before reading any capacity.
+  PERFORM 1 FROM public.order_addons oa
+    WHERE oa.event_id = p_source_event_id
+      AND oa.ticket_id IN (SELECT t.id FROM public.tickets t
+                           WHERE t.event_id = p_source_event_id
+                             AND t.status IN ('active','scanned','transfer_pending'))
+    ORDER BY oa.id FOR UPDATE;
+
+  -- No variant map exists, and a variant's stock lives on
+  -- ticket_addon_variants, so a variant purchase cannot be remapped safely.
+  -- Production has no variants today (checked 2026-10-03). Refuse.
+  IF EXISTS (
+    SELECT 1 FROM public.order_addons oa
+    JOIN public.tickets t ON t.id = oa.ticket_id
+    WHERE oa.event_id = p_source_event_id AND oa.variant_id IS NOT NULL
+      AND t.event_id = p_source_event_id
+      AND t.status IN ('active','scanned','transfer_pending')
+  ) THEN
+    RAISE EXCEPTION 'event_consolidation_addon_variant_unsupported: a moved add-on purchase has a variant; variants cannot be remapped'
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.order_addons oa
+    JOIN public.tickets t ON t.id = oa.ticket_id
+    WHERE oa.event_id = p_source_event_id
+      AND t.event_id = p_source_event_id
+      AND t.status IN ('active','scanned','transfer_pending')
+      AND NOT (COALESCE(p_addon_map, '{}'::jsonb) ? oa.addon_id::text)
+  ) THEN
+    RAISE EXCEPTION 'event_consolidation_addon_unmapped: every moved add-on purchase needs a destination add-on in p_addon_map'
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_each_text(COALESCE(p_addon_map, '{}'::jsonb)) m
+    LEFT JOIN public.ticket_addons a
+      ON a.id = m.value::uuid AND a.event_id = p_destination_event_id
+    WHERE a.id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'event_consolidation_addon_map_invalid: p_addon_map points at an add-on outside the destination event'
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  PERFORM 1 FROM public.ticket_addons a
+    WHERE a.id IN (SELECT m.key::uuid FROM jsonb_each_text(COALESCE(p_addon_map, '{}'::jsonb)) m
+                   UNION
+                   SELECT m.value::uuid FROM jsonb_each_text(COALESCE(p_addon_map, '{}'::jsonb)) m)
+    ORDER BY a.id FOR UPDATE;
+
+  -- Same arithmetic cart_create_hold uses for a non-variant add-on line:
+  -- quantity_total - quantity_sold - quantity_held - live cart holds on that
+  -- add-on. Incoming is the summed quantity of every moved purchase, whatever
+  -- its status: cart_complete_issuance adds quantity to quantity_sold on sale
+  -- and no path in the repo or live subtracts it on refund or redeem, so each
+  -- moved row is already inside the source's quantity_sold.
+  IF EXISTS (
+    SELECT 1
+    FROM (
+      SELECT (p_addon_map->>oa.addon_id::text)::uuid AS dest_addon,
+             sum(oa.quantity) AS incoming
+      FROM public.order_addons oa
+      JOIN public.tickets t ON t.id = oa.ticket_id
+      WHERE oa.event_id = p_source_event_id
+        AND t.event_id = p_source_event_id
+        AND t.status IN ('active','scanned','transfer_pending')
+      GROUP BY 1
+    ) m
+    JOIN public.ticket_addons a ON a.id = m.dest_addon
+    WHERE a.quantity_total IS NOT NULL
+      AND m.incoming > a.quantity_total
+        - COALESCE(a.quantity_sold, 0)
+        - COALESCE(a.quantity_held, 0)
+        - COALESCE((SELECT sum(ch.qty) FROM public.cart_holds ch
+                    WHERE ch.addon_id = a.id AND ch.variant_id IS NULL
+                      AND ch.released = false AND ch.expires_at > now()), 0)
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Destination add-on capacity would be exceeded');
+  END IF;
+
   INSERT INTO public.event_consolidation_operations(
     operation_id, source_event_id, destination_event_id, actor_auth_id,
-    preflight_hash, ticket_type_map, before_snapshot
+    preflight_hash, ticket_type_map, addon_map, before_snapshot
   ) VALUES (
     p_operation_id, p_source_event_id, p_destination_event_id, p_actor_auth_id,
-    p_expected_preflight_hash, p_ticket_type_map, v_before
+    p_expected_preflight_hash, p_ticket_type_map, COALESCE(p_addon_map, '{}'::jsonb), v_before
   );
 
   INSERT INTO public.event_consolidation_ticket_ledger(
@@ -323,13 +443,47 @@ BEGIN
   -- at some other event's door (result wrong_event) stays where it was
   -- scanned. Add-on scans can carry order_addon_id with no ticket_id, so
   -- those follow the add-on.
+  -- Each moved purchase is re-pointed at its mapped destination catalog item.
+  INSERT INTO public.event_consolidation_addon_ledger(
+    operation_id, order_addon_id, source_addon_id, destination_addon_id, quantity
+  )
+  SELECT p_operation_id, oa.id, oa.addon_id,
+         (p_addon_map->>oa.addon_id::text)::uuid, oa.quantity
+  FROM public.order_addons oa
+  JOIN public.event_consolidation_ticket_ledger l
+    ON l.operation_id = p_operation_id AND l.ticket_id = oa.ticket_id
+  WHERE oa.event_id = p_source_event_id;
+
   UPDATE public.order_addons oa
-  SET event_id = p_destination_event_id
-  FROM public.event_consolidation_ticket_ledger l
-  WHERE l.operation_id = p_operation_id
-    AND oa.ticket_id = l.ticket_id
-    AND oa.event_id = p_source_event_id;
+  SET event_id = p_destination_event_id,
+      addon_id = al.destination_addon_id
+  FROM public.event_consolidation_addon_ledger al
+  WHERE al.operation_id = p_operation_id
+    AND al.order_addon_id = oa.id;
   GET DIAGNOSTICS v_moved_addons = ROW_COUNT;
+
+  -- Shift sold stock by exactly what moved, so any drift these items already
+  -- carry for reasons unrelated to the move is neither hidden nor rewritten
+  -- (unlike ticket tiers, nothing establishes order_addons as the
+  -- authoritative source for add-on quantity_sold). The source decrement hits the
+  -- ticket_addons_qty_nonneg CHECK if the source was under-counted, which
+  -- aborts the move rather than clamping to zero.
+  UPDATE public.ticket_addons a
+  SET quantity_sold = COALESCE(a.quantity_sold, 0) - s.qty
+  FROM (SELECT source_addon_id AS id, sum(quantity) AS qty
+        FROM public.event_consolidation_addon_ledger
+        WHERE operation_id = p_operation_id GROUP BY 1) s
+  WHERE a.id = s.id;
+
+  UPDATE public.ticket_addons a
+  SET quantity_sold = COALESCE(a.quantity_sold, 0) + d.qty
+  FROM (SELECT destination_addon_id AS id, sum(quantity) AS qty
+        FROM public.event_consolidation_addon_ledger
+        WHERE operation_id = p_operation_id GROUP BY 1) d
+  WHERE a.id = d.id;
+
+  SELECT COALESCE(sum(quantity), 0) INTO v_moved_addon_qty
+  FROM public.event_consolidation_addon_ledger WHERE operation_id = p_operation_id;
 
   UPDATE public.checkins c
   SET event_id = p_destination_event_id
@@ -383,6 +537,12 @@ BEGIN
         <> (v_before->>'source_order_addon_count')::integer - v_moved_addons
      OR (v_after->>'destination_order_addon_count')::integer
         <> (v_before->>'destination_order_addon_count')::integer + v_moved_addons
+     OR (v_after->>'source_addon_sold')::bigint
+        <> (v_before->>'source_addon_sold')::bigint - v_moved_addon_qty
+     OR (v_after->>'destination_addon_sold')::bigint
+        <> (v_before->>'destination_addon_sold')::bigint + v_moved_addon_qty
+     OR (v_after->>'destination_foreign_addon_count')::integer
+        <> (v_before->>'destination_foreign_addon_count')::integer
      OR (v_after->>'source_checkin_count')::integer
         <> (v_before->>'source_checkin_count')::integer - v_moved_checkins
      OR (v_after->>'destination_checkin_count')::integer
@@ -398,13 +558,14 @@ BEGIN
   WHERE operation_id=p_operation_id;
 
   RETURN jsonb_build_object('ok', true, 'moved_count', v_moved,
-    'moved_addon_count', v_moved_addons, 'moved_checkin_count', v_moved_checkins,
+    'moved_addon_count', v_moved_addons, 'moved_addon_quantity', v_moved_addon_qty,
+    'moved_checkin_count', v_moved_checkins,
     'after', v_after);
 END;
 $$;
-REVOKE ALL ON FUNCTION public.execute_event_consolidation(integer, integer, text, uuid, text, jsonb)
+REVOKE ALL ON FUNCTION public.execute_event_consolidation(integer, integer, text, uuid, text, jsonb, jsonb)
   FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.execute_event_consolidation(integer, integer, text, uuid, text, jsonb)
+GRANT EXECUTE ON FUNCTION public.execute_event_consolidation(integer, integer, text, uuid, text, jsonb, jsonb)
   TO service_role;
 
 COMMIT;
