@@ -5,7 +5,7 @@
  * Body: {
  *   event_id: number,
  *   tier_id: string,                // ticket_types.id (must belong to event)
- *   recipients: string[],           // usernames OR emails, mixed allowed
+ *   recipients: string[],           // usernames, emails or phone numbers, mixed
  *   note?: string,                  // optional message tucked in entity_payload
  * }
  *
@@ -24,11 +24,17 @@
  * RSVP guest path sends. Issuance and delivery are reported separately —
  * a ticket that exists but whose email bounced is never called delivered.
  *
+ * A phone number gets a phone comp: a $0 ticket held against a single-use
+ * claim link. DVNT sends nothing. The response carries the link and the
+ * host's device texts it from the host's own number. Comping the same
+ * unclaimed number again rotates the link on the same ticket.
+ *
  * Rate-limited 3 per 5 minutes per (sender, event).
  *
  * Returns:
  *   { ok: true, data: { issued, guest_issued, skipped: [{recipient, reason}],
- *     delivery: [{recipient, status, error?}] } }
+ *     delivery: [{recipient, status, error?}], phone_guest_issued,
+ *     claim_links: [{recipient, phone, ticket_id, url, expires_at, reissued}] } }
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -48,7 +54,11 @@ import {
   ticketConfirmation,
 } from "../_shared/send-resend-email.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
-import { sendTicketSms } from "../_shared/ticket-sms-delivery.ts";
+import {
+  type CompClaimLink,
+  type IssuedPhoneLink,
+  toCompClaimLink,
+} from "../_shared/comp-claim-links.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -304,7 +314,7 @@ Deno.serve(async (req: Request) => {
 
     if (resolved.length === 0 && guests.length === 0 && phoneGuests.length === 0) {
       return json(
-        { ok: true, data: { issued: 0, guest_issued: 0, phone_guest_issued: 0, skipped, delivery: [] } },
+        { ok: true, data: { issued: 0, guest_issued: 0, phone_guest_issued: 0, skipped, delivery: [], claim_links: [] } },
         200,
         req,
       );
@@ -383,8 +393,11 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // ── Phone guest comps: issue first, deliver separately via SMS ──────────
-    let phoneIssued: { id: string; guest_phone_e164: string; guest_lookup_token: string }[] = [];
+    // ── Phone guest comps: issue a claim link, the host sends it ────────────
+    // DVNT sends no SMS. The RPC mints the ticket and a single-use claim token
+    // (stored only as a hash) and the host's own device texts the link. See
+    // docs/workstreams/07-comp-sms-delivery.md.
+    let claimLinks: CompClaimLink[] = [];
     if (phoneGuests.length > 0) {
       const { data: phoneIssuance, error: phoneIssueError } = await supabase.rpc(
         "issue_guest_phone_comp_tickets_atomic",
@@ -405,13 +418,15 @@ Deno.serve(async (req: Request) => {
           : phoneIssuance?.error || "Could not issue phone guest ticket";
         for (const g of phoneGuests) skipped.push({ recipient: g.raw, reason });
       } else {
-        phoneIssued = (phoneIssuance.tickets || []) as {
-          id: string; guest_phone_e164: string; guest_lookup_token: string;
-        }[];
-        const minted = new Set(phoneIssued.map((t) => t.guest_phone_e164));
+        const issuedLinks = (phoneIssuance.links || []) as IssuedPhoneLink[];
+        const claimed = new Set<string>((phoneIssuance.claimed || []) as string[]);
+        const rawByPhone = new Map(phoneGuests.map((g) => [g.phone, g.raw]));
+        claimLinks = issuedLinks.map((link) =>
+          toCompClaimLink(link, rawByPhone.get(link.phone) || link.phone, SITE_URL)
+        );
         for (const g of phoneGuests) {
-          if (!minted.has(g.phone)) skipped.push({
-            recipient: g.raw, reason: "Already holds a ticket in this tier",
+          if (claimed.has(g.phone)) skipped.push({
+            recipient: g.raw, reason: "Already claimed a ticket in this tier",
           });
         }
       }
@@ -544,56 +559,16 @@ Deno.serve(async (req: Request) => {
     }
     const emailDelivery = summarizeCompDelivery(sends);
 
-    const rawByPhone = new Map(phoneGuests.map((g) => [g.phone, g.raw]));
-    const phoneDelivery = await Promise.all(phoneIssued.map(async (ticket) => {
-      const recipient = rawByPhone.get(ticket.guest_phone_e164) || ticket.guest_phone_e164;
-      // No opt-out lookup here any more. sendTicketSms owns the consent gate and
-      // the consent record, so it cannot be skipped by a caller and a read
-      // failure there comes back as a retryable failure instead of a send.
-      // authId is the organizer who typed the number in: that is the
-      // attestation the audit row stores.
-      const result = await sendTicketSms({
-        supabase,
-        to: ticket.guest_phone_e164,
-        eventTitle: event.title || "an event",
-        hostLabel: "A DVNT host",
-        lookupToken: ticket.guest_lookup_token,
-        actorId: authId,
-        eventId,
-        ticketId: ticket.id,
-        source: "bulk-comp-tickets",
-      });
-      await supabase.from("tickets").update({
-        guest_sms_status: result.state,
-        guest_sms_provider_id: result.providerMessageId || null,
-        guest_sms_last_error: result.ok ? null : result.error || "SMS delivery failed",
-        ...(result.ok ? { guest_sms_sent_at: new Date().toISOString() } : {}),
-      }).eq("id", ticket.id);
-      await supabase.from("ticket_sms_delivery_events").insert({
-        ticket_id: ticket.id,
-        provider_message_id: result.providerMessageId || null,
-        phone_e164: ticket.guest_phone_e164,
-        status: result.state,
-        retryable: result.retryable === true,
-        error: result.ok ? null : result.error || "SMS delivery failed",
-      });
-      return {
-        recipient,
-        status: result.state,
-        ...(result.ok ? {} : { error: result.error || "SMS delivery failed" }),
-      };
-    }));
-
     return json(
       {
         ok: true,
         data: {
           issued: inserted?.length || 0,
           guest_issued: guestIssued.length,
-          phone_guest_issued: phoneIssued.length,
+          phone_guest_issued: claimLinks.filter((l) => !l.reissued).length,
           skipped,
           delivery: emailDelivery.results,
-          sms_delivery: phoneDelivery,
+          claim_links: claimLinks,
           tier: tier.name,
         },
       },

@@ -505,10 +505,7 @@ verify_jwt = false
 verify_jwt = false
 
 
-# Twilio inbound keywords + delivery receipts. Twilio cannot present a Supabase
-# session JWT, so the gateway check must stay off. The X-Twilio-Signature
-# HMAC-SHA1 check in the handler is the authentication, and it runs before any
-# database write: no TWILIO_AUTH_TOKEN or no signature means 403/500 and no
-# write. Do not flip this to true and do not remove that check.
-[functions.ticket-sms-webhook]
+# Phone comp claim. Better Auth session, checked in the handler, like every
+# other function here.
+[functions.claim-comp-ticket]
 verify_jwt = false
