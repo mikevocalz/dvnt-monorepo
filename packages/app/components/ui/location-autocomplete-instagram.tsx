@@ -7,6 +7,8 @@ import {
 } from "react";
 import {
   ActivityIndicator,
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -35,6 +37,7 @@ import {
 } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
+import { decideLocationPermission } from "@dvnt/app/lib/places/location-permission";
 
 export type LocationData = {
   name: string;
@@ -202,6 +205,9 @@ export function LocationAutocompleteInstagram({
   );
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [locationBlocked, setLocationBlocked] = useState<{
+    canOpenSettings: boolean;
+  } | null>(null);
   const [googleApiUnavailable, setGoogleApiUnavailable] = useState(
     !HAS_GOOGLE_PLACES_KEY,
   );
@@ -510,9 +516,25 @@ export function LocationAutocompleteInstagram({
     try {
       // Location permission is intentionally requested ONLY after this explicit
       // tap. Opening Create Post or the place picker must never trigger an OS
-      // permission prompt.
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") return;
+      // permission prompt. Once denied, iOS and browsers never prompt again, so
+      // check first and show the blocked state instead of failing silently.
+      const platform = Platform.OS;
+      let decision = decideLocationPermission({
+        ...(await Location.getForegroundPermissionsAsync()),
+        platform,
+      });
+      if (decision.kind === "request") {
+        const requested = await Location.requestForegroundPermissionsAsync();
+        decision = decideLocationPermission({ ...requested, platform });
+        // A fresh "no" on the system prompt is an answer, not a dead end yet:
+        // only show the blocked row when the OS will not ask again.
+        if (decision.kind === "request") return;
+      }
+      if (decision.kind === "blocked") {
+        setLocationBlocked({ canOpenSettings: decision.canOpenSettings });
+        return;
+      }
+      setLocationBlocked(null);
 
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
@@ -729,16 +751,38 @@ export function LocationAutocompleteInstagram({
                     <Text style={[styles.rowTitle, { color: colors.foreground }]}>
                       {isLoadingLocation
                         ? "Finding your location…"
-                        : currentLocation?.name || "Use my current location"}
+                        : locationBlocked
+                          ? "Location is off for DVNT"
+                          : currentLocation?.name || "Use my current location"}
                     </Text>
                     <Text
                       style={[styles.rowSubtitle, { color: colors.mutedForeground }]}
                     >
-                      {currentLocation?.formattedAddress ||
-                        "Location permission is requested only when you tap here."}
+                      {locationBlocked
+                        ? locationBlocked.canOpenSettings
+                          ? "Turn it on in Settings, then tap here. Search still works."
+                          : "Allow location for this site in your browser’s address bar, then tap here."
+                        : currentLocation?.formattedAddress ||
+                          "Location permission is requested only when you tap here."}
                     </Text>
                   </View>
                 </TouchableOpacity>
+                {locationBlocked?.canOpenSettings ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void Linking.openSettings()}
+                    style={[
+                      styles.settingsButton,
+                      { borderColor: colors.border, backgroundColor: colors.card },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.manualButtonTitle, { color: colors.foreground }]}
+                    >
+                      Open Settings
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : null}
 
@@ -972,6 +1016,15 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 4,
     marginBottom: 18,
+  },
+  settingsButton: {
+    alignSelf: "flex-start",
+    minHeight: 44,
+    justifyContent: "center",
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
   manualButtonTitle: {
     fontSize: 14,
