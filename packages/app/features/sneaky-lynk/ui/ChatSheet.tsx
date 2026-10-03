@@ -42,6 +42,7 @@ import { Reply, MessageCircleMore, ArrowDown } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import type { SneakyUser } from "../types";
 import type { RoomComment, Mention, RoomCommentAuthor } from "../api/comments";
+import { broadcastSenderId } from "../api/comment-anonymity";
 import {
   fetchRoomComments,
   postRoomComment,
@@ -454,6 +455,13 @@ export function ChatSheet({
   const stopTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingExpiryTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const authorDirectoryRef = useRef<Record<string, RoomCommentAuthor>>({});
+  // Typing broadcasts reach the whole channel. An anonymous member sends a
+  // per-session token and their label, never their auth id or username.
+  const typingSessionTokenRef = useRef(Math.random().toString(36).slice(2, 12));
+  const typingSenderId = broadcastSenderId(currentUser, typingSessionTokenRef.current);
+  const typingSenderName = currentUser.isAnonymous
+    ? currentUser.anonLabel || "Anonymous"
+    : currentUser.displayName || currentUser.username || "Someone";
 
   // Drive present/dismiss from isOpen
   useEffect(() => {
@@ -516,7 +524,11 @@ export function ChatSheet({
             return [...filtered, newComment];
           });
         },
-        { resolveAuthor: (authorId) => authorDirectoryRef.current[authorId] },
+        {
+          resolveAuthor: (authorId) => authorDirectoryRef.current[authorId],
+          onDeleted: (commentId) =>
+            setComments((prev) => prev.filter((c) => c.id !== commentId)),
+        },
       );
     })().catch(() => {
       if (cancelled) return;
@@ -538,7 +550,7 @@ export function ChatSheet({
     channel.on("broadcast", { event: "typing" }, (msg) => {
       const payload = msg.payload as { userId?: string; username?: string } | null;
       if (!payload?.userId || !payload?.username) return;
-      if (payload.userId === currentUser.id) return;
+      if (payload.userId === typingSenderId) return;
       setTypingUsers((prev) => ({ ...prev, [payload.userId!]: payload.username! }));
       const existing = typingExpiryTimersRef.current[payload.userId];
       if (existing) clearTimeout(existing);
@@ -553,7 +565,7 @@ export function ChatSheet({
     });
     channel.on("broadcast", { event: "stopped" }, (msg) => {
       const payload = msg.payload as { userId?: string } | null;
-      if (!payload?.userId || payload.userId === currentUser.id) return;
+      if (!payload?.userId || payload.userId === typingSenderId) return;
       setTypingUsers((prev) => {
         const next = { ...prev };
         delete next[payload.userId!];
@@ -572,7 +584,7 @@ export function ChatSheet({
       if (stopTypingTimerRef.current) { clearTimeout(stopTypingTimerRef.current); stopTypingTimerRef.current = null; }
       setTypingUsers({});
     };
-  }, [roomId, currentUser.id]);
+  }, [roomId, currentUser.id, typingSenderId]);
 
   const threads = useMemo(() => buildCommentThreads(comments), [comments]);
 
@@ -627,20 +639,20 @@ export function ChatSheet({
         if (text.length > 0) {
           if (now - lastTypingSentAtRef.current > 1200) {
             lastTypingSentAtRef.current = now;
-            channel.send({ type: "broadcast", event: "typing", payload: { userId: currentUser.id, username: currentUser.displayName || currentUser.username || "Someone" } }).catch(() => {});
+            channel.send({ type: "broadcast", event: "typing", payload: { userId: typingSenderId, username: typingSenderName } }).catch(() => {});
           }
           if (stopTypingTimerRef.current) clearTimeout(stopTypingTimerRef.current);
           stopTypingTimerRef.current = setTimeout(() => {
-            channel.send({ type: "broadcast", event: "stopped", payload: { userId: currentUser.id } }).catch(() => {});
+            channel.send({ type: "broadcast", event: "stopped", payload: { userId: typingSenderId } }).catch(() => {});
           }, 2000);
         } else if (lastTypingSentAtRef.current > 0) {
           lastTypingSentAtRef.current = 0;
           if (stopTypingTimerRef.current) { clearTimeout(stopTypingTimerRef.current); stopTypingTimerRef.current = null; }
-          channel.send({ type: "broadcast", event: "stopped", payload: { userId: currentUser.id } }).catch(() => {});
+          channel.send({ type: "broadcast", event: "stopped", payload: { userId: typingSenderId } }).catch(() => {});
         }
       }
     },
-    [currentUser.id, currentUser.displayName, currentUser.username],
+    [currentUser.id, typingSenderId, typingSenderName],
   );
 
   const handleInsertMention = useCallback(

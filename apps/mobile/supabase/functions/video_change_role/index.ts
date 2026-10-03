@@ -6,6 +6,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { resolveRoomMemberTarget } from "../_shared/room-member-handle.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
@@ -93,7 +94,11 @@ Deno.serve(async (req: any) => {
       return errorResponse("validation_error", parsed.error.errors[0].message);
     }
 
-    const { roomId, targetUserId, newRole } = parsed.data;
+    const { roomId, newRole } = parsed.data;
+    // A `member:<id>` handle names an anonymous member; it is resolved to the
+    // auth id below, after the room is known. Responses echo the handle.
+    const targetHandle = parsed.data.targetUserId;
+    let targetUserId = targetHandle;
 
     // Cannot change your own role
     if (actorId === targetUserId) {
@@ -112,6 +117,19 @@ Deno.serve(async (req: any) => {
     }
 
     const internalRoomId = room.id;
+
+    const resolvedTarget = await resolveRoomMemberTarget(
+      supabase,
+      internalRoomId,
+      targetHandle,
+    );
+    if (!resolvedTarget) {
+      return errorResponse("not_found", "User is not a member of this room");
+    }
+    targetUserId = resolvedTarget;
+    if (actorId === targetUserId) {
+      return errorResponse("validation_error", "Cannot change your own role");
+    }
 
     if (room.status !== "open") {
       return errorResponse("conflict", "Room is no longer open");
@@ -180,7 +198,7 @@ Deno.serve(async (req: any) => {
 
     return jsonResponse({
       ok: true,
-      data: { changed: true, targetUserId, role: newRole },
+      data: { changed: true, targetUserId: targetHandle, role: newRole },
     });
   } catch (err) {
     console.error("[video_change_role] Unexpected error:", err);

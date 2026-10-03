@@ -59,9 +59,10 @@ type UpdateProfileInput = {
   avatar?: string;
   location?: string;
   pronouns?: string;
-  gender?: string;
-  sexuality?: string[];
-  eventAudience?: string;
+  // Identity: omit = untouched, null = clear.
+  gender?: string | null;
+  sexuality?: string[] | null;
+  eventAudience?: string | null;
   hashtags?: string[];
   username?: string;
 };
@@ -508,15 +509,24 @@ export function useUpdateProfile() {
         avatar: variables.avatar ?? authUser.avatar,
         location: variables.location ?? authUser.location,
         pronouns: variables.pronouns ?? authUser.pronouns,
-        gender: variables.gender ?? authUser.gender,
+        // undefined = untouched; null = cleared (so not `??`, which would
+        // fall back to the old value on a clear).
+        gender:
+          variables.gender === undefined ? authUser.gender : (variables.gender ?? ""),
         hashtags: variables.hashtags ?? authUser.hashtags,
         name: variables.name ?? authUser.name,
         // These two drive the `identity` (20) and `audience` (10) items in
         // computeProfileCompletion. Omitting them here made the completion ring
         // snap back to 70% the moment you saved, before the server round-trip
         // could restore it.
-        sexuality: variables.sexuality ?? (authUser as any).sexuality,
-        eventAudience: variables.eventAudience ?? (authUser as any).eventAudience,
+        sexuality:
+          variables.sexuality === undefined
+            ? (authUser as any).sexuality
+            : (variables.sexuality ?? []),
+        eventAudience:
+          variables.eventAudience === undefined
+            ? (authUser as any).eventAudience
+            : (variables.eventAudience ?? undefined),
       } as AppUser;
       setUser(optimisticUser);
       patchCurrentUserEverywhere(queryClient, authUser, optimisticUser);

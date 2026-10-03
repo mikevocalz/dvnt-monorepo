@@ -216,11 +216,18 @@ function useRoomChat(roomId: string, currentUser: SneakyUser) {
       const initial = await fetchRoomComments(roomId);
       if (active) setComments(initial);
     })();
-    const unsubscribe = subscribeToRoomComments(roomId, (incoming) => {
-      setComments((prev) =>
-        prev.some((c) => c.id === incoming.id) ? prev : [...prev, incoming],
-      );
-    });
+    const unsubscribe = subscribeToRoomComments(
+      roomId,
+      (incoming) => {
+        setComments((prev) =>
+          prev.some((c) => c.id === incoming.id) ? prev : [...prev, incoming],
+        );
+      },
+      {
+        onDeleted: (commentId) =>
+          setComments((prev) => prev.filter((c) => c.id !== commentId)),
+      },
+    );
     return () => {
       active = false;
       unsubscribe();

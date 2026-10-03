@@ -2,7 +2,11 @@ import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import { getCurrentUserId, getCurrentUserIdSync } from "./auth-helper";
 import { updateProfilePrivileged } from "../supabase/privileged";
-import { requireBetterAuthToken, getCurrentUserRow } from "../auth/identity";
+import {
+  requireBetterAuthToken,
+  getCurrentUserRow,
+  ownEmailFor,
+} from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
 
 function normalizeUserLinks(value: unknown): string[] {
@@ -44,7 +48,6 @@ async function getViewerIdForRelationshipChecks(): Promise<number | null> {
 type BetterAuthUserRow = {
   id: string;
   name: string | null;
-  email: string | null;
   image: string | null;
   username: string | null;
   createdAt: string | null;
@@ -57,7 +60,7 @@ async function getBetterAuthUserById(
 
   const { data, error } = await supabase
     .from("user")
-    .select("id, name, email, image, username, createdAt")
+    .select("id, name, image, username, createdAt")
     .eq("id", authId)
     .maybeSingle();
 
@@ -130,6 +133,9 @@ export const usersApi = {
 
       const currentUserId = await getViewerIdForRelationshipChecks();
 
+      // No gender, sexuality or event_audience: this serves the signed-out
+      // public profile too, and anon cannot read them (20261003150500), so
+      // selecting one fails the whole request. No profile screen shows them.
       // Fire user fetch + follow check in parallel (no waterfall)
       const userFetch = supabase
         .from(DB.users.table)
@@ -138,7 +144,6 @@ export const usersApi = {
           ${DB.users.id},
           ${DB.users.authId},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -146,7 +151,6 @@ export const usersApi = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -190,7 +194,7 @@ export const usersApi = {
           id: String(targetUserId),
           authId,
           username: resolvedUsername,
-          email: data[DB.users.email] || betterAuthUser?.email || "",
+          email: ownEmailFor({ authId: data[DB.users.authId], id: data[DB.users.id] }),
           firstName: data[DB.users.firstName] || displayNameParts.firstName,
           lastName: data[DB.users.lastName] || displayNameParts.lastName,
           name:
@@ -202,7 +206,6 @@ export const usersApi = {
           website: data[DB.users.website] || "",
           links: normalizeUserLinks(data[DB.users.links]),
           pronouns: data[DB.users.pronouns] || "",
-          gender: data[DB.users.gender] || "",
           avatar: dbAvatar || betterAuthUser?.image || "",
           verified: data[DB.users.verified] || false,
           followersCount:
@@ -224,7 +227,7 @@ export const usersApi = {
       // Fallback: Better Auth `user` table by username (single indexed query)
       const { data: baUser } = await supabase
         .from("user")
-        .select("id, name, email, image, username, createdAt")
+        .select("id, name, image, username, createdAt")
         .eq("username", username)
         .maybeSingle();
 
@@ -269,7 +272,6 @@ export const usersApi = {
           ${DB.users.id},
           ${DB.users.authId},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -277,7 +279,6 @@ export const usersApi = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -327,7 +328,7 @@ export const usersApi = {
         id: String(data[DB.users.id]),
         authId,
         username: resolvedUsername,
-        email: data[DB.users.email] || betterAuthUser?.email || "",
+        email: ownEmailFor({ authId: data[DB.users.authId], id: data[DB.users.id] }),
         firstName: data[DB.users.firstName] || displayNameParts.firstName,
         lastName: data[DB.users.lastName] || displayNameParts.lastName,
         name:
@@ -339,7 +340,6 @@ export const usersApi = {
         website: data[DB.users.website] || "",
         links: normalizeUserLinks(data[DB.users.links]),
         pronouns: data[DB.users.pronouns] || "",
-        gender: data[DB.users.gender] || "",
         avatar: dbAvatar || betterAuthUser?.image || "",
         verified: data[DB.users.verified] || false,
         followersCount:
@@ -379,7 +379,6 @@ export const usersApi = {
           ${DB.users.id},
           ${DB.users.authId},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -387,7 +386,6 @@ export const usersApi = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -431,7 +429,7 @@ export const usersApi = {
           id: String(profile[DB.users.id]),
           username: resolvedUsername,
           authId: resolvedAuthId,
-          email: profile[DB.users.email] || betterAuthUser?.email || "",
+          email: ownEmailFor({ authId: profile[DB.users.authId], id: profile[DB.users.id] }),
           firstName: profile[DB.users.firstName] || displayNameParts.firstName,
           lastName: profile[DB.users.lastName] || displayNameParts.lastName,
           name:
@@ -443,7 +441,6 @@ export const usersApi = {
           website: profile[DB.users.website] || "",
           links: normalizeUserLinks(profile[DB.users.links]),
           pronouns: profile[DB.users.pronouns] || "",
-          gender: profile[DB.users.gender] || "",
           avatar: dbAvatar || betterAuthUser?.image || "",
           verified: profile[DB.users.verified] || false,
           followersCount:
@@ -466,7 +463,7 @@ export const usersApi = {
       // Fallback: query Better Auth `user` table directly
       const { data: authUser, error } = await supabase
         .from("user")
-        .select("id, name, email, image, username, createdAt")
+        .select("id, name, image, username, createdAt")
         .eq("id", authId)
         .single();
 
@@ -480,7 +477,7 @@ export const usersApi = {
           authUser.username ||
           displayName.toLowerCase().replace(/\s+/g, "_") ||
           authId,
-        email: authUser.email,
+        email: ownEmailFor({ authId }),
         firstName: displayName.split(" ")[0] || "",
         lastName: displayName.split(" ").slice(1).join(" ") || "",
         name: displayName || "New User",
@@ -628,88 +625,30 @@ export const usersApi = {
    */
   async getNewestUsers(limit: number = 15) {
     try {
-      // Get current user's auth_id to exclude from results
-      const currentUserRow = await getCurrentUserRow();
-      const currentAuthId = currentUserRow?.authId || null;
-
-      // Query Better Auth `user` table — this is where real signups live
-      let query = supabase
-        .from("user")
-        .select("id, name, email, image, username, createdAt")
-        .order("createdAt", { ascending: false })
-        .limit(limit * 3);
-
-      if (currentAuthId) {
-        query = query.neq("id", currentAuthId);
-      }
-
-      const { data: authUsers, error } = await query;
-
-      if (error) {
-        console.error("[Users] getNewestUsers BA query error:", error);
-        throw error;
-      }
-      if (!authUsers?.length) {
-        console.log("[Users] getNewestUsers: no BA users found");
-        return [];
-      }
-
-      console.log("[Users] getNewestUsers BA raw count:", authUsers.length);
-
-      // Phase 1: Filter out test accounts by email only
-      const TEST_EMAILS = ["@test.com", "@example.com", "@deviant.test"];
-      const emailFiltered = authUsers.filter((u: any) => {
-        const email = (u.email || "").toLowerCase();
-        if (TEST_EMAILS.some((t) => email.endsWith(t))) return false;
-        const name = (u.name || "").toLowerCase().trim();
-        if (name.startsWith("test")) return false;
-        return true;
+      // Reads the get_newest_users definer RPC rather than Better Auth's `user`
+      // table. That table is readable by `anon` but not by `authenticated`, and
+      // an RLS denial comes back as an empty result rather than an error — so a
+      // signed-in member saw "No new profiles to discover right now" while a
+      // signed-out visitor saw the full list, with only a "no BA users found"
+      // log to show for it. The filtering (test accounts, hidden usernames, the
+      // ghost guard) moved into SQL, which also stops `email` being selected
+      // from a table anon can read.
+      const currentUserRow = await getCurrentUserRow().catch(() => null);
+      const { data, error } = await supabase.rpc("get_newest_users", {
+        p_limit: limit,
+        p_exclude_auth_id: currentUserRow?.authId ?? null,
       });
+      if (error) throw error;
 
-      // Enrich with app profile data (username, avatar, bio)
-      const authIds = emailFiltered.map((u: any) => u.id);
-      const { data: profiles } = await supabase
-        .from(DB.users.table)
-        .select(
-          `${DB.users.authId}, ${DB.users.username}, ${DB.users.bio}, ${DB.users.verified}, avatar:${DB.users.avatarId}(url)`,
-        )
-        .in(DB.users.authId, authIds);
-
-      const profileMap: Record<string, any> = {};
-      for (const p of profiles || []) {
-        profileMap[p[DB.users.authId]] = p;
-      }
-
-      // Phase 2: Filter out hidden accounts by BOTH name and username
-      const HIDDEN_USERNAMES = ["mike_test", "applereview"];
-      const filtered = emailFiltered.filter((u: any) => {
-        const profile = profileMap[u.id];
-        const name = (u.name || "").toLowerCase().trim();
-        const username = (profile?.[DB.users.username] || "").toLowerCase();
-        if (HIDDEN_USERNAMES.includes(name)) return false;
-        if (HIDDEN_USERNAMES.includes(username)) return false;
-        return true;
-      });
-
-      console.log("[Users] getNewestUsers filtered count:", filtered.length);
-
-      return filtered.slice(0, limit).map((u: any) => {
-        const profile = profileMap[u.id];
-        const displayName = (u.name || "").trim();
-        const username =
-          profile?.[DB.users.username] ||
-          u.username ||
-          displayName.toLowerCase().replace(/\s+/g, "_");
-        return {
-          id: u.id,
-          username,
-          name: displayName || username,
-          avatar: profile?.avatar?.url || u.image || "",
-          verified: profile?.[DB.users.verified] || false,
-          bio: profile?.[DB.users.bio] || "",
-          postsCount: 0,
-        };
-      });
+      return ((data as any[]) ?? []).map((u) => ({
+        id: String(u.id),
+        username: u.username || "",
+        name: u.name || u.username || "",
+        avatar: u.avatar || "",
+        verified: Boolean(u.verified),
+        bio: u.bio || "",
+        postsCount: 0,
+      }));
     } catch (error) {
       console.error("[Users] getNewestUsers error:", error);
       return [];
@@ -881,7 +820,6 @@ export const usersApi = {
           `
           ${DB.users.id},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -897,7 +835,7 @@ export const usersApi = {
       return {
         id: String(data[DB.users.id]),
         username: data[DB.users.username],
-        email: data[DB.users.email],
+        email: ownEmailFor({ id: data[DB.users.id] }),
         firstName: data[DB.users.firstName],
         lastName: data[DB.users.lastName],
         name: data[DB.users.firstName] || data[DB.users.username],

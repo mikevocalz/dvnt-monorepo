@@ -7,6 +7,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { resolveRoomMemberTarget } from "../_shared/room-member-handle.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
@@ -97,7 +98,11 @@ Deno.serve(async (req: any) => {
       return errorResponse("validation_error", parsed.error.errors[0].message);
     }
 
-    const { roomId, targetUserId, action } = parsed.data;
+    const { roomId, action } = parsed.data;
+    // A `member:<id>` handle names an anonymous member; it is resolved to the
+    // auth id below, after the room is known. Responses echo the handle.
+    const targetHandle = parsed.data.targetUserId;
+    let targetUserId = targetHandle;
     const eventType = action === "unmute" ? "unmute_peer" : "mute_peer";
 
     // Cannot mute yourself via this endpoint
@@ -120,6 +125,19 @@ Deno.serve(async (req: any) => {
     }
 
     const internalRoomId = room.id;
+
+    const resolvedTarget = await resolveRoomMemberTarget(
+      supabase,
+      internalRoomId,
+      targetHandle,
+    );
+    if (!resolvedTarget) {
+      return errorResponse("not_found", "User is not a member of this room");
+    }
+    targetUserId = resolvedTarget;
+    if (actorId === targetUserId) {
+      return errorResponse("validation_error", "Use local controls to mute yourself");
+    }
 
     if (room.status !== "open") {
       return errorResponse("conflict", "Room is no longer open");
@@ -184,7 +202,7 @@ Deno.serve(async (req: any) => {
 
     return jsonResponse({
       ok: true,
-      data: { [action === "unmute" ? "unmuted" : "muted"]: true, targetUserId },
+      data: { [action === "unmute" ? "unmuted" : "muted"]: true, targetUserId: targetHandle },
     });
   } catch (err) {
     console.error("[video_mute_peer] Unexpected error:", err);

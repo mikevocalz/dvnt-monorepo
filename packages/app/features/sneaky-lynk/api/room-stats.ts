@@ -7,6 +7,32 @@ export interface RoomMemberStatRow {
   left_at?: string | null;
 }
 
+/**
+ * Columns a client may read for presence stats. Not user_id: clients have no
+ * SELECT on it (migration 20261003150200), and naming it fails the whole
+ * query with 42501. (room_id, user_id) is unique, so the row id counts the
+ * same people.
+ */
+export const MEMBER_STAT_COLUMNS = "id, room_id, role, status, joined_at, left_at";
+
+export function toMemberStatRow(row: {
+  id: number;
+  room_id: number;
+  role?: string | null;
+  status: string;
+  joined_at?: string | null;
+  left_at?: string | null;
+}): RoomMemberStatRow {
+  return {
+    room_id: row.room_id,
+    user_id: `member:${row.id}`,
+    role: row.role,
+    status: row.status,
+    joined_at: row.joined_at,
+    left_at: row.left_at,
+  };
+}
+
 export interface RoomPresenceStats {
   activeCount: number;
   activeHostCount: number;

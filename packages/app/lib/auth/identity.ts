@@ -177,6 +177,27 @@ export function getAuthIdFromStore(): string | null {
 }
 
 /**
+ * The signed-in member's email, for their own profile only.
+ *
+ * Clients cannot read users.email or "user".email (migration
+ * 20261003150400_users_contact_columns_private.sql). The address comes from
+ * the Better Auth session held in the auth store. Anyone else gets "".
+ */
+export function ownEmailFor(ids: {
+  authId?: string | null;
+  id?: string | number | null;
+}): string {
+  const me = useAuthStore.getState().user as
+    | { id?: string; authId?: string; email?: string }
+    | null;
+  if (!me?.email) return "";
+  const byAuth =
+    !!ids.authId && (ids.authId === me.authId || ids.authId === me.id);
+  const byId = ids.id != null && me.id != null && String(ids.id) === String(me.id);
+  return byAuth || byId ? me.email : "";
+}
+
+/**
  * Get the current user's database row.
  * Fetches from users table and caches the result.
  *
@@ -200,7 +221,6 @@ export async function getCurrentUserRow(
     let query = supabase.from(DB.users.table).select(`
         ${DB.users.id},
         ${DB.users.authId},
-        ${DB.users.email},
         ${DB.users.username},
         ${DB.users.firstName},
         ${DB.users.lastName},
@@ -230,7 +250,8 @@ export async function getCurrentUserRow(
     const userRow: UserRow = {
       id: data[DB.users.id] as number,
       authId: data[DB.users.authId] as string,
-      email: data[DB.users.email] as string,
+      // Not selectable by clients; the session holds the member's own email.
+      email: (user as any).email ?? "",
       username: data[DB.users.username] as string,
       firstName: data[DB.users.firstName] as string | null,
       lastName: data[DB.users.lastName] as string | null,

@@ -23,6 +23,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { parseMemberHandle } from "../_shared/room-member-handle.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -178,6 +179,15 @@ Deno.serve(async (req) => {
       }
       if (targetUserId === callerId) {
         return errorResponse("validation_error", "You are already the host");
+      }
+      // An anonymous member reaches the client only as `member:<id>`. The
+      // invite row stores invitee_id and the inviter can read it back, so
+      // resolving the handle here would hand the host the member's auth id.
+      if (parseMemberHandle(String(targetUserId)) !== null) {
+        return errorResponse(
+          "validation_error",
+          "Anonymous members can't be invited to co-host",
+        );
       }
 
       // Rooms are addressed by uuid on the client and by integer id in the DB.

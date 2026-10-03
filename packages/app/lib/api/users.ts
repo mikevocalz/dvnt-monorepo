@@ -2,7 +2,11 @@ import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import { getCurrentUserId, getCurrentUserIdSync } from "./auth-helper";
 import { updateProfilePrivileged } from "../supabase/privileged";
-import { requireBetterAuthToken, getCurrentUserRow } from "../auth/identity";
+import {
+  requireBetterAuthToken,
+  getCurrentUserRow,
+  ownEmailFor,
+} from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
 import { resolveFollowRelationship } from "../profile/follow-relationship";
 import {
@@ -74,7 +78,6 @@ async function getFollowRelationship(viewerId: number | null, targetId: number) 
 type BetterAuthUserRow = {
   id: string;
   name: string | null;
-  email: string | null;
   image: string | null;
   username: string | null;
   createdAt: string | null;
@@ -87,7 +90,7 @@ async function getBetterAuthUserById(
 
   const { data, error } = await supabase
     .from("user")
-    .select("id, name, email, image, username, createdAt")
+    .select("id, name, image, username, createdAt")
     .eq("id", authId)
     .maybeSingle();
 
@@ -160,6 +163,9 @@ export const usersApi = {
 
       const currentUserId = await getViewerIdForRelationshipChecks();
 
+      // No gender, sexuality or event_audience: this serves the signed-out
+      // public profile too, and anon cannot read them (20261003150500), so
+      // selecting one fails the whole request. No profile screen shows them.
       // Fire user fetch + follow check in parallel (no waterfall)
       const userFetch = supabase
         .from(DB.users.table)
@@ -168,7 +174,6 @@ export const usersApi = {
           ${DB.users.id},
           ${DB.users.authId},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -176,7 +181,6 @@ export const usersApi = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -210,7 +214,7 @@ export const usersApi = {
           id: String(targetUserId),
           authId,
           username: resolvedUsername,
-          email: data[DB.users.email] || betterAuthUser?.email || "",
+          email: ownEmailFor({ authId: data[DB.users.authId], id: data[DB.users.id] }),
           firstName: data[DB.users.firstName] || displayNameParts.firstName,
           lastName: data[DB.users.lastName] || displayNameParts.lastName,
           name:
@@ -222,7 +226,6 @@ export const usersApi = {
           website: data[DB.users.website] || "",
           links: normalizeUserLinks(data[DB.users.links]),
           pronouns: data[DB.users.pronouns] || "",
-          gender: data[DB.users.gender] || "",
           avatar: dbAvatar || betterAuthUser?.image || "",
           verified: data[DB.users.verified] || false,
           followersCount:
@@ -245,7 +248,7 @@ export const usersApi = {
       // Fallback: Better Auth `user` table by username (single indexed query)
       const { data: baUser } = await supabase
         .from("user")
-        .select("id, name, email, image, username, createdAt")
+        .select("id, name, image, username, createdAt")
         .eq("username", username)
         .maybeSingle();
 
@@ -290,7 +293,6 @@ export const usersApi = {
           ${DB.users.id},
           ${DB.users.authId},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -298,7 +300,6 @@ export const usersApi = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -335,7 +336,7 @@ export const usersApi = {
         id: String(data[DB.users.id]),
         authId,
         username: resolvedUsername,
-        email: data[DB.users.email] || betterAuthUser?.email || "",
+        email: ownEmailFor({ authId: data[DB.users.authId], id: data[DB.users.id] }),
         firstName: data[DB.users.firstName] || displayNameParts.firstName,
         lastName: data[DB.users.lastName] || displayNameParts.lastName,
         name:
@@ -347,7 +348,6 @@ export const usersApi = {
         website: data[DB.users.website] || "",
         links: normalizeUserLinks(data[DB.users.links]),
         pronouns: data[DB.users.pronouns] || "",
-        gender: data[DB.users.gender] || "",
         avatar: dbAvatar || betterAuthUser?.image || "",
         verified: data[DB.users.verified] || false,
         followersCount:
@@ -388,7 +388,6 @@ export const usersApi = {
           ${DB.users.id},
           ${DB.users.authId},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -396,7 +395,6 @@ export const usersApi = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -431,7 +429,7 @@ export const usersApi = {
           id: String(profile[DB.users.id]),
           username: resolvedUsername,
           authId: resolvedAuthId,
-          email: profile[DB.users.email] || betterAuthUser?.email || "",
+          email: ownEmailFor({ authId: profile[DB.users.authId], id: profile[DB.users.id] }),
           firstName: profile[DB.users.firstName] || displayNameParts.firstName,
           lastName: profile[DB.users.lastName] || displayNameParts.lastName,
           name:
@@ -443,7 +441,6 @@ export const usersApi = {
           website: profile[DB.users.website] || "",
           links: normalizeUserLinks(profile[DB.users.links]),
           pronouns: profile[DB.users.pronouns] || "",
-          gender: profile[DB.users.gender] || "",
           avatar: dbAvatar || betterAuthUser?.image || "",
           verified: profile[DB.users.verified] || false,
           followersCount:
@@ -467,7 +464,7 @@ export const usersApi = {
       // Fallback: query Better Auth `user` table directly
       const { data: authUser, error } = await supabase
         .from("user")
-        .select("id, name, email, image, username, createdAt")
+        .select("id, name, image, username, createdAt")
         .eq("id", authId)
         .single();
 
@@ -481,7 +478,7 @@ export const usersApi = {
           authUser.username ||
           displayName.toLowerCase().replace(/\s+/g, "_") ||
           authId,
-        email: authUser.email,
+        email: ownEmailFor({ authId }),
         firstName: displayName.split(" ")[0] || "",
         lastName: displayName.split(" ").slice(1).join(" ") || "",
         name: displayName || "New User",
@@ -516,9 +513,10 @@ export const usersApi = {
     lastName?: string;
     username?: string;
     pronouns?: string;
-    gender?: string;
-    sexuality?: string[];
-    eventAudience?: string;
+    // Identity: omit = untouched, null = clear (see lib/profile/own-identity).
+    gender?: string | null;
+    sexuality?: string[] | null;
+    eventAudience?: string | null;
     bio?: string;
     location?: string;
     name?: string;
@@ -542,10 +540,10 @@ export const usersApi = {
           ? { pronouns: updates.pronouns.trim() }
           : {}),
         ...(updates.gender !== undefined
-          ? { gender: updates.gender.trim() }
+          ? { gender: updates.gender === null ? null : updates.gender.trim() }
           : {}),
         ...(Array.isArray(updates.links) ? { links: updates.links } : {}),
-        ...(Array.isArray(updates.sexuality)
+        ...(updates.sexuality !== undefined
           ? { sexuality: updates.sexuality }
           : {}),
         ...(updates.eventAudience !== undefined
@@ -818,7 +816,6 @@ export const usersApi = {
           `
           ${DB.users.id},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -834,7 +831,7 @@ export const usersApi = {
       return {
         id: String(data[DB.users.id]),
         username: data[DB.users.username],
-        email: data[DB.users.email],
+        email: ownEmailFor({ id: data[DB.users.id] }),
         firstName: data[DB.users.firstName],
         lastName: data[DB.users.lastName],
         name: data[DB.users.firstName] || data[DB.users.username],
