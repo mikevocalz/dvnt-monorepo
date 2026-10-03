@@ -79,3 +79,28 @@ test('a zone name Intl does not know is dropped, and the event still publishes',
   const h = harness(); const result = await h.publish({ ...draft, eventTz: 'Not/AZone' });
   assert.equal(result.ok, true); assert.equal(result.data.event.event_tz, undefined);
 });
+
+// E06: hide an event, or schedule when it goes public.
+test('a hidden event and a go-public time are stored', async () => {
+  const h = harness();
+  const result = await h.publish({ ...draft, isHidden: true, publishAt: '2026-09-25T16:00:00Z' });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.event.is_hidden, true);
+  assert.equal(result.data.event.publish_at, '2026-09-25T16:00:00.000Z');
+});
+test('without either field the event is public now', async () => {
+  const h = harness(); const result = await h.publish(draft);
+  assert.equal(result.data.event.is_hidden, false); assert.equal(result.data.event.publish_at, null);
+});
+test('an unparseable go-public time is refused and nothing is inserted', async () => {
+  const h = harness(); const result = await h.publish({ ...draft, publishAt: 'next friday' });
+  assert.equal(result.ok, false); assert.equal(result.error.code, 'validation_error'); assert.equal(h.rows.length, 0);
+});
+test('a go-public time after the event starts is refused', async () => {
+  const h = harness(); const result = await h.publish({ ...draft, publishAt: '2026-10-01T21:00:00Z' });
+  assert.equal(result.ok, false); assert.match(result.error.message, /before the event starts/); assert.equal(h.rows.length, 0);
+});
+test('isHidden must be a real boolean, not a truthy string', async () => {
+  const h = harness(); const result = await h.publish({ ...draft, isHidden: 'false' });
+  assert.equal(result.ok, false); assert.equal(result.error.code, 'validation_error'); assert.equal(h.rows.length, 0);
+});

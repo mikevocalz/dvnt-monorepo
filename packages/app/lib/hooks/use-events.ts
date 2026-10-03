@@ -79,6 +79,12 @@ export interface Event {
   /** IANA venue zone; null when the event never recorded one. */
   event_tz?: string | null;
   isOnline?: boolean;
+  /** Organizer hid the event (E06). Only the host's own lists carry it. */
+  isHidden?: boolean;
+  /** When the event goes public; null = already public. */
+  publishAt?: string | null;
+  /** The signed-in user hosts this event (My Events rows only). */
+  isHost?: boolean;
   category?: string;
   likes?: number;
   isLiked?: boolean;

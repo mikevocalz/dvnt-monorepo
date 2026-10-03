@@ -269,6 +269,29 @@ Deno.serve(async (req) => {
       }
       insertPayload.end_date = endDate;
     }
+    // Hide the event, or schedule when it goes public (E06). Validated here,
+    // not by a DB CHECK, for the same reason as the end date above.
+    if (body.isHidden !== undefined && body.isHidden !== null && typeof body.isHidden !== "boolean") {
+      return errorResponse(req, "validation_error", "isHidden must be true or false");
+    }
+    insertPayload.is_hidden = body.isHidden === true;
+    const publishAt = text(body.publishAt);
+    if (publishAt) {
+      const publishMs = new Date(publishAt).getTime();
+      if (Number.isNaN(publishMs)) {
+        return errorResponse(req, "validation_error", "Go-public time is not a valid date");
+      }
+      if (publishMs > new Date(startDate).getTime()) {
+        return errorResponse(
+          req,
+          "validation_error",
+          "Set the go-public time before the event starts.",
+        );
+      }
+      insertPayload.publish_at = new Date(publishMs).toISOString();
+    } else {
+      insertPayload.publish_at = null;
+    }
     // Venue timezone (IANA name). The client always sends it; physical events
     // render start/end in this zone (event-time.ts) — dropping it made every
     // event display in the viewer's local zone instead of the venue's.

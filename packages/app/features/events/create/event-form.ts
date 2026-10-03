@@ -21,6 +21,10 @@ import {
   localIsoToZonedIso,
   normalizeTimeZone,
 } from "../../../lib/events/event-zone.ts";
+import {
+  publishAtError,
+  publishAtLocalToInstant,
+} from "../../../lib/events/event-publication.ts";
 
 // ── Event Type taxonomy (canonical) ─────────────────────────────────────────
 export const EVENT_TYPE_LABELS: Record<EventType, string> = {
@@ -102,6 +106,10 @@ export interface EventFormDraft {
   eventType: EventType | null;
   tags: string[];
   visibility: "public" | "private" | "link_only";
+  /** E06. Optional so drafts saved before it existed still type-check. */
+  isHidden?: boolean;
+  /** E06: typed wall clock as a device-local ISO; "" = public on publish. */
+  publishAt?: string;
   ageRestriction: "none" | "18+" | "21+";
   isNsfw: boolean;
   dressCode: string;
@@ -177,6 +185,7 @@ export interface EventFormErrors {
   location?: string;
   price?: string;
   terms?: string;
+  publishAt?: string;
 }
 
 export function validateEventDraft(d: EventFormDraft): {
@@ -190,6 +199,11 @@ export function validateEventDraft(d: EventFormDraft): {
 
   const schedule = resolveEventSchedule(d);
   if (schedule.error) errors.date = schedule.error;
+  const publishError = publishAtError(
+    publishAtLocalToInstant(d.publishAt, schedule.eventTz),
+    schedule.startIso,
+  );
+  if (publishError) errors.publishAt = publishError;
 
   if (!d.isOnline && !d.location.trim()) {
     errors.location = "Add a venue, or mark the event online.";
@@ -243,6 +257,8 @@ export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {})
     price,
     maxAttendees: Number.isFinite(maxAttendees as number) ? maxAttendees : undefined,
     visibility: d.visibility,
+    isHidden: d.isHidden === true,
+    publishAt: publishAtLocalToInstant(d.publishAt, schedule.eventTz) ?? undefined,
     isOnline: d.isOnline,
     image: media.image,
     images: media.images,

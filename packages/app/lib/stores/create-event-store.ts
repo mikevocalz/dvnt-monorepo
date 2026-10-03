@@ -126,6 +126,13 @@ interface DraftFields {
   attachLynkRoom: boolean;
   ticketingEnabled: boolean;
   visibility: VisibilityOption;
+  /** E06: hidden from everyone but host, co-hosts, invitees, ticket holders. */
+  isHidden: boolean;
+  /**
+   * E06: when the event goes public, as a device-local ISO holding the typed
+   * wall clock (like eventDate); "" = as soon as it is published.
+   */
+  publishAt: string;
   ageRestriction: AgeRestriction;
   isOnline: boolean;
   dressCode: string;
@@ -201,6 +208,8 @@ interface CreateEventActions {
   setAttachLynkRoom: (v: boolean) => void;
   setTicketingEnabled: (v: boolean) => void;
   setVisibility: (v: VisibilityOption) => void;
+  setIsHidden: (v: boolean) => void;
+  setPublishAt: (v: string) => void;
   setAgeRestriction: (v: AgeRestriction) => void;
   setIsOnline: (v: boolean) => void;
   setDressCode: (v: string) => void;
@@ -290,6 +299,8 @@ const DRAFT_DEFAULTS: DraftFields = {
   attachLynkRoom: false,
   ticketingEnabled: false,
   visibility: "public",
+  isHidden: false,
+  publishAt: "",
   ageRestriction: "none",
   isOnline: false,
   dressCode: "",
@@ -358,6 +369,8 @@ export const useCreateEventStore = create<CreateEventState>()(
       setAttachLynkRoom: (v) => set({ attachLynkRoom: v }),
       setTicketingEnabled: (v) => set({ ticketingEnabled: v }),
       setVisibility: (v) => set({ visibility: v }),
+      setIsHidden: (v) => set({ isHidden: v }),
+      setPublishAt: (v) => set({ publishAt: v }),
       setAgeRestriction: (v) => set({ ageRestriction: v }),
       setIsOnline: (v) => set({ isOnline: v }),
       setDressCode: (v) => set({ dressCode: v }),
@@ -554,6 +567,8 @@ export const useCreateEventStore = create<CreateEventState>()(
         attachLynkRoom: state.attachLynkRoom,
         ticketingEnabled: state.ticketingEnabled,
         visibility: state.visibility,
+        isHidden: state.isHidden,
+        publishAt: state.publishAt,
         ageRestriction: state.ageRestriction,
         isOnline: state.isOnline,
         dressCode: state.dressCode,

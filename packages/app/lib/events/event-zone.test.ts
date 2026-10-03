@@ -204,3 +204,20 @@ test("checkout and ticket line reads day and time in the venue zone", () => {
   assert.equal(formatEventWhen("2026-07-11T03:00:00Z", { event_tz: LA }), "Fri, Jul 10 at 8:00 PM PDT");
   assert.equal(formatEventWhen(null, { event_tz: LA }), "");
 });
+
+// E06: hide the event, or schedule when it goes public, read in the event's zone.
+test("the create payload carries the hidden flag and the go-public instant", () => {
+  const built = buildEventInsert(draft({ isHidden: true, publishAt: typed(2026, 3, 1, 12) }));
+  assert.equal(built.isHidden, true);
+  assert.equal(built.publishAt, "2026-03-01T20:00:00.000Z"); // noon PST, typed in New York
+  const plain = buildEventInsert(draft({}));
+  assert.equal(plain.isHidden, false);
+  assert.equal(plain.publishAt, undefined);
+});
+
+test("a go-public time after the event starts blocks publishing", () => {
+  const late = validateEventDraft(draft({ publishAt: typed(2026, 3, 8, 1) }));
+  assert.equal(late.ok, false);
+  assert.match(late.errors.publishAt ?? "", /before the event starts/);
+  assert.equal(validateEventDraft(draft({ publishAt: typed(2026, 3, 1, 12) })).errors.publishAt, undefined);
+});

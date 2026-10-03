@@ -68,6 +68,10 @@ interface EventEditState {
   maxAttendees: string;
   category: string;
   visibility: string;
+  /** E06: hidden from everyone but host, co-hosts, invitees, ticket holders. */
+  isHidden: boolean;
+  /** E06: go-public time as the zone's wall clock in a device-local ISO; "" = none. */
+  publishAt: string;
   dressCode: string;
   doorPolicy: string;
   lineup: string;
@@ -103,6 +107,8 @@ interface EventEditState {
   setMaxAttendees: (v: string) => void;
   setCategory: (v: string) => void;
   setVisibility: (v: string) => void;
+  setIsHidden: (v: boolean) => void;
+  setPublishAt: (v: string) => void;
   setDressCode: (v: string) => void;
   setDoorPolicy: (v: string) => void;
   setLineup: (v: string) => void;
@@ -141,6 +147,8 @@ const initial = {
   maxAttendees: "",
   category: "",
   visibility: "public",
+  isHidden: false,
+  publishAt: "",
   dressCode: "",
   doorPolicy: "",
   lineup: "",
@@ -172,6 +180,8 @@ export const useEventEditStore = create<EventEditState>((set) => ({
   setMaxAttendees: (v) => set({ maxAttendees: v }),
   setCategory: (v) => set({ category: v }),
   setVisibility: (v) => set({ visibility: v }),
+  setIsHidden: (v) => set({ isHidden: v }),
+  setPublishAt: (v) => set({ publishAt: v }),
   setDressCode: (v) => set({ dressCode: v }),
   setDoorPolicy: (v) => set({ doorPolicy: v }),
   setLineup: (v) => set({ lineup: v }),

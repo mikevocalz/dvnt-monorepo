@@ -24,6 +24,7 @@ import {
   listRowZoneFields,
   type EventZoneFields,
 } from "../events/event-time";
+import { publishAtError } from "../events/event-publication";
 import type { TicketTypeCategory } from "./ticket-types";
 import type { TierType, TierVisibility } from "../tickets/pricing";
 import type { DraftAddon } from "../../features/events/create/addon-form";
@@ -535,6 +536,12 @@ export const eventsApi = {
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           status: event.status || undefined,
           cancelledAt: event.cancelled_at || undefined,
+          // My Events is where a host sees "Hidden" / "Goes public ...".
+          isHidden: event.is_hidden === true,
+          publishAt: event.publish_at ?? null,
+          event_tz: event.event_tz ?? null,
+          // Only the host sees the Hidden / Goes public badge, not an invitee.
+          isHost: event[DB.events.hostId] === authId,
         };
       });
       return enrichEventsWithTierPrices(mapped);
@@ -781,6 +788,9 @@ export const eventsApi = {
         // viewer-local formatting on the detail screen.
         event_tz: ev.event_tz ?? null,
         isOnline: ev.is_online ?? false,
+        // Hide / go-public schedule; the detail screen badges it for the host.
+        isHidden: ev.is_hidden === true,
+        publishAt: ev.publish_at ?? null,
         // V2 fields
         locationLat:
           ev.location_lat != null ? Number(ev.location_lat) : undefined,
@@ -1046,7 +1056,7 @@ export const eventsApi = {
       const { data: beforeEvent } = await supabase
         .from(DB.events.table)
         .select(
-          "id, start_date, end_date, location, location_name, age_restriction",
+          "id, start_date, end_date, location, location_name, age_restriction, publish_at",
         )
         .eq(DB.events.id, parseInt(eventId))
         .maybeSingle();
@@ -1080,6 +1090,11 @@ export const eventsApi = {
       // corrected — display fell back to UTC or the viewer's zone forever.
       if (updates.eventTz !== undefined)
         updateData.event_tz = updates.eventTz || null;
+      // Hide / schedule going public (E06). A strict boolean only: a string
+      // "false" would otherwise hide the event.
+      if (typeof updates.isHidden === "boolean") updateData.is_hidden = updates.isHidden;
+      if (updates.publishAt !== undefined)
+        updateData.publish_at = updates.publishAt || null;
       if (updates.category !== undefined)
         updateData.category = updates.category || null;
       if (updates.visibility !== undefined)
@@ -1137,6 +1152,12 @@ export const eventsApi = {
       if (endsBeforeStart(nextStart, nextEnd)) {
         throw new Error(END_BEFORE_START_ERROR);
       }
+      // Same rule create-event applies; this client check is the only gate on
+      // the edit path for the same reason as the end date above.
+      const nextPublishAt =
+        "publish_at" in updateData ? updateData.publish_at : beforeEvent?.publish_at ?? null;
+      const publishError = publishAtError(nextPublishAt, nextStart);
+      if (publishError) throw new Error(publishError);
 
       // Ensure the Supabase JWT bridge is attached so PostgREST sees
       // us as `authenticated` (not `anon`) — RLS on events_update_own
