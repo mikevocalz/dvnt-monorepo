@@ -19,6 +19,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
 import { checkAdultBirthDate } from "../_shared/age-policy.ts";
+import { normalizeVerificationState } from "../_shared/verification-state.ts";
 
 function json(req: Request, data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -54,12 +55,22 @@ Deno.serve(
     // Already approved → the user never sees the flow again (B3).
     const { data: existing } = await supabase
       .from("identity_verifications")
-      .select("status, provider_ref, date_of_birth")
+      .select("status, provider_ref, date_of_birth, failure_code, failure_message")
       .eq("user_id", authUserId)
       .maybeSingle();
     // Table vocabulary (CHECK constraint): pending|submitted|passed|failed|expired|review.
     if (existing?.status === "passed" && checkAdultBirthDate(existing.date_of_birth).allowed) {
       return json(req, { ok: true, data: { status: "passed" } });
+    }
+    const normalized = normalizeVerificationState(existing);
+    if (normalized.state === "rejected" && !normalized.retryable) {
+      return json(req, {
+        ok: false,
+        error: {
+          code: normalized.reason || "verification_rejected",
+          message: normalized.message || "This account cannot retry identity verification.",
+        },
+      }, 403);
     }
 
     // Optional post-verification return URL (validated https or app scheme).
