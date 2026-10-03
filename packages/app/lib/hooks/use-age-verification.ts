@@ -4,6 +4,10 @@ import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { onboardingCheckpoint, onboardingFailure } from "@dvnt/observability/flows";
 import { validateDateOfBirth } from "@dvnt/app/lib/utils/age-verification";
+import {
+  normalizeVerificationState,
+  type NormalizedVerification,
+} from "@dvnt/app/lib/auth/verification-state";
 
 /**
  * B3 deferred ID verification (Didit). Status vocabulary mirrors the
@@ -22,6 +26,7 @@ export type AgeVerificationStatus =
 
 export const ageVerificationKeys = {
   status: ["age-verification", "status"] as const,
+  state: ["age-verification", "state"] as const,
 };
 
 /** Own-row read via RLS (identity_verifications_own SELECT policy). */
@@ -76,7 +81,29 @@ export function needsAgeVerification(
   return restricted && status !== "passed" && inScope;
 }
 
-/** Starts (or resumes) a Didit session; returns the hosted capture URL. */
+/** Rich verification state used by adult-only product surfaces such as SPICY. */
+export function useVerificationState() {
+  const authId = useAuthStore((s) => s.user?.authId);
+  return useQuery({
+    queryKey: [...ageVerificationKeys.state, authId],
+    enabled: !!authId,
+    staleTime: 15_000,
+    queryFn: async (): Promise<NormalizedVerification> => {
+      const { data, error } = await supabase
+        .from("identity_verifications")
+        .select("user_id,status,date_of_birth,failure_code,failure_message,provider_ref")
+        .eq("user_id", authId!)
+        .maybeSingle();
+      if (error) throw error;
+      if (data && data.user_id !== authId) {
+        return normalizeVerificationState(null);
+      }
+      return normalizeVerificationState(data);
+    },
+  });
+}
+
+/** Starts (or retries) a Didit session; returns the hosted capture URL. */
 export function useStartVerification() {
   const queryClient = useQueryClient();
   const authId = useAuthStore((s) => s.user?.authId);
@@ -103,6 +130,7 @@ export function useStartVerification() {
         onboardingCheckpoint("verification.verified");
         queryClient.setQueryData([...ageVerificationKeys.status, authId], "passed");
       }
+      void queryClient.invalidateQueries({ queryKey: ageVerificationKeys.state });
     },
     onError: (error) => {
       onboardingFailure("verification.capture_start", error);

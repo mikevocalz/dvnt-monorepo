@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
+import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat.ts";
 
 export interface NewGroupSelectedUser {
   id: string;
