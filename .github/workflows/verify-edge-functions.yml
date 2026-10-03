@@ -16,6 +16,7 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-admission-gate.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -25,6 +26,7 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-admission-gate.mjs"
 
 jobs:
   verify:
@@ -72,3 +74,20 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-call-capacity.mjs
+
+  admission-gate-rls:
+    # Applies the verified-admission migration to a throwaway cluster that
+    # reproduces the live policies, then checks row visibility and writes as
+    # each persona (unverified, underage, old unverified, approved adult,
+    # anon, service_role). It also runs the same checks without the migration
+    # and requires the changed ones to fail there. No --allow-skip: a runner
+    # without Postgres must break the build, not report an empty green.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-admission-gate.mjs
