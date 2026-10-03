@@ -1,14 +1,68 @@
 {
-  "version": 1,
+  "version": 2,
+  "_schema": {
+    "kind": {
+      "test": "a test file. Must exist, contain an assertion, and be matched by an npm script that a workflow runs.",
+      "script": "a verifier script. Must exist and be invoked by an npm script that a workflow runs.",
+      "command": "an npm script name. Must exist in package.json and be a run: step in the gate workflow."
+    },
+    "note": "v1 mixed three kinds of `automation` with no marker (file paths, one directory, two shell commands) and nothing read the file. scripts/verify-release-regression.mjs now consumes it, so an entry that points nowhere fails the gate."
+  },
   "criticalScenarios": [
-    {"id":"age-under-18","owner":"identity","automation":"packages/app/lib/auth/age-admission.integration.test.ts"},
-    {"id":"age-account-switch","owner":"identity","automation":"packages/app/lib/auth/account-token-cache.test.ts"},
-    {"id":"private-event-access","owner":"events","automation":"packages/app/lib/events"},
-    {"id":"ticket-exactly-once","owner":"tickets","automation":"scripts/verify-issuance-invariants.mjs"},
-    {"id":"queued-post-recovery","owner":"posts","automation":"packages/app/lib/posts/publish-queue.test.ts"},
-    {"id":"location-consent","owner":"location","automation":"packages/app/lib/stores/city-discovery-visibility.test.ts"},
-    {"id":"lynk-session-lifecycle","owner":"lynk","automation":"pnpm test:lynk-session"},
-    {"id":"edge-auth-config","owner":"platform","automation":"pnpm verify:functions"}
+    {
+      "id": "age-under-18",
+      "owner": "identity",
+      "kind": "test",
+      "automation": "packages/app/lib/auth/age-admission.integration.test.ts"
+    },
+    {
+      "id": "age-account-switch",
+      "owner": "identity",
+      "kind": "test",
+      "automation": "packages/app/lib/auth/account-token-cache.test.ts"
+    },
+    {
+      "id": "private-event-access",
+      "owner": "events",
+      "kind": "test",
+      "automation": "packages/app/lib/events/event-access.test.ts"
+    },
+    {
+      "id": "ticket-exactly-once",
+      "owner": "tickets",
+      "kind": "script",
+      "automation": "scripts/verify-issuance-invariants.mjs"
+    },
+    {
+      "id": "queued-post-recovery",
+      "owner": "posts",
+      "kind": "test",
+      "automation": "packages/app/lib/posts/publish-queue.test.ts"
+    },
+    {
+      "id": "location-consent",
+      "owner": "location",
+      "kind": "test",
+      "automation": "packages/app/lib/stores/city-discovery-visibility.test.ts"
+    },
+    {
+      "id": "verified-admission-fail-closed",
+      "owner": "identity",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/_shared/verified-admission.test.ts"
+    },
+    {
+      "id": "lynk-session-lifecycle",
+      "owner": "lynk",
+      "kind": "command",
+      "automation": "test:lynk-session"
+    },
+    {
+      "id": "edge-auth-config",
+      "owner": "platform",
+      "kind": "command",
+      "automation": "verify:functions"
+    }
   ],
   "releaseCandidateManual": [
     "iOS device smoke",
