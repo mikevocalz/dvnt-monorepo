@@ -529,3 +529,12 @@ verify_jwt = false
 
 [functions.event-followup-unsubscribe]
 verify_jwt = false
+
+[functions.event-lynk-invite]
+verify_jwt = false
+
+[functions.process-event-lynk-lifecycle]
+verify_jwt = false
+
+[functions.event-lynk-room]
+verify_jwt = false

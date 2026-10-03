@@ -29,6 +29,7 @@ export * from "./api/room-stats";
 export * from "./hooks/useRoomEvents";
 export * from "./hooks/useRoomReactions";
 export * from "./hooks/useRoomCapacityWatcher";
+export * from "./hooks/useEventLynkWaitingRoom";
 export * from "./hooks/useSneakyLynkCaptureProtection";
 export * from "./hooks/useSneakyLynkCaptureBroadcast";
 

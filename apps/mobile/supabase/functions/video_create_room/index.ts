@@ -5,6 +5,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import {
   CALL_HUMAN_CAPACITY,
@@ -49,7 +50,7 @@ type ErrorCode =
 interface ApiResponse<T = unknown> {
   ok: boolean;
   data?: T;
-  error?: { code: ErrorCode; message: string };
+  error?: { code: ErrorCode; message: string; detail?: Record<string, unknown> };
 }
 
 function isMissingColumnError(error: unknown, column: string): boolean {
@@ -71,8 +72,15 @@ function jsonResponse<T>(data: ApiResponse<T>, status = 200): Response {
   });
 }
 
-function errorResponse(code: ErrorCode, message: string): Response {
-  return jsonResponse({ ok: false, error: { code, message } }, 200);
+function errorResponse(
+  code: ErrorCode,
+  message: string,
+  detail?: Record<string, unknown>,
+): Response {
+  return jsonResponse(
+    { ok: false, error: { code, message, ...(detail ? { detail } : {}) } },
+    200,
+  );
 }
 
 async function notifyRoomInvite(
@@ -192,6 +200,14 @@ Deno.serve(async (req) => {
     );
 
     const userId = sessionResult.userId;
+
+    // Verified-only admission, the same gate video_join_room applies at line
+    // 141. A client that skips the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabase, userId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return errorResponse("forbidden", refusal.message, { reason: refusal.reason });
+    }
 
     // Parse and validate input
     let body: unknown;

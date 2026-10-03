@@ -99,6 +99,8 @@ export interface Activity {
     changes?: string[];
     /** Specific pass for ticket rows, when the emitter sends one. */
     ticket_id?: string;
+    /** room_invite: the event the Lynk belongs to (event-lynk-invite). */
+    event_title?: string | null;
   } | null;
 }
 

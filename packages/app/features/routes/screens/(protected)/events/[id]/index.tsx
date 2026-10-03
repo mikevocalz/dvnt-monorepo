@@ -115,6 +115,9 @@ import {
   OrganizerCard,
 } from "@dvnt/app/features/events/ui";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
+import { canHostEventLynk } from "@dvnt/app/lib/events/event-lynk";
+import { EventLynkHostPanel } from "@dvnt/app/features/events/ui/EventLynkHostPanel";
 import { canScanTickets } from "@dvnt/app/lib/events/event-role";
 import { eventEnded } from "@dvnt/app/lib/events/event-time";
 import type {
@@ -1128,6 +1131,14 @@ function EventDetailScreenContent() {
     return false;
   }, [user?.id, eventData?.host?.id]);
 
+  // Event Lynk waiting room. Host = owner or accepted admin/editor
+  // co-organizer, the server's rule; the server re-checks on every call.
+  const mayHostLynk = canHostEventLynk(doorRole) || isHost;
+  const lynkHost = useEventLynkHost(
+    Number(eventId),
+    mayHostLynk && !!(eventData as any)?.lynkRoomId,
+  );
+
   // ── WS-9 safe destructive flows ──────────────────────────────────
   // Cancel (auto-refund) / Postpone (reversible, no refunds) / Delete
   // (blocked while paid tickets exist) each get their own confirmed
@@ -1848,6 +1859,26 @@ function EventDetailScreenContent() {
     }
     go(roomId);
   };
+  /** Host's Start: opens the room for everyone waiting, then enters it. */
+  const startEventLynk = async () => {
+    try {
+      const res = await lynkHost.start();
+      showToast(
+        "success",
+        "Lynk started",
+        res.admitted > 0
+          ? `${res.admitted} waiting ${res.admitted === 1 ? "guest is" : "guests are"} joining`
+          : "Guests can join now",
+      );
+      void openEventLynk();
+    } catch (err) {
+      showToast(
+        "error",
+        "Couldn't start the Lynk",
+        err instanceof Error && err.message ? err.message : "Try again in a moment.",
+      );
+    }
+  };
   // CRITICAL: event.date is the day number ("22"), event.fullDate is the ISO string
   const isoDate = event.fullDate || event.date;
   // Day and time in the venue's zone with its abbreviation ("8:00 PM PDT"),
@@ -2490,6 +2521,15 @@ function EventDetailScreenContent() {
                 </Text>
               </View>
             </Pressable>
+          ) : null}
+          {(event as any).lynkRoomId && mayHostLynk && lynkHost.view ? (
+            <EventLynkHostPanel
+              waiting={lynkHost.view.waiting}
+              count={lynkHost.view.count}
+              isLive={lynkHost.isLive}
+              isStarting={lynkHost.isStarting}
+              onStart={() => void startEventLynk()}
+            />
           ) : null}
 
           {/* ── 4. COLLAPSIBLE EVENT DETAILS ─────────────────────── */}

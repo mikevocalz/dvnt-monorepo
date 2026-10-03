@@ -49,6 +49,7 @@ import { notificationKeys } from "@dvnt/app/lib/hooks/use-notifications-query";
 import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
+import { roomInviteActivityText } from "@dvnt/app/lib/events/event-lynk";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import * as privileged from "@dvnt/app/lib/api/privileged";
 import { isTicketActivityType, ticketActivityCopy } from "@dvnt/app/lib/activity/ticket-activity";
@@ -173,6 +174,9 @@ function getActivityText(activity: Activity): string {
     case "event_venue_changed":
       return ticketActivityCopy(activity.type) || " updated your ticket.";
     case "room_invite":
+      return roomInviteActivityText(
+        activity.event?.title || activity.payload?.event_title,
+      );
     case "sneaky_lynk":
       return " invited you to a Sneaky Lynk.";
     default:

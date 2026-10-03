@@ -68,6 +68,7 @@ import type {
 } from "@dvnt/app/features/sneaky-lynk/types";
 import { RoomJoinErrorSheet } from "@dvnt/app/features/sneaky-lynk";
 import { RoomFullSheet } from "@dvnt/app/features/sneaky-lynk";
+import { useEventLynkWaitingRoom } from "@dvnt/app/features/sneaky-lynk";
 import { CaptureNotificationBanner } from "@dvnt/app/features/sneaky-lynk";
 import { CaptureDisclosureChip } from "@dvnt/app/features/sneaky-lynk/ui";
 import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/features/sneaky-lynk";
@@ -84,6 +85,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useRoomStore } from "@dvnt/app/features/sneaky-lynk";
 import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
+import { eventLynkApi } from "@dvnt/app/lib/api/event-lynk";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import { shareUrl } from "@dvnt/app/lib/deep-linking/share-link";
@@ -255,6 +257,61 @@ function PresenceToast({ event }: { event: PresenceEvent }) {
           {event.label}
         </Text>
       </DVNTLiquidGlass>
+    </View>
+  );
+}
+
+/**
+ * An event Lynk the host has not started. The guest stays here, on the host's
+ * waiting list, and joins on their own the moment the host starts.
+ */
+function WaitingRoomScreen({
+  roomTitle,
+  onBack,
+}: {
+  roomTitle: string;
+  onBack: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+      <View className="w-full py-3 border-b border-border">
+        <View className="flex-row items-center px-4" style={DETAIL_HEADER_ROW}>
+          <Pressable onPress={onBack} hitSlop={12} accessibilityLabel="Leave the waiting room">
+            <ArrowLeft size={24} color="#fff" />
+          </Pressable>
+          <View className="flex-1 mx-4">
+            <Text className="text-foreground font-semibold text-center" numberOfLines={1}>
+              {roomTitle || getLynkDisplayName()}
+            </Text>
+          </View>
+          <View className="w-6" />
+        </View>
+      </View>
+
+      <View
+        className="flex-1 items-center justify-center px-6"
+        accessibilityLiveRegion="polite"
+        testID="lynk-waiting-room"
+      >
+        <View className="w-20 h-20 rounded-full bg-primary/20 items-center justify-center mb-6">
+          <Radio size={36} color="#8A40CF" />
+        </View>
+        <Text className="text-2xl font-bold text-foreground text-center mb-3">
+          Waiting for the host to start
+        </Text>
+        <Text className="text-muted-foreground text-center mb-8">
+          You&apos;re in the waiting room. You&apos;ll join automatically when the host starts.
+        </Text>
+        <ActivityIndicator color="#8A40CF" />
+        <Pressable
+          onPress={onBack}
+          className="mt-8 px-6 py-4 rounded-full bg-secondary items-center"
+        >
+          <Text className="text-foreground font-semibold">Leave</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -553,21 +610,32 @@ function SneakyLynkRoomScreenContent({
   const [roomLookup, setRoomLookup] = useState<{
     loading: boolean;
     room: SneakyRoom | null;
+    /** An event Lynk this account may wait for or enter (event-lynk-room). */
+    eventRoom: boolean;
   }>({
     loading: shouldGateJoin,
     room: null,
+    eventRoom: false,
   });
 
   useEffect(() => {
     if (!shouldGateJoin || !id) return;
 
     let cancelled = false;
-    setRoomLookup({ loading: true, room: null });
+    setRoomLookup({ loading: true, room: null, eventRoom: false });
 
     (async () => {
       const room = await sneakyLynkApi.getRoomById(id);
+      // An open event room with no host in it yet is not "ended": it is
+      // waiting for a host to start it. Ask the server whether this account
+      // may wait for it (or enter, for a host). Any refusal keeps the
+      // closed screen below.
+      let eventRoom = false;
+      if (room && room.status === "open" && !room.isLive) {
+        eventRoom = await eventLynkApi.wait(id).then(() => true, () => false);
+      }
       if (!cancelled) {
-        setRoomLookup({ loading: false, room });
+        setRoomLookup({ loading: false, room, eventRoom });
       }
     })();
 
@@ -599,7 +667,7 @@ function SneakyLynkRoomScreenContent({
     shouldGateJoin &&
     (!roomLookup.room ||
       roomLookup.room.status === "ended" ||
-      !roomLookup.room.isLive)
+      (!roomLookup.room.isLive && !roomLookup.eventRoom))
   ) {
     return (
       <ClosedRoomScreen
@@ -635,6 +703,7 @@ function SneakyLynkRoomScreenContent({
         initialCameraOn={joinCameraOn}
         initialMicOn={joinMicOn}
         initialRoom={roomLookup.room}
+        isEventRoom={roomLookup.eventRoom}
         billing={billing}
       />
     );
@@ -1034,6 +1103,7 @@ function ServerRoom({
   initialCameraOn = true,
   initialMicOn = true,
   initialRoom = null,
+  isEventRoom = false,
   billing = null,
 }: {
   id: string;
@@ -1044,6 +1114,8 @@ function ServerRoom({
   initialCameraOn?: boolean;
   initialMicOn?: boolean;
   initialRoom?: SneakyRoom | null;
+  /** Event Lynk not started yet: no host in it is expected, not "ended". */
+  isEventRoom?: boolean;
   billing?: SneakyBilling | null;
 }) {
   const router = useRouter();
@@ -1083,6 +1155,10 @@ function ServerRoom({
   // migration of ServerRoom lives with the rest of the Sneaky Lynk
   // cleanup work, not this targeted fix.
   const [joinError, setJoinError] = useState<ClassifiedError | null>(null);
+  // Event Lynk not started by a host yet: show the waiting room, not an
+  // error. The ref lets the mount effect see it without re-running.
+  const [waitingForHost, setWaitingForHost] = useState(false);
+  const waitingForHostRef = useRef(false);
   // Capacity flow phase — "idle" (sheet just opened, showing Notify me),
   // "waiting" (polling for a seat), "seat-open" (poll detected room
   // has space, waiting for user to tap-to-join).
@@ -1093,7 +1169,8 @@ function ServerRoom({
     initialRoom,
   );
   const [closedReason, setClosedReason] = useState<string | null>(
-    initialRoom && (initialRoom.status === "ended" || !initialRoom.isLive)
+    initialRoom &&
+      (initialRoom.status === "ended" || (!initialRoom.isLive && !isEventRoom))
       ? "This Lynk has ended and can't be reopened."
       : null,
   );
@@ -1138,6 +1215,11 @@ function ServerRoom({
         error,
         envelope?.detail,
       );
+      if (classified.reason === "waiting_for_host") {
+        waitingForHostRef.current = true;
+        setWaitingForHost(true);
+        return;
+      }
       if (classified.reason !== "unknown") {
         setJoinError(classified);
       } else {
@@ -1158,6 +1240,23 @@ function ServerRoom({
   // Stable ref so callbacks never capture a stale videoRoom object
   const videoRoomRef = useRef(videoRoom);
   videoRoomRef.current = videoRoom;
+
+  // Heartbeat the waiting room; when the host starts, run the normal join so
+  // video_join_room still applies bans, capacity and verification.
+  useEventLynkWaitingRoom({
+    roomId: id,
+    enabled: waitingForHost,
+    onAdmitted: () => {
+      waitingForHostRef.current = false;
+      setWaitingForHost(false);
+      void videoRoomRef.current.join();
+    },
+    onRefused: (message) => {
+      waitingForHostRef.current = false;
+      setWaitingForHost(false);
+      markRoomClosed(null, message);
+    },
+  });
 
   // When anonymous, use the anon label from the server response instead of real profile
   const localAnonLabel = normalizeSneakyAnonLabel(
@@ -1344,6 +1443,8 @@ function ServerRoom({
       if (!cancelled) {
         console.log("[SneakyLynk:Server] Join result:", joined);
         if (!joined) {
+          // Not a closed room: the guest is in the waiting room.
+          if (waitingForHostRef.current) return;
           const latestRoom = await sneakyLynkApi.getRoomById(id);
           if (cancelled) return;
           if (!latestRoom) {
@@ -2116,6 +2217,15 @@ function ServerRoom({
     clearRaisedHands();
     closeHandQueue();
   }, [clearRaisedHands, closeHandQueue]);
+
+  if (waitingForHost && !closedReason) {
+    return (
+      <WaitingRoomScreen
+        roomTitle={roomSnapshot?.title || paramTitle || getLynkDisplayName()}
+        onBack={handleLeave}
+      />
+    );
+  }
 
   if (closedReason) {
     return (

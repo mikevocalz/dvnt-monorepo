@@ -90,6 +90,8 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
+import { eventLynkApi } from "@dvnt/app/lib/api/event-lynk";
+import { useEventLynkWaitingRoom } from "../hooks/useEventLynkWaitingRoom";
 import { getSneakyUserLabel } from "../ui/user-labels";
 import {
   bannerPhaseFor,
@@ -140,6 +142,7 @@ import { useRoomStore } from "../stores/room-store";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { isPublisherRole } from "../publish-roles";
 import { stageGridClass } from "../ui/stage-grid";
+import { HERO_ASPECT, HOST_STAGE_MAX_WIDTH, HOST_TILE_GAP } from "../ui/stage-layout";
 import { useLynkHistoryStore } from "../stores/lynk-history-store";
 import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
 import { SecureCaptureBoundary } from "@dvnt/app/lib/secure-capture";
@@ -657,6 +660,8 @@ function RoomInner({
   // pre-join reset runs) and skip the join entirely — the room then mounts but
   // never calls video_join_room. A ref is fresh on every mount.
   const joinFiredRef = useRef(false);
+  // Bumped by the waiting room to re-run the join effect after a host starts.
+  const [joinAttempt, setJoinAttempt] = useState(0);
   const joinCompletedRef = useRef(false);
 
   // Local identity projected as a SneakyUser for reactions/chat authorship.
@@ -757,6 +762,10 @@ function RoomInner({
         // surface, so it gets a dedicated phase rather than the error screen.
         if (classified.reason === "app_only") {
           setAppOnlyPhase();
+        } else if (classified.reason === "waiting_for_host") {
+          // Event Lynk not started yet: the waiting room below heartbeats
+          // and re-runs this join once the host starts.
+          setPhase("waiting");
         } else if (isClosedRoomError(msg)) {
           setClosed("This Lynk has ended and can't be reopened.");
         } else {
@@ -818,7 +827,19 @@ function RoomInner({
       if (!joinCompletedRef.current) joinFiredRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, joinAnonymous, roomHasVideo]);
+  }, [id, joinAnonymous, roomHasVideo, joinAttempt]);
+
+  // Waiting room: heartbeat until the host starts, then run the join above
+  // again so video_join_room still applies bans, capacity and verification.
+  useEventLynkWaitingRoom({
+    roomId: id,
+    enabled: phase === "waiting",
+    onAdmitted: () => {
+      joinFiredRef.current = false;
+      setJoinAttempt((n) => n + 1);
+    },
+    onRefused: (message) => setClosed(message),
+  });
 
   // ── Go live ───────────────────────────────────────────────────────────────
   // Publishing starts once we hold BOTH a publish-capable role and a minted
@@ -1314,6 +1335,14 @@ function RoomInner({
   const listenerTiles = remoteTiles.filter((t) => !t.isPublisher);
 
   const stageTiles = [localTile, ...remotePublisherTiles];
+  // The host and one co-host share the top of the stage (hostStageLayout):
+  // one host is a single capped, centred tile; a co-host splits it in two.
+  // Other publishers keep the uniform grid underneath.
+  const hostStageTiles = [
+    stageTiles.find((t) => t.isHost),
+    stageTiles.find((t) => t.isCoHost),
+  ].filter((t): t is Tile => !!t);
+  const otherStageTiles = stageTiles.filter((t) => !hostStageTiles.includes(t));
   const roomTitle = roomSnapshot?.title || paramTitle || getLynkDisplayName();
   const participantCount = stageTiles.length;
 
@@ -1333,6 +1362,35 @@ function RoomInner({
   // browser. Terminal on the web rail by design — this is the one place
   // Sneaky Lynk protection is ENFORCED rather than deterred, so there is no
   // retry, no fallback view, and nothing to reveal.
+  if (phase === "waiting") {
+    return (
+      <RoomShell title={roomTitle} onBack={() => router.back()}>
+        <div
+          className="flex flex-1 flex-col items-center justify-center px-6 text-center"
+          role="status"
+          aria-live="polite"
+          data-testid="lynk-waiting-room"
+        >
+          <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-[#8A40CF]/20">
+            <Radio size={36} className="text-[#8A40CF]" />
+          </span>
+          <h2 className="mb-3 text-2xl font-bold">Waiting for the host to start</h2>
+          <p className="mb-8 max-w-md text-white/60">
+            You&apos;re in the waiting room. You&apos;ll join automatically when the host starts.
+          </p>
+          <div className="mb-8 h-6 w-6 rounded-full border-2 border-white/20 border-t-[#8A40CF] animate-spin motion-reduce:animate-none" />
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
+          >
+            Leave
+          </button>
+        </div>
+      </RoomShell>
+    );
+  }
+
   if (phase === "app-only") {
     return (
       <RoomShell title={roomTitle} onBack={() => router.back()}>
@@ -1611,16 +1669,48 @@ function RoomInner({
               what `data-speaking` on each tile already does. `auto-rows-fr`
               plus a filling tile means N people share the stage evenly rather
               than the grid growing past the fold. */}
-          <section className="flex min-h-0 flex-1 items-center justify-center px-4 py-2 md:px-6 lg:px-8">
-            <div
-              className={`mx-auto grid h-full max-h-[calc(100dvh-20rem)] w-full max-w-6xl auto-rows-fr gap-3 md:gap-4 ${stageGridClass(
-                stageTiles.length,
-              )}`}
-            >
-              {stageTiles.map((tile) => (
-                <StageTile key={tile.key} tile={tile} />
-              ))}
-            </div>
+          <section className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-2 md:px-6 lg:px-8">
+            {hostStageTiles.length > 0 ? (
+              // Capped at max-w-3xl (HOST_STAGE_MAX_WIDTH) and by the height
+              // left for it, kept at 16:9 and centred, so one host never
+              // fills a desktop. Two hosts split the same box; the host tile
+              // animates its width as a co-host arrives or leaves.
+              <div
+                data-host-count={hostStageTiles.length}
+                className="mx-auto flex w-full shrink-0 overflow-hidden"
+                style={{
+                  maxWidth: `min(${HOST_STAGE_MAX_WIDTH}px, calc((100dvh - 20rem) * ${HERO_ASPECT}))`,
+                  aspectRatio: HERO_ASPECT,
+                  gap: HOST_TILE_GAP,
+                }}
+              >
+                {hostStageTiles.map((tile) => (
+                  <div
+                    key={tile.key}
+                    className="h-full min-w-0 transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none"
+                    style={{
+                      width:
+                        hostStageTiles.length === 2
+                          ? `calc(50% - ${HOST_TILE_GAP / 2}px)`
+                          : "100%",
+                    }}
+                  >
+                    <StageTile tile={tile} />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {otherStageTiles.length > 0 ? (
+              <div
+                className={`mx-auto grid min-h-0 w-full max-w-6xl flex-1 auto-rows-fr gap-3 md:gap-4 ${
+                  hostStageTiles.length > 0 ? "max-h-[40dvh]" : "h-full max-h-[calc(100dvh-20rem)]"
+                } ${stageGridClass(otherStageTiles.length)}`}
+              >
+                {otherStageTiles.map((tile) => (
+                  <StageTile key={tile.key} tile={tile} />
+                ))}
+              </div>
+            ) : null}
           </section>
 
           {/* Listener row — TanStack Virtual (horizontal) */}
@@ -2102,10 +2192,21 @@ export function SneakyLynkRoomScreen() {
       if (cancelled) return;
       if (!room) {
         setClosed("This Lynk is unavailable.");
-      } else if (room.status === "ended" || !room.isLive) {
+      } else if (room.status === "ended") {
+        setRoomSnapshot(room);
+        setClosed("This Lynk has ended and can't be reopened.");
+      } else if (
+        !room.isLive &&
+        // An event Lynk with no host in it yet is waiting for a host to
+        // start it, not ended. The server says whether this account may
+        // wait for it; any refusal keeps the closed screen.
+        !(await eventLynkApi.wait(id).then(() => true, () => false))
+      ) {
+        if (cancelled) return;
         setRoomSnapshot(room);
         setClosed("This Lynk has ended and can't be reopened.");
       } else {
+        if (cancelled) return;
         setRoomSnapshot(room);
         setPhase("prejoin");
       }
