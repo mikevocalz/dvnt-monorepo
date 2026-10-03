@@ -125,7 +125,8 @@ function onlyInviteAcceptUpdates(writes: Write[], authId: string) {
   return writes.every((w) =>
     w.op === "insert" ||
     (w.op === "update" &&
-      JSON.stringify(w.payload) === JSON.stringify({ status: "applied" }) &&
+      JSON.stringify(Object.keys(w.payload ?? {}).sort()) === JSON.stringify(["status", "updated_at"]) &&
+      (w.payload as Record<string, unknown>).status === "applied" &&
       JSON.stringify(w.filters) === JSON.stringify([["user_id", authId], ["status", "invited"]]))
   );
 }
@@ -168,7 +169,9 @@ Deno.test("an invited user who applies moves to applied, and nothing else change
   assertEquals(outcome.httpStatus, 200);
   if (outcome.kind !== "accepted") throw new Error("unreachable");
   assertEquals(outcome.creator.status, "applied");
-  assertEquals(rows.get("u1"), { ...seed, status: "applied" });
+  const { updated_at, ...accepted } = rows.get("u1") as Record<string, unknown>;
+  assertEquals(accepted, { ...seed, status: "applied" });
+  assert(typeof updated_at === "string" && !Number.isNaN(Date.parse(updated_at)), String(updated_at));
   // Another invited user's row is untouched.
   assertEquals(rows.get("u2"), other);
   assert(onlyInviteAcceptUpdates(writes, "u1"), JSON.stringify(writes));

@@ -79,7 +79,7 @@ export async function applyForCreatorProgram(
   // The row exists. Accepting an invite is the one move allowed. The status
   // filter makes this a no-op for every other status, and makes a concurrent
   // second apply lose: only one request can match status = 'invited'.
-  const accepted = await db.from("creator_hosts").update({ status: "applied" })
+  const accepted = await db.from("creator_hosts").update({ status: "applied", updated_at: new Date().toISOString() })
     .eq("user_id", authId).eq("status", "invited")
     .select(CREATOR_COLUMNS).maybeSingle();
   if (accepted.error) {
