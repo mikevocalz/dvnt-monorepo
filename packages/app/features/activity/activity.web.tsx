@@ -59,6 +59,7 @@ import { notificationKeys } from "@dvnt/app/lib/hooks/use-notifications-query";
 import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
+import { roomInviteActivityText } from "@dvnt/app/lib/events/event-lynk";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import * as privileged from "@dvnt/app/lib/api/privileged";
 
@@ -320,6 +321,9 @@ function getActivityText(activity: Activity): string {
     case "ticket_refunded":
       return ` issued a refund for your ${activity.event?.title || "event"} ticket.`;
     case "room_invite":
+      return roomInviteActivityText(
+        activity.event?.title || activity.payload?.event_title,
+      );
     case "sneaky_lynk":
       return " invited you to a Sneaky Lynk.";
     default:

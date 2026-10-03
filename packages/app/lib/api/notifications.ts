@@ -58,6 +58,8 @@ export interface Notification {
     body?: string;
     summary?: string;
     changes?: string[];
+    /** room_invite: the event the Lynk belongs to (event-lynk-invite). */
+    event_title?: string | null;
   } | null;
 }
 

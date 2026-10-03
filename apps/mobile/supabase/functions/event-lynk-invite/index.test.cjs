@@ -11,7 +11,7 @@ const ts = require('typescript');
 function harness({ blocks = [], failBlocks = false } = {}) {
   let handler;
   const tables = {
-    events: [{ id: 9, host_id: 'host-auth', lynk_room_id: 'room-uuid', status: 'active' }],
+    events: [{ id: 9, title: 'Basement Set', host_id: 'host-auth', lynk_room_id: 'room-uuid', status: 'active' }],
     event_co_organizers: [],
     video_rooms: [{ id: 3, uuid: 'room-uuid', status: 'open' }],
     users: [
@@ -49,6 +49,7 @@ function harness({ blocks = [], failBlocks = false } = {}) {
         eq: (k, v) => { eq[k] = v; return q; },
         in: (k, v) => { inList[k] = v; return q; },
         or: (expr) => { or = expr; return q; },
+        limit: () => q,
         upsert: (v) => { write = v; return q; },
         insert: (v) => { write = v; return q; },
         maybeSingle: async () => ({ data: rows()[0] || null, error: null }),
@@ -57,6 +58,12 @@ function harness({ blocks = [], failBlocks = false } = {}) {
       return q;
     },
   };
+  // The host rule is the real shared module, not a stub.
+  const shared = {};
+  vm.runInNewContext(ts.transpileModule(
+    fs.readFileSync(`${__dirname}/../_shared/event-lynk-host.ts`, 'utf8'),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+  ).outputText, { exports: shared, Error, String });
   const source = ts.transpileModule(
     fs.readFileSync(`${__dirname}/index.ts`, 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
@@ -64,7 +71,8 @@ function harness({ blocks = [], failBlocks = false } = {}) {
   vm.runInNewContext(source, {
     exports: {}, console: { log() {}, warn() {}, error() {} }, Response,
     Deno: { env: { get: () => 'test' }, serve: (fn) => { handler = fn; } },
-    require: (name) => name.includes('supabase-js') ? { createClient: () => client } : {
+    require: (name) => name.includes('supabase-js') ? { createClient: () => client }
+      : name.includes('event-lynk-host') ? shared : {
       verifySession: async () => 'host-auth',
       corsHeaders: () => ({}),
       optionsResponse: () => new Response(null, { status: 204 }),
@@ -108,4 +116,13 @@ test('an auth id with no profile is skipped, not invited', async () => {
   const got = await h.invite(['ghost-auth']);
   assert.equal(h.writes.video_room_invites.length, 0);
   assert.equal(got.body.skipped, 1);
+});
+
+test('the invite row names the event for Activity', async () => {
+  const h = harness();
+  await h.invite(['friend-auth']);
+  const [row] = h.writes.notifications;
+  assert.equal(row.entity_type, 'event');
+  assert.equal(row.entity_id, '9');
+  assert.equal(row.entity_payload.event_title, 'Basement Set');
 });

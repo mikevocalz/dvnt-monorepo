@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
+import { isEventLynkHost } from "../_shared/event-lynk-host.ts";
 const SUPABASE_URL=Deno.env.get("SUPABASE_URL")||""; const SERVICE_KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
 function json(req:Request,b:unknown,s=200){return new Response(JSON.stringify(b),{status:s,headers:{...corsHeaders(req),"Content-Type":"application/json"}})}
 Deno.serve(async(req)=>{
@@ -10,14 +11,12 @@ Deno.serve(async(req)=>{
  const body=await req.json().catch(()=>({})); const eventId=Number(body.event_id);
  const targets:string[]=Array.isArray(body.user_ids)?[...new Set<string>(body.user_ids.map(String))].slice(0,50):[];
  if(!Number.isInteger(eventId)||!targets.length) return json(req,{ok:false,error:"event_id and user_ids required"},400);
- const {data:event}=await db.from("events").select("id,host_id,lynk_room_id,status").eq("id",eventId).maybeSingle();
+ const {data:event,error:eventError}=await db.from("events").select("id,title,host_id,lynk_room_id,status").eq("id",eventId).maybeSingle();
+ if(eventError) return json(req,{ok:false,error:"Could not load event"},500);
  if(!event?.lynk_room_id) return json(req,{ok:false,error:"Event Lynk not found"},404);
- let allowed=String(event.host_id)===String(actor);
- if(!allowed){
-   const {data:co}=await db.from("event_co_organizers").select("id").eq("event_id",eventId)
-     .eq("user_id",actor).eq("accepted",true).in("role",["admin","editor"]).maybeSingle();
-   allowed=!!co;
- }
+ let allowed=false;
+ try{ allowed=await isEventLynkHost(db,event,String(actor)); }
+ catch{ return json(req,{ok:false,error:"Could not verify host"},500); }
  if(!allowed) return json(req,{ok:false,error:"Only host/cohost can invite"},403);
  const {data:room}=await db.from("video_rooms").select("id,status").eq("uuid",event.lynk_room_id).maybeSingle();
  if(!room||room.status!=="open") return json(req,{ok:false,error:"Room is not live"},409);
@@ -45,7 +44,9 @@ Deno.serve(async(req)=>{
    if(inviteError) return json(req,{ok:false,error:"Could not save invites"},500);
    const {error:notifyError}=await db.from("notifications").insert(valid.map((id:string)=>({
      recipient_id:intByAuth.get(id),actor_id:actorInt,type:"room_invite",entity_type:"event",entity_id:String(eventId),
-     entity_payload:{url:`/feed/sneaky-lynk/room/${event.lynk_room_id}`,event_id:eventId},
+     // event_title lets Activity name the event even when the batched events
+     // lookup misses the row; entity_type/entity_id already drive that lookup.
+     entity_payload:{url:`/feed/sneaky-lynk/room/${event.lynk_room_id}`,event_id:eventId,event_title:event.title??null},
    })));
    // The invites are saved, which is what admits the member to the room.
    // A missing activity row is reported rather than failing the request.
