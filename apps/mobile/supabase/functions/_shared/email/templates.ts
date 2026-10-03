@@ -560,6 +560,43 @@ export function welcome(name?: string | null, opts: WelcomeOpts = {}): EmailCont
 }
 
 /**
+ * promoterInvite — sent when a host adds a DVNT member as an event promoter
+ * (T07). Same destination as the push: the promoter dashboard, where payout
+ * setup is the first thing a new promoter does. The code sits in a plain card
+ * rather than codeBlock, whose 40px tracked type only fits short numeric codes.
+ */
+export function promoterInvite(opts: {
+  eventId: number;
+  eventTitle?: string | null;
+  hostHandle?: string | null;
+  code: string;
+}): EmailContent {
+  const event = opts.eventTitle?.trim() || "an event";
+  const host = opts.hostHandle?.trim() || "An event host";
+  const url = `${SITE_URL}/feed/events/${opts.eventId}/promoter`;
+  return {
+    subject: `You're a promoter for ${event}`,
+    html: brandEmailWrapper(
+      [
+        heading("You're a promoter"),
+        paragraph(`${esc(host)} added you as a promoter for <strong style="color:${COLORS.text}">${esc(event)}</strong>.`),
+        card(
+          paragraph(
+            `Your code: <strong style="font-family:${FONTS.mono};color:${COLORS.cyan}">${esc(opts.code)}</strong>`,
+            { size: 18, color: COLORS.text, margin: "0" },
+          ),
+        ),
+        paragraph("Share it with your people. Set up payouts on your promoter dashboard so your earnings can reach you.", {
+          size: 15,
+        }),
+        button(url, "Open promoter dashboard", { gradient: "brand" }),
+      ].join(""),
+      { preheader: `Your promoter code for ${event}` },
+    ),
+  };
+}
+
+/**
  * magicLinkEmail — one-tap sign-in link (B4). Also powers the guided finish
  * flow for stalled accounts: the link resumes exactly where they left off.
  */

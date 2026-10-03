@@ -38,6 +38,27 @@ export interface EventPromoter {
   createdAt: string;
 }
 
+/** How the add went for the invite email; see manage-promoters. */
+export type PromoterInviteEmailStatus =
+  | "sent"
+  | "no_account"
+  | "no_email"
+  | "not_configured"
+  | "failed";
+
+export interface PromoterLibraryEntry {
+  id: string;
+  promoterAuthId: string;
+  username: string | null;
+  displayName: string;
+  avatarUrl: string | null;
+  preferredCode: string | null;
+  customerDiscountBps: number;
+  promoterCommissionBps: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PromoterLeaderboardRow {
   promoterId: string;
   displayName: string;
@@ -83,7 +104,10 @@ export const promotersApi = {
     customerDiscountBps?: number;
     promoterCommissionBps?: number;
     code?: string;
-  }): Promise<EventPromoter> {
+    saveToLibrary?: boolean;
+    /** Name-only promoters only: where to send the invite. Not stored. */
+    inviteEmail?: string;
+  }): Promise<EventPromoter & { inviteEmail: PromoterInviteEmailStatus | null }> {
     const customerDiscountBps = params.customerDiscountBps ?? params.revShareBps;
     const promoterCommissionBps = params.promoterCommissionBps ??
       params.revShareBps;
@@ -97,6 +121,7 @@ export const promotersApi = {
     const { data, error } = await invokeEdge<{
       ok: boolean;
       promoter: EventPromoter;
+      inviteEmail?: PromoterInviteEmailStatus;
       error?: string;
     }>("manage-promoters", {
       action: "add",
@@ -106,12 +131,18 @@ export const promotersApi = {
       customer_discount_bps: customerDiscountBps,
       promoter_commission_bps: promoterCommissionBps,
       ...(params.code ? { code: params.code } : {}),
+      ...(!params.username && params.inviteEmail?.trim()
+        ? { invite_email: params.inviteEmail.trim() }
+        : {}),
+      save_to_library: params.saveToLibrary ?? true,
     });
-    if (error) throw new Error(error.message);
+    // Keep the HTTP status so the form can put a 409 code conflict under the
+    // code field instead of in a toast.
+    if (error) throw Object.assign(new Error(error.message), { status: error.status });
     if (!data?.ok || !data.promoter) {
       throw new Error(data?.error || "Could not add promoter");
     }
-    return data.promoter;
+    return { ...data.promoter, inviteEmail: data.inviteEmail ?? null };
   },
 
   async update(params: {
@@ -154,6 +185,58 @@ export const promotersApi = {
     );
     if (error) throw new Error(error.message);
     if (!data?.ok) throw new Error(data?.error || "Could not remove promoter");
+  },
+
+  async library(): Promise<PromoterLibraryEntry[]> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      entries: PromoterLibraryEntry[];
+      error?: string;
+    }>("manage-promoters", { action: "library-list" });
+    if (error) throw new Error(error.message);
+    if (!data?.ok) throw new Error(data?.error || "Could not load promoter library");
+    return data.entries ?? [];
+  },
+
+  async saveLibrary(params: {
+    promoterAuthId?: string;
+    username?: string;
+    displayName?: string;
+    preferredCode?: string | null;
+    customerDiscountBps: number;
+    promoterCommissionBps: number;
+  }): Promise<string> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      id: string;
+      error?: string;
+    }>("manage-promoters", {
+      action: "library-save",
+      ...(params.promoterAuthId
+        ? { promoter_auth_id: params.promoterAuthId }
+        : {}),
+      ...(params.username ? { username: params.username } : {}),
+      ...(params.displayName ? { display_name: params.displayName } : {}),
+      preferred_code: params.preferredCode ?? null,
+      customer_discount_bps: params.customerDiscountBps,
+      promoter_commission_bps: params.promoterCommissionBps,
+    });
+    if (error) throw new Error(error.message);
+    if (!data?.ok || !data.id) {
+      throw new Error(data?.error || "Could not save promoter");
+    }
+    return data.id;
+  },
+
+  async removeLibrary(libraryId: string): Promise<void> {
+    const { data, error } = await invokeEdge<{ ok: boolean; error?: string }>(
+      "manage-promoters",
+      { action: "library-remove", library_id: libraryId },
+    );
+    if (error) throw new Error(error.message);
+    if (!data?.ok) {
+      throw new Error(data?.error || "Could not remove saved promoter");
+    }
   },
 
   /** Ranked by net ledger earnings — single ledger query server-side. */

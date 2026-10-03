@@ -27,6 +27,10 @@ export interface PromoterCodeResult {
   commission_cents: number;
 }
 
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 export async function validateAndApplyPromoterCode(
   supabase: any,
   eventId: number,
@@ -39,12 +43,15 @@ export async function validateAndApplyPromoterCode(
   }
 
   const normalizedCode = code.trim().toUpperCase();
+  // ilike is a pattern match: escape % _ and \ so a code like TRE_1 only
+  // matches itself, not TREX1. Matching stays case-insensitive.
+  const codePattern = escapeLikePattern(normalizedCode);
 
   const { data: promoter, error } = await supabase
     .from("event_promoters")
     .select("id, code, customer_discount_bps, promoter_commission_bps, status")
     .eq("event_id", eventId)
-    .ilike("code", normalizedCode)
+    .ilike("code", codePattern)
     .eq("status", "active")
     .maybeSingle();
 

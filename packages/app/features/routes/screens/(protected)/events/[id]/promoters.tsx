@@ -22,6 +22,7 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -32,6 +33,7 @@ import {
   Megaphone,
   Pause,
   Play,
+  Share2,
   UserPlus,
   X,
 } from "lucide-react-native";
@@ -42,6 +44,19 @@ import {
   type EventPromoter,
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
+import { useEvent } from "@dvnt/app/lib/hooks/use-events";
+import { shareUrls } from "@dvnt/app/lib/deep-linking/share-link";
+import { shareMessage } from "@dvnt/app/lib/sharing";
+import {
+  buildPromoterShareMessage,
+  promoterSmsHref,
+} from "@dvnt/app/lib/events/promoter-share";
+import {
+  normalizePromoterCodeInput,
+  promoterAddedDescription,
+  promoterCodeFieldError,
+  promoterInviteEmailFieldError,
+} from "@dvnt/app/lib/events/promoter-code";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
@@ -65,14 +80,24 @@ interface PromotersUIState {
   addMode: "linked" | "external";
   usernameInput: string;
   nameInput: string;
+  /** External promoters only: where the invite goes. Sent once, not stored. */
+  emailInput: string;
+  emailError: string | null;
   customerDiscountInput: string;
   promoterCommissionInput: string;
+  codeInput: string;
+  /** Server refusal about the code (409 duplicate, 400 format), shown inline. */
+  codeError: string | null;
   toggleAdd: () => void;
   setAddMode: (m: "linked" | "external") => void;
   setUsernameInput: (v: string) => void;
   setNameInput: (v: string) => void;
+  setEmailInput: (v: string) => void;
+  setEmailError: (v: string | null) => void;
   setCustomerDiscountInput: (v: string) => void;
   setPromoterCommissionInput: (v: string) => void;
+  setCodeInput: (v: string) => void;
+  setCodeError: (v: string | null) => void;
   resetAdd: () => void;
 }
 
@@ -81,22 +106,35 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   addMode: "linked",
   usernameInput: "",
   nameInput: "",
+  emailInput: "",
+  emailError: null,
   customerDiscountInput: "10",
   promoterCommissionInput: "10",
+  codeInput: "",
+  codeError: null,
   toggleAdd: () => set((s) => ({ addOpen: !s.addOpen })),
   setAddMode: (m) => set({ addMode: m }),
   setUsernameInput: (v) => set({ usernameInput: v }),
   setNameInput: (v) => set({ nameInput: v }),
+  setEmailInput: (v) => set({ emailInput: v, emailError: null }),
+  setEmailError: (v) => set({ emailError: v }),
   setCustomerDiscountInput: (v) => set({ customerDiscountInput: v }),
   setPromoterCommissionInput: (v) => set({ promoterCommissionInput: v }),
+  // Case is kept as typed; the server matches codes case-insensitively.
+  setCodeInput: (v) => set({ codeInput: normalizePromoterCodeInput(v), codeError: null }),
+  setCodeError: (v) => set({ codeError: v }),
   resetAdd: () =>
     set({
       addOpen: false,
       addMode: "linked",
       usernameInput: "",
       nameInput: "",
+      emailInput: "",
+      emailError: null,
       customerDiscountInput: "10",
       promoterCommissionInput: "10",
+      codeInput: "",
+      codeError: null,
     }),
 }));
 
@@ -111,6 +149,10 @@ export default function EventPromotersScreen() {
   const addMode = usePromotersUIStore((s) => s.addMode);
   const usernameInput = usePromotersUIStore((s) => s.usernameInput);
   const nameInput = usePromotersUIStore((s) => s.nameInput);
+  const emailInput = usePromotersUIStore((s) => s.emailInput);
+  const emailError = usePromotersUIStore((s) => s.emailError);
+  const setEmailInput = usePromotersUIStore((s) => s.setEmailInput);
+  const setEmailError = usePromotersUIStore((s) => s.setEmailError);
   const customerDiscountInput = usePromotersUIStore((s) => s.customerDiscountInput);
   const promoterCommissionInput = usePromotersUIStore((s) => s.promoterCommissionInput);
   const toggleAdd = usePromotersUIStore((s) => s.toggleAdd);
@@ -119,6 +161,10 @@ export default function EventPromotersScreen() {
   const setNameInput = usePromotersUIStore((s) => s.setNameInput);
   const setCustomerDiscountInput = usePromotersUIStore((s) => s.setCustomerDiscountInput);
   const setPromoterCommissionInput = usePromotersUIStore((s) => s.setPromoterCommissionInput);
+  const codeInput = usePromotersUIStore((s) => s.codeInput);
+  const codeError = usePromotersUIStore((s) => s.codeError);
+  const setCodeInput = usePromotersUIStore((s) => s.setCodeInput);
+  const setCodeError = usePromotersUIStore((s) => s.setCodeError);
   const resetAdd = usePromotersUIStore((s) => s.resetAdd);
 
   const promotersQuery = useQuery({
@@ -137,17 +183,29 @@ export default function EventPromotersScreen() {
       displayName?: string;
       customerDiscountBps: number;
       promoterCommissionBps: number;
+      code?: string;
+      inviteEmail?: string;
     }) => promotersApi.add({ eventId, ...input }),
     onSuccess: (promoter) => {
       showToast(
         "success",
         "Promoter added",
-        `Code ${promoter.code} — copy their link to share.`,
+        promoterAddedDescription(promoter.code, promoter.inviteEmail),
       );
       resetAdd();
       invalidate();
     },
     onError: (err: any) => {
+      const fieldError = promoterCodeFieldError(err);
+      if (fieldError) {
+        setCodeError(fieldError);
+        return;
+      }
+      const emailFieldError = promoterInviteEmailFieldError(err);
+      if (emailFieldError) {
+        setEmailError(emailFieldError);
+        return;
+      }
       showToast("error", "Couldn't add promoter", err?.message || "Try again.");
     },
   });
@@ -179,6 +237,32 @@ export default function EventPromotersScreen() {
   const callerRole = promotersQuery.data?.callerRole || null;
   const canManage = callerRole === "owner" || callerRole === "admin";
 
+  const eventQuery = useEvent(eventId > 0 ? String(eventId) : "");
+
+  // T08: the share sheet (Messages included). If it can't open, go to the SMS
+  // composer, then to the clipboard.
+  const shareCode = async (promoter: EventPromoter) => {
+    const content = buildPromoterShareMessage({
+      code: promoter.code,
+      eventUrl: shareUrls.event(String(eventId)),
+      eventTitle: eventQuery.data?.title,
+      eventDescription: eventQuery.data?.description,
+    });
+    const outcome = await shareMessage(content);
+    if (outcome !== "unsupported") return;
+    const sms = promoterSmsHref(content.message);
+    // openURL directly: canOpenURL needs sms in LSApplicationQueriesSchemes on
+    // iOS, and openURL rejects anyway when nothing handles the scheme.
+    try {
+      await Linking.openURL(sms);
+      return;
+    } catch {
+      // fall through to copy
+    }
+    await Clipboard.setStringAsync(content.message);
+    showToast("success", "Message copied", "Paste it into any chat.");
+  };
+
   const copyLink = async (promoter: EventPromoter) => {
     const link = promoterShareLink(eventId, promoter.code);
     await Clipboard.setStringAsync(link);
@@ -202,6 +286,7 @@ export default function EventPromotersScreen() {
         username: u,
         customerDiscountBps,
         promoterCommissionBps,
+        ...(codeInput.trim() ? { code: codeInput.trim() } : {}),
       });
     } else {
       const n = nameInput.trim();
@@ -213,6 +298,8 @@ export default function EventPromotersScreen() {
         displayName: n,
         customerDiscountBps,
         promoterCommissionBps,
+        ...(codeInput.trim() ? { code: codeInput.trim() } : {}),
+        ...(emailInput.trim() ? { inviteEmail: emailInput.trim() } : {}),
       });
     }
   };
@@ -280,15 +367,71 @@ export default function EventPromotersScreen() {
               />
             </View>
           ) : (
-            <View style={styles.inputRow}>
-              <TextInput
-                value={nameInput}
-                onChangeText={setNameInput}
-                placeholder="Promoter name (no DVNT account)"
-                placeholderTextColor="rgba(255,255,255,0.35)"
-                style={styles.input}
-              />
-            </View>
+            <>
+              <View style={styles.inputRow}>
+                <TextInput
+                  value={nameInput}
+                  onChangeText={setNameInput}
+                  placeholder="Promoter name (no DVNT account)"
+                  placeholderTextColor="rgba(255,255,255,0.35)"
+                  style={styles.input}
+                />
+              </View>
+              <Text style={styles.fieldLabel}>EMAIL (OPTIONAL)</Text>
+              <View style={[styles.inputRow, emailError ? styles.inputRowError : null]}>
+                <TextInput
+                  value={emailInput}
+                  onChangeText={setEmailInput}
+                  placeholder="name@example.com"
+                  placeholderTextColor="rgba(255,255,255,0.35)"
+                  keyboardType="email-address"
+                  textContentType="emailAddress"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={254}
+                  accessibilityLabel="Promoter email"
+                  accessibilityHint="We email their code and dashboard link. Not saved."
+                  style={styles.input}
+                />
+              </View>
+              {emailError ? (
+                <Text style={styles.fieldError} accessibilityRole="alert">
+                  {emailError}
+                </Text>
+              ) : (
+                <Text style={styles.hint}>
+                  We email their code and dashboard link once. The address
+                  isn't saved.
+                </Text>
+              )}
+            </>
+          )}
+
+          <Text style={styles.fieldLabel}>CUSTOM PROMOTER CODE (OPTIONAL)</Text>
+          <View style={[styles.inputRow, codeError ? styles.inputRowError : null]}>
+            <TextInput
+              value={codeInput}
+              onChangeText={setCodeInput}
+              placeholder="MikeVIP"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={32}
+              accessibilityLabel="Custom promoter code"
+              accessibilityHint="Leave blank to generate one"
+              style={[styles.input, styles.mono]}
+            />
+          </View>
+          {codeError ? (
+            <Text style={styles.fieldError} accessibilityRole="alert">
+              {codeError}
+            </Text>
+          ) : (
+            <Text style={styles.hint}>
+              Shown as you type it. Buyers can enter it in any case. Leave
+              blank to generate one.
+            </Text>
           )}
 
           <Text style={styles.fieldLabel}>
@@ -417,6 +560,15 @@ export default function EventPromotersScreen() {
                     >
                       <Link2 size={14} color="#3FDCFF" />
                     </Pressable>
+                    <Pressable
+                      onPress={() => void shareCode(p)}
+                      hitSlop={8}
+                      style={styles.actionBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Share ${p.displayName}'s code`}
+                    >
+                      <Share2 size={14} color={ACCENT_TEXT} />
+                    </Pressable>
                     {canManage && (
                       <>
                         <Pressable
@@ -519,6 +671,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "transparent",
   },
   inputPrefix: {
     color: "rgba(255,255,255,0.5)",
@@ -542,6 +696,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     letterSpacing: 0.3,
+  },
+  inputRowError: {
+    borderColor: "#ef4444",
+  },
+  fieldError: {
+    color: "#f87171",
+    fontSize: 12,
+    marginTop: 6,
   },
   hint: {
     color: "rgba(255,255,255,0.35)",

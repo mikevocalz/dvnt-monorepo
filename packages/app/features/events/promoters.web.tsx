@@ -30,9 +30,11 @@ import {
   ArrowLeft,
   Link2,
   Megaphone,
+  MessageSquare,
   Pause,
   Pencil,
   Play,
+  Share2,
   UserPlus,
   X,
 } from "lucide-react";
@@ -42,6 +44,19 @@ import {
   type EventPromoter,
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
+import { useEvent } from "@dvnt/app/lib/hooks/use-events";
+import { shareUrls } from "@dvnt/app/lib/deep-linking/share-link";
+import { shareMessage } from "@dvnt/app/lib/sharing";
+import {
+  buildPromoterShareMessage,
+  promoterSmsHref,
+} from "@dvnt/app/lib/events/promoter-share";
+import {
+  normalizePromoterCodeInput,
+  promoterAddedDescription,
+  promoterCodeFieldError,
+  promoterInviteEmailFieldError,
+} from "@dvnt/app/lib/events/promoter-code";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { toast } from "sonner";
 import { UserPicker } from "./ui/user-picker.web";
@@ -66,8 +81,16 @@ interface PromotersUIState {
   addOpen: boolean;
   pickerQuery: string;
   selectedUser: { id: string; username: string; name: string; avatar: string } | null;
+  /** No member selected: add by name, optionally with an invite address. */
+  nameInput: string;
+  /** Sent once with the invite, never stored. */
+  emailInput: string;
+  emailError: string | null;
   customerDiscountInput: string;
   promoterCommissionInput: string;
+  codeInput: string;
+  /** Server refusal about the code (409 duplicate, 400 format), shown inline. */
+  codeError: string | null;
   editTarget: EventPromoter | null;
   editCustomerDiscountInput: string;
   editPromoterCommissionInput: string;
@@ -76,8 +99,13 @@ interface PromotersUIState {
   closeAdd: () => void;
   setPickerQuery: (v: string) => void;
   setSelectedUser: (u: PromotersUIState["selectedUser"]) => void;
+  setNameInput: (v: string) => void;
+  setEmailInput: (v: string) => void;
+  setEmailError: (v: string | null) => void;
   setCustomerDiscountInput: (v: string) => void;
   setPromoterCommissionInput: (v: string) => void;
+  setCodeInput: (v: string) => void;
+  setCodeError: (v: string | null) => void;
   setEditTarget: (p: EventPromoter | null) => void;
   setEditCustomerDiscountInput: (v: string) => void;
   setEditPromoterCommissionInput: (v: string) => void;
@@ -89,8 +117,13 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   addOpen: false,
   pickerQuery: "",
   selectedUser: null,
+  nameInput: "",
+  emailInput: "",
+  emailError: null,
   customerDiscountInput: "10",
   promoterCommissionInput: "10",
+  codeInput: "",
+  codeError: null,
   editTarget: null,
   editCustomerDiscountInput: "",
   editPromoterCommissionInput: "",
@@ -99,8 +132,14 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   closeAdd: () => set({ addOpen: false }),
   setPickerQuery: (v) => set({ pickerQuery: v }),
   setSelectedUser: (u) => set({ selectedUser: u }),
+  setNameInput: (v) => set({ nameInput: v }),
+  setEmailInput: (v) => set({ emailInput: v, emailError: null }),
+  setEmailError: (v) => set({ emailError: v }),
   setCustomerDiscountInput: (v) => set({ customerDiscountInput: v }),
   setPromoterCommissionInput: (v) => set({ promoterCommissionInput: v }),
+  // Case is kept as typed; the server matches codes case-insensitively.
+  setCodeInput: (v) => set({ codeInput: normalizePromoterCodeInput(v), codeError: null }),
+  setCodeError: (v) => set({ codeError: v }),
   setEditTarget: (p) =>
     set({
       editTarget: p,
@@ -116,8 +155,13 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
       addOpen: false,
       pickerQuery: "",
       selectedUser: null,
+      nameInput: "",
+      emailInput: "",
+      emailError: null,
       customerDiscountInput: "10",
       promoterCommissionInput: "10",
+      codeInput: "",
+      codeError: null,
     }),
 }));
 
@@ -125,6 +169,8 @@ function PromoterRow({
   promoter,
   canManage,
   onCopyLink,
+  onShare,
+  smsHref,
   onEdit,
   onTogglePause,
   onRemove,
@@ -132,6 +178,8 @@ function PromoterRow({
   promoter: EventPromoter;
   canManage: boolean;
   onCopyLink: () => void;
+  onShare: () => void;
+  smsHref: string;
   onEdit: () => void;
   onTogglePause: () => void;
   onRemove: () => void;
@@ -203,6 +251,23 @@ function PromoterRow({
           >
             <Link2 size={14} color="#3FDCFF" />
           </button>
+          <button
+            type="button"
+            onClick={onShare}
+            aria-label={`Share ${name}'s code`}
+            title="Share code"
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/6 active:bg-white/10"
+          >
+            <Share2 size={14} color="#C084FC" />
+          </button>
+          <a
+            href={smsHref}
+            aria-label={`Text ${name}'s code`}
+            title="Text code"
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/6 active:bg-white/10"
+          >
+            <MessageSquare size={14} color="rgba(255,255,255,0.7)" />
+          </a>
           {canManage ? (
             <>
               <button
@@ -257,8 +322,17 @@ export function EventPromotersScreen() {
   const addOpen = usePromotersUIStore((s) => s.addOpen);
   const pickerQuery = usePromotersUIStore((s) => s.pickerQuery);
   const selectedUser = usePromotersUIStore((s) => s.selectedUser);
+  const nameInput = usePromotersUIStore((s) => s.nameInput);
+  const emailInput = usePromotersUIStore((s) => s.emailInput);
+  const emailError = usePromotersUIStore((s) => s.emailError);
+  const setNameInput = usePromotersUIStore((s) => s.setNameInput);
+  const setEmailInput = usePromotersUIStore((s) => s.setEmailInput);
+  const setEmailError = usePromotersUIStore((s) => s.setEmailError);
   const customerDiscountInput = usePromotersUIStore((s) => s.customerDiscountInput);
   const promoterCommissionInput = usePromotersUIStore((s) => s.promoterCommissionInput);
+  const codeInput = usePromotersUIStore((s) => s.codeInput);
+  const codeError = usePromotersUIStore((s) => s.codeError);
+  const setCodeError = usePromotersUIStore((s) => s.setCodeError);
   const editTarget = usePromotersUIStore((s) => s.editTarget);
   const editCustomerDiscountInput = usePromotersUIStore((s) => s.editCustomerDiscountInput);
   const editPromoterCommissionInput = usePromotersUIStore((s) => s.editPromoterCommissionInput);
@@ -269,6 +343,7 @@ export function EventPromotersScreen() {
   const setSelectedUser = usePromotersUIStore((s) => s.setSelectedUser);
   const setCustomerDiscountInput = usePromotersUIStore((s) => s.setCustomerDiscountInput);
   const setPromoterCommissionInput = usePromotersUIStore((s) => s.setPromoterCommissionInput);
+  const setCodeInput = usePromotersUIStore((s) => s.setCodeInput);
   const setEditTarget = usePromotersUIStore((s) => s.setEditTarget);
   const setEditCustomerDiscountInput = usePromotersUIStore(
     (s) => s.setEditCustomerDiscountInput,
@@ -278,6 +353,12 @@ export function EventPromotersScreen() {
   );
   const setRemoveTarget = usePromotersUIStore((s) => s.setRemoveTarget);
   const resetAdd = usePromotersUIStore((s) => s.resetAdd);
+
+  const libraryQuery = useQuery({
+    queryKey: ["promoter-library"],
+    queryFn: () => promotersApi.library(),
+    staleTime: 30_000,
+  });
 
   const promotersQuery = useQuery({
     queryKey: ["event-promoters", eventId],
@@ -295,18 +376,31 @@ export function EventPromotersScreen() {
       displayName?: string;
       customerDiscountBps: number;
       promoterCommissionBps: number;
-    }) => promotersApi.add({ eventId, ...input }),
+      code?: string;
+      inviteEmail?: string;
+    }) => promotersApi.add({ eventId, ...input, saveToLibrary: true }),
     onSuccess: (promoter) => {
       // Secondary confirmation — the event_promoters row + the
       // notification are the record; the toast is the "done" flash.
       toast.success(`${promoter.displayName} added as promoter`, {
-        description: `Code ${promoter.code} — they've been notified.`,
+        description: promoterAddedDescription(promoter.code, promoter.inviteEmail),
       });
       resetAdd();
       invalidate();
+      queryClient.invalidateQueries({ queryKey: ["promoter-library"] });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (err: any) => {
+      const fieldError = promoterCodeFieldError(err);
+      if (fieldError) {
+        setCodeError(fieldError);
+        return;
+      }
+      const emailFieldError = promoterInviteEmailFieldError(err);
+      if (emailFieldError) {
+        setEmailError(emailFieldError);
+        return;
+      }
       showToast("error", "Couldn't add promoter", err?.message || "Try again.");
     },
   });
@@ -368,6 +462,33 @@ export function EventPromotersScreen() {
     overscan: 8,
   });
 
+  const eventQuery = useEvent(eventId > 0 ? String(eventId) : "");
+  const shareContentFor = (promoter: EventPromoter) =>
+    buildPromoterShareMessage({
+      code: promoter.code,
+      eventUrl: shareUrls.event(String(eventId)),
+      eventTitle: eventQuery.data?.title,
+      eventDescription: eventQuery.data?.description,
+    });
+
+  // T08: share sheet first; where the browser has none, copy the whole message.
+  // The Text button beside it opens the SMS composer with the same text.
+  const shareCode = async (promoter: EventPromoter) => {
+    const content = shareContentFor(promoter);
+    const outcome = await shareMessage(content);
+    if (outcome !== "unsupported") return;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(content.message);
+        showToast("success", "Message copied", "Paste it anywhere, or use Text to send it as an SMS.");
+        return;
+      } catch {
+        // fall through
+      }
+    }
+    showToast("error", "Couldn't share", content.message);
+  };
+
   const copyLink = (promoter: EventPromoter) => {
     const link = promoterShareLink(eventId, promoter.code);
     if (typeof navigator !== "undefined" && navigator.clipboard) {
@@ -389,14 +510,27 @@ export function EventPromotersScreen() {
       toast.error("Enter a percent from 0 to 100.");
       return;
     }
-    if (!selectedUser) {
-      toast.error("Pick a person first");
+    const code = codeInput.trim() ? { code: codeInput.trim() } : {};
+    if (selectedUser) {
+      addMutation.mutate({
+        username: selectedUser.username,
+        customerDiscountBps,
+        promoterCommissionBps,
+        ...code,
+      });
+      return;
+    }
+    const name = nameInput.trim();
+    if (!name) {
+      toast.error("Pick a member or enter a name");
       return;
     }
     addMutation.mutate({
-      username: selectedUser.username,
+      displayName: name,
       customerDiscountBps,
       promoterCommissionBps,
+      ...code,
+      ...(emailInput.trim() ? { inviteEmail: emailInput.trim() } : {}),
     });
   };
 
@@ -506,6 +640,8 @@ export function EventPromotersScreen() {
                       promoter={promoter}
                       canManage={canManage}
                       onCopyLink={() => copyLink(promoter)}
+                      onShare={() => void shareCode(promoter)}
+                      smsHref={promoterSmsHref(shareContentFor(promoter).message)}
                       onEdit={() => setEditTarget(promoter)}
                       onTogglePause={() =>
                         updateMutation.mutate({
@@ -541,7 +677,7 @@ export function EventPromotersScreen() {
               Cancel
             </button>
             <button
-              disabled={addMutation.isPending || !selectedUser}
+              disabled={addMutation.isPending || (!selectedUser && !nameInput.trim())}
               onClick={onAddSubmit}
               className="flex-1 rounded-xl py-3 font-semibold text-white disabled:opacity-60"
               style={{ backgroundColor: ACCENT }}
@@ -551,6 +687,43 @@ export function EventPromotersScreen() {
           </>
         }
       >
+        {(libraryQuery.data?.length ?? 0) > 0 ? (
+          <div className="mb-4">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-white/40">
+              Saved promoters
+            </p>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {libraryQuery.data!.map((saved) => (
+                <button
+                  key={saved.id}
+                  type="button"
+                  disabled={addMutation.isPending || !saved.username}
+                  onClick={() => {
+                    if (!saved.username) return;
+                    setSelectedUser({
+                      id: saved.promoterAuthId,
+                      username: saved.username,
+                      name: saved.displayName,
+                      avatar: saved.avatarUrl || "",
+                    });
+                    setCustomerDiscountInput(String(saved.customerDiscountBps / 100));
+                    setPromoterCommissionInput(String(saved.promoterCommissionBps / 100));
+                    setCodeInput(saved.preferredCode || "");
+                  }}
+                  className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left disabled:opacity-40"
+                >
+                  <span className="block text-sm font-semibold text-white">
+                    {saved.displayName}
+                  </span>
+                  <span className="block text-[11px] text-white/45">
+                    {saved.username ? `@${saved.username}` : "Unavailable"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <UserPicker
           query={pickerQuery}
           onQueryChange={setPickerQuery}
@@ -564,6 +737,77 @@ export function EventPromotersScreen() {
           They&apos;re added to the event right away and notified — no
           accept step.
         </p>
+
+        {!selectedUser ? (
+          <div className="mt-4 border-t border-white/8 pt-4">
+            <label className="block">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
+                Not on DVNT? Add them by name
+              </span>
+              <input
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                placeholder="Promoter name"
+                maxLength={80}
+                disabled={addMutation.isPending}
+                className="mt-1.5 w-full rounded-xl bg-white/6 px-3 py-2.5 text-[15px] text-white outline-none placeholder:text-white/30 disabled:opacity-50"
+              />
+            </label>
+            <label className="mt-3 block">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
+                Email (optional)
+              </span>
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="name@example.com"
+                autoComplete="email"
+                maxLength={254}
+                disabled={addMutation.isPending}
+                aria-invalid={emailError ? true : undefined}
+                aria-describedby="promoter-email-hint"
+                className={`mt-1.5 w-full rounded-xl bg-white/6 px-3 py-2.5 text-[15px] text-white outline-none placeholder:text-white/30 disabled:opacity-50 ${emailError ? "ring-1 ring-red-500" : ""}`}
+              />
+              {emailError ? (
+                <p id="promoter-email-hint" role="alert" className="mt-1 text-[11px] text-red-400">
+                  {emailError}
+                </p>
+              ) : (
+                <p id="promoter-email-hint" className="mt-1 text-[11px] text-white/35">
+                  We email their code and dashboard link once. The address isn&apos;t saved.
+                </p>
+              )}
+            </label>
+          </div>
+        ) : null}
+
+        <label className="mt-4 block">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
+            Custom promoter code (optional)
+          </span>
+          <input
+            value={codeInput}
+            onChange={(e) => setCodeInput(e.target.value)}
+            placeholder="MikeVIP"
+            disabled={addMutation.isPending}
+            aria-invalid={codeError ? true : undefined}
+            aria-describedby="promoter-code-hint"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            className={`mt-1.5 w-full rounded-xl bg-white/6 px-3 py-2.5 font-mono text-[15px] text-white outline-none placeholder:text-white/30 disabled:opacity-50 ${codeError ? "ring-1 ring-red-500" : ""}`}
+          />
+          {codeError ? (
+            <p id="promoter-code-hint" role="alert" className="mt-1 text-[11px] text-red-400">
+              {codeError}
+            </p>
+          ) : (
+            <p id="promoter-code-hint" className="mt-1 text-[11px] text-white/35">
+              Shown as you type it. Buyers can enter it in any case. Leave blank to generate one.
+            </p>
+          )}
+        </label>
 
         <label className="mt-4 block">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
