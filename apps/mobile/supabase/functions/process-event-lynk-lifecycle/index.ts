@@ -3,8 +3,12 @@
  *
  * Cron sweep (every 5 min via cron_event_lynk_lifecycle_sweep, which sends
  * x-cron-secret). For every event that owns a Lynk room it syncs the
- * event_lynk_lifecycle row, opens a scheduled room once the event starts,
- * and ends the room once the event ends or is cancelled.
+ * event_lynk_lifecycle row and ends the room once the event ends or is
+ * cancelled.
+ *
+ * It never opens a room. A room goes live only when a host starts it
+ * (event-lynk-room, action "start"), and sync_event_lynk_lifecycle keeps a
+ * host-started row live until the event ends.
  *
  * Auth: header `x-cron-secret: <CRON_SECRET>`, the same Vault-backed
  * dispatcher shape as event-reminders. Fails closed when CRON_SECRET is unset.
@@ -100,18 +104,6 @@ Deno.serve(async (req: Request) => {
         .select("id")
         .maybeSingle();
       if (endError) fail(e.id, "end room", endError);
-      else if (r) changed++;
-    } else if (now >= start) {
-      // A pre-created event room becomes eligible to appear live at start.
-      // Actual isLive still requires fresh host presence.
-      const { data: r, error: openError } = await s
-        .from("video_rooms")
-        .update({ status: "open" })
-        .eq("uuid", e.lynk_room_id)
-        .eq("status", "scheduled")
-        .select("id")
-        .maybeSingle();
-      if (openError) fail(e.id, "open room", openError);
       else if (r) changed++;
     }
   }

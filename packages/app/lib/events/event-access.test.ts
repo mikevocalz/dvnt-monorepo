@@ -20,17 +20,21 @@ function reason(result: ReturnType<typeof decideEventRoomAccess>) {
 test("a room invite cannot replace a paid-event admission ticket", () => {
   assert.equal(reason(decideEventRoomAccess(event, { ...noAccess, invited: true }, room, start)), "event_ticket_required");
 });
-test("ticket holders wait until the scheduled instant", () => {
-  assert.equal(reason(decideEventRoomAccess(event, { ...noAccess, ticket: true }, room, start - 1)), "event_not_started");
-  assert.equal(reason(decideEventRoomAccess(event, { ...noAccess, ticket: true }, room, start)), "allowed");
+test("ticket holders wait for the host, not the clock", () => {
+  const ticket = { ...noAccess, ticket: true };
+  assert.equal(reason(decideEventRoomAccess(event, ticket, room, start - 1)), "waiting_for_host");
+  assert.equal(reason(decideEventRoomAccess(event, ticket, room, start + 60_000)), "waiting_for_host");
+  assert.equal(reason(decideEventRoomAccess(event, ticket, room, start, true)), "allowed");
+  // A host may start early; guests then get in before start_date.
+  assert.equal(reason(decideEventRoomAccess(event, ticket, room, start - 600_000, true)), "allowed");
 });
 test("free-plan duration starts at event start, not advance room creation", () => {
-  const result = decideEventRoomAccess(event, { ...noAccess, ticket: true }, room, start);
+  const result = decideEventRoomAccess(event, { ...noAccess, ticket: true }, room, start, true);
   assert.deepEqual(result, { ok: true, linked: true, endsAt: new Date(start + 300_000).toISOString() });
-  assert.equal(reason(decideEventRoomAccess(event, { ...noAccess, ticket: true }, room, start + 300_000)), "session_expired");
+  assert.equal(reason(decideEventRoomAccess(event, { ...noAccess, ticket: true }, room, start + 300_000, true)), "session_expired");
 });
 test("event end caps an unlimited room", () => {
-  assert.equal(reason(decideEventRoomAccess(event, { ...noAccess, ticket: true }, {}, start + 3_600_000)), "session_expired");
+  assert.equal(reason(decideEventRoomAccess(event, { ...noAccess, ticket: true }, {}, start + 3_600_000, true)), "session_expired");
 });
 test("cancelled events deny the host as well", () => {
   assert.equal(reason(decideEventRoomAccess({ ...event, status: "cancelled" }, { ...noAccess, organizer: true }, {}, start)), "event_unavailable");
@@ -41,7 +45,7 @@ test("host can prepare before start, but missing schedule fails closed", () => {
 });
 test("free invited events admit invitees and reject strangers", () => {
   const free = { ...event, ticketing_enabled: false };
-  assert.equal(reason(decideEventRoomAccess(free, { ...noAccess, invited: true }, room, start)), "allowed");
+  assert.equal(reason(decideEventRoomAccess(free, { ...noAccess, invited: true }, room, start, true)), "allowed");
   assert.equal(reason(decideEventRoomAccess(free, noAccess, room, start)), "event_invite_required");
 });
 test("ordinary rooms preserve their original expiry", () => {
@@ -87,6 +91,15 @@ test("lookup failure never becomes public event access", async () => {
   await assert.rejects(canAccessEvent(database({ events: [event] }, "events"), 12, "buyer"));
   await assert.rejects(canAccessEvent(database({ events: [event] }, "tickets"), 12, "buyer"));
   await assert.rejects(resolveEventRoomAccess(database({}, "events"), { uuid: "room" }, "buyer"));
+});
+test("room access reads the host's start from event_lynk_lifecycle and fails closed", async () => {
+  const linked = { ...event, lynk_room_id: "room", start_date: new Date(Date.now() - 60_000).toISOString(), end_date: new Date(Date.now() + 3_600_000).toISOString() };
+  const tickets = [{ event_id: 12, user_id: "buyer", status: "active", category: "admission" }];
+  const before = await resolveEventRoomAccess(database({ events: [linked], tickets }), { uuid: "room" }, "buyer");
+  assert.equal(reason(before), "waiting_for_host");
+  const live = await resolveEventRoomAccess(database({ events: [linked], tickets, event_lynk_lifecycle: [{ event_id: 12, state: "live" }] }), { uuid: "room" }, "buyer");
+  assert.equal(reason(live), "allowed");
+  await assert.rejects(resolveEventRoomAccess(database({ events: [linked], tickets }, "event_lynk_lifecycle"), { uuid: "room" }, "buyer"));
 });
 test("ambiguous linked event relation fails closed", async () => {
   await assert.rejects(resolveEventRoomAccess(database({ events: [{ ...event, lynk_room_id: "room" }, { ...event, id: 13, lynk_room_id: "room" }] }), { uuid: "room" }, "buyer"));

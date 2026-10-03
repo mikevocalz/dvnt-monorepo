@@ -272,6 +272,22 @@ Deno.serve(async (req) => {
         if (event.lynk_room_id) eventByRoom.set(String(event.lynk_room_id), event);
       }
     }
+    // An event room is live only after a host starts it (event-lynk-room).
+    const liveEventIds = new Set<number>();
+    const linkedEventIds = [...eventByRoom.values()].map((event: any) => event.id);
+    if (linkedEventIds.length > 0) {
+      const { data: lifecycles, error: lifecycleError } = await supabase
+        .from("event_lynk_lifecycle")
+        .select("event_id, state")
+        .in("event_id", linkedEventIds);
+      if (lifecycleError) {
+        console.error("[video_list_rooms] Lifecycle lookup failed:", lifecycleError);
+        return errorResponse("internal_error", "Could not verify scheduled rooms");
+      }
+      for (const row of lifecycles || []) {
+        if (row.state === "live") liveEventIds.add(Number(row.event_id));
+      }
+    }
 
     rooms = rooms.filter((room: any) => {
       const event = eventByRoom.get(String(room.uuid || ""));
@@ -280,7 +296,6 @@ Deno.serve(async (req) => {
 
       const start = Date.parse(event.start_date || "");
       if (!Number.isFinite(start)) return false;
-      if (nowMs < start) return false;
 
       const explicitEnd = Date.parse(event.end_date || "");
       const end = Number.isFinite(explicitEnd)
@@ -293,7 +308,7 @@ Deno.serve(async (req) => {
         if (room.status !== "ended") return false;
         return nowMs - end <= 24 * 60 * 60 * 1000;
       }
-      return room.status === "open";
+      return room.status === "open" && liveEventIds.has(Number(event.id));
     });
 
     const creatorIds = [

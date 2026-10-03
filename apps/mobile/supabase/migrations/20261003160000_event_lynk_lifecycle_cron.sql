@@ -4,12 +4,10 @@
 -- read from Vault at call time and sent as x-cron-secret, so the secret is
 -- never baked into cron.job.
 --
--- Every 5 minutes: the sweep is what flips a precreated 'scheduled' room to
--- 'open' at event start, so the cadence is the worst-case lag between the
--- advertised start and the room opening. 15 minutes (the reminder cadence)
--- would leave ticket holders on the countdown for up to a quarter hour.
--- End-of-event cleanup only needs to beat the 24h listing cap, which any of
--- these cadences does.
+-- The sweep never opens a room: a host starts it (event-lynk-room "start").
+-- It syncs lifecycle rows and ends rooms whose event has ended or been
+-- cancelled. Every 5 minutes keeps a cancelled event's room from staying
+-- joinable for long; the 24h listing cap alone would allow far less often.
 --
 -- PREREQUISITE: Vault already holds CRON_SECRET (seeded for
 -- reconcile-orders, reused by event reminders). The edge function must be

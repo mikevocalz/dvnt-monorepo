@@ -92,7 +92,13 @@ test('the right x-cron-secret runs the sweep', async () => {
   assert.equal(got.status, 200);
   assert.deepEqual(h.rpcCalls, [1, 2]);
   assert.deepEqual(got.body.failed, []);
-  assert.deepEqual(h.opened, ['room-1', 'room-2']);
+});
+
+test('the sweep never opens a room on its own, even after start_date', async () => {
+  // Both events started an hour ago. Only a host's start opens the room.
+  const h = harness();
+  await h.sweep({ 'x-cron-secret': 'cron-secret' });
+  assert.deepEqual(h.opened, []);
 });
 
 test('a failed lifecycle sync is reported as 500 and the sweep keeps going', async () => {
@@ -102,8 +108,7 @@ test('a failed lifecycle sync is reported as 500 and the sweep keeps going', asy
   assert.equal(got.body.ok, false);
   assert.deepEqual(got.body.failed, [1]);
   assert.deepEqual(h.rpcCalls, [1, 2]);
-  // The event whose sync failed is not opened; the next one still is.
-  assert.deepEqual(h.opened, ['room-2']);
+
 });
 
 const migrations = path.join(__dirname, '../../migrations');
