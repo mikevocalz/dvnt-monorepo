@@ -69,8 +69,30 @@ const stripComments = (sql) =>
 // the grant does not have to be in the creating migration, only to exist.
 const CREATE_TABLE =
   /\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?(?:public\.)?["']?([a-z0-9_]+)["']?/gi;
-const GRANT_TO_SERVICE_ROLE =
-  /\bgrant\s+([^;]*?)\s+on\s+(?:table\s+)?(?:public\.)?["']?([a-z0-9_]+)["']?\s+to\s+([^;]*?)service_role/gi;
+// The table position is a comma list: `grant ... on public.a, public.b to
+// service_role` is one statement granting both. Matching a single name missed
+// every table in such a list, including the first.
+const TABLE_NAME = `(?:public\\.)?["']?[a-z0-9_]+["']?`;
+const GRANT_TO_SERVICE_ROLE = new RegExp(
+  `\\bgrant\\s+([^;]*?)\\s+on\\s+(?:table\\s+)?((?:${TABLE_NAME}\\s*,\\s*)*${TABLE_NAME})\\s+to\\s+([^;]*?)service_role`,
+  "gi",
+);
+const grantedTables = (list) =>
+  list.split(",").map((t) => t.trim().replace(/^public\./i, "").replace(/["']/g, ""));
+
+// Self-check of the parser, so a regex regression fails here instead of
+// silently reporting granted tables as ungranted (or the reverse).
+{
+  const sample =
+    "grant select, insert on public.a_one, public.a_two,\n  a_three to service_role;" +
+    " grant select on table public.b_one to authenticated, service_role;";
+  const got = [...sample.matchAll(GRANT_TO_SERVICE_ROLE)].flatMap((m) => grantedTables(m[2]));
+  const want = ["a_one", "a_two", "a_three", "b_one"];
+  if (JSON.stringify(got) !== JSON.stringify(want)) {
+    console.error(`verify-issuance: grant parser self-check failed: ${JSON.stringify(got)}`);
+    process.exit(2);
+  }
+}
 const GRANT_ALL_TABLES =
   /\bgrant\s+[^;]*?\s+on\s+all\s+tables\s+in\s+schema\s+public\s+to\s+[^;]*?service_role/i;
 
@@ -85,7 +107,9 @@ function checkGrants(files) {
     for (const m of body.matchAll(CREATE_TABLE)) {
       if (!created.has(m[1])) created.set(m[1], name);
     }
-    for (const m of body.matchAll(GRANT_TO_SERVICE_ROLE)) granted.add(m[2]);
+    for (const m of body.matchAll(GRANT_TO_SERVICE_ROLE)) {
+      for (const t of grantedTables(m[2])) granted.add(t);
+    }
   }
 
   for (const [table, where] of created) {
