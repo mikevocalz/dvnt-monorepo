@@ -5,10 +5,13 @@
  * `creator_hosts.status` legally holds 'suspended' and 'rejected'. An upsert
  * that carried a status let a suspended creator clear their own suspension
  * (or self-approve), so this path only ever INSERTs `{ user_id }` and lets the
- * column DEFAULT ('applied') decide. When the row already exists the write is
- * refused with a 409 that names the current status, and the row is left
- * exactly as it was. Moving a creator between statuses is a moderator action;
- * nothing here can do it.
+ * column DEFAULT ('applied') decide. When the row already exists, one
+ * transition is allowed: a row a moderator created as 'invited' becomes
+ * 'applied', which is the user accepting the invite. That is a single
+ * conditional UPDATE keyed on the caller and on status = 'invited', with the
+ * new status a constant here. Any other existing row is refused with a 409
+ * that names the current status and is left exactly as it was. Every other
+ * move between statuses is a moderator action; nothing here can do it.
  */
 
 /** Postgres unique_violation. The primary key on user_id is what trips it. */
@@ -27,6 +30,7 @@ export interface CreatorRecord {
 
 export type ApplyOutcome =
   | { kind: "created"; httpStatus: 200; creator: CreatorRecord }
+  | { kind: "accepted"; httpStatus: 200; creator: CreatorRecord }
   | {
     kind: "exists";
     httpStatus: 409;
@@ -72,7 +76,21 @@ export async function applyForCreatorProgram(
     return { kind: "failed", httpStatus: 500, message: "Could not submit creator application" };
   }
 
-  // The row exists. Read it only to say which status the caller is in.
+  // The row exists. Accepting an invite is the one move allowed. The status
+  // filter makes this a no-op for every other status, and makes a concurrent
+  // second apply lose: only one request can match status = 'invited'.
+  const accepted = await db.from("creator_hosts").update({ status: "applied" })
+    .eq("user_id", authId).eq("status", "invited")
+    .select(CREATOR_COLUMNS).maybeSingle();
+  if (accepted.error) {
+    console.error("[creator-program] apply invite accept failed", accepted.error.message);
+    return { kind: "failed", httpStatus: 500, message: "Could not submit creator application" };
+  }
+  if (accepted.data) {
+    return { kind: "accepted", httpStatus: 200, creator: accepted.data as CreatorRecord };
+  }
+
+  // Not an invite. Read the row only to say which status the caller is in.
   const existing = await db.from("creator_hosts").select(CREATOR_COLUMNS)
     .eq("user_id", authId).maybeSingle();
   if (existing.error) {

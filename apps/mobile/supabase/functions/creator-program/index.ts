@@ -78,6 +78,8 @@ async function handleApply({ db, req, authId }: Ctx) {
   switch (outcome.kind) {
     case "created":
       return json({ ok: true, creator: outcome.creator, created: true }, 200, req);
+    case "accepted":
+      return json({ ok: true, creator: outcome.creator, created: false, accepted: true }, 200, req);
     case "exists":
       return json(
         { ok: false, error: outcome.message, code: outcome.code, creator: outcome.creator },

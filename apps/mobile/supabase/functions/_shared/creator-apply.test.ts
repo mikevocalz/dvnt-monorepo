@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import { applyForCreatorProgram, UNIQUE_VIOLATION } from "./creator-apply.ts";
 
 type Row = Record<string, unknown>;
+type Write = { op: string; payload: Row; filters?: [string, unknown][] };
 
 /**
  * A creator_hosts table with a primary key on user_id and the real column
@@ -10,7 +11,7 @@ type Row = Record<string, unknown>;
  */
 function fakeDb(seed: Row[] = []) {
   const rows = new Map<string, Row>(seed.map((r) => [String(r.user_id), { ...r }]));
-  const writes: { op: string; payload: Row }[] = [];
+  const writes: Write[] = [];
 
   function from(table: string) {
     assertEquals(table, "creator_hosts");
@@ -41,13 +42,32 @@ function fakeDb(seed: Row[] = []) {
         return { select: () => ({ single: async () => ({ data: { ...row }, error: null }) }) };
       },
       update(payload: Row) {
-        writes.push({ op: "update", payload });
-        return {
-          eq: async (_col: string, id: string) => {
-            rows.set(id, { ...(rows.get(id) ?? {}), ...payload });
-            return { error: null };
+        // Filters are honoured, so a conditional update only touches the
+        // rows it names. An update without the status filter writes through.
+        const filters: [string, unknown][] = [];
+        writes.push({ op: "update", payload, filters });
+        const apply = () => {
+          const hit = [...rows.values()].filter((r) => filters.every(([c, v]) => r[c] === v));
+          for (const r of hit) rows.set(String(r.user_id), { ...r, ...payload });
+          return hit.map((r) => ({ ...rows.get(String(r.user_id)) }));
+        };
+        const builder = {
+          eq(col: string, val: unknown) {
+            filters.push([col, val]);
+            return builder;
+          },
+          select: () => ({
+            maybeSingle: async () => {
+              const hit = apply();
+              return { data: hit[0] ?? null, error: null };
+            },
+          }),
+          then(resolve: (v: unknown) => void) {
+            apply();
+            resolve({ error: null });
           },
         };
+        return builder;
       },
       select() {
         return {
@@ -94,18 +114,91 @@ Deno.test("a suspended creator cannot clear their suspension by applying", async
   assert(outcome.message.includes("suspended"));
   // The row is byte-for-byte what it was, audit fields included.
   assertEquals(rows.get("u1"), suspended);
-  assert(writes.every((w) => w.op === "insert"), JSON.stringify(writes));
+  assert(onlyInviteAcceptUpdates(writes, "u1"), JSON.stringify(writes));
 });
 
-Deno.test("rejected, approved and in-flight rows are refused and left unchanged", async () => {
-  for (const status of ["rejected", "approved", "applied", "under_review", "invited", "paused"]) {
-    const seed = { user_id: "u1", status, payout_status: "not_started", terms_version: null, terms_accepted_at: null };
+/**
+ * The only update this path may issue: status to 'applied', keyed on the
+ * caller AND on the row still being 'invited'.
+ */
+function onlyInviteAcceptUpdates(writes: Write[], authId: string) {
+  return writes.every((w) =>
+    w.op === "insert" ||
+    (w.op === "update" &&
+      JSON.stringify(w.payload) === JSON.stringify({ status: "applied" }) &&
+      JSON.stringify(w.filters) === JSON.stringify([["user_id", authId], ["status", "invited"]]))
+  );
+}
+
+Deno.test("every non-invited status is refused and left byte-identical", async () => {
+  for (const status of ["applied", "under_review", "approved", "paused", "rejected", "suspended"]) {
+    const seed = {
+      user_id: "u1",
+      status,
+      payout_status: "not_started",
+      terms_version: "creator-host-v1",
+      terms_accepted_at: "2026-10-01T00:00:00.000Z",
+      suspended_at: status === "suspended" ? "2026-10-02T00:00:00.000Z" : null,
+    };
     const { db, rows, writes } = fakeDb([seed]);
     const outcome = await applyForCreatorProgram(db, "u1");
 
     assertEquals(outcome.httpStatus, 409, status);
+    if (outcome.kind !== "exists") throw new Error(status);
+    assertEquals(outcome.code, "creator_application_exists", status);
+    assertEquals(outcome.creator?.status, status, status);
     assertEquals(rows.get("u1"), seed, status);
-    assert(writes.every((w) => w.op === "insert"), status);
+    assert(onlyInviteAcceptUpdates(writes, "u1"), `${status} ${JSON.stringify(writes)}`);
+  }
+});
+
+Deno.test("an invited user who applies moves to applied, and nothing else changes", async () => {
+  const seed = {
+    user_id: "u1",
+    status: "invited",
+    payout_status: "not_started",
+    terms_version: null,
+    terms_accepted_at: null,
+  };
+  const other = { ...seed, user_id: "u2" };
+  const { db, rows, writes } = fakeDb([seed, other]);
+  const outcome = await applyForCreatorProgram(db, "u1");
+
+  assertEquals(outcome.kind, "accepted");
+  assertEquals(outcome.httpStatus, 200);
+  if (outcome.kind !== "accepted") throw new Error("unreachable");
+  assertEquals(outcome.creator.status, "applied");
+  assertEquals(rows.get("u1"), { ...seed, status: "applied" });
+  // Another invited user's row is untouched.
+  assertEquals(rows.get("u2"), other);
+  assert(onlyInviteAcceptUpdates(writes, "u1"), JSON.stringify(writes));
+});
+
+Deno.test("a second apply after the invite is accepted gets the 409", async () => {
+  const seed = { user_id: "u1", status: "invited", payout_status: "not_started", terms_version: null, terms_accepted_at: null };
+
+  // Back to back.
+  {
+    const { db, rows } = fakeDb([seed]);
+    const first = await applyForCreatorProgram(db, "u1");
+    const second = await applyForCreatorProgram(db, "u1");
+    assertEquals(first.kind, "accepted");
+    assertEquals(second.httpStatus, 409);
+    if (second.kind !== "exists") throw new Error("unreachable");
+    assertEquals(second.creator?.status, "applied");
+    assertEquals(rows.get("u1")?.status, "applied");
+  }
+
+  // Two requests in flight at once: exactly one wins the conditional update.
+  {
+    const { db, rows } = fakeDb([seed]);
+    const outcomes = await Promise.all([
+      applyForCreatorProgram(db, "u1"),
+      applyForCreatorProgram(db, "u1"),
+    ]);
+    assertEquals(outcomes.map((o) => o.httpStatus).sort(), [200, 409]);
+    assertEquals(outcomes.filter((o) => o.kind === "accepted").length, 1);
+    assertEquals(rows.get("u1")?.status, "applied");
   }
 });
 
