@@ -17,6 +17,7 @@ on:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
       - "scripts/verify-users-lockdown.mjs"
+      - "scripts/verify-content-lockdown.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -27,6 +28,7 @@ on:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
       - "scripts/verify-users-lockdown.mjs"
+      - "scripts/verify-content-lockdown.mjs"
 
 jobs:
   verify:
@@ -89,3 +91,19 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-users-lockdown.mjs
+
+  content-lockdown:
+    # posts writes and video_room_members.user_id reads. Same shape as the job
+    # above: proves both holes exist in a fixture copied from production,
+    # applies 20261003150100 and 20261003150200, and asserts they are closed.
+    # Also fails if client code writes posts/likes/comments or names
+    # video_room_members.user_id. No --allow-skip.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-content-lockdown.mjs
