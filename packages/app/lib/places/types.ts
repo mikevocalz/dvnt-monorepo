@@ -9,6 +9,14 @@ export interface PlacesPrediction {
   mainText: string;
   secondaryText?: string;
   fullText?: string;
+  /** Straight-line meters from the request's origin, when one was sent. */
+  distanceMeters?: number;
+}
+
+/** Point Google measures `distanceMeters` from. Never moves ranking. */
+export interface PlacesOrigin {
+  latitude: number;
+  longitude: number;
 }
 
 export interface PlacesLocationData {

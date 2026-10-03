@@ -28,6 +28,13 @@ export const MEDIA_SIZE_LIMITS: Record<string, number> = {
   "message-image": 5 * 1024 * 1024,
   "message-video": 12 * 1024 * 1024,
 };
+/**
+ * Video containers and length media-upload accepts (ALLOWED_VIDEO_MIMES and
+ * MAX_VIDEO_DURATION_SEC there). video-pick-policy.test.ts parses the edge
+ * function to keep these identical.
+ */
+export const ALLOWED_VIDEO_MIMES = ["video/mp4", "video/quicktime", "video/mov"] as const;
+export const MAX_VIDEO_DURATION_SEC = 60;
 export const UPLOAD_TIMEOUT_MS = 5 * 60_000;
 export function sizeLimitForKind(kind: string): number {
   return MEDIA_SIZE_LIMITS[kind] ?? MEDIA_SIZE_LIMITS["post-image"];

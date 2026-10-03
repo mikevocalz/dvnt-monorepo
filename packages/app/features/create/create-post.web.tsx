@@ -16,13 +16,13 @@
  * Camera links to /feed/camera. Avatars / media tiles are rounded SQUARES, no pills.
  */
 
+import dynamic from "next/dynamic";
 import { useEffect, useRef } from "react";
 import { useRouter } from "solito/navigation";
 import {
   Hash,
   X,
   ImagePlus,
-  Camera,
   MapPin,
   Trash2,
   Plus,
@@ -50,8 +50,8 @@ import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import type { MediaKind, TextPostThemeKey } from "@dvnt/app/lib/types";
 import { useCreatePostUIStore } from "./create-post-ui-store";
-import { usePlacesAutocomplete } from "@dvnt/app/lib/hooks/use-places-autocomplete";
-import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import { readVideoDurationSec } from "@dvnt/app/lib/media/video-duration.web";
+import { validateVideoPick, videoLimitsLabel } from "@dvnt/app/lib/media/video-pick-policy";
 
 const MAX_PHOTOS = 10;
 const MAX_ANIMATED_VIDEO_DURATION = 15; // seconds
@@ -66,6 +66,14 @@ const COMPOSER_MAX_WIDTH = 672;
 
 const inputCls =
   "w-full h-11 px-3 rounded-xl bg-white/6 border border-white/10 text-[15px] text-white placeholder:text-white/35 outline-none focus:border-cyan-500/60";
+
+const CreatePostLocation = dynamic(
+  () => import("./create-post-location.web").then((m) => m.CreatePostLocation),
+  {
+    ssr: false,
+    loading: () => <div className="mt-3 h-11 rounded-xl border border-white/10 bg-white/6" />,
+  },
+);
 
 export function CreatePostScreen() {
   const router = useRouter();
@@ -93,9 +101,6 @@ export function CreatePostScreen() {
     updateTextSlide,
     addTextSlide,
     removeTextSlide,
-    location,
-    setLocation,
-    setLocationData,
     isNSFW,
     setIsNSFW,
     tags,
@@ -138,23 +143,6 @@ export function CreatePostScreen() {
     useCameraResultStore.getState().clear();
   }, [cameraResult, setSelectedMedia, showToast]);
 
-  // Location — same autocomplete stack as event create: usePlacesAutocomplete →
-  // places-autocomplete / places-details edge fns, biased by activeCity then
-  // device coords then IP. The "current location" row mirrors the native
-  // composer's quick-pick and the events feed's auto-detected city.
-  const activeCity = useEventsLocationStore((s) => s.activeCity);
-  const places = usePlacesAutocomplete({
-    value: location,
-    onLocationSelect: (loc) => {
-      setLocationData({
-        name: loc.name,
-        latitude: loc.latitude,
-        longitude: loc.longitude,
-        placeId: loc.placeId,
-      });
-    },
-  });
-
   const isTextPost = postKind === "text";
   const activeTextSlide = textSlides[activeTextSlideIndex] ?? textSlides[0];
   const canAddMore = selectedMedia.length < MAX_PHOTOS;
@@ -171,13 +159,14 @@ export function CreatePostScreen() {
 
   // ---- Media intake (file input → object-URL MediaAssets) ----
 
-  const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
+  const onPickFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const files = Array.from(input.files ?? []);
     if (files.length === 0) return;
     const remaining = MAX_PHOTOS - selectedMedia.length;
     if (remaining <= 0) {
       showToast("warning", "Photo limit", `Maximum ${MAX_PHOTOS} photos per post.`);
-      e.target.value = "";
+      input.value = "";
       return;
     }
 
@@ -186,6 +175,23 @@ export function CreatePostScreen() {
       const isVideo = file.type.startsWith("video/");
       const isImage = file.type.startsWith("image/");
       if (!isVideo && !isImage) continue;
+      let durationSec: number | null = null;
+      if (isVideo) {
+        // Same limits media-upload enforces, checked before a byte is sent.
+        // The browser uploads the file as picked, so size counts here.
+        durationSec = await readVideoDurationSec(file);
+        const check = validateVideoPick({
+          kind: "post-video",
+          mimeType: file.type,
+          fileName: file.name,
+          sizeBytes: file.size,
+          durationSec,
+        });
+        if (!check.ok) {
+          showToast("error", check.title, check.message);
+          continue;
+        }
+      }
       if (!isVideo && next.length >= remaining) {
         showToast("warning", "Photo limit reached", `You can add up to ${MAX_PHOTOS} photos per post.`);
         break;
@@ -202,13 +208,15 @@ export function CreatePostScreen() {
         type: isVideo ? "video" : "image",
         kind,
         mimeType: file.type || undefined,
+        ...(durationSec != null ? { duration: durationSec } : {}),
       });
     }
 
     if (next.length > 0) {
-      setSelectedMedia([...selectedMedia, ...next]);
+      // Read the store again: the duration reads above are async.
+      setSelectedMedia([...useCreatePostStore.getState().selectedMedia, ...next]);
     }
-    e.target.value = "";
+    input.value = "";
   };
 
   const handleRemoveMedia = (id: string) => {
@@ -372,9 +380,10 @@ export function CreatePostScreen() {
           ) : null}
         </div>
 
-        {/* Media intake buttons */}
+        {/* One coherent media entry. The dedicated camera route remains
+            available to other product surfaces without duplicating controls here. */}
         {!isTextPost && selectedMedia.length === 0 ? (
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex">
             <button
               onClick={() => fileRef.current?.click()}
               className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-500 py-3.5 font-semibold text-white"
@@ -382,94 +391,14 @@ export function CreatePostScreen() {
               <ImagePlus size={20} />
               Add Photos
             </button>
-            <button
-              onClick={() => router.push("/feed/camera")}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/15 bg-[#1a1a1a] py-3.5 font-semibold text-white"
-            >
-              <Camera size={20} />
-              Camera
-            </button>
           </div>
         ) : null}
 
-        {/* Location — autocomplete biased to the member's city, like events */}
-        <div className="relative mt-3">
-          <input
-            value={places.input}
-            onChange={(e) => {
-              const text = e.target.value;
-              places.setInput(text);
-              setLocation(text);
-              if (!text.trim()) setLocationData(null);
-            }}
-            onFocus={() => places.setShowDropdown(true)}
-            onBlur={() => setTimeout(() => places.setShowDropdown(false), 150)}
-            placeholder="Add location"
-            maxLength={100}
-            className={inputCls}
-            aria-label="Add location"
-          />
-          {places.showDropdown ? (
-            <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-white/12 bg-[#10121B] shadow-xl">
-              {!places.input.trim() && activeCity ? (
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    setLocationData({
-                      name: activeCity.state
-                        ? `${activeCity.name}, ${activeCity.state}`
-                        : activeCity.name,
-                      latitude: activeCity.lat,
-                      longitude: activeCity.lng,
-                    });
-                    places.setShowDropdown(false);
-                  }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left hover:bg-cyan-500/10"
-                >
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/15">
-                    <MapPin size={15} className="text-cyan-300" />
-                  </span>
-                  <span>
-                    <span className="block text-sm font-bold text-white">Current location</span>
-                    <span className="block text-xs text-white/55">
-                      {activeCity.state ? `${activeCity.name}, ${activeCity.state}` : activeCity.name}
-                    </span>
-                  </span>
-                </button>
-              ) : null}
-              {places.input.trim().length >= 2 ? (
-                places.error ? (
-                  <p className="px-3 py-2.5 text-[13px] text-white/60">{places.error}</p>
-                ) : places.predictions.length > 0 ? (
-                  places.predictions.map((p) => (
-                    <button
-                      key={p.placeId}
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => places.selectPrediction(p)}
-                      className="flex w-full items-center gap-2.5 border-t border-white/6 px-3 py-2.5 text-left hover:bg-cyan-500/10"
-                    >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-500/12">
-                        <MapPin size={14} className="text-cyan-300" />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-bold text-white">{p.mainText}</span>
-                        {p.secondaryText || p.fullText ? (
-                          <span className="block truncate text-xs text-white/55">
-                            {p.secondaryText || p.fullText}
-                          </span>
-                        ) : null}
-                      </span>
-                    </button>
-                  ))
-                ) : places.isLoading ? null : (
-                  <p className="px-3 py-2.5 text-[13px] text-white/60">No places found</p>
-                )
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+        {!isTextPost && canAddMore ? (
+          <p className="mt-2 text-xs text-white/45">{videoLimitsLabel("post-video")}</p>
+        ) : null}
+
+        <CreatePostLocation />
 
         {/* Text-post composer */}
         {isTextPost ? (

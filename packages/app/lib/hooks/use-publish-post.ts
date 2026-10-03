@@ -17,6 +17,7 @@ import {
 import { storage } from "@dvnt/app/lib/utils/storage";
 import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
 import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
+import { friendlyUploadError } from "@dvnt/app/lib/media/video-pick-policy";
 
 type Draft = ReturnType<typeof useCreatePostStore.getState>;
 
@@ -85,7 +86,7 @@ function usePublishTaskDeps(): PublishTaskDeps {
               ...(result.thumbnail && { thumbnail: result.thumbnail }),
               ...(result.livePhotoVideoUrl && { livePhotoVideoUrl: result.livePhotoVideoUrl }),
             }
-          : { error: result.error || "Media upload failed. Try again." },
+          : { error: friendlyUploadError(result.error) },
       );
     },
     createPost: async (input) => {
