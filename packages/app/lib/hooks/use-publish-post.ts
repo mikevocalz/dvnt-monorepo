@@ -15,6 +15,9 @@ import {
   persistLocalMediaSelection,
 } from "@dvnt/app/lib/media/persist-local-selection";
 import { storage } from "@dvnt/app/lib/utils/storage";
+import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
+import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
+import { friendlyUploadError } from "@dvnt/app/lib/media/video-pick-policy";
 
 type Draft = ReturnType<typeof useCreatePostStore.getState>;
 
@@ -83,10 +86,23 @@ function usePublishTaskDeps(): PublishTaskDeps {
               ...(result.thumbnail && { thumbnail: result.thumbnail }),
               ...(result.livePhotoVideoUrl && { livePhotoVideoUrl: result.livePhotoVideoUrl }),
             }
-          : { error: result.error || "Media upload failed. Try again." },
+          : { error: friendlyUploadError(result.error) },
       );
     },
-    createPost: (input) => createPost(input),
+    createPost: async (input) => {
+      // If this composer came from the ticket→first-post offer, re-check the
+      // event at the actual publish boundary (after any media/upload delay).
+      // The helper fails closed if visibility can no longer be proven public.
+      await assertFirstPostPublishable();
+      // The server repeats the check and adds the adult-verification gate, so a
+      // client that skips the recheck above is still refused.
+      const firstPostEventId = useFirstPostOfferStore.getState().pendingEventId ?? undefined;
+      const post = await createPost(
+        firstPostEventId == null ? input : { ...input, firstPostEventId },
+      );
+      if (post?.id) useFirstPostOfferStore.getState().clearPending();
+      return post;
+    },
     addPlacedTags: (postId, tags) => {
       void postTagsApi
         .addTags(postId, tags.map((tag) => ({

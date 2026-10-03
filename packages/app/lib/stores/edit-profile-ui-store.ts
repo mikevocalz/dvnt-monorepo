@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { OwnIdentityLoad } from "../profile/own-identity";
 
 /**
  * Local UI/form state for the web Edit Profile screen. The native screen keeps
@@ -15,6 +16,8 @@ interface EditProfileUIState {
   sexuality: string[];
   /** "Looking for events w/…" audience preference. */
   eventAudience: string;
+  /** Whether gender/sexuality/eventAudience came from a successful row read. */
+  identityLoad: OwnIdentityLoad;
   links: string[];
   newLink: string;
   showPronouns: boolean;
@@ -30,6 +33,7 @@ interface EditProfileUIState {
   toggleSexuality: (v: string) => void;
   setSexuality: (v: string[]) => void;
   setEventAudience: (v: string) => void;
+  setIdentityLoad: (v: OwnIdentityLoad) => void;
   setLinks: (updater: string[] | ((prev: string[]) => string[])) => void;
   setNewLink: (v: string) => void;
   setShowPronouns: (v: boolean) => void;
@@ -55,6 +59,7 @@ const initial = {
   gender: "",
   sexuality: [] as string[],
   eventAudience: "",
+  identityLoad: { status: "loading" } as OwnIdentityLoad,
   links: [] as string[],
   newLink: "",
   showPronouns: false,
@@ -77,6 +82,7 @@ export const useEditProfileUIStore = create<EditProfileUIState>((set) => ({
     })),
   setSexuality: (sexuality) => set({ sexuality }),
   setEventAudience: (eventAudience) => set({ eventAudience }),
+  setIdentityLoad: (identityLoad) => set({ identityLoad }),
   setLinks: (updater) =>
     set((s) => ({ links: typeof updater === "function" ? updater(s.links) : updater })),
   setNewLink: (newLink) => set({ newLink }),
@@ -92,6 +98,7 @@ export const useEditProfileUIStore = create<EditProfileUIState>((set) => ({
       links,
       sexuality: sexuality ?? [],
       eventAudience: eventAudience ?? "",
+      identityLoad: { status: "loading" },
     }),
   reset: () => set(initial),
 }));

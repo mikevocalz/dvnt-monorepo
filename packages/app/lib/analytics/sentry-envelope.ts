@@ -105,21 +105,23 @@ export interface SentryReport {
   level?: "fatal" | "error" | "warning";
   platform?: string;
   release?: string;
+  /** ISO timestamp of the original error, not the relaunch that sends it. */
+  timestamp?: string;
+  handled?: boolean;
   /** Extra context. Already truncated by the caller. */
   extra?: Record<string, unknown>;
 }
 
 /**
- * POST one error. Fire-and-forget by design: callers are crash and boot paths
- * that cannot await a round trip, and none of them has anything useful to do
- * with a failure. Never throws — a reporter that crashes the app it reports on
- * is worse than no reporter, which is the exact bug this file's neighbours
- * document.
+ * Resolve true only when Sentry accepts the envelope. Boot callers start this
+ * without blocking startup, then clear their persisted report after success.
+ * A missing DSN, timeout, HTTP rejection, or network error must retain it.
  */
-export function sendToSentry(
+export async function sendToSentry(
   report: SentryReport,
   dsn: string | undefined | null,
-): void {
+): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const parts = parseDsn(dsn);
     if (!parts) {
@@ -130,11 +132,11 @@ export function sendToSentry(
       // crash reporting dies silently, which is the exact five-build blind
       // spot this file was written to end. Warn rather than return quietly.
       warnMissingDsnOnce();
-      return;
+      return false;
     }
 
     const id = eventId();
-    const nowSec = Date.now() / 1000;
+    const occurredAt = report.timestamp ? Date.parse(report.timestamp) : NaN;
 
     const header = {
       event_id: id,
@@ -143,11 +145,10 @@ export function sendToSentry(
     const itemHeader = { type: "event" };
     const event = {
       event_id: id,
-      timestamp: nowSec,
+      timestamp: (Number.isFinite(occurredAt) ? occurredAt : Date.now()) / 1000,
       platform: "javascript",
-      // A crash is fatal by definition; everything else is an error unless the
-      // caller says otherwise. Defaulted HERE rather than at each call site so
-      // one report path can't quietly file a crash as a warning.
+      // ErrorUtils also persists nonfatal errors; preserve their explicit
+      // severity instead of counting every persisted record as a crash.
       level: report.level ?? (report.featureArea === "crash" ? "fatal" : "error"),
       logger: "dvnt.mobile",
       release: report.release,
@@ -162,6 +163,9 @@ export function sendToSentry(
             type: report.name || "Error",
             value: report.message,
             stacktrace: framesFromStack(report.stack),
+            mechanism: report.handled === undefined
+              ? undefined
+              : { type: "generic", handled: report.handled },
           },
         ],
       },
@@ -174,14 +178,26 @@ export function sendToSentry(
 
     const body = `${JSON.stringify(header)}\n${JSON.stringify(itemHeader)}\n${JSON.stringify(event)}\n`;
 
-    void fetch(`${parts.endpoint}?sentry_key=${parts.publicKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-sentry-envelope" },
-      body,
-    }).catch(() => {
-      // Swallowed on purpose — see the header.
-    });
+    const controller = typeof AbortController === "function"
+      ? new AbortController()
+      : undefined;
+    return await Promise.race([
+      fetch(`${parts.endpoint}?sentry_key=${parts.publicKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-sentry-envelope" },
+        body,
+        signal: controller?.signal,
+      }).then((response) => response.ok, () => false),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => {
+          resolve(false);
+          controller?.abort();
+        }, 5_000);
+      }),
+    ]);
   } catch {
-    // Swallowed on purpose — see the header.
+    return false;
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }

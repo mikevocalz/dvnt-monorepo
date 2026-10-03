@@ -9,7 +9,7 @@ import { SafeAreaView } from "@dvnt/app/components/ui/html";
  * Route: /(protected)/events/[id]/edit
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import {
   View,
@@ -60,6 +60,24 @@ import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { Progress } from "@dvnt/app/components/ui/progress";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { eventsApi, formatEventDate } from "@dvnt/app/lib/api/events";
+import { resolveEventSchedule } from "@dvnt/app/features/events/create/event-form";
+import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
+import { EventPublicationField } from "@dvnt/app/features/events/ui/event-publication-field";
+import {
+  publishAtError,
+  publishAtInstantToLocal,
+  publishAtLocalToInstant,
+} from "@dvnt/app/lib/events/event-publication";
+import {
+  deviceTimeZone,
+  normalizeTimeZone,
+  zonedIsoToLocalIso,
+} from "@dvnt/app/lib/events/event-zone";
+import {
+  saleWindowInstantToLocal,
+  saleWindowLabel,
+  saleWindowLocalToInstant,
+} from "@dvnt/app/lib/events/sale-window";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { useQueryClient } from "@tanstack/react-query";
@@ -116,6 +134,18 @@ function EditEventScreenContent() {
   const [eventImages, setEventImages] = useState<string[]>([]);
   const [eventDate, setEventDate] = useState(new Date());
   const [endDate, setEndDate] = useState<Date | null>(null);
+  // Zone the pickers above are read in. eventDate/endDate hold that zone's
+  // wall clock as device-local Dates; save converts back to instants.
+  const [eventTz, setEventTz] = useState(deviceTimeZone);
+  const schedule = useMemo(
+    () =>
+      resolveEventSchedule({
+        eventDate: eventDate.toISOString(),
+        endDate: endDate ? endDate.toISOString() : null,
+        eventTz,
+      }),
+    [eventDate, endDate, eventTz],
+  );
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
@@ -125,6 +155,9 @@ function EditEventScreenContent() {
   const [maxAttendees, setMaxAttendees] = useState("");
   const [category, setCategory] = useState("");
   const [visibility, setVisibility] = useState("public");
+  // E06: hide, or schedule going public (typed wall clock, device-local ISO).
+  const [isHidden, setIsHidden] = useState(false);
+  const [publishAt, setPublishAt] = useState("");
   const [dressCode, setDressCode] = useState("");
   const [doorPolicy, setDoorPolicy] = useState("");
   const [lineup, setLineup] = useState("");
@@ -243,15 +276,24 @@ function EditEventScreenContent() {
         setEventImages(images);
 
         // Parse dates
+        // Reopen the stored instants as wall-clock times in the event's
+        // zone, so a 9 PM Pacific event reads 9 PM here wherever this phone
+        // is. No recorded zone: this phone's zone, as the old editor did.
         const isoDate = ev.fullDate || ev.startDate || ev.date;
-        if (isoDate) setEventDate(new Date(isoDate));
-        if (ev.endDate) setEndDate(new Date(ev.endDate));
+        const tz = normalizeTimeZone((ev as any).event_tz) ?? deviceTimeZone();
+        setEventTz(tz);
+        if (isoDate) {
+          setEventDate(new Date(zonedIsoToLocalIso(new Date(isoDate).toISOString(), tz)));
+        }
+        if (ev.endDate) setEndDate(new Date(zonedIsoToLocalIso(ev.endDate, tz)));
 
         // V2 fields
         setPrice(ev.price != null ? String(ev.price) : "");
         setMaxAttendees(ev.maxAttendees != null ? String(ev.maxAttendees) : "");
         setCategory(ev.category || "");
         setVisibility(ev.visibility || "public");
+        setIsHidden((ev as any).isHidden === true);
+        setPublishAt(publishAtInstantToLocal((ev as any).publishAt, tz));
         setDressCode(ev.dressCode || "");
         setDoorPolicy(ev.doorPolicy || "");
         setLineup(ev.lineup || "");
@@ -301,7 +343,8 @@ function EditEventScreenContent() {
             tier: (t.tier || "ga") as TierLevel,
             description: t.description || "",
             isActive: true,
-            saleStart: t.sale_start || "",
+            // Reopened as the wall clock in the event's zone, like the start.
+            saleStart: saleWindowInstantToLocal(t.sale_start, tz),
           })),
         );
 
@@ -326,13 +369,17 @@ function EditEventScreenContent() {
       title !== (od.title || "") ||
       description !== (od.description || "") ||
       location !== (od.location || "") ||
-      eventDate.toISOString() !==
-        new Date(isoDate || Date.now()).toISOString() ||
+      schedule.startIso !== new Date(isoDate || Date.now()).toISOString() ||
+      (schedule.endIso ?? null) !==
+        (od.endDate ? new Date(od.endDate).toISOString() : null) ||
+      eventTz !== (normalizeTimeZone((od as any).event_tz) ?? deviceTimeZone()) ||
       price !== (od.price != null ? String(od.price) : "") ||
       maxAttendees !==
         (od.maxAttendees != null ? String(od.maxAttendees) : "") ||
       category !== (od.category || "") ||
       visibility !== (od.visibility || "public") ||
+      isHidden !== ((od as any).isHidden === true) ||
+      publishAtLocalToInstant(publishAt, schedule.eventTz) !== ((od as any).publishAt ?? null) ||
       dressCode !== (od.dressCode || "") ||
       doorPolicy !== (od.doorPolicy || "") ||
       lineup !== (od.lineup || "") ||
@@ -347,10 +394,14 @@ function EditEventScreenContent() {
     location,
     eventDate,
     endDate,
+    schedule,
+    eventTz,
     price,
     maxAttendees,
     category,
     visibility,
+    isHidden,
+    publishAt,
     dressCode,
     doorPolicy,
     lineup,
@@ -456,6 +507,18 @@ function EditEventScreenContent() {
 
     if (!title.trim()) {
       showToast("error", "Error", "Title is required");
+      return;
+    }
+    if (schedule.error) {
+      showToast("error", "Check the time", schedule.error);
+      return;
+    }
+    const publishError = publishAtError(
+      publishAtLocalToInstant(publishAt, schedule.eventTz),
+      schedule.startIso,
+    );
+    if (publishError) {
+      showToast("error", "Check the go-public time", publishError);
       return;
     }
 
@@ -573,12 +636,15 @@ function EditEventScreenContent() {
         title: title.trim(),
         description: description.trim(),
         location: locationData?.name || location,
-        startDate: eventDate.toISOString(),
-        endDate: endDate ? endDate.toISOString() : undefined,
+        startDate: schedule.startIso,
+        endDate: schedule.endIso || undefined,
+        eventTz: schedule.eventTz,
         price: price ? parseFloat(price) : 0,
         maxAttendees: maxAttendees ? parseInt(maxAttendees) : undefined,
         category: category || undefined,
         visibility,
+        isHidden,
+        publishAt: publishAtLocalToInstant(publishAt, schedule.eventTz),
         dressCode: dressCode || undefined,
         doorPolicy: doorPolicy || undefined,
         lineup: lineup || undefined,
@@ -616,7 +682,9 @@ function EditEventScreenContent() {
       // pill updates the instant the user taps back — without waiting
       // on the useUpdateEvent mutation's onMutate to compute them.
       const dateParts = updateData.startDate
-        ? formatEventDate(updateData.startDate as string)
+        ? formatEventDate(updateData.startDate as string, {
+            event_tz: schedule.eventTz,
+          })
         : null;
       const optimisticPatch: Record<string, unknown> = {
         title: updateData.title,
@@ -624,6 +692,7 @@ function EditEventScreenContent() {
         location: updateData.location,
         fullDate: updateData.startDate,
         endDate: updateData.endDate || null,
+        event_tz: schedule.eventTz,
         price: updateData.price,
         maxAttendees: updateData.maxAttendees,
         category: updateData.category || null,
@@ -753,7 +822,7 @@ function EditEventScreenContent() {
             priceCents,
             quantityTotal: qty,
             maxPerUser,
-            saleStart: tier.saleStart || undefined,
+            saleStart: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz) ?? undefined,
           });
         } else {
           await ticketTypesApi.update(tier.id, {
@@ -763,7 +832,7 @@ function EditEventScreenContent() {
             price_cents: priceCents,
             quantity_total: qty,
             max_per_user: maxPerUser,
-            sale_start: tier.saleStart || null,
+            sale_start: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz),
           });
         }
       });
@@ -824,6 +893,7 @@ function EditEventScreenContent() {
     locationData,
     eventDate,
     endDate,
+    schedule,
     eventImages,
     price,
     maxAttendees,
@@ -1243,6 +1313,23 @@ function EditEventScreenContent() {
               <Text className="text-xs text-destructive">Clear end date</Text>
             </Pressable>
           )}
+          {schedule.error && endDate ? (
+            <Text
+              className="text-xs text-destructive mt-2"
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+              selectable
+            >
+              {schedule.error}
+            </Text>
+          ) : null}
+          <EventZonePicker
+            value={eventTz}
+            onChange={setEventTz}
+            at={schedule.startIso}
+            accent={colors.primary}
+            muted={colors.mutedForeground}
+          />
         </View>
 
         {showEndDatePicker && (
@@ -1421,6 +1508,19 @@ function EditEventScreenContent() {
               {eventVisibilityCopy(visibility).helper}
             </Text>
           </View>
+          <EventPublicationField
+            isHidden={isHidden}
+            onHiddenChange={setIsHidden}
+            publishAt={publishAt}
+            onPublishAtChange={setPublishAt}
+            eventTz={schedule.eventTz}
+            error={publishAtError(
+              publishAtLocalToInstant(publishAt, schedule.eventTz),
+              schedule.startIso,
+            )}
+            accent={colors.primary}
+            muted={colors.mutedForeground}
+          />
         </View>
 
         {/* Guest list — private only. A link-only event lets anyone holding
@@ -1874,13 +1974,7 @@ function EditEventScreenContent() {
                       }}
                     >
                       {tier.saleStart
-                        ? new Date(tier.saleStart).toLocaleString("en-US", {
-                            weekday: "short",
-                            month: "short",
-                            day: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })
+                        ? saleWindowLabel(tier.saleStart, eventTz)
                         : "Immediately on publish"}
                     </Text>
                   </View>

@@ -8,6 +8,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
+import { deviceTimeZone, normalizeTimeZone } from "@dvnt/app/lib/events/event-zone";
 import type { DraftAddon } from "@dvnt/app/features/events/create/addon-form";
 
 type VisibilityOption = "public" | "private" | "link_only";
@@ -72,6 +73,30 @@ interface CoOrganizer {
  */
 export type EventGuestDraft = CoOrganizer;
 
+export interface PromoterTemplateDraft {
+  username: string | null;
+  displayName: string;
+  code: string;
+  customerDiscountBps: number;
+  promoterCommissionBps: number;
+}
+
+/**
+ * A standalone promo code on the event a draft was duplicated from. Display
+ * only: event-drafts copy_promo_codes re-reads the source on publish.
+ */
+export interface PromoCodeTemplateDraft {
+  code: string;
+  discountType: string;
+  discountValue: number;
+  maxUses: number | null;
+  validFrom: string | null;
+  validUntil: string | null;
+  ticketTierName: string | null;
+  /** Redeemable right now by the rules in _shared/apply-promo-code.ts. */
+  active: boolean;
+}
+
 /** Editor row → `price_schedule` jsonb entry ("price changes to $X at T"). */
 export interface TierScheduleRow {
   effectiveAt: string; // ISO — when the new price takes effect
@@ -105,6 +130,13 @@ interface TicketTier {
 // Fields that persist as a draft
 interface DraftFields {
   clientRequestId: string | null;
+  /** Server-backed named draft identity; null means this is only the local autosave. */
+  serverDraftId: string | null;
+  serverDraftRevision: number | null;
+  /** Live event this draft was intentionally duplicated from. */
+  draftSourceEventId: number | null;
+  /** Duplicate Event cannot publish until the organizer explicitly picks a date. */
+  scheduleNeedsReview: boolean;
   title: string;
   description: string;
   location: string;
@@ -113,12 +145,25 @@ interface DraftFields {
   tags: string[];
   eventDate: string; // ISO string — Date can't be serialized
   endDate: string | null;
+  /**
+   * IANA zone the picked date/time belongs to. eventDate/endDate hold the
+   * wall clock as a device-local ISO; event-form.ts re-reads that wall clock
+   * in this zone when it builds the stored instant.
+   */
+  eventTz: string;
   ticketPrice: string;
   maxAttendees: string;
   youtubeUrl: string;
   attachLynkRoom: boolean;
   ticketingEnabled: boolean;
   visibility: VisibilityOption;
+  /** E06: hidden from everyone but host, co-hosts, invitees, ticket holders. */
+  isHidden: boolean;
+  /**
+   * E06: when the event goes public, as a device-local ISO holding the typed
+   * wall clock (like eventDate); "" = as soon as it is published.
+   */
+  publishAt: string;
   ageRestriction: AgeRestriction;
   isOnline: boolean;
   dressCode: string;
@@ -131,6 +176,10 @@ interface DraftFields {
   addons: DraftAddon[];
   coOrganizers: CoOrganizer[];
   guests: EventGuestDraft[];
+  /** Fresh promoter invitations to recreate after publishing a duplicated event. */
+  promoterTemplates: PromoterTemplateDraft[];
+  /** Promo codes the duplicated event will carry; shown on review. */
+  promoCodeTemplates: PromoCodeTemplateDraft[];
   flyerImage: string | null;
   flyerMediaType: "image" | "video";
   // Fallback still image shown when the primary flyer is a video and the
@@ -149,6 +198,7 @@ interface UIFields {
   showEndDatePicker: boolean;
   showEndTimePicker: boolean;
   isSubmitting: boolean;
+  isSavingDraft: boolean;
   uploadProgress: number;
   customTag: string;
   lineupInput: string;
@@ -178,6 +228,14 @@ interface UIFields {
 
 interface CreateEventActions {
   getPublishRequestId: () => string;
+  setServerDraftMeta: (id: string | null, revision: number | null) => void;
+  setPromoterTemplates: (
+    v: PromoterTemplateDraft[] | ((prev: PromoterTemplateDraft[]) => PromoterTemplateDraft[]),
+  ) => void;
+  loadServerDraft: (
+    payload: Partial<DraftFields>,
+    meta: { id: string; revision: number },
+  ) => void;
   // Draft field setters
   setTitle: (v: string) => void;
   setDescription: (v: string) => void;
@@ -187,12 +245,15 @@ interface CreateEventActions {
   setTags: (v: string[] | ((prev: string[]) => string[])) => void;
   setEventDate: (v: string) => void;
   setEndDate: (v: string | null) => void;
+  setEventTz: (v: string) => void;
   setTicketPrice: (v: string) => void;
   setMaxAttendees: (v: string) => void;
   setYoutubeUrl: (v: string) => void;
   setAttachLynkRoom: (v: boolean) => void;
   setTicketingEnabled: (v: boolean) => void;
   setVisibility: (v: VisibilityOption) => void;
+  setIsHidden: (v: boolean) => void;
+  setPublishAt: (v: string) => void;
   setAgeRestriction: (v: AgeRestriction) => void;
   setIsOnline: (v: boolean) => void;
   setDressCode: (v: string) => void;
@@ -216,6 +277,7 @@ interface CreateEventActions {
   setShowEndDatePicker: (v: boolean) => void;
   setShowEndTimePicker: (v: boolean) => void;
   setIsSubmitting: (v: boolean) => void;
+  setIsSavingDraft: (v: boolean) => void;
   setUploadProgress: (v: number) => void;
   setCustomTag: (v: string) => void;
   setLineupInput: (v: string) => void;
@@ -267,6 +329,10 @@ type CreateEventState = DraftFields & UIFields & CreateEventActions;
 
 const DRAFT_DEFAULTS: DraftFields = {
   clientRequestId: null,
+  serverDraftId: null,
+  serverDraftRevision: null,
+  draftSourceEventId: null,
+  scheduleNeedsReview: false,
   title: "",
   description: "",
   location: "",
@@ -275,12 +341,15 @@ const DRAFT_DEFAULTS: DraftFields = {
   tags: [],
   eventDate: new Date().toISOString(),
   endDate: null,
+  eventTz: deviceTimeZone(),
   ticketPrice: "",
   maxAttendees: "",
   youtubeUrl: "",
   attachLynkRoom: false,
   ticketingEnabled: false,
   visibility: "public",
+  isHidden: false,
+  publishAt: "",
   ageRestriction: "none",
   isOnline: false,
   dressCode: "",
@@ -291,6 +360,8 @@ const DRAFT_DEFAULTS: DraftFields = {
   addons: [],
   coOrganizers: [],
   guests: [],
+  promoterTemplates: [],
+  promoCodeTemplates: [],
   flyerImage: null,
   flyerMediaType: "image",
   flyerFallbackImage: null,
@@ -305,6 +376,7 @@ const UI_DEFAULTS: UIFields = {
   showEndDatePicker: false,
   showEndTimePicker: false,
   isSubmitting: false,
+  isSavingDraft: false,
   uploadProgress: 0,
   customTag: "",
   lineupInput: "",
@@ -340,14 +412,17 @@ export const useCreateEventStore = create<CreateEventState>()(
       setEventImages: (v) =>
         set((s) => ({ eventImages: resolve(v, s.eventImages) })),
       setTags: (v) => set((s) => ({ tags: resolve(v, s.tags) })),
-      setEventDate: (v) => set({ eventDate: v }),
+      setEventDate: (v) => set({ eventDate: v, scheduleNeedsReview: false }),
       setEndDate: (v) => set({ endDate: v }),
+      setEventTz: (v) => set({ eventTz: v }),
       setTicketPrice: (v) => set({ ticketPrice: v }),
       setMaxAttendees: (v) => set({ maxAttendees: v }),
       setYoutubeUrl: (v) => set({ youtubeUrl: v }),
       setAttachLynkRoom: (v) => set({ attachLynkRoom: v }),
       setTicketingEnabled: (v) => set({ ticketingEnabled: v }),
       setVisibility: (v) => set({ visibility: v }),
+      setIsHidden: (v) => set({ isHidden: v }),
+      setPublishAt: (v) => set({ publishAt: v }),
       setAgeRestriction: (v) => set({ ageRestriction: v }),
       setIsOnline: (v) => set({ isOnline: v }),
       setDressCode: (v) => set({ dressCode: v }),
@@ -363,6 +438,25 @@ export const useCreateEventStore = create<CreateEventState>()(
       setEventType: (v) => set({ eventType: v }),
       setDisclaimers: (v) => set({ disclaimers: v }),
       setIsNsfw: (v) => set({ isNsfw: v }),
+      setServerDraftMeta: (id, revision) =>
+        set({ serverDraftId: id, serverDraftRevision: revision }),
+      setPromoterTemplates: (v) =>
+        set((s) => ({ promoterTemplates: resolve(v, s.promoterTemplates) })),
+      loadServerDraft: (payload, meta) =>
+        set({
+          ...DRAFT_DEFAULTS,
+          ...UI_DEFAULTS,
+          ...payload,
+          // A duplicated draft carries its source event's zone. A draft saved
+          // without one (or with a zone Intl does not know) falls back to this
+          // device's zone, which is what its wall clock was typed in.
+          eventTz: normalizeTimeZone(payload.eventTz) ?? deviceTimeZone(),
+          // A server draft is configuration, never a continuation of a live
+          // publish idempotency operation from another device.
+          clientRequestId: null,
+          serverDraftId: meta.id,
+          serverDraftRevision: meta.revision,
+        }),
 
       getPublishRequestId: () => {
         const existing = get().clientRequestId;
@@ -378,6 +472,7 @@ export const useCreateEventStore = create<CreateEventState>()(
       setShowEndDatePicker: (v) => set({ showEndDatePicker: v }),
       setShowEndTimePicker: (v) => set({ showEndTimePicker: v }),
       setIsSubmitting: (v) => set({ isSubmitting: v }),
+      setIsSavingDraft: (v) => set({ isSavingDraft: v }),
       setUploadProgress: (v) => set({ uploadProgress: v }),
       setCustomTag: (v) => set({ customTag: v }),
       setLineupInput: (v) => set({ lineupInput: v }),
@@ -499,7 +594,8 @@ export const useCreateEventStore = create<CreateEventState>()(
         );
       },
 
-      resetDraft: () => set({ ...DRAFT_DEFAULTS, ...UI_DEFAULTS }),
+      resetDraft: () =>
+        set({ ...DRAFT_DEFAULTS, eventTz: deviceTimeZone(), ...UI_DEFAULTS }),
     }),
     {
       name: "create-event-draft",
@@ -528,6 +624,10 @@ export const useCreateEventStore = create<CreateEventState>()(
       },
       partialize: (state) => ({
         clientRequestId: state.clientRequestId,
+        serverDraftId: state.serverDraftId,
+        serverDraftRevision: state.serverDraftRevision,
+        draftSourceEventId: state.draftSourceEventId,
+        scheduleNeedsReview: state.scheduleNeedsReview,
         title: state.title,
         description: state.description,
         location: state.location,
@@ -536,12 +636,15 @@ export const useCreateEventStore = create<CreateEventState>()(
         tags: state.tags,
         eventDate: state.eventDate,
         endDate: state.endDate,
+        eventTz: state.eventTz,
         ticketPrice: state.ticketPrice,
         maxAttendees: state.maxAttendees,
         youtubeUrl: state.youtubeUrl,
         attachLynkRoom: state.attachLynkRoom,
         ticketingEnabled: state.ticketingEnabled,
         visibility: state.visibility,
+        isHidden: state.isHidden,
+        publishAt: state.publishAt,
         ageRestriction: state.ageRestriction,
         isOnline: state.isOnline,
         dressCode: state.dressCode,
@@ -552,6 +655,8 @@ export const useCreateEventStore = create<CreateEventState>()(
         addons: state.addons,
         coOrganizers: state.coOrganizers,
         guests: state.guests,
+        promoterTemplates: state.promoterTemplates,
+        promoCodeTemplates: state.promoCodeTemplates,
         flyerImage: state.flyerImage,
         flyerMediaType: state.flyerMediaType,
         flyerFallbackImage: state.flyerFallbackImage,

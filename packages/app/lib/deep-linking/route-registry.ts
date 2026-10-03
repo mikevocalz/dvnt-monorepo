@@ -192,6 +192,16 @@ export const ROUTE_REGISTRY: RouteEntry[] = [
   },
 
   // ── Tickets ────────────────────────────────────────────────────────
+  // Phone comp claim link a host texted. Before /ticket/:id. Auth-required:
+  // a signed-out recipient is held as a pending link, sent through login,
+  // and lands back here to claim.
+  {
+    urlPattern: "/ticket/claim/:token",
+    routerPath: "/(protected)/ticket/claim/:token",
+    auth: "auth-required",
+    paramsSchema: tokenSchema,
+    label: "Claim comped ticket",
+  },
   {
     urlPattern: "/ticket/:id",
     routerPath: "/(protected)/ticket/:id",

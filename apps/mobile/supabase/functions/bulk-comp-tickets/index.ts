@@ -5,7 +5,7 @@
  * Body: {
  *   event_id: number,
  *   tier_id: string,                // ticket_types.id (must belong to event)
- *   recipients: string[],           // usernames OR emails, mixed allowed
+ *   recipients: string[],           // usernames, emails or phone numbers, mixed
  *   note?: string,                  // optional message tucked in entity_payload
  * }
  *
@@ -24,11 +24,17 @@
  * RSVP guest path sends. Issuance and delivery are reported separately —
  * a ticket that exists but whose email bounced is never called delivered.
  *
+ * A phone number gets a phone comp: a $0 ticket held against a single-use
+ * claim link. DVNT sends nothing. The response carries the link and the
+ * host's device texts it from the host's own number. Comping the same
+ * unclaimed number again rotates the link on the same ticket.
+ *
  * Rate-limited 3 per 5 minutes per (sender, event).
  *
  * Returns:
  *   { ok: true, data: { issued, guest_issued, skipped: [{recipient, reason}],
- *     delivery: [{recipient, status, error?}] } }
+ *     delivery: [{recipient, status, error?}], phone_guest_issued,
+ *     claim_links: [{recipient, phone, ticket_id, url, expires_at, reissued}] } }
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -48,6 +54,11 @@ import {
   ticketConfirmation,
 } from "../_shared/send-resend-email.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
+import {
+  type CompClaimLink,
+  type IssuedPhoneLink,
+  toCompClaimLink,
+} from "../_shared/comp-claim-links.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -264,13 +275,17 @@ Deno.serve(async (req: Request) => {
     };
     const resolved: Resolved[] = [];
     const guests: { raw: string; email: string }[] = [];
+    const phoneGuests: { raw: string; phone: string }[] = [];
     const guestSeen = new Set<string>();
+    const phoneSeen = new Set<string>();
     for (const p of validParsed) {
       const n = p.norm!;
       const u =
         n.kind === "username"
           ? userByUsername.get(n.value)
-          : userByEmail.get(n.value);
+          : n.kind === "email"
+            ? userByEmail.get(n.value)
+            : null;
       const route = routeCompRecipient(p.raw, u ?? null);
       if (route.route === "skip") {
         skipped.push({ recipient: p.raw, reason: route.reason });
@@ -285,12 +300,21 @@ Deno.serve(async (req: Request) => {
         guests.push({ raw: p.raw, email: route.email });
         continue;
       }
+      if (route.route === "phone_guest") {
+        if (phoneSeen.has(route.phone)) {
+          skipped.push({ recipient: p.raw, reason: "Same phone already included in this batch" });
+          continue;
+        }
+        phoneSeen.add(route.phone);
+        phoneGuests.push({ raw: p.raw, phone: route.phone });
+        continue;
+      }
       resolved.push({ raw: p.raw, authId: u!.authId, intId: u!.intId });
     }
 
-    if (resolved.length === 0 && guests.length === 0) {
+    if (resolved.length === 0 && guests.length === 0 && phoneGuests.length === 0) {
       return json(
-        { ok: true, data: { issued: 0, guest_issued: 0, skipped, delivery: [] } },
+        { ok: true, data: { issued: 0, guest_issued: 0, phone_guest_issued: 0, skipped, delivery: [], claim_links: [] } },
         200,
         req,
       );
@@ -309,7 +333,7 @@ Deno.serve(async (req: Request) => {
         p_user_ids: accounts.unique.map((recipient) => recipient.authId),
       });
       if (issueError) {
-        console.error("[bulk-comp-tickets] atomic issuance failed:", issueError);
+        console.error("[bulk-comp-tickets] atomic issuance failed:", issueError.code);
         return err("Could not issue tickets. Try again.", 500, req);
       }
       if (!issuance?.ok) {
@@ -345,7 +369,7 @@ Deno.serve(async (req: Request) => {
         },
       );
       if (guestError) {
-        console.error("[bulk-comp-tickets] guest issuance failed:", guestError);
+        console.error("[bulk-comp-tickets] guest issuance failed:", guestError.code);
         return err("Could not issue guest tickets. Try again.", 500, req);
       }
       if (!guestIssuance?.ok) {
@@ -364,6 +388,45 @@ Deno.serve(async (req: Request) => {
         for (const g of guests) {
           if (!mintedEmails.has(g.email)) skipped.push({
             recipient: g.raw, reason: "Already holds a ticket in this tier",
+          });
+        }
+      }
+    }
+
+    // ── Phone guest comps: issue a claim link, the host sends it ────────────
+    // DVNT sends no SMS. The RPC mints the ticket and a single-use claim token
+    // (stored only as a hash) and the host's own device texts the link. See
+    // docs/workstreams/07-comp-sms-delivery.md.
+    let claimLinks: CompClaimLink[] = [];
+    if (phoneGuests.length > 0) {
+      const { data: phoneIssuance, error: phoneIssueError } = await supabase.rpc(
+        "issue_guest_phone_comp_tickets_atomic",
+        {
+          p_event_id: eventId,
+          p_tier_id: tierId,
+          p_actor_id: authId,
+          p_guest_phones: phoneGuests.map((g) => g.phone),
+        },
+      );
+      if (phoneIssueError) {
+        console.error("[bulk-comp-tickets] phone issuance failed:", phoneIssueError.code);
+        return err("Could not issue phone guest tickets. Try again.", 500, req);
+      }
+      if (!phoneIssuance?.ok) {
+        const reason = phoneIssuance?.would_exceed === true
+          ? `Tier capacity reached — ${phoneIssuance?.remaining ?? 0} left, no phone guest tickets issued`
+          : phoneIssuance?.error || "Could not issue phone guest ticket";
+        for (const g of phoneGuests) skipped.push({ recipient: g.raw, reason });
+      } else {
+        const issuedLinks = (phoneIssuance.links || []) as IssuedPhoneLink[];
+        const claimed = new Set<string>((phoneIssuance.claimed || []) as string[]);
+        const rawByPhone = new Map(phoneGuests.map((g) => [g.phone, g.raw]));
+        claimLinks = issuedLinks.map((link) =>
+          toCompClaimLink(link, rawByPhone.get(link.phone) || link.phone, SITE_URL)
+        );
+        for (const g of phoneGuests) {
+          if (claimed.has(g.phone)) skipped.push({
+            recipient: g.raw, reason: "Already claimed a ticket in this tier",
           });
         }
       }
@@ -408,7 +471,9 @@ Deno.serve(async (req: Request) => {
             type: "ticket_comped",
             entityType: "event",
             entityId: String(eventId),
-            url: `https://dvntapp.live/e/${eventId}`,
+            // The pass, not the event page (T04). /ticket/<event id> resolves
+            // to the recipient's own pass for this event.
+            url: `https://dvntapp.live/ticket/${eventId}`,
           },
           sound: "default",
           channelId: "default",
@@ -473,7 +538,7 @@ Deno.serve(async (req: Request) => {
           }
           return { recipient, delivered: true, email: ticket.guest_email };
         } catch (sendErr: any) {
-          console.error("[bulk-comp-tickets] guest email failed:", sendErr);
+          console.error("[bulk-comp-tickets] guest email failed:", sendErr?.name || "send error");
           return { recipient, delivered: false, error: "Email delivery failed" };
         }
       }),
@@ -491,10 +556,10 @@ Deno.serve(async (req: Request) => {
         .eq("ticket_type_id", tierId)
         .in("guest_email", deliveredEmails);
       if (stampError) {
-        console.warn("[bulk-comp-tickets] delivery stamp failed:", stampError);
+        console.warn("[bulk-comp-tickets] delivery stamp failed:", stampError.code);
       }
     }
-    const delivery = summarizeCompDelivery(sends);
+    const emailDelivery = summarizeCompDelivery(sends);
 
     return json(
       {
@@ -502,8 +567,10 @@ Deno.serve(async (req: Request) => {
         data: {
           issued: inserted?.length || 0,
           guest_issued: guestIssued.length,
+          phone_guest_issued: claimLinks.filter((l) => !l.reissued).length,
           skipped,
-          delivery: delivery.results,
+          delivery: emailDelivery.results,
+          claim_links: claimLinks,
           tier: tier.name,
         },
       },

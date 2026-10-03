@@ -9,7 +9,7 @@ import {
 } from "../../../../apps/mobile/supabase/functions/_shared/verified-admission.ts";
 
 const now = new Date("2026-09-16T00:00:00Z");
-const ENFORCED = { enforce: true, cohort_created_after: null, grace_deadline: "2026-12-01T00:00:00Z" };
+const ENFORCED = { enforce: true, grace_deadline: "2026-12-01T00:00:00Z" };
 const MEMBER = "auth_member";
 
 /** The server owns the decision; the client mirror must never disagree with it. */
@@ -29,7 +29,7 @@ test("enforcement off admits every account, verified or not", () => {
   }
   // A long-dormant, never-verified legacy account is untouched by merging this.
   assert.equal(
-    decide({ userId: MEMBER, accountCreatedAt: "2019-04-02T10:00:00Z", policy: { enforce: false }, record: { user_id: MEMBER, status: "none" } }).state,
+    decide({ userId: MEMBER, policy: { enforce: false }, record: { user_id: MEMBER, status: "none" } }).state,
     "allowed",
   );
 });
@@ -40,12 +40,21 @@ test("an in-scope unverified account is in grace until the deadline", () => {
   assert.equal(verdict.reason, "verification_required");
   assert.equal(verdict.deadline, "2026-12-01T00:00:00.000Z");
   assert.match(verdict.message ?? "", /verified-only from December 1, 2026/);
-  assert.match(verdict.message ?? "", /posting, buying tickets, joining rooms and messaging/);
+  assert.match(verdict.message ?? "", /posting, commenting, messaging, hosting and joining rooms/);
+  assert.doesNotMatch(verdict.message ?? "", /ticket/);
 
-  // No deadline set: prompt only, never a refusal.
-  const open = decide({ userId: MEMBER, policy: { enforce: true, grace_deadline: null }, record: null });
-  assert.equal(open.state, "grace");
-  assert.equal(open.deadline, null);
+  // No deadline set: grace is opt-in, so an enforced policy refuses at once.
+  const noGrace = decide({ userId: MEMBER, policy: { enforce: true, grace_deadline: null }, record: null });
+  assert.equal(noGrace.state, "blocked");
+  assert.equal(noGrace.deadline, null);
+  // An account that predates the rollout is in scope too (checklist A03):
+  // a leftover cohort_created_after from an old policy row exempts nobody.
+  const legacy = { enforce: true, cohort_created_after: "2026-09-10T00:00:00Z", grace_deadline: null };
+  for (const accountCreatedAt of ["2019-04-02T10:00:00Z", null]) {
+    const verdict = decide({ userId: MEMBER, accountCreatedAt, policy: legacy, record: null } as AdmissionContext);
+    assert.equal(verdict.state, "blocked");
+    assert.equal(verdict.reason, "verification_required");
+  }
 
   // A submitted-but-undecided check is still inside grace, with its own reason.
   for (const status of ["pending", "submitted", "review"]) {
@@ -68,15 +77,9 @@ test("past the deadline participation is refused with an actionable reason", () 
     message: verdict.message,
   });
 
-  // The cohort selector and the allowlist keep members out of the refusal.
-  const cohort = { ...past, cohort_created_after: "2026-09-10T00:00:00Z" };
-  assert.equal(decide({ userId: MEMBER, accountCreatedAt: "2024-01-01T00:00:00Z", policy: cohort, record: null }).reason, "out_of_cohort");
-  assert.equal(decide({ userId: MEMBER, accountCreatedAt: "2026-09-12T00:00:00Z", policy: cohort, record: null }).state, "blocked");
+  // The allowlist is the only exemption, and the denylist overrides it.
   assert.equal(decide({ userId: MEMBER, policy: past, record: null, exempt: true }).reason, "exempt");
-  // Denylist overrides both the cohort date and the allowlist.
-  assert.equal(decide({ userId: MEMBER, accountCreatedAt: "2024-01-01T00:00:00Z", policy: cohort, record: null, exempt: true, denied: true }).state, "blocked");
-  // An unknown account age is in scope rather than silently admitted.
-  assert.equal(decide({ userId: MEMBER, accountCreatedAt: null, policy: cohort, record: null }).state, "blocked");
+  assert.equal(decide({ userId: MEMBER, policy: past, record: null, exempt: true, denied: true }).state, "blocked");
   // No signed-in account is refused outright, before any policy is consulted.
   assert.equal(decide({ userId: null, policy: null }).reason, "unauthenticated");
 });
@@ -129,6 +132,35 @@ test("verification status is never inherited across an account switch", () => {
   // An under-18 row belonging to someone else does not block B either.
   assert.equal(
     decide({ userId: "auth_other", policy: null, record: { user_id: MEMBER, status: "failed", date_of_birth: "2008-09-17" } }).state,
+    "allowed",
+  );
+});
+
+test("a checkout-created profile stays locked until an adult document passes, on both sides", () => {
+  for (const policy of [null, { enforce: false }, ENFORCED]) {
+    const locked = decide({ userId: MEMBER, policy, record: null, restricted: true });
+    assert.equal(locked.state, "blocked", JSON.stringify(policy));
+    assert.equal(locked.reason, "restricted_profile");
+    assert.match(locked.message ?? "", /Verify your ID/);
+  }
+  // The allowlist exempts members from the rollout, not from signup's age check.
+  assert.equal(
+    decide({ userId: MEMBER, policy: ENFORCED, exempt: true, record: null, restricted: true }).state,
+    "blocked",
+  );
+  // A pending check does not unlock it.
+  assert.equal(
+    decide({ userId: MEMBER, policy: null, record: { user_id: MEMBER, status: "review" }, restricted: true }).reason,
+    "restricted_profile",
+  );
+  // A passed adult verification does.
+  assert.equal(
+    decide({
+      userId: MEMBER,
+      policy: null,
+      record: { user_id: MEMBER, status: "passed", date_of_birth: "1990-01-01" },
+      restricted: true,
+    }).state,
     "allowed",
   );
 });

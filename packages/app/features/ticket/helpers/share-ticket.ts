@@ -6,31 +6,12 @@
 
 import { Share } from "react-native";
 import type { Ticket } from "@dvnt/app/lib/stores/ticket-store";
+import { formatEventClock, formatEventDay } from "@dvnt/app/lib/events/event-time";
 import { shareUrls } from "@dvnt/app/lib/deep-linking/share-link";
 
 export interface ShareTicketResult {
   success: boolean;
   error?: string;
-}
-
-function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  if (!Number.isFinite(date.getTime())) return "";
-  return date.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-function formatTime(dateString: string): string {
-  const date = new Date(dateString);
-  if (!Number.isFinite(date.getTime())) return "";
-  return date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }
 
 /**
@@ -58,8 +39,16 @@ export async function shareTicket(
       lines.push(`📍 ${ticket.eventLocation}`);
     }
     if (ticket.eventDate) {
-      const formattedDate = formatDate(ticket.eventDate);
-      const formattedTime = formatTime(ticket.eventDate);
+      // Venue zone with its abbreviation, so a friend elsewhere reads the
+      // door time the host set ("Friday, July 10, 2026 at 8:00 PM PDT").
+      const zone = { eventTz: ticket.eventTz ?? null, isOnline: ticket.eventIsOnline ?? false };
+      const formattedDate = formatEventDay(ticket.eventDate, zone, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+      const formattedTime = formatEventClock(ticket.eventDate, zone);
       if (formattedDate && formattedTime) {
         lines.push(`🗓 ${formattedDate} at ${formattedTime}`);
       }

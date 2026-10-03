@@ -16,6 +16,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { Motion } from "@legendapp/motion";
 import { memo, useCallback, useState, useMemo } from "react";
 import { Skeleton } from "@dvnt/app/components/ui/skeleton";
+import { resolveFollowControl, type FollowMutationAction } from "@dvnt/app/lib/profile/follow-relationship";
 
 interface FollowerUser {
   id: string;
@@ -24,6 +25,7 @@ interface FollowerUser {
   name?: string;
   avatar?: string;
   isFollowing?: boolean;
+  followsYou?: boolean;
   postsCount?: number;
   followersCount?: number;
   followingCount?: number;
@@ -56,6 +58,8 @@ function seedProfilePreviewCache(
         typeof user.isFollowing === "boolean"
           ? user.isFollowing
           : old?.isFollowing,
+      followsYou:
+        typeof user.followsYou === "boolean" ? user.followsYou : old?.followsYou,
     }),
   );
 }
@@ -89,14 +93,22 @@ const FollowerRow = memo(function FollowerRow({
   onPress,
   onFollowPress,
   isFollowPending,
+  pendingAction,
   isCurrentUser,
 }: {
   user: FollowerUser;
   onPress: () => void;
   onFollowPress: () => void;
   isFollowPending: boolean;
+  pendingAction?: FollowMutationAction;
   isCurrentUser: boolean;
 }) {
+  const followControl = resolveFollowControl({
+    viewerFollowsTarget: user.isFollowing,
+    targetFollowsViewer: user.followsYou,
+    isPending: isFollowPending,
+    pendingAction,
+  });
   return (
     <Pressable
       onPress={onPress}
@@ -117,6 +129,9 @@ const FollowerRow = memo(function FollowerRow({
         <Text className="text-sm text-muted-foreground" numberOfLines={1}>
           {user.name || user.username}
         </Text>
+        {followControl.marker ? (
+          <Text className="text-xs text-muted-foreground">{followControl.marker}</Text>
+        ) : null}
       </View>
       {/* Follow/Following button */}
       {!isCurrentUser && (
@@ -145,7 +160,7 @@ const FollowerRow = memo(function FollowerRow({
                 color: "#fff",
               }}
             >
-              {user.isFollowing ? "Following" : "Follow"}
+              {followControl.buttonLabel}
             </Text>
           </Motion.View>
         </Motion.Pressable>
@@ -163,7 +178,7 @@ function FollowersScreenContent() {
   const { colors } = useColorScheme();
   const currentUser = useAuthStore((state) => state.user);
   const queryClient = useQueryClient();
-  const { mutate: followMutate, isPending: isFollowPending } = useFollow();
+  const { mutate: followMutate, isPending: isFollowPending, variables: followVars } = useFollow();
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -266,7 +281,15 @@ function FollowersScreenContent() {
         user={item}
         onPress={() => handleUserPress(item)}
         onFollowPress={() => handleFollowPress(item)}
-        isFollowPending={isFollowPending}
+        isFollowPending={
+          isFollowPending &&
+          String(followVars?.userId || "") === String(item.id)
+        }
+        pendingAction={
+          String(followVars?.userId || "") === String(item.id)
+            ? followVars?.action
+            : undefined
+        }
         isCurrentUser={currentUser?.id === item.id}
       />
     ),

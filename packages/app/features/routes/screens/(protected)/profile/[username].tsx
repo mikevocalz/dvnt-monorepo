@@ -1070,8 +1070,8 @@ function UserProfileScreenComponent() {
                         {followMutation.isPending
                           ? followVars?.action === "follow"
                             ? "Following…"
-                            : "Not Following…"
-                          : followButtonLabel({ isFollowing })}
+                            : "Unfollowing…"
+                          : followButtonLabel({ isFollowing, followsYou: Boolean((user as any)?.followsYou) })}
                       </Text>
                     </Motion.View>
                   </Motion.Pressable>

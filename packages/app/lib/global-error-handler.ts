@@ -121,8 +121,8 @@ export function installGlobalErrorHandler(): void {
       g.ErrorUtils.setGlobalHandler((error, isFatal) => {
         try {
           const report = captureError(error, "errorutils", isFatal);
-          logBanner(report);
           persist(report);
+          logBanner(report);
         } catch {
           // Logging itself failed — never let our handler crash the
           // crash handler.
@@ -150,11 +150,11 @@ export function installGlobalErrorHandler(): void {
 }
 
 /**
- * Read + clear the most recent persisted JS error. Called by
+ * Read the most recent persisted JS error without consuming it. Called by
  * `lib/native-exception-log.ts` so the boot-time reporter surfaces
  * BOTH native and JS prior-session errors in one pass.
  */
-export function readAndClearLastJSError(): PersistedJSError | null {
+export function readLastJSError(): PersistedJSError | null {
   try {
     const raw = mmkv.getString(STORAGE_KEY);
     if (!raw) return null;
@@ -165,10 +165,21 @@ export function readAndClearLastJSError(): PersistedJSError | null {
       mmkv.remove(STORAGE_KEY);
       return null;
     }
-    mmkv.remove(STORAGE_KEY);
     return parsed;
   } catch {
     return null;
+  }
+}
+
+/** A new error may have been captured while the previous report was sending. */
+export function clearLastJSError(reported: PersistedJSError): void {
+  try {
+    const raw = mmkv.getString(STORAGE_KEY);
+    if (raw && JSON.stringify(JSON.parse(raw)) === JSON.stringify(reported)) {
+      mmkv.remove(STORAGE_KEY);
+    }
+  } catch {
+    // Retaining a report is safer than clearing one we could not compare.
   }
 }
 

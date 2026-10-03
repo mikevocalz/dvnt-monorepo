@@ -44,6 +44,7 @@ import { PagerViewWrapper } from "@dvnt/app/components/ui/pager-view";
 import {
   useEvents,
   useForYouEvents,
+  usePastEvents,
   useToggleEventLike,
   eventKeys,
   type Event,
@@ -58,6 +59,7 @@ import { useDeviceLocation } from "@dvnt/app/lib/hooks/use-device-location";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { eventEnded } from "@dvnt/app/lib/events/event-time";
+import { pastTabEvents } from "@dvnt/app/lib/events/past-tab";
 import { EventCollectionRow } from "@dvnt/app/features/events";
 import { EventsMapSheet } from "@dvnt/app/features/events";
 import { EventFilterSheet } from "@dvnt/app/features/events";
@@ -500,6 +502,12 @@ function EventsScreenContent() {
   const { data: forYouEvents = [], isLoading: forYouLoading } =
     useForYouEvents();
 
+  // Past Events: the same query web's Past tab reads (getPastEvents, up to
+  // 20 ended public events). It used to filter the home RPC above, which only
+  // returns events that ended in the last 24 hours, so native Past held at
+  // most a day of history while web showed the full list.
+  const { data: pastEvents = [] } = usePastEvents();
+
   // Spotlight + promoted event IDs
   const { data: spotlightItems = [] } = useSpotlightFeed();
   const { data: promotedIds } = usePromotedEventIds();
@@ -561,15 +569,30 @@ function EventsScreenContent() {
           );
         case 1: // For You — use filtered results when any filter/search is active
           return hasActiveFilters ? eventsWithPromotion : forYouEvents;
-        case 3: // past_events
-          return eventsWithPromotion.filter(
-            (event: Event) => event.fullDate && eventEnded(event),
+        case 3: {
+          // past_events — the same source as web's Past tab
+          // (events-list.web.tsx): ended events from getPastEvents, narrowed
+          // by the search text. Pills and sort do not apply here; they are
+          // home-RPC parameters.
+          return pastTabEvents(pastEvents as Event[], debouncedSearch).map(
+            (event) => ({
+              ...event,
+              isPromoted: promotedIds?.has(parseInt(event.id)) ?? false,
+            }),
           );
+        }
         default: // All Events (2)
           return eventsWithPromotion;
       }
     },
-    [eventsWithPromotion, forYouEvents, hasActiveFilters],
+    [
+      eventsWithPromotion,
+      forYouEvents,
+      hasActiveFilters,
+      pastEvents,
+      debouncedSearch,
+      promotedIds,
+    ],
   );
 
   const handleTabPress = useCallback(

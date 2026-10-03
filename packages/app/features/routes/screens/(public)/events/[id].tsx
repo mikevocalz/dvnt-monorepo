@@ -29,6 +29,7 @@ import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useTicketTypes } from "@dvnt/app/lib/hooks/use-tickets";
 import { usePublicGateStore } from "@dvnt/app/lib/stores/public-gate-store";
 import { GuestCheckoutSheet } from "@dvnt/app/features/events";
+import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
 import { OrganizerCard } from "@dvnt/app/features/events/ui";
 
 interface TierLite {
@@ -68,21 +69,6 @@ function formatSaleWindow(
     minute: "2-digit",
   });
   return kind === "opens" ? `Sales open ${when}` : `Sales end ${when}`;
-}
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
 }
 
 function PublicEventDetailContent() {
@@ -204,7 +190,8 @@ function PublicEventDetailContent() {
   const title: string = ev.title || "Untitled event";
   const startIso: string | null =
     ev.startDate || ev.start_date || ev.fullDate || null;
-  const dateStr = formatDate(startIso);
+  // Venue zone with its abbreviation ("Fri, Jul 10 at 8:00 PM PDT").
+  const dateStr = formatEventWhen(startIso, ev);
   const locationLabel: string =
     ev.locationName ||
     ev.locationAddress ||
@@ -424,6 +411,7 @@ function PublicEventDetailContent() {
           onClose={() => setGuestSheetOpen(false)}
           eventId={eventId}
           eventTitle={title}
+          eventWhen={dateStr}
           ticketTypeId={selectedTier.id}
           ticketTypeName={selectedTier.name}
           pricePerTicketCents={selectedTier.priceCents}

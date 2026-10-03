@@ -48,7 +48,7 @@ test("sendToSentry posts a 3-line envelope with a fatal crash event", async () =
   }) as typeof fetch;
 
   try {
-    sendToSentry(
+    const accepted = await sendToSentry(
       {
         name: "TypeError",
         message: "Cannot read property 'id' of null",
@@ -59,8 +59,7 @@ test("sendToSentry posts a 3-line envelope with a fatal crash event", async () =
       },
       DSN,
     );
-    // sendToSentry is fire-and-forget; let the microtask queue drain.
-    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(accepted, true);
 
     assert.equal(calls.length, 1);
     const call = calls[0];
@@ -105,15 +104,45 @@ test("a non-crash area reports as error, and no DSN sends nothing", async () => 
   }) as typeof fetch;
 
   try {
-    sendToSentry({ message: "outbox drain failed", featureArea: "outbox" }, DSN);
-    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(await sendToSentry({ message: "outbox drain failed", featureArea: "outbox" }, DSN), true);
     assert.equal(calls.length, 1);
     assert.equal(JSON.parse(calls[0].trimEnd().split("\n")[2]).level, "error");
 
     // Unconfigured DSN must not attempt a request at all.
-    sendToSentry({ message: "x", featureArea: "crash" }, undefined);
-    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(await sendToSentry({ message: "x", featureArea: "crash" }, undefined), false);
     assert.equal(calls.length, 1);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a stalled request times out, aborts, and never acknowledges delivery", async (t) => {
+  const realFetch = globalThis.fetch;
+  let signal: AbortSignal | null | undefined;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  globalThis.fetch = ((_url, init) => {
+    signal = init?.signal;
+    return new Promise<Response>(() => {});
+  }) as typeof fetch;
+  try {
+    const pending = sendToSentry({ message: "fatal", featureArea: "crash" }, DSN);
+    t.mock.timers.tick(5_000);
+    assert.equal(await pending, false);
+    assert.equal(signal?.aborted, true);
+  } finally {
+    globalThis.fetch = realFetch;
+    t.mock.timers.reset();
+  }
+});
+
+test("synchronous fetch failures and cyclic extras cannot reject the reporter promise", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () => { throw new Error("fetch unavailable"); };
+  try {
+    assert.equal(await sendToSentry({ message: "fatal", featureArea: "crash" }, DSN), false);
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    assert.equal(await sendToSentry({ message: "fatal", featureArea: "crash", extra: cyclic }, DSN), false);
   } finally {
     globalThis.fetch = realFetch;
   }

@@ -1,10 +1,14 @@
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { corsHeaders } from "../_shared/verify-session.ts";
+import {
+  parsePlacesOrigin,
+  readDistanceMeters,
+} from "../_shared/places-origin.ts";
 
 type LatLng = { latitude: number; longitude: number };
 
 const AUTOCOMPLETE_FIELD_MASK =
-  "suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat";
+  "suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat,suggestions.placePrediction.distanceMeters";
 const DEFAULT_BIAS_CENTER: LatLng = { latitude: 34.0522, longitude: -118.2437 };
 const DEFAULT_RADIUS_METERS = 50_000;
 
@@ -91,6 +95,8 @@ function normalizeSuggestion(suggestion: any) {
       "",
     secondaryText: prediction.structuredFormat?.secondaryText?.text || "",
     fullText: prediction.text?.text || "",
+    // Present only when the request carried an origin and Google computed it.
+    distanceMeters: readDistanceMeters(prediction.distanceMeters),
   };
 }
 
@@ -145,6 +151,7 @@ Deno.serve(async (req) => {
   }
 
   const bias = await resolveBias(body, identifier);
+  const origin = parsePlacesOrigin(body.origin);
 
   // Do not send includedPrimaryTypes here. Google's Autocomplete (New) caps it
   // at five primary types, and this field must serve both venues/POIs and street
@@ -155,6 +162,8 @@ Deno.serve(async (req) => {
     sessionToken,
     languageCode: "en",
     includedRegionCodes: ["us"],
+    // origin only adds distanceMeters to each prediction; it does not rank.
+    ...(origin ? { origin } : {}),
     // Omit locationBias entirely when we have no location (rather than pin to a
     // default city) — Google then ranks by relevance without a wrong-city skew.
     ...(bias

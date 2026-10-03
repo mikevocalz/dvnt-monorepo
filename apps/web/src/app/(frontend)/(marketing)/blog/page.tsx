@@ -128,7 +128,13 @@ function FeaturedHero({ post }: { post: BlogPostCard }) {
   const cat = post.categories?.[0]
   return (
     <section style={heroSection} aria-label="Featured story">
-      <Link href={`/posts/${post.slug}`} style={heroLink} className="dvnt-hero-card">
+      {/* The card is a wrapper, not a link: the category chip is its own link,
+          and a link inside a link is invalid (the HTML parser closes the outer
+          <a> at the inner one). The post link is a sibling overlay covering the
+          card; the body sits above it with pointer-events off so only the chip
+          takes clicks. */}
+      <div style={heroCard} className="dvnt-hero-card">
+        <Link href={`/posts/${post.slug}`} aria-label={post.title} className="dvnt-card-link" style={cardLinkOverlay} />
         <div style={heroImgWrap}>
           {imgSrc
             ? <img src={imgSrc} alt={post.heroImage?.alt ?? post.title} style={heroImg} />
@@ -136,7 +142,7 @@ function FeaturedHero({ post }: { post: BlogPostCard }) {
           <div style={heroOverlay} aria-hidden="true" />
           <div style={heroGlow} aria-hidden="true" />
         </div>
-        <div style={heroBody}>
+        <div style={{ ...heroBody, ...aboveCardLink }}>
           <div style={heroMeta}>
             {cat && <CategoryPill category={cat} />}
             {post.eyebrow && !cat && <span style={eyebrow}>{post.eyebrow}</span>}
@@ -148,7 +154,7 @@ function FeaturedHero({ post }: { post: BlogPostCard }) {
           {post.excerpt && <p style={heroDek}>{post.excerpt}</p>}
           <BylineRow post={post} />
         </div>
-      </Link>
+      </div>
     </section>
   )
 }
@@ -268,7 +274,7 @@ function CategoryPill({ category }: { category: BlogCategory }) {
     <Link
       href={`/blog?category=${category.slug}`}
       style={{
-        display: 'inline-block', textDecoration: 'none',
+        display: 'inline-block', textDecoration: 'none', pointerEvents: 'auto',
         padding: '3px 10px', borderRadius: 7,
         border: `1px solid ${accent}44`, background: `${accent}18`,
         color: accent, fontSize: 10, fontFamily: MONO,
@@ -347,7 +353,11 @@ const main: React.CSSProperties = {
 
 // Hero
 const heroSection: React.CSSProperties = {}
-const heroLink: React.CSSProperties = { display: 'block', textDecoration: 'none', borderRadius: 20, overflow: 'hidden', border: `1px solid ${BORDER}` }
+const heroCard: React.CSSProperties = { position: 'relative', display: 'block', borderRadius: 20, overflow: 'hidden', border: `1px solid ${BORDER}` }
+/** Full-card post link, laid under the card body (see FeaturedHero). */
+const cardLinkOverlay: React.CSSProperties = { position: 'absolute', inset: 0, zIndex: 1, borderRadius: 'inherit' }
+/** Content above the overlay link; clicks fall through except on its own links. */
+const aboveCardLink: React.CSSProperties = { position: 'relative', zIndex: 2, pointerEvents: 'none' }
 const heroImgWrap: React.CSSProperties = { position: 'relative', width: '100%', aspectRatio: '21/9' }
 const heroImg: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover', display: 'block' }
 const heroImgFallback: React.CSSProperties = { width: '100%', height: '100%', background: 'rgba(138,64,207,0.2)' }
@@ -492,6 +502,7 @@ const pagerInfo: React.CSSProperties = {
 
 const CSS = `
 .dvnt-hero-card { transition: box-shadow .3s ease; }
+.dvnt-card-link:focus-visible { outline: 2px solid #FF5BFC; outline-offset: -2px; }
 .dvnt-hero-card:hover { box-shadow: 0 0 0 1px rgba(255,91,252,0.3), 0 32px 80px rgba(0,0,0,0.6); }
 .dvnt-hero-card:hover img { transform: scale(1.02); transition: transform .6s cubic-bezier(0.22,1,0.36,1); }
 .dvnt-card { transition: transform .3s cubic-bezier(0.22,1,0.36,1), box-shadow .3s ease, border-color .3s ease; }

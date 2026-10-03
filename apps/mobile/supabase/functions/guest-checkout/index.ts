@@ -8,8 +8,13 @@
  * on Stripe's page; the webhook issues + emails the ticket(s). No card data ever
  * touches us, no account required.
  *
- *   POST { event_id, ticket_type_id, quantity, guest_email, guest_name? }
+ *   POST { event_id, ticket_type_id, quantity, guest_email, guest_name?,
+ *          username?, full_name?, phone? }
  *   -> { ok, url }   // redirect the browser to `url`
+ *
+ * username/full_name/phone: send all three or none. With them, the buyer gets
+ * a restricted profile once the ticket is issued (_shared/checkout-profile.ts).
+ * Without them the request is an older client and checkout works as before.
  *
  * Deno env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, PUBLIC_SITE_URL.
  */
@@ -23,8 +28,14 @@ import {
   TIER_VISIBILITY_MESSAGES,
 } from "../_shared/tier-visibility.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { isUnpublished } from "../_shared/event-access.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
+import { parseCheckoutProfileFields } from "../_shared/checkout-profile-fields.ts";
+import {
+  provisionCheckoutProfile,
+  recordCheckoutProfileIntake,
+} from "../_shared/checkout-profile.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -92,6 +103,9 @@ Deno.serve(async (req) => {
       : "";
 
     if (!EMAIL_RE.test(guestEmail)) return err("invalid_email", "Enter a valid email.");
+    const profile = parseCheckoutProfileFields(body);
+    if (!profile.ok) return err(profile.code, profile.message);
+    const profileFields = profile.fields;
     if (!Number.isFinite(eventId) || !ticketTypeId) return err("invalid_request", "Missing event or tier.");
 
     // Idempotency: the client generates one key per sheet open, so a
@@ -131,10 +145,12 @@ Deno.serve(async (req) => {
     // private/spicy events (the visibility resolver hides them).
     const { data: ev } = await supabase
       .from("events")
-      .select("id, title, visibility, status, ticketing_enabled, host_id, fee_mode, attendee_name_requirement, end_date, start_date")
+      .select("id, title, visibility, status, ticketing_enabled, host_id, fee_mode, attendee_name_requirement, end_date, start_date, is_hidden, publish_at")
       .eq("id", eventId)
       .single();
-    if (!ev || ev.visibility !== "public") return err("event_not_found", "Event not found.", 404);
+    // A guest has no account, so no relationship can open a hidden or
+    // not-yet-published event: it reads as missing, like a private one.
+    if (!ev || ev.visibility !== "public" || isUnpublished(ev)) return err("event_not_found", "Event not found.", 404);
     if (coalesceStatus(ev.status) === "cancelled") return err("event_cancelled", "This event was cancelled.");
     // Card-not-present sales stop 30 min before the event ends — after
     // that the only legitimate way to sell is card-present (Tap to Pay).
@@ -337,12 +353,19 @@ Deno.serve(async (req) => {
         },
       ]);
 
+      // Profile before email, so the email can name the account it made.
+      // Best-effort: a failure here never touches the issued tickets.
+      const created = profileFields
+        ? await provisionCheckoutProfile(supabase, profileFields, "[guest-checkout]")
+        : null;
+
       // Bundle email from the order's authoritative rows. Failure is
       // persisted as retryable delivery state — never a rollback of
       // issued tickets.
       await deliverTicketBundleEmail(supabase, freeOrder.id, {
         kind: "fulfillment",
         logPrefix: "[guest-checkout]",
+        profileUsername: created?.status === "created" ? created.username : null,
       });
 
       return json({
@@ -504,6 +527,13 @@ Deno.serve(async (req) => {
       // Non-fatal: the Stripe session is already live. Log loudly —
       // reconciliation can still repair the order later.
       console.error("[guest-checkout] order insert failed:", guestOrderError);
+    }
+
+    // The profile is made when the webhook issues the tickets, not now: an
+    // abandoned checkout must not leave an account (or a claimed username)
+    // behind. The fields wait under the session id until then.
+    if (profileFields) {
+      await recordCheckoutProfileIntake(supabase, session.id, profileFields, "[guest-checkout]");
     }
 
     return json({ ok: true, url: session.url });

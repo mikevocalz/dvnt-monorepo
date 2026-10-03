@@ -2,7 +2,8 @@
  * brand-outbox-worker Edge Function
  *
  * POST /brand-outbox-worker   (cron only, x-cron-secret)
- * Body: { limit?: number, cap?: number, lookback_days?: number }
+ * Body: { limit?: number, cap?: number, lookback_days?: number,
+ *         follow_backfill_limit?: number }
  *
  * Drains public.brand_message_outbox as the canonical Deviant account.
  * Claims rows atomically, sends each one with its stable provider idempotency
@@ -23,13 +24,20 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { brandSendGate, brandUnsubscribeUrl, verifyBrandSender } from "../_shared/brand-sender.ts";
+import {
+  brandSendGate,
+  brandUnsubscribeUrl,
+  resolveBrandSender,
+  verifyBrandSender,
+} from "../_shared/brand-sender.ts";
+import { NEW_PROFILE_WINDOW } from "../_shared/brand-follow.ts";
 import { campaignMessage, transition } from "../_shared/brand-outbox.ts";
 import {
   ensureDirectConversation,
   postConversationMessage,
 } from "../_shared/conversation-delivery.ts";
 import { sendResendEmail } from "../_shared/send-resend-email.ts";
+import { welcome as welcomeEmail } from "../_shared/email/templates.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -46,6 +54,93 @@ function json(data: unknown, status = 200) {
     status,
     headers: { "Content-Type": "application/json", ...cors },
   });
+}
+
+type BrandFollowResult =
+  | { status: "ran"; memberToBrandInserted: number; brandToNewMemberInserted: number; remaining: number; done: boolean }
+  | { status: "skipped"; reason: string }
+  | { status: "error"; error: string };
+
+async function runBrandFollowBackfill(
+  supabase: any,
+  limit: number,
+): Promise<BrandFollowResult> {
+  // Never guess the brand from @username: prove the configured ID pair first.
+  const resolved = resolveBrandSender();
+  const identity = resolved.ok
+    ? await verifyBrandSender(supabase, resolved.sender)
+    : resolved;
+  if (!identity.ok) {
+    console.warn(`[brand-outbox-worker] follow backfill skipped: ${identity.reason}`);
+    return { status: "skipped", reason: identity.reason };
+  }
+  const { data, error } = await supabase.rpc("backfill_brand_follows", {
+    p_brand_id: identity.sender.userId,
+    p_limit: limit,
+    p_new_profile_window: NEW_PROFILE_WINDOW,
+  });
+  if (error) {
+    console.error("[brand-outbox-worker] follow backfill failed:", error);
+    return { status: "error", error: error.message ?? String(error) };
+  }
+  const remaining = Number(data?.remaining ?? 0);
+  return {
+    status: "ran",
+    memberToBrandInserted: Number(data?.memberToBrandInserted ?? 0),
+    brandToNewMemberInserted: Number(data?.brandToNewMemberInserted ?? 0),
+    remaining,
+    done: remaining === 0,
+  };
+}
+
+type CheckoutWelcomeResult =
+  | { status: "ran"; claimed: number; sent: number; released: number }
+  | { status: "error"; error: string };
+
+/**
+ * Welcome email for profiles made at guest checkout, which never pass the
+ * auth function's user.create.after hook. claim_checkout_welcome_emails
+ * writes the sent marker before anything goes out, so a second worker or the
+ * next tick cannot send it again. A failed send releases the marker for the
+ * next tick. Runs whether or not DVNT_BRAND_OUTBOX_ENABLED is set: this is the
+ * account's welcome, not a growth message.
+ */
+async function sendCheckoutWelcomeEmails(supabase: any): Promise<CheckoutWelcomeResult> {
+  const { data, error } = await supabase.rpc("claim_checkout_welcome_emails", {
+    p_lookback: "7 days",
+    p_limit: 50,
+  });
+  if (error) {
+    console.error("[brand-outbox-worker] checkout welcome claim failed:", error);
+    return { status: "error", error: error.message ?? String(error) };
+  }
+  const rows = (data || []) as Array<{ auth_id: string; email: string | null; username: string | null }>;
+  let sent = 0;
+  let released = 0;
+  for (const row of rows) {
+    let providerId: string | null = null;
+    if (row.email) {
+      try {
+        const { subject, html } = welcomeEmail(row.username, { checkoutProfile: true });
+        providerId = await sendResendEmail({ to: row.email, subject, html });
+      } catch (err) {
+        console.error("[brand-outbox-worker] checkout welcome send failed:", err);
+      }
+    }
+    // sendResendEmail returns null when RESEND_API_KEY is missing: not sent.
+    const ok = providerId !== null;
+    const { error: completeError } = await supabase.rpc("complete_checkout_welcome_email", {
+      p_auth_id: row.auth_id,
+      p_sent: ok,
+      p_provider_message_id: providerId,
+    });
+    if (completeError) {
+      console.error("[brand-outbox-worker] checkout welcome complete failed:", completeError);
+    }
+    if (ok) sent += 1;
+    else released += 1;
+  }
+  return { status: "ran", claimed: rows.length, sent, released };
 }
 
 Deno.serve(async (req: Request) => {
@@ -67,7 +162,12 @@ Deno.serve(async (req: Request) => {
       global: { headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } },
     });
 
-    let body: { limit?: number; cap?: number; lookback_days?: number } = {};
+    let body: {
+      limit?: number;
+      cap?: number;
+      lookback_days?: number;
+      follow_backfill_limit?: number;
+    } = {};
     try {
       body = await req.json();
     } catch {
@@ -79,16 +179,33 @@ Deno.serve(async (req: Request) => {
       Math.max(Number(body.lookback_days) || 7, 1),
       90,
     );
+    const followBackfillLimit = Math.min(
+      Math.max(Number(body.follow_backfill_limit) || 250, 1),
+      1000,
+    );
 
     // Enqueue runs whether or not sending is enabled: the outbox can fill up
     // safely, and nothing leaves until an operator turns it on.
     const { data: enqueued, error: enqueueError } = await supabase.rpc(
-      "enqueue_brand_welcome",
-      { p_auth_id: null, p_lookback: `${lookbackDays} days` },
+      "enqueue_brand_onboarding",
+      {
+        p_auth_id: null,
+        p_lookback: `${lookbackDays} days`,
+        p_first_post_delay: "24 hours",
+      },
     );
     if (enqueueError) {
       console.error("[brand-outbox-worker] enqueue failed:", enqueueError);
     }
+
+    // Follow backfill: every eligible member follows @DeviantEvents, up to
+    // followBackfillLimit per run, and the brand follows profiles created in
+    // the last NEW_PROFILE_WINDOW that skipped auth-sync. It needs the proven
+    // brand ID pair but not DVNT_BRAND_OUTBOX_ENABLED. Once nothing is missing
+    // the RPC inserts nothing and reports remaining: 0.
+    const brandFollows = await runBrandFollowBackfill(supabase, followBackfillLimit);
+
+    const checkoutWelcome = await sendCheckoutWelcomeEmails(supabase);
 
     const configured = brandSendGate();
     // Well-formed is not the same as correct: a typo in either id would pass
@@ -103,7 +220,14 @@ Deno.serve(async (req: Request) => {
       );
       return json({
         ok: true,
-        data: { enqueued: enqueued ?? 0, claimed: 0, sent: 0, disabled: gate.reason },
+        data: {
+          enqueued: enqueued ?? 0,
+          brandFollows,
+          checkoutWelcome,
+          claimed: 0,
+          sent: 0,
+          disabled: gate.reason,
+        },
       });
     }
 
@@ -126,7 +250,16 @@ Deno.serve(async (req: Request) => {
 
     const rows = (claimed || []) as Array<Record<string, any>>;
     if (rows.length === 0) {
-      return json({ ok: true, data: { enqueued: enqueued ?? 0, claimed: 0, sent: 0 } });
+      return json({
+        ok: true,
+        data: {
+          enqueued: enqueued ?? 0,
+          brandFollows,
+          checkoutWelcome,
+          claimed: 0,
+          sent: 0,
+        },
+      });
     }
 
     const recipientIds = rows.map((r) => r.recipient_id);
@@ -226,6 +359,8 @@ Deno.serve(async (req: Request) => {
       ok: true,
       data: {
         enqueued: enqueued ?? 0,
+        brandFollows,
+        checkoutWelcome,
         claimed: rows.length,
         sent,
         failed,

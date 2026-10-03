@@ -64,6 +64,24 @@ import {
   draftAddonToCreateParams,
 } from "@dvnt/app/features/events/create/addon-form";
 import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web";
+import { resolveEventSchedule } from "@dvnt/app/features/events/create/event-form";
+import { EventZonePickerWeb } from "@dvnt/app/features/events/ui/event-zone-picker.web";
+import { EventPublicationFieldWeb } from "@dvnt/app/features/events/ui/event-publication-picker.web";
+import {
+  publishAtError,
+  publishAtInstantToLocal,
+  publishAtLocalToInstant,
+} from "@dvnt/app/lib/events/event-publication";
+import {
+  deviceTimeZone,
+  normalizeTimeZone,
+  zonedIsoToLocalIso,
+} from "@dvnt/app/lib/events/event-zone";
+import {
+  saleWindowInstantToLocal,
+  saleWindowLabel,
+  saleWindowLocalToInstant,
+} from "@dvnt/app/lib/events/sale-window";
 
 const inputCls =
   "w-full bg-white/[0.05] border border-white/12 rounded-xl px-3 h-11 text-[15px] text-white placeholder:text-white/40 outline-none focus:border-[#3FDCFF]/60";
@@ -145,6 +163,11 @@ export function EventEditScreen() {
     }
 
     const isoDate = ev.fullDate || ev.startDate || ev.date;
+    // Reopen the stored instants as wall-clock times in the event's zone, so
+    // a 9 PM Pacific event reads 9 PM here whatever zone this browser is in.
+    // An event with no recorded zone opens in this browser's zone, which is
+    // the zone the old editor showed it in.
+    const eventTz = normalizeTimeZone(ev.event_tz ?? ev.eventTz) ?? deviceTimeZone();
     // Video FIRST. This read `ev.flyerImageUrl` only, so opening Edit on an
     // event with a video flyer showed the still (or an empty box) and the
     // editor had no idea a video existed — which is how saving could leave the
@@ -161,10 +184,13 @@ export function EventEditScreen() {
       title: ev.title || "",
       description: ev.description || "",
       location: ev.location || "",
+      eventTz,
+      isHidden: (ev as any).isHidden === true,
+      publishAt: publishAtInstantToLocal((ev as any).publishAt, eventTz),
       eventDate: isoDate
-        ? new Date(isoDate).toISOString()
+        ? zonedIsoToLocalIso(new Date(isoDate).toISOString(), eventTz)
         : new Date().toISOString(),
-      endDate: ev.endDate ? new Date(ev.endDate).toISOString() : null,
+      endDate: ev.endDate ? zonedIsoToLocalIso(ev.endDate, eventTz) || null : null,
       price: ev.price != null ? String(ev.price) : "",
       maxAttendees: ev.maxAttendees != null ? String(ev.maxAttendees) : "",
       category: ev.category || "",
@@ -197,7 +223,8 @@ export function EventEditScreen() {
         tier: (t.tier || "ga") as LocalTicketTier["tier"],
         description: t.description || "",
         isActive: true,
-        saleStart: t.sale_start || "",
+        // Reopened as the wall clock in the event's zone, like the event start.
+        saleStart: saleWindowInstantToLocal(t.sale_start, eventTz),
         // v2 tier model — hydrate the jsonb shapes into editor rows.
         tierType: t.tier_type || "ga",
         visibility: t.tier_visibility || "public",
@@ -251,6 +278,20 @@ export function EventEditScreen() {
       showToast("error", "Error", "Title is required");
       return;
     }
+    const schedule = resolveEventSchedule(s);
+    if (schedule.error) {
+      s.setDateError(schedule.error);
+      showToast("error", "Check the time", schedule.error);
+      return;
+    }
+    const publishError = publishAtError(
+      publishAtLocalToInstant(s.publishAt, schedule.eventTz),
+      schedule.startIso,
+    );
+    if (publishError) {
+      showToast("error", "Check the go-public time", publishError);
+      return;
+    }
 
     saveLock.current = true;
     setUploadPct(0);
@@ -302,8 +343,11 @@ export function EventEditScreen() {
         title: s.title.trim(),
         description: s.description.trim(),
         location: s.location,
-        startDate: s.eventDate,
-        endDate: s.endDate || undefined,
+        startDate: schedule.startIso,
+        endDate: schedule.endIso || undefined,
+        eventTz: schedule.eventTz,
+        isHidden: s.isHidden,
+        publishAt: publishAtLocalToInstant(s.publishAt, schedule.eventTz),
         price: s.price ? parseFloat(s.price) : 0,
         maxAttendees: s.maxAttendees ? parseInt(s.maxAttendees) : undefined,
         category: s.category || undefined,
@@ -366,7 +410,7 @@ export function EventEditScreen() {
               priceCents,
               quantityTotal: qty,
               maxPerUser,
-              saleStart: tier.saleStart || undefined,
+              saleStart: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz) ?? undefined,
               tierType: tier.tierType,
               tierVisibility: tier.visibility,
               unlockCode:
@@ -386,7 +430,7 @@ export function EventEditScreen() {
               price_cents: priceCents,
               quantity_total: qty,
               max_per_user: maxPerUser,
-              sale_start: tier.saleStart || null,
+              sale_start: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz),
               tier_type: tier.tierType,
               tier_visibility: tier.visibility,
               unlock_code:
@@ -786,7 +830,7 @@ export function EventEditScreen() {
               onChange={(e) => s.setEventDate(fromLocalInput(e.target.value))}
             />
           </FormField>
-          <FormField label="Ends (optional)">
+          <FormField label="Ends (optional)" error={s.dateError ?? undefined}>
             <input
               type="datetime-local"
               className={inputCls}
@@ -804,6 +848,11 @@ export function EventEditScreen() {
               Clear end date
             </button>
           ) : null}
+          <EventZonePickerWeb
+            value={s.eventTz}
+            onChange={s.setEventTz}
+            at={resolveEventSchedule(s).startIso}
+          />
         </Section>
 
         {/* Pricing & Visibility */}
@@ -881,6 +930,22 @@ export function EventEditScreen() {
               {eventVisibilityCopy(s.visibility).helper}
             </p>
           </FormField>
+          <div className="mb-4">
+            <EventPublicationFieldWeb
+              isHidden={s.isHidden}
+              onHiddenChange={s.setIsHidden}
+              publishAt={s.publishAt}
+              onPublishAtChange={s.setPublishAt}
+              eventTz={s.eventTz}
+              error={(() => {
+                const sched = resolveEventSchedule(s);
+                return publishAtError(
+                  publishAtLocalToInstant(s.publishAt, sched.eventTz),
+                  sched.startIso,
+                );
+              })()}
+            />
+          </div>
           {/* Private only. A link-only event lets anyone holding the URL in, so
               a guest list there would grant a permission everyone already has
               while implying a restriction. */}
@@ -1028,6 +1093,7 @@ export function EventEditScreen() {
 
 function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
   const updateTier = useEventEditStore((st) => st.updateTier);
+  const eventTz = useEventEditStore((st) => st.eventTz);
   const removeTier = useEventEditStore((st) => st.removeTier);
   const borderColor = `${tierLevelColor[tier.tier] ?? "#34A2DF"}4D`;
   const activeCat = TICKET_TYPE_CATEGORIES.find(
@@ -1162,6 +1228,11 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
               })
             }
           />
+          <span className="block text-[11px] text-white/40">
+            {tier.saleStart
+              ? saleWindowLabel(tier.saleStart, eventTz)
+              : "In the event's time zone"}
+          </span>
         </div>
         {tier.saleStart ? (
           <button

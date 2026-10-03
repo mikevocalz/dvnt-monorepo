@@ -7,6 +7,8 @@ import {
 } from "react";
 import {
   ActivityIndicator,
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -35,6 +37,10 @@ import {
 } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
+import { decideLocationPermission } from "@dvnt/app/lib/places/location-permission";
+import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import { placeDistanceLabel } from "@dvnt/app/lib/proximity";
+import { calculateDistance } from "@dvnt/app/lib/types/location";
 
 export type LocationData = {
   name: string;
@@ -65,7 +71,11 @@ type GooglePlace = {
   types?: string[];
   latitude?: number;
   longitude?: number;
+  /** Straight-line meters from the member's stored city, when known. */
+  distanceMeters?: number;
 };
+
+type SearchOrigin = { lat: number; lng: number };
 
 type RecentLocation = {
   id: string;
@@ -95,7 +105,32 @@ function sanitizeRecentLocations(value: unknown): RecentLocation[] {
   );
 }
 
+function readDistanceMeters(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
 function createPredictionFromSuggestion(suggestion: any): GooglePlace | null {
+  // Places API (New) autocomplete returns suggestions[].placePrediction.
+  const prediction = suggestion?.placePrediction;
+  if (prediction?.placeId) {
+    const mainText =
+      prediction.structuredFormat?.mainText?.text || prediction.text?.text || "";
+    if (!mainText) return null;
+    const secondaryText = prediction.structuredFormat?.secondaryText?.text || "";
+    return {
+      place_id: prediction.placeId,
+      description: prediction.text?.text || mainText,
+      structured_formatting: {
+        main_text: mainText,
+        secondary_text: secondaryText || undefined,
+      },
+      types: prediction.types || [],
+      distanceMeters: readDistanceMeters(prediction.distanceMeters),
+    };
+  }
+
   const place = suggestion?.place;
   const text = suggestion?.text?.text;
   const placeId = place?.id;
@@ -127,10 +162,17 @@ function normalizeLegacyPredictions(data: any): GooglePlace[] | null {
         typeof prediction.description === "string" &&
         !!prediction.structured_formatting?.main_text,
     )
-    .slice(0, 8);
+    .slice(0, 8)
+    .map((prediction: any) => ({
+      ...prediction,
+      distanceMeters: readDistanceMeters(prediction.distance_meters),
+    }));
 }
 
-function normalizePhotonPredictions(data: any): GooglePlace[] | null {
+function normalizePhotonPredictions(
+  data: any,
+  origin: SearchOrigin | null,
+): GooglePlace[] | null {
   if (!data || !Array.isArray(data.features)) return null;
 
   return data.features
@@ -174,6 +216,12 @@ function normalizePhotonPredictions(data: any): GooglePlace[] | null {
         types: [props.osm_value || "geocode"],
         latitude,
         longitude,
+        // Photon has no origin parameter; it returns coordinates, so measure
+        // from the stored city here.
+        distanceMeters:
+          origin && latitude != null && longitude != null
+            ? calculateDistance(origin.lat, origin.lng, latitude, longitude) * 1000
+            : undefined,
       } satisfies GooglePlace;
     })
     .filter(Boolean)
@@ -191,6 +239,15 @@ export function LocationAutocompleteInstagram({
   onDismiss,
 }: LocationAutocompleteProps) {
   const { colors } = useColorScheme();
+  // Distances are measured from the member's stored city, never a device fix.
+  const activeCity = useEventsLocationStore((s) => s.activeCity);
+  const searchOrigin = useMemo<SearchOrigin | null>(
+    () => (activeCity ? { lat: activeCity.lat, lng: activeCity.lng } : null),
+    [activeCity],
+  );
+  // The debouncer below is built once, so it reads the origin through a ref.
+  const searchOriginRef = useRef(searchOrigin);
+  searchOriginRef.current = searchOrigin;
   const sheetRef = useRef<BottomSheetModal>(null);
   const searchInputRef = useRef<any>(null);
   const snapPoints = useMemo(() => ["78%"], []);
@@ -202,6 +259,9 @@ export function LocationAutocompleteInstagram({
   );
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [locationBlocked, setLocationBlocked] = useState<{
+    canOpenSettings: boolean;
+  } | null>(null);
   const [googleApiUnavailable, setGoogleApiUnavailable] = useState(
     !HAS_GOOGLE_PLACES_KEY,
   );
@@ -251,53 +311,6 @@ export function LocationAutocompleteInstagram({
   }, [value]);
 
   useEffect(() => {
-    setIsLoadingLocation(true);
-
-    const loadCurrentLocation = async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") return;
-
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        const [reverse] = await Location.reverseGeocodeAsync({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-
-        const locationName =
-          reverse?.name ||
-          [reverse?.city, reverse?.region].filter(Boolean).join(", ") ||
-          "Current Location";
-
-        setCurrentLocation({
-          name: locationName,
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          formattedAddress: [
-            reverse?.street,
-            reverse?.city,
-            reverse?.region,
-            reverse?.postalCode,
-          ]
-            .filter(Boolean)
-            .join(", "),
-        });
-      } catch (error) {
-        console.warn(
-          "[LocationAutocompleteInstagram] Failed to resolve current location:",
-          error,
-        );
-      } finally {
-        setIsLoadingLocation(false);
-      }
-    };
-
-    void loadCurrentLocation();
-  }, []);
-
-  useEffect(() => {
     if (query.trim().length < 2) {
       setPredictions([]);
       return;
@@ -341,12 +354,14 @@ export function LocationAutocompleteInstagram({
     if (!HAS_GOOGLE_PLACES_KEY) return null;
 
     try {
+      const origin = searchOriginRef.current;
       const url =
         "https://maps.googleapis.com/maps/api/place/autocomplete/json" +
         `?key=${GOOGLE_PLACES_API_KEY}` +
         `&input=${encodeURIComponent(text)}` +
         "&language=en" +
-        "&components=country:us";
+        "&components=country:us" +
+        (origin ? `&origin=${origin.lat},${origin.lng}` : "");
 
       const response = await fetch(url);
       if (!response.ok) return null;
@@ -368,7 +383,7 @@ export function LocationAutocompleteInstagram({
       );
       if (!response.ok) return null;
       const data = await response.json();
-      return normalizePhotonPredictions(data);
+      return normalizePhotonPredictions(data, searchOriginRef.current);
     } catch (error) {
       console.warn(
         "[LocationAutocompleteInstagram] Photon autocomplete failed:",
@@ -400,6 +415,14 @@ export function LocationAutocompleteInstagram({
                 input: normalizedText,
                 languageCode: "en",
                 includedRegionCodes: ["us"],
+                ...(searchOriginRef.current
+                  ? {
+                      origin: {
+                        latitude: searchOriginRef.current.lat,
+                        longitude: searchOriginRef.current.lng,
+                      },
+                    }
+                  : {}),
               }),
             },
           );
@@ -552,10 +575,65 @@ export function LocationAutocompleteInstagram({
     [commitSelection],
   );
 
-  const handleSelectCurrentLocation = useCallback(() => {
-    if (!currentLocation) return;
-    commitSelection(currentLocation);
-  }, [commitSelection, currentLocation]);
+  const handleSelectCurrentLocation = useCallback(async () => {
+    setIsLoadingLocation(true);
+    try {
+      // Location permission is intentionally requested ONLY after this explicit
+      // tap. Opening Create Post or the place picker must never trigger an OS
+      // permission prompt. Once denied, iOS and browsers never prompt again, so
+      // check first and show the blocked state instead of failing silently.
+      const platform = Platform.OS;
+      let decision = decideLocationPermission({
+        ...(await Location.getForegroundPermissionsAsync()),
+        platform,
+      });
+      if (decision.kind === "request") {
+        const requested = await Location.requestForegroundPermissionsAsync();
+        decision = decideLocationPermission({ ...requested, platform });
+        // A fresh "no" on the system prompt is an answer, not a dead end yet:
+        // only show the blocked row when the OS will not ask again.
+        if (decision.kind === "request") return;
+      }
+      if (decision.kind === "blocked") {
+        setLocationBlocked({ canOpenSettings: decision.canOpenSettings });
+        return;
+      }
+      setLocationBlocked(null);
+
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const [reverse] = await Location.reverseGeocodeAsync({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+      const nextLocation: LocationData = {
+        name:
+          reverse?.name ||
+          [reverse?.city, reverse?.region].filter(Boolean).join(", ") ||
+          "Current Location",
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        formattedAddress: [
+          reverse?.street,
+          reverse?.city,
+          reverse?.region,
+          reverse?.postalCode,
+        ]
+          .filter(Boolean)
+          .join(", "),
+      };
+      setCurrentLocation(nextLocation);
+      commitSelection(nextLocation);
+    } catch (error) {
+      console.warn(
+        "[LocationAutocompleteInstagram] Failed to resolve current location:",
+        error,
+      );
+    } finally {
+      setIsLoadingLocation(false);
+    }
+  }, [commitSelection]);
 
   const handleManualSubmit = useCallback(() => {
     const trimmed = query.trim();
@@ -579,35 +657,54 @@ export function LocationAutocompleteInstagram({
   );
 
   const renderPredictionRow = useCallback(
-    (prediction: GooglePlace) => (
-      <TouchableOpacity
-        key={prediction.place_id}
-        onPress={() => void handleSelectPrediction(prediction)}
-        activeOpacity={0.8}
-        style={[styles.row, { backgroundColor: colors.card }]}
-      >
-        <View style={styles.rowIconWrap}>
-          {prediction.types?.includes("establishment") ? (
-            <Building size={16} color={colors.mutedForeground} />
-          ) : (
-            <MapPin size={16} color={colors.mutedForeground} />
-          )}
-        </View>
-        <View style={styles.rowTextWrap}>
-          <Text style={[styles.rowTitle, { color: colors.foreground }]}>
-            {prediction.structured_formatting.main_text}
-          </Text>
-          {prediction.structured_formatting.secondary_text ? (
-            <Text
-              style={[styles.rowSubtitle, { color: colors.mutedForeground }]}
-            >
-              {prediction.structured_formatting.secondary_text}
+    (prediction: GooglePlace) => {
+      const distance = placeDistanceLabel(
+        prediction.distanceMeters,
+        searchOrigin,
+      );
+      return (
+        <TouchableOpacity
+          key={prediction.place_id}
+          onPress={() => void handleSelectPrediction(prediction)}
+          activeOpacity={0.8}
+          style={[styles.row, { backgroundColor: colors.card }]}
+        >
+          <View style={styles.rowIconWrap}>
+            {prediction.types?.includes("establishment") ? (
+              <Building size={16} color={colors.mutedForeground} />
+            ) : (
+              <MapPin size={16} color={colors.mutedForeground} />
+            )}
+          </View>
+          <View style={styles.rowTextWrap}>
+            <Text style={[styles.rowTitle, { color: colors.foreground }]}>
+              {prediction.structured_formatting.main_text}
             </Text>
-          ) : null}
-        </View>
-      </TouchableOpacity>
-    ),
-    [colors.card, colors.foreground, colors.mutedForeground, handleSelectPrediction],
+            {prediction.structured_formatting.secondary_text ? (
+              <Text
+                style={[styles.rowSubtitle, { color: colors.mutedForeground }]}
+              >
+                {prediction.structured_formatting.secondary_text}
+              </Text>
+            ) : null}
+            {distance ? (
+              <Text
+                style={[styles.rowSubtitle, { color: colors.mutedForeground }]}
+              >
+                {distance}
+              </Text>
+            ) : null}
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [
+      colors.card,
+      colors.foreground,
+      colors.mutedForeground,
+      handleSelectPrediction,
+      searchOrigin,
+    ],
   );
 
   const displayValue = value?.trim() || "";
@@ -718,14 +815,15 @@ export function LocationAutocompleteInstagram({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {query.trim().length < 2 && currentLocation ? (
+            {query.trim().length < 2 ? (
               <View style={styles.sectionWrap}>
                 {renderSectionHeader(
                   "Use Current Location",
                   <Navigation size={16} color={colors.mutedForeground} />,
                 )}
                 <TouchableOpacity
-                  onPress={handleSelectCurrentLocation}
+                  onPress={() => void handleSelectCurrentLocation()}
+                  disabled={isLoadingLocation}
                   activeOpacity={0.8}
                   style={[styles.row, { backgroundColor: colors.card }]}
                 >
@@ -734,20 +832,40 @@ export function LocationAutocompleteInstagram({
                   </View>
                   <View style={styles.rowTextWrap}>
                     <Text style={[styles.rowTitle, { color: colors.foreground }]}>
-                      {currentLocation.name}
+                      {isLoadingLocation
+                        ? "Finding your location…"
+                        : locationBlocked
+                          ? "Location is off for DVNT"
+                          : currentLocation?.name || "Use my current location"}
                     </Text>
-                    {currentLocation.formattedAddress ? (
-                      <Text
-                        style={[
-                          styles.rowSubtitle,
-                          { color: colors.mutedForeground },
-                        ]}
-                      >
-                        {currentLocation.formattedAddress}
-                      </Text>
-                    ) : null}
+                    <Text
+                      style={[styles.rowSubtitle, { color: colors.mutedForeground }]}
+                    >
+                      {locationBlocked
+                        ? locationBlocked.canOpenSettings
+                          ? "Turn it on in Settings, then tap here. Search still works."
+                          : "Allow location for this site in your browser’s address bar, then tap here."
+                        : currentLocation?.formattedAddress ||
+                          "Location permission is requested only when you tap here."}
+                    </Text>
                   </View>
                 </TouchableOpacity>
+                {locationBlocked?.canOpenSettings ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void Linking.openSettings()}
+                    style={[
+                      styles.settingsButton,
+                      { borderColor: colors.border, backgroundColor: colors.card },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.manualButtonTitle, { color: colors.foreground }]}
+                    >
+                      Open Settings
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : null}
 
@@ -981,6 +1099,15 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 4,
     marginBottom: 18,
+  },
+  settingsButton: {
+    alignSelf: "flex-start",
+    minHeight: 44,
+    justifyContent: "center",
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
   manualButtonTitle: {
     fontSize: 14,

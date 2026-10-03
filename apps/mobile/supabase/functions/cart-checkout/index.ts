@@ -1,5 +1,4 @@
 import { canAccessEvent } from "../_shared/event-access.ts";
-import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 /**
  * cart-checkout Edge Function
  *
@@ -28,6 +27,7 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { requireMemberPhone } from "../_shared/member-phone.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
@@ -173,11 +173,8 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
     const authId = await verifySession(supabase, req);
     if (!authId) return errorResponse("Unauthorized", 401);
 
-    // Verified-only admission. A client that skips the banner is still refused.
-    const cartAdmission = await resolveVerifiedAdmission(supabase, authId);
-    if (cartAdmission.state === "blocked") {
-      return errorResponse(admissionRefusal(cartAdmission).message, 403);
-    }
+    // No verified-admission check: ticket purchase stays open to unverified
+    // buyers (checklist A01/A03). See ticket-checkout.
 
     let parsed: unknown;
     try {
@@ -188,6 +185,18 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
 
     const cartId = parseCartId(parsed);
     if (!cartId) return errorResponse("Invalid cartId", 400);
+
+    // A buyer with no phone on file gives one before paying. Stored
+    // server-side; a number already on file is never replaced.
+    const memberPhone = await requireMemberPhone(
+      supabase,
+      authId,
+      parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).phone : undefined,
+      "[cart-checkout]",
+    );
+    if (!memberPhone.ok) {
+      return jsonResponse({ error: memberPhone.message, code: memberPhone.code }, memberPhone.status);
+    }
 
     const promoCode =
       parsed && typeof parsed === "object"

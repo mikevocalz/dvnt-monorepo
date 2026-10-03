@@ -62,6 +62,7 @@ import { inviteEventGuests } from "@dvnt/app/lib/api/privileged";
 // Popover removed — inline expanding pickers used instead
 import { DvntMap } from "@dvnt/app/components/map";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
+import { useEventMediaPreupload } from "@dvnt/app/lib/hooks/use-event-media-preupload";
 import { Motion } from "@legendapp/motion";
 import { Badge } from "@dvnt/app/components/ui/badge";
 import { Text as UIText } from "@dvnt/app/components/ui/text";
@@ -72,6 +73,8 @@ import {
 } from "@dvnt/app/components/ui/location-autocomplete-v3";
 import { useCreateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { eventsApi } from "@dvnt/app/lib/api/events";
+import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import {
   ticketTypesApi,
@@ -105,7 +108,23 @@ type AgeRestriction = "none" | "18+" | "21+";
 // Canonical Event Type taxonomy lives in the shared form core (one schema,
 // two layouts). Imported for local use here and re-exported for existing
 // importers of this screen.
-import { EVENT_TYPE_LABELS } from "@dvnt/app/features/events/create/event-form";
+import {
+  EVENT_TYPE_LABELS,
+  describePromoTemplate,
+  resolveEventSchedule,
+  sortPromoTemplates,
+} from "@dvnt/app/features/events/create/event-form";
+import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
+import { EventPublicationField } from "@dvnt/app/features/events/ui/event-publication-field";
+import {
+  publishAtError,
+  publishAtLocalToInstant,
+} from "@dvnt/app/lib/events/event-publication";
+import { zoneDisplayName } from "@dvnt/app/lib/events/event-zone";
+import {
+  saleWindowLabel,
+  saleWindowLocalToInstant,
+} from "@dvnt/app/lib/events/sale-window";
 export { EVENT_TYPE_LABELS };
 
 interface TicketTier {
@@ -161,6 +180,7 @@ function CreateEventScreenContent() {
   const { colors } = useColorScheme();
   const { pickFromLibrary, requestPermissions } = useMediaPicker();
   const createEvent = useCreateEvent();
+  useEventMediaPreupload();
   const showToast = useUIStore((s) => s.showToast);
   // Transient UI state: which tier currently has its "Sale starts" picker
   // open. Kept outside the draft store because it's not persisted.
@@ -203,6 +223,8 @@ function CreateEventScreenContent() {
   const setEventDateISO = useCreateEventStore((s) => s.setEventDate);
   const endDateISO = useCreateEventStore((s) => s.endDate);
   const setEndDateISO = useCreateEventStore((s) => s.setEndDate);
+  const eventTz = useCreateEventStore((s) => s.eventTz);
+  const setEventTz = useCreateEventStore((s) => s.setEventTz);
   const ticketPrice = useCreateEventStore((s) => s.ticketPrice);
   const setTicketPrice = useCreateEventStore((s) => s.setTicketPrice);
   const maxAttendees = useCreateEventStore((s) => s.maxAttendees);
@@ -213,6 +235,12 @@ function CreateEventScreenContent() {
   const setAttachLynkRoom = useCreateEventStore((s) => s.setAttachLynkRoom);
   const isSubmitting = useCreateEventStore((s) => s.isSubmitting);
   const setIsSubmitting = useCreateEventStore((s) => s.setIsSubmitting);
+  const isSavingDraft = useCreateEventStore((s) => s.isSavingDraft);
+  const setIsSavingDraft = useCreateEventStore((s) => s.setIsSavingDraft);
+  const scheduleNeedsReview = useCreateEventStore((s) => s.scheduleNeedsReview);
+  const draftSourceEventId = useCreateEventStore((s) => s.draftSourceEventId);
+  const draftEventTz = useCreateEventStore((s) => s.eventTz);
+  const promoCodeTemplates = useCreateEventStore((s) => s.promoCodeTemplates);
   const uploadProgress = useCreateEventStore((s) => s.uploadProgress);
   const setUploadProgress = useCreateEventStore((s) => s.setUploadProgress);
   const ticketingEnabled = useCreateEventStore((s) => s.ticketingEnabled);
@@ -235,6 +263,10 @@ function CreateEventScreenContent() {
   );
   const visibility = useCreateEventStore((s) => s.visibility);
   const setVisibility = useCreateEventStore((s) => s.setVisibility);
+  const isHidden = useCreateEventStore((s) => s.isHidden);
+  const setIsHidden = useCreateEventStore((s) => s.setIsHidden);
+  const publishAt = useCreateEventStore((s) => s.publishAt);
+  const setPublishAt = useCreateEventStore((s) => s.setPublishAt);
   const ageRestriction = useCreateEventStore((s) => s.ageRestriction);
   const setAgeRestriction = useCreateEventStore((s) => s.setAgeRestriction);
   const isNsfw = useCreateEventStore((s) => s.isNsfw);
@@ -299,11 +331,45 @@ function CreateEventScreenContent() {
   const flyerMediaType = useCreateEventStore((s) => s.flyerMediaType);
   const setFlyerMediaType = useCreateEventStore((s) => s.setFlyerMediaType);
 
+  const handleSaveDraft = useCallback(async () => {
+    if (useCreateEventStore.getState().isSavingDraft) return;
+    setIsSavingDraft(true);
+    try {
+      const saved = await eventDraftsApi.saveCurrent();
+      showToast(
+        "success",
+        "Draft saved",
+        saved.revision > 1
+          ? "Your draft was updated."
+          : "You can resume it from Host Dashboard.",
+      );
+    } catch (error) {
+      showToast(
+        "error",
+        "Couldn't save draft",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    } finally {
+      setIsSavingDraft(false);
+    }
+  }, [setIsSavingDraft, showToast]);
+
   // Convert ISO strings to Date objects for pickers
   const eventDate = useMemo(() => new Date(eventDateISO), [eventDateISO]);
   const endDate = useMemo(
     () => (endDateISO ? new Date(endDateISO) : null),
     [endDateISO],
+  );
+  // The pickers hold a wall clock; this is that wall clock read in the
+  // event's zone, i.e. what gets stored, plus the end-before-start check.
+  const schedule = useMemo(
+    () =>
+      resolveEventSchedule({
+        eventDate: eventDateISO,
+        endDate: endDateISO,
+        eventTz,
+      }),
+    [eventDateISO, endDateISO, eventTz],
   );
 
   useEffect(() => {
@@ -480,6 +546,24 @@ function CreateEventScreenContent() {
       }
       if (!eventType) {
         showToast("error", "Pick a type", "Choose what kind of event this is");
+        return;
+      }
+      if (scheduleNeedsReview) {
+        showToast(
+          "error",
+          "Choose a new date",
+          "Duplicated events need a new start date and time before publishing.",
+        );
+        return;
+      }
+      if (schedule.error) {
+        showToast("error", "Check the time", schedule.error);
+        return;
+      }
+      const publishAtIso = publishAtLocalToInstant(publishAt, schedule.eventTz);
+      const publishError = publishAtError(publishAtIso, schedule.startIso);
+      if (publishError) {
+        showToast("error", "Check the go-public time", publishError);
         return;
       }
       // Honor virtual events — an online event doesn't need a typed location.
@@ -711,8 +795,9 @@ function CreateEventScreenContent() {
         expectedAuthId: publishingAuthId,
         title: title.trim(),
         description: description.trim(),
-        date: eventDateISO,
+        date: schedule.startIso,
         time: formatTime(eventDate),
+        eventTz: schedule.eventTz,
         location: location.trim(),
         price: ticketPrice ? parseFloat(ticketPrice) : 0,
         image: mainEventImageUrl,
@@ -734,8 +819,10 @@ function CreateEventScreenContent() {
         event_type: eventType || undefined,
         disclaimers: disclaimers.trim() || undefined,
         // V2 fields — new
-        endDate: endDateISO || undefined,
+        endDate: schedule.endIso || undefined,
         visibility,
+        isHidden,
+        publishAt: publishAtIso ?? undefined,
         ageRestriction: ageRestriction !== "none" ? ageRestriction : undefined,
         dressCode: dressCode.trim() || undefined,
         doorPolicy: doorPolicy.trim() || undefined,
@@ -748,7 +835,13 @@ function CreateEventScreenContent() {
 
       const data = await createEvent.mutateAsync(eventData);
       if (data?.replayed && data.id) {
+        const replayedDraftId = useCreateEventStore.getState().serverDraftId;
         resetDraft();
+        if (replayedDraftId) {
+          void eventDraftsApi.delete(replayedDraftId).catch((error) =>
+            console.warn("[CreateEvent] replayed draft cleanup failed", error),
+          );
+        }
         showToast("warning", "Event already published", "Review tickets and add-ons in Edit before sharing it.");
         if (screenMounted.current) router.replace(`/(protected)/events/${data.id}/edit` as any);
         return;
@@ -772,8 +865,10 @@ function CreateEventScreenContent() {
               priceCents: tier.priceCents,
               quantityTotal: tier.quantity,
               maxPerUser: tier.maxPerUser,
-              saleStart: tier.saleStart || undefined,
-              saleEnd: tier.saleEnd || undefined,
+              // The picker holds the typed wall clock; store it as that
+              // time in the event's zone.
+              saleStart: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz) ?? undefined,
+              saleEnd: saleWindowLocalToInstant(tier.saleEnd, schedule.eventTz) ?? undefined,
               // v2 tier model — visibility, type, early-bird pricing.
               tierType: tier.tierType,
               tierVisibility: tier.visibility,
@@ -875,6 +970,55 @@ function CreateEventScreenContent() {
         }
       }
 
+      // Promoter configuration copied by Duplicate Event is recreated as a
+      // fresh invitation. Earnings, attributions and historical payout state
+      // never enter the draft.
+      const promoterTemplates = useCreateEventStore.getState().promoterTemplates;
+      if (promoterTemplates.length > 0 && data?.id) {
+        const failed: string[] = [];
+        for (const promoter of promoterTemplates) {
+          try {
+            await promotersApi.add({
+              eventId: Number(data.id),
+              username: promoter.username || undefined,
+              displayName: promoter.displayName || undefined,
+              code: promoter.code || undefined,
+              customerDiscountBps: promoter.customerDiscountBps,
+              promoterCommissionBps: promoter.promoterCommissionBps,
+            });
+          } catch (promoterErr) {
+            console.warn("[CreateEvent] promoter recreation failed", promoterErr);
+            failed.push(promoter.displayName || promoter.username || "Promoter");
+          }
+        }
+        if (failed.length) {
+          showToast(
+            "warning",
+            "Some promoters weren't recreated",
+            failed.join(", "),
+          );
+        }
+      }
+
+      // Standalone promo codes from the duplicated event. Copied on the
+      // server, idempotent, inactive codes stay inactive.
+      const promoSourceId = useCreateEventStore.getState().draftSourceEventId;
+      if (promoSourceId && data?.id) {
+        try {
+          const res = await eventDraftsApi.copyPromoCodes(Number(data.id), promoSourceId);
+          if (res.skipped.length > 0) {
+            showToast(
+              "warning",
+              "Some promo codes weren't copied",
+              `Add them from Promo codes: ${res.skipped.map((p) => p.code).join(", ")}.`,
+            );
+          }
+        } catch (promoErr) {
+          console.warn("[CreateEvent] promo code copy failed", promoErr);
+          showToast("warning", "Promo codes not copied", "Your event is live. Add codes from Promo codes.");
+        }
+      }
+
       // Guest list. Same write-after-publish shape as the co-organizer block
       // above and for the same reason: there was no event id to attach an
       // invite to until now. One batched call; a guest who can't be added
@@ -905,7 +1049,13 @@ function CreateEventScreenContent() {
 
       setUploadProgress(100);
       showToast("success", "Success", "Event created successfully!");
+      const publishedDraftId = useCreateEventStore.getState().serverDraftId;
       resetDraft();
+      if (publishedDraftId) {
+        void eventDraftsApi.delete(publishedDraftId).catch((error) =>
+          console.warn("[CreateEvent] published draft cleanup failed", error),
+        );
+      }
       if (screenMounted.current) router.back();
     } catch (error: any) {
       setIsSubmitting(false);
@@ -1265,6 +1415,25 @@ function CreateEventScreenContent() {
                   )}
                 </>
               )}
+
+              {schedule.error && endDate ? (
+                <Text
+                  className="text-xs text-destructive mt-2 px-1"
+                  accessibilityRole="alert"
+                  accessibilityLiveRegion="polite"
+                  selectable
+                >
+                  {schedule.error}
+                </Text>
+              ) : null}
+
+              <EventZonePicker
+                value={eventTz}
+                onChange={setEventTz}
+                at={schedule.startIso}
+                accent={colors.primary}
+                muted={colors.mutedForeground}
+              />
             </View>
           </>
         )}
@@ -1495,6 +1664,20 @@ function CreateEventScreenContent() {
                   </Text>
                 </View>
               </View>
+
+              <EventPublicationField
+                isHidden={isHidden}
+                onHiddenChange={setIsHidden}
+                publishAt={publishAt}
+                onPublishAtChange={setPublishAt}
+                eventTz={schedule.eventTz}
+                error={publishAtError(
+                  publishAtLocalToInstant(publishAt, schedule.eventTz),
+                  schedule.startIso,
+                )}
+                accent={colors.primary}
+                muted={colors.mutedForeground}
+              />
 
               {/* Guest list — private only. A link-only event lets anyone
                   holding the URL in, so a list there would grant a permission
@@ -2443,16 +2626,7 @@ function CreateEventScreenContent() {
                           </Text>
                           <Text className="text-sm font-semibold text-foreground">
                             {tier.saleStart
-                              ? new Date(tier.saleStart).toLocaleString(
-                                  "en-US",
-                                  {
-                                    weekday: "short",
-                                    month: "short",
-                                    day: "numeric",
-                                    hour: "numeric",
-                                    minute: "2-digit",
-                                  },
-                                )
+                              ? saleWindowLabel(tier.saleStart, eventTz)
                               : "Immediately on publish"}
                           </Text>
                         </View>
@@ -3179,6 +3353,9 @@ function CreateEventScreenContent() {
                   ? ` — ${formatDate(endDate)} at ${formatTime(endDate)}`
                   : ""}
               </Text>
+              <Text className="text-xs text-muted-foreground mt-1">
+                {zoneDisplayName(eventTz, schedule.startIso ? Date.parse(schedule.startIso) : Date.now())}
+              </Text>
             </View>
 
             {/* Location */}
@@ -3262,8 +3439,39 @@ function CreateEventScreenContent() {
                     {coOrganizers.map((c) => `@${c.username}`).join(", ")}
                   </Text>
                 )}
+                {draftSourceEventId && draftEventTz ? (
+                  <Text className="text-sm text-foreground">
+                    Time zone: {draftEventTz}
+                  </Text>
+                ) : null}
               </View>
             </View>
+
+            {/* Promo codes the duplicated event carries */}
+            {draftSourceEventId && promoCodeTemplates.length > 0 ? (
+              <View className="bg-card rounded-2xl p-4">
+                <Text className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                  Promo codes from the original event
+                </Text>
+                <View className="gap-1.5">
+                  {sortPromoTemplates(promoCodeTemplates).map((p) => (
+                    <View key={p.code} className="flex-row items-center justify-between gap-3">
+                      <Text className="flex-1 text-sm text-foreground" numberOfLines={1}>
+                        <Text className="font-semibold">{p.code}</Text> {describePromoTemplate(p)}
+                      </Text>
+                      <Text
+                        className={p.active ? "text-xs font-semibold text-emerald-400" : "text-xs font-semibold text-muted-foreground"}
+                      >
+                        {p.active ? "Enabled" : "Off"}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                <Text className="mt-2 text-xs text-muted-foreground">
+                  Off codes were expired or used up on the original, and stay off on this event.
+                </Text>
+              </View>
+            ) : null}
           </View>
         )}
       </KeyboardAwareScrollView>
@@ -3285,6 +3493,18 @@ function CreateEventScreenContent() {
         ) : (
           <View />
         )}
+
+        <Pressable
+          onPress={() => void handleSaveDraft()}
+          disabled={isSavingDraft || isSubmitting || !useCreateEventStore.getState().hasDraft()}
+          className="px-3 py-3 rounded-full border border-border bg-card"
+          accessibilityRole="button"
+          accessibilityLabel="Save event draft"
+        >
+          <Text className="text-xs font-semibold text-foreground">
+            {isSavingDraft ? "Saving…" : "Save Draft"}
+          </Text>
+        </Pressable>
 
         {/* Next / Create button */}
         {currentStep < totalSteps - 1 ? (

@@ -8,6 +8,8 @@
  *   const userData = await resolveOrProvisionUser(supabaseAdmin, authUserId, selectFields);
  */
 
+import { ensureBrandFollows } from "./brand-follow.ts";
+
 interface ResolvedUser {
   id: number;
   [key: string]: unknown;
@@ -132,6 +134,9 @@ export async function resolveOrProvisionUser(
       "for auth_id:",
       authId,
     );
+    // This profile skipped auth-sync, so it would otherwise wait for the
+    // brand-outbox cron to get its @DeviantEvents follows.
+    await ensureBrandFollows(supabase, Number(newRow.id), "resolve-user");
     return newRow;
   }
 

@@ -13,7 +13,6 @@ import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVi
 import {
   X,
   Image as ImageIcon,
-  Camera,
   Trash2,
   Plus,
   Hash,
@@ -32,6 +31,7 @@ import {
 } from "@dvnt/app/components/ui/location-autocomplete-instagram";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useMediaPicker } from "@dvnt/app/lib/hooks";
+import { validateVideoPick, videoLimitsLabel } from "@dvnt/app/lib/media/video-pick-policy";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { useCreateHeaderStore } from "@dvnt/app/lib/stores/create-header-store";
@@ -140,6 +140,22 @@ function CreateScreenContent() {
 
       for (const item of media) {
         if (item.type === "video") {
+          // Same limits media-upload enforces, checked at pick time. Native
+          // encodes an oversized clip down to the post budget, so size is not
+          // a refusal here; format and length are.
+          const check = validateVideoPick({
+            kind: "post-video",
+            mimeType: item.mimeType,
+            fileName: item.fileName,
+            sizeBytes: item.fileSize,
+            durationSec: item.duration,
+            canReencode: true,
+            unknownFormat: "allow",
+          });
+          if (!check.ok) {
+            showToast("error", check.title, check.message);
+            continue;
+          }
           const duration = item.duration ?? 0;
           if (duration <= MAX_ANIMATED_VIDEO_DURATION && duration > 0) {
             // Short clip → animated loop (muted, autoplaying in feed)
@@ -239,17 +255,6 @@ function CreateScreenContent() {
       }
     }, [consumeCameraResult, validateMedia, selectedMedia, setSelectedMedia]),
   );
-
-  const handleOpenCamera = () => {
-    if (selectedMedia.length >= MAX_PHOTOS) {
-      showToast("warning", "Photo limit", `Maximum ${MAX_PHOTOS} photos per post.`);
-      return;
-    }
-    router.push({
-      pathname: "/(protected)/camera",
-      params: { mode: "photo", source: "post" },
-    });
-  };
 
   const handleRemoveMedia = (id: string) => {
     setSelectedMedia(selectedMedia.filter((m) => m.id !== id));
@@ -460,7 +465,7 @@ function CreateScreenContent() {
           </View>
         </View>
 
-        {/* Meta block — Add tag, Add Photos/Camera, Add location.
+        {/* Meta block — Add tag, Add Photos, Add location.
             Lifted above the per-mode content (text composer / media
             preview / caption) so this stays in the same spot whether
             the user is on the Media tab or the Text tab. */}
@@ -572,18 +577,10 @@ function CreateScreenContent() {
         </View>
 
         {!isTextPost && selectedMedia.length === 0 && (
-          <View
-            style={{
-              flexDirection: "row",
-              paddingHorizontal: 16,
-              paddingTop: 12,
-              gap: 8,
-            }}
-          >
+          <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
             <Pressable
               onPress={handlePickLibrary}
               style={{
-                flex: 1,
                 flexDirection: "row",
                 alignItems: "center",
                 justifyContent: "center",
@@ -598,25 +595,20 @@ function CreateScreenContent() {
                 Add Photos
               </Text>
             </Pressable>
-            <Pressable
-              onPress={handleOpenCamera}
-              style={{
-                flex: 1,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                backgroundColor: "#1a1a1a",
-                borderWidth: 1,
-                borderColor: "#333",
-                paddingVertical: 14,
-                borderRadius: 12,
-              }}
-            >
-              <Camera size={20} color="#fff" />
-              <Text style={{ color: "#fff", fontWeight: "600" }}>Camera</Text>
-            </Pressable>
           </View>
+        )}
+
+        {!isTextPost && canAddMore && (
+          <Text
+            style={{
+              paddingHorizontal: 16,
+              paddingTop: 8,
+              color: "rgba(255,255,255,0.45)",
+              fontSize: 12,
+            }}
+          >
+            {videoLimitsLabel("post-video")}
+          </Text>
         )}
 
         <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 }}>

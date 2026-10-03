@@ -485,7 +485,9 @@ function resolveFeatureImport(fromRel, spec) {
 function extractWiringDeep(fromRel, src, depth = 1) {
   const w = extractWiring(src);
   if (depth <= 0) return w;
-  for (const m of src.matchAll(/from\s+["']([^"']+)["']/g)) {
+  // Static imports and dynamic import() both count: a lazy-loaded component
+  // (React.lazy(() => import("./x.web"))) still owns the screen's wiring.
+  for (const m of src.matchAll(/(?:from\s+|import\(\s*)["']([^"']+)["']/g)) {
     const p = resolveFeatureImport(fromRel, m[1]);
     if (!p) continue;
     try {

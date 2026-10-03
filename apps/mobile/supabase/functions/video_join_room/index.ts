@@ -6,10 +6,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { provisionCallMedia } from "../_shared/call-media.ts";
 import { resolveEventRoomAccess } from "../_shared/event-access.ts";
+import { isEventLynkHost } from "../_shared/event-lynk-host.ts";
+import { startEventLynk } from "../_shared/event-lynk-start.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { CALL_HUMAN_CAPACITY } from "../_shared/call-capacity.ts";
+import {
+  creatorStandingRefusal,
+  resolveCreatorStanding,
+} from "../_shared/creator-standing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -330,11 +336,28 @@ Deno.serve(async (req) => {
         return errorResponse("forbidden", "You are banned from this room");
       }
 
-      if (!room.is_public && !eventAccess.linked) {
-        const isHostOrCoHost = userId === room.created_by ||
-          existingMember?.role === "host" ||
-          existingMember?.role === "co-host";
+      const isHostOrCoHost = userId === room.created_by ||
+        existingMember?.role === "host" ||
+        existingMember?.role === "co-host";
 
+      // ── Creator standing ───────────────────────────────────────────────────
+      // Refusing room CREATION is not enough on its own: a creator suspended
+      // after opening a Lynk would otherwise keep hosting it across every
+      // reconnect. The gate closes the host chair, not the door — a suspended
+      // creator can still join someone else's Lynk as a participant, and
+      // personal calls (handled in the isCall branch above) are untouched.
+      if (isHostOrCoHost) {
+        const standing = await resolveCreatorStanding(supabase, userId);
+        if (standing.state === "refused") {
+          const refusal = creatorStandingRefusal(standing);
+          return errorResponse("forbidden", refusal.message, {
+            reason: refusal.reason,
+            code: refusal.code,
+          });
+        }
+      }
+
+      if (!room.is_public && !eventAccess.linked) {
         const hasPriorAccess = !!existingMember &&
           existingMember.status !== "banned" &&
           existingMember.status !== "kicked";
@@ -684,6 +707,23 @@ Deno.serve(async (req) => {
       actor_id: userId,
       payload: { role: memberRole, peerId: peer.id },
     });
+
+    // A host joining their own event room starts it, the way a Zoom meeting
+    // starts when the host joins. Same host rule and same lifecycle change as
+    // event-lynk-room "start", idempotent. It runs after the join has
+    // succeeded, so a failure here is logged and never costs the host a seat.
+    if (!isCall && eventAccess.event) {
+      try {
+        if (await isEventLynkHost(supabase, eventAccess.event, userId)) {
+          const started = await startEventLynk(supabase, eventAccess.event, userId);
+          if (!started.ok) {
+            console.warn(`[video_join_room] host join did not start event ${eventAccess.event.id}: ${started.reason}`);
+          }
+        }
+      } catch (startErr) {
+        console.error("[video_join_room] host join start failed:", (startErr as Error).message);
+      }
+    }
 
     // Build user payload for the response. For the anon case we use the
     // anon label; otherwise reuse the profile we already fetched before

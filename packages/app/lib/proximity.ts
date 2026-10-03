@@ -116,6 +116,30 @@ export function formatMiles(miles: number): string {
   return `${rounded} miles away`;
 }
 
+const METERS_PER_MILE = 1609.344;
+
+export function metersToMiles(meters: number): number {
+  return meters / METERS_PER_MILE;
+}
+
+/**
+ * Distance line under a place search result, measured from the member's
+ * stored city. Returns null (render nothing) when there is no city to measure
+ * from or the provider sent no usable distance. A place a few meters from the
+ * city centroid reads "0.1 miles away" rather than "0 miles away".
+ */
+export function placeDistanceLabel(
+  distanceMeters: number | null | undefined,
+  origin: { lat: number; lng: number } | null | undefined,
+): string | null {
+  if (!origin) return null;
+  if (typeof distanceMeters !== "number" || !Number.isFinite(distanceMeters)) {
+    return null;
+  }
+  if (distanceMeters < 0) return null;
+  return formatMiles(Math.max(metersToMiles(distanceMeters), 0.1));
+}
+
 /**
  * The badge a profile can honestly show. Same named city collapses to
  * "In {City}" — a centroid-to-centroid figure between two points inside one

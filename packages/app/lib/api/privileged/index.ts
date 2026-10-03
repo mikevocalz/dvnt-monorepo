@@ -44,7 +44,10 @@ export interface UpdateProfileInput {
   links?: string[];
   avatarUrl?: string;
   pronouns?: string;
-  gender?: string;
+  // Identity: omit = untouched, null = clear (update-profile skips "" and []).
+  gender?: string | null;
+  sexuality?: string[] | null;
+  eventAudience?: string | null;
 }
 
 // Post types
@@ -432,14 +435,35 @@ export interface CompResult {
    */
   guest_issued?: number;
   delivery?: CompDeliveryResult[];
+  /** Phone comps newly minted (a resend rotates an existing one and is not counted). */
+  phone_guest_issued?: number;
+  /**
+   * One single-use claim link per phone. DVNT does not text these: the host's
+   * device does, from the host's own number.
+   */
+  claim_links?: CompClaimLink[];
   skipped: { recipient: string; reason: string }[];
   tier?: string;
 }
 
+export interface CompClaimLink {
+  /** What the host typed or picked. */
+  recipient: string;
+  /** E.164, ready for the SMS composer. */
+  phone: string;
+  ticket_id: string;
+  url: string;
+  expires_at: string;
+  /** True when this replaced an earlier unclaimed link for the same phone. */
+  reissued: boolean;
+}
+
+
 /**
- * Bulk-issue free tickets to a list of usernames/emails. Owner or
- * admin only. Server enforces tier capacity + skips dupes. An email
- * with no account gets a guest ticket emailed as a claim link.
+ * Bulk-issue free tickets to a list of usernames, emails or phone numbers.
+ * Owner or admin only. Server enforces tier capacity + skips dupes. An email
+ * with no account gets a guest ticket emailed as a claim link; a phone number
+ * gets a claim link in `claim_links` for the host to text.
  */
 export async function bulkCompTickets(
   eventId: number,

@@ -18,6 +18,8 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
+import { useCheckoutPhoneStore } from "@dvnt/app/lib/stores/checkout-phone-store";
+import { isPhoneRequiredError } from "@dvnt/app/lib/checkout/member-phone";
 
 interface CheckoutParams {
   eventId: string;
@@ -51,6 +53,10 @@ export function useTicketCheckout() {
         return { success: false, error: "Checkout already in progress" };
       }
 
+      // A buyer the server already asked for a phone must have typed one.
+      const phone = useCheckoutPhoneStore.getState().forRequest();
+      if (!phone.ok) return { success: false, error: phone.message };
+
       setCheckoutLoading(true);
 
       try {
@@ -71,6 +77,7 @@ export function useTicketCheckout() {
               quantity,
               ...(promoCode ? { promo_code: promoCode } : {}),
               ...(promoterCode ? { promoter_code: promoterCode } : {}),
+              ...(phone.phone ? { phone: phone.phone } : {}),
             },
             headers: { Authorization: `Bearer ${token}` },
           },
@@ -82,6 +89,8 @@ export function useTicketCheckout() {
           try {
             const ctx = await (error as any).context?.json?.();
             if (ctx?.error) msg = ctx.error;
+            // No phone on file: show the field; the next tap sends it.
+            if (isPhoneRequiredError(ctx)) useCheckoutPhoneStore.getState().markNeeded();
           } catch {}
           if (msg === "Failed to create payment") msg = error.message || msg;
           throw new Error(msg);
@@ -90,6 +99,8 @@ export function useTicketCheckout() {
         const result = typeof data === "string" ? JSON.parse(data) : data;
 
         if (result.error) throw new Error(result.error);
+        // Past the phone check: the number is on file now.
+        useCheckoutPhoneStore.getState().reset();
 
         // Free ticket — already issued server-side
         if (result.free && result.tickets) {

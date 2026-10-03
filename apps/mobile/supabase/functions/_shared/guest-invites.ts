@@ -41,6 +41,16 @@ export type GuestRoute =
 export function routeGuestRecipient(raw: unknown): GuestRoute {
   const text = typeof raw === "string" ? raw.trim() : "";
   const norm = normalizeCompRecipient(raw);
+  // Comps accept phone numbers (a claim link the host texts). A guest-list
+  // invite is keyed by account or email and has no phone path, so a number
+  // must stop here instead of falling through as a "username".
+  if (norm?.kind === "phone") {
+    return {
+      route: "skip",
+      raw: text,
+      reason: "Phone numbers can't be invited. Comp them a ticket instead",
+    };
+  }
   if (!norm) {
     return {
       route: "skip",

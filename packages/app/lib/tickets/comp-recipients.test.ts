@@ -70,6 +70,8 @@ test("issued is not delivered — a bounced claim email still leaves a valid tic
   assert.deepEqual(s, {
     issued: 2,
     guestIssued: 3,
+    phoneIssued: 0,
+    claimLinks: 0,
     totalIssued: 5,
     delivered: 2,
     undelivered: 1,
@@ -82,9 +84,35 @@ test("an older edge fn that omits guest fields still summarises", () => {
   assert.deepEqual(s, {
     issued: 4,
     guestIssued: 0,
+    phoneIssued: 0,
+    claimLinks: 0,
     totalIssued: 4,
     delivered: 0,
     undelivered: 0,
     skipped: 0,
   });
+});
+
+test("phone numbers are counted apart from usernames and emails", () => {
+  const p = parseCompRecipients("@nova\n(415) 555-0134, +44 7911 123456; friend@example.com");
+  assert.equal(p.phones, 2);
+  assert.equal(p.emails, 1);
+  assert.equal(p.members, 1);
+});
+
+test("phone comps count as issued and their links as still to send", () => {
+  const s = summarizeCompResult({
+    issued: 1,
+    guest_issued: 0,
+    phone_guest_issued: 2,
+    claim_links: [
+      { recipient: "a", phone: "+14155550134", ticket_id: "t1", url: "u1", expires_at: "x", reissued: false },
+      { recipient: "b", phone: "+14155550135", ticket_id: "t2", url: "u2", expires_at: "x", reissued: false },
+      { recipient: "c", phone: "+14155550136", ticket_id: "t3", url: "u3", expires_at: "x", reissued: true },
+    ],
+    skipped: [],
+  });
+  assert.equal(s.phoneIssued, 2);
+  assert.equal(s.claimLinks, 3);
+  assert.equal(s.totalIssued, 3);
 });

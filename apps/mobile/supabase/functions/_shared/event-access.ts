@@ -7,6 +7,20 @@ export interface EventAccessRow {
   ticketing_enabled?: boolean | null;
   start_date?: string | null;
   end_date?: string | null;
+  is_hidden?: boolean | null;
+  publish_at?: string | null;
+}
+
+/**
+ * Hidden by the organizer, or publish_at not reached yet. Same rule as
+ * can_view_event (20261003110000_event_hide_and_publish_at); an unparseable
+ * publish_at counts as unpublished.
+ */
+export function isUnpublished(event: Pick<EventAccessRow, "is_hidden" | "publish_at">, now = Date.now()): boolean {
+  if (event.is_hidden === true) return true;
+  if (event.publish_at == null || event.publish_at === "") return false;
+  const at = Date.parse(event.publish_at);
+  return !Number.isFinite(at) || at > now;
 }
 
 async function exists(query: any): Promise<boolean> {
@@ -39,10 +53,12 @@ export async function eventRelationships(db: any, event: EventAccessRow, userId:
 export async function canAccessEvent(db: any, eventId: number, userId: string | null): Promise<boolean> {
   if (!Number.isSafeInteger(eventId) || eventId <= 0) return false;
   const { data: event, error } = await db.from("events")
-    .select("id, host_id, visibility, status").eq("id", eventId).maybeSingle();
+    .select("id, host_id, visibility, status, is_hidden, publish_at").eq("id", eventId).maybeSingle();
   if (error) throw new Error("Could not verify event access");
   if (!event || ["cancelled", "deleted"].includes(event.status)) return false;
-  if (event.visibility !== "private") return true;
+  // A hidden or not-yet-published event admits the same people a private one
+  // does: host, co-organizers, invitees and admission ticket holders.
+  if (event.visibility !== "private" && !isUnpublished(event)) return true;
   const access = await eventRelationships(db, event, userId);
   return access.organizer || access.ticket || access.invited;
 }
@@ -53,7 +69,7 @@ export async function canAccessEvent(db: any, eventId: number, userId: string | 
 const ASSUMED_EVENT_LENGTH_MS = 6 * 60 * 60 * 1000;
 
 export type EventRoomAccess =
-  | { ok: true; linked: boolean; endsAt: string | null }
+  | { ok: true; linked: boolean; endsAt: string | null; event?: EventAccessRow & { lynk_room_id?: string | null } }
   | { ok: false; code: "forbidden" | "conflict"; message: string; detail: Record<string, unknown> };
 
 /** Pure decision function, shared by all token rails through the resolver below. */
@@ -62,6 +78,8 @@ export function decideEventRoomAccess(
   access: { organizer: boolean; ticket: boolean; invited: boolean },
   room: { created_at?: string | null; ends_at?: string | null },
   now = Date.now(),
+  /** event_lynk_lifecycle.state === 'live': a host pressed Start. */
+  started = false,
 ): EventRoomAccess {
   const deny = (reason: string, message: string, code: "forbidden" | "conflict" = "forbidden"): EventRoomAccess =>
     ({ ok: false, code, message, detail: { reason } });
@@ -74,8 +92,10 @@ export function decideEventRoomAccess(
       event.ticketing_enabled ? "An active admission ticket is required for this event" : "This event requires an invitation");
   const start = Date.parse(event.start_date ?? "");
   if (!Number.isFinite(start)) return deny("event_schedule_missing", "The event schedule is not ready", "conflict");
-  if (!access.organizer && now < start)
-    return { ok: false, code: "conflict", message: "This event has not started yet", detail: { reason: "event_not_started", startsAt: event.start_date } };
+  // The room opens when a host starts it, not when the clock reaches
+  // start_date. Until then an eligible guest waits (event-lynk-room "wait").
+  if (!access.organizer && !started)
+    return { ok: false, code: "conflict", message: "Waiting for the host to start", detail: { reason: "waiting_for_host", startsAt: event.start_date } };
   const end = Date.parse(event.end_date ?? "");
   // Free-plan rooms used to expire five minutes after being created, days before
   // a scheduled event. Preserve the plan duration, starting at the event's start.
@@ -111,5 +131,15 @@ export async function resolveEventRoomAccess(db: any, room: any, userId: string)
   const event = events?.[0] ?? null;
   const access = event ? await eventRelationships(db, event, userId)
     : { organizer: false, ticket: false, invited: false };
-  return decideEventRoomAccess(event, access, room);
+  let started = false;
+  if (event && !access.organizer) {
+    // Fail closed: an unreadable lifecycle row must not let a guest in early.
+    const { data: lifecycle, error: lifecycleError } = await db.from("event_lynk_lifecycle")
+      .select("state").eq("event_id", event.id).maybeSingle();
+    if (lifecycleError) throw new Error("Could not verify the event room state");
+    started = lifecycle?.state === "live";
+  }
+  const decision = decideEventRoomAccess(event, access, room, Date.now(), started);
+  // video_join_room needs the row to start the room when a host joins.
+  return decision.ok && event ? { ...decision, event: { ...event, lynk_room_id: room.uuid } } : decision;
 }

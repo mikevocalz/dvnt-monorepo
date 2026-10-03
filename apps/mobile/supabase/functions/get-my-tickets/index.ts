@@ -63,7 +63,7 @@ Deno.serve(async (req: Request) => {
         // `dominant_color` rides along so the Apple Watch has an offline-safe
         // flyer colour for every card (see features/watch/watch-payload.ts).
         // It is one already-materialised column on a row we are joining anyway.
-        "*, ticket_types(name), events(title, cover_image_url, dominant_color, start_date, end_date, location)",
+        "*, ticket_types(name), events(title, cover_image_url, dominant_color, start_date, end_date, location, event_tz, is_online)",
       )
       .in("user_id", userIdCandidates)
       .order("created_at", { ascending: false });
@@ -88,6 +88,9 @@ Deno.serve(async (req: Request) => {
       event_image: t.events?.cover_image_url || "",
       event_dominant_color: t.events?.dominant_color ?? null,
       event_date: t.events?.start_date || "",
+      // Venue zone, so the ticket shows the door time the host set ("8:00 PM PDT").
+      event_tz: t.events?.event_tz ?? null,
+      event_is_online: t.events?.is_online ?? false,
       event_location: t.events?.location || "",
     }));
 

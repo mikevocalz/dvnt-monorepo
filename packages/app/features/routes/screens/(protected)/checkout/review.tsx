@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
 import { useQuery } from "@tanstack/react-query";
 import {
+  CalendarDays,
   CreditCard,
   Minus,
   Plus,
@@ -19,10 +20,13 @@ import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
 import type { CartLineItem, LineItemCategory } from "@dvnt/app/lib/contracts/dto";
 import { calculateCartSubtotalCents } from "@dvnt/app/lib/contracts/invariants";
 import { useMixedCartCheckout } from "@dvnt/app/lib/hooks/use-mixed-cart-checkout";
+import { CheckoutPhoneField } from "@dvnt/app/features/events/checkout-phone-field";
 import { computeFees, formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
+import { useEvent } from "@dvnt/app/lib/hooks/use-events";
+import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
 import {
   effectiveAddonUnitPriceCents,
   filterEligibleAddons,
@@ -465,6 +469,9 @@ export default function CartReviewScreen() {
           keyExtractor={(item) => item.key}
           estimatedItemSize={96}
           contentContainerStyle={styles.listContent}
+          ListHeaderComponent={
+            cart?.eventId ? <CheckoutEventWhen eventId={cart.eventId} /> : null
+          }
           ListFooterComponent={
             cart?.eventId ? (
               <AddonUpsellSection
@@ -503,6 +510,9 @@ export default function CartReviewScreen() {
           </Text>
         </View>
 
+        {/* Signed-in buyer with no phone on file: shown after checkout asks. */}
+        <CheckoutPhoneField />
+
         <Pressable
           onPress={handleContinue}
           accessibilityRole="button"
@@ -522,6 +532,51 @@ export default function CartReviewScreen() {
     </View>
   );
 }
+
+/**
+ * When the event is, in the venue's zone ("Fri, Jul 10 at 8:00 PM PDT"), so a
+ * buyer in another zone sees the door time the host set. Reads the cached
+ * detail query the buyer came from; renders nothing until it has a start.
+ */
+function CheckoutEventWhen({ eventId }: { eventId: string }) {
+  const { data: event } = useEvent(String(eventId));
+  const when = formatEventWhen((event as any)?.fullDate, event as any);
+  if (!when) return null;
+  return (
+    <View style={whenStyles.card}>
+      <CalendarDays size={18} color="#3FDCFF" />
+      <View style={whenStyles.text}>
+        {event?.title ? (
+          <Text style={whenStyles.title} numberOfLines={1}>
+            {event.title}
+          </Text>
+        ) : null}
+        <Text style={whenStyles.when} selectable>
+          {when}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+const whenStyles = StyleSheet.create({
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 16,
+    borderCurve: "continuous",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.03)",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  text: { flex: 1, minWidth: 0 },
+  title: { color: "#FFFFFF", fontSize: 14, fontWeight: "600" },
+  when: { color: "rgba(255,255,255,0.70)", fontSize: 12, marginTop: 2 },
+});
 
 const upsellStyles = StyleSheet.create({
   wrap: {

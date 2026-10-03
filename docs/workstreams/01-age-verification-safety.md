@@ -38,18 +38,21 @@ Persist provider references and minimal audit metadata; do not persist raw docum
 
 ### 4. Participation gates
 Centralize the server check and apply it to all relevant write/action boundaries:
-- SPICY posting
-- restricted media publishing
-- restricted event admission
-- ticket/room participation where policy requires verification
-- Sneaky Lynk participation where policy requires verification
+- posting, editing a post, commenting (posts and events) and stories
+- SPICY posting (approved adult ID required whatever the rollout policy says)
+- SPICY viewing: a signed-in member with no under-18 identity document on file, no passed ID needed; signed-out callers and flagged minors see none except their own posts (checklist A02, 2026-10-03; migrations 20261003170100 and 20261003170200, `_shared/spicy-access.ts`)
+- hosting events
+- Sneaky Lynk room joins and media tokens
+- messaging
 - any future adult-only surface
+
+Ticket purchase, holds, RSVPs, the ticket wallet and likes (posts, comments, events) are never gated (checklist A01/A03; likes by product decision, 2026-10-03). A ticket alone does not admit anyone to an adult virtual event: the room join checks the verdict, not the ticket.
 
 Client UI is explanatory only; edge functions/RLS/API authorization are the enforcement layer.
 
 ### 5. Existing-member rollout
-- Do not mass-lock the legacy membership.
-- Use `verified_admission_policy` for cohort cutoff + grace period.
+- Existing unverified accounts are in scope (checklist A03), including returning users and direct links. There is no cohort or account-age exemption; the only exemption is the operator allowlist, and the denylist overrides it. `cohort_created_after` remains as an unused column because already-deployed edge functions select it by name.
+- Grace is opt-in: a NULL `grace_deadline` refuses as soon as `enforce = true`; a future deadline shows a prompt until then.
 - Add explicit rollout telemetry: eligible, prompted, pending, approved, blocked.
 - Provide a safe admin rollback/kill switch that disables enforcement without destroying verification records.
 
@@ -77,7 +80,7 @@ No dead-end modal that asks for ID when verification cannot actually be launched
 - [ ] A required verification can complete, resume, retry, and survive app restart.
 - [ ] Approved status is identical on web/native and server.
 - [ ] SPICY/restricted writes fail server-side for a member who does not satisfy policy.
-- [ ] Existing members outside the rollout cohort remain usable.
+- [ ] Existing unverified members keep ticket purchase and ticket access, and lose protected features until verified.
 - [ ] Raw identity-document payloads are absent from application-readable audit tables.
 - [ ] Every denial returns a structured reason code.
 - [ ] Verification rollout can be disabled without schema rollback.
