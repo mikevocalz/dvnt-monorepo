@@ -145,7 +145,7 @@ export function formatEventWhen(
 
 /**
  * True when both instants parse and the end is strictly before the start.
- * Same rule as the events_end_not_before_start constraint and create-event.
+ * Same rule create-event enforces on the server.
  */
 export function endsBeforeStart(
   start: string | number | Date | null | undefined,

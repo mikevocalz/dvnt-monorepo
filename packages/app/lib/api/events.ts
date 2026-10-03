@@ -1121,9 +1121,9 @@ export const eventsApi = {
           : updates.images;
 
       // End before start: check the row as it will be after this patch, so
-      // moving only the start (or only the end) is caught too. The DB
-      // refuses it as well (events_end_not_before_start); this keeps the
-      // message readable.
+      // moving only the start (or only the end) is caught too. Edits go
+      // straight to PostgREST, so until they move into an edge function this
+      // client check is the only gate on the edit path.
       const nextStart =
         updateData[DB.events.startDate] ?? beforeEvent?.start_date ?? null;
       const nextEnd =
@@ -1150,9 +1150,6 @@ export const eventsApi = {
         .eq(DB.events.id, parseInt(eventId))
         .select();
 
-      if (error?.code === "23514" && /events_end_not_before_start/.test(error.message ?? "")) {
-        throw new Error(END_BEFORE_START_ERROR);
-      }
       if (error) throw error;
       if (!Array.isArray(data) || data.length === 0) {
         // PostgREST returns 200 with [] when RLS blocks. Treat as a

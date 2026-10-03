@@ -251,8 +251,9 @@ Deno.serve(async (req) => {
       insertPayload.age_restriction = ageRestriction;
     }
     // An end before the start is the "ended before it began" event. The
-    // create forms check this too, but a client is not a gate; the DB has the
-    // same rule (events_end_not_before_start).
+    // create forms check this too, but a client is not a gate. There is no DB
+    // CHECK on purpose: a constraint on the events insert once broke every
+    // publish, so this rule lives in app code.
     const endDate = text(body.endDate);
     if (endDate) {
       const endMs = new Date(endDate).getTime();
