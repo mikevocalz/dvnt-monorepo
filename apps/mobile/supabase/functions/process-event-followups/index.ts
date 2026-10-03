@@ -30,7 +30,9 @@ async function suppressionCheck(s:any,email:string,authId:string|null){
 Deno.serve(async(req)=>{
   const secret=Deno.env.get("CRON_SECRET")||"";
   if(!secret){ console.error("[process-event-followups] CRON_SECRET not set — rejecting request"); return new Response("Misconfigured",{status:500}); }
-  if(req.headers.get("authorization")!==`Bearer ${secret}`) return new Response("Unauthorized",{status:401});
+  // Same header as event-reminders: pg_cron's cron_event_followup_sweep reads
+  // CRON_SECRET from Vault and sends it as x-cron-secret.
+  if(req.headers.get("x-cron-secret")!==secret) return new Response("Unauthorized",{status:401});
   // No signing secret means no working unsubscribe link, so nothing goes out.
   const unsubSecret=Deno.env.get("EVENT_FOLLOWUP_UNSUBSCRIBE_SECRET")||"";
   if(!unsubSecret){ console.error("[process-event-followups] EVENT_FOLLOWUP_UNSUBSCRIBE_SECRET not set — refusing to send"); return new Response("Misconfigured",{status:500}); }
