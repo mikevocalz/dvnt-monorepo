@@ -7,14 +7,13 @@ import {
   type PreuploadJobView,
 } from "./event-media-preupload-run.ts";
 
-function fakeDeps(
-  jobs: Record<string, PreuploadJobView & Record<string, unknown>>,
-  upload: PreuploadDeps["upload"],
-) {
+type Jobs = Record<string, PreuploadJobView & Record<string, unknown>>;
+
+function fakeDeps(jobs: Jobs, upload: PreuploadDeps["upload"]) {
   const banked: Array<[string, string]> = [];
   const deps: PreuploadDeps = {
     getJob: (uri) => jobs[uri],
-    patch: (uri, values) => { jobs[uri] = { ...jobs[uri], ...values } as typeof jobs[string]; },
+    patch: (uri, values) => { jobs[uri] = { ...jobs[uri], ...values } as Jobs[string]; },
     persist: async (item) => item.uri,
     upload,
     bank: (item, url) => { banked.push([item.uri, url]); },
@@ -29,7 +28,7 @@ test("an upload that finishes after the effect is cancelled still records its UR
   // The hook's effect re-runs (and cancels the old run) whenever the picked
   // media changes, e.g. the organizer adds a photo while the flyer uploads.
   let cancelled = false;
-  const jobs = { [flyer.uri]: { state: "queued" as const, attempts: 0 } };
+  const jobs: Jobs = { [flyer.uri]: { state: "queued", attempts: 0 } };
   const { deps, banked } = fakeDeps(jobs, async () => {
     cancelled = true;
     return { success: true, url: "https://cdn.test/flyer.jpg" };
@@ -42,7 +41,7 @@ test("an upload that finishes after the effect is cancelled still records its UR
 
 test("a failure after cancellation is recorded, not left as uploading", async () => {
   let cancelled = false;
-  const jobs = { [flyer.uri]: { state: "queued" as const, attempts: 0 } };
+  const jobs: Jobs = { [flyer.uri]: { state: "queued", attempts: 0 } };
   const { deps } = fakeDeps(jobs, async () => {
     cancelled = true;
     return { success: false, error: "413" };
@@ -54,9 +53,9 @@ test("a failure after cancellation is recorded, not left as uploading", async ()
 test("cancellation stops the next upload from starting", async () => {
   let cancelled = false;
   const started: string[] = [];
-  const jobs = {
-    [flyer.uri]: { state: "queued" as const, attempts: 0 },
-    [photo.uri]: { state: "queued" as const, attempts: 0 },
+  const jobs: Jobs = {
+    [flyer.uri]: { state: "queued", attempts: 0 },
+    [photo.uri]: { state: "queued", attempts: 0 },
   };
   const { deps } = fakeDeps(jobs, async (uri) => {
     started.push(uri);
@@ -69,7 +68,7 @@ test("cancellation stops the next upload from starting", async () => {
 });
 
 test("a job that failed twice is not retried automatically", async () => {
-  const jobs = { [flyer.uri]: { state: "failed" as const, attempts: 2 } };
+  const jobs: Jobs = { [flyer.uri]: { state: "failed", attempts: 2 } };
   let calls = 0;
   const { deps } = fakeDeps(jobs, async () => { calls += 1; return { success: true, url: "x" }; });
   await runEventMediaPreupload([flyer], deps, () => false);
