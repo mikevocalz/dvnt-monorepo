@@ -19,6 +19,7 @@
 import { withSentry } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
+import { viewerMaySeeSpicy } from "../_shared/spicy-access.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -271,14 +272,20 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
-      // Fetch the set of author IDs the viewer follows + themselves
-      const { data: followRows } = await supabase
-        .from("follows")
-        .select("following_id")
-        .eq("follower_id", intUserId);
-      const followedIds = (followRows || []).map((r: any) => Number(r.following_id));
-      followedIds.push(intUserId); // own posts always visible
-      spicyAuthorIds = followedIds;
+      // Without an approved adult ID the viewer gets only their own spicy
+      // posts. Same rule create-post applies to publishing them.
+      if (!(await viewerMaySeeSpicy(supabase, sessionUserId))) {
+        spicyAuthorIds = [intUserId];
+      } else {
+        // Fetch the set of author IDs the viewer follows + themselves
+        const { data: followRows } = await supabase
+          .from("follows")
+          .select("following_id")
+          .eq("follower_id", intUserId);
+        const followedIds = (followRows || []).map((r: any) => Number(r.following_id));
+        followedIds.push(intUserId); // own posts always visible
+        spicyAuthorIds = followedIds;
+      }
     }
 
     // ── Fire ALL queries in parallel — never sequential ──────────

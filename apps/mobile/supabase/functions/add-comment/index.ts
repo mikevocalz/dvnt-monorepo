@@ -6,6 +6,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { checkRateLimit, WRITE_LIMIT } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
@@ -28,7 +29,9 @@ function jsonResponse<T>(data: ApiResponse<T>, status = 200): Response {
   });
 }
 
-function errorResponse(code: string, message: string): Response {
+// Always 200: supabase.functions.invoke throws on non-2xx, and the client
+// reads ok/error from the body. The status argument documents intent only.
+function errorResponse(code: string, message: string, _status?: number): Response {
   console.error(`[Edge:add-comment] Error: ${code} - ${message}`);
   return jsonResponse({ ok: false, error: { code, message } }, 200);
 }
@@ -72,6 +75,14 @@ Deno.serve(async (req) => {
     }
 
     const authUserId = sessionResult.userId;
+
+    // Verified-only admission, same gate as create-post. A client that skips
+    // the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabaseAdmin, authUserId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return errorResponse(refusal.code, refusal.message, 403);
+    }
 
     // Rate limit check
     const rl = checkRateLimit(authUserId, "add-comment", WRITE_LIMIT);

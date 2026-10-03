@@ -62,11 +62,10 @@ export function useAgeVerificationStatus() {
  * everyone.
  *
  * Who is in scope is not this function's decision. It belongs to
- * verified_admission_policy, which already carries the enforce switch, the
- * cohort cutoff and the grace deadline. Pass the verdict from
- * useVerifiedAdmission(); while enforcement is off, nobody is in scope and the
- * interstitial never opens. Set a cohort and only accounts created after it are
- * asked.
+ * verified_admission_policy, which carries the enforce switch and the grace
+ * deadline. Pass the verdict from useVerifiedAdmission(); while enforcement is
+ * off, nobody is in scope and the interstitial never opens. Once it is on,
+ * every unverified account is asked.
  *
  * ponytail: `inScope` is optional and defaults to NOT in scope. A caller that
  * forgets it shows no prompt rather than prompting everyone — wrong in the
