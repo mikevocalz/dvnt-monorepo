@@ -2,7 +2,11 @@ import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import { getCurrentUserId, getCurrentUserIdSync } from "./auth-helper";
 import { updateProfilePrivileged } from "../supabase/privileged";
-import { requireBetterAuthToken, getCurrentUserRow } from "../auth/identity";
+import {
+  requireBetterAuthToken,
+  getCurrentUserRow,
+  ownEmailFor,
+} from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
 import { resolveFollowRelationship } from "../profile/follow-relationship";
 import {
@@ -74,7 +78,6 @@ async function getFollowRelationship(viewerId: number | null, targetId: number) 
 type BetterAuthUserRow = {
   id: string;
   name: string | null;
-  email: string | null;
   image: string | null;
   username: string | null;
   createdAt: string | null;
@@ -87,7 +90,7 @@ async function getBetterAuthUserById(
 
   const { data, error } = await supabase
     .from("user")
-    .select("id, name, email, image, username, createdAt")
+    .select("id, name, image, username, createdAt")
     .eq("id", authId)
     .maybeSingle();
 
@@ -168,7 +171,6 @@ export const usersApi = {
           ${DB.users.id},
           ${DB.users.authId},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -210,7 +212,7 @@ export const usersApi = {
           id: String(targetUserId),
           authId,
           username: resolvedUsername,
-          email: data[DB.users.email] || betterAuthUser?.email || "",
+          email: ownEmailFor({ authId: data[DB.users.authId], id: data[DB.users.id] }),
           firstName: data[DB.users.firstName] || displayNameParts.firstName,
           lastName: data[DB.users.lastName] || displayNameParts.lastName,
           name:
@@ -245,7 +247,7 @@ export const usersApi = {
       // Fallback: Better Auth `user` table by username (single indexed query)
       const { data: baUser } = await supabase
         .from("user")
-        .select("id, name, email, image, username, createdAt")
+        .select("id, name, image, username, createdAt")
         .eq("username", username)
         .maybeSingle();
 
@@ -290,7 +292,6 @@ export const usersApi = {
           ${DB.users.id},
           ${DB.users.authId},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -335,7 +336,7 @@ export const usersApi = {
         id: String(data[DB.users.id]),
         authId,
         username: resolvedUsername,
-        email: data[DB.users.email] || betterAuthUser?.email || "",
+        email: ownEmailFor({ authId: data[DB.users.authId], id: data[DB.users.id] }),
         firstName: data[DB.users.firstName] || displayNameParts.firstName,
         lastName: data[DB.users.lastName] || displayNameParts.lastName,
         name:
@@ -388,7 +389,6 @@ export const usersApi = {
           ${DB.users.id},
           ${DB.users.authId},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -431,7 +431,7 @@ export const usersApi = {
           id: String(profile[DB.users.id]),
           username: resolvedUsername,
           authId: resolvedAuthId,
-          email: profile[DB.users.email] || betterAuthUser?.email || "",
+          email: ownEmailFor({ authId: profile[DB.users.authId], id: profile[DB.users.id] }),
           firstName: profile[DB.users.firstName] || displayNameParts.firstName,
           lastName: profile[DB.users.lastName] || displayNameParts.lastName,
           name:
@@ -467,7 +467,7 @@ export const usersApi = {
       // Fallback: query Better Auth `user` table directly
       const { data: authUser, error } = await supabase
         .from("user")
-        .select("id, name, email, image, username, createdAt")
+        .select("id, name, image, username, createdAt")
         .eq("id", authId)
         .single();
 
@@ -481,7 +481,7 @@ export const usersApi = {
           authUser.username ||
           displayName.toLowerCase().replace(/\s+/g, "_") ||
           authId,
-        email: authUser.email,
+        email: ownEmailFor({ authId }),
         firstName: displayName.split(" ")[0] || "",
         lastName: displayName.split(" ").slice(1).join(" ") || "",
         name: displayName || "New User",
@@ -818,7 +818,6 @@ export const usersApi = {
           `
           ${DB.users.id},
           ${DB.users.username},
-          ${DB.users.email},
           ${DB.users.firstName},
           ${DB.users.lastName},
           ${DB.users.bio},
@@ -834,7 +833,7 @@ export const usersApi = {
       return {
         id: String(data[DB.users.id]),
         username: data[DB.users.username],
-        email: data[DB.users.email],
+        email: ownEmailFor({ id: data[DB.users.id] }),
         firstName: data[DB.users.firstName],
         lastName: data[DB.users.lastName],
         name: data[DB.users.firstName] || data[DB.users.username],

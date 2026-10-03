@@ -132,7 +132,6 @@ export const auth = {
       const selectFields = `
           ${DB.users.id},
           ${DB.users.authId},
-          ${DB.users.email},
           ${DB.users.username},
           ${DB.users.firstName},
           ${DB.users.lastName},
@@ -174,20 +173,10 @@ export const auth = {
 
         if (authIdResult.data) {
           data = authIdResult.data;
-        } else if (email) {
-          // Fallback: query by email if auth_id not found
-          console.log("[Auth] auth_id not found, trying email:", email);
-          const emailResult = await supabase
-            .from(DB.users.table)
-            .select(selectFields)
-            .eq(DB.users.email, email)
-            .single();
-          data = emailResult.data;
-          error = emailResult.error;
-          // Read only. Linking auth_id to this row happens in the auth-sync
-          // edge function, keyed on the verified Better Auth session. Clients
-          // cannot write public.users (20261003150000_users_anon_write_lockdown).
         } else {
+          // No email fallback: clients cannot filter on users.email
+          // (20261003150400). auth-sync links auth_id from the verified
+          // session; until it has, the caller falls back to session data.
           error = authIdResult.error;
         }
       }
@@ -200,7 +189,7 @@ export const auth = {
       return {
         id: String(data[DB.users.id]),
         authId: data[DB.users.authId] || userId,
-        email: data[DB.users.email],
+        email: email ?? "",
         username: data[DB.users.username],
         name: data[DB.users.firstName] || data[DB.users.username],
         avatar: data.avatar?.url,
