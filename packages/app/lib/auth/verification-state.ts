@@ -1,4 +1,4 @@
-import { validateDateOfBirth } from "../utils/age-verification";
+import { validateDateOfBirth } from "../utils/age-verification.ts";
 
 export type VerificationState =
   | "not_started"
