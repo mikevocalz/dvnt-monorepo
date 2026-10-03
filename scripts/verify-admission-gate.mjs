@@ -142,10 +142,12 @@ await admin.query("CREATE DATABASE post");
 // defaults and CHECK constraints. Foreign keys to tables outside this set
 // (carts, orders, ticket_types) are left out.
 //
-// One live policy is left out: event_rsvps.event_private_boundary, a
-// RESTRICTIVE SELECT policy calling can_view_event(event_id), which reaches
-// the whole events privacy model. It governs reads only; this harness only
-// inserts RSVPs (no RETURNING), so it cannot affect any assertion.
+// Left out: event_private_boundary on event_rsvps, event_likes and
+// event_comments, a RESTRICTIVE SELECT policy calling can_view_event(event_id),
+// which reaches the whole events privacy model. It governs reads only; this
+// harness only inserts into those tables (no RETURNING), so it cannot affect
+// any assertion. The count and history triggers on likes and event_likes are
+// left out too: they run after the row passes RLS and do not decide it.
 const FIXTURE = `
 CREATE SCHEMA auth;
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
@@ -246,6 +248,33 @@ CREATE TABLE public.comments (
 -- Stand-in: only the two columns the ticket policies read.
 CREATE TABLE public.events (id SERIAL PRIMARY KEY, host_id TEXT);
 
+CREATE TABLE public.likes (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  post_id INTEGER REFERENCES public.posts(id) ON DELETE SET NULL,
+  comment_id INTEGER REFERENCES public.comments(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, post_id)
+);
+
+CREATE TABLE public.event_likes (
+  id SERIAL PRIMARY KEY,
+  event_id INTEGER NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (event_id, user_id)
+);
+
+CREATE TABLE public.event_comments (
+  id SERIAL PRIMARY KEY,
+  event_id INTEGER NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
+  author_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE TABLE public.event_rsvps (
   id SERIAL PRIMARY KEY,
   event_id INTEGER NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
@@ -283,7 +312,8 @@ CREATE TABLE public.ticket_holds (
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.comments, public.event_rsvps, public.posts,
-  public.posts_media, public.users TO anon, authenticated;
+  public.posts_media, public.users, public.likes, public.event_likes, public.event_comments
+  TO anon, authenticated;
 GRANT SELECT ON public.identity_verifications TO authenticated;
 GRANT SELECT ON public.post_text_slides TO anon, authenticated;
 GRANT SELECT ON public.ticket_holds TO authenticated;
@@ -302,6 +332,9 @@ ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.event_rsvps ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ticket_holds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.likes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.event_likes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.event_comments ENABLE ROW LEVEL SECURITY;
 
 -- ── Live functions (pg_get_functiondef) ──
 CREATE FUNCTION public.is_verified_self()
@@ -394,6 +427,23 @@ CREATE POLICY "RSVPs viewable by everyone" ON public.event_rsvps FOR SELECT USIN
 CREATE POLICY "Users can update own RSVPs" ON public.event_rsvps FOR UPDATE USING (true);
 CREATE POLICY event_rsvps_delete ON public.event_rsvps FOR DELETE USING (true);
 CREATE POLICY verified_participation_boundary ON public.event_rsvps AS RESTRICTIVE FOR INSERT
+  TO anon, authenticated WITH CHECK (verified_participation_allowed());
+
+CREATE POLICY "Anyone can create likes" ON public.likes FOR INSERT WITH CHECK (true);
+CREATE POLICY "Likes viewable by everyone" ON public.likes FOR SELECT USING (true);
+CREATE POLICY "Users can delete own likes" ON public.likes FOR DELETE USING (true);
+CREATE POLICY verified_participation_boundary ON public.likes AS RESTRICTIVE FOR INSERT
+  TO anon, authenticated WITH CHECK (verified_participation_allowed());
+
+CREATE POLICY event_likes_select ON public.event_likes FOR SELECT USING (true);
+CREATE POLICY event_likes_insert ON public.event_likes FOR INSERT WITH CHECK (true);
+CREATE POLICY event_likes_delete ON public.event_likes FOR DELETE USING (true);
+CREATE POLICY verified_participation_boundary ON public.event_likes AS RESTRICTIVE FOR INSERT
+  TO anon, authenticated WITH CHECK (verified_participation_allowed());
+
+CREATE POLICY event_comments_select ON public.event_comments FOR SELECT USING (true);
+CREATE POLICY event_comments_insert_all ON public.event_comments FOR INSERT WITH CHECK (true);
+CREATE POLICY verified_participation_boundary ON public.event_comments AS RESTRICTIVE FOR INSERT
   TO anon, authenticated WITH CHECK (verified_participation_allowed());
 
 CREATE POLICY ticket_holds_own ON public.ticket_holds FOR SELECT
@@ -664,7 +714,42 @@ const SECTIONS = [
     },
   },
   {
-    name: "the participation boundary is gone from tickets, ticket_holds and event_rsvps and kept elsewhere",
+    name: "enforce = true, no grace: every member can like a post, a comment and an event",
+    changed: true,
+    async fn(db) {
+      await db.query(`INSERT INTO public.comments (id, author_id, post_id, content) VALUES (900, 4, 1, 'seed')
+                      ON CONFLICT DO NOTHING`);
+      await withPolicy(db, { enforce: true }, async () => {
+        const all = Object.fromEntries(MEMBERS.map((w) => [w, true]));
+        expectOutcomes(
+          await each(MEMBERS, (who) => as(db, who, `INSERT INTO public.likes (user_id, post_id) VALUES ($1, $2)`, [userIdOf(who), POST.publicByAdult])),
+          all, "likes INSERT (post)");
+        expectOutcomes(
+          await each(MEMBERS, (who) => as(db, who, `INSERT INTO public.likes (user_id, comment_id) VALUES ($1, 900)`, [userIdOf(who)])),
+          all, "likes INSERT (comment)");
+        expectOutcomes(
+          await each(MEMBERS, (who) => as(db, who, `INSERT INTO public.event_likes (event_id, user_id) VALUES (1, $1)`, [userIdOf(who)])),
+          all, "event_likes INSERT");
+      });
+    },
+  },
+  {
+    name: "enforce = true, no grace: event comments stay verified-only",
+    changed: true,
+    async fn(db) {
+      await withPolicy(db, { enforce: true }, async () => {
+        expectOutcomes(
+          await each(EVERYONE, (who) => as(db, who,
+            `INSERT INTO public.event_comments (event_id, author_id, content) VALUES (1, $1, 'hi')`,
+            [userIdOf(who) ?? PERSONAS.adult.id])),
+          { unverified: false, underage: false, old: false, adult: true, anon: false },
+          "event_comments INSERT",
+        );
+      });
+    },
+  },
+  {
+    name: "the participation boundary is gone from tickets, ticket_holds, event_rsvps, likes and event_likes and kept elsewhere",
     changed: true,
     async fn(db) {
       const rows = await db.query(
@@ -673,7 +758,7 @@ const SECTIONS = [
       );
       assert.deepEqual(
         rows.rows.map((r) => r.tablename),
-        ["comments", "post_text_slides", "posts", "posts_media"],
+        ["comments", "event_comments", "post_text_slides", "posts", "posts_media"],
       );
     },
   },

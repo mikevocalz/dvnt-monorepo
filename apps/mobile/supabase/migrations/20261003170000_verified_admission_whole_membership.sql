@@ -17,9 +17,12 @@
 --   1. A NULL grace_deadline now means no grace. With enforce = true and no
 --      deadline, unverified accounts are refused at once. Matches
 --      decideVerifiedAdmission in functions/_shared/verified-admission.ts.
---   2. Ticket purchase, ticket holds and RSVPs leave the participation
+--   2. Ticket purchase, ticket holds, RSVPs and likes leave the participation
 --      boundary (checklist A01/A03). Buying or holding a ticket never needs
 --      verification; using it for an adult surface (Lynk rooms) still does.
+--      Liking a post, a comment or an event is open to every account by
+--      product decision (2026-10-03). Posts, comments, event comments,
+--      stories and messages stay behind the boundary.
 --   3. SPICY (is_nsfw) posts, their media and their text slides are visible
 --      through PostgREST only to the author or to a viewer with an approved
 --      adult ID. Creating or updating a post as SPICY needs the same. This
@@ -73,11 +76,13 @@ COMMENT ON COLUMN public.verified_admission_policy.grace_deadline IS
 COMMENT ON COLUMN public.verified_admission_policy.cohort_created_after IS
   'Accounts created before this instant are exempt. NULL = whole membership. Checklist A03 requires NULL.';
 
--- ── 2. Tickets, holds and RSVPs are not participation ────────────────────
+-- ── 2. Tickets, holds, RSVPs and likes are not participation ─────────────
+-- likes covers post and comment likes (likes.post_id / likes.comment_id);
+-- event_likes covers events. comment_likes never had the boundary.
 DO $$
 DECLARE v_table text;
 BEGIN
-  FOREACH v_table IN ARRAY ARRAY['tickets', 'ticket_holds', 'event_rsvps'] LOOP
+  FOREACH v_table IN ARRAY ARRAY['tickets', 'ticket_holds', 'event_rsvps', 'likes', 'event_likes'] LOOP
     CONTINUE WHEN to_regclass('public.' || quote_ident(v_table)) IS NULL;
     EXECUTE format('DROP POLICY IF EXISTS verified_participation_boundary ON public.%I', v_table);
   END LOOP;

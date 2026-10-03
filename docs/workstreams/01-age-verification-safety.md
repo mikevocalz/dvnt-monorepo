@@ -38,14 +38,14 @@ Persist provider references and minimal audit metadata; do not persist raw docum
 
 ### 4. Participation gates
 Centralize the server check and apply it to all relevant write/action boundaries:
-- posting, editing a post, commenting and stories
+- posting, editing a post, commenting (posts and events) and stories
 - SPICY posting and SPICY viewing (approved adult ID required whatever the rollout policy says; the author always sees their own)
 - hosting events
 - Sneaky Lynk room joins and media tokens
 - messaging
 - any future adult-only surface
 
-Ticket purchase, holds, RSVPs and the ticket wallet are never gated (checklist A01/A03). A ticket alone does not admit anyone to an adult virtual event: the room join checks the verdict, not the ticket.
+Ticket purchase, holds, RSVPs, the ticket wallet and likes (posts, comments, events) are never gated (checklist A01/A03; likes by product decision, 2026-10-03). A ticket alone does not admit anyone to an adult virtual event: the room join checks the verdict, not the ticket.
 
 Client UI is explanatory only; edge functions/RLS/API authorization are the enforcement layer.
 
