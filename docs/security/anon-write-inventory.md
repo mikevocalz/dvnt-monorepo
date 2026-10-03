@@ -7,9 +7,10 @@ policy whose USING or WITH CHECK expression is the literal `true`, applied to
 is in every app bundle, so each row is writable by anyone on the internet,
 limited only by column constraints.
 
-`users` is closed by `20261003150000_users_anon_write_lockdown.sql` and
-`posts` by `20261003150100_posts_client_write_lockdown.sql` (neither is
-applied to production yet). The other 25 are unchanged.
+`users` is closed by `20261003150000_users_anon_write_lockdown.sql`,
+`posts` by `20261003150100_posts_client_write_lockdown.sql` and
+`room_comments` by `20261003150300_room_comments_author_private.sql` (none is
+applied to production yet). The other 24 are unchanged.
 
 Most of these policies exist because clients reach PostgREST as anon, so an
 ownership predicate has no `sub` to compare against. The mint-supabase-jwt
@@ -98,12 +99,20 @@ video_change_role) resolve that handle with service_role; lynk-cohost-invite
 refuses it. `pnpm verify:content-lockdown` proves the co-member read before
 and the 42501 after.
 
-Still open, same leak through other tables:
+**room_comments.author_id.** anon and authenticated could SELECT every
+column of every room's chat (`USING (true)`, TO public) and INSERT any
+author_id. `20261003150300_room_comments_author_private.sql` revokes every
+client write and SELECT on author_id, adds author_handle (set by a trigger:
+auth id for a named member, `member:<video_room_members.id>` for an anonymous
+one), and limits reads to authenticated members and the host of the room.
+Writes go through the `lynk-room-comment` edge function (post, delete by the
+author or a room moderator). Banning an author passes the message's handle to
+video_ban_user, which already resolves it inside the room. Typing and reaction
+broadcasts from an anonymous member now carry a per-session token instead of
+the auth id. `pnpm verify:content-lockdown` sections 9 to 11 prove it.
 
-- **room_comments.author_id** is the author's auth id, readable by anyone who
-  can read the room's chat. An anonymous member who types in chat is still
-  identifiable. Fix: write room comments through an edge function that stores
-  an anonymity snapshot and stop exposing author_id for anonymous authors.
+Still open:
+
 - **lynk_cohost_invites.invitee_id**: why the cohost-invite function refuses
   member handles instead of resolving them.
 

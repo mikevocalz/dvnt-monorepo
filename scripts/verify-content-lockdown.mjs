@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Proves two holes are closed by migrations 20261003150100 and 20261003150200.
+ * Proves three holes are closed by migrations 20261003150100, 20261003150200
+ * and 20261003150300.
  *
  * posts: production granted anon and authenticated INSERT and UPDATE with
  * policies of WITH CHECK (true) / USING (true), so the anon key from any app
@@ -11,6 +12,11 @@
  * that shows every row of a room to every co-member, user_id included. For an
  * anonymous Sneaky Lynk member user_id is their auth id, so any co-member
  * could unmask them with one join to users.
+ *
+ * room_comments: anon and authenticated could SELECT and INSERT every
+ * column with policies of USING (true) / WITH CHECK (true). author_id is the
+ * author's auth id, so anyone reading a room's chat (anyone at all) could
+ * unmask an anonymous member, and anyone could post as anyone.
  *
  * Parts:
  *   1. Source scan: no client code writes posts, likes or comments (likes and
@@ -41,6 +47,7 @@ const skipMigration = process.argv.includes("--skip-migration");
 const MIGRATIONS = [
   "apps/mobile/supabase/migrations/20261003150100_posts_client_write_lockdown.sql",
   "apps/mobile/supabase/migrations/20261003150200_video_room_members_user_id_private.sql",
+  "apps/mobile/supabase/migrations/20261003150300_room_comments_author_private.sql",
 ].map((p) => join(root, p));
 
 // ── 1. Source scan ───────────────────────────────────────────────────────────
@@ -53,9 +60,10 @@ const MIGRATIONS = [
       `\\.from\\(\\s*(?:${names.map((n) => `DB\\.${n}\\.table|["'\`]${n}["'\`]`).join("|")})\\s*\\)`,
       "g",
     );
-  const WRITE_FROM = tableFrom(["posts", "likes", "comments"]);
+  const WRITE_FROM = tableFrom(["posts", "likes", "comments", "room_comments"]);
   const WRITE = /^\s*(?:\/\/[^\n]*\n\s*)*\.(update|insert|upsert|delete)\s*\(/;
   const MEMBERS_FROM = /\.from\(\s*["'`]video_room_members["'`]\s*\)/g;
+  const CHAT_FROM = /\.from\(\s*["'`]room_comments["'`]\s*\)/g;
   // Realtime filters on video_room_members are evaluated with the same column
   // privileges, so a `user_id=eq.` filter would be rejected too.
   const MEMBERS_RT = /table:\s*["'`]video_room_members["'`][^}]*filter:\s*`?["']?[^,}]*user_id/;
@@ -84,17 +92,27 @@ const MIGRATIONS = [
           if (/\buser_id\b/.test(chain)) reads.push(`${rel}:${lineOf(m.index)}`);
         }
         if (MEMBERS_RT.test(src)) reads.push(`${rel} (realtime filter on user_id)`);
+        for (const m of src.matchAll(CHAT_FROM)) {
+          const rest = src.slice(m.index, m.index + 1200);
+          const chain = rest.slice(0, rest.search(/;\s*\n/) + 1 || rest.length);
+          // select("*") names author_id implicitly and is a 42501 now.
+          if (/\bauthor_id\b|\.select\(\s*["'`]\*["'`]/.test(chain)) {
+            reads.push(`${rel}:${lineOf(m.index)} (room_comments author_id or *)`);
+          }
+        }
       }
     }
   };
   for (const d of SCAN) walk(join(root, d));
-  assert.deepEqual(writes, [], `client code writes posts/likes/comments directly:\n  ${writes.join("\n  ")}`);
+  assert.deepEqual(writes, [], `client code writes posts/likes/comments/room_comments directly:\n  ${writes.join("\n  ")}`);
   assert.deepEqual(
     reads,
     [],
-    `client code reads video_room_members.user_id (use lynk_room_roster):\n  ${reads.join("\n  ")}`,
+    `client code reads video_room_members.user_id (use lynk_room_roster) or room_comments.author_id (use author_handle):\n  ${reads.join("\n  ")}`,
   );
-  console.log("1. OK: no client writes to posts/likes/comments; no client read of video_room_members.user_id");
+  console.log(
+  "1. OK: no client writes to posts/likes/comments/room_comments; no client read of video_room_members.user_id or room_comments.author_id",
+);
 }
 
 // ── Postgres ─────────────────────────────────────────────────────────────────
@@ -241,6 +259,7 @@ CREATE TRIGGER trg_likes_update_post_count AFTER INSERT ON public.likes
 
 CREATE TABLE public.video_rooms (
   id SERIAL PRIMARY KEY,
+  uuid UUID NOT NULL DEFAULT gen_random_uuid(),
   created_by TEXT,
   status TEXT DEFAULT 'open'
 );
@@ -294,12 +313,39 @@ CREATE POLICY video_room_members_select_participant ON public.video_room_members
   FOR SELECT TO authenticated
   USING ((user_id = (SELECT (auth.jwt() ->> 'sub'))) OR viewer_in_lynk_room(room_id) OR viewer_hosts_lynk_room(room_id));
 
-INSERT INTO public.video_rooms (id, created_by) VALUES (1, 'ba-host'), (2, 'ba-other-host');
+INSERT INTO public.video_rooms (id, uuid, created_by) VALUES
+  (1, '11111111-1111-4111-8111-111111111111', 'ba-host'),
+  (2, '22222222-2222-4222-8222-222222222222', 'ba-other-host');
 INSERT INTO public.video_room_members (room_id, user_id, role, is_anonymous, anon_label) VALUES
   (1, 'ba-host', 'host', false, NULL),
   (1, 'ba-dana', 'participant', false, NULL),
   (1, 'ba-sam', 'participant', true, 'Anon 3'),
   (2, 'ba-other-host', 'host', false, NULL);
+
+-- room_comments: columns, constraints, relacl anon=ar authenticated=ar, the
+-- sequence grants and both policies (TO public) as read 2026-10-03.
+CREATE TABLE public.room_comments (
+  id BIGSERIAL PRIMARY KEY,
+  room_id TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  body TEXT NOT NULL CHECK (char_length(body) <= 2000),
+  parent_id BIGINT REFERENCES public.room_comments(id) ON DELETE CASCADE,
+  root_id BIGINT REFERENCES public.room_comments(id) ON DELETE CASCADE,
+  depth SMALLINT NOT NULL DEFAULT 0 CHECK (depth >= 0 AND depth <= 2),
+  mentions JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE public.room_comments ENABLE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT ON public.room_comments TO anon, authenticated;
+GRANT ALL ON public.room_comments TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.room_comments_id_seq TO anon, authenticated, service_role;
+CREATE POLICY room_comments_select ON public.room_comments FOR SELECT USING (true);
+CREATE POLICY room_comments_insert ON public.room_comments FOR INSERT WITH CHECK (true);
+
+INSERT INTO public.room_comments (room_id, author_id, body) VALUES
+  ('11111111-1111-4111-8111-111111111111', 'ba-sam', 'sam says'),
+  ('11111111-1111-4111-8111-111111111111', 'ba-dana', 'dana says'),
+  ('22222222-2222-4222-8222-222222222222', 'ba-other-host', 'room two');
 `;
 await sql(FIXTURE);
 const SAM_ROW = (await sql(`SELECT id FROM public.video_room_members WHERE user_id = 'ba-sam'`))[0].id;
@@ -334,6 +380,10 @@ const POST_WRITES = [
   ["post as someone else", "INSERT INTO public.posts (author_id, content) VALUES (1, 'forged')"],
 ];
 const UNMASK = "SELECT user_id FROM public.video_room_members WHERE room_id = 1 AND is_anonymous";
+const ROOM1 = "11111111-1111-4111-8111-111111111111";
+const CHAT_UNMASK = "SELECT author_id FROM public.room_comments WHERE body = 'sam says'";
+const CHAT_FORGE = `INSERT INTO public.room_comments (room_id, author_id, body) VALUES ('${ROOM1}', 'ba-sam', 'forged')`;
+const CHAT_COLUMNS = "id, room_id, author_handle, body, parent_id, root_id, depth, mentions, created_at";
 
 // ── 2. The fixture reproduces both holes ────────────────────────────────────
 for (const role of ["anon", "authenticated"]) {
@@ -347,7 +397,17 @@ for (const role of ["anon", "authenticated"]) {
   assert.ok(r.ok, `fixture is not faithful: co-member read failed (${r.message})`);
   assert.deepEqual(r.rows, [{ user_id: "ba-sam" }], "fixture is not faithful: co-member could not unmask");
 }
-console.log("2. OK: before the migrations anon/authenticated rewrite posts and a co-member reads ba-sam's user_id");
+{
+  const r = await as("authenticated", CHAT_UNMASK, "ba-dana");
+  assert.deepEqual(r.rows, [{ author_id: "ba-sam" }], `fixture is not faithful: co-member chat read (${r.message})`);
+  const a = await as("anon", CHAT_UNMASK);
+  assert.deepEqual(a.rows, [{ author_id: "ba-sam" }], `fixture is not faithful: anon chat read (${a.message})`);
+  const forged = await as("authenticated", CHAT_FORGE, "ba-dana");
+  assert.ok(forged.ok && forged.rowCount === 1, `fixture is not faithful: forged chat insert (${forged.message})`);
+}
+console.log(
+  "2. OK: before the migrations anon/authenticated rewrite posts, a co-member reads ba-sam's user_id, and anyone reads ba-sam's chat author_id or posts as him",
+);
 
 // ── 3. Apply ─────────────────────────────────────────────────────────────────
 if (skipMigration) {
@@ -357,7 +417,7 @@ if (skipMigration) {
     await sql(readFileSync(m, "utf8"));
     await sql(readFileSync(m, "utf8"));
   }
-  console.log("3. OK: both migrations applied (twice, to prove they are re-runnable)");
+  console.log("3. OK: all migrations applied (twice, to prove they are re-runnable)");
 }
 
 // ── 4. posts: every client write is a privilege error ───────────────────────
@@ -481,5 +541,103 @@ console.log("7. OK: roster gives co-members and the host member:<id> for ba-sam,
   assert.ok(rr.ok && rr.rowCount === 3, `service_role roster failed (${rr.message})`);
 }
 console.log("8. OK: service_role reads user_id, writes members and can call the roster");
+
+// ── 9. room_comments: author_id is unreadable, writes are server-only ──────
+// The client's own resolver, run against what the database hands each viewer.
+const { resolveCommentAuthor } = await import(
+  join(root, "packages/app/features/sneaky-lynk/api/comment-anonymity.ts")
+);
+const SAM_HANDLE = `member:${SAM_ROW}`;
+{
+  for (const [label, stmt] of [
+    ["select author_id", CHAT_UNMASK],
+    ["select *", `SELECT * FROM public.room_comments WHERE room_id = '${ROOM1}'`],
+    ["filter on author_id", "SELECT id FROM public.room_comments WHERE author_id = 'ba-sam'"],
+    ["order by author_id", "SELECT id FROM public.room_comments ORDER BY author_id"],
+    ["return author_id via row", "SELECT c FROM public.room_comments c"],
+    ["insert as someone else", CHAT_FORGE],
+    ["update", "UPDATE public.room_comments SET body = 'x'"],
+    ["delete", "DELETE FROM public.room_comments"],
+  ]) {
+    for (const sub of ["ba-dana", "ba-host", "ba-sam"]) {
+      const r = await as("authenticated", stmt, sub);
+      assert.equal(r.code, "42501", `${sub} could ${label} on room_comments (${r.ok ? JSON.stringify(r.rows) : r.message})`);
+    }
+    const a = await as("anon", stmt);
+    assert.equal(a.code, "42501", `anon could ${label} on room_comments (${a.ok ? JSON.stringify(a.rows) : a.message})`);
+  }
+  const anonRead = await as("anon", `SELECT ${CHAT_COLUMNS} FROM public.room_comments`);
+  assert.equal(anonRead.code, "42501", "anon can read room chat");
+  const priv = await sql(`
+    SELECT attname, has_column_privilege('authenticated', 'public.room_comments'::regclass, attname, 'SELECT') AS ok
+    FROM pg_attribute WHERE attrelid = 'public.room_comments'::regclass AND attnum > 0 AND NOT attisdropped
+    ORDER BY attnum`);
+  assert.deepEqual(
+    priv.filter((c) => !c.ok).map((c) => c.attname),
+    ["author_id"],
+    "authenticated must lack SELECT on room_comments.author_id and only that column (realtime drops it from payloads)",
+  );
+  const seq = await sql(`SELECT has_sequence_privilege('authenticated', 'public.room_comments_id_seq', 'USAGE') AS a,
+    has_sequence_privilege('anon', 'public.room_comments_id_seq', 'USAGE') AS b`);
+  assert.deepEqual(seq, [{ a: false, b: false }], "clients still hold the room_comments sequence");
+}
+console.log("9. OK: no client reads, filters or orders by author_id, or writes room_comments; anon has no chat access");
+
+// ── 10. Handles: co-members see member:<id>, the author maps to themself ─────
+const chatAs = async (sub) => {
+  const c = await as("authenticated", `SELECT ${CHAT_COLUMNS} FROM public.room_comments WHERE room_id = '${ROOM1}' ORDER BY id`, sub);
+  assert.ok(c.ok, `${sub} chat read failed (${c.message})`);
+  const r = await as("authenticated", "SELECT member_id, user_id, is_anonymous, anon_label FROM public.lynk_room_roster(1)", sub);
+  assert.ok(r.ok, `${sub} roster failed (${r.message})`);
+  return c.rows.map((row) => ({ body: row.body, handle: row.author_handle, ...resolveCommentAuthor(r.rows, row.author_handle) }));
+};
+{
+  for (const viewer of ["ba-dana", "ba-host"]) {
+    const rows = await chatAs(viewer);
+    assert.ok(!JSON.stringify(rows).includes("ba-sam"), `${viewer} learned ba-sam from chat: ${JSON.stringify(rows)}`);
+    const sam = rows.find((x) => x.body === "sam says");
+    assert.deepEqual(
+      { handle: sam.handle, authorId: sam.authorId, isAnonymous: sam.isAnonymous, anonLabel: sam.anonLabel },
+      { handle: SAM_HANDLE, authorId: SAM_HANDLE, isAnonymous: true, anonLabel: "Anon 3" },
+      `${viewer} view of the anonymous message`,
+    );
+    const dana = rows.find((x) => x.body === "dana says");
+    assert.deepEqual([dana.authorId, dana.isAnonymous], ["ba-dana", false], `${viewer} view of a named message`);
+  }
+  const own = (await chatAs("ba-sam")).find((x) => x.body === "sam says");
+  assert.deepEqual(
+    [own.handle, own.authorId, own.isAnonymous],
+    [SAM_HANDLE, "ba-sam", true],
+    "the anonymous author's own message does not map back to them",
+  );
+  const outsider = await as("authenticated", `SELECT id FROM public.room_comments WHERE room_id = '${ROOM1}'`, "ba-out");
+  assert.ok(outsider.ok && outsider.rowCount === 0, "a non-member reads room 1 chat");
+  const otherRoom = await as("authenticated", "SELECT id FROM public.room_comments WHERE body = 'room two'", "ba-dana");
+  assert.ok(otherRoom.ok && otherRoom.rowCount === 0, "a member of room 1 reads room 2 chat");
+}
+console.log("10. OK: co-members and the host get member:<id> + label for ba-sam; ba-sam's own message maps to ba-sam; outsiders read nothing");
+
+// ── 11. service_role: full access, and the trigger owns author_handle ────────
+{
+  const r = await as("service_role", CHAT_UNMASK);
+  assert.ok(r.ok && r.rows[0]?.author_id === "ba-sam", `service_role lost author_id (${r.message})`);
+  const ins = await as(
+    "service_role",
+    `INSERT INTO public.room_comments (room_id, author_id, author_handle, body)
+     VALUES ('${ROOM1}', 'ba-sam', 'ba-sam', 'new') RETURNING author_handle`,
+  );
+  assert.ok(ins.ok, `service_role insert failed (${ins.message})`);
+  assert.equal(ins.rows[0].author_handle, SAM_HANDLE, "a supplied author_handle overrode the trigger");
+  const named = await as(
+    "service_role",
+    `INSERT INTO public.room_comments (room_id, author_id, body) VALUES ('${ROOM1}', 'ba-dana', 'hi') RETURNING author_handle`,
+  );
+  assert.equal(named.rows?.[0]?.author_handle, "ba-dana", `named author handle (${named.message})`);
+  const del = await as("service_role", "DELETE FROM public.room_comments WHERE body = 'sam says'");
+  assert.ok(del.ok && del.rowCount === 1, `service_role could not delete (${del.message})`);
+  const nulls = await sql("SELECT count(*)::int AS n FROM public.room_comments WHERE author_handle IS NULL");
+  assert.equal(nulls[0].n, 0, "backfill left rows without author_handle");
+}
+console.log("11. OK: service_role reads author_id, writes and deletes; author_handle comes from the trigger and the backfill");
 
 console.log("\nverify-content-lockdown: all sections pass");

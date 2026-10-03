@@ -18,6 +18,7 @@ on:
       - "scripts/verify-edge-functions.mjs"
       - "scripts/verify-users-lockdown.mjs"
       - "scripts/verify-content-lockdown.mjs"
+      - "packages/app/features/sneaky-lynk/api/comment-anonymity.ts"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -29,6 +30,7 @@ on:
       - "scripts/verify-edge-functions.mjs"
       - "scripts/verify-users-lockdown.mjs"
       - "scripts/verify-content-lockdown.mjs"
+      - "packages/app/features/sneaky-lynk/api/comment-anonymity.ts"
 
 jobs:
   verify:
@@ -93,11 +95,13 @@ jobs:
       - run: node scripts/verify-users-lockdown.mjs
 
   content-lockdown:
-    # posts writes and video_room_members.user_id reads. Same shape as the job
-    # above: proves both holes exist in a fixture copied from production,
-    # applies 20261003150100 and 20261003150200, and asserts they are closed.
-    # Also fails if client code writes posts/likes/comments or names
-    # video_room_members.user_id. No --allow-skip.
+    # posts writes, video_room_members.user_id reads and room_comments.author_id
+    # reads/writes. Same shape as the job above: proves the holes exist in a
+    # fixture copied from production, applies 20261003150100, 20261003150200
+    # and 20261003150300, and asserts they are closed (room chat handles are
+    # checked through the app's own resolver, comment-anonymity.ts). Also
+    # fails if client code writes posts/likes/comments/room_comments or names
+    # video_room_members.user_id or room_comments.author_id. No --allow-skip.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
