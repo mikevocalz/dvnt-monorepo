@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-function harness() {
+function harness({ standing = { state: 'allowed', reason: 'not_enrolled', message: null } } = {}) {
   let handler, nextId = 1;
   const rows = [];
   const client = { from: () => {
@@ -28,6 +28,7 @@ function harness() {
     Deno: { env: { get: () => 'test' }, serve: fn => { handler = fn; } },
     require: name => name.includes('supabase-js') ? { createClient: () => client }
       : name.includes('verify-session') ? { verifySession: async (_db, req) => req.headers.get('x-test-actor'), corsHeaders: () => ({}), optionsResponse: () => new Response(null, { status: 204 }) }
+      : name.includes('creator-standing') ? { resolveCreatorStanding: async () => standing, creatorStandingRefusal: verdict => ({ code: 'creator_hosting_closed', reason: verdict.reason, message: verdict.message }) }
       : name.includes('verified-admission') ? { resolveVerifiedAdmission: async () => ({ state: 'allowed', reason: 'not_enforced', deadline: null, message: null }), admissionRefusal: verdict => ({ code: 'verification_required', reason: verdict.reason, message: verdict.message }) }
       : { checkRateLimit: () => ({ allowed: true }), WRITE_LIMIT: {} },
   });
@@ -103,4 +104,9 @@ test('a go-public time after the event starts is refused', async () => {
 test('isHidden must be a real boolean, not a truthy string', async () => {
   const h = harness(); const result = await h.publish({ ...draft, isHidden: 'false' });
   assert.equal(result.ok, false); assert.equal(result.error.code, 'validation_error'); assert.equal(h.rows.length, 0);
+});
+test('a creator whose hosting is closed publishes nothing', async () => {
+  const h = harness({ standing: { state: 'refused', reason: 'suspended', message: 'Hosting is paused on this account.' } });
+  const result = await h.publish(draft);
+  assert.equal(result.ok, false); assert.equal(result.error.code, 'creator_hosting_closed'); assert.equal(h.rows.length, 0);
 });
