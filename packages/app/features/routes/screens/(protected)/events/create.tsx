@@ -829,9 +829,6 @@ function CreateEventScreenContent() {
         lineup: lineup.length > 0 ? lineup : undefined,
         perks: perks.length > 0 ? perks : undefined,
         nsfw: isNsfw || undefined,
-        // A duplicated draft keeps its source event's zone; createEvent falls
-        // back to this device's zone only when it is absent.
-        eventTz: useCreateEventStore.getState().eventTz || undefined,
       };
 
       console.log("[CreateEvent] Creating event with data:", eventData);

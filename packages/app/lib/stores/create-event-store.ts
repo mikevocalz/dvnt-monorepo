@@ -8,7 +8,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
-import { deviceTimeZone } from "@dvnt/app/lib/events/event-zone";
+import { deviceTimeZone, normalizeTimeZone } from "@dvnt/app/lib/events/event-zone";
 import type { DraftAddon } from "@dvnt/app/features/events/create/addon-form";
 
 type VisibilityOption = "public" | "private" | "link_only";
@@ -180,11 +180,6 @@ interface DraftFields {
   promoterTemplates: PromoterTemplateDraft[];
   /** Promo codes the duplicated event will carry; shown on review. */
   promoCodeTemplates: PromoCodeTemplateDraft[];
-  /**
-   * IANA zone of the event this draft was duplicated from. Publish sends it
-   * instead of the publisher's device zone. Null for a fresh draft.
-   */
-  eventTz: string | null;
   flyerImage: string | null;
   flyerMediaType: "image" | "video";
   // Fallback still image shown when the primary flyer is a video and the
@@ -367,7 +362,6 @@ const DRAFT_DEFAULTS: DraftFields = {
   guests: [],
   promoterTemplates: [],
   promoCodeTemplates: [],
-  eventTz: null,
   flyerImage: null,
   flyerMediaType: "image",
   flyerFallbackImage: null,
@@ -453,6 +447,10 @@ export const useCreateEventStore = create<CreateEventState>()(
           ...DRAFT_DEFAULTS,
           ...UI_DEFAULTS,
           ...payload,
+          // A duplicated draft carries its source event's zone. A draft saved
+          // without one (or with a zone Intl does not know) falls back to this
+          // device's zone, which is what its wall clock was typed in.
+          eventTz: normalizeTimeZone(payload.eventTz) ?? deviceTimeZone(),
           // A server draft is configuration, never a continuation of a live
           // publish idempotency operation from another device.
           clientRequestId: null,
@@ -659,7 +657,6 @@ export const useCreateEventStore = create<CreateEventState>()(
         guests: state.guests,
         promoterTemplates: state.promoterTemplates,
         promoCodeTemplates: state.promoCodeTemplates,
-        eventTz: state.eventTz,
         flyerImage: state.flyerImage,
         flyerMediaType: state.flyerMediaType,
         flyerFallbackImage: state.flyerFallbackImage,

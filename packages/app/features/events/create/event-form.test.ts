@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildEventInsert, type EventFormDraft } from "./event-form.ts";
+import { deviceTimeZone } from "../../../lib/events/event-zone.ts";
 
 const draft = (over: Partial<EventFormDraft> = {}): EventFormDraft => ({
   title: "Cookout (Copy)",
@@ -39,10 +40,13 @@ test("a duplicated draft publishes in its source event's zone", () => {
   assert.equal(buildEventInsert(draft({ eventTz: "America/Los_Angeles" })).eventTz, "America/Los_Angeles");
 });
 
-test("a fresh draft sends no zone, so createEvent uses the device zone", () => {
-  assert.equal(buildEventInsert(draft({ eventTz: null })).eventTz, undefined);
-  assert.equal(buildEventInsert(draft()).eventTz, undefined);
-  assert.equal(buildEventInsert(draft({ eventTz: "  " })).eventTz, undefined);
+// The timezone branch made the zone part of every insert: the wall clock is
+// read in it, so a draft with no usable zone publishes in the device's zone.
+test("a draft with no usable zone publishes in the device zone", () => {
+  const device = deviceTimeZone();
+  assert.equal(buildEventInsert(draft({ eventTz: null })).eventTz, device);
+  assert.equal(buildEventInsert(draft()).eventTz, device);
+  assert.equal(buildEventInsert(draft({ eventTz: "  " })).eventTz, device);
 });
 
 test("promo code templates read as plain discounts, enabled first", async () => {

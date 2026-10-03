@@ -127,8 +127,6 @@ export interface EventFormDraft {
   agreementAccepted: boolean;
   /** Duplicated events must get an explicit new schedule before publish. */
   scheduleNeedsReview?: boolean;
-  /** Zone carried by a duplicated draft; publish falls back to the device zone. */
-  eventTz?: string | null;
 }
 
 // ── Ticketing helpers ────────────────────────────────────────────────────────
@@ -295,9 +293,6 @@ export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {})
     perks: d.perks.length > 0 ? d.perks : undefined,
     disclaimers: d.disclaimers.trim() || undefined,
     nsfw: d.isNsfw || undefined,
-    // A duplicated draft keeps its source event's zone. createEvent uses the
-    // device zone only when this is absent.
-    eventTz: d.eventTz?.trim() || undefined,
   };
 }
 
