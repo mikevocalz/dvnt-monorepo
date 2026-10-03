@@ -341,6 +341,8 @@ test('the migration marks events already in progress live and leaves future ones
   assert.match(backfill, /'live'/);
   assert.match(backfill, /e\.start_date <= now\(\)/);
   assert.match(backfill, /now\(\) < COALESCE\(e\.end_date, e\.start_date \+ interval '6 hours'\)/);
-  assert.match(backfill, /NOT IN \('cancelled','deleted'\)/);
+  // Only active events go live; draft, postponed, suspended and cancelled stay scheduled.
+  assert.match(backfill, /e\.status = 'active'/);
+  assert.doesNotMatch(backfill, /NOT IN \('cancelled','deleted'\)/);
   assert.match(backfill, /ON CONFLICT \(event_id\) DO UPDATE/);
 });
