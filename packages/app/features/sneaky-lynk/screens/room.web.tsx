@@ -142,6 +142,7 @@ import { useRoomStore } from "../stores/room-store";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { isPublisherRole } from "../publish-roles";
 import { stageGridClass } from "../ui/stage-grid";
+import { HERO_ASPECT, HOST_STAGE_MAX_WIDTH, HOST_TILE_GAP } from "../ui/stage-layout";
 import { useLynkHistoryStore } from "../stores/lynk-history-store";
 import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
 import { SecureCaptureBoundary } from "@dvnt/app/lib/secure-capture";
@@ -1327,6 +1328,14 @@ function RoomInner({
   const listenerTiles = remoteTiles.filter((t) => !t.isPublisher);
 
   const stageTiles = [localTile, ...remotePublisherTiles];
+  // The host and one co-host share the top of the stage (hostStageLayout):
+  // one host is a single capped, centred tile; a co-host splits it in two.
+  // Other publishers keep the uniform grid underneath.
+  const hostStageTiles = [
+    stageTiles.find((t) => t.isHost),
+    stageTiles.find((t) => t.isCoHost),
+  ].filter((t): t is Tile => !!t);
+  const otherStageTiles = stageTiles.filter((t) => !hostStageTiles.includes(t));
   const roomTitle = roomSnapshot?.title || paramTitle || getLynkDisplayName();
   const participantCount = stageTiles.length;
 
@@ -1653,16 +1662,48 @@ function RoomInner({
               what `data-speaking` on each tile already does. `auto-rows-fr`
               plus a filling tile means N people share the stage evenly rather
               than the grid growing past the fold. */}
-          <section className="flex min-h-0 flex-1 items-center justify-center px-4 py-2 md:px-6 lg:px-8">
-            <div
-              className={`mx-auto grid h-full max-h-[calc(100dvh-20rem)] w-full max-w-6xl auto-rows-fr gap-3 md:gap-4 ${stageGridClass(
-                stageTiles.length,
-              )}`}
-            >
-              {stageTiles.map((tile) => (
-                <StageTile key={tile.key} tile={tile} />
-              ))}
-            </div>
+          <section className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-2 md:px-6 lg:px-8">
+            {hostStageTiles.length > 0 ? (
+              // Capped at max-w-3xl (HOST_STAGE_MAX_WIDTH) and by the height
+              // left for it, kept at 16:9 and centred, so one host never
+              // fills a desktop. Two hosts split the same box; the host tile
+              // animates its width as a co-host arrives or leaves.
+              <div
+                data-host-count={hostStageTiles.length}
+                className="mx-auto flex w-full shrink-0 overflow-hidden"
+                style={{
+                  maxWidth: `min(${HOST_STAGE_MAX_WIDTH}px, calc((100dvh - 20rem) * ${HERO_ASPECT}))`,
+                  aspectRatio: HERO_ASPECT,
+                  gap: HOST_TILE_GAP,
+                }}
+              >
+                {hostStageTiles.map((tile) => (
+                  <div
+                    key={tile.key}
+                    className="h-full min-w-0 transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none"
+                    style={{
+                      width:
+                        hostStageTiles.length === 2
+                          ? `calc(50% - ${HOST_TILE_GAP / 2}px)`
+                          : "100%",
+                    }}
+                  >
+                    <StageTile tile={tile} />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {otherStageTiles.length > 0 ? (
+              <div
+                className={`mx-auto grid min-h-0 w-full max-w-6xl flex-1 auto-rows-fr gap-3 md:gap-4 ${
+                  hostStageTiles.length > 0 ? "max-h-[40dvh]" : "h-full max-h-[calc(100dvh-20rem)]"
+                } ${stageGridClass(otherStageTiles.length)}`}
+              >
+                {otherStageTiles.map((tile) => (
+                  <StageTile key={tile.key} tile={tile} />
+                ))}
+              </div>
+            ) : null}
           </section>
 
           {/* Listener row — TanStack Virtual (horizontal) */}
