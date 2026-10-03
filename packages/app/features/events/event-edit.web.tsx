@@ -71,6 +71,11 @@ import {
   normalizeTimeZone,
   zonedIsoToLocalIso,
 } from "@dvnt/app/lib/events/event-zone";
+import {
+  saleWindowInstantToLocal,
+  saleWindowLabel,
+  saleWindowLocalToInstant,
+} from "@dvnt/app/lib/events/sale-window";
 
 const inputCls =
   "w-full bg-white/[0.05] border border-white/12 rounded-xl px-3 h-11 text-[15px] text-white placeholder:text-white/40 outline-none focus:border-[#3FDCFF]/60";
@@ -210,7 +215,8 @@ export function EventEditScreen() {
         tier: (t.tier || "ga") as LocalTicketTier["tier"],
         description: t.description || "",
         isActive: true,
-        saleStart: t.sale_start || "",
+        // Reopened as the wall clock in the event's zone, like the event start.
+        saleStart: saleWindowInstantToLocal(t.sale_start, eventTz),
         // v2 tier model — hydrate the jsonb shapes into editor rows.
         tierType: t.tier_type || "ga",
         visibility: t.tier_visibility || "public",
@@ -386,7 +392,7 @@ export function EventEditScreen() {
               priceCents,
               quantityTotal: qty,
               maxPerUser,
-              saleStart: tier.saleStart || undefined,
+              saleStart: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz) ?? undefined,
               tierType: tier.tierType,
               tierVisibility: tier.visibility,
               unlockCode:
@@ -406,7 +412,7 @@ export function EventEditScreen() {
               price_cents: priceCents,
               quantity_total: qty,
               max_per_user: maxPerUser,
-              sale_start: tier.saleStart || null,
+              sale_start: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz),
               tier_type: tier.tierType,
               tier_visibility: tier.visibility,
               unlock_code:
@@ -1053,6 +1059,7 @@ export function EventEditScreen() {
 
 function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
   const updateTier = useEventEditStore((st) => st.updateTier);
+  const eventTz = useEventEditStore((st) => st.eventTz);
   const removeTier = useEventEditStore((st) => st.removeTier);
   const borderColor = `${tierLevelColor[tier.tier] ?? "#34A2DF"}4D`;
   const activeCat = TICKET_TYPE_CATEGORIES.find(
@@ -1187,6 +1194,11 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
               })
             }
           />
+          <span className="block text-[11px] text-white/40">
+            {tier.saleStart
+              ? saleWindowLabel(tier.saleStart, eventTz)
+              : "In the event's time zone"}
+          </span>
         </div>
         {tier.saleStart ? (
           <button

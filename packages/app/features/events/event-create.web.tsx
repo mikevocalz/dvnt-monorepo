@@ -47,6 +47,11 @@ import {
 import { VenueSearchInput } from "@dvnt/ui";
 import { EventZonePickerWeb } from "@dvnt/app/features/events/ui/event-zone-picker.web";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
+import {
+  saleWindowLabel,
+  saleWindowLocalToInstant,
+} from "@dvnt/app/lib/events/sale-window";
+import { zoneDisplayName } from "@dvnt/app/lib/events/event-zone";
 import { useCreateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { usePlacesAutocomplete } from "@dvnt/app/lib/hooks/use-places-autocomplete";
 import type { PlacesLocationData } from "@dvnt/app/lib/places/types";
@@ -397,6 +402,10 @@ export function CreateEventScreen() {
                   quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
                   maxPerUser:
                     tier.maxPerUser > 0 ? tier.maxPerUser : s.simpleMaxPerUser,
+                  // The form holds the typed wall clock; store it as that
+                  // time in the event's zone. These were never sent before.
+                  saleStart: saleWindowLocalToInstant(tier.saleStart, s.eventTz) ?? undefined,
+                  saleEnd: saleWindowLocalToInstant(tier.saleEnd, s.eventTz) ?? undefined,
                   // v2 tier model — visibility, type, early-bird pricing.
                   tierType: tier.tierType,
                   tierVisibility: tier.visibility,
@@ -1397,6 +1406,7 @@ function slugifyTitle(t: string): string {
 function TicketTiersEditor() {
   const ticketTiers = useCreateEventStore((st) => st.ticketTiers);
   const setTicketTiers = useCreateEventStore((st) => st.setTicketTiers);
+  const eventTz = useCreateEventStore((st) => st.eventTz);
   const update = (idx: number, patch: Partial<typeof ticketTiers[number]>) =>
     setTicketTiers((cur) => cur.map((t, i) => (i === idx ? { ...t, ...patch } : t)));
   const remove = (idx: number) =>
@@ -1486,6 +1496,9 @@ function TicketTiersEditor() {
             onChange={(e) => update(idx, { description: e.target.value })}
           />
           <div className="grid grid-cols-2 gap-2">
+            <p className="col-span-2 text-[11px] text-white/40">
+              Sale times are in the event&apos;s zone: {zoneDisplayName(eventTz)}
+            </p>
             <label className="text-[11px] text-white/55">
               Sales start
               <input
@@ -1496,6 +1509,9 @@ function TicketTiersEditor() {
                   update(idx, { saleStart: e.target.value ? fromLocalInput(e.target.value) : "" })
                 }
               />
+              {tier.saleStart ? (
+                <span className="mt-0.5 block text-white/40">{saleWindowLabel(tier.saleStart, eventTz)}</span>
+              ) : null}
             </label>
             <label className="text-[11px] text-white/55">
               Sales end
@@ -1507,6 +1523,9 @@ function TicketTiersEditor() {
                   update(idx, { saleEnd: e.target.value ? fromLocalInput(e.target.value) : "" })
                 }
               />
+              {tier.saleEnd ? (
+                <span className="mt-0.5 block text-white/40">{saleWindowLabel(tier.saleEnd, eventTz)}</span>
+              ) : null}
             </label>
           </div>
 

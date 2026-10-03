@@ -111,6 +111,10 @@ import {
 } from "@dvnt/app/features/events/create/event-form";
 import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
 import { zoneDisplayName } from "@dvnt/app/lib/events/event-zone";
+import {
+  saleWindowLabel,
+  saleWindowLocalToInstant,
+} from "@dvnt/app/lib/events/sale-window";
 export { EVENT_TYPE_LABELS };
 
 interface TicketTier {
@@ -795,8 +799,10 @@ function CreateEventScreenContent() {
               priceCents: tier.priceCents,
               quantityTotal: tier.quantity,
               maxPerUser: tier.maxPerUser,
-              saleStart: tier.saleStart || undefined,
-              saleEnd: tier.saleEnd || undefined,
+              // The picker holds the typed wall clock; store it as that
+              // time in the event's zone.
+              saleStart: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz) ?? undefined,
+              saleEnd: saleWindowLocalToInstant(tier.saleEnd, schedule.eventTz) ?? undefined,
               // v2 tier model — visibility, type, early-bird pricing.
               tierType: tier.tierType,
               tierVisibility: tier.visibility,
@@ -2485,16 +2491,7 @@ function CreateEventScreenContent() {
                           </Text>
                           <Text className="text-sm font-semibold text-foreground">
                             {tier.saleStart
-                              ? new Date(tier.saleStart).toLocaleString(
-                                  "en-US",
-                                  {
-                                    weekday: "short",
-                                    month: "short",
-                                    day: "numeric",
-                                    hour: "numeric",
-                                    minute: "2-digit",
-                                  },
-                                )
+                              ? saleWindowLabel(tier.saleStart, eventTz)
                               : "Immediately on publish"}
                           </Text>
                         </View>

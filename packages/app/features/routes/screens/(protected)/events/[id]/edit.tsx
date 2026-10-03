@@ -67,6 +67,11 @@ import {
   normalizeTimeZone,
   zonedIsoToLocalIso,
 } from "@dvnt/app/lib/events/event-zone";
+import {
+  saleWindowInstantToLocal,
+  saleWindowLabel,
+  saleWindowLocalToInstant,
+} from "@dvnt/app/lib/events/sale-window";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { useQueryClient } from "@tanstack/react-query";
@@ -327,7 +332,8 @@ function EditEventScreenContent() {
             tier: (t.tier || "ga") as TierLevel,
             description: t.description || "",
             isActive: true,
-            saleStart: t.sale_start || "",
+            // Reopened as the wall clock in the event's zone, like the start.
+            saleStart: saleWindowInstantToLocal(t.sale_start, tz),
           })),
         );
 
@@ -791,7 +797,7 @@ function EditEventScreenContent() {
             priceCents,
             quantityTotal: qty,
             maxPerUser,
-            saleStart: tier.saleStart || undefined,
+            saleStart: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz) ?? undefined,
           });
         } else {
           await ticketTypesApi.update(tier.id, {
@@ -801,7 +807,7 @@ function EditEventScreenContent() {
             price_cents: priceCents,
             quantity_total: qty,
             max_per_user: maxPerUser,
-            sale_start: tier.saleStart || null,
+            sale_start: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz),
           });
         }
       });
@@ -1930,13 +1936,7 @@ function EditEventScreenContent() {
                       }}
                     >
                       {tier.saleStart
-                        ? new Date(tier.saleStart).toLocaleString("en-US", {
-                            weekday: "short",
-                            month: "short",
-                            day: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })
+                        ? saleWindowLabel(tier.saleStart, eventTz)
                         : "Immediately on publish"}
                     </Text>
                   </View>
