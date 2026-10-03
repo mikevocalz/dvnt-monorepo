@@ -46,6 +46,21 @@ const nextConfig: NextConfig = {
   // uploads, and the production chunks carry no module paths. Off by default so
   // normal builds don't pay for it: ANALYZE_SOURCEMAPS=1 pnpm build.
   productionBrowserSourceMaps: process.env.ANALYZE_SOURCEMAPS === '1',
+  // lucide-react is a ~1,500-icon package imported as a named barrel from at
+  // least five files in the /feed chain (features/home/screen.web.tsx,
+  // story-viewer-overlay.web.tsx, event/FeedEventCard.web.tsx,
+  // verified-admission-banner.web.tsx, story-viewers-sheet.web.tsx). This
+  // rewrites those to per-icon imports so only the icons used ship.
+  //
+  // Deliberately NOT listing @dvnt/ui or @dvnt/app here: both contain real
+  // import side effects (a react-lite-youtube-embed CSS import, plus bare
+  // side-effect imports in features/gpu/GpuRuntime.ts, features/events/
+  // event-detail.web.tsx, features/routes/screens/_layout.tsx and
+  // lib/guards/list-guard.ts), so treating them as side-effect-free could drop
+  // code silently. Use subpath imports for those instead.
+  experimental: {
+    optimizePackageImports: ['lucide-react'],
+  },
   // Keep only the genuinely server-only AWS SDK external. Do NOT externalize
   // @payloadcms/storage-s3 / plugin-cloud-storage — they ship the admin's
   // client component (S3ClientUploadHandler, referenced from the import map),
