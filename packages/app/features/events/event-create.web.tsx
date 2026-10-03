@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import { VenueSearchInput } from "@dvnt/ui";
 import { EventZonePickerWeb } from "@dvnt/app/features/events/ui/event-zone-picker.web";
+import { EventPublicationFieldWeb } from "@dvnt/app/features/events/ui/event-publication-picker.web";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import {
   saleWindowLabel,
@@ -217,7 +218,8 @@ export function CreateEventScreen() {
     const { ok, errors: errs } = validateEventDraft(s);
     if (!ok) {
       const first =
-        errs.title || errs.eventType || errs.date || errs.location || errs.price || errs.terms;
+        errs.title || errs.eventType || errs.date || errs.location || errs.price || errs.terms ||
+        errs.publishAt;
       showToast("error", "Almost there", first || "Check the highlighted fields.");
       return;
     }
@@ -1083,6 +1085,14 @@ export function CreateEventScreen() {
                   {eventVisibilityCopy(s.visibility).helper}
                 </p>
               </Field>
+              <EventPublicationFieldWeb
+                isHidden={s.isHidden}
+                onHiddenChange={s.setIsHidden}
+                publishAt={s.publishAt}
+                onPublishAtChange={s.setPublishAt}
+                eventTz={s.eventTz}
+                error={errors.publishAt}
+              />
               {/* Private only. A link-only event lets anyone holding the URL in,
                   so a guest list there would grant a permission everyone
                   already has while implying a restriction. */}

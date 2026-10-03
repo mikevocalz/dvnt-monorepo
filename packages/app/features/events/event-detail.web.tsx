@@ -61,7 +61,9 @@ import {
   Ticket,
   Trash2,
   Users,
+  EyeOff,
 } from "lucide-react";
+import { publicationBadge } from "@dvnt/app/lib/events/event-publication";
 import { useQueryClient } from "@tanstack/react-query";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { eventsApi } from "@dvnt/app/lib/api/events";
@@ -1293,6 +1295,14 @@ export function EventDetailScreen() {
             )}
           </div>
           <h1 className="text-2xl font-extrabold mt-1 leading-tight">{e.title}</h1>
+          {/* Host-only: hidden, or not public until publish_at. Nobody else
+              can open the event, so nobody else needs telling. */}
+          {isHost && publicationBadge(e as any) ? (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#C084FC]/40 bg-[#C084FC]/10 px-3 py-1 text-[13px] font-semibold text-[#C084FC]">
+              <EyeOff size={14} aria-hidden />
+              {publicationBadge(e as any)}
+            </div>
+          ) : null}
           {e.location ? (
             <div className="flex items-center gap-1.5 text-white/60 text-sm mt-2">
               <MapPin size={15} />

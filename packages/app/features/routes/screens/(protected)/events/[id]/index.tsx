@@ -46,7 +46,9 @@ import {
   Send,
   Ticket,
   Radio,
+  EyeOff,
 } from "lucide-react-native";
+import { publicationBadge } from "@dvnt/app/lib/events/event-publication";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Motion } from "@legendapp/motion";
@@ -2010,6 +2012,33 @@ function EventDetailScreenContent() {
               {host?.verified && <BadgeCheck size={16} color="#34A2DF" />}
             </Pressable>
           </View>
+
+          {/* Host-only: the event is hidden, or not public until publish_at.
+              Nobody else can open it, so nobody else needs telling. */}
+          {isHost && publicationBadge(eventData as any) ? (
+            <View style={s.section}>
+              <View
+                accessibilityRole="text"
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  alignSelf: "flex-start",
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  backgroundColor: "rgba(192,132,252,0.12)",
+                  borderWidth: 1,
+                  borderColor: "rgba(192,132,252,0.4)",
+                }}
+              >
+                <EyeOff size={14} color="#C084FC" />
+                <Text style={{ color: "#C084FC", fontSize: 13, fontWeight: "600" }}>
+                  {publicationBadge(eventData as any)}
+                </Text>
+              </View>
+            </View>
+          ) : null}
 
           {/* ── CANCELLED — premium full-bleed banner that replaces
                  the entire ticketing surface. The cancel-event edge

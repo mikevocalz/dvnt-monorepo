@@ -62,6 +62,12 @@ import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { eventsApi, formatEventDate } from "@dvnt/app/lib/api/events";
 import { resolveEventSchedule } from "@dvnt/app/features/events/create/event-form";
 import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
+import { EventPublicationField } from "@dvnt/app/features/events/ui/event-publication-field";
+import {
+  publishAtError,
+  publishAtInstantToLocal,
+  publishAtLocalToInstant,
+} from "@dvnt/app/lib/events/event-publication";
 import {
   deviceTimeZone,
   normalizeTimeZone,
@@ -149,6 +155,9 @@ function EditEventScreenContent() {
   const [maxAttendees, setMaxAttendees] = useState("");
   const [category, setCategory] = useState("");
   const [visibility, setVisibility] = useState("public");
+  // E06: hide, or schedule going public (typed wall clock, device-local ISO).
+  const [isHidden, setIsHidden] = useState(false);
+  const [publishAt, setPublishAt] = useState("");
   const [dressCode, setDressCode] = useState("");
   const [doorPolicy, setDoorPolicy] = useState("");
   const [lineup, setLineup] = useState("");
@@ -283,6 +292,8 @@ function EditEventScreenContent() {
         setMaxAttendees(ev.maxAttendees != null ? String(ev.maxAttendees) : "");
         setCategory(ev.category || "");
         setVisibility(ev.visibility || "public");
+        setIsHidden((ev as any).isHidden === true);
+        setPublishAt(publishAtInstantToLocal((ev as any).publishAt, tz));
         setDressCode(ev.dressCode || "");
         setDoorPolicy(ev.doorPolicy || "");
         setLineup(ev.lineup || "");
@@ -367,6 +378,8 @@ function EditEventScreenContent() {
         (od.maxAttendees != null ? String(od.maxAttendees) : "") ||
       category !== (od.category || "") ||
       visibility !== (od.visibility || "public") ||
+      isHidden !== ((od as any).isHidden === true) ||
+      publishAtLocalToInstant(publishAt, schedule.eventTz) !== ((od as any).publishAt ?? null) ||
       dressCode !== (od.dressCode || "") ||
       doorPolicy !== (od.doorPolicy || "") ||
       lineup !== (od.lineup || "") ||
@@ -387,6 +400,8 @@ function EditEventScreenContent() {
     maxAttendees,
     category,
     visibility,
+    isHidden,
+    publishAt,
     dressCode,
     doorPolicy,
     lineup,
@@ -496,6 +511,14 @@ function EditEventScreenContent() {
     }
     if (schedule.error) {
       showToast("error", "Check the time", schedule.error);
+      return;
+    }
+    const publishError = publishAtError(
+      publishAtLocalToInstant(publishAt, schedule.eventTz),
+      schedule.startIso,
+    );
+    if (publishError) {
+      showToast("error", "Check the go-public time", publishError);
       return;
     }
 
@@ -620,6 +643,8 @@ function EditEventScreenContent() {
         maxAttendees: maxAttendees ? parseInt(maxAttendees) : undefined,
         category: category || undefined,
         visibility,
+        isHidden,
+        publishAt: publishAtLocalToInstant(publishAt, schedule.eventTz),
         dressCode: dressCode || undefined,
         doorPolicy: doorPolicy || undefined,
         lineup: lineup || undefined,
@@ -1483,6 +1508,19 @@ function EditEventScreenContent() {
               {eventVisibilityCopy(visibility).helper}
             </Text>
           </View>
+          <EventPublicationField
+            isHidden={isHidden}
+            onHiddenChange={setIsHidden}
+            publishAt={publishAt}
+            onPublishAtChange={setPublishAt}
+            eventTz={schedule.eventTz}
+            error={publishAtError(
+              publishAtLocalToInstant(publishAt, schedule.eventTz),
+              schedule.startIso,
+            )}
+            accent={colors.primary}
+            muted={colors.mutedForeground}
+          />
         </View>
 
         {/* Guest list — private only. A link-only event lets anyone holding

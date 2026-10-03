@@ -66,6 +66,12 @@ import {
 import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web";
 import { resolveEventSchedule } from "@dvnt/app/features/events/create/event-form";
 import { EventZonePickerWeb } from "@dvnt/app/features/events/ui/event-zone-picker.web";
+import { EventPublicationFieldWeb } from "@dvnt/app/features/events/ui/event-publication-picker.web";
+import {
+  publishAtError,
+  publishAtInstantToLocal,
+  publishAtLocalToInstant,
+} from "@dvnt/app/lib/events/event-publication";
 import {
   deviceTimeZone,
   normalizeTimeZone,
@@ -179,6 +185,8 @@ export function EventEditScreen() {
       description: ev.description || "",
       location: ev.location || "",
       eventTz,
+      isHidden: (ev as any).isHidden === true,
+      publishAt: publishAtInstantToLocal((ev as any).publishAt, eventTz),
       eventDate: isoDate
         ? zonedIsoToLocalIso(new Date(isoDate).toISOString(), eventTz)
         : new Date().toISOString(),
@@ -276,6 +284,14 @@ export function EventEditScreen() {
       showToast("error", "Check the time", schedule.error);
       return;
     }
+    const publishError = publishAtError(
+      publishAtLocalToInstant(s.publishAt, schedule.eventTz),
+      schedule.startIso,
+    );
+    if (publishError) {
+      showToast("error", "Check the go-public time", publishError);
+      return;
+    }
 
     saveLock.current = true;
     setUploadPct(0);
@@ -330,6 +346,8 @@ export function EventEditScreen() {
         startDate: schedule.startIso,
         endDate: schedule.endIso || undefined,
         eventTz: schedule.eventTz,
+        isHidden: s.isHidden,
+        publishAt: publishAtLocalToInstant(s.publishAt, schedule.eventTz),
         price: s.price ? parseFloat(s.price) : 0,
         maxAttendees: s.maxAttendees ? parseInt(s.maxAttendees) : undefined,
         category: s.category || undefined,
@@ -912,6 +930,22 @@ export function EventEditScreen() {
               {eventVisibilityCopy(s.visibility).helper}
             </p>
           </FormField>
+          <div className="mb-4">
+            <EventPublicationFieldWeb
+              isHidden={s.isHidden}
+              onHiddenChange={s.setIsHidden}
+              publishAt={s.publishAt}
+              onPublishAtChange={s.setPublishAt}
+              eventTz={s.eventTz}
+              error={(() => {
+                const sched = resolveEventSchedule(s);
+                return publishAtError(
+                  publishAtLocalToInstant(s.publishAt, sched.eventTz),
+                  sched.startIso,
+                );
+              })()}
+            />
+          </div>
           {/* Private only. A link-only event lets anyone holding the URL in, so
               a guest list there would grant a permission everyone already has
               while implying a restriction. */}

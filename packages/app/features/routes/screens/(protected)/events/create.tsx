@@ -110,6 +110,11 @@ import {
   resolveEventSchedule,
 } from "@dvnt/app/features/events/create/event-form";
 import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
+import { EventPublicationField } from "@dvnt/app/features/events/ui/event-publication-field";
+import {
+  publishAtError,
+  publishAtLocalToInstant,
+} from "@dvnt/app/lib/events/event-publication";
 import { zoneDisplayName } from "@dvnt/app/lib/events/event-zone";
 import {
   saleWindowLabel,
@@ -246,6 +251,10 @@ function CreateEventScreenContent() {
   );
   const visibility = useCreateEventStore((s) => s.visibility);
   const setVisibility = useCreateEventStore((s) => s.setVisibility);
+  const isHidden = useCreateEventStore((s) => s.isHidden);
+  const setIsHidden = useCreateEventStore((s) => s.setIsHidden);
+  const publishAt = useCreateEventStore((s) => s.publishAt);
+  const setPublishAt = useCreateEventStore((s) => s.setPublishAt);
   const ageRestriction = useCreateEventStore((s) => s.ageRestriction);
   const setAgeRestriction = useCreateEventStore((s) => s.setAgeRestriction);
   const isNsfw = useCreateEventStore((s) => s.isNsfw);
@@ -508,6 +517,12 @@ function CreateEventScreenContent() {
         showToast("error", "Check the time", schedule.error);
         return;
       }
+      const publishAtIso = publishAtLocalToInstant(publishAt, schedule.eventTz);
+      const publishError = publishAtError(publishAtIso, schedule.startIso);
+      if (publishError) {
+        showToast("error", "Check the go-public time", publishError);
+        return;
+      }
       // Honor virtual events — an online event doesn't need a typed location.
       if (!isOnline && !location.trim()) {
         showToast(
@@ -763,6 +778,8 @@ function CreateEventScreenContent() {
         // V2 fields — new
         endDate: schedule.endIso || undefined,
         visibility,
+        isHidden,
+        publishAt: publishAtIso ?? undefined,
         ageRestriction: ageRestriction !== "none" ? ageRestriction : undefined,
         dressCode: dressCode.trim() || undefined,
         doorPolicy: doorPolicy.trim() || undefined,
@@ -1543,6 +1560,20 @@ function CreateEventScreenContent() {
                   </Text>
                 </View>
               </View>
+
+              <EventPublicationField
+                isHidden={isHidden}
+                onHiddenChange={setIsHidden}
+                publishAt={publishAt}
+                onPublishAtChange={setPublishAt}
+                eventTz={schedule.eventTz}
+                error={publishAtError(
+                  publishAtLocalToInstant(publishAt, schedule.eventTz),
+                  schedule.startIso,
+                )}
+                accent={colors.primary}
+                muted={colors.mutedForeground}
+              />
 
               {/* Guest list — private only. A link-only event lets anyone
                   holding the URL in, so a list there would grant a permission
