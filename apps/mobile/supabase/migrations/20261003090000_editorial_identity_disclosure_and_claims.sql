@@ -86,6 +86,44 @@ CREATE TRIGGER editorial_profiles_account_guard
   FOR EACH ROW
   EXECUTE FUNCTION public.editorial_profiles_require_editorial_account();
 
+-- The marker is only worth something if a client cannot write it. Live, anon
+-- and authenticated hold table-level INSERT and UPDATE on public.users, and the
+-- policies are "Users can update own profile" USING (true) and INSERT WITH
+-- CHECK (true). A new column inherits those grants, so without this guard any
+-- caller could set is_editorial = true on a member's row and then the trigger
+-- above would accept that member as an editorial account.
+--
+-- A column REVOKE cannot narrow a table-level grant, so this is a trigger.
+-- SECURITY INVOKER on purpose: current_user is then the PostgREST request role
+-- (anon or authenticated), and a migration or service-role write passes.
+CREATE OR REPLACE FUNCTION public.users_guard_is_editorial()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF current_user NOT IN ('anon', 'authenticated') THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'INSERT' AND NEW.is_editorial THEN
+    RAISE EXCEPTION 'users.is_editorial is set by migration only'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.is_editorial IS DISTINCT FROM OLD.is_editorial THEN
+    RAISE EXCEPTION 'users.is_editorial is set by migration only'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS users_is_editorial_guard ON public.users;
+CREATE TRIGGER users_is_editorial_guard
+  BEFORE INSERT OR UPDATE OF is_editorial ON public.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.users_guard_is_editorial();
+
 -- ── H6 · visual lanes keep their human ─────────────────────────────────────
 -- Postgres has no ADD CONSTRAINT IF NOT EXISTS, so this is the re-runnable
 -- form. Every seeded lane already carries requires_human_approval = true, so
@@ -206,6 +244,9 @@ CREATE INDEX IF NOT EXISTS editorial_jobs_claimable_idx
 --                    without this the worker would claim 25 jobs a run and
 --                    advance none of them. Unlike parking, this reverses
 --                    itself: enable the lane and its jobs are claimable again.
+--                    The bound account must still carry is_editorial, so
+--                    revoking the marker stops the lane on the next run
+--                    instead of leaving it posting as a demoted account.
 --   scheduled + due  a job already moved to 'scheduled' waits for its time
 --                    without being claimed. 'approved' with a future time is
 --                    still claimed once, to make that one transition.
@@ -240,6 +281,12 @@ BEGIN
              AND p.enabled
              AND NOT p.paused
              AND p.account_auth_id IS NOT NULL
+             AND EXISTS (
+               SELECT 1
+                 FROM public.users u
+                WHERE u.auth_id = p.account_auth_id
+                  AND u.is_editorial
+             )
         )
       ORDER BY c.created_at
       LIMIT GREATEST(COALESCE(p_limit, 0), 0)

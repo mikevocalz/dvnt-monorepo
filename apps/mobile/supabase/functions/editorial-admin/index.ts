@@ -140,7 +140,12 @@ async function handleEnqueue(req: Request, db: Db, body: Db, actor: string) {
   if (!profile) {
     return json(req, { ok: false, error: "Editorial profile not found" }, 404);
   }
-  if (!profile.account_auth_id) {
+  // Re-proved here, not only at bind time: the marker can be revoked after a
+  // lane is bound, and a job queued then would publish as a demoted account.
+  if (
+    !profile.account_auth_id ||
+    !(await isEditorialAccount(db, String(profile.account_auth_id)))
+  ) {
     return json(req, {
       ok: false,
       error: "Bind the profile to a real DVNT editorial account before scheduling",
