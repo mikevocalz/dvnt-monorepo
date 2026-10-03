@@ -13,6 +13,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { ensureBrandFollows } from "../_shared/brand-follow.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,6 +44,30 @@ function errorResponse(
 ): Response {
   console.error(`[Edge:auth-sync] Error: ${code} - ${message}`);
   return jsonResponse({ ok: false, error: { code, message } }, 200);
+}
+
+async function applyBrandOnboarding(
+  supabaseAdmin: any,
+  member: { id: number | string; auth_id?: string | null },
+): Promise<void> {
+  const authId = String(member.auth_id ?? "").trim();
+  const memberId = Number(member.id);
+  if (!authId || !Number.isSafeInteger(memberId) || memberId <= 0) return;
+
+  // Queue exactly-once onboarding campaigns even when sending is disabled.
+  // The outbox is allowed to fill safely; the worker still fails closed.
+  const { error: enqueueError } = await supabaseAdmin.rpc("enqueue_brand_onboarding", {
+    p_auth_id: authId,
+    p_lookback: "7 days",
+    p_first_post_delay: "24 hours",
+  });
+  if (enqueueError) {
+    console.error("[Edge:auth-sync] brand onboarding enqueue failed:", enqueueError.message);
+  }
+
+  // Member -> brand for any eligible member still missing it; brand -> member
+  // only for profiles created inside NEW_PROFILE_WINDOW.
+  await ensureBrandFollows(supabaseAdmin, memberId, "Edge:auth-sync");
 }
 
 function normalizeLinks(value: unknown): string[] {
@@ -178,6 +203,7 @@ Deno.serve(async (req) => {
 
     if (existingUser) {
       console.log("[Edge:auth-sync] Found user by auth_id:", existingUser.id);
+      await applyBrandOnboarding(supabaseAdmin, existingUser);
       return jsonResponse({
         ok: true,
         data: {
@@ -236,10 +262,12 @@ Deno.serve(async (req) => {
         return errorResponse("internal_error", "Failed to sync user");
       }
 
+      const syncedUser = { ...userByEmail, auth_id: authId };
+      await applyBrandOnboarding(supabaseAdmin, syncedUser);
       return jsonResponse({
         ok: true,
         data: {
-          user: formatUserResponse({ ...userByEmail, auth_id: authId }),
+          user: formatUserResponse(syncedUser),
           action: "updated_auth_id",
         },
       });
@@ -319,6 +347,7 @@ Deno.serve(async (req) => {
     }
 
     console.log("[Edge:auth-sync] Created new user:", newUser.id);
+    await applyBrandOnboarding(supabaseAdmin, newUser);
 
     return jsonResponse({
       ok: true,

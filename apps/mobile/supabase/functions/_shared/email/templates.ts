@@ -487,8 +487,24 @@ export function payoutStatement(opts: {
 
 // ─── Better Auth: welcome / reset / verify (link-based) ──────────────────────
 
-export function welcome(name?: string | null): EmailContent {
+export interface WelcomeOpts {
+  /**
+   * The profile was made for the member at guest checkout and stays locked
+   * until they verify their ID. Adds the paragraph that says how to unlock it.
+   */
+  checkoutProfile?: boolean;
+}
+
+export function welcome(name?: string | null, opts: WelcomeOpts = {}): EmailContent {
   const who = name ? esc(name) : "there";
+  const unlock = opts.checkoutProfile
+    ? card(
+        paragraph(
+          "We made this profile when you got your ticket. Posting, comments, messages and Lynk rooms open after you verify your ID: sign in with this email address, then tap <strong>Verify your ID</strong> at the top of your feed. Your tickets work at the door either way.",
+          { size: 15, color: COLORS.textBody, margin: "0" },
+        ),
+      )
+    : "";
   return {
     subject: `Welcome to the cookout — ${BRAND.name}`,
     html: brandEmailWrapper(
@@ -501,6 +517,7 @@ export function welcome(name?: string | null): EmailContent {
         paragraph(
           "Start with your profile, and complete age and identity verification to unlock verified spaces. Your chosen name is how the community knows you; your verification details stay private.",
         ),
+        unlock,
         card(
           paragraph(
             [
