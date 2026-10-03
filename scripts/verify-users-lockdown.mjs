@@ -98,9 +98,7 @@ const UNREADABLE = {
   // SSR, share pages) must not select them: as anon the whole request is a
   // 42501, not just a missing field.
   const SIGNED_IN_READERS = new Map([
-    ["packages/app/features/routes/screens/(protected)/welcome.tsx", "onboarding prefill, own row, needs user.id"],
-    ["packages/app/features/auth/screens/WelcomeScreen.web.tsx", "onboarding prefill, own row, needs user.id"],
-    ["packages/app/features/profile/edit-profile.web.tsx", "edit own profile, own row, needs user.id"],
+    ["packages/app/lib/profile/own-identity.ts", "fetchOwnIdentity: welcome and edit-profile, own row, needs user.id"],
     ["packages/app/lib/api/auth.ts", "auth.getProfile identity read, own row after sign-in"],
     ["apps/mobile/lib/api/auth.ts", "legacy copy of auth.getProfile"],
   ]);

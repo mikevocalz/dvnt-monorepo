@@ -29,6 +29,12 @@ import { useEffect, useState, useRef } from "react";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { appendCacheBuster } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { useUpdateProfile } from "@dvnt/app/lib/hooks/use-profile";
+import { supabase } from "@dvnt/app/lib/supabase/client";
+import {
+  fetchOwnIdentity,
+  identityPatch,
+  type OwnIdentityLoad,
+} from "@dvnt/app/lib/profile/own-identity";
 import {
   IDENTITY_OPTIONS,
   AUDIENCE_OPTIONS,
@@ -125,6 +131,30 @@ function EditProfileScreenContent() {
   // completed, the ring could never reach 100%, and the card never hid.
   const [sexuality, setSexuality] = useState<string[]>([]);
   const [eventAudience, setEventAudience] = useState("");
+  // gender/sexuality/eventAudience are read from the member's own row. Until
+  // that read succeeds the fields cannot be edited and the save leaves them
+  // out: the auth store can lack them, and hydrating blanks from it used to
+  // write blanks over the stored values.
+  const [identityLoad, setIdentityLoad] = useState<OwnIdentityLoad>({
+    status: "loading",
+  });
+  const identityReady = identityLoad.status === "ready";
+  const loadIdentity = async (userId: string) => {
+    setIdentityLoad({ status: "loading" });
+    const result = await fetchOwnIdentity(supabase, userId);
+    if (!result.ok) {
+      setIdentityLoad({ status: "error" });
+      return;
+    }
+    setGender(result.identity.gender);
+    setSexuality(result.identity.sexuality);
+    setEventAudience(result.identity.eventAudience);
+    setIdentityLoad({ status: "ready", baseline: result.identity });
+  };
+  useEffect(() => {
+    if (user?.id) void loadIdentity(user.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // ?focus=<completion item key> — sent by the profile-completion card so a row
   // lands on the field it asked for instead of dumping you at the top of a long
@@ -270,9 +300,9 @@ function EditProfileScreenContent() {
         avatar?: string;
         username?: string;
         pronouns?: string;
-        gender?: string;
-        sexuality?: string[];
-        eventAudience?: string;
+        gender?: string | null;
+        sexuality?: string[] | null;
+        eventAudience?: string | null;
       } = {
         name: editName.trim(),
         bio: editBio.trim(),
@@ -280,9 +310,13 @@ function EditProfileScreenContent() {
         links: allLinks,
         location: editLocation.trim(),
         pronouns: nextPronouns,
-        gender: nextGender,
-        sexuality,
-        eventAudience,
+        // Only identity fields changed from a loaded baseline; none if the
+        // prefill read failed.
+        ...identityPatch(identityLoad, {
+          gender: nextGender,
+          sexuality,
+          eventAudience,
+        }),
         ...(avatarUrl ? { avatar: avatarUrl } : {}),
         ...(trimmedUsername !== (user.username || "").toLowerCase()
           ? { username: trimmedUsername }
@@ -320,16 +354,7 @@ function EditProfileScreenContent() {
       setEditLocation(user.location || "");
       setUsername(user.username || "");
       setPronouns(typeof user.pronouns === "string" ? user.pronouns : "");
-      setGender(typeof user.gender === "string" ? user.gender : "");
       setLinks(normalizeLinks((user as any)?.links));
-      setSexuality(
-        Array.isArray((user as any)?.sexuality) ? (user as any).sexuality : [],
-      );
-      setEventAudience(
-        typeof (user as any)?.eventAudience === "string"
-          ? (user as any).eventAudience
-          : "",
-      );
       return;
     }
 
@@ -657,6 +682,7 @@ function EditProfileScreenContent() {
 
             <Pressable
               style={{ ...rowStyle, borderBottomWidth: 0 }}
+              disabled={!identityReady}
               onPress={() => setShowGender(!showGender)}
             >
               <Text style={labelStyle}>Gender</Text>
@@ -675,13 +701,17 @@ function EditProfileScreenContent() {
                     color: gender ? colors.foreground : colors.mutedForeground,
                   }}
                 >
-                  {gender || "Prefer not to say"}
+                  {identityReady
+                    ? gender || "Prefer not to say"
+                    : identityLoad.status === "loading"
+                      ? "Loading…"
+                      : "Couldn't load"}
                 </Text>
                 <ChevronRight size={16} color={colors.mutedForeground} />
               </View>
             </Pressable>
 
-            {showGender && (
+            {showGender && identityReady && (
               <View style={{ paddingBottom: 12 }}>
                 <View
                   style={{
@@ -843,6 +873,34 @@ function EditProfileScreenContent() {
           onLayout={rememberSection("identity")}
         >
           <Text style={sectionLabelStyle}>Who you are</Text>
+          {!identityReady ? (
+            identityLoad.status === "loading" ? (
+              <ActivityIndicator color={colors.mutedForeground} />
+            ) : (
+              <View style={{ gap: 8 }}>
+                <Text style={{ fontSize: 14, color: colors.foreground }}>
+                  Couldn&apos;t load your gender, identity and event preferences.
+                  Saving now leaves them unchanged.
+                </Text>
+                <Pressable
+                  onPress={() => user?.id && void loadIdentity(user.id)}
+                  accessibilityRole="button"
+                  style={{
+                    alignSelf: "flex-start",
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    backgroundColor: colors.muted,
+                  }}
+                >
+                  <Text style={{ fontSize: 14, color: colors.foreground }}>
+                    Try again
+                  </Text>
+                </Pressable>
+              </View>
+            )
+          ) : (
+          <>
           <Text
             style={{
               fontSize: 12,
@@ -891,8 +949,11 @@ function EditProfileScreenContent() {
               );
             })}
           </View>
+          </>
+          )}
         </View>
 
+        {identityReady && (
         <View
           style={{ paddingHorizontal: 16, marginTop: 24 }}
           onLayout={rememberSection("audience")}
@@ -940,6 +1001,7 @@ function EditProfileScreenContent() {
             })}
           </View>
         </View>
+        )}
 
         <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
           <Text

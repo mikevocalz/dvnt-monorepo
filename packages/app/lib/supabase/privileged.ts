@@ -24,7 +24,10 @@ interface UpdateProfileParams {
   links?: string[];
   avatarUrl?: string;
   pronouns?: string;
-  gender?: string;
+  // Identity: omit = untouched, null = clear (update-profile skips "" and []).
+  gender?: string | null;
+  sexuality?: string[] | null;
+  eventAudience?: string | null;
 }
 
 interface PrivilegedResponse<T> {

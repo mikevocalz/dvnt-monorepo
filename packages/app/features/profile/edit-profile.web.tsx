@@ -13,6 +13,7 @@ import { appendCacheBuster } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { useEditProfileUIStore } from "@dvnt/app/lib/stores/edit-profile-ui-store";
 import { IDENTITY_OPTIONS, AUDIENCE_OPTIONS } from "@dvnt/app/lib/constants/identity";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { fetchOwnIdentity, identityPatch } from "@dvnt/app/lib/profile/own-identity";
 
 const PRONOUNS_OPTIONS = ["He/Him", "She/Her", "They/Them", "He/They", "She/They", "Ze/Zir", "Custom"];
 const GENDER_OPTIONS = ["Male", "Female", "Trans Male", "Trans Female", "Non-binary", "Prefer not to say", "Custom"];
@@ -70,6 +71,36 @@ export function EditProfileScreen() {
     useProfileStore();
   const s = useEditProfileUIStore();
 
+  // gender/sexuality/event_audience come from the member's own row. Until that
+  // read succeeds the fields are hidden and the save leaves them out: a failed
+  // read used to hydrate blanks that the save then wrote over stored values.
+  //
+  // The auth store write is GUARDED: updateUser mints a new user object, and an
+  // unconditional write re-ran the hydrate effect forever (the "screen jumping
+  // / nothing saves" bug). Only write back when the row differs from the store.
+  const loadIdentity = async (userId: string) => {
+    s.setIdentityLoad({ status: "loading" });
+    const result = await fetchOwnIdentity(supabase, userId);
+    if (!result.ok) {
+      s.setIdentityLoad({ status: "error" });
+      return;
+    }
+    const { gender, sexuality, eventAudience } = result.identity;
+    s.setGender(gender);
+    s.setSexuality(sexuality);
+    s.setEventAudience(eventAudience);
+    s.setIdentityLoad({ status: "ready", baseline: result.identity });
+    const cur = useAuthStore.getState().user;
+    if (
+      cur &&
+      ((cur.gender ?? "") !== gender ||
+        JSON.stringify(cur.sexuality ?? []) !== JSON.stringify(sexuality) ||
+        (cur.eventAudience ?? "") !== eventAudience)
+    ) {
+      useAuthStore.getState().updateUser({ gender, sexuality, eventAudience });
+    }
+  };
+
   // Hydrate text + transient state from the authed user on mount / user change.
   useEffect(() => {
     if (user) {
@@ -85,35 +116,7 @@ export function EditProfileScreen() {
         sexuality: Array.isArray(user.sexuality) ? user.sexuality : [],
         eventAudience: user.eventAudience || "",
       });
-      // The auth store only carries sexuality/event_audience after they've
-      // been saved this session — refresh both from the row so the form (and
-      // the dirty baseline) reflect what's actually stored.
-      //
-      // GUARDED: this effect depends on `user`, and updateUser mints a new
-      // user object — an unconditional updateUser here re-ran the effect,
-      // which re-hydrated (wiping whatever the person had typed) and fetched
-      // again, forever. That was the "screen jumping / nothing saves" bug.
-      // Only write back when the row actually differs from the store.
-      void supabase
-        .from("users")
-        .select("sexuality, event_audience")
-        .eq("id", Number(user.id))
-        .maybeSingle()
-        .then(({ data }) => {
-          if (!data) return;
-          const sexuality = Array.isArray(data.sexuality) ? data.sexuality : [];
-          const eventAudience = data.event_audience || "";
-          const cur = useAuthStore.getState().user;
-          const changed =
-            !!cur &&
-            (JSON.stringify(cur.sexuality ?? []) !== JSON.stringify(sexuality) ||
-              (cur.eventAudience ?? "") !== eventAudience);
-          if (changed) {
-            useAuthStore.getState().updateUser({ sexuality, eventAudience });
-            s.setSexuality(sexuality);
-            s.setEventAudience(eventAudience);
-          }
-        });
+      void loadIdentity(user.id);
       return;
     }
     s.reset();
@@ -128,9 +131,9 @@ export function EditProfileScreen() {
       editLocation.trim() !== (user.location || "") ||
       s.username !== (user.username || "") ||
       s.pronouns !== (typeof user.pronouns === "string" ? user.pronouns : "") ||
-      s.gender !== (typeof user.gender === "string" ? user.gender : "") ||
-      JSON.stringify(s.sexuality) !== JSON.stringify(user.sexuality || []) ||
-      s.eventAudience !== (user.eventAudience || "") ||
+      Object.keys(
+        identityPatch(s.identityLoad, { gender: s.gender, sexuality: s.sexuality, eventAudience: s.eventAudience }),
+      ).length > 0 ||
       JSON.stringify(s.links) !== JSON.stringify(normalizeLinks((user as any)?.links)) ||
       !!s.newAvatarUri);
   useDirtyGuard(isDirty);
@@ -200,9 +203,13 @@ export function EditProfileScreen() {
         links: allLinks,
         location: editLocation.trim(),
         pronouns: s.pronouns.trim(),
-        gender: s.gender.trim(),
-        sexuality: s.sexuality,
-        eventAudience: s.eventAudience,
+        // Only identity fields changed from a loaded baseline; none if the
+        // prefill read failed.
+        ...identityPatch(s.identityLoad, {
+          gender: s.gender,
+          sexuality: s.sexuality,
+          eventAudience: s.eventAudience,
+        }),
         ...(avatarUrl ? { avatar: avatarUrl } : {}),
         ...(trimmedUsername !== (user.username || "").toLowerCase() ? { username: trimmedUsername } : {}),
       };
@@ -344,6 +351,26 @@ export function EditProfileScreen() {
             />
           </FormField>
 
+          {s.identityLoad.status !== "ready" ? (
+            <FormField label="Gender, I am, Looking for events with">
+              {s.identityLoad.status === "loading" ? (
+                <p className="text-sm text-white/50">Loading your private details…</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm text-white/70">
+                    Couldn&apos;t load your private details. Saving now leaves them unchanged.
+                  </p>
+                  <button
+                    onClick={() => user && void loadIdentity(user.id)}
+                    className="self-start px-3.5 h-9 rounded-xl text-[13px] font-medium bg-white/8 text-white/85"
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+            </FormField>
+          ) : (
+          <>
           <FormField label="Gender">
             <button
               onClick={() => s.setShowGender(!s.showGender)}
@@ -406,6 +433,8 @@ export function EditProfileScreen() {
               ))}
             </div>
           </FormField>
+          </>
+          )}
         </div>
 
         {/* Links */}

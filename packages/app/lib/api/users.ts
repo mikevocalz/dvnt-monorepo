@@ -513,9 +513,10 @@ export const usersApi = {
     lastName?: string;
     username?: string;
     pronouns?: string;
-    gender?: string;
-    sexuality?: string[];
-    eventAudience?: string;
+    // Identity: omit = untouched, null = clear (see lib/profile/own-identity).
+    gender?: string | null;
+    sexuality?: string[] | null;
+    eventAudience?: string | null;
     bio?: string;
     location?: string;
     name?: string;
@@ -539,10 +540,10 @@ export const usersApi = {
           ? { pronouns: updates.pronouns.trim() }
           : {}),
         ...(updates.gender !== undefined
-          ? { gender: updates.gender.trim() }
+          ? { gender: updates.gender === null ? null : updates.gender.trim() }
           : {}),
         ...(Array.isArray(updates.links) ? { links: updates.links } : {}),
-        ...(Array.isArray(updates.sexuality)
+        ...(updates.sexuality !== undefined
           ? { sexuality: updates.sexuality }
           : {}),
         ...(updates.eventAudience !== undefined
