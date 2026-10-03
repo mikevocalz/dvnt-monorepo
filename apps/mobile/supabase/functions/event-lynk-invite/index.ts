@@ -22,18 +22,35 @@ Deno.serve(async(req)=>{
  const {data:room}=await db.from("video_rooms").select("id,status").eq("uuid",event.lynk_room_id).maybeSingle();
  if(!room||room.status!=="open") return json(req,{ok:false,error:"Room is not live"},409);
 
- const {data:blocked}=await db.from("blocks").select("blocker_id,blocked_id")
-   .or(`blocker_id.eq.${actor},blocked_id.eq.${actor}`);
- const blockedIds=new Set((blocked||[]).flatMap((x:any)=>[String(x.blocker_id),String(x.blocked_id)]).filter((x:string)=>x!==String(actor)));
- const valid=targets.filter((id:string)=>!blockedIds.has(id)&&id!==String(actor));
+ // blocks stores INTEGER users.id values, while actor and targets are Better
+ // Auth text ids. Resolve both sides to users.id before checking blocks, and
+ // fail closed if any lookup errors: an unread block list must not invite.
+ const {data:profiles,error:profilesError}=await db.from("users").select("id,auth_id")
+   .in("auth_id",[String(actor),...targets]);
+ if(profilesError) return json(req,{ok:false,error:"Could not resolve members"},500);
+ const intByAuth=new Map<string,number>((profiles||[]).map((u:any)=>[String(u.auth_id),Number(u.id)]));
+ const actorInt=intByAuth.get(String(actor));
+ if(!actorInt) return json(req,{ok:false,error:"Host profile not found"},404);
+ const {data:blocked,error:blocksError}=await db.from("blocks").select("blocker_id,blocked_id")
+   .or(`blocker_id.eq.${actorInt},blocked_id.eq.${actorInt}`);
+ if(blocksError) return json(req,{ok:false,error:"Could not check blocks"},500);
+ const blockedInts=new Set<number>((blocked||[]).flatMap((x:any)=>[Number(x.blocker_id),Number(x.blocked_id)]).filter((x:number)=>x!==actorInt));
+ const valid=targets.filter((id:string)=>{
+   const intId=intByAuth.get(id);
+   return intId!==undefined&&intId!==actorInt&&!blockedInts.has(intId);
+ });
+ let notified=0;
  if(valid.length){
-   await db.from("video_room_invites").upsert(valid.map((id:string)=>({room_id:room.id,user_id:id,invited_by:actor})),{onConflict:"room_id,user_id"});
-   const {data:profiles}=await db.from("users").select("id,auth_id").in("auth_id",valid);
-   const intIds=(profiles||[]).map((u:any)=>u.id);
-   if(intIds.length) await db.from("notifications").insert(intIds.map((id:number)=>({
-     recipient_id:id,type:"room_invite",entity_type:"event",entity_id:String(eventId),
+   const {error:inviteError}=await db.from("video_room_invites").upsert(valid.map((id:string)=>({room_id:room.id,user_id:id,invited_by:actor})),{onConflict:"room_id,user_id"});
+   if(inviteError) return json(req,{ok:false,error:"Could not save invites"},500);
+   const {error:notifyError}=await db.from("notifications").insert(valid.map((id:string)=>({
+     recipient_id:intByAuth.get(id),type:"room_invite",entity_type:"event",entity_id:String(eventId),
      entity_payload:{url:`/feed/sneaky-lynk/room/${event.lynk_room_id}`,event_id:eventId},
    })));
+   // The invites are saved, which is what admits the member to the room.
+   // A missing activity row is reported rather than failing the request.
+   if(notifyError) console.error("[event-lynk-invite] notification insert failed:",notifyError.message);
+   else notified=valid.length;
  }
- return json(req,{ok:true,invited:valid.length,skipped:targets.length-valid.length});
+ return json(req,{ok:true,invited:valid.length,notified,skipped:targets.length-valid.length});
 });
