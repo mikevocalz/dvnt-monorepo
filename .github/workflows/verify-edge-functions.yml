@@ -16,6 +16,7 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-users-lockdown.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -25,6 +26,7 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-users-lockdown.mjs"
 
 jobs:
   verify:
@@ -72,3 +74,18 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-call-capacity.mjs
+
+  users-write-lockdown:
+    # Boots a throwaway cluster with production's public.users grants and
+    # policies, proves the hole is reproduced, applies the lockdown migration
+    # and asserts anon/authenticated get 42501 on every write. No --allow-skip,
+    # for the same reason as the job above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-users-lockdown.mjs
