@@ -16,6 +16,8 @@ import {
   filterPubliclyListableEvents,
 } from "../events/event-discovery";
 import {
+  END_BEFORE_START_ERROR,
+  endsBeforeStart,
   eventSalesClosed,
   formatEventClock,
   formatEventDay,
@@ -1118,6 +1120,18 @@ export const eventsApi = {
           ? updates.images.filter((m: any) => hosted(m?.url))
           : updates.images;
 
+      // End before start: check the row as it will be after this patch, so
+      // moving only the start (or only the end) is caught too. The DB
+      // refuses it as well (events_end_not_before_start); this keeps the
+      // message readable.
+      const nextStart =
+        updateData[DB.events.startDate] ?? beforeEvent?.start_date ?? null;
+      const nextEnd =
+        "end_date" in updateData ? updateData.end_date : beforeEvent?.end_date ?? null;
+      if (endsBeforeStart(nextStart, nextEnd)) {
+        throw new Error(END_BEFORE_START_ERROR);
+      }
+
       // Ensure the Supabase JWT bridge is attached so PostgREST sees
       // us as `authenticated` (not `anon`) — RLS on events_update_own
       // only applies to the authenticated role, and a missing JWT
@@ -1136,6 +1150,9 @@ export const eventsApi = {
         .eq(DB.events.id, parseInt(eventId))
         .select();
 
+      if (error?.code === "23514" && /events_end_not_before_start/.test(error.message ?? "")) {
+        throw new Error(END_BEFORE_START_ERROR);
+      }
       if (error) throw error;
       if (!Array.isArray(data) || data.length === 0) {
         // PostgREST returns 200 with [] when RLS blocks. Treat as a

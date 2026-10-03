@@ -59,3 +59,23 @@ test('online event does not require a fabricated physical venue and saves video 
   assert.equal(result.ok, true); assert.equal(result.data.event.location, 'Online');
   assert.equal(result.data.event.video_flyer_url, 'https://cdn.test/event-video/flyer'); assert.equal(result.data.event.image, null);
 });
+test('an end before the start is refused and nothing is inserted', async () => {
+  const h = harness();
+  const result = await h.publish({ ...draft, endDate: '2026-10-01T19:00:00Z' });
+  assert.equal(result.ok, false); assert.equal(result.error.code, 'validation_error');
+  assert.match(result.error.message, /ends before it starts/); assert.equal(h.rows.length, 0);
+});
+test('an unparseable end date is refused rather than handed to Postgres', async () => {
+  const h = harness(); const result = await h.publish({ ...draft, endDate: 'not a date' });
+  assert.equal(result.ok, false); assert.equal(result.error.code, 'validation_error'); assert.equal(h.rows.length, 0);
+});
+test('an end after the start and the picked zone are stored', async () => {
+  const h = harness();
+  const result = await h.publish({ ...draft, endDate: '2026-10-02T02:00:00Z', eventTz: 'America/Los_Angeles' });
+  assert.equal(result.ok, true); assert.equal(result.data.event.end_date, '2026-10-02T02:00:00Z');
+  assert.equal(result.data.event.event_tz, 'America/Los_Angeles');
+});
+test('a zone name Intl does not know is dropped, and the event still publishes', async () => {
+  const h = harness(); const result = await h.publish({ ...draft, eventTz: 'Not/AZone' });
+  assert.equal(result.ok, true); assert.equal(result.data.event.event_tz, undefined);
+});
