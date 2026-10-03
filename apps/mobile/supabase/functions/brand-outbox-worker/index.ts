@@ -37,6 +37,7 @@ import {
   postConversationMessage,
 } from "../_shared/conversation-delivery.ts";
 import { sendResendEmail } from "../_shared/send-resend-email.ts";
+import { welcome as welcomeEmail } from "../_shared/email/templates.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -90,6 +91,56 @@ async function runBrandFollowBackfill(
     remaining,
     done: remaining === 0,
   };
+}
+
+type CheckoutWelcomeResult =
+  | { status: "ran"; claimed: number; sent: number; released: number }
+  | { status: "error"; error: string };
+
+/**
+ * Welcome email for profiles made at guest checkout, which never pass the
+ * auth function's user.create.after hook. claim_checkout_welcome_emails
+ * writes the sent marker before anything goes out, so a second worker or the
+ * next tick cannot send it again. A failed send releases the marker for the
+ * next tick. Runs whether or not DVNT_BRAND_OUTBOX_ENABLED is set: this is the
+ * account's welcome, not a growth message.
+ */
+async function sendCheckoutWelcomeEmails(supabase: any): Promise<CheckoutWelcomeResult> {
+  const { data, error } = await supabase.rpc("claim_checkout_welcome_emails", {
+    p_lookback: "7 days",
+    p_limit: 50,
+  });
+  if (error) {
+    console.error("[brand-outbox-worker] checkout welcome claim failed:", error);
+    return { status: "error", error: error.message ?? String(error) };
+  }
+  const rows = (data || []) as Array<{ auth_id: string; email: string | null; username: string | null }>;
+  let sent = 0;
+  let released = 0;
+  for (const row of rows) {
+    let providerId: string | null = null;
+    if (row.email) {
+      try {
+        const { subject, html } = welcomeEmail(row.username, { checkoutProfile: true });
+        providerId = await sendResendEmail({ to: row.email, subject, html });
+      } catch (err) {
+        console.error("[brand-outbox-worker] checkout welcome send failed:", err);
+      }
+    }
+    // sendResendEmail returns null when RESEND_API_KEY is missing: not sent.
+    const ok = providerId !== null;
+    const { error: completeError } = await supabase.rpc("complete_checkout_welcome_email", {
+      p_auth_id: row.auth_id,
+      p_sent: ok,
+      p_provider_message_id: providerId,
+    });
+    if (completeError) {
+      console.error("[brand-outbox-worker] checkout welcome complete failed:", completeError);
+    }
+    if (ok) sent += 1;
+    else released += 1;
+  }
+  return { status: "ran", claimed: rows.length, sent, released };
 }
 
 Deno.serve(async (req: Request) => {
@@ -154,6 +205,8 @@ Deno.serve(async (req: Request) => {
     // the RPC inserts nothing and reports remaining: 0.
     const brandFollows = await runBrandFollowBackfill(supabase, followBackfillLimit);
 
+    const checkoutWelcome = await sendCheckoutWelcomeEmails(supabase);
+
     const configured = brandSendGate();
     // Well-formed is not the same as correct: a typo in either id would pass
     // brandSendGate and then send as whatever account that id names. Prove the
@@ -170,6 +223,7 @@ Deno.serve(async (req: Request) => {
         data: {
           enqueued: enqueued ?? 0,
           brandFollows,
+          checkoutWelcome,
           claimed: 0,
           sent: 0,
           disabled: gate.reason,
@@ -201,6 +255,7 @@ Deno.serve(async (req: Request) => {
         data: {
           enqueued: enqueued ?? 0,
           brandFollows,
+          checkoutWelcome,
           claimed: 0,
           sent: 0,
         },
@@ -305,6 +360,7 @@ Deno.serve(async (req: Request) => {
       data: {
         enqueued: enqueued ?? 0,
         brandFollows,
+        checkoutWelcome,
         claimed: rows.length,
         sent,
         failed,

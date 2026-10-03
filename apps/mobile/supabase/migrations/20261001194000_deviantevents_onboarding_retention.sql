@@ -298,6 +298,88 @@ BEGIN
 END;
 $$;
 
+-- ── Welcome email for profiles created outside Better Auth ──────────────────
+-- The auth function's user.create.after hook sends the welcome email to every
+-- signup. A profile created by guest checkout (user_private_profile.source =
+-- 'checkout', added by 20261003180000) is inserted in SQL and never passes
+-- that hook, so it would get no welcome at all. brand-outbox-worker claims
+-- those here on each cron tick and sends the same template directly, with a
+-- paragraph on unlocking the locked features. It does not go through the
+-- outbox, so it does not wait for DVNT_BRAND_OUTBOX_ENABLED.
+--
+-- One row per auth id is the sent marker. A claim inserts it before the send,
+-- so two workers can never both send; a failed send releases it for the next
+-- tick; a crash between claim and send leaves it claimed, which means at most
+-- once, never twice.
+CREATE TABLE IF NOT EXISTS public.welcome_email_sends (
+  auth_id text PRIMARY KEY,
+  source text NOT NULL CHECK (source IN ('checkout')),
+  claimed_at timestamptz NOT NULL DEFAULT now(),
+  sent_at timestamptz,
+  provider_message_id text
+);
+
+ALTER TABLE public.welcome_email_sends ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.welcome_email_sends FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.welcome_email_sends TO service_role;
+
+CREATE OR REPLACE FUNCTION public.claim_checkout_welcome_emails(
+  p_lookback interval DEFAULT interval '7 days',
+  p_limit integer DEFAULT 50
+) RETURNS TABLE (auth_id text, email text, username text)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+#variable_conflict use_column
+BEGIN
+  -- The checkout migration may not be applied yet. Without its table there
+  -- are no checkout profiles to welcome.
+  IF to_regclass('public.user_private_profile') IS NULL THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  WITH claimed AS (
+    INSERT INTO public.welcome_email_sends AS w (auth_id, source)
+    SELECT p.auth_id, 'checkout'
+    FROM public.user_private_profile p
+    WHERE p.source = 'checkout'
+      AND p.created_at >= now() - COALESCE(p_lookback, interval '7 days')
+      AND NOT EXISTS (SELECT 1 FROM public.welcome_email_sends s WHERE s.auth_id = p.auth_id)
+    ORDER BY p.created_at
+    LIMIT LEAST(GREATEST(COALESCE(p_limit, 50), 1), 200)
+    ON CONFLICT ON CONSTRAINT welcome_email_sends_pkey DO NOTHING
+    RETURNING w.auth_id
+  )
+  SELECT c.auth_id, a.email, COALESCE(a.username, a.name)
+  FROM claimed c
+  JOIN public."user" a ON a.id = c.auth_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.complete_checkout_welcome_email(
+  p_auth_id text,
+  p_sent boolean,
+  p_provider_message_id text DEFAULT NULL
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF p_sent THEN
+    UPDATE public.welcome_email_sends
+       SET sent_at = now(), provider_message_id = p_provider_message_id
+     WHERE auth_id = p_auth_id AND sent_at IS NULL;
+  ELSE
+    -- Only an unsent claim is released; a sent marker is permanent.
+    DELETE FROM public.welcome_email_sends
+     WHERE auth_id = p_auth_id AND sent_at IS NULL;
+  END IF;
+END;
+$$;
+
 -- Preserve existing suppression/cap behavior, but do not claim delayed rows early.
 -- First-post rows (campaign first_post_reminder) are also stopped when:
 --   - first_post_v1 (the 24h reminder) is due for a member who has not passed
@@ -379,9 +461,13 @@ GRANT EXECUTE ON FUNCTION public.backfill_brand_follows(integer, integer, interv
 GRANT EXECUTE ON FUNCTION public.enqueue_brand_onboarding(text, interval, interval) TO service_role;
 REVOKE ALL ON FUNCTION public.brand_member_adult_verified(integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.enqueue_first_post_prompt(text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.claim_checkout_welcome_emails(interval, integer) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.complete_checkout_welcome_email(text, boolean, text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.claim_brand_messages(integer, integer, integer, interval) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.brand_member_adult_verified(integer) TO service_role;
 GRANT EXECUTE ON FUNCTION public.enqueue_first_post_prompt(text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.claim_checkout_welcome_emails(interval, integer) TO service_role;
+GRANT EXECUTE ON FUNCTION public.complete_checkout_welcome_email(text, boolean, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.claim_brand_messages(integer, integer, integer, interval) TO service_role;
 
 -- Schedule the existing worker. It remains fail-closed until the brand sender,

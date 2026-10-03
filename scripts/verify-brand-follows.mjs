@@ -26,7 +26,9 @@
  *      passed adult verification, and nothing for an unverified member or one
  *      who has posted;
  *  10. the 24h first_post_v1 reminder is suppressed for an unverified member,
- *      and beside first_post_v2 so a member gets one first-post message.
+ *      and beside first_post_v2 so a member gets one first-post message;
+ *  11. a checkout-created profile gets the welcome email claimed exactly once,
+ *      a Better Auth signup is never claimed, and a failed send is retried.
  *
  *   node scripts/verify-brand-follows.mjs
  *   node scripts/verify-brand-follows.mjs --allow-skip   # CI without Postgres
@@ -151,6 +153,17 @@ CREATE TABLE public.identity_verifications (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Shape from 20261003180000_checkout_restricted_profiles.sql (checkout branch).
+CREATE TABLE public.user_private_profile (
+  auth_id TEXT PRIMARY KEY REFERENCES public."user"(id) ON DELETE CASCADE,
+  email_normalized TEXT NOT NULL,
+  full_name TEXT,
+  phone_e164 TEXT,
+  source TEXT NOT NULL CHECK (source IN ('checkout')),
+  checkout_restricted BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE SCHEMA payload;
 CREATE TYPE payload.enum_members_status AS ENUM
@@ -430,10 +443,42 @@ await section("the 24h first-post reminder is suppressed for unverified members 
   assert.equal(await prompt("verified24"), 0, "prompted after the reminder was sent");
 });
 
+// ── 11. Checkout-profile welcome email exactly once ────────────────────────
+await section("a checkout-created profile gets the welcome email exactly once", async () => {
+  await member("checkoutbuyer", { created: "now()" });
+  await sql(`INSERT INTO public.user_private_profile (auth_id, email_normalized, source) VALUES ($1, $2, 'checkout')`,
+    ["auth_checkoutbuyer", "checkoutbuyer@example.test"]);
+  await member("betterauthsignup", { created: "now()" });
+  await member("oldcheckout", { created: OLD });
+  await sql(`INSERT INTO public.user_private_profile (auth_id, email_normalized, source, created_at)
+             VALUES ($1, $2, 'checkout', now() - interval '90 days')`, ["auth_oldcheckout", "oldcheckout@example.test"]);
+
+  const claim = () => sql(`SELECT * FROM public.claim_checkout_welcome_emails(interval '7 days', 50)`);
+  const complete = (sent) =>
+    sql(`SELECT public.complete_checkout_welcome_email($1, $2, $3)`, ["auth_checkoutbuyer", sent, sent ? "re_1" : null]);
+
+  const [first, second] = await Promise.all([claim(), claim()]);
+  const claimed = [...first, ...second];
+  assert.deepEqual(claimed, [{ auth_id: "auth_checkoutbuyer", email: "checkoutbuyer@example.test", username: "checkoutbuyer" }],
+    "concurrent claims must hand the checkout profile out once, and nobody else");
+  // A failed send releases the marker, so the next tick retries.
+  await complete(false);
+  assert.equal((await claim()).length, 1, "a released claim was not retried");
+  await complete(true);
+  assert.equal((await claim()).length, 0, "claimed again after it was sent");
+  await complete(false);
+  const [marker] = await sql(`SELECT sent_at IS NOT NULL AS sent, provider_message_id FROM public.welcome_email_sends WHERE auth_id = $1`, ["auth_checkoutbuyer"]);
+  assert.deepEqual(marker, { sent: true, provider_message_id: "re_1" }, "a sent marker was released");
+  const [{ n }] = await sql(`SELECT count(*)::int AS n FROM public.welcome_email_sends`);
+  assert.equal(n, 1, "a Better Auth signup or an old checkout profile was claimed");
+});
+
 await section("onboarding functions are service_role only", async () => {
   for (const sig of [
     "public.enqueue_first_post_prompt(text)",
     "public.brand_member_adult_verified(integer)",
+    "public.claim_checkout_welcome_emails(interval, integer)",
+    "public.complete_checkout_welcome_email(text, boolean, text)",
   ]) {
     const [p] = await sql(
       `SELECT has_function_privilege('anon', $1, 'execute') AS anon,

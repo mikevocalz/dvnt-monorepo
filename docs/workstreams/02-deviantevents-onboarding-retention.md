@@ -22,6 +22,8 @@ Turn the canonical @DeviantEvents account into the reliable onboarding/retention
 For a newly activated eligible member:
 - send the welcome email directly from the auth function's `user.create.after` hook, as master does. It does not go through the outbox, because the outbox sends nothing until `DVNT_BRAND_OUTBOX_ENABLED`, the brand sender and an unsubscribe URL are configured.
 - enqueue welcome DM from @DeviantEvents (`welcome_dm_v2`) and the first-post reminder (`first_post_v1`) in the outbox. `enqueue_brand_onboarding` queues no email row.
+- profiles made at guest checkout (`user_private_profile.source = 'checkout'`) never pass `user.create.after`. `brand-outbox-worker` claims them through `claim_checkout_welcome_emails` on each cron tick and sends the same welcome template with a paragraph on verifying your ID to unlock posting, comments, messages and Lynk rooms. `welcome_email_sends` is the sent marker: one row per auth id, written before the send, released only if the send fails. This runs before the `DVNT_BRAND_OUTBOX_ENABLED` gate.
+- R03/R07: `enqueue_first_post_prompt(p_auth_id text)` queues `first_post_v2` ("You're verified...") right after a member passes adult verification, unless they have posted or already got a first-post message. The 24h `first_post_v1` reminder is suppressed as `unverified` for members without a passed adult verification. No verify-first prompt campaign exists, so those members get nothing from this reminder; `first_post_v2` reaches them once they verify. `first_post_v1` is also suppressed as `already_prompted` when `first_post_v2` is queued or either was sent.
 - optionally enqueue an Activity item if it adds value rather than duplicating the DM
 - record campaign version so copy changes can be rolled out intentionally
 
@@ -50,7 +52,7 @@ The brand does not follow existing members back. Both inserts use `ON CONFLICT (
 
 Live numbers on 2026-10-03 (read-only): 1286 profiles, 1263 eligible, 67 already following, 1196 to backfill, so five cron ticks. The 23 ineligible are the brand account and 22 profiles whose Better Auth login no longer exists.
 
-`pnpm verify:brand-follows` replays the migration on a throwaway Postgres and checks batching, the end condition, duplicate-free inserts, exact counts, skipped ineligible accounts, the brand never following itself or old members, and both directions for a profile created outside auth-sync.
+`pnpm verify:brand-follows` replays the migration on a throwaway Postgres and checks batching, the end condition, duplicate-free inserts, exact counts, skipped ineligible accounts, the brand never following itself or old members, and both directions for a profile created outside auth-sync, the first-post prompt and reminder rules, and the checkout welcome email being claimed exactly once.
 
 Following grants nothing protected. No verification, role, admission or RLS check reads `follows`. Follows do gate two visibility features: spicy posts from accounts you follow (bootstrap-feed, bootstrap-profile) and the DM primary/requests split (bootstrap-messages). Members therefore see @DeviantEvents's spicy posts and its DMs land in their primary inbox; the brand sees spicy posts only from members it follows, which is new profiles.
 

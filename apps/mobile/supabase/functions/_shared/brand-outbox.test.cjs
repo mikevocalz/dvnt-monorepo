@@ -295,3 +295,28 @@ test('first_post_v2 tells a newly verified member that posting is open', () => {
   assert.ok(msg.body.includes("You're verified."));
   assert.equal(outbox.campaignMessage('first_post_v3'), null);
 });
+
+// Profiles made at guest checkout skip user.create.after, so the worker sends
+// them the same welcome template, plus how to unlock posting.
+test('the checkout welcome is the signup template plus the unlock paragraph', async () => {
+  globalThis.Deno ??= { env: { get: () => undefined } };
+  const t = await import(`${__dirname}/email/templates.ts`);
+  const plain = t.welcome('sam');
+  const checkout = t.welcome('sam', { checkoutProfile: true });
+  assert.equal(checkout.subject, plain.subject);
+  assert.ok(!plain.html.includes('Verify your ID'), 'signup welcome must not change');
+  assert.ok(checkout.html.includes('<strong>Verify your ID</strong>'));
+  assert.ok(checkout.html.includes('Posting, comments, messages and Lynk rooms open after you verify your ID'));
+});
+
+test('the worker claims the checkout welcome before sending and releases it on failure', () => {
+  const worker = fs.readFileSync(`${__dirname}/../brand-outbox-worker/index.ts`, 'utf8');
+  const fn = worker.slice(worker.indexOf('async function sendCheckoutWelcomeEmails'), worker.indexOf('Deno.serve('));
+  const claimAt = fn.indexOf('rpc("claim_checkout_welcome_emails"');
+  const sendAt = fn.indexOf('sendResendEmail(');
+  assert.ok(claimAt > 0 && sendAt > claimAt, 'the marker must be claimed before the send');
+  assert.match(fn, /welcomeEmail\(row\.username, \{ checkoutProfile: true \}\)/);
+  assert.match(fn, /rpc\("complete_checkout_welcome_email", \{[\s\S]{0,80}p_sent: ok/);
+  // It runs before the DVNT_BRAND_OUTBOX_ENABLED gate.
+  assert.ok(worker.indexOf('await sendCheckoutWelcomeEmails(supabase)') < worker.indexOf('const configured = brandSendGate()'));
+});
