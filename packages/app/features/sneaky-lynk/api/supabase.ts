@@ -7,7 +7,12 @@ import { Platform } from "react-native";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import type { CreateRoomParams, JoinRoomResponse, SneakyRoom } from "../types";
-import { buildRoomParticipantStats, resolveRoomAudience } from "./room-stats";
+import {
+  MEMBER_STAT_COLUMNS,
+  buildRoomParticipantStats,
+  resolveRoomAudience,
+  toMemberStatRow,
+} from "./room-stats";
 
 type ErrorCode =
   | "unauthorized"
@@ -294,10 +299,13 @@ export const sneakyLynkApi = {
       if (roomIds.length > 0) {
         const { data: members } = await supabase
           .from("video_room_members")
-          .select("room_id, user_id, role, status, joined_at, left_at")
+          .select(MEMBER_STAT_COLUMNS)
           .in("room_id", roomIds);
         if (members) {
-          roomStats = buildRoomParticipantStats(members, nowMs);
+          roomStats = buildRoomParticipantStats(
+            members.map(toMemberStatRow),
+            nowMs,
+          );
         }
       }
 
@@ -379,10 +387,13 @@ export const sneakyLynkApi = {
 
       const { data: members } = await supabase
         .from("video_room_members")
-        .select("room_id, user_id, role, status, joined_at, left_at")
+        .select(MEMBER_STAT_COLUMNS)
         .eq("room_id", data.id);
 
-      const roomStats = buildRoomParticipantStats(members || [], Date.now());
+      const roomStats = buildRoomParticipantStats(
+        (members || []).map(toMemberStatRow),
+        Date.now(),
+      );
       const audience = resolveRoomAudience(
         {
           id: data.id,

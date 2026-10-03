@@ -7,6 +7,7 @@
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import type { SneakyUser } from "../types";
+import { commentAnonymity, type RosterRow } from "./comment-anonymity";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -48,6 +49,24 @@ export interface RoomComment {
 
 export type RoomCommentAuthor = NonNullable<RoomComment["author"]>;
 
+/** Roster for a room addressed by uuid (room_comments.room_id), or null. */
+async function fetchRoomRoster(roomUuid: string): Promise<RosterRow[] | null> {
+  const { data: room } = await supabase
+    .from("video_rooms")
+    .select("id")
+    .eq("uuid", roomUuid)
+    .maybeSingle();
+  if (!room?.id) return null;
+  const { data, error } = await supabase.rpc("lynk_room_roster", {
+    p_room_id: room.id,
+  });
+  if (error) {
+    console.error("[RoomComments] roster failed:", error.message);
+    return null;
+  }
+  return (data as RosterRow[] | null) ?? null;
+}
+
 async function lookupRoomCommentAuthor(
   authorId: string,
   roomId?: string,
@@ -62,24 +81,9 @@ async function lookupRoomCommentAuthor(
 
   // Live messages go through here, so without this an anonymous author is
   // named the moment they speak even though the initial fetch hid them.
-  let anon: { isAnonymous: boolean; anonLabel: string | null } = {
-    isAnonymous: false,
-    anonLabel: null,
-  };
-  if (roomId) {
-    const { data: member } = await supabase
-      .from("video_room_members")
-      .select("is_anonymous, anon_label")
-      .eq("room_id", roomId)
-      .eq("user_id", authorId)
-      .maybeSingle();
-    if (member) {
-      anon = {
-        isAnonymous: !!(member as any).is_anonymous,
-        anonLabel: (member as any).anon_label ?? null,
-      };
-    }
-  }
+  const anon = roomId
+    ? commentAnonymity(await fetchRoomRoster(roomId), authorId)
+    : { isAnonymous: false, anonLabel: null };
 
   return {
     username: userData.username || "unknown",
@@ -115,21 +119,14 @@ export async function fetchRoomComments(
   // anon_label (migration 20260314_anon_lynk_members). Joining the author
   // against `users` alone, as this did, cannot know that the person is
   // anonymous in THIS room, so every chat message rendered their real name.
-  let anonMap: Record<string, { isAnonymous: boolean; anonLabel: string | null }> = {};
-  if (authorIds.length > 0) {
-    const { data: members } = await supabase
-      .from("video_room_members")
-      .select("user_id, is_anonymous, anon_label")
-      .eq("room_id", roomId)
-      .in("user_id", authorIds);
-    if (members) {
-      for (const m of members as any[]) {
-        anonMap[m.user_id] = {
-          isAnonymous: !!m.is_anonymous,
-          anonLabel: m.anon_label ?? null,
-        };
-      }
-    }
+  // The old lookup here filtered video_room_members on user_id with the room
+  // uuid against an integer column, so it always failed and every anonymous
+  // author was printed by name. Clients can no longer read user_id at all;
+  // the roster RPC is the only source (see comment-anonymity.ts).
+  const roster = authorIds.length > 0 ? await fetchRoomRoster(roomId) : null;
+  const anonMap: Record<string, { isAnonymous: boolean; anonLabel: string | null }> = {};
+  for (const id of authorIds as string[]) {
+    anonMap[id] = commentAnonymity(roster, id);
   }
   let authorsMap: Record<string, any> = {};
   if (authorIds.length > 0) {
