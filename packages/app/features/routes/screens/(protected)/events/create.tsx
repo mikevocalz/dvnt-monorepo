@@ -62,6 +62,7 @@ import { inviteEventGuests } from "@dvnt/app/lib/api/privileged";
 // Popover removed — inline expanding pickers used instead
 import { DvntMap } from "@dvnt/app/components/map";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
+import { useEventMediaPreupload } from "@dvnt/app/lib/hooks/use-event-media-preupload";
 import { Motion } from "@legendapp/motion";
 import { Badge } from "@dvnt/app/components/ui/badge";
 import { Text as UIText } from "@dvnt/app/components/ui/text";
@@ -179,6 +180,7 @@ function CreateEventScreenContent() {
   const { colors } = useColorScheme();
   const { pickFromLibrary, requestPermissions } = useMediaPicker();
   const createEvent = useCreateEvent();
+  useEventMediaPreupload();
   const showToast = useUIStore((s) => s.showToast);
   // Transient UI state: which tier currently has its "Sale starts" picker
   // open. Kept outside the draft store because it's not persisted.

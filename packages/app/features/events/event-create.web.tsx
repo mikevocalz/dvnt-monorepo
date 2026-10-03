@@ -73,6 +73,7 @@ import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
+import { useEventMediaPreupload } from "@dvnt/app/lib/hooks/use-event-media-preupload";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
   EVENT_VISIBILITY_OPTIONS,
@@ -174,6 +175,7 @@ export function CreateEventScreen() {
     return () => { screenMounted.current = false; };
   }, []);
   const s = useCreateEventStore();
+  useEventMediaPreupload();
   const createEvent = useCreateEvent();
   const showToast = useUIStore((st) => st.showToast);
   const [attempted, setAttempted] = useState(false);
