@@ -24,6 +24,7 @@ import {
   verificationCode,
 } from "../_shared/send-resend-email.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { isUnpublished } from "../_shared/event-access.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -115,11 +116,13 @@ Deno.serve(async (req) => {
     // The event must be a public, free-RSVP event (paid events use checkout).
     const { data: ev, error: evErr } = await supabase
       .from("events")
-      .select("ticketing_enabled, status, visibility, start_date, end_date, date")
+      .select("ticketing_enabled, status, visibility, start_date, end_date, date, is_hidden, publish_at")
       .eq("id", eventId)
       .single();
     if (evErr || !ev) return err("event_not_found", "Event not found.", 404);
-    if (ev.visibility !== "public") return err("event_not_found", "Event not found.", 404);
+    // Same rule as issue_guest_rsvp_tickets: a hidden or unpublished event
+    // is not found, so no code is sent for it.
+    if (ev.visibility !== "public" || isUnpublished(ev)) return err("event_not_found", "Event not found.", 404);
     if (ev.ticketing_enabled) return err("requires_checkout", "This event requires a paid ticket.");
     // Fail fast: without this, a closed event issues the OTP and only rejects
     // at rsvp-issue-guest — the guest does the whole code dance for nothing.

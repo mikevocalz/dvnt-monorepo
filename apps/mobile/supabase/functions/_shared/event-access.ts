@@ -7,6 +7,20 @@ export interface EventAccessRow {
   ticketing_enabled?: boolean | null;
   start_date?: string | null;
   end_date?: string | null;
+  is_hidden?: boolean | null;
+  publish_at?: string | null;
+}
+
+/**
+ * Hidden by the organizer, or publish_at not reached yet. Same rule as
+ * can_view_event (20261003110000_event_hide_and_publish_at); an unparseable
+ * publish_at counts as unpublished.
+ */
+export function isUnpublished(event: Pick<EventAccessRow, "is_hidden" | "publish_at">, now = Date.now()): boolean {
+  if (event.is_hidden === true) return true;
+  if (event.publish_at == null || event.publish_at === "") return false;
+  const at = Date.parse(event.publish_at);
+  return !Number.isFinite(at) || at > now;
 }
 
 async function exists(query: any): Promise<boolean> {
@@ -39,10 +53,12 @@ export async function eventRelationships(db: any, event: EventAccessRow, userId:
 export async function canAccessEvent(db: any, eventId: number, userId: string | null): Promise<boolean> {
   if (!Number.isSafeInteger(eventId) || eventId <= 0) return false;
   const { data: event, error } = await db.from("events")
-    .select("id, host_id, visibility, status").eq("id", eventId).maybeSingle();
+    .select("id, host_id, visibility, status, is_hidden, publish_at").eq("id", eventId).maybeSingle();
   if (error) throw new Error("Could not verify event access");
   if (!event || ["cancelled", "deleted"].includes(event.status)) return false;
-  if (event.visibility !== "private") return true;
+  // A hidden or not-yet-published event admits the same people a private one
+  // does: host, co-organizers, invitees and admission ticket holders.
+  if (event.visibility !== "private" && !isUnpublished(event)) return true;
   const access = await eventRelationships(db, event, userId);
   return access.organizer || access.ticket || access.invited;
 }

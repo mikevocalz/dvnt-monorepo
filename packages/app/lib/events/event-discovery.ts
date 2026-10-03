@@ -39,7 +39,28 @@ export type DiscoveryEvent = {
   visibility?: string | null;
   /** Random 32-hex share token (events.share_slug). */
   share_slug?: string | null;
+  /** Organizer hid the event (events.is_hidden). */
+  is_hidden?: boolean | null;
+  /** When the event becomes publicly listable; null = now (events.publish_at). */
+  publish_at?: string | null;
 };
+
+/**
+ * Published for the public: not hidden, and publish_at (if any) has passed.
+ * Same rule as the listing RPCs and can_view_event
+ * (20261003110000_event_hide_and_publish_at). A publish_at that does not parse
+ * fails closed. Rows from callers that never select the columns read as
+ * published, which is what they were before the columns existed.
+ */
+export function isPublishedEvent(
+  event: Pick<DiscoveryEvent, "is_hidden" | "publish_at"> | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  if (!event || event.is_hidden === true) return false;
+  if (event.publish_at == null || event.publish_at === "") return true;
+  const at = Date.parse(event.publish_at);
+  return Number.isFinite(at) && at <= now;
+}
 
 /**
  * Share tokens are 32 hex chars — `replace(gen_random_uuid()::text, '-', '')`
@@ -92,14 +113,20 @@ export function filterDiscoverableEvents<T extends DiscoveryEvent>(rows: T[] | n
  * same rule or private/link_only rows leak to every signed-in member, whose
  * SELECT policy is USING true.
  */
-export function isPubliclyListableEvent(event: DiscoveryEvent | null | undefined): boolean {
+export function isPubliclyListableEvent(
+  event: DiscoveryEvent | null | undefined,
+  now: number = Date.now(),
+): boolean {
   if (!event) return false;
-  return isDiscoverableEvent(event) && isTitleResolvable(event);
+  return isDiscoverableEvent(event) && isTitleResolvable(event) && isPublishedEvent(event, now);
 }
 
 /** Drop rows that must never appear in a public browse list. */
-export function filterPubliclyListableEvents<T extends DiscoveryEvent>(rows: T[] | null | undefined): T[] {
-  return (rows ?? []).filter(isPubliclyListableEvent);
+export function filterPubliclyListableEvents<T extends DiscoveryEvent>(
+  rows: T[] | null | undefined,
+  now: number = Date.now(),
+): T[] {
+  return (rows ?? []).filter((row) => isPubliclyListableEvent(row, now));
 }
 
 /**
