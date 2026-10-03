@@ -445,6 +445,10 @@ export const ticketsApi = {
     quantity: number;
     guestEmail: string;
     guestName?: string;
+    /** Restricted-profile fields; send all three (see checkout-profile-fields). */
+    username?: string;
+    fullName?: string;
+    phoneE164?: string;
     promoCode?: string;
     idempotencyKey?: string;
   }): Promise<{
@@ -466,6 +470,9 @@ export const ticketsApi = {
             quantity: params.quantity,
             guest_email: params.guestEmail,
             ...(params.guestName ? { guest_name: params.guestName } : {}),
+            ...(params.username ? { username: params.username } : {}),
+            ...(params.fullName ? { full_name: params.fullName } : {}),
+            ...(params.phoneE164 ? { phone: params.phoneE164 } : {}),
             ...(params.promoCode ? { promo_code: params.promoCode } : {}),
             ...(promoterCode ? { promoter_code: promoterCode } : {}),
             ...(params.idempotencyKey

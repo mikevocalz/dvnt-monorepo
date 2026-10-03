@@ -1,15 +1,19 @@
 "use client";
 /**
- * GuestRsvpSheet (web) — no-account free-RSVP flow (Phase 5.6.3b). Three steps in
+ * GuestRsvpSheet (web) — signed-out free-RSVP flow (Phase 5.6.3b). Three steps in
  * a BottomSheet: contact form → OTP code → confirmed. Calls the deployed edge
- * functions (rsvp-verify issue/verify → rsvp-issue-guest). State lives in
- * useGuestRsvpStore (Zustand, no useState).
+ * functions (rsvp-verify issue/verify → rsvp-issue-guest). The form also takes
+ * username, full name and mobile number, which set up the guest's restricted
+ * DVNT profile. State lives in useGuestRsvpStore and useCheckoutProfileStore
+ * (Zustand, no useState).
  */
 import { useEffect } from "react";
 import { Minus, Plus, Mail, CheckCircle2 } from "lucide-react";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useGuestRsvpStore } from "@dvnt/app/lib/stores/guest-rsvp-store";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
+import { useCheckoutProfileStore } from "@dvnt/app/lib/stores/checkout-profile-store";
+import { CheckoutProfileFields } from "./checkout-profile-fields.web";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -37,9 +41,15 @@ async function callFn(
 
 export function GuestRsvpSheet() {
   const s = useGuestRsvpStore();
+  const profile = useCheckoutProfileStore();
+  const resetProfile = profile.reset;
   const patch = s.patch;
   const open = s.open;
   const eventId = s.eventId;
+  // Fresh profile fields each time the sheet opens.
+  useEffect(() => {
+    if (open) resetProfile();
+  }, [open, eventId, resetProfile]);
   // Fetch this event's attendee-name requirement (anon can read public events).
   useEffect(() => {
     if (!open || !eventId) return;
@@ -67,6 +77,12 @@ export function GuestRsvpSheet() {
     const email = s.email.trim().toLowerCase();
     if (!EMAIL_RE.test(email)) {
       s.patch({ error: "Enter a valid email." });
+      return;
+    }
+    // Checked before the code is sent, so a bad phone never costs a code.
+    const fields = profile.validate(email);
+    if (!fields.ok) {
+      s.patch({ error: fields.message });
       return;
     }
     if (namesRequired) {
@@ -109,11 +125,20 @@ export function GuestRsvpSheet() {
       s.patch({ loading: false, error: v.error || "Incorrect code." });
       return;
     }
+    const fields = profile.validate(s.email.trim().toLowerCase());
+    if (!fields.ok) {
+      s.patch({ loading: false, step: "form", error: fields.message });
+      return;
+    }
     const issue = await callFn("rsvp-issue-guest", {
       grant: v.data.grant,
       event_id: Number(s.eventId),
       quantity: s.quantity,
-      guest_name: s.name.trim() || undefined,
+      // The full name doubles as the name on the door list.
+      guest_name: fields.fields.fullName,
+      username: fields.fields.username,
+      full_name: fields.fields.fullName,
+      phone: fields.fields.phoneE164,
       attendee_names: collectNames ? s.attendeeNames.slice(0, s.quantity) : undefined,
     });
     s.patch({ loading: false });
@@ -131,7 +156,7 @@ export function GuestRsvpSheet() {
           <div>
             <div className="font-bold">{s.eventTitle}</div>
             <div className="text-sm text-white/50">
-              Free RSVP — we&apos;ll email your ticket{s.quantity > 1 ? "s" : ""}. No account needed.
+              Free RSVP. We&apos;ll email your ticket{s.quantity > 1 ? "s" : ""}.
             </div>
           </div>
 
@@ -146,14 +171,7 @@ export function GuestRsvpSheet() {
               className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#3FDCFF]"
             />
           </Field>
-          <Field label="Your name (optional)">
-            <input
-              value={s.name}
-              onChange={(e) => s.patch({ name: e.target.value })}
-              placeholder="Name on the door list"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#3FDCFF]"
-            />
-          </Field>
+          <CheckoutProfileFields onEdit={() => s.patch({ error: null })} />
 
           <div className="flex items-center justify-between">
             <span className="text-sm text-white/70">How many?</span>
@@ -244,7 +262,11 @@ export function GuestRsvpSheet() {
           <h2 className="text-xl font-extrabold">You&apos;re in!</h2>
           <p className="max-w-[300px] text-sm text-white/70">
             {s.resultCount > 1 ? `${s.resultCount} tickets are` : "Your ticket is"} on the way to{" "}
-            <b className="text-white">{s.email}</b> — each with its own QR for the door.
+            <b className="text-white">{s.email}</b>, each with its own QR for the door.
+          </p>
+          <p className="max-w-[300px] text-xs text-white/50">
+            The same email has a link to finish your DVNT profile. Verify your ID in DVNT to
+            post, comment and join rooms.
           </p>
           <button
             onClick={s.close}
