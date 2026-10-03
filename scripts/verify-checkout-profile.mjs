@@ -490,7 +490,7 @@ let owl;
       RETURNS jsonb LANGUAGE sql AS $$
         INSERT INTO hook_calls VALUES ('follow', p_member_id || '|' || p_brand_id || '|' || p_bidirectional || '|' || p_lookback) RETURNING '{}'::jsonb $$;
     CREATE FUNCTION public.enqueue_first_post_prompt(p_auth_id text)
-      RETURNS void LANGUAGE sql AS $$ INSERT INTO hook_calls VALUES ('first_post', p_auth_id) $$;
+      RETURNS integer LANGUAGE sql AS $$ INSERT INTO hook_calls VALUES ('first_post', p_auth_id) RETURNING 1 $$;
   `);
   assert.deepEqual(await onboard(owl.authId, owl.memberId, 7), { enqueue: "ok", follow: "ok" });
   assert.deepEqual(
@@ -506,7 +506,7 @@ let owl;
 
   // A hook that throws is reported and does not take the caller down.
   await sql(`CREATE OR REPLACE FUNCTION public.enqueue_first_post_prompt(p_auth_id text)
-    RETURNS void LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'boom'; END $$`);
+    RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'boom'; END $$`);
   assert.deepEqual(
     (await sql(`SELECT public.run_verified_onboarding($1) AS r`, [owl.authId]))[0].r,
     { firstPostPrompt: "error:P0001" },

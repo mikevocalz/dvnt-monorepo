@@ -311,9 +311,11 @@ END;
 $$;
 
 -- ── Onboarding hooks that live on other branches ───────────────────────────
--- enqueue_brand_onboarding and ensure_brand_follow_relationships ship with the
--- @DeviantEvents onboarding work; enqueue_first_post_prompt does not exist on
--- any branch yet. Each call is skipped when its function is missing, so this
+-- enqueue_brand_onboarding, ensure_brand_follow_relationships and
+-- enqueue_first_post_prompt(text) RETURNS integer ship with the
+-- @DeviantEvents onboarding work (20261001194000 on
+-- workstream/02-deviantevents-onboarding-retention). Each call is skipped
+-- when its function is missing, so this
 -- migration applies before, after or without them. A failure inside one is
 -- reported in the result and never undoes the profile or the ticket.
 CREATE OR REPLACE FUNCTION public.run_new_profile_onboarding(
