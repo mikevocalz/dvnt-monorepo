@@ -102,12 +102,13 @@ Deno.serve(async (req: Request) => {
   }
 
   // Existing published content means this is not a first-post onboarding case.
-  const { data: priorPost } = await db
+  const { data: priorPost, error: priorPostError } = await db
     .from("posts")
     .select("id")
     .eq("author_id", member.id)
     .limit(1)
     .maybeSingle();
+  if (priorPostError) return errorResponse("Could not inspect prior posts", 500);
   if (priorPost) {
     return jsonResponse({ ok: true, offer: null, reason: "already_posted" });
   }
@@ -128,7 +129,9 @@ Deno.serve(async (req: Request) => {
 
   // Prove this ticket is the first valid admission, not merely the first ticket
   // in the current cart. This makes retries/devices/webhook replays converge.
-  const { data: older } = await db
+  // A failed read proves nothing, so it must not fall through to "no prior
+  // admission" and burn the once-per-member offer on the wrong ticket.
+  const { data: older, error: olderError } = await db
     .from("tickets")
     .select("id,category,status,created_at")
     .in("user_id", candidates)
@@ -136,6 +139,7 @@ Deno.serve(async (req: Request) => {
     .lt("created_at", ticket.created_at)
     .order("created_at", { ascending: false })
     .limit(25);
+  if (olderError) return errorResponse("Could not inspect prior tickets", 500);
   if ((older || []).some(isAdmission)) {
     return jsonResponse({ ok: true, offer: null, reason: "prior_admission" });
   }
