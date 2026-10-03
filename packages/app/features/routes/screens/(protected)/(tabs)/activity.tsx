@@ -51,6 +51,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import * as privileged from "@dvnt/app/lib/api/privileged";
+import { isTicketActivityType, ticketActivityCopy } from "@dvnt/app/lib/activity/ticket-activity";
 
 const TABS = [
   "All",
@@ -58,6 +59,7 @@ const TABS = [
   "Likes",
   "Comments",
   "Mentions",
+  "Tickets",
   "Liked",
 ] as const;
 type TabType = (typeof TABS)[number];
@@ -89,6 +91,12 @@ const ActivityIcon = memo(({ type }: { type: Activity["type"] }) => {
     case "ticket_transfer_cancelled":
     case "ticket_comped":
     case "ticket_refunded":
+    case "ticket_claim_required":
+    case "ticket_delivery_failed":
+    case "ticket_voided":
+    case "event_postponed":
+    case "event_time_changed":
+    case "event_venue_changed":
       return <Calendar size={16} color="#10B981" />;
     case "room_invite":
     case "sneaky_lynk":
@@ -157,6 +165,13 @@ function getActivityText(activity: Activity): string {
       return ` comped you a ticket to ${activity.event?.title || "an event"}.`;
     case "ticket_refunded":
       return ` issued a refund for your ${activity.event?.title || "event"} ticket.`;
+    case "ticket_claim_required":
+    case "ticket_delivery_failed":
+    case "ticket_voided":
+    case "event_postponed":
+    case "event_time_changed":
+    case "event_venue_changed":
+      return ticketActivityCopy(activity.type) || " updated your ticket.";
     case "room_invite":
     case "sneaky_lynk":
       return " invited you to a Sneaky Lynk.";
@@ -712,6 +727,9 @@ function ActivityScreenContent() {
         .length,
       Mentions: activities.filter((activity) => activity.type === "mention")
         .length,
+      Tickets: activities.filter((activity) =>
+        isTicketActivityType(activity.type),
+      ).length,
       Liked: likedActivities.length,
     }),
     [activities, likedActivities],
@@ -771,6 +789,7 @@ function ActivityScreenContent() {
           if (activeTab === "Likes") return activity.type === "like";
           if (activeTab === "Comments") return activity.type === "comment";
           if (activeTab === "Mentions") return activity.type === "mention";
+          if (activeTab === "Tickets") return isTicketActivityType(activity.type);
           return true;
         }),
     [activities, activeTab],

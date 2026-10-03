@@ -61,6 +61,11 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import * as privileged from "@dvnt/app/lib/api/privileged";
+import {
+  isTicketActivityType,
+  ticketActivityCopy,
+  ticketActivityRoute,
+} from "@dvnt/app/lib/activity/ticket-activity";
 
 const TABS = [
   "All",
@@ -68,6 +73,7 @@ const TABS = [
   "Likes",
   "Comments",
   "Mentions",
+  "Tickets",
   "Liked",
 ] as const;
 type TabType = (typeof TABS)[number];
@@ -180,6 +186,15 @@ function webRouteForActivity(activity: Activity): string {
   if (type === "event_promoter_added" && entityId)
     return `/feed/events/${entityId}/promoter`;
 
+  // Ticket rows open the pass or the transfer/claim screen (T04). Must run
+  // before the generic entityType "event" branch, which comp and refund rows
+  // would otherwise hit.
+  const ticketRoute = ticketActivityRoute(
+    { type, entityType, entityId, eventId: event?.id, payload: activity.payload },
+    "web",
+  );
+  if (ticketRoute) return ticketRoute;
+
   if (entityType === "event" && entityId) return `/events/${entityId}`;
   if (entityType === "room" && entityId) return `/sneaky-lynk/room/${entityId}`;
 
@@ -208,6 +223,12 @@ function webRouteForActivity(activity: Activity): string {
     case "ticket_transfer_cancelled":
     case "ticket_comped":
     case "ticket_refunded":
+    case "ticket_claim_required":
+    case "ticket_delivery_failed":
+    case "ticket_voided":
+    case "event_postponed":
+    case "event_time_changed":
+    case "event_venue_changed":
       if (event?.id || entityId) return `/events/${event?.id || entityId}`;
       return `/events`;
     case "room_invite":
@@ -254,6 +275,12 @@ function ActivityIcon({ type }: { type: Activity["type"] }) {
     case "ticket_transfer_cancelled":
     case "ticket_comped":
     case "ticket_refunded":
+    case "ticket_claim_required":
+    case "ticket_delivery_failed":
+    case "ticket_voided":
+    case "event_postponed":
+    case "event_time_changed":
+    case "event_venue_changed":
       return <Calendar size={14} color="#10B981" />;
     case "room_invite":
     case "sneaky_lynk":
@@ -319,6 +346,13 @@ function getActivityText(activity: Activity): string {
       return ` comped you a ticket to ${activity.event?.title || "an event"}.`;
     case "ticket_refunded":
       return ` issued a refund for your ${activity.event?.title || "event"} ticket.`;
+    case "ticket_claim_required":
+    case "ticket_delivery_failed":
+    case "ticket_voided":
+    case "event_postponed":
+    case "event_time_changed":
+    case "event_venue_changed":
+      return ticketActivityCopy(activity.type) || " updated your ticket.";
     case "room_invite":
     case "sneaky_lynk":
       return " invited you to a Sneaky Lynk.";
@@ -718,6 +752,7 @@ export function ActivityScreen() {
       Likes: activities.filter((a) => a.type === "like").length,
       Comments: activities.filter((a) => a.type === "comment").length,
       Mentions: activities.filter((a) => a.type === "mention").length,
+      Tickets: activities.filter((a) => isTicketActivityType(a.type)).length,
       Liked: likedActivities.length,
     }),
     [activities, likedActivities],
@@ -754,6 +789,7 @@ export function ActivityScreen() {
           if (activeTab === "Likes") return activity.type === "like";
           if (activeTab === "Comments") return activity.type === "comment";
           if (activeTab === "Mentions") return activity.type === "mention";
+          if (activeTab === "Tickets") return isTicketActivityType(activity.type);
           return true;
         }),
     [activities, activeTab],

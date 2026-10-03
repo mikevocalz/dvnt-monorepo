@@ -408,7 +408,9 @@ Deno.serve(async (req: Request) => {
             type: "ticket_comped",
             entityType: "event",
             entityId: String(eventId),
-            url: `https://dvntapp.live/e/${eventId}`,
+            // The pass, not the event page (T04). /ticket/<event id> resolves
+            // to the recipient's own pass for this event.
+            url: `https://dvntapp.live/ticket/${eventId}`,
           },
           sound: "default",
           channelId: "default",
