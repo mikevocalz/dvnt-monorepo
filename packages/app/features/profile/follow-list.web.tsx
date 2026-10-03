@@ -31,6 +31,7 @@ import { useFollow } from "@dvnt/app/lib/hooks/use-follow";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { resolveAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { useFollowListSearchStore } from "@dvnt/app/lib/stores/follow-list-search-store";
+import { resolveFollowControl, type FollowMutationAction } from "@dvnt/app/lib/profile/follow-relationship";
 
 type Variant = "followers" | "following";
 
@@ -41,6 +42,7 @@ interface FollowUser {
   name?: string;
   avatar?: string;
   isFollowing?: boolean;
+  followsYou?: boolean;
   postsCount?: number;
   followersCount?: number;
   followingCount?: number;
@@ -66,15 +68,23 @@ function FollowRow({
   onPress,
   onFollowPress,
   isFollowPending,
+  pendingAction,
   isCurrentUser,
 }: {
   user: FollowUser;
   onPress: () => void;
   onFollowPress: () => void;
   isFollowPending: boolean;
+  pendingAction?: FollowMutationAction;
   isCurrentUser: boolean;
 }) {
   const avatarUrl = resolveAvatarUrl(user.avatar);
+  const followControl = resolveFollowControl({
+    viewerFollowsTarget: user.isFollowing,
+    targetFollowsViewer: user.followsYou,
+    isPending: isFollowPending,
+    pendingAction,
+  });
   return (
     <div
       onClick={onPress}
@@ -98,6 +108,9 @@ function FollowRow({
         <p className="truncate text-sm text-white/60">
           {user.name || user.username}
         </p>
+        {followControl.marker ? (
+          <p className="mt-0.5 text-xs text-white/45">{followControl.marker}</p>
+        ) : null}
       </div>
       {!isCurrentUser ? (
         <button
@@ -113,7 +126,7 @@ function FollowRow({
               : "bg-[#3EA4E5] active:bg-[#3590cf]"
           }`}
         >
-          {user.isFollowing ? "Following" : "Follow"}
+          {followControl.buttonLabel}
         </button>
       ) : null}
     </div>
@@ -144,7 +157,7 @@ export function FollowList({ variant }: { variant: Variant }) {
 
   const queryClient = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
-  const { mutate: followMutate, isPending: isFollowPending } = useFollow();
+  const { mutate: followMutate, isPending: isFollowPending, variables: followVars } = useFollow();
 
   const query = useFollowListSearchStore((s) => s.query);
   const setQuery = useFollowListSearchStore((s) => s.setQuery);
@@ -326,7 +339,15 @@ export function FollowList({ variant }: { variant: Variant }) {
                       user={user}
                       onPress={() => handleUserPress(user)}
                       onFollowPress={() => handleFollowPress(user)}
-                      isFollowPending={isFollowPending}
+                      isFollowPending={
+                        isFollowPending &&
+                        String(followVars?.userId || "") === String(user.id)
+                      }
+                      pendingAction={
+                        String(followVars?.userId || "") === String(user.id)
+                          ? followVars?.action
+                          : undefined
+                      }
                       isCurrentUser={currentUser?.id === user.id}
                     />
                   </div>
