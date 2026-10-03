@@ -9,10 +9,46 @@ CREATE INDEX IF NOT EXISTS brand_message_outbox_available_idx
   ON public.brand_message_outbox (available_at, id)
   WHERE state = 'queued';
 
+-- Who may be put into a follow relationship with @DeviantEvents. Checked on
+-- every automatic write, single-member and batch alike:
+--   - never the brand account itself;
+--   - not banned in the app profile (users.banned_at);
+--   - the Better Auth account still exists (a deleted login leaves its
+--     public.users row behind with a dangling auth_id) and is not banned;
+--   - not suspended, banned or shadow-banned in the moderation console
+--     (payload.members.app_user_id holds public.users.id as text).
+-- Following the brand confers nothing else: no column or role changes here.
+CREATE OR REPLACE FUNCTION public.brand_follow_eligible(
+  p_member_id integer,
+  p_brand_id integer
+) RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.users u
+    JOIN public."user" a ON a.id = u.auth_id
+    WHERE u.id = p_member_id
+      AND u.id <> p_brand_id
+      AND u.banned_at IS NULL
+      AND a.banned IS NOT TRUE
+      AND NOT EXISTS (
+        SELECT 1 FROM payload.members m
+        WHERE m.app_user_id = u.id::text
+          AND m.status IN ('suspended', 'banned', 'shadow_banned')
+      )
+  );
+$$;
+
 -- Idempotent follow graph write. Direct DB insert is deliberate: the automatic
 -- onboarding relationship must not fan out "new follower" push notifications.
--- New signups only: auth-sync calls this on every sign-in, so a member created
--- before the lookback window is skipped. There is no retroactive backfill.
+-- auth-sync calls this on every sign-in. The member follows the brand whatever
+-- their signup date, so a returning member who is still missing the follow
+-- gets it. The brand follows back only members created inside p_lookback: old
+-- members are never followed by the brand, one sign-in at a time or otherwise.
 CREATE OR REPLACE FUNCTION public.ensure_brand_follow_relationships(
   p_member_id integer,
   p_brand_id integer,
@@ -41,9 +77,8 @@ BEGIN
   IF NOT FOUND OR NOT EXISTS (SELECT 1 FROM public.users WHERE id = p_brand_id) THEN
     RAISE EXCEPTION 'member or brand profile missing';
   END IF;
-  -- A NULL created_at is treated as old: fail closed, no follow.
-  IF v_member_created IS NULL OR v_member_created < now() - p_lookback THEN
-    RETURN jsonb_build_object('memberToBrand', 0, 'brandToMember', 0, 'self', false, 'outsideWindow', true);
+  IF NOT public.brand_follow_eligible(p_member_id, p_brand_id) THEN
+    RETURN jsonb_build_object('memberToBrand', 0, 'brandToMember', 0, 'self', false, 'ineligible', true);
   END IF;
 
   INSERT INTO public.follows (follower_id, following_id)
@@ -51,7 +86,10 @@ BEGIN
   ON CONFLICT (follower_id, following_id) DO NOTHING;
   GET DIAGNOSTICS v_member_to_brand = ROW_COUNT;
 
-  IF p_bidirectional THEN
+  -- A NULL created_at is treated as old: fail closed, no follow-back.
+  IF p_bidirectional
+     AND v_member_created IS NOT NULL
+     AND v_member_created >= now() - p_lookback THEN
     INSERT INTO public.follows (follower_id, following_id)
     VALUES (p_brand_id, p_member_id)
     ON CONFLICT (follower_id, following_id) DO NOTHING;
@@ -62,6 +100,88 @@ BEGIN
     'memberToBrand', v_member_to_brand,
     'brandToMember', v_brand_to_member,
     'self', false
+  );
+END;
+$$;
+
+-- Batched catch-up, run by brand-outbox-worker on every cron tick.
+--   1. Backfill: up to p_limit eligible members of any age who do not follow
+--      @DeviantEvents start following it. This is the only retroactive
+--      direction. The brand does NOT follow existing members back.
+--   2. New profiles: the brand follows eligible members created inside
+--      p_new_profile_window that it does not follow yet. This reaches profiles
+--      created by any path that skips auth-sync (resolveOrProvisionUser, the
+--      backfill-users function), at most one cron tick late.
+-- Both inserts use ON CONFLICT on follower_following_idx, so a row that already
+-- exists, or one a concurrent sign-in wrote first, is skipped and fires no
+-- trigger; trigger_sync_follow_counts recounts from the table on each real
+-- insert, so the counts cannot double. Once nothing is missing both inserts
+-- touch no rows and 'remaining' reports 0.
+CREATE OR REPLACE FUNCTION public.backfill_brand_follows(
+  p_brand_id integer,
+  p_limit integer DEFAULT 250,
+  p_new_profile_window interval DEFAULT interval '7 days'
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 250), 1), 1000);
+  v_member_to_brand integer := 0;
+  v_brand_to_member integer := 0;
+  v_remaining integer := 0;
+BEGIN
+  IF p_brand_id IS NULL OR p_brand_id <= 0
+     OR NOT EXISTS (SELECT 1 FROM public.users WHERE id = p_brand_id) THEN
+    RAISE EXCEPTION 'valid brand profile required';
+  END IF;
+  IF p_new_profile_window IS NULL THEN
+    RAISE EXCEPTION 'a new-profile window is required';
+  END IF;
+
+  INSERT INTO public.follows (follower_id, following_id)
+  SELECT u.id, p_brand_id
+  FROM public.users u
+  WHERE u.id <> p_brand_id
+    AND NOT EXISTS (
+      SELECT 1 FROM public.follows f
+      WHERE f.follower_id = u.id AND f.following_id = p_brand_id
+    )
+    AND public.brand_follow_eligible(u.id, p_brand_id)
+  ORDER BY u.id
+  LIMIT v_limit
+  ON CONFLICT (follower_id, following_id) DO NOTHING;
+  GET DIAGNOSTICS v_member_to_brand = ROW_COUNT;
+
+  INSERT INTO public.follows (follower_id, following_id)
+  SELECT p_brand_id, u.id
+  FROM public.users u
+  WHERE u.id <> p_brand_id
+    AND u.created_at >= now() - p_new_profile_window
+    AND NOT EXISTS (
+      SELECT 1 FROM public.follows f
+      WHERE f.follower_id = p_brand_id AND f.following_id = u.id
+    )
+    AND public.brand_follow_eligible(u.id, p_brand_id)
+  ORDER BY u.id
+  LIMIT v_limit
+  ON CONFLICT (follower_id, following_id) DO NOTHING;
+  GET DIAGNOSTICS v_brand_to_member = ROW_COUNT;
+
+  SELECT count(*) INTO v_remaining
+  FROM public.users u
+  WHERE u.id <> p_brand_id
+    AND NOT EXISTS (
+      SELECT 1 FROM public.follows f
+      WHERE f.follower_id = u.id AND f.following_id = p_brand_id
+    )
+    AND public.brand_follow_eligible(u.id, p_brand_id);
+
+  RETURN jsonb_build_object(
+    'memberToBrandInserted', v_member_to_brand,
+    'brandToNewMemberInserted', v_brand_to_member,
+    'remaining', v_remaining
   );
 END;
 $$;
@@ -164,9 +284,13 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.brand_follow_eligible(integer, integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ensure_brand_follow_relationships(integer, integer, boolean, interval) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.backfill_brand_follows(integer, integer, interval) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.enqueue_brand_onboarding(text, interval, interval) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.brand_follow_eligible(integer, integer) TO service_role;
 GRANT EXECUTE ON FUNCTION public.ensure_brand_follow_relationships(integer, integer, boolean, interval) TO service_role;
+GRANT EXECUTE ON FUNCTION public.backfill_brand_follows(integer, integer, interval) TO service_role;
 GRANT EXECUTE ON FUNCTION public.enqueue_brand_onboarding(text, interval, interval) TO service_role;
 
 -- Schedule the existing worker. It remains fail-closed until the brand sender,
@@ -196,7 +320,7 @@ BEGIN
       'Content-Type', 'application/json',
       'x-cron-secret', v_secret
     ),
-    body := '{}'::jsonb,
+    body := '{"follow_backfill_limit":250}'::jsonb,
     timeout_milliseconds := 120000
   );
 END;

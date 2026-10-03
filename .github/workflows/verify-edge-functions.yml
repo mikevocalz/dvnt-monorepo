@@ -16,6 +16,7 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-brand-follows.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -25,6 +26,7 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-brand-follows.mjs"
 
 jobs:
   verify:
@@ -72,3 +74,18 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-call-capacity.mjs
+
+  brand-follow-backfill:
+    # Replays the @DeviantEvents follow functions on a throwaway cluster and
+    # checks the backfill batches, skips ineligible accounts, never duplicates
+    # a follow or drifts the counts, and never has the brand follow old
+    # members. No --allow-skip, for the same reason as the job above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-brand-follows.mjs
