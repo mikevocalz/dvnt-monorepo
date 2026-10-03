@@ -19,7 +19,7 @@
  *
  * Returns:
  *   200 { ok: true, data: { ticket_id, event_id, already_claimed } }
- *   4xx { ok: false, error: { code, message } }
+ *   4xx { ok: false, error: <message>, code }
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -43,7 +43,9 @@ function json(data: unknown, status: number, req: Request) {
 }
 
 function refuse(status: number, code: string, message: string, req: Request) {
-  return json({ ok: false, error: { code, message } }, status, req);
+  // `error` is the message string: the client's invokeEdge surfaces a string
+  // `error` as-is, and the status already says which refusal it was.
+  return json({ ok: false, error: message, code }, status, req);
 }
 
 Deno.serve(async (req: Request) => {
