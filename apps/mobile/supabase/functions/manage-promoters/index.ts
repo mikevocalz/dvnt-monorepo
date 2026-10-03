@@ -606,6 +606,10 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
         return json({ error: "Could not add promoter" }, 500, req);
       }
 
+      // Insert-only: ON CONFLICT (organizer_auth_id, promoter_auth_id) DO
+      // NOTHING. An existing library entry holds the host's saved code and
+      // rates; adding the promoter to one event must not overwrite them.
+      // Edits to a saved entry go through library-save.
       if (userId && body.save_to_library !== false) {
         const { error: librarySaveError } = await supabase
           .from("promoter_library_entries")
@@ -619,7 +623,10 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
               promoter_commission_bps: promoterCommissionBps,
               updated_at: new Date().toISOString(),
             },
-            { onConflict: "organizer_auth_id,promoter_auth_id" },
+            {
+              onConflict: "organizer_auth_id,promoter_auth_id",
+              ignoreDuplicates: true,
+            },
           );
         if (librarySaveError) {
           console.warn("[manage-promoters] library autosave failed (non-fatal):", librarySaveError);
