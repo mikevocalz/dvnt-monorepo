@@ -48,7 +48,7 @@ import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import { slugify } from "@dvnt/app/lib/slug";
 import { EVENT_VISIBILITY_COPY } from "@dvnt/app/lib/events/event-visibility-copy";
-import { eventEnded } from "@dvnt/app/lib/events/event-time";
+import { eventEnded, formatEventWhen } from "@dvnt/app/lib/events/event-time";
 import { EVENT_CARD_ASPECT } from "@dvnt/app/components/event/feed-event-card-shape";
 import {
   resolvePosterUrl,
@@ -91,6 +91,16 @@ function shortDate(iso?: string): string {
     month: "short",
     day: "numeric",
   });
+}
+
+/**
+ * Card date line. With a recorded zone it is day and time in that zone with
+ * its label ("Fri, Jul 10 at 8:00 PM PDT"); without one it stays the
+ * viewer-local day it always was.
+ */
+function cardDate(e: Event): string {
+  const iso = e.fullDate || e.date;
+  return (e.event_tz && formatEventWhen(iso, e)) || shortDate(iso);
 }
 
 const dateOf = (e: Event) => new Date(e.fullDate || e.date || "");
@@ -677,7 +687,7 @@ function LargeEventCard({
       <div className="absolute inset-x-0 bottom-0 p-5">
         <div className="flex items-center gap-1.5 text-[#379ED8] text-xs font-semibold">
           <Calendar size={14} />
-          {shortDate(e.fullDate || e.date)}
+          {cardDate(e)}
         </div>
         <div className="text-2xl font-extrabold leading-tight mt-1 line-clamp-2">
           {e.title}
@@ -739,7 +749,7 @@ function EventCard({
         )}
       </div>
       <div className="text-[#379ED8] text-[11px] font-semibold mt-1.5">
-        {shortDate(e.fullDate || e.date)}
+        {cardDate(e)}
       </div>
       <div className="text-sm font-semibold leading-snug line-clamp-2">
         {e.title}

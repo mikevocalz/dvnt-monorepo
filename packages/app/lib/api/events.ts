@@ -21,6 +21,7 @@ import {
   eventSalesClosed,
   formatEventClock,
   formatEventDay,
+  listRowZoneFields,
   type EventZoneFields,
 } from "../events/event-time";
 import type { TicketTypeCategory } from "./ticket-types";
@@ -158,8 +159,7 @@ function normalizeVisibility(
 /**
  * Card date parts. With the event row passed in, day/month/time come from the
  * event's zone and `time` carries its abbreviation ("8:00 PM PDT"). Rows with
- * no recorded zone (and the RPC lists, which do not return event_tz) keep the
- * viewer-local, unlabelled output.
+ * no recorded zone keep the viewer-local, unlabelled output.
  */
 export function formatEventDate(
   isoDate: string | null | undefined,
@@ -313,7 +313,8 @@ export const eventsApi = {
       // — this is the client-side half, so the list is correct on a build that
       // reaches a database where that migration has not run yet.
       const mapped = filterDiscoverableEvents((data as any[]) || []).map((event: any) => {
-        const dateParts = formatEventDate(event.start_date);
+        const zone = listRowZoneFields(event);
+        const dateParts = formatEventDate(event.start_date, zone);
         const avatars = Array.isArray(event.attendee_avatars)
           ? event.attendee_avatars
           : [];
@@ -348,6 +349,8 @@ export const eventsApi = {
           // badge. RPC now returns this; we just pass it through.
           status: event.status || undefined,
           cancelledAt: event.cancelled_at || undefined,
+          event_tz: zone.event_tz,
+          isOnline: zone.is_online,
           locationLat:
             event.location_lat != null ? Number(event.location_lat) : undefined,
           locationLng:
@@ -411,7 +414,8 @@ export const eventsApi = {
       // — this is the client-side half, so the list is correct on a build that
       // reaches a database where that migration has not run yet.
       const mapped = filterDiscoverableEvents((data as any[]) || []).map((event: any) => {
-        const dateParts = formatEventDate(event.start_date);
+        const zone = listRowZoneFields(event);
+        const dateParts = formatEventDate(event.start_date, zone);
         const avatars = Array.isArray(event.attendee_avatars)
           ? event.attendee_avatars
           : [];
@@ -441,6 +445,8 @@ export const eventsApi = {
           category: event.category || undefined,
           status: event.status || undefined,
           cancelledAt: event.cancelled_at || undefined,
+          event_tz: zone.event_tz,
+          isOnline: zone.is_online,
           friendsGoing: event.friends_going || 0,
           host: {
             username: event.host_username || "unknown",

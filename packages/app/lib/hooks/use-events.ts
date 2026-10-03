@@ -76,6 +76,9 @@ export interface Event {
   month?: string;
   fullDate?: string;
   time?: string;
+  /** IANA venue zone; null when the event never recorded one. */
+  event_tz?: string | null;
+  isOnline?: boolean;
   category?: string;
   likes?: number;
   isLiked?: boolean;

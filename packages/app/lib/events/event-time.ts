@@ -95,6 +95,22 @@ export interface EventZoneFields {
   isOnline?: boolean | null;
 }
 
+/**
+ * Zone fields for a get_events_home / get_events_for_you row. Those return
+ * event_tz and location_type but not is_online; location_type 'virtual' is the
+ * same flag (every live row agrees). An unknown zone becomes null so the card
+ * keeps the unlabelled viewer-local output.
+ */
+export function listRowZoneFields(row: {
+  event_tz?: unknown;
+  location_type?: unknown;
+} | null | undefined): { event_tz: string | null; is_online: boolean } {
+  return {
+    event_tz: normalizeTimeZone(row?.event_tz),
+    is_online: row?.location_type === "virtual",
+  };
+}
+
 function zoneFor(event: EventZoneFields | null | undefined, viewerTz?: string) {
   return displayZone(
     event?.event_tz ?? event?.eventTz,
