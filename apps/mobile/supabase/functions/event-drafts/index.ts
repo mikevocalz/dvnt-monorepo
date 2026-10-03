@@ -284,10 +284,19 @@ Deno.serve(async (req: Request) => {
       if (!data) return errorResponse("Draft changed on another device. Reload it before saving.", 409);
       return jsonResponse({ ok: true, draft: data });
     }
+    // draftSourceEventId comes from the client. Store defaults are null, and
+    // Number(null) is 0, which breaks the events FK. A positive id is kept only
+    // when the caller hosts that event, so a draft cannot claim someone else's.
+    const sourceId = Number(payload.draftSourceEventId);
+    let sourceEventId: number | null = null;
+    if (Number.isSafeInteger(sourceId) && sourceId > 0) {
+      const { data: source } = await db.from("events").select("id,host_id")
+        .eq("id", sourceId).maybeSingle();
+      if (source && String(source.host_id) === authId) sourceEventId = sourceId;
+    }
     const { data, error } = await db.from("event_drafts").insert({
       owner_auth_id: authId,
-      source_event_id: Number.isSafeInteger(Number(payload.draftSourceEventId))
-        ? Number(payload.draftSourceEventId) : null,
+      source_event_id: sourceEventId,
       title,
       payload,
       revision: 1,
