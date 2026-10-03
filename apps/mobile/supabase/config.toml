@@ -512,3 +512,6 @@ verify_jwt = false
 
 [functions.first-post-offer]
 verify_jwt = false
+
+[functions.event-drafts]
+verify_jwt = false

@@ -235,6 +235,31 @@ export function EventOrganizerScreen() {
   const eventId = Array.isArray(rawId) ? rawId[0] ?? "" : rawId ?? "";
 
   const showToast = useUIStore((s) => s.showToast);
+  const duplicateLock = useRef(false);
+
+  const handleDuplicateEvent = useCallback(async () => {
+    const numericId = Number(eventId);
+    if (!Number.isSafeInteger(numericId) || numericId <= 0 || duplicateLock.current) return;
+    duplicateLock.current = true;
+    try {
+      const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
+      await eventDraftsApi.duplicateEvent(numericId);
+      showToast(
+        "success",
+        "Draft created",
+        "We copied the event setup. Pick a new date before publishing.",
+      );
+      router.push("/feed/events/create");
+    } catch (error) {
+      showToast(
+        "error",
+        "Couldn't duplicate event",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    } finally {
+      duplicateLock.current = false;
+    }
+  }, [eventId, router, showToast]);
 
   // Offline check-in state (Zustand — exact native store)
   const offlineStore = useOfflineCheckinStore();
@@ -526,7 +551,7 @@ export function EventOrganizerScreen() {
             </button>
           </div>
 
-          {/* Sub-tool nav: Promoters (WS-4 — tracked links + rev share) */}
+          {/* Sub-tool nav: Promoters + intentional duplicate-to-draft */}
           <div className="flex gap-2">
             <button
               type="button"
@@ -535,6 +560,14 @@ export function EventOrganizerScreen() {
             >
               <Megaphone size={16} color="#C084FC" />
               Promoters
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDuplicateEvent()}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/6 py-3 text-[13px] font-semibold text-white active:bg-white/8"
+            >
+              <span aria-hidden className="text-base leading-none text-[#3FDCFF]">＋</span>
+              Duplicate Event
             </button>
           </div>
         </div>

@@ -73,6 +73,30 @@ interface CoOrganizer {
  */
 export type EventGuestDraft = CoOrganizer;
 
+export interface PromoterTemplateDraft {
+  username: string | null;
+  displayName: string;
+  code: string;
+  customerDiscountBps: number;
+  promoterCommissionBps: number;
+}
+
+/**
+ * A standalone promo code on the event a draft was duplicated from. Display
+ * only: event-drafts copy_promo_codes re-reads the source on publish.
+ */
+export interface PromoCodeTemplateDraft {
+  code: string;
+  discountType: string;
+  discountValue: number;
+  maxUses: number | null;
+  validFrom: string | null;
+  validUntil: string | null;
+  ticketTierName: string | null;
+  /** Redeemable right now by the rules in _shared/apply-promo-code.ts. */
+  active: boolean;
+}
+
 /** Editor row → `price_schedule` jsonb entry ("price changes to $X at T"). */
 export interface TierScheduleRow {
   effectiveAt: string; // ISO — when the new price takes effect
@@ -106,6 +130,13 @@ interface TicketTier {
 // Fields that persist as a draft
 interface DraftFields {
   clientRequestId: string | null;
+  /** Server-backed named draft identity; null means this is only the local autosave. */
+  serverDraftId: string | null;
+  serverDraftRevision: number | null;
+  /** Live event this draft was intentionally duplicated from. */
+  draftSourceEventId: number | null;
+  /** Duplicate Event cannot publish until the organizer explicitly picks a date. */
+  scheduleNeedsReview: boolean;
   title: string;
   description: string;
   location: string;
@@ -145,6 +176,15 @@ interface DraftFields {
   addons: DraftAddon[];
   coOrganizers: CoOrganizer[];
   guests: EventGuestDraft[];
+  /** Fresh promoter invitations to recreate after publishing a duplicated event. */
+  promoterTemplates: PromoterTemplateDraft[];
+  /** Promo codes the duplicated event will carry; shown on review. */
+  promoCodeTemplates: PromoCodeTemplateDraft[];
+  /**
+   * IANA zone of the event this draft was duplicated from. Publish sends it
+   * instead of the publisher's device zone. Null for a fresh draft.
+   */
+  eventTz: string | null;
   flyerImage: string | null;
   flyerMediaType: "image" | "video";
   // Fallback still image shown when the primary flyer is a video and the
@@ -163,6 +203,7 @@ interface UIFields {
   showEndDatePicker: boolean;
   showEndTimePicker: boolean;
   isSubmitting: boolean;
+  isSavingDraft: boolean;
   uploadProgress: number;
   customTag: string;
   lineupInput: string;
@@ -192,6 +233,14 @@ interface UIFields {
 
 interface CreateEventActions {
   getPublishRequestId: () => string;
+  setServerDraftMeta: (id: string | null, revision: number | null) => void;
+  setPromoterTemplates: (
+    v: PromoterTemplateDraft[] | ((prev: PromoterTemplateDraft[]) => PromoterTemplateDraft[]),
+  ) => void;
+  loadServerDraft: (
+    payload: Partial<DraftFields>,
+    meta: { id: string; revision: number },
+  ) => void;
   // Draft field setters
   setTitle: (v: string) => void;
   setDescription: (v: string) => void;
@@ -233,6 +282,7 @@ interface CreateEventActions {
   setShowEndDatePicker: (v: boolean) => void;
   setShowEndTimePicker: (v: boolean) => void;
   setIsSubmitting: (v: boolean) => void;
+  setIsSavingDraft: (v: boolean) => void;
   setUploadProgress: (v: number) => void;
   setCustomTag: (v: string) => void;
   setLineupInput: (v: string) => void;
@@ -284,6 +334,10 @@ type CreateEventState = DraftFields & UIFields & CreateEventActions;
 
 const DRAFT_DEFAULTS: DraftFields = {
   clientRequestId: null,
+  serverDraftId: null,
+  serverDraftRevision: null,
+  draftSourceEventId: null,
+  scheduleNeedsReview: false,
   title: "",
   description: "",
   location: "",
@@ -311,6 +365,9 @@ const DRAFT_DEFAULTS: DraftFields = {
   addons: [],
   coOrganizers: [],
   guests: [],
+  promoterTemplates: [],
+  promoCodeTemplates: [],
+  eventTz: null,
   flyerImage: null,
   flyerMediaType: "image",
   flyerFallbackImage: null,
@@ -325,6 +382,7 @@ const UI_DEFAULTS: UIFields = {
   showEndDatePicker: false,
   showEndTimePicker: false,
   isSubmitting: false,
+  isSavingDraft: false,
   uploadProgress: 0,
   customTag: "",
   lineupInput: "",
@@ -360,7 +418,7 @@ export const useCreateEventStore = create<CreateEventState>()(
       setEventImages: (v) =>
         set((s) => ({ eventImages: resolve(v, s.eventImages) })),
       setTags: (v) => set((s) => ({ tags: resolve(v, s.tags) })),
-      setEventDate: (v) => set({ eventDate: v }),
+      setEventDate: (v) => set({ eventDate: v, scheduleNeedsReview: false }),
       setEndDate: (v) => set({ endDate: v }),
       setEventTz: (v) => set({ eventTz: v }),
       setTicketPrice: (v) => set({ ticketPrice: v }),
@@ -386,6 +444,21 @@ export const useCreateEventStore = create<CreateEventState>()(
       setEventType: (v) => set({ eventType: v }),
       setDisclaimers: (v) => set({ disclaimers: v }),
       setIsNsfw: (v) => set({ isNsfw: v }),
+      setServerDraftMeta: (id, revision) =>
+        set({ serverDraftId: id, serverDraftRevision: revision }),
+      setPromoterTemplates: (v) =>
+        set((s) => ({ promoterTemplates: resolve(v, s.promoterTemplates) })),
+      loadServerDraft: (payload, meta) =>
+        set({
+          ...DRAFT_DEFAULTS,
+          ...UI_DEFAULTS,
+          ...payload,
+          // A server draft is configuration, never a continuation of a live
+          // publish idempotency operation from another device.
+          clientRequestId: null,
+          serverDraftId: meta.id,
+          serverDraftRevision: meta.revision,
+        }),
 
       getPublishRequestId: () => {
         const existing = get().clientRequestId;
@@ -401,6 +474,7 @@ export const useCreateEventStore = create<CreateEventState>()(
       setShowEndDatePicker: (v) => set({ showEndDatePicker: v }),
       setShowEndTimePicker: (v) => set({ showEndTimePicker: v }),
       setIsSubmitting: (v) => set({ isSubmitting: v }),
+      setIsSavingDraft: (v) => set({ isSavingDraft: v }),
       setUploadProgress: (v) => set({ uploadProgress: v }),
       setCustomTag: (v) => set({ customTag: v }),
       setLineupInput: (v) => set({ lineupInput: v }),
@@ -552,6 +626,10 @@ export const useCreateEventStore = create<CreateEventState>()(
       },
       partialize: (state) => ({
         clientRequestId: state.clientRequestId,
+        serverDraftId: state.serverDraftId,
+        serverDraftRevision: state.serverDraftRevision,
+        draftSourceEventId: state.draftSourceEventId,
+        scheduleNeedsReview: state.scheduleNeedsReview,
         title: state.title,
         description: state.description,
         location: state.location,
@@ -579,6 +657,9 @@ export const useCreateEventStore = create<CreateEventState>()(
         addons: state.addons,
         coOrganizers: state.coOrganizers,
         guests: state.guests,
+        promoterTemplates: state.promoterTemplates,
+        promoCodeTemplates: state.promoCodeTemplates,
+        eventTz: state.eventTz,
         flyerImage: state.flyerImage,
         flyerMediaType: state.flyerMediaType,
         flyerFallbackImage: state.flyerFallbackImage,

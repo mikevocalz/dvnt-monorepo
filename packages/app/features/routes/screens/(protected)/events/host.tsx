@@ -20,6 +20,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -29,6 +30,8 @@ import {
   ChevronRight,
   ChevronDown,
   Calendar,
+  FilePenLine,
+  Trash2,
   Ticket,
   TrendingUp,
 } from "lucide-react-native";
@@ -37,6 +40,10 @@ import {
   type HostDashboardEvent,
 } from "@dvnt/app/lib/api/privileged";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
+import {
+  eventDraftsApi,
+  type EventDraftSummary,
+} from "@dvnt/app/lib/api/event-drafts";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 function formatMoney(cents: number): string {
@@ -210,6 +217,56 @@ function CollapsibleSection({
   );
 }
 
+function SavedDrafts({
+  drafts,
+  onOpen,
+  onDelete,
+}: {
+  drafts: EventDraftSummary[];
+  onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  if (drafts.length === 0) return null;
+  return (
+    <View>
+      <Text style={styles.sectionLabel}>SAVED DRAFTS · {drafts.length}</Text>
+      {drafts.map((draft) => (
+        <View key={draft.id} style={styles.savedDraftRow}>
+          <Pressable
+            onPress={() => onOpen(draft.id)}
+            style={styles.savedDraftMain}
+            accessibilityRole="button"
+            accessibilityLabel={`Continue draft ${draft.title || "Untitled event"}`}
+          >
+            <View style={styles.savedDraftIcon}>
+              <FilePenLine size={18} color="#3FDCFF" />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.savedDraftTitle} numberOfLines={1}>
+                {draft.title || "Untitled event"}
+              </Text>
+              <Text style={styles.eventMeta} numberOfLines={1}>
+                Updated {new Date(draft.updated_at).toLocaleString()}
+                {draft.source_event_id ? " · duplicated event" : ""}
+              </Text>
+            </View>
+            <ChevronRight size={18} color="rgba(255,255,255,0.25)" />
+          </Pressable>
+          <Pressable
+            onPress={() => onDelete(draft.id)}
+            style={styles.savedDraftDelete}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete draft ${draft.title || "Untitled event"}`}
+          >
+            <Trash2 size={16} color="rgba(255,255,255,0.45)" />
+          </Pressable>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export default function HostDashboardScreen() {
   const router = useRouter();
   const q = useQuery({
@@ -217,6 +274,50 @@ export default function HostDashboardScreen() {
     queryFn: getHostDashboard,
     staleTime: 30_000,
   });
+  const savedDrafts = useQuery({
+    queryKey: ["event-drafts"],
+    queryFn: eventDraftsApi.list,
+    staleTime: 10_000,
+  });
+
+  const openSavedDraft = useCallback(
+    async (draftId: string) => {
+      try {
+        await eventDraftsApi.open(draftId);
+        router.push("/(protected)/events/create" as any);
+      } catch (error) {
+        Alert.alert(
+          "Couldn't open draft",
+          error instanceof Error ? error.message : "Try again.",
+        );
+      }
+    },
+    [router],
+  );
+
+  const deleteSavedDraft = useCallback(
+    (draftId: string) => {
+      Alert.alert("Delete draft?", "This saved draft will be permanently deleted.", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void eventDraftsApi
+              .delete(draftId)
+              .then(() => savedDrafts.refetch())
+              .catch((error) =>
+                Alert.alert(
+                  "Couldn't delete draft",
+                  error instanceof Error ? error.message : "Try again.",
+                ),
+              );
+          },
+        },
+      ]);
+    },
+    [savedDrafts],
+  );
 
   const goEvent = useCallback(
     (id: number) => router.push(`/(protected)/events/${id}` as any),
@@ -275,7 +376,8 @@ export default function HostDashboardScreen() {
     data.tonight.length === 0 &&
     data.upcoming.length === 0 &&
     data.drafts.length === 0 &&
-    data.past.length === 0;
+    data.past.length === 0 &&
+    (savedDrafts.data?.length ?? 0) === 0;
 
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
@@ -318,6 +420,12 @@ export default function HostDashboardScreen() {
             accent={tierAccent("free")}
           />
         </View>
+
+        <SavedDrafts
+          drafts={savedDrafts.data ?? []}
+          onOpen={(id) => void openSavedDraft(id)}
+          onDelete={deleteSavedDraft}
+        />
 
         {empty ? (
           <View style={styles.emptyWrap}>
@@ -458,6 +566,42 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
 
+  savedDraftRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 8,
+    borderRadius: 12,
+  },
+  savedDraftMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10,
+    paddingLeft: 8,
+  },
+  savedDraftIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(63,220,255,0.18)",
+    backgroundColor: "rgba(63,220,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  savedDraftTitle: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  savedDraftDelete: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 4,
+  },
   sectionLabel: {
     paddingHorizontal: 16,
     paddingTop: 24,
