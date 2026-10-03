@@ -39,3 +39,13 @@ test("waiting time reads in minutes, then hours", () => {
   assert.equal(waitingSinceLabel("2026-10-03T18:00:00Z", now), "Waiting 2 h");
   assert.equal(waitingSinceLabel("not a date", now), "Just arrived");
 });
+
+test("every Lynk path that hosts, joins or re-mints a token runs verified admission", () => {
+  const fnDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "apps", "mobile", "supabase", "functions");
+  for (const fn of ["video_create_room", "video_join_room", "video_refresh_token", "lynk-moq-token", "lynk-livestream-token"]) {
+    const src = readFileSync(join(fnDir, fn, "index.ts"), "utf8");
+    const call = src.indexOf("resolveVerifiedAdmission(supabase, userId)");
+    assert.ok(call > 0, `${fn} never calls resolveVerifiedAdmission`);
+    assert.match(src.slice(call, call + 400), /admission\.state === "blocked"[\s\S]*?admissionRefusal\(admission\)/, `${fn} does not refuse a blocked verdict`);
+  }
+});
