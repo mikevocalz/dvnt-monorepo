@@ -85,6 +85,8 @@ test('a member the host blocked is not invited or notified', async () => {
   assert.equal(got.status, 200);
   assert.deepEqual(h.writes.video_room_invites.map((r) => r.user_id), ['friend-auth']);
   assert.deepEqual(h.writes.notifications.map((r) => r.recipient_id), [2]);
+  // The Activity row names the host; without actor_id it renders with no sender.
+  assert.deepEqual(h.writes.notifications.map((r) => r.actor_id), [1]);
   assert.equal(got.body.invited, 1);
 });
 

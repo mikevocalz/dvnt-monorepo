@@ -8,7 +8,7 @@ Deno.serve(async(req)=>{
  const db=createClient(SUPABASE_URL, SERVICE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
  const actor=await verifySession(db,req); if(!actor) return json(req,{ok:false,error:"Unauthorized"},401);
  const body=await req.json().catch(()=>({})); const eventId=Number(body.event_id);
- const targets=Array.isArray(body.user_ids)?[...new Set(body.user_ids.map(String))].slice(0,50):[];
+ const targets:string[]=Array.isArray(body.user_ids)?[...new Set<string>(body.user_ids.map(String))].slice(0,50):[];
  if(!Number.isInteger(eventId)||!targets.length) return json(req,{ok:false,error:"event_id and user_ids required"},400);
  const {data:event}=await db.from("events").select("id,host_id,lynk_room_id,status").eq("id",eventId).maybeSingle();
  if(!event?.lynk_room_id) return json(req,{ok:false,error:"Event Lynk not found"},404);
@@ -44,7 +44,7 @@ Deno.serve(async(req)=>{
    const {error:inviteError}=await db.from("video_room_invites").upsert(valid.map((id:string)=>({room_id:room.id,user_id:id,invited_by:actor})),{onConflict:"room_id,user_id"});
    if(inviteError) return json(req,{ok:false,error:"Could not save invites"},500);
    const {error:notifyError}=await db.from("notifications").insert(valid.map((id:string)=>({
-     recipient_id:intByAuth.get(id),type:"room_invite",entity_type:"event",entity_id:String(eventId),
+     recipient_id:intByAuth.get(id),actor_id:actorInt,type:"room_invite",entity_type:"event",entity_id:String(eventId),
      entity_payload:{url:`/feed/sneaky-lynk/room/${event.lynk_room_id}`,event_id:eventId},
    })));
    // The invites are saved, which is what admits the member to the room.
