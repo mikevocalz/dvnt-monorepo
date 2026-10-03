@@ -1,22 +1,28 @@
--- Discovery RPCs return event_tz
+-- Discovery RPCs: return event_tz, and list only published events
 --
 -- Home and For You cards print event times, but get_events_home and
 -- get_events_for_you never returned events.event_tz, so a card could not say
--- which zone a time is in. This adds that one column to the JSON each row
--- carries. Nothing else changes: same signatures, STABLE SECURITY DEFINER,
--- SET search_path, filters and ordering. CREATE OR REPLACE keeps the existing
--- grants, so none are restated here.
+-- which zone a time is in. Each now returns it.
+--
+-- They also take the publication rule from 20261003110000: an event is listed
+-- only when it is public, not hidden, and its publish_at (if any) has passed:
+--   AND NOT e.is_hidden
+--   AND (e.publish_at IS NULL OR e.publish_at <= now())
+-- added under the existing visibility filter. publish_at is compared with now()
+-- at query time, so a scheduled event appears on its own once the time passes.
+--
+-- Nothing else changes: same signatures, STABLE SECURITY DEFINER, SET
+-- search_path, columns, filters and ordering. CREATE OR REPLACE keeps the
+-- existing grants, so none are restated here. Only the 11-argument
+-- get_events_home overload is here (the one both clients call); the
+-- 10-argument overload is redefined in 20261003110000.
 --
 -- Each body below is the LIVE definition from project npfjanxturvmjyevoyfo,
--- read on 2026-10-03 with pg_get_functiondef, plus the line `e.event_tz,`
--- after `e.cancelled_at,`. The live text is quoted under BEGIN LIVE / END
--- LIVE so the static test (packages/app/lib/events/discovery-rpc-event-tz.test.ts)
--- can prove the diff is that one line. The md5 is md5(pg_get_functiondef(oid))
--- as returned live; the test recomputes it over the quoted text.
---
--- Only the 11-argument get_events_home overload is redefined: it is the one
--- both clients call (they always pass p_nsfw). The 10-argument overload is
--- left as it is.
+-- read on 2026-10-03 with pg_get_functiondef, plus those lines. The live text
+-- is quoted under BEGIN LIVE / END LIVE with md5(pg_get_functiondef(oid)) as
+-- returned live. packages/app/lib/events/live-function-redefinitions.test.ts
+-- recomputes each md5 and checks every new body is the quoted text with only
+-- the listed edits applied.
 --
 -- No constraint, trigger or write path is touched.
 --
@@ -354,6 +360,8 @@ BEGIN
     WHERE e.start_date IS NOT NULL
       AND COALESCE(e.end_date, e.start_date + interval '6 hours') >= now() - interval '24 hours'
       AND COALESCE(e.visibility, 'public') = 'public'
+      AND NOT e.is_hidden
+      AND (e.publish_at IS NULL OR e.publish_at <= now())
       AND (p_nsfw IS NULL OR COALESCE(e.nsfw, false) = p_nsfw)
       AND (p_filter_online IS NULL OR
            (p_filter_online = true AND e.location_type = 'virtual') OR
@@ -383,8 +391,7 @@ BEGIN
 
   RETURN COALESCE(v_result, '[]'::json);
 END;
-$function$
-;
+$function$;
 
 CREATE OR REPLACE FUNCTION public.get_events_for_you(p_viewer_id integer, p_limit integer DEFAULT 20, p_offset integer DEFAULT 0)
  RETURNS json
@@ -507,6 +514,8 @@ BEGIN
     ) cat_affinity ON true
     WHERE e.start_date IS NOT NULL
       AND COALESCE(e.visibility, 'public') = 'public'
+      AND NOT e.is_hidden
+      AND (e.publish_at IS NULL OR e.publish_at <= now())
       AND COALESCE(e.status, 'active') NOT IN ('cancelled', 'canceled', 'draft', 'suspended')
     ORDER BY score DESC, e.start_date ASC
     LIMIT p_limit
@@ -515,5 +524,4 @@ BEGIN
 
   RETURN COALESCE(v_result, '[]'::json);
 END;
-$function$
-;
+$function$;
