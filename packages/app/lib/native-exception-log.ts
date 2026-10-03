@@ -21,7 +21,8 @@
  *   2. If present, NSLogs it again so the current session's logs show
  *      what killed the prior session (visible in TestFlight feedback
  *      attached devicelogs) and reports it to `analytics_events`
- *   3. Deletes the file only after Sentry accepts it; failed sends retry on boot
+ *   3. Deletes the file once every reachable sink has it (see reportPriorCrash);
+ *      transient failures retry on later boots, a bounded number of times
  *
  * Safe to call on every boot — defensive against missing / corrupted
  * file / wrong platform. NEVER throws.
@@ -34,7 +35,7 @@ import { Platform } from "react-native";
 import { readLastJSError, clearLastJSError } from "@dvnt/app/lib/global-error-handler";
 import { mmkv } from "@dvnt/app/lib/mmkv-zustand";
 import { crashSignature } from "@dvnt/observability/capture";
-import { reportIssue } from "@dvnt/app/lib/analytics/report-issue";
+import { deliverIssue } from "@dvnt/app/lib/analytics/report-issue";
 
 interface NativeExceptionPayload {
   timestamp: string;
@@ -48,78 +49,83 @@ interface NativeExceptionPayload {
 
 let _hasReportedThisSession = false;
 
-/** A receipt identifies an occurrence, not every future crash with this error. */
-const REPORTED_SIGNATURES_KEY = "DVNT_REPORTED_CRASH_RECEIPTS_V2";
-/** Bounded so a stream of distinct signatures cannot grow the record forever. */
-const MAX_TRACKED_SIGNATURES = 20;
 /** Frames kept on the event. The throwing class/selector is at the top of the
  *  stack; the rest is dispatch plumbing that repeats on every crash. */
 const STACK_FRAMES_ON_EVENT = 12;
 
 /**
- * Only acknowledge accepted deliveries. The old claim-before-send logic
- * permanently suppressed the error even when the first attempt was offline.
+ * Per-crash delivery ledger, keyed by a receipt that identifies one
+ * occurrence (signature + original timestamp), not every future crash with
+ * the same error.
+ *
+ * Each sink is tracked separately because they fail separately. The previous
+ * design retained the source until Sentry accepted it and wrote an
+ * analytics_events row on every attempt, so a build without
+ * EXPO_PUBLIC_SENTRY_DSN, or a Sentry project rejecting the envelope, turned
+ * one crash into one row per launch (measured: 10 rows over 5 boots for one
+ * JS crash plus one native crash).
+ *
+ *   a: analytics_events accepted the row. Never written again.
+ *   s: Sentry accepted the envelope. Never sent again.
+ *   n: delivery attempts so far.
  */
-function wasReported(receipt: string): boolean {
-  try {
-    const raw = mmkv.getString(REPORTED_SIGNATURES_KEY);
-    const seen: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(seen) && seen.includes(receipt);
-  } catch {
-    return false;
-  }
-}
+interface CrashLedgerEntry { a: boolean; s: boolean; n: number }
 
-function rememberReceipt(receipt: string): void {
-  try {
-    const raw = mmkv.getString(REPORTED_SIGNATURES_KEY);
-    const stored: unknown = raw ? JSON.parse(raw) : [];
-    const seen = Array.isArray(stored) ? stored.filter((v) => typeof v === "string") : [];
-    mmkv.set(REPORTED_SIGNATURES_KEY, JSON.stringify(
-      [...seen.filter((v) => v !== receipt), receipt].slice(-MAX_TRACKED_SIGNATURES),
-    ));
-  } catch {
-    // The source record can still be cleared after a confirmed delivery.
-  }
-}
-
-/** Attempts per receipt, so a build that can never deliver stops re-billing.
- *  Retention is keyed on acceptance, which is right, but it means a build with
- *  no EXPO_PUBLIC_SENTRY_DSN never clears the source and re-reads it on every
- *  relaunch — and reportIssue writes an analytics_events row each pass. That
- *  turns one crash into one row per source per launch, worst during the crash
- *  loop this reporting exists to diagnose. */
-const DELIVERY_ATTEMPTS_KEY = "DVNT_REPORTED_CRASH_ATTEMPTS_V2";
+const LEDGER_KEY = "DVNT_CRASH_DELIVERY_LEDGER_V3";
+/** Receipts written by the earlier V2 logic meant "Sentry accepted"; a crash
+ *  listed there was already reported and must not be sent again. */
+const LEGACY_RECEIPTS_KEY = "DVNT_REPORTED_CRASH_RECEIPTS_V2";
+/** Bounded so a stream of distinct crashes cannot grow the record forever. */
+const MAX_TRACKED_RECEIPTS = 20;
+/** Transient failures (offline, HTTP 5xx/429, timeouts) retry on later boots
+ *  up to this many attempts per crash. After that the source is released so
+ *  it is not re-read on every launch for the life of the install. */
 const MAX_DELIVERY_ATTEMPTS = 5;
 
-function readAttempts(): Record<string, number> {
+function readLedger(): Record<string, CrashLedgerEntry> {
   try {
-    const raw = mmkv.getString(DELIVERY_ATTEMPTS_KEY);
+    const raw = mmkv.getString(LEDGER_KEY);
     const stored: unknown = raw ? JSON.parse(raw) : {};
     if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
-    const counts: Record<string, number> = {};
+    const ledger: Record<string, CrashLedgerEntry> = {};
     for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
-      if (typeof value === "number" && Number.isFinite(value)) counts[key] = value;
+      const v = value as Partial<CrashLedgerEntry> | null;
+      if (!v || typeof v !== "object") continue;
+      ledger[key] = {
+        a: v.a === true,
+        s: v.s === true,
+        n: typeof v.n === "number" && Number.isFinite(v.n) ? v.n : 0,
+      };
     }
-    return counts;
+    return ledger;
   } catch {
     return {};
   }
 }
 
-function attemptCount(receipt: string): number {
-  return readAttempts()[receipt] ?? 0;
+function ledgerEntry(receipt: string): CrashLedgerEntry {
+  const entry = readLedger()[receipt];
+  if (entry) return entry;
+  try {
+    const raw = mmkv.getString(LEGACY_RECEIPTS_KEY);
+    const legacy: unknown = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(legacy) && legacy.includes(receipt)) return { a: true, s: true, n: 0 };
+  } catch {
+    // Treat an unreadable legacy record as empty.
+  }
+  return { a: false, s: false, n: 0 };
 }
 
-function recordAttempt(receipt: string): void {
+function writeLedgerEntry(receipt: string, entry: CrashLedgerEntry): void {
   try {
-    const counts = readAttempts();
-    counts[receipt] = (counts[receipt] ?? 0) + 1;
-    mmkv.set(DELIVERY_ATTEMPTS_KEY, JSON.stringify(
-      Object.fromEntries(Object.entries(counts).slice(-MAX_TRACKED_SIGNATURES)),
+    const ledger = readLedger();
+    delete ledger[receipt];
+    ledger[receipt] = entry;
+    mmkv.set(LEDGER_KEY, JSON.stringify(
+      Object.fromEntries(Object.entries(ledger).slice(-MAX_TRACKED_RECEIPTS)),
     ));
   } catch {
-    // Losing a counter costs one extra attempt, not correctness.
+    // Losing the ledger costs at most one repeat delivery, not correctness.
   }
 }
 
@@ -294,8 +300,18 @@ function logToConsole(report: NativeExceptionPayload): void {
  * `EXUpdates/ErrorRecovery.crash()`. The `.crash` files carry only the
  * re-raise; the reason string lives in these records and nowhere else.
  *
- * Never throws or blocks boot. The promise acknowledges Sentry acceptance;
- * callers retain the persisted source when it resolves false.
+ * Delivery contract, per crash occurrence (see CrashLedgerEntry):
+ *   - analytics_events gets at most one row. Once an insert succeeds the
+ *     ledger records it and later attempts skip that sink.
+ *   - Sentry gets at most one accepted envelope, and is retried only while
+ *     the build has a usable DSN. A build without EXPO_PUBLIC_SENTRY_DSN can
+ *     never deliver, so retaining the source for it only re-bills analytics.
+ *   - Transient failures retry on later boots, at most MAX_DELIVERY_ATTEMPTS
+ *     times in total.
+ *
+ * Never throws or blocks boot. Resolves true when the caller may clear the
+ * persisted source: every reachable sink accepted, or the attempt budget is
+ * spent. Resolves false when a retry on a later boot is still worthwhile.
  */
 export async function reportPriorCrash(kind: string, payload: Record<string, unknown>): Promise<boolean> {
   try {
@@ -306,7 +322,9 @@ export async function reportPriorCrash(kind: string, payload: Record<string, unk
     // Re-reading one persisted report must not bill twice, but a new crash
     // with the same error must remain visible (including after an upgrade).
     const receipt = `${signature}|${timestamp ?? "legacy-unknown-time"}`;
-    if (wasReported(receipt)) return true;
+    const known = ledgerEntry(receipt);
+    if (known.a && known.s) return true;
+    if (known.n >= MAX_DELIVERY_ATTEMPTS) return true;
     const pending = pendingDeliveries.get(receipt);
     if (pending) return await pending;
     // 2.8: the full callStackSymbols array rode along on every event. The
@@ -324,28 +342,42 @@ export async function reportPriorCrash(kind: string, payload: Record<string, unk
         }
       : payload;
 
-    // Resolve false without sending once the cap is hit: false means the
-    // caller retains the source, so a crash survives for a build that can
-    // actually deliver it, while costing nothing further per launch.
-    if (attemptCount(receipt) >= MAX_DELIVERY_ATTEMPTS) return false;
-
     const delivery = (async () => {
-      recordAttempt(receipt);
-      const accepted = await reportIssue("crash", {
+      const before = ledgerEntry(receipt);
+      // Count the attempt before sending: a process killed mid-request has
+      // still spent one of its attempts.
+      writeLedgerEntry(receipt, { ...before, n: before.n + 1 });
+      const outcome = await deliverIssue("crash", {
         kind,
         signature,
+        // Stable per occurrence, so rows can also be deduplicated server-side.
+        crash_id: receipt,
         timestamp,
         name: payload.name ?? null,
         reason: payload.message ?? payload.reason ?? null,
-        // reportIssue reads this top-level field; burying it under detail
+        // deliverIssue reads this top-level field; burying it under detail
         // discarded every persisted JS stack from Sentry's exception frames.
         stack: typeof payload.stack === "string" ? payload.stack : null,
         level: kind === "js" && payload.isFatal !== true ? "error" : "fatal",
         handled: false,
         detail,
-      });
-      if (accepted) rememberReceipt(receipt);
-      return accepted;
+      }, { sentry: !before.s, analytics: !before.a });
+      const after: CrashLedgerEntry = {
+        a: before.a || outcome.analytics === "accepted",
+        s: before.s || outcome.sentry === "accepted",
+        n: before.n + 1,
+      };
+      writeLedgerEntry(receipt, after);
+      const sentryDone = after.s || outcome.sentry === "unconfigured";
+      if (after.a && sentryDone) return true;
+      if (after.n >= MAX_DELIVERY_ATTEMPTS) {
+        console.warn(
+          `[NATIVE-CRASH] giving up on crash ${receipt} after ${after.n} attempts ` +
+            `(analytics ${after.a ? "accepted" : "failed"}, sentry ${after.s ? "accepted" : outcome.sentry})`,
+        );
+        return true;
+      }
+      return false;
     })().finally(() => pendingDeliveries.delete(receipt));
     pendingDeliveries.set(receipt, delivery);
     return await delivery;

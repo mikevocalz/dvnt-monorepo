@@ -126,14 +126,56 @@ test("HTTP 429 does not acknowledge either persisted source even when analytics 
   assert.equal(native.mmkv.getString(JS_KEY), undefined);
   assert.equal(native.disk.contents, null);
   assert.equal(native.disk.removals, 1);
+  // The retry went to Sentry only; analytics already had both rows.
+  assert.equal(native.analytics.rows.length, 2);
 });
 
-test("missing DSN retains the persisted report for a later correctly configured build", async () => {
+test("missing DSN: five boots write one analytics row per crash and release both sources", async () => {
   delete process.env.EXPO_PUBLIC_SENTRY_DSN;
   native.mmkv.set(JS_KEY, JSON.stringify(payload));
+  native.disk.contents = JSON.stringify({ ...payload, reason: payload.message, callStackSymbols: [] });
+  for (let i = 0; i < 5; i++) await launch();
+  // Before: the sources were retained and re-reported on every boot, 10 rows.
+  assert.equal(native.analytics.rows.length, 2);
+  assert.equal(responses.length, 0);
+  assert.equal(native.mmkv.getString(JS_KEY), undefined);
+  assert.equal(native.disk.contents, null);
+  const ids = native.analytics.rows.map((row: any) => row.metadata.crash_id);
+  assert.equal(new Set(ids).size, 2);
+});
+
+test("Sentry rejecting every send: one analytics row per crash, and retries stop at the cap", async () => {
+  status = 429;
+  native.mmkv.set(JS_KEY, JSON.stringify(payload));
+  for (let i = 0; i < 8; i++) await launch();
+  assert.equal(native.analytics.rows.length, 1);
+  assert.equal(responses.length, 5);
+  // Released once the attempt budget is spent, so it is not re-read forever.
+  assert.equal(native.mmkv.getString(JS_KEY), undefined);
+});
+
+test("an analytics failure retries on the next boot, then the row is written once", async () => {
+  delete process.env.EXPO_PUBLIC_SENTRY_DSN;
+  native.mmkv.set(JS_KEY, JSON.stringify(payload));
+  native.analytics.fail = true;
   await launch();
   assert.ok(native.mmkv.getString(JS_KEY));
+  native.analytics.fail = false;
+  native.analytics.rows.length = 0;
+  for (let i = 0; i < 4; i++) await launch();
+  assert.equal(native.analytics.rows.length, 1);
+  assert.equal(native.mmkv.getString(JS_KEY), undefined);
+});
+
+test("a crash already acknowledged by the V2 receipt record is not sent again", async () => {
+  native.mmkv.set(RECEIPTS_KEY, JSON.stringify([`${(await import(
+    new URL("../../../observability/src/capture.ts", import.meta.url).href,
+  )).crashSignature("js", payload)}|${payload.timestamp}`]));
+  native.mmkv.set(JS_KEY, JSON.stringify(payload));
+  await launch();
+  assert.equal(native.analytics.rows.length, 0);
   assert.equal(responses.length, 0);
+  assert.equal(native.mmkv.getString(JS_KEY), undefined);
 });
 
 test("acknowledging an older report cannot delete a new crash captured during the request", async () => {
