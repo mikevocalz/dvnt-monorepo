@@ -520,3 +520,12 @@ verify_jwt = false
 # other function here.
 [functions.claim-comp-ticket]
 verify_jwt = false
+
+[functions.event-followup-settings]
+verify_jwt = false
+
+[functions.process-event-followups]
+verify_jwt = false
+
+[functions.event-followup-unsubscribe]
+verify_jwt = false

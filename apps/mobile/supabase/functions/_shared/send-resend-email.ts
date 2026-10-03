@@ -34,6 +34,8 @@ export interface SendEmailArgs {
   html: string;
   /** Optional from override (defaults to RESEND_FROM_EMAIL). */
   from?: string;
+  /** Extra MIME headers, e.g. List-Unsubscribe. Omitted from the request when empty. */
+  headers?: Record<string, string>;
 }
 
 export async function sendResendEmail(
@@ -60,6 +62,7 @@ export async function sendResendEmail(
       to: [args.to],
       subject: args.subject,
       html: args.html,
+      ...(args.headers && Object.keys(args.headers).length ? { headers: args.headers } : {}),
     }),
   });
 
