@@ -50,6 +50,8 @@ import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import type { MediaKind, TextPostThemeKey } from "@dvnt/app/lib/types";
 import { useCreatePostUIStore } from "./create-post-ui-store";
+import { readVideoDurationSec } from "@dvnt/app/lib/media/video-duration.web";
+import { validateVideoPick, videoLimitsLabel } from "@dvnt/app/lib/media/video-pick-policy";
 
 const MAX_PHOTOS = 10;
 const MAX_ANIMATED_VIDEO_DURATION = 15; // seconds
@@ -157,13 +159,14 @@ export function CreatePostScreen() {
 
   // ---- Media intake (file input → object-URL MediaAssets) ----
 
-  const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
+  const onPickFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const files = Array.from(input.files ?? []);
     if (files.length === 0) return;
     const remaining = MAX_PHOTOS - selectedMedia.length;
     if (remaining <= 0) {
       showToast("warning", "Photo limit", `Maximum ${MAX_PHOTOS} photos per post.`);
-      e.target.value = "";
+      input.value = "";
       return;
     }
 
@@ -172,6 +175,23 @@ export function CreatePostScreen() {
       const isVideo = file.type.startsWith("video/");
       const isImage = file.type.startsWith("image/");
       if (!isVideo && !isImage) continue;
+      let durationSec: number | null = null;
+      if (isVideo) {
+        // Same limits media-upload enforces, checked before a byte is sent.
+        // The browser uploads the file as picked, so size counts here.
+        durationSec = await readVideoDurationSec(file);
+        const check = validateVideoPick({
+          kind: "post-video",
+          mimeType: file.type,
+          fileName: file.name,
+          sizeBytes: file.size,
+          durationSec,
+        });
+        if (!check.ok) {
+          showToast("error", check.title, check.message);
+          continue;
+        }
+      }
       if (!isVideo && next.length >= remaining) {
         showToast("warning", "Photo limit reached", `You can add up to ${MAX_PHOTOS} photos per post.`);
         break;
@@ -188,13 +208,15 @@ export function CreatePostScreen() {
         type: isVideo ? "video" : "image",
         kind,
         mimeType: file.type || undefined,
+        ...(durationSec != null ? { duration: durationSec } : {}),
       });
     }
 
     if (next.length > 0) {
-      setSelectedMedia([...selectedMedia, ...next]);
+      // Read the store again: the duration reads above are async.
+      setSelectedMedia([...useCreatePostStore.getState().selectedMedia, ...next]);
     }
-    e.target.value = "";
+    input.value = "";
   };
 
   const handleRemoveMedia = (id: string) => {
@@ -370,6 +392,10 @@ export function CreatePostScreen() {
               Add Photos
             </button>
           </div>
+        ) : null}
+
+        {!isTextPost && canAddMore ? (
+          <p className="mt-2 text-xs text-white/45">{videoLimitsLabel("post-video")}</p>
         ) : null}
 
         <CreatePostLocation />

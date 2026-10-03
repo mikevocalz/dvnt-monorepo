@@ -31,6 +31,7 @@ import {
 } from "@dvnt/app/components/ui/location-autocomplete-instagram";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useMediaPicker } from "@dvnt/app/lib/hooks";
+import { validateVideoPick, videoLimitsLabel } from "@dvnt/app/lib/media/video-pick-policy";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { useCreateHeaderStore } from "@dvnt/app/lib/stores/create-header-store";
@@ -139,6 +140,22 @@ function CreateScreenContent() {
 
       for (const item of media) {
         if (item.type === "video") {
+          // Same limits media-upload enforces, checked at pick time. Native
+          // encodes an oversized clip down to the post budget, so size is not
+          // a refusal here; format and length are.
+          const check = validateVideoPick({
+            kind: "post-video",
+            mimeType: item.mimeType,
+            fileName: item.fileName,
+            sizeBytes: item.fileSize,
+            durationSec: item.duration,
+            canReencode: true,
+            unknownFormat: "allow",
+          });
+          if (!check.ok) {
+            showToast("error", check.title, check.message);
+            continue;
+          }
           const duration = item.duration ?? 0;
           if (duration <= MAX_ANIMATED_VIDEO_DURATION && duration > 0) {
             // Short clip → animated loop (muted, autoplaying in feed)
@@ -579,6 +596,19 @@ function CreateScreenContent() {
               </Text>
             </Pressable>
           </View>
+        )}
+
+        {!isTextPost && canAddMore && (
+          <Text
+            style={{
+              paddingHorizontal: 16,
+              paddingTop: 8,
+              color: "rgba(255,255,255,0.45)",
+              fontSize: 12,
+            }}
+          >
+            {videoLimitsLabel("post-video")}
+          </Text>
         )}
 
         <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 }}>
