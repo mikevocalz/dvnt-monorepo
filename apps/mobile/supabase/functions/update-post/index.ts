@@ -6,6 +6,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
+import { resolveAdultVerificationState } from "../_shared/verification-state.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,7 +29,9 @@ function jsonResponse<T>(data: ApiResponse<T>, status = 200): Response {
   });
 }
 
-function errorResponse(code: string, message: string): Response {
+// Always 200: supabase.functions.invoke throws on non-2xx, and the client
+// reads ok/error from the body. The status argument documents intent only.
+function errorResponse(code: string, message: string, _status?: number): Response {
   return jsonResponse({ ok: false, error: { code, message } }, 200);
 }
 
@@ -70,6 +74,14 @@ Deno.serve(async (req) => {
 
     const authUserId = sessionResult.userId;
 
+    // Verified-only admission, same gate as create-post. A client that skips
+    // the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabaseAdmin, authUserId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return errorResponse(refusal.code, refusal.message, 403);
+    }
+
     let body: {
       postId: number;
       content?: string;
@@ -109,11 +121,25 @@ Deno.serve(async (req) => {
         403,
       );
 
+    // Same rule as create-post: marking a post SPICY needs an approved adult
+    // ID, whatever verified_admission_policy says. Without this an unverified
+    // account could publish a normal post and flip it to SPICY afterwards.
+    if (isNSFW === true) {
+      const verification = await resolveAdultVerificationState(supabaseAdmin, authUserId);
+      if (verification.state !== "approved") {
+        return errorResponse(
+          "adult_verification_required",
+          verification.message || "Verify that you're 18 or older before posting SPICY content.",
+          403,
+        );
+      }
+    }
+
     const updateData: any = {};
     if (content !== undefined) updateData.content = content;
     if (textTheme !== undefined) updateData.text_theme = textTheme;
     if (location !== undefined) updateData.location = location;
-    if (isNSFW !== undefined) updateData.is_nsfw = isNSFW;
+    if (isNSFW !== undefined) updateData.is_nsfw = isNSFW === true;
 
     const normalizedSlides =
       Array.isArray(slides) && post?.post_kind === "text"
