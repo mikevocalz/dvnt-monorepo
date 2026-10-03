@@ -38,6 +38,8 @@ import { FeedSkeleton } from "@dvnt/app/components/skeletons";
 // StoriesBar is rendered at the HomeScreen level (app/(protected)/(tabs)/index.tsx)
 // so it survives feed-mode toggles and the spicy toggle without remounting.
 import { EmptyState } from "@dvnt/app/components/ui/empty-state";
+import { Button } from "@dvnt/app/components/ui/button";
+import { feedBodyState, FEED_COPY } from "@dvnt/app/components/feed/feed-body-state";
 import { ImageOff, WifiOff } from "lucide-react-native";
 import { useConnectivityStore } from "@dvnt/app/lib/stores/connectivity-store";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
@@ -595,6 +597,7 @@ export function MasonryFeed() {
   const nsfwEnabled = useAppStore((s) => s.nsfwEnabled);
   const nsfwLoaded = useAppStore((s) => s.nsfwLoaded);
   const loadNsfwSetting = useAppStore((s) => s.loadNsfwSetting);
+  const setNsfwEnabled = useAppStore((s) => s.setNsfwEnabled);
 
   // Drives the OfflineFeedEmpty branch below — shown only when we
   // have no cached posts AND the flap-debounced connectivity store
@@ -772,11 +775,24 @@ export function MasonryFeed() {
     return <OfflineFeedEmpty onRetry={() => refetch()} />;
   }
 
-  if (error) {
+  const bodyState = feedBodyState({
+    isLoading,
+    isError: !!error,
+    spicy: nsfwEnabled,
+    postCount: filteredPosts.length,
+  });
+
+  if (bodyState === "error") {
     return (
-      <View className="flex-1 items-center justify-center pb-20">
-        <Text className="text-destructive">Failed to load posts</Text>
-      </View>
+      <EmptyState
+        icon={WifiOff}
+        title={FEED_COPY.error}
+        action={
+          <Button variant="outline" onPress={() => refetch()} loading={isRefetching}>
+            {FEED_COPY.retry}
+          </Button>
+        }
+      />
     );
   }
 
@@ -841,7 +857,19 @@ export function MasonryFeed() {
       ListEmptyComponent={
         <EmptyState
           icon={ImageOff}
-          title={nsfwEnabled ? "No Spicy Posts Yet" : "No Posts Yet"}
+          title={
+            bodyState === "spicy-empty" ? FEED_COPY.spicyEmpty : "No Posts Yet"
+          }
+          action={
+            bodyState === "spicy-empty" ? (
+              <Button
+                variant="outline"
+                onPress={() => setNsfwEnabled(false, "feed_empty_spicy_off")}
+              >
+                {FEED_COPY.spicyOff}
+              </Button>
+            ) : undefined
+          }
           // Spicy empty has a DIFFERENT cause than sweet empty — the server
           // only serves spicy from creators you follow, so a blank grid here
           // is a follow problem, not an "add a post" problem.

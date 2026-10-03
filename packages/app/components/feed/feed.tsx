@@ -30,7 +30,9 @@ import { useFeedPostUIStore } from "@dvnt/app/lib/stores/feed-post-store";
 // StoriesBar is rendered at the HomeScreen level (app/(protected)/(tabs)/index.tsx)
 // so it survives feed-mode toggles and the spicy toggle without remounting.
 import { EmptyState } from "@dvnt/app/components/ui/empty-state";
-import { ImageOff } from "lucide-react-native";
+import { ImageOff, WifiOff } from "lucide-react-native";
+import { Button } from "@dvnt/app/components/ui/button";
+import { feedBodyState, FEED_COPY } from "@dvnt/app/components/feed/feed-body-state";
 import type { Post } from "@dvnt/app/lib/types";
 import { useBookmarks } from "@dvnt/app/lib/hooks/use-bookmarks";
 import { useQueryClient } from "@tanstack/react-query";
@@ -583,20 +585,42 @@ export function Feed({
     },
   ).current;
 
+  const bodyState = feedBodyState({
+    isLoading: isLoading || !nsfwLoaded,
+    isError: !!error,
+    spicy: effectiveNsfwEnabled,
+    postCount: filteredPosts.length,
+  });
+  const setNsfwEnabled = useAppStore((s) => s.setNsfwEnabled);
+
   const ListEmpty = useCallback(
-    () => (
-      <EmptyState
-        icon={ImageOff}
-        title="No Posts Yet"
-        description="When you or people you follow share posts, they'll appear here"
-      />
-    ),
-    [],
+    () =>
+      bodyState === "spicy-empty" ? (
+        <EmptyState
+          icon={ImageOff}
+          title={FEED_COPY.spicyEmpty}
+          action={
+            <Button
+              variant="outline"
+              onPress={() => setNsfwEnabled(false, "feed_empty_spicy_off")}
+            >
+              {FEED_COPY.spicyOff}
+            </Button>
+          }
+        />
+      ) : (
+        <EmptyState
+          icon={ImageOff}
+          title="No Posts Yet"
+          description="When you or people you follow share posts, they'll appear here"
+        />
+      ),
+    [bodyState, setNsfwEnabled],
   );
 
   // Only show empty state if we're definitely not loading and have no data
   const shouldShowEmptyState =
-    !isLoading && nsfwLoaded && allPosts.length === 0 && !error;
+    bodyState === "empty" || bodyState === "spicy-empty";
 
   const actionPost = useMemo(
     () =>
@@ -710,10 +734,22 @@ export function Feed({
     return <FeedSkeleton />;
   }
 
-  if (error) {
+  if (bodyState === "error") {
     return (
-      <View className="flex-1 bg-background items-center justify-center pb-20">
-        <Text className="text-destructive">Failed to load posts</Text>
+      <View className="flex-1 bg-background">
+        <EmptyState
+          icon={WifiOff}
+          title={FEED_COPY.error}
+          action={
+            <Button
+              variant="outline"
+              onPress={() => refetch()}
+              loading={isRefetching}
+            >
+              {FEED_COPY.retry}
+            </Button>
+          }
+        />
       </View>
     );
   }

@@ -35,6 +35,10 @@ import { useEvents } from "@dvnt/app/lib/hooks/use-events";
 // screen only ever fetched posts. Same builder the native masonry uses.
 import { buildFeedSlots } from "@dvnt/app/components/feed/feed-slots";
 import {
+  feedBodyState,
+  FEED_COPY,
+} from "@dvnt/app/components/feed/feed-body-state";
+import {
   packMasonry,
   type PackTile,
 } from "@dvnt/app/components/feed/masonry-pack";
@@ -182,8 +186,18 @@ function formatCount(n: number): string {
 export function HomeScreen() {
   const { width: winW } = useWindowDimensions();
   const feedMode = useAppStore((s) => s.feedMode);
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
-    useInfiniteFeedPosts();
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    isError,
+    isRefetching,
+    refetch,
+  } = useInfiniteFeedPosts();
+  const nsfwEnabled = useAppStore((s) => s.nsfwEnabled);
+  const setNsfwEnabled = useAppStore((s) => s.setNsfwEnabled);
   // Live feed: refetch when other users post/delete (web has no pull-to-refresh).
   useFeedRealtime();
   const { data: feedEvents } = useEvents();
@@ -194,6 +208,12 @@ export function HomeScreen() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const posts: Post[] = data?.pages?.flatMap((p: any) => p?.data ?? []) ?? [];
+  const bodyState = feedBodyState({
+    isLoading,
+    isError,
+    spicy: nsfwEnabled,
+    postCount: posts.length,
+  });
 
   // Size the grid from the ACTUAL container width (the shell's center column),
   // not the window. Driving it off `winW` made the grid compute a window-wide
@@ -331,12 +351,33 @@ export function HomeScreen() {
           <SpicyToggle />
         </div>
 
-        {isLoading && posts.length === 0 ? (
+        {bodyState === "loading" ? (
           <FeedSkeleton columns={numColumns} columnWidth={columnWidth} />
-        ) : posts.length === 0 ? (
-          <p className="text-white/60 text-center pt-20">
-            No posts yet — be the first to share something.
-          </p>
+        ) : bodyState === "error" ? (
+          <div role="alert" className="flex flex-col items-center gap-4 pt-20 px-6">
+            <p className="text-white/60 text-center">{FEED_COPY.error}</p>
+            <button
+              type="button"
+              onClick={() => refetch()}
+              disabled={isRefetching}
+              className="h-10 px-5 rounded-xl border border-white/15 bg-white/[0.06] text-white text-sm font-semibold disabled:opacity-50"
+            >
+              {FEED_COPY.retry}
+            </button>
+          </div>
+        ) : bodyState === "spicy-empty" ? (
+          <div className="flex flex-col items-center gap-4 pt-20 px-6">
+            <p className="text-white/60 text-center">{FEED_COPY.spicyEmpty}</p>
+            <button
+              type="button"
+              onClick={() => setNsfwEnabled(false, "feed_empty_spicy_off")}
+              className="h-10 px-5 rounded-xl border border-white/15 bg-white/[0.06] text-white text-sm font-semibold"
+            >
+              {FEED_COPY.spicyOff}
+            </button>
+          </div>
+        ) : bodyState === "empty" ? (
+          <p className="text-white/60 text-center pt-20">{FEED_COPY.empty}</p>
         ) : (
           <section
             className="mx-auto pb-28"
