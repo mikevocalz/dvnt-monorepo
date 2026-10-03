@@ -111,8 +111,21 @@ video_ban_user, which already resolves it inside the room. Typing and reaction
 broadcasts from an anonymous member now carry a per-session token instead of
 the auth id. `pnpm verify:content-lockdown` sections 9 to 11 prove it.
 
+**users.email and "user".email.** Both tables granted anon and
+authenticated table-wide SELECT, so the anon key read every member's email
+from either table. users also exposed hash and salt (5 legacy Payload
+passwords, reused as CMS admin passwords by promote-admin), reset and API key
+columns, and device_lat / device_lng. `20261003150400_users_contact_columns_private.sql`
+re-grants SELECT on every column except those (13 on users; email,
+emailVerified, role, banned, banReason, banExpires on "user"). Row visibility
+is unchanged. Client code that selected email now takes the member's own
+address from the Better Auth session (`ownEmailFor` in identity.ts) and shows
+"" for anyone else. `pnpm verify:users-lockdown` section 8 proves it.
+
 Still open:
 
+- **users.sexuality, gender, event_audience** stay readable by anyone with
+  the anon key. Whether those belong on a public profile is a product call.
 - **lynk_cohost_invites.invitee_id**: why the cohost-invite function refuses
   member handles instead of resolving them.
 

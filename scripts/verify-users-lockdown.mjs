@@ -1,11 +1,18 @@
 #!/usr/bin/env node
 /**
- * Proves that clients holding the public anon key cannot write public.users.
+ * Proves that clients holding the public anon key cannot write public.users,
+ * and cannot read email or the other private columns of public.users and
+ * Better Auth's public."user".
  *
  * Production had UPDATE and INSERT granted to anon and authenticated, an
  * UPDATE policy of USING (true) and INSERT policies of WITH CHECK (true). The
  * anon key ships in every app bundle, so any visitor could set role or
  * verified on any member, or rewrite auth_id and take over an account.
+ *
+ * Reads: both tables granted table-wide SELECT, so the anon key read every
+ * member's email, plus users.hash/salt (legacy passwords), reset tokens, API
+ * keys and device coordinates. 20261003150400 limits client SELECT to the
+ * remaining columns.
  *
  * Two parts:
  *
@@ -42,6 +49,19 @@ const MIGRATION = join(
   root,
   "apps/mobile/supabase/migrations/20261003150000_users_anon_write_lockdown.sql",
 );
+const READ_MIGRATION = join(
+  root,
+  "apps/mobile/supabase/migrations/20261003150400_users_contact_columns_private.sql",
+);
+// Columns clients must not read. Everything else stays readable.
+const PRIVATE = {
+  users: [
+    "api_key", "api_key_index", "device_lat", "device_lng", "email", "enable_a_p_i_key", "hash",
+    "location_updated_at", "lock_until", "login_attempts", "reset_password_expiration",
+    "reset_password_token", "salt",
+  ],
+  user: ["banExpires", "banReason", "banned", "email", "emailVerified", "role"],
+};
 
 // ── 1. Source scan ───────────────────────────────────────────────────────────
 {
@@ -52,6 +72,13 @@ const MIGRATION = join(
   // SUPABASE_SERVICE_ROLE_KEY.
   const SERVER_PREFIXES = ["apps/mobile/supabase/", "apps/mobile/scripts/"];
   const USERS_FROM = /\.from\(\s*(?:DB\.users\.table|["'`]users["'`])\s*\)/g;
+  const ANY_USER_FROM = /\.from\(\s*(?:DB\.users\.table|["'`]users?["'`])\s*\)/g;
+  // A select naming a private column, DB.users.email, or "*" (which now
+  // includes columns clients cannot read). Filters on them count too.
+  const PRIVATE_COL = new RegExp(
+    `\\bDB\\.users\\.email\\b|\\.select\\(\\s*["'\`]\\*["'\`]|["'\`.,(\\s](?:${[...new Set([...PRIVATE.users, ...PRIVATE.user])].join("|")})\\b`,
+  );
+  const reads = [];
   const WRITE = /^\s*(?:\/\/[^\n]*\n\s*)*\.(update|insert|upsert|delete)\s*\(/;
 
   const hits = [];
@@ -65,6 +92,17 @@ const MIGRATION = join(
       if (st.isDirectory()) walk(full);
       else if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.test\./.test(name)) {
         const src = readFileSync(full, "utf8");
+        for (const m of src.matchAll(ANY_USER_FROM)) {
+          const rest = src.slice(m.index, m.index + 1500);
+          const chain = rest.slice(0, rest.search(/;\s*\n/) + 1 || rest.length);
+          // Only the select list and filters matter; drop line comments.
+          const code = chain.replace(/\/\/[^\n]*/g, "");
+          const hit = code.match(PRIVATE_COL);
+          if (hit) {
+            const line = src.slice(0, m.index).split("\n").length;
+            reads.push(`${rel}:${line} ${hit[0].trim()}`);
+          }
+        }
         for (const m of src.matchAll(USERS_FROM)) {
           const rest = src.slice(m.index + m[0].length, m.index + m[0].length + 400);
           // supabase-js puts the write verb directly after from(); filters
@@ -84,7 +122,12 @@ const MIGRATION = join(
     [],
     `client code writes public.users directly; anon and authenticated have no write grant:\n  ${hits.join("\n  ")}`,
   );
-  console.log("1. OK: no client code writes public.users");
+  assert.deepEqual(
+    reads,
+    [],
+    `client code reads a private column of users/"user" (use the session for the member's own email):\n  ${reads.join("\n  ")}`,
+  );
+  console.log("1. OK: no client code writes public.users or reads a private users/\"user\" column");
 }
 
 // ── Locating a Postgres server (same rules as verify-call-capacity) ──────────
@@ -218,8 +261,31 @@ CREATE POLICY "Users can update own profile" ON public.users FOR UPDATE TO publi
 CREATE POLICY users_insert_anon ON public.users FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY users_insert_authenticated ON public.users FOR INSERT TO authenticated WITH CHECK (true);
 
-INSERT INTO public.users (username, email, auth_id, bio)
-VALUES ('victim', 'victim@example.test', 'ba-victim', 'original bio');
+INSERT INTO public.users (username, email, auth_id, bio, hash, salt)
+VALUES ('victim', 'victim@example.test', 'ba-victim', 'original bio', 'pbkdf2-hash', 'pbkdf2-salt');
+
+-- Better Auth's table: columns from information_schema, relacl anon=r
+-- authenticated=r, one SELECT policy for anon.
+CREATE TABLE public."user" (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  email TEXT NOT NULL,
+  "emailVerified" BOOLEAN NOT NULL DEFAULT false,
+  image TEXT,
+  "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  role TEXT,
+  banned BOOLEAN,
+  "banReason" TEXT,
+  "banExpires" TIMESTAMPTZ,
+  username TEXT,
+  "displayUsername" TEXT
+);
+ALTER TABLE public."user" ENABLE ROW LEVEL SECURITY;
+GRANT SELECT ON public."user" TO anon, authenticated;
+GRANT ALL ON public."user" TO service_role;
+CREATE POLICY user_select_anon ON public."user" FOR SELECT TO anon USING (true);
+INSERT INTO public."user" (id, name, email, username) VALUES ('ba-victim', 'Victim', 'victim@example.test', 'victim');
 `;
 await sql(FIXTURE);
 
@@ -231,7 +297,7 @@ async function as(role, text) {
     await client.query("BEGIN");
     await client.query(`SET LOCAL ROLE ${role}`);
     const res = await client.query(text);
-    return { ok: true, rowCount: res.rowCount };
+    return { ok: true, rowCount: res.rowCount, rows: res.rows };
   } catch (err) {
     return { ok: false, code: err.code, message: err.message };
   } finally {
@@ -266,16 +332,28 @@ for (const role of ["anon", "authenticated"]) {
     assert.ok(r.ok && r.rowCount === 1, `fixture is not faithful: ${role} could not ${label} before the migration (${r.message})`);
   }
 }
-console.log("2. OK: before the migration, anon and authenticated can write every column (hole reproduced)");
+for (const [role, stmt, want] of [
+  ["anon", "SELECT email, hash FROM public.users WHERE id = 1", { email: "victim@example.test", hash: "pbkdf2-hash" }],
+  ["authenticated", "SELECT email FROM public.users WHERE id = 1", { email: "victim@example.test" }],
+  ["anon", `SELECT email FROM public."user" WHERE id = 'ba-victim'`, { email: "victim@example.test" }],
+]) {
+  const r = await as(role, stmt);
+  assert.deepEqual(r.rows, [want], `fixture is not faithful: ${role} could not read ${stmt} (${r.message})`);
+}
+console.log(
+  "2. OK: before the migrations, anon and authenticated write every users column and read email (and users.hash)",
+);
 
 // ── 3. Apply the migration ───────────────────────────────────────────────────
 if (skipMigration) {
-  console.log("3. --skip-migration: NOT applying 20261003150000_users_anon_write_lockdown.sql");
+  console.log("3. --skip-migration: NOT applying 20261003150000 or 20261003150400");
 } else {
-  await sql(readFileSync(MIGRATION, "utf8"));
-  // Idempotent: Supabase may replay it on a branch reset.
-  await sql(readFileSync(MIGRATION, "utf8"));
-  console.log("3. OK: migration applied (twice, to prove it is re-runnable)");
+  // Idempotent: Supabase may replay them on a branch reset.
+  for (const m of [MIGRATION, READ_MIGRATION]) {
+    await sql(readFileSync(m, "utf8"));
+    await sql(readFileSync(m, "utf8"));
+  }
+  console.log("3. OK: both migrations applied (twice, to prove they are re-runnable)");
 }
 
 // ── 4. anon and authenticated: every write is a privilege error ──────────────
@@ -331,5 +409,54 @@ for (const [label, stmt] of [
   assert.ok(r.ok && r.rowCount >= 1, `service_role could not ${label} (${r.code} ${r.message})`);
 }
 console.log("7. OK: service_role can still update, insert, upsert and delete");
+
+// ── 8. Private columns are unreadable; the rest still read ──────────────────
+{
+  const tables = { users: "public.users", user: 'public."user"' };
+  for (const [key, rel] of Object.entries(tables)) {
+    const cols = await sql(
+      `SELECT attname FROM pg_attribute WHERE attrelid = '${rel}'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum`,
+    );
+    const names = cols.map((c) => c.attname);
+    for (const p of PRIVATE[key]) assert.ok(names.includes(p), `fixture ${rel} lacks ${p}`);
+    const pub = names.filter((n) => !PRIVATE[key].includes(n));
+    const where = key === "users" ? "id = 1" : "id = 'ba-victim'";
+    for (const role of ["anon", "authenticated"]) {
+      const priv = await sql(
+        `SELECT attname FROM pg_attribute WHERE attrelid = '${rel}'::regclass AND attnum > 0 AND NOT attisdropped
+           AND NOT has_column_privilege('${role}', '${rel}'::regclass, attname, 'SELECT') ORDER BY attname`,
+      );
+      assert.deepEqual(
+        priv.map((c) => c.attname),
+        [...PRIVATE[key]].sort(),
+        `${role}: unreadable columns of ${rel} must be exactly the private list`,
+      );
+      for (const [label, stmt] of [
+        ...PRIVATE[key].map((c) => [`select ${c}`, `SELECT "${c}" FROM ${rel} WHERE ${where}`]),
+        ["select *", `SELECT * FROM ${rel} WHERE ${where}`],
+        ["filter on email", `SELECT id FROM ${rel} WHERE email = 'victim@example.test'`],
+        ["order by email", `SELECT id FROM ${rel} ORDER BY email`],
+        ["row value", `SELECT t FROM ${rel} t`],
+      ]) {
+        const r = await as(role, stmt);
+        assert.equal(r.code, "42501", `${role} could ${label} on ${rel} (${r.ok ? JSON.stringify(r.rows) : r.message})`);
+      }
+      const ok = await as(role, `SELECT ${pub.map((c) => `"${c}"`).join(", ")} FROM ${rel} WHERE ${where}`);
+      assert.ok(ok.ok, `${role} lost a public column of ${rel} (${ok.message})`);
+      // Row visibility is the policies' business and did not change: users is
+      // public to both roles, "user" has a policy for anon only.
+      const expectRows = key === "users" || role === "anon" ? 1 : 0;
+      assert.equal(ok.rowCount, expectRows, `${role} row count on ${rel}`);
+    }
+    const svc = await as("service_role", `SELECT email FROM ${rel} WHERE ${where}`);
+    assert.deepEqual(svc.rows, [{ email: "victim@example.test" }], `service_role lost email on ${rel} (${svc.message})`);
+  }
+  // The joins other tables' policies make (users.id by auth_id) still work.
+  const join = await as("authenticated", "SELECT id FROM public.users WHERE auth_id = 'ba-victim'");
+  assert.ok(join.ok && join.rowCount === 1, `auth_id lookup broke (${join.message})`);
+}
+console.log(
+  `8. OK: anon/authenticated get 42501 on ${PRIVATE.users.length} users and ${PRIVATE.user.length} "user" private columns (select, *, filter, order); every other column reads; service_role reads email`,
+);
 
 console.log("\nverify-users-lockdown: all sections pass");
