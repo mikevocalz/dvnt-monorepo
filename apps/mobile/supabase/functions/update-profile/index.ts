@@ -8,6 +8,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { identityColumns } from "../_shared/profile-identity.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
@@ -39,9 +40,11 @@ const UpdateProfileSchema = z
     avatarUrl: z.string().optional(),
     links: z.array(z.string().max(200)).max(4).optional(),
     pronouns: z.string().max(50).optional(),
-    gender: z.string().max(50).optional(),
-    sexuality: z.array(z.string().max(30)).max(12).optional(),
-    eventAudience: z.string().max(40).optional(),
+    // Identity: omit = untouched, null = clear. "" / [] are skipped (see
+    // _shared/profile-identity.ts).
+    gender: z.string().max(50).nullable().optional(),
+    sexuality: z.array(z.string().max(30)).max(12).nullable().optional(),
+    eventAudience: z.string().max(40).nullable().optional(),
   })
   .refine((data) => Object.values(data).some((v) => v !== undefined), {
     message: "At least one field must be provided",
@@ -201,15 +204,7 @@ Deno.serve(async (req) => {
     if (updates.pronouns !== undefined) {
       updateData.pronouns = updates.pronouns;
     }
-    if (updates.gender !== undefined) {
-      updateData.gender = updates.gender;
-    }
-    if (updates.sexuality !== undefined) {
-      updateData.sexuality = updates.sexuality;
-    }
-    if (updates.eventAudience !== undefined) {
-      updateData.event_audience = updates.eventAudience;
-    }
+    Object.assign(updateData, identityColumns(updates));
 
     // Username change — check uniqueness before updating
     if (updates.username !== undefined) {
