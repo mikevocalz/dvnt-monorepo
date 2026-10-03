@@ -68,11 +68,14 @@ AS $$
 DECLARE
   v_count integer := 0;
 BEGIN
+  -- auth-sync calls this on every sign-in, not only at signup, so the
+  -- lookback bounds the single-member path too. Without it every legacy
+  -- member who signs in gets a "welcome" DM, email and first-post reminder.
   WITH recipients AS (
     SELECT u.id
     FROM public.users u
-    WHERE (p_auth_id IS NOT NULL AND u.auth_id = p_auth_id)
-       OR (p_auth_id IS NULL AND u.created_at >= now() - p_lookback)
+    WHERE u.created_at >= now() - p_lookback
+      AND (p_auth_id IS NULL OR u.auth_id = p_auth_id)
   ), rows_to_insert AS (
     SELECT 'welcome'::text AS campaign, 'welcome_dm_v2'::text AS campaign_version,
            r.id AS recipient_id, 'dm'::text AS channel, now() AS available_at

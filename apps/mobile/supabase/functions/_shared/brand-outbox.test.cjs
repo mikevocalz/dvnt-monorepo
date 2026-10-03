@@ -189,3 +189,24 @@ test("an unreadable users table sends nothing", async () => {
   const got = await verifyBrandSender(fakeDb({ error: new Error("boom") }), BRAND);
   assert.equal(got.ok, false);
 });
+
+// auth-sync calls enqueue_brand_onboarding with p_auth_id on every sign-in,
+// including members who joined years ago. The lookback must bound that path
+// too, or every returning member is "welcomed" again.
+test("enqueue_brand_onboarding applies the lookback to the single-member path", () => {
+  const sql = fs.readFileSync(
+    `${__dirname}/../../migrations/20261001194000_deviantevents_onboarding_retention.sql`,
+    'utf8',
+  );
+  const fn = sql.slice(
+    sql.indexOf('FUNCTION public.enqueue_brand_onboarding'),
+    sql.indexOf('FUNCTION public.backfill_brand_relationships'),
+  );
+  const recipients = fn.slice(fn.indexOf('recipients AS ('), fn.indexOf('rows_to_insert AS ('));
+  const where = recipients.slice(recipients.indexOf('WHERE')).replace(/\s+/g, ' ');
+  assert.match(where, /^WHERE u\.created_at >= now\(\) - p_lookback AND \(/);
+  assert.ok(!/\)\s*OR\s*\(/.test(where), 'no OR branch may bypass the lookback');
+
+  const authSync = fs.readFileSync(`${__dirname}/../auth-sync/index.ts`, 'utf8');
+  assert.match(authSync, /enqueue_brand_onboarding[\s\S]{0,120}p_lookback: "7 days"/);
+});
