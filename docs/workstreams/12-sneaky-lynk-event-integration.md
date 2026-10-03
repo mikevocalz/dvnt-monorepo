@@ -148,7 +148,7 @@ Why 5 minutes: it bounds how long a cancelled event's room stays joinable. Endin
 1. Migrations in filename order: `20261002210000_event_lynk_lifecycle.sql` (both tables + `sync_event_lynk_lifecycle`), then `20261003155900_notifications_room_invite_type.sql`.
 2. Deploy `event-lynk-room` (new; `verify_jwt = false` is pinned in `config.toml`).
 3. Deploy the functions that read `event_lynk_lifecycle`: `video_join_room`, `video_refresh_token`, `lynk-moq-token`, `lynk-livestream-token` (all through `_shared/event-access.ts`) and `video_list_rooms`. They must not ship before step 1: the lifecycle read fails closed, so guests would get errors instead of the waiting room.
-4. Deploy `event-lynk-invite` and `process-event-lynk-lifecycle`, with `CRON_SECRET` set to the Vault value.
+4. Deploy `event-lynk-invite`, `process-event-lynk-lifecycle` (with `CRON_SECRET` set to the Vault value) and `video_create_room`, which now applies verified admission before a room is created (`video_refresh_token` gets the same gate in step 3).
 5. `20261003160000_event_lynk_lifecycle_cron.sql` last.
 6. Ship the app (native + web) after the functions. An older app that gets `waiting_for_host` shows its generic join error, not the waiting room.
 
