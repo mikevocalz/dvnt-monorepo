@@ -538,3 +538,6 @@ verify_jwt = false
 
 [functions.event-lynk-room]
 verify_jwt = false
+
+[functions.event-consolidation]
+verify_jwt = false

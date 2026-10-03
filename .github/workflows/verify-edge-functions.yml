@@ -28,6 +28,8 @@ on:
       - "scripts/verify-brand-follows.mjs"
       - "scripts/verify-comp-claims.mjs"
       - "scripts/verify-event-lynk-lifecycle.mjs"
+      - "scripts/verify-event-consolidation.mjs"
+      - "scripts/verify-call-capacity.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -48,6 +50,8 @@ on:
       - "scripts/verify-event-publication.mjs"
       - "scripts/verify-brand-follows.mjs"
       - "scripts/verify-event-lynk-lifecycle.mjs"
+      - "scripts/verify-event-consolidation.mjs"
+      - "scripts/verify-call-capacity.mjs"
 
 jobs:
   verify:
@@ -211,3 +215,19 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-event-lynk-lifecycle.mjs
+
+
+  event-consolidation:
+    # Replays the consolidation migration on a throwaway cluster: destination
+    # authorization, tier capacity against live holds and racing buyers,
+    # NULL-tier tickets, and total_attendees on event_id moves. No
+    # --allow-skip, for the same reason as the job above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-event-consolidation.mjs

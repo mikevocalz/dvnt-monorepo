@@ -1,0 +1,82 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+function json(req: Request, body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+  });
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return optionsResponse();
+  if (req.method !== "POST") return json(req, { ok:false, error:"Method not allowed" }, 405);
+  const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth:{ persistSession:false, autoRefreshToken:false }});
+  const authId = await verifySession(supabase, req);
+  if (!authId) return json(req, { ok:false, error:"Unauthorized" }, 401);
+
+  const body = await req.json().catch(() => ({}));
+  const source = Number(body.source_event_id);
+  const destination = Number(body.destination_event_id);
+  if (!Number.isInteger(source) || !Number.isInteger(destination) || source <= 0 || destination <= 0) {
+    return json(req, { ok:false, error:"Valid source_event_id and destination_event_id are required" }, 400);
+  }
+
+  // Both events, not just the source. Authorizing only the source let any host
+  // consolidate a throwaway event into a stranger's event by integer id, which
+  // rewrote the victim's quantity_sold and put QRs they never sold on their
+  // door list. The RPC re-checks this; neither check is load-bearing alone.
+  const administers = async (eventId: number) => {
+    const { data: event } = await supabase.from("events")
+      .select("host_id").eq("id", eventId).maybeSingle();
+    if (!event) return false;
+    if (String(event.host_id || "") === String(authId)) return true;
+    const { data: admin } = await supabase.from("event_co_organizers")
+      .select("user_id").eq("event_id", eventId).eq("user_id", authId)
+      .eq("accepted", true).eq("role", "admin").maybeSingle();
+    return Boolean(admin);
+  };
+  if (!(await administers(source))) {
+    return json(req, { ok:false, error:"Forbidden" }, 403);
+  }
+  if (!(await administers(destination))) {
+    return json(req, { ok:false, error:"Forbidden on destination event" }, 403);
+  }
+
+  if (body.mode === "preflight") {
+    const { data, error } = await supabase.rpc("event_consolidation_snapshot", {
+      p_source_event_id: source,
+      p_destination_event_id: destination,
+    });
+    if (error) return json(req, { ok:false, error:error.message }, 500);
+    return json(req, { ok:true, data });
+  }
+
+  if (body.mode === "execute") {
+    if (!body.operation_id || !body.expected_preflight_hash || !body.ticket_type_map) {
+      return json(req, { ok:false, error:"operation_id, expected_preflight_hash and ticket_type_map are required" }, 400);
+    }
+    if (body.addon_map != null && (typeof body.addon_map !== "object" || Array.isArray(body.addon_map))) {
+      return json(req, { ok:false, error:"addon_map must be an object of source add-on id to destination add-on id" }, 400);
+    }
+    const { data, error } = await supabase.rpc("execute_event_consolidation", {
+      p_source_event_id: source,
+      p_destination_event_id: destination,
+      p_actor_auth_id: authId,
+      p_operation_id: body.operation_id,
+      p_expected_preflight_hash: body.expected_preflight_hash,
+      p_ticket_type_map: body.ticket_type_map,
+      // Source add-on id -> destination add-on id, same shape as
+      // ticket_type_map. Optional: the RPC refuses the move if any moved
+      // add-on purchase has no entry.
+      p_addon_map: body.addon_map ?? {},
+    });
+    if (error) return json(req, { ok:false, error:error.message }, 500);
+    return json(req, data, data?.ok ? 200 : 409);
+  }
+
+  return json(req, { ok:false, error:"mode must be preflight or execute" }, 400);
+});
