@@ -7,6 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
+import { resolveAdultVerificationState } from "../_shared/verification-state.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -131,6 +132,22 @@ Deno.serve(async (req) => {
     const normalizedLocationValue = normalizeLocation(location);
     const normalizedVisibility = visibility || "public";
     const normalizedIsNsfw = Boolean(isNSFW);
+
+    // SPICY is stricter than the staged membership-wide admission policy:
+    // a verified adult document is required even while verified_admission_policy
+    // is still in prompt/grace mode. The client toggle is convenience only;
+    // direct API callers hit the same server gate here.
+    if (normalizedIsNsfw) {
+      const verification = await resolveAdultVerificationState(supabaseAdmin, authUserId);
+      if (verification.state !== "approved") {
+        return errorResponse(
+          "adult_verification_required",
+          verification.message || "Verify that you're 18 or older before posting SPICY content.",
+          403,
+        );
+      }
+    }
+
     const normalizedTheme =
       // `deviant` was missing here, so the theme the picker shows SECOND fell
       // through to the else and was written as graphite — silently, with no

@@ -15,6 +15,8 @@ import { VerifiedAdmissionBanner } from "@dvnt/app/components/verified-admission
  */
 import {
   Component,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -53,9 +55,23 @@ import {
   useStoryViewerStore,
   type StoryViewerGroup,
 } from "@dvnt/app/lib/stores/story-viewer-store";
-import { StoryViewerOverlay } from "@dvnt/app/components/story-viewer-overlay.web";
+// Lazy, because this overlay renders nothing until someone opens a story, and
+// statically importing it put a large subtree on /feed's First Load JS: it
+// pulls the @dvnt/ui barrel (which re-exports MapPicker via
+// @vis.gl/react-google-maps, ImageCropper via react-easy-crop and QrScanner via
+// html5-qrcode), plus StoryOverlaysLayer and StoryViewersSheetWeb.
+// React.lazy rather than next/dynamic: this is a shared package and should not
+// depend on Next. Same intent as the dynamic() sidecars in feed/layout.tsx.
+const StoryViewerOverlay = lazy(() =>
+  import("@dvnt/app/components/story-viewer-overlay.web").then((m) => ({
+    default: m.StoryViewerOverlay,
+  })),
+);
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
-import { TextPostSurface } from "@dvnt/app/features/post";
+// Subpath, not the features/post barrel: that barrel also exports ImageTagger,
+// which pulls react-native-keyboard-controller, expo-image, lucide-react-native,
+// @legendapp/motion, expo-haptics and @tanstack/react-pacer at module scope.
+import { TextPostSurface } from "@dvnt/app/features/post/ui/TextPostSurface";
 import type { Post } from "@dvnt/app/lib/types";
 
 const GAP = 10;
@@ -396,7 +412,9 @@ export function HomeScreen() {
           </section>
         )}
       </div>
-      <StoryViewerOverlay />
+      <Suspense fallback={null}>
+        <StoryViewerOverlay />
+      </Suspense>
     </div>
   );
 }
