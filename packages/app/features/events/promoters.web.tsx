@@ -53,7 +53,9 @@ import {
 } from "@dvnt/app/lib/events/promoter-share";
 import {
   normalizePromoterCodeInput,
+  promoterAddedDescription,
   promoterCodeFieldError,
+  promoterInviteEmailFieldError,
 } from "@dvnt/app/lib/events/promoter-code";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { toast } from "sonner";
@@ -79,6 +81,11 @@ interface PromotersUIState {
   addOpen: boolean;
   pickerQuery: string;
   selectedUser: { id: string; username: string; name: string; avatar: string } | null;
+  /** No member selected: add by name, optionally with an invite address. */
+  nameInput: string;
+  /** Sent once with the invite, never stored. */
+  emailInput: string;
+  emailError: string | null;
   customerDiscountInput: string;
   promoterCommissionInput: string;
   codeInput: string;
@@ -92,6 +99,9 @@ interface PromotersUIState {
   closeAdd: () => void;
   setPickerQuery: (v: string) => void;
   setSelectedUser: (u: PromotersUIState["selectedUser"]) => void;
+  setNameInput: (v: string) => void;
+  setEmailInput: (v: string) => void;
+  setEmailError: (v: string | null) => void;
   setCustomerDiscountInput: (v: string) => void;
   setPromoterCommissionInput: (v: string) => void;
   setCodeInput: (v: string) => void;
@@ -107,6 +117,9 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   addOpen: false,
   pickerQuery: "",
   selectedUser: null,
+  nameInput: "",
+  emailInput: "",
+  emailError: null,
   customerDiscountInput: "10",
   promoterCommissionInput: "10",
   codeInput: "",
@@ -119,6 +132,9 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   closeAdd: () => set({ addOpen: false }),
   setPickerQuery: (v) => set({ pickerQuery: v }),
   setSelectedUser: (u) => set({ selectedUser: u }),
+  setNameInput: (v) => set({ nameInput: v }),
+  setEmailInput: (v) => set({ emailInput: v, emailError: null }),
+  setEmailError: (v) => set({ emailError: v }),
   setCustomerDiscountInput: (v) => set({ customerDiscountInput: v }),
   setPromoterCommissionInput: (v) => set({ promoterCommissionInput: v }),
   // Case is kept as typed; the server matches codes case-insensitively.
@@ -139,6 +155,9 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
       addOpen: false,
       pickerQuery: "",
       selectedUser: null,
+      nameInput: "",
+      emailInput: "",
+      emailError: null,
       customerDiscountInput: "10",
       promoterCommissionInput: "10",
       codeInput: "",
@@ -303,6 +322,12 @@ export function EventPromotersScreen() {
   const addOpen = usePromotersUIStore((s) => s.addOpen);
   const pickerQuery = usePromotersUIStore((s) => s.pickerQuery);
   const selectedUser = usePromotersUIStore((s) => s.selectedUser);
+  const nameInput = usePromotersUIStore((s) => s.nameInput);
+  const emailInput = usePromotersUIStore((s) => s.emailInput);
+  const emailError = usePromotersUIStore((s) => s.emailError);
+  const setNameInput = usePromotersUIStore((s) => s.setNameInput);
+  const setEmailInput = usePromotersUIStore((s) => s.setEmailInput);
+  const setEmailError = usePromotersUIStore((s) => s.setEmailError);
   const customerDiscountInput = usePromotersUIStore((s) => s.customerDiscountInput);
   const promoterCommissionInput = usePromotersUIStore((s) => s.promoterCommissionInput);
   const codeInput = usePromotersUIStore((s) => s.codeInput);
@@ -352,12 +377,13 @@ export function EventPromotersScreen() {
       customerDiscountBps: number;
       promoterCommissionBps: number;
       code?: string;
+      inviteEmail?: string;
     }) => promotersApi.add({ eventId, ...input, saveToLibrary: true }),
     onSuccess: (promoter) => {
       // Secondary confirmation — the event_promoters row + the
       // notification are the record; the toast is the "done" flash.
       toast.success(`${promoter.displayName} added as promoter`, {
-        description: `Code ${promoter.code} — they've been notified.`,
+        description: promoterAddedDescription(promoter.code, promoter.inviteEmail),
       });
       resetAdd();
       invalidate();
@@ -368,6 +394,11 @@ export function EventPromotersScreen() {
       const fieldError = promoterCodeFieldError(err);
       if (fieldError) {
         setCodeError(fieldError);
+        return;
+      }
+      const emailFieldError = promoterInviteEmailFieldError(err);
+      if (emailFieldError) {
+        setEmailError(emailFieldError);
         return;
       }
       showToast("error", "Couldn't add promoter", err?.message || "Try again.");
@@ -479,15 +510,27 @@ export function EventPromotersScreen() {
       toast.error("Enter a percent from 0 to 100.");
       return;
     }
-    if (!selectedUser) {
-      toast.error("Pick a person first");
+    const code = codeInput.trim() ? { code: codeInput.trim() } : {};
+    if (selectedUser) {
+      addMutation.mutate({
+        username: selectedUser.username,
+        customerDiscountBps,
+        promoterCommissionBps,
+        ...code,
+      });
+      return;
+    }
+    const name = nameInput.trim();
+    if (!name) {
+      toast.error("Pick a member or enter a name");
       return;
     }
     addMutation.mutate({
-      username: selectedUser.username,
+      displayName: name,
       customerDiscountBps,
       promoterCommissionBps,
-      ...(codeInput.trim() ? { code: codeInput.trim() } : {}),
+      ...code,
+      ...(emailInput.trim() ? { inviteEmail: emailInput.trim() } : {}),
     });
   };
 
@@ -634,7 +677,7 @@ export function EventPromotersScreen() {
               Cancel
             </button>
             <button
-              disabled={addMutation.isPending || !selectedUser}
+              disabled={addMutation.isPending || (!selectedUser && !nameInput.trim())}
               onClick={onAddSubmit}
               className="flex-1 rounded-xl py-3 font-semibold text-white disabled:opacity-60"
               style={{ backgroundColor: ACCENT }}
@@ -694,6 +737,50 @@ export function EventPromotersScreen() {
           They&apos;re added to the event right away and notified — no
           accept step.
         </p>
+
+        {!selectedUser ? (
+          <div className="mt-4 border-t border-white/8 pt-4">
+            <label className="block">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
+                Not on DVNT? Add them by name
+              </span>
+              <input
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                placeholder="Promoter name"
+                maxLength={80}
+                disabled={addMutation.isPending}
+                className="mt-1.5 w-full rounded-xl bg-white/6 px-3 py-2.5 text-[15px] text-white outline-none placeholder:text-white/30 disabled:opacity-50"
+              />
+            </label>
+            <label className="mt-3 block">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
+                Email (optional)
+              </span>
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="name@example.com"
+                autoComplete="email"
+                maxLength={254}
+                disabled={addMutation.isPending}
+                aria-invalid={emailError ? true : undefined}
+                aria-describedby="promoter-email-hint"
+                className={`mt-1.5 w-full rounded-xl bg-white/6 px-3 py-2.5 text-[15px] text-white outline-none placeholder:text-white/30 disabled:opacity-50 ${emailError ? "ring-1 ring-red-500" : ""}`}
+              />
+              {emailError ? (
+                <p id="promoter-email-hint" role="alert" className="mt-1 text-[11px] text-red-400">
+                  {emailError}
+                </p>
+              ) : (
+                <p id="promoter-email-hint" className="mt-1 text-[11px] text-white/35">
+                  We email their code and dashboard link once. The address isn&apos;t saved.
+                </p>
+              )}
+            </label>
+          </div>
+        ) : null}
 
         <label className="mt-4 block">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-white/40">

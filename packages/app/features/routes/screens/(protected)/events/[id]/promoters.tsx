@@ -53,7 +53,9 @@ import {
 } from "@dvnt/app/lib/events/promoter-share";
 import {
   normalizePromoterCodeInput,
+  promoterAddedDescription,
   promoterCodeFieldError,
+  promoterInviteEmailFieldError,
 } from "@dvnt/app/lib/events/promoter-code";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
@@ -78,6 +80,9 @@ interface PromotersUIState {
   addMode: "linked" | "external";
   usernameInput: string;
   nameInput: string;
+  /** External promoters only: where the invite goes. Sent once, not stored. */
+  emailInput: string;
+  emailError: string | null;
   customerDiscountInput: string;
   promoterCommissionInput: string;
   codeInput: string;
@@ -87,6 +92,8 @@ interface PromotersUIState {
   setAddMode: (m: "linked" | "external") => void;
   setUsernameInput: (v: string) => void;
   setNameInput: (v: string) => void;
+  setEmailInput: (v: string) => void;
+  setEmailError: (v: string | null) => void;
   setCustomerDiscountInput: (v: string) => void;
   setPromoterCommissionInput: (v: string) => void;
   setCodeInput: (v: string) => void;
@@ -99,6 +106,8 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   addMode: "linked",
   usernameInput: "",
   nameInput: "",
+  emailInput: "",
+  emailError: null,
   customerDiscountInput: "10",
   promoterCommissionInput: "10",
   codeInput: "",
@@ -107,6 +116,8 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   setAddMode: (m) => set({ addMode: m }),
   setUsernameInput: (v) => set({ usernameInput: v }),
   setNameInput: (v) => set({ nameInput: v }),
+  setEmailInput: (v) => set({ emailInput: v, emailError: null }),
+  setEmailError: (v) => set({ emailError: v }),
   setCustomerDiscountInput: (v) => set({ customerDiscountInput: v }),
   setPromoterCommissionInput: (v) => set({ promoterCommissionInput: v }),
   // Case is kept as typed; the server matches codes case-insensitively.
@@ -118,6 +129,8 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
       addMode: "linked",
       usernameInput: "",
       nameInput: "",
+      emailInput: "",
+      emailError: null,
       customerDiscountInput: "10",
       promoterCommissionInput: "10",
       codeInput: "",
@@ -136,6 +149,10 @@ export default function EventPromotersScreen() {
   const addMode = usePromotersUIStore((s) => s.addMode);
   const usernameInput = usePromotersUIStore((s) => s.usernameInput);
   const nameInput = usePromotersUIStore((s) => s.nameInput);
+  const emailInput = usePromotersUIStore((s) => s.emailInput);
+  const emailError = usePromotersUIStore((s) => s.emailError);
+  const setEmailInput = usePromotersUIStore((s) => s.setEmailInput);
+  const setEmailError = usePromotersUIStore((s) => s.setEmailError);
   const customerDiscountInput = usePromotersUIStore((s) => s.customerDiscountInput);
   const promoterCommissionInput = usePromotersUIStore((s) => s.promoterCommissionInput);
   const toggleAdd = usePromotersUIStore((s) => s.toggleAdd);
@@ -167,12 +184,13 @@ export default function EventPromotersScreen() {
       customerDiscountBps: number;
       promoterCommissionBps: number;
       code?: string;
+      inviteEmail?: string;
     }) => promotersApi.add({ eventId, ...input }),
     onSuccess: (promoter) => {
       showToast(
         "success",
         "Promoter added",
-        `Code ${promoter.code} — copy their link to share.`,
+        promoterAddedDescription(promoter.code, promoter.inviteEmail),
       );
       resetAdd();
       invalidate();
@@ -181,6 +199,11 @@ export default function EventPromotersScreen() {
       const fieldError = promoterCodeFieldError(err);
       if (fieldError) {
         setCodeError(fieldError);
+        return;
+      }
+      const emailFieldError = promoterInviteEmailFieldError(err);
+      if (emailFieldError) {
+        setEmailError(emailFieldError);
         return;
       }
       showToast("error", "Couldn't add promoter", err?.message || "Try again.");
@@ -276,6 +299,7 @@ export default function EventPromotersScreen() {
         customerDiscountBps,
         promoterCommissionBps,
         ...(codeInput.trim() ? { code: codeInput.trim() } : {}),
+        ...(emailInput.trim() ? { inviteEmail: emailInput.trim() } : {}),
       });
     }
   };
@@ -343,15 +367,45 @@ export default function EventPromotersScreen() {
               />
             </View>
           ) : (
-            <View style={styles.inputRow}>
-              <TextInput
-                value={nameInput}
-                onChangeText={setNameInput}
-                placeholder="Promoter name (no DVNT account)"
-                placeholderTextColor="rgba(255,255,255,0.35)"
-                style={styles.input}
-              />
-            </View>
+            <>
+              <View style={styles.inputRow}>
+                <TextInput
+                  value={nameInput}
+                  onChangeText={setNameInput}
+                  placeholder="Promoter name (no DVNT account)"
+                  placeholderTextColor="rgba(255,255,255,0.35)"
+                  style={styles.input}
+                />
+              </View>
+              <Text style={styles.fieldLabel}>EMAIL (OPTIONAL)</Text>
+              <View style={[styles.inputRow, emailError ? styles.inputRowError : null]}>
+                <TextInput
+                  value={emailInput}
+                  onChangeText={setEmailInput}
+                  placeholder="name@example.com"
+                  placeholderTextColor="rgba(255,255,255,0.35)"
+                  keyboardType="email-address"
+                  textContentType="emailAddress"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={254}
+                  accessibilityLabel="Promoter email"
+                  accessibilityHint="We email their code and dashboard link. Not saved."
+                  style={styles.input}
+                />
+              </View>
+              {emailError ? (
+                <Text style={styles.fieldError} accessibilityRole="alert">
+                  {emailError}
+                </Text>
+              ) : (
+                <Text style={styles.hint}>
+                  We email their code and dashboard link once. The address
+                  isn't saved.
+                </Text>
+              )}
+            </>
           )}
 
           <Text style={styles.fieldLabel}>CUSTOM PROMOTER CODE (OPTIONAL)</Text>
