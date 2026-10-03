@@ -272,9 +272,9 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
-      // Without an approved adult ID the viewer gets only their own spicy
-      // posts. Same rule create-post applies to publishing them.
-      if (!(await viewerMaySeeSpicy(supabase, sessionUserId))) {
+      // Any signed-in member may view SPICY (spicy-access.ts). The follow
+      // gate below is the separate, deferred feed policy noted above.
+      if (!viewerMaySeeSpicy(sessionUserId)) {
         spicyAuthorIds = [intUserId];
       } else {
         // Fetch the set of author IDs the viewer follows + themselves

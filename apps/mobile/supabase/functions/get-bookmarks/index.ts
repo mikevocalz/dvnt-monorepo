@@ -108,11 +108,9 @@ Deno.serve(async (req) => {
     // Preserve bookmark creation order (bookmarks were fetched DESC above).
     // Build an id→post lookup and iterate postIds — O(n) vs the .sort() O(n log n)
     // it replaces, and it skips posts that went missing between queries.
-    // A bookmark does not outlive the SPICY rule: without an approved adult ID
-    // the viewer gets only their own SPICY posts back.
-    const maySeeSpicy = (posts || []).some((p: any) => p?.is_nsfw === true)
-      ? await viewerMaySeeSpicy(supabase, authId)
-      : true;
+    // A bookmark does not outlive the SPICY rule: a signed-out caller gets
+    // only non-SPICY posts back.
+    const maySeeSpicy = viewerMaySeeSpicy(authId);
     const postById = new Map<string, any>();
     for (const p of withoutHiddenSpicy(posts || [], { userId, maySeeSpicy })) postById.set(String(p.id), p);
     const orderedPosts = postIds

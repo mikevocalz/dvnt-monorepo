@@ -90,8 +90,8 @@ Deno.serve(async (req: Request) => {
     const isOwnProfile = !viewerUserId || viewerUserId === profileUserId;
 
     // ── NSFW gate ─────────────────────────────────────────────────
-    // Spicy posts from a profile go to its owner, or to a viewer who has an
-    // approved adult ID AND follows the owner. Force safe mode otherwise.
+    // Spicy posts from a profile go to its owner, or to a signed-in viewer
+    // who follows the owner. Force safe mode otherwise.
     // isOwnProfile is also true for a guest (it gates the follow-state reads
     // below), so the owner check here needs a real signed-in viewer.
     const viewerOwnsProfile = viewerUserId !== null && viewerUserId === profileUserId;
@@ -100,8 +100,8 @@ Deno.serve(async (req: Request) => {
       if (!viewerUserId) {
         // Guest — never allow spicy
         effectiveIncludeNsfw = false;
-      } else if (!(await viewerMaySeeSpicy(supabase, sessionUserId))) {
-        // No approved adult ID: same rule create-post applies to publishing.
+      } else if (!viewerMaySeeSpicy(sessionUserId)) {
+        // No signed-in session behind the viewer id.
         effectiveIncludeNsfw = false;
       } else {
         const { data: followRow } = await supabase

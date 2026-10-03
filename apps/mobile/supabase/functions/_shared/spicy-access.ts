@@ -1,25 +1,20 @@
 /**
  * Who may receive SPICY (is_nsfw) posts from a service-role read.
  *
- * The rule matches create-post and update-post: an approved adult ID, whatever
- * verified_admission_policy says. The author always sees their own posts. A
- * failed verification read is "not approved" (resolveAdultVerificationState
- * returns retry_required), so this fails closed.
+ * Product rule (2026-10-03): any signed-in member may view SPICY posts; a
+ * signed-out caller may not. Viewing needs no ID check. Publishing a post as
+ * SPICY is a different rule and still needs an approved adult ID (create-post,
+ * update-post, and the spicy_*_requires_verified_adult policies).
  *
  * Feed and profile reads run on the service role and bypass RLS, so they have
  * to apply this themselves. Direct PostgREST reads are covered by the
- * spicy_requires_verified_viewer policy on public.posts.
+ * spicy_requires_verified_viewer policies (20261003170100), which test for a
+ * JWT sub claim the same way.
  */
-import { resolveAdultVerificationState } from "./verification-state.ts";
 
-/** Better Auth user id of the viewer, or null for an anonymous request. */
-export async function viewerMaySeeSpicy(
-  db: any,
-  viewerAuthId: string | null | undefined,
-): Promise<boolean> {
-  if (!viewerAuthId) return false;
-  const verification = await resolveAdultVerificationState(db, viewerAuthId);
-  return verification.state === "approved";
+/** Better Auth user id of the viewer, or null for a signed-out request. */
+export function viewerMaySeeSpicy(viewerAuthId: string | null | undefined): boolean {
+  return typeof viewerAuthId === "string" && viewerAuthId.length > 0;
 }
 
 /**

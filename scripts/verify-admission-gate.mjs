@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * Runs 20261003170000_verified_admission_whole_membership.sql against a real
- * Postgres and checks what it does to row-level security, persona by persona.
+ * Runs 20261003170000_verified_admission_whole_membership.sql, then
+ * 20261003170100_spicy_viewing_signed_in.sql, against a real Postgres and
+ * checks what they do to row-level security, persona by persona.
  *
- * The migration rewrites verified_participation_allowed(), drops the
- * participation boundary from tickets, ticket_holds and event_rsvps, and adds
- * RESTRICTIVE SPICY (is_nsfw) policies on posts, posts_media and
- * post_text_slides. None of that is reachable from a unit test: whether a row
+ * 170000 rewrites verified_participation_allowed(), drops the participation
+ * boundary from tickets, ticket_holds and event_rsvps, and adds RESTRICTIVE
+ * SPICY (is_nsfw) policies on posts, posts_media and post_text_slides. 170100
+ * relaxes the read side of those policies to "signed in" (a JWT sub claim);
+ * creating or marking a post SPICY still needs an approved adult ID. None of that is reachable from a unit test: whether a row
  * comes back depends on which permissive and restrictive policies Postgres
  * combines for the role and JWT claims PostgREST sets. So this harness boots a
  * throwaway cluster and asks Postgres.
@@ -19,7 +21,8 @@
  * the table grants for anon and authenticated.
  *
  *   pre   the fixture alone, i.e. production today
- *   post  the fixture plus the migration, applied twice (it must re-run)
+ *   post  the fixture plus both migrations in order, the pair applied twice
+ *         (it must re-run)
  *
  * Every section runs against both. On post every section must pass. On pre,
  * each section marked `changed` must FAIL, which proves the check can tell the
@@ -37,7 +40,7 @@
  *
  *   node scripts/verify-admission-gate.mjs
  *   node scripts/verify-admission-gate.mjs --allow-skip   # no Postgres: record as unverified
- *   ADMISSION_GATE_MIGRATION=/path/to/other.sql node scripts/verify-admission-gate.mjs
+ *   ADMISSION_GATE_MIGRATION=/a.sql,/b.sql node scripts/verify-admission-gate.mjs   # comma-separated, applied in order
  *
  * Needs the Postgres server binaries (initdb/pg_ctl/postgres) from one prefix,
  * found the same way as verify-call-capacity.mjs. Without --allow-skip a
@@ -54,9 +57,12 @@ import pg from "pg";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const allowSkip = process.argv.includes("--allow-skip");
 const MIGRATIONS = join(root, "apps/mobile/supabase/migrations");
-const TARGET =
-  process.env.ADMISSION_GATE_MIGRATION ||
-  join(MIGRATIONS, "20261003170000_verified_admission_whole_membership.sql");
+const TARGETS = process.env.ADMISSION_GATE_MIGRATION
+  ? process.env.ADMISSION_GATE_MIGRATION.split(",").map((f) => f.trim()).filter(Boolean)
+  : [
+      join(MIGRATIONS, "20261003170000_verified_admission_whole_membership.sql"),
+      join(MIGRATIONS, "20261003170100_spicy_viewing_signed_in.sql"),
+    ];
 
 // Same server discovery as verify-call-capacity.mjs: initdb, postgres and
 // pg_ctl must come from one prefix, or initdb dies halfway through.
@@ -546,7 +552,7 @@ async function seed(db) {
 
 const pre = connect("pre");
 const post = connect("post");
-const migrationSql = readFileSync(TARGET, "utf8");
+const migrationSqls = TARGETS.map((f) => readFileSync(f, "utf8"));
 
 for (const db of [pre, post]) {
   await db.query(FIXTURE);
@@ -558,9 +564,10 @@ for (const db of [pre, post]) {
 // not fail on its own leftovers.
 const setupFailures = [];
 try {
-  await post.query(migrationSql);
-  await post.query(migrationSql);
-  console.log("OK: migration applies, and applies again over itself");
+  for (let pass = 0; pass < 2; pass++) {
+    for (const sql of migrationSqls) await post.query(sql);
+  }
+  console.log(`OK: ${migrationSqls.length} migration(s) apply in order, and apply again over themselves`);
 } catch (err) {
   setupFailures.push("migration applies twice");
   console.error(`FAIL: migration applies twice\n  ${err.message}`);
@@ -654,13 +661,14 @@ async function each(names, fn) {
 // fail against production (pre) and pass after the migration (post).
 const SECTIONS = [
   {
-    name: "SPICY posts, media and slides are visible only to the author and to an approved adult",
+    name: "SPICY posts, media and slides are visible to every signed-in member and hidden from anon",
     changed: true,
     async fn(db) {
+      // Product rule (2026-10-03): signed in = may view SPICY. No ID check.
       const expected = {
-        unverified: [POST.spicyByUnverified], // the author of post 2
-        underage: [],
-        old: [],
+        unverified: SPICY,
+        underage: SPICY,
+        old: SPICY,
         adult: SPICY,
         anon: [],
         service: SPICY,
@@ -937,6 +945,21 @@ const POST_ONLY = [
       assert.equal(c.userId, PERSONAS.old.auth);
       assert.deepEqual(Object.keys(c).sort(), ["denied", "exempt", "policy", "record", "userId"]);
       assert.deepEqual(Object.keys(c.policy).sort(), ["enforce", "grace_deadline"]);
+      // 170100: the SPICY read helper keys on a signed-in JWT, not the ID check.
+      for (const who of MEMBERS) {
+        const h = await as(db, who, `SELECT public.post_spicy_hidden($1::bigint) AS h`, [POST.spicyByAdult]);
+        assert.equal(h.rows?.[0]?.h, false, `${who}: post_spicy_hidden ${h.error ?? ""}`);
+      }
+      const anonHidden = await as(db, "anon", `SELECT public.post_spicy_hidden($1::bigint) AS h`, [POST.spicyByAdult]);
+      assert.equal(anonHidden.rows?.[0]?.h, true, `anon: post_spicy_hidden ${anonHidden.error ?? ""}`);
+      const svcHidden = await as(db, "service", `SELECT public.post_spicy_hidden($1::bigint) AS h`, [POST.spicyByAdult]);
+      assert.equal(svcHidden.rows?.[0]?.h, false, svcHidden.error);
+      const [writes] = (await db.query(`
+        SELECT count(*)::int AS n FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'posts'
+          AND policyname IN ('spicy_write_requires_verified_adult', 'spicy_update_requires_verified_adult')
+          AND with_check LIKE '%viewer_is_verified_adult()%'`)).rows;
+      assert.equal(writes.n, 2, "SPICY write policies must still require viewer_is_verified_adult()");
       const anonCtx = await as(db, "anon", `SELECT public.verified_admission_context() AS c`);
       assert.ok(!anonCtx.ok, "anon must not execute verified_admission_context()");
       const [dup] = (await db.query(`

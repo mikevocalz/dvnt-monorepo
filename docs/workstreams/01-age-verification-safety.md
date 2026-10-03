@@ -39,7 +39,8 @@ Persist provider references and minimal audit metadata; do not persist raw docum
 ### 4. Participation gates
 Centralize the server check and apply it to all relevant write/action boundaries:
 - posting, editing a post, commenting (posts and events) and stories
-- SPICY posting and SPICY viewing (approved adult ID required whatever the rollout policy says; the author always sees their own)
+- SPICY posting (approved adult ID required whatever the rollout policy says)
+- SPICY viewing: any signed-in member, no ID check; signed-out callers see none (product rule 2026-10-03, migration 20261003170100)
 - hosting events
 - Sneaky Lynk room joins and media tokens
 - messaging

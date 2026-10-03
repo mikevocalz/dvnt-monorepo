@@ -10,8 +10,9 @@
 //   legacy  account from 2023, never verified, holds a ticket
 //   adult   passed ID check with a 1990 date of birth
 //
-// Expected: everyone can check out. Only the adult can post, comment, post a
-// story, host an event, join a Lynk room or receive SPICY posts.
+// Expected: everyone can check out and, being signed in, view SPICY posts.
+// Only the adult can post, comment, post a story, host an event, join a Lynk
+// room or publish a post as SPICY.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -248,53 +249,66 @@ test('no ticket purchase, hold, RSVP or wallet rail imports the admission gate',
 });
 
 // ── SPICY reads ───────────────────────────────────────────────────────────
+// Product rule (2026-10-03): every signed-in member may view SPICY posts; a
+// signed-out caller may not. Viewing needs no ID check. Publishing SPICY still
+// does (update-post section below).
 const spicyIds = posts => (posts || []).filter(p => p.isNSFW === true || p.is_nsfw === true).map(p => String(p.id));
 
 for (const who of ALL) {
-  test(`bootstrap-feed: ${who} ${who === 'adult' ? 'receives' : 'does not receive'} a followed author's SPICY post`, async () => {
+  test(`bootstrap-feed: signed-in ${who} receives a followed author's SPICY post`, async () => {
     const res = await harness().call('bootstrap-feed', PERSONAS[who].authId, { include_nsfw: true });
     assert.equal(res.status, 200, JSON.stringify(res.json));
-    assert.equal(spicyIds(res.json.posts).includes('10'), who === 'adult', JSON.stringify(spicyIds(res.json.posts)));
+    assert.ok(spicyIds(res.json.posts).includes('10'), JSON.stringify(spicyIds(res.json.posts)));
   });
-  test(`bootstrap-profile: ${who} ${who === 'adult' ? 'receives' : 'does not receive'} SPICY posts on a followed profile`, async () => {
+  test(`bootstrap-profile: signed-in ${who} receives SPICY posts on a followed profile`, async () => {
     const res = await harness().call('bootstrap-profile', PERSONAS[who].authId, { user_id: SPICY_AUTHOR, include_nsfw: true });
     assert.equal(res.status, 200, JSON.stringify(res.json));
-    assert.equal(spicyIds(res.json.posts).includes('10'), who === 'adult', JSON.stringify(res.json.posts));
+    assert.ok(spicyIds(res.json.posts).includes('10'), JSON.stringify(res.json.posts));
   });
-  test(`get-text-post-slides: ${who} ${who === 'adult' ? 'gets' : 'does not get'} a SPICY post's slides`, async () => {
+  test(`get-text-post-slides: signed-in ${who} gets a SPICY post's slides`, async () => {
     const res = await harness().call('get-text-post-slides', PERSONAS[who].authId, { postIds: [10, 11] });
     const ids = res.json.data.posts.map(p => p.postId);
     assert.ok(ids.includes('11'));
-    assert.equal(ids.includes('10'), who === 'adult', JSON.stringify(ids));
+    assert.ok(ids.includes('10'), JSON.stringify(ids));
   });
-  test(`get-bookmarks: ${who} ${who === 'adult' ? 'gets' : 'does not get'} a bookmarked SPICY post back`, async () => {
+  test(`get-bookmarks: signed-in ${who} gets a bookmarked SPICY post back`, async () => {
     const res = await harness().call('get-bookmarks', PERSONAS[who].authId, { withPosts: true });
     assert.equal(res.status, 200, JSON.stringify(res.json));
-    assert.equal(res.json.posts.some(p => String(p.id) === '10'), who === 'adult', JSON.stringify(res.json));
+    assert.ok(res.json.posts.some(p => String(p.id) === '10'), JSON.stringify(res.json));
   });
-  test(`get-liked-activity: ${who} ${who === 'adult' ? 'sees' : 'does not see'} a liked SPICY post's text and image`, async () => {
+  test(`get-liked-activity: signed-in ${who} sees a liked SPICY post's text and image`, async () => {
     const res = await harness().call('get-liked-activity', PERSONAS[who].authId, {});
     assert.equal(res.status, 200, JSON.stringify(res.json));
     const item = res.json.items.find(i => i.entityId === '10');
     assert.ok(item, JSON.stringify(res.json));
-    assert.equal(item.title === 'spicy', who === 'adult', item.title);
-    assert.equal(item.previewImage === 'https://cdn.test/spicy.jpg', who === 'adult', item.previewImage);
+    assert.equal(item.title, 'spicy');
+    assert.equal(item.previewImage, 'https://cdn.test/spicy.jpg');
   });
 }
 
-test('bootstrap-feed: an unverified author still sees their own SPICY post', async () => {
-  const res = await harness().call('bootstrap-feed', PERSONAS.buyer.authId, { include_nsfw: true });
-  assert.deepEqual(spicyIds(res.json.posts), ['12']);
+test('bootstrap-feed: a signed-out viewer asking for SPICY gets an empty feed', async () => {
+  const res = await harness().call('bootstrap-feed', null, { include_nsfw: true });
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  assert.deepEqual(spicyIds(res.json.posts), []);
 });
 test('bootstrap-profile: a signed-out viewer gets no SPICY posts', async () => {
   const res = await harness().call('bootstrap-profile', null, { user_id: SPICY_AUTHOR, include_nsfw: true });
   assert.equal(res.status, 200, JSON.stringify(res.json));
   assert.deepEqual(spicyIds(res.json.posts), []);
 });
-test('SPICY reads stay gated with enforcement off: the rule is the approved ID, not the rollout', async () => {
+test('get-text-post-slides: a signed-out viewer gets no SPICY slides', async () => {
+  const res = await harness().call('get-text-post-slides', null, { postIds: [10, 11] });
+  const ids = (res.json.data?.posts || []).map(p => p.postId);
+  assert.ok(!ids.includes('10'), JSON.stringify(res.json));
+});
+test('SPICY viewing ignores the rollout switch: enforcement off, signed-in still sees it', async () => {
   const res = await harness({ policy: { ...ENFORCED, enforce: false } })
     .call('bootstrap-feed', PERSONAS.legacy.authId, { include_nsfw: true });
-  assert.deepEqual(spicyIds(res.json.posts), []);
+  assert.ok(spicyIds(res.json.posts).includes('10'), JSON.stringify(spicyIds(res.json.posts)));
+});
+test('spicy-access: signed-in means a non-empty Better Auth id', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'spicy-access.ts'), 'utf8');
+  assert.doesNotMatch(src, /resolveAdultVerificationState/, 'viewing must not consult the ID check');
 });
 test('live-surface filters SPICY out of its public post query', () => {
   const src = fs.readFileSync(path.join(FUNCTIONS, 'live-surface', 'index.ts'), 'utf8');

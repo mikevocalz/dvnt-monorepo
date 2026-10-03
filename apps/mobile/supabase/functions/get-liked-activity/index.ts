@@ -372,9 +372,7 @@ Deno.serve(async (req) => {
 
     // A like does not outlive the SPICY rule. A hidden post renders as
     // "Post unavailable" with no preview image.
-    const maySeeSpicy = (posts || []).some((post: any) => post?.is_nsfw === true)
-      ? await viewerMaySeeSpicy(supabaseAdmin, sessionResult.userId)
-      : true;
+    const maySeeSpicy = viewerMaySeeSpicy(sessionResult.userId);
     const postsById = new Map(
       withoutHiddenSpicy(posts || [], { userId: userData.id, maySeeSpicy })
         .map((post: any) => [String(post.id), post]),

@@ -89,10 +89,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // SPICY slides follow the create-post rule: approved adult ID or author.
-    const maySeeSpicy = (posts || []).some((post: any) => post?.is_nsfw === true)
-      ? await viewerMaySeeSpicy(supabaseAdmin, viewerAuthId)
-      : true;
+    // SPICY slides go to any signed-in viewer (spicy-access.ts).
+    const maySeeSpicy = viewerMaySeeSpicy(viewerAuthId);
     const allowedPostIds = withoutHiddenSpicy(posts || [], { userId: viewerUserId, maySeeSpicy })
       .filter((post: any) => {
         const visibility = String(post?.visibility || "public");
