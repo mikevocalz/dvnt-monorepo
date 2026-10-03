@@ -25,7 +25,7 @@ test("a public event turns the first admission purchase into a draft", () => {
   assert.equal(draft?.eventId, EVENT_ID);
   assert.equal(
     draft?.content,
-    'Hey, I just punched my ticket for "Deviant DC" 🎟️\n\n#DeviantDC #Washington #DVNT #DeviantEvents',
+    'Hey, I just punched my ticket for Deviant DC! #DeviantDC #Washington #DVNT #DeviantEvents',
   );
 });
 
@@ -69,7 +69,7 @@ test("a missing city omits its hashtag rather than guessing one", () => {
     });
     assert.equal(
       draft?.content,
-      'Hey, I just punched my ticket for "Deviant DC" 🎟️\n\n#DeviantDC #DVNT #DeviantEvents',
+      'Hey, I just punched my ticket for Deviant DC! #DeviantDC #DVNT #DeviantEvents',
     );
   }
 });
@@ -140,4 +140,16 @@ test("no ticket, order, QR or address identifier can reach the draft", () => {
     assert.equal(content.includes(secret), false, `leaked ${secret}`);
   }
   assert.ok(content.length > 0);
+});
+
+test("the draft matches the R04 template exactly: no quotes, no emoji, one line", () => {
+  const draft = buildFirstPostDraft({
+    event: { ...publicEvent, title: "Deviant DC Halloween", cityName: "Washington, D.C." },
+    lines: [admission],
+  });
+  assert.equal(
+    draft?.content,
+    "Hey, I just punched my ticket for Deviant DC Halloween! #DeviantDCHalloween #WashingtonDC #DVNT #DeviantEvents",
+  );
+  assert.doesNotMatch(draft?.content ?? "", /["\n\u{1F39F}]/u);
 });
