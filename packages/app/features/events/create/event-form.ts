@@ -107,6 +107,8 @@ export interface EventFormDraft {
   agreementAccepted: boolean;
   /** Duplicated events must get an explicit new schedule before publish. */
   scheduleNeedsReview?: boolean;
+  /** Zone carried by a duplicated draft; publish falls back to the device zone. */
+  eventTz?: string | null;
 }
 
 // ── Ticketing helpers ────────────────────────────────────────────────────────
@@ -241,5 +243,33 @@ export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {})
     perks: d.perks.length > 0 ? d.perks : undefined,
     disclaimers: d.disclaimers.trim() || undefined,
     nsfw: d.isNsfw || undefined,
+    // A duplicated draft keeps its source event's zone. createEvent uses the
+    // device zone only when this is absent.
+    eventTz: d.eventTz?.trim() || undefined,
   };
+}
+
+// ── Promo codes carried by a duplicated draft (review step) ─────────────────
+export interface PromoCodeTemplateLike {
+  code: string;
+  discountType: string;
+  discountValue: number;
+  ticketTierName: string | null;
+  active: boolean;
+}
+
+/** "10% off", "$5.00 off", "Buy one, get one", plus the tier when scoped. */
+export function describePromoTemplate(p: PromoCodeTemplateLike): string {
+  const discount =
+    p.discountType === "fixed_cents"
+      ? `$${(p.discountValue / 100).toFixed(2)} off`
+      : p.discountType === "bogo"
+        ? "Buy one, get one"
+        : `${p.discountValue}% off`;
+  return p.ticketTierName ? `${discount}, ${p.ticketTierName} only` : discount;
+}
+
+/** Enabled codes first, then the ones that copy switched off. */
+export function sortPromoTemplates<T extends PromoCodeTemplateLike>(list: T[]): T[] {
+  return [...list].sort((a, b) => Number(b.active) - Number(a.active) || a.code.localeCompare(b.code));
 }

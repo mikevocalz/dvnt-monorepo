@@ -80,6 +80,22 @@ export interface PromoterTemplateDraft {
   promoterCommissionBps: number;
 }
 
+/**
+ * A standalone promo code on the event a draft was duplicated from. Display
+ * only: event-drafts copy_promo_codes re-reads the source on publish.
+ */
+export interface PromoCodeTemplateDraft {
+  code: string;
+  discountType: string;
+  discountValue: number;
+  maxUses: number | null;
+  validFrom: string | null;
+  validUntil: string | null;
+  ticketTierName: string | null;
+  /** Redeemable right now by the rules in _shared/apply-promo-code.ts. */
+  active: boolean;
+}
+
 /** Editor row → `price_schedule` jsonb entry ("price changes to $X at T"). */
 export interface TierScheduleRow {
   effectiveAt: string; // ISO — when the new price takes effect
@@ -148,6 +164,13 @@ interface DraftFields {
   guests: EventGuestDraft[];
   /** Fresh promoter invitations to recreate after publishing a duplicated event. */
   promoterTemplates: PromoterTemplateDraft[];
+  /** Promo codes the duplicated event will carry; shown on review. */
+  promoCodeTemplates: PromoCodeTemplateDraft[];
+  /**
+   * IANA zone of the event this draft was duplicated from. Publish sends it
+   * instead of the publisher's device zone. Null for a fresh draft.
+   */
+  eventTz: string | null;
   flyerImage: string | null;
   flyerMediaType: "image" | "video";
   // Fallback still image shown when the primary flyer is a video and the
@@ -323,6 +346,8 @@ const DRAFT_DEFAULTS: DraftFields = {
   coOrganizers: [],
   guests: [],
   promoterTemplates: [],
+  promoCodeTemplates: [],
+  eventTz: null,
   flyerImage: null,
   flyerMediaType: "image",
   flyerFallbackImage: null,
@@ -606,6 +631,8 @@ export const useCreateEventStore = create<CreateEventState>()(
         coOrganizers: state.coOrganizers,
         guests: state.guests,
         promoterTemplates: state.promoterTemplates,
+        promoCodeTemplates: state.promoCodeTemplates,
+        eventTz: state.eventTz,
         flyerImage: state.flyerImage,
         flyerMediaType: state.flyerMediaType,
         flyerFallbackImage: state.flyerFallbackImage,

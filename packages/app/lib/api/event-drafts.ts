@@ -45,6 +45,8 @@ function snapshotCurrentDraft(): Record<string, unknown> {
     // duplicate_event never copies them from a source event.
     guests: s.guests,
     promoterTemplates: s.promoterTemplates,
+    promoCodeTemplates: s.promoCodeTemplates,
+    eventTz: s.eventTz,
     flyerImage: s.flyerImage,
     flyerMediaType: s.flyerMediaType,
     flyerFallbackImage: s.flyerFallbackImage,
@@ -65,6 +67,12 @@ async function invoke<T>(body: Record<string, unknown>): Promise<T> {
   if (error) throw new Error(error.message);
   if (!data?.ok) throw new Error(data?.error || "Event draft request failed");
   return data;
+}
+
+export interface CopyPromoCodesResult {
+  copied: { code: string; active: boolean }[];
+  kept: string[];
+  skipped: { code: string; reason: string }[];
 }
 
 export const eventDraftsApi = {
@@ -112,6 +120,14 @@ export const eventDraftsApi = {
     await invoke<{ deleted: boolean }>({ action: "delete", draftId });
     const s = useCreateEventStore.getState();
     if (s.serverDraftId === draftId) s.resetDraft();
+  },
+
+  /**
+   * Copy the source event's promo codes onto the event published from its
+   * duplicate. Server-side and idempotent, so a retried publish is safe.
+   */
+  async copyPromoCodes(eventId: number, sourceEventId: number): Promise<CopyPromoCodesResult> {
+    return invoke<CopyPromoCodesResult>({ action: "copy_promo_codes", eventId, sourceEventId });
   },
 
   async duplicateEvent(eventId: number): Promise<EventDraftRecord> {
