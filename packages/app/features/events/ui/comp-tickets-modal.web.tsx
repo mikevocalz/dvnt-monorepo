@@ -16,17 +16,23 @@
  *
  * Issued is not delivered. The result panel keeps them in two columns so a
  * host cannot read "5 issued" as "5 people got an email".
+ *
+ * Phone comps come back as single-use claim links. DVNT sends no SMS: each
+ * row opens the host's SMS app through an `sms:` URL, one person per tap.
  */
 
 import { useEffect, useMemo } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Gift, Check, AlertCircle, Mail } from "lucide-react";
+import { Gift, Check, AlertCircle, Mail, MessageSquare, Share2, Copy } from "lucide-react";
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 import { searchApi } from "@dvnt/app/lib/api/search";
 import { bulkCompTickets, type CompResult } from "@dvnt/app/lib/api/privileged";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAttendeesStore } from "@dvnt/app/lib/stores/attendees-store";
+import { useCompClaimSendStore } from "@dvnt/app/lib/stores/comp-claim-send-store";
+import type { ClaimSendStatus } from "@dvnt/app/lib/tickets/comp-claim-message";
+import { copyShareUrl } from "@dvnt/app/lib/deep-linking/share-link";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
 import {
   MAX_COMP_RECIPIENTS,
@@ -78,6 +84,7 @@ function ResultPanel({ result }: { result: CompResult }) {
           <p className="mt-1 text-[13px] text-white/50">
             {s.issued} to accounts
             {s.guestIssued ? ` · ${s.guestIssued} to guests` : ""}
+            {s.phoneIssued ? ` · ${s.phoneIssued} by phone` : ""}
             {result.tier ? ` · ${result.tier}` : ""}
           </p>
         </div>
@@ -121,6 +128,8 @@ function ResultPanel({ result }: { result: CompResult }) {
         </div>
       ) : null}
 
+      {s.claimLinks > 0 ? <ClaimLinksPanel /> : null}
+
       {result.skipped.length > 0 ? (
         <div className="mt-4 rounded-2xl border border-white/10 p-4">
           <p className="flex items-center gap-2 text-[13px] font-semibold text-white/70">
@@ -144,6 +153,91 @@ function ResultPanel({ result }: { result: CompResult }) {
   );
 }
 
+const STATUS_LABEL: Record<ClaimSendStatus, string> = {
+  pending: "Not texted yet",
+  sent: "Texted",
+  opened: "Opened in Messages",
+  shared: "Shared",
+  cancelled: "Not sent",
+  failed: "Couldn't open Messages",
+};
+
+/**
+ * One row, one person, one link. There is no "text everyone" here: an sms:
+ * URL hands off and returns at once, so a loop would open every composer at
+ * the same moment. Copy is for a desktop with no SMS app.
+ */
+function ClaimLinksPanel() {
+  const links = useCompClaimSendStore((s) => s.links);
+  const statuses = useCompClaimSendStore((s) => s.statuses);
+  const active = useCompClaimSendStore((s) => s.active);
+  const text = useCompClaimSendStore((s) => s.text);
+  const share = useCompClaimSendStore((s) => s.share);
+  const showToast = useUIStore((s) => s.showToast);
+  return (
+    <div className="mt-4 rounded-2xl border border-cyan-300/25 p-4">
+      <p className="flex items-center gap-2 text-[13px] font-semibold text-cyan-200">
+        <MessageSquare size={14} /> Text each person their link
+      </p>
+      <p className="mt-1 text-[13px] text-white/50">
+        Each link works once and goes out from your number. Comping the same
+        number again replaces its link.
+      </p>
+      <ul className="mt-3 divide-y divide-white/8">
+        {links.map((link) => {
+          const status = statuses[link.ticket_id] ?? "pending";
+          return (
+            <li key={link.ticket_id} className="flex items-center gap-2 py-2.5">
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-[14px] font-semibold text-white">
+                  {link.recipient}
+                </span>
+                <span
+                  className={`text-[12px] ${
+                    status === "failed" ? "text-red-300" : "text-white/45"
+                  }`}
+                >
+                  {link.reissued ? "New link, the old one stopped working. " : ""}
+                  {STATUS_LABEL[status]}
+                </span>
+              </span>
+              <button
+                type="button"
+                aria-label={`Copy link for ${link.recipient}`}
+                onClick={() => {
+                  copyShareUrl(link.url);
+                  showToast("success", "Link copied", `Send it to ${link.recipient} only.`);
+                }}
+                className="rounded-lg bg-white/8 p-2 text-white hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+              >
+                <Copy size={15} />
+              </button>
+              <button
+                type="button"
+                aria-label={`Share link for ${link.recipient}`}
+                disabled={active !== null}
+                onClick={() => void share(link.ticket_id)}
+                className="rounded-lg bg-white/8 p-2 text-white hover:bg-white/12 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+              >
+                <Share2 size={15} />
+              </button>
+              <button
+                type="button"
+                disabled={active !== null}
+                onClick={() => void text(link.ticket_id)}
+                className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-[13px] font-semibold text-black disabled:opacity-40 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+              >
+                <MessageSquare size={14} />
+                {status === "pending" ? "Text" : "Text again"}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export function CompTicketsModal({
   visible,
   onClose,
@@ -152,6 +246,8 @@ export function CompTicketsModal({
   onSuccess,
 }: Props) {
   const showToast = useUIStore((s) => s.showToast);
+  const loadClaimLinks = useCompClaimSendStore((s) => s.load);
+  const resetClaimLinks = useCompClaimSendStore((s) => s.reset);
   const tierId = useAttendeesStore((s) => s.compTierId);
   const setTierId = useAttendeesStore((s) => s.setCompTierId);
   const recipientsRaw = useAttendeesStore((s) => s.compRecipients);
@@ -214,6 +310,7 @@ export function CompTicketsModal({
     mutationFn: () =>
       bulkCompTickets(eventId, tierId!, preview.entries, note.trim() || undefined),
     onSuccess: (res) => {
+      loadClaimLinks(res.claim_links ?? [], eventTitle);
       onSuccess?.(res);
       const s = summarizeCompResult(res);
       if (s.totalIssued > 0) {
@@ -223,6 +320,7 @@ export function CompTicketsModal({
           [
             `${s.totalIssued} issued`,
             s.guestIssued ? `${s.guestIssued} by email` : "",
+            s.claimLinks ? `${s.claimLinks} to text` : "",
             s.undelivered
               ? `${s.undelivered} email${s.undelivered === 1 ? "" : "s"} failed`
               : "",
@@ -231,6 +329,8 @@ export function CompTicketsModal({
             .filter(Boolean)
             .join(", ") + ".",
         );
+      } else if (s.claimLinks > 0) {
+        showToast("success", "Links ready", `${s.claimLinks} to text.`);
       } else if (s.skipped > 0) {
         showToast(
           "warning",
@@ -253,6 +353,7 @@ export function CompTicketsModal({
   const handleClose = () => {
     if (sending) return;
     mutation.reset();
+    resetClaimLinks();
     onClose();
   };
 
@@ -273,7 +374,9 @@ export function CompTicketsModal({
               preview.entries.length === 1 ? "" : "s"
             } · ${preview.members} member${
               preview.members === 1 ? "" : "s"
-            } · ${preview.emails} email${preview.emails === 1 ? "" : "s"}`}
+            } · ${preview.emails} email${preview.emails === 1 ? "" : "s"} · ${
+              preview.phones
+            } phone${preview.phones === 1 ? "" : "s"}`}
       </p>
       <button
         type="button"
@@ -480,7 +583,7 @@ export function CompTicketsModal({
               spellCheck={false}
               autoCapitalize="none"
               autoCorrect="off"
-              placeholder="@username, friend@example.com, …"
+              placeholder="@username, friend@example.com, +1 415 555 0134"
               className="w-full resize-y rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[15px] text-white placeholder:text-white/30 outline-none focus:border-white/30 focus:ring-2 focus:ring-cyan-400/40 disabled:opacity-50"
             />
             {preview.overLimit ? (
@@ -491,9 +594,10 @@ export function CompTicketsModal({
             ) : null}
             <p className="mt-2 text-[13px] leading-relaxed text-white/45">
               A DVNT username lands in that member&apos;s wallet. An email with
-              no account gets a guest ticket emailed as a claim link — no
-              sign-up needed to get in. Phone numbers aren&apos;t supported.
-              Separate entries with a comma, semicolon, or new line.
+              no account gets a guest ticket emailed as a claim link. A phone
+              number gets a claim link you text from your own phone; they sign
+              in to claim it, and the link works once. Separate entries with a
+              comma, semicolon, or new line.
             </p>
           </div>
 

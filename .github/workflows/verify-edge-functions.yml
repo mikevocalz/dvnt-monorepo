@@ -26,6 +26,7 @@ on:
       - "scripts/verify-checkout-profile.mjs"
       - "scripts/verify-event-publication.mjs"
       - "scripts/verify-brand-follows.mjs"
+      - "scripts/verify-comp-claims.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -92,6 +93,9 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-call-capacity.mjs
+      # Phone comp claims: single use, a second account refused, expiry, and
+      # racing claims, against the real migration SQL. Same no-skip rule.
+      - run: node scripts/verify-comp-claims.mjs
 
   users-write-lockdown:
     # Boots a throwaway cluster with production's public.users grants and

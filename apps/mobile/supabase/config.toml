@@ -515,3 +515,8 @@ verify_jwt = false
 
 [functions.event-drafts]
 verify_jwt = false
+
+# Phone comp claim. Better Auth session, checked in the handler, like every
+# other function here.
+[functions.claim-comp-ticket]
+verify_jwt = false

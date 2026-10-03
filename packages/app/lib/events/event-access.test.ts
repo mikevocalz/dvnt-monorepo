@@ -91,10 +91,13 @@ test("lookup failure never becomes public event access", async () => {
 test("ambiguous linked event relation fails closed", async () => {
   await assert.rejects(resolveEventRoomAccess(database({ events: [{ ...event, lynk_room_id: "room" }, { ...event, id: 13, lynk_room_id: "room" }] }), { uuid: "room" }, "buyer"));
 });
-test("comp recipients normalize valid accounts and reject phone/ambiguous inputs", () => {
+test("comp recipients normalize accounts and phones, and reject ambiguous inputs", () => {
   assert.deepEqual(normalizeCompRecipient(" @Micah "), { kind: "username", value: "micah" });
   assert.deepEqual(normalizeCompRecipient(" Name@Example.com "), { kind: "email", value: "name@example.com" });
-  for (const input of ["+1 (202) 555-0123", "2025550123", "@bad@email.com", {}, null])
+  // Phones are a comp route now (host-texted claim link), never an account guess.
+  assert.deepEqual(normalizeCompRecipient("+1 (202) 555-0123"), { kind: "phone", value: "+12025550123" });
+  assert.deepEqual(normalizeCompRecipient("2025550123"), { kind: "phone", value: "+12025550123" });
+  for (const input of ["123-45-67", "@bad@email.com", {}, null])
     assert.equal(normalizeCompRecipient(input), null);
 });
 test("username and email aliases receive one comp, retaining a skipped explanation", () => {
