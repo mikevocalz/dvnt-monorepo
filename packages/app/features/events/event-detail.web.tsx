@@ -1,5 +1,7 @@
 import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
+import { canHostEventLynk, waitingSinceLabel } from "@dvnt/app/lib/events/event-lynk";
 import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { canScanTickets, canViewFullRoster } from "@dvnt/app/lib/events/event-role";
 /**
@@ -711,6 +713,11 @@ export function EventDetailScreen() {
   const mayScan = canScanTickets(doorRole);
   const mayManage = isHost || canViewFullRoster(doorRole);
 
+  // Event Lynk waiting room. Host = owner or accepted admin/editor
+  // co-organizer, the server's rule; the server re-checks on every call.
+  const mayHostLynk = isHost || canHostEventLynk(doorRole);
+  const lynkHost = useEventLynkHost(Number(eventId), mayHostLynk && !!e?.lynkRoomId);
+
   // Promoters get their own door back to the promoter dashboard — the
   // payout-setup screen must always be reachable, not just from the push
   // notification that says they were added.
@@ -775,6 +782,27 @@ export function EventDetailScreen() {
     }
     go(roomId);
   }, [e?.lynkRoomId, e?.title, e?.description, eventId, isHost, router]);
+
+  /** Host's Start: opens the room for everyone waiting, then enters it. */
+  const startEventLynk = useCallback(async () => {
+    try {
+      const res = await lynkHost.start();
+      showToast(
+        "success",
+        "Lynk started",
+        res.admitted > 0
+          ? `${res.admitted} waiting ${res.admitted === 1 ? "guest is" : "guests are"} joining`
+          : "Guests can join now",
+      );
+      void openEventLynk();
+    } catch (err) {
+      showToast(
+        "error",
+        "Couldn't start the Lynk",
+        err instanceof Error && err.message ? err.message : "Try again in a moment.",
+      );
+    }
+  }, [lynkHost, openEventLynk, showToast]);
 
   if (!e && resolving) return <Centered>Loading…</Centered>;
   if (!e) {
@@ -1664,6 +1692,52 @@ export function EventDetailScreen() {
                   </span>
                 </span>
               </button>
+              {mayHostLynk && lynkHost.view && !lynkHost.isLive ? (
+                <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" data-testid="event-lynk-host-panel">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-white" aria-live="polite">
+                      {lynkHost.view.count === 0
+                        ? "No one waiting yet"
+                        : lynkHost.view.count === 1
+                          ? "1 person waiting"
+                          : `${lynkHost.view.count} people waiting`}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void startEventLynk()}
+                      disabled={lynkHost.isStarting}
+                      aria-busy={lynkHost.isStarting}
+                      data-testid="event-lynk-start"
+                      className="rounded-full bg-[#8A40CF] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-60"
+                    >
+                      {lynkHost.isStarting ? "Starting" : "Start Lynk"}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-white/55">
+                    Guests wait here until you start. Everyone waiting joins when you do.
+                  </p>
+                  {lynkHost.view.count > 0 ? (
+                    <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+                      {lynkHost.view.waiting.map((w) => {
+                        const name = w.displayName || w.username || "Guest";
+                        return (
+                          <li key={w.userId} className="flex items-center gap-3 py-1">
+                            {w.avatar ? (
+                              <img src={w.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+                            ) : (
+                              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-white/60">
+                                {name.slice(0, 1).toUpperCase()}
+                              </span>
+                            )}
+                            <span className="min-w-0 flex-1 truncate text-sm text-white">{name}</span>
+                            <span className="text-xs text-white/55">{waitingSinceLabel(w.joinedAt)}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
             </Section>
           ) : null}
 
