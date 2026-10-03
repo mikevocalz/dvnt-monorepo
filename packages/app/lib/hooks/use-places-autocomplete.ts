@@ -5,6 +5,7 @@ import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-sto
 import type {
   PlacesBias,
   PlacesLocationData,
+  PlacesOrigin,
   PlacesPrediction,
 } from "@dvnt/app/lib/places/types";
 
@@ -58,12 +59,15 @@ interface UsePlacesAutocompleteOptions {
   value?: string;
   onLocationSelect?: (location: PlacesLocationData) => void;
   debounceMs?: number;
+  /** When set, each prediction comes back with distanceMeters from here. */
+  origin?: PlacesOrigin | null;
 }
 
 export function usePlacesAutocomplete({
   value = "",
   onLocationSelect,
   debounceMs = 280,
+  origin = null,
 }: UsePlacesAutocompleteOptions = {}) {
   const activeCity = useEventsLocationStore((s) => s.activeCity);
   const deviceLat = useEventsLocationStore((s) => s.deviceLat);
@@ -126,6 +130,11 @@ export function usePlacesAutocomplete({
     return null;
   }, [activeCity, deviceBias, deviceLat, deviceLng]);
 
+  // Depend on the numbers, not the object, so a caller passing a fresh
+  // { latitude, longitude } literal each render does not refire the search.
+  const originLat = origin?.latitude;
+  const originLng = origin?.longitude;
+
   const resetSession = useCallback(() => {
     sessionTokenRef.current = null;
   }, []);
@@ -161,6 +170,9 @@ export function usePlacesAutocomplete({
           input: query,
           sessionToken: ensureSession(),
           locationBias,
+          ...(isFiniteCoord(originLat) && isFiniteCoord(originLng)
+            ? { origin: { latitude: originLat, longitude: originLng } }
+            : {}),
         },
       });
 
@@ -174,7 +186,7 @@ export function usePlacesAutocomplete({
       }
       setIsLoading(false);
     },
-    [ensureSession, locationBias],
+    [ensureSession, locationBias, originLat, originLng],
   );
 
   useEffect(() => {

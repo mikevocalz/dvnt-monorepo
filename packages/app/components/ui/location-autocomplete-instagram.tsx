@@ -38,6 +38,9 @@ import {
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
 import { decideLocationPermission } from "@dvnt/app/lib/places/location-permission";
+import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import { placeDistanceLabel } from "@dvnt/app/lib/proximity";
+import { calculateDistance } from "@dvnt/app/lib/types/location";
 
 export type LocationData = {
   name: string;
@@ -68,7 +71,11 @@ type GooglePlace = {
   types?: string[];
   latitude?: number;
   longitude?: number;
+  /** Straight-line meters from the member's stored city, when known. */
+  distanceMeters?: number;
 };
+
+type SearchOrigin = { lat: number; lng: number };
 
 type RecentLocation = {
   id: string;
@@ -98,7 +105,32 @@ function sanitizeRecentLocations(value: unknown): RecentLocation[] {
   );
 }
 
+function readDistanceMeters(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
 function createPredictionFromSuggestion(suggestion: any): GooglePlace | null {
+  // Places API (New) autocomplete returns suggestions[].placePrediction.
+  const prediction = suggestion?.placePrediction;
+  if (prediction?.placeId) {
+    const mainText =
+      prediction.structuredFormat?.mainText?.text || prediction.text?.text || "";
+    if (!mainText) return null;
+    const secondaryText = prediction.structuredFormat?.secondaryText?.text || "";
+    return {
+      place_id: prediction.placeId,
+      description: prediction.text?.text || mainText,
+      structured_formatting: {
+        main_text: mainText,
+        secondary_text: secondaryText || undefined,
+      },
+      types: prediction.types || [],
+      distanceMeters: readDistanceMeters(prediction.distanceMeters),
+    };
+  }
+
   const place = suggestion?.place;
   const text = suggestion?.text?.text;
   const placeId = place?.id;
@@ -130,10 +162,17 @@ function normalizeLegacyPredictions(data: any): GooglePlace[] | null {
         typeof prediction.description === "string" &&
         !!prediction.structured_formatting?.main_text,
     )
-    .slice(0, 8);
+    .slice(0, 8)
+    .map((prediction: any) => ({
+      ...prediction,
+      distanceMeters: readDistanceMeters(prediction.distance_meters),
+    }));
 }
 
-function normalizePhotonPredictions(data: any): GooglePlace[] | null {
+function normalizePhotonPredictions(
+  data: any,
+  origin: SearchOrigin | null,
+): GooglePlace[] | null {
   if (!data || !Array.isArray(data.features)) return null;
 
   return data.features
@@ -177,6 +216,12 @@ function normalizePhotonPredictions(data: any): GooglePlace[] | null {
         types: [props.osm_value || "geocode"],
         latitude,
         longitude,
+        // Photon has no origin parameter; it returns coordinates, so measure
+        // from the stored city here.
+        distanceMeters:
+          origin && latitude != null && longitude != null
+            ? calculateDistance(origin.lat, origin.lng, latitude, longitude) * 1000
+            : undefined,
       } satisfies GooglePlace;
     })
     .filter(Boolean)
@@ -194,6 +239,15 @@ export function LocationAutocompleteInstagram({
   onDismiss,
 }: LocationAutocompleteProps) {
   const { colors } = useColorScheme();
+  // Distances are measured from the member's stored city, never a device fix.
+  const activeCity = useEventsLocationStore((s) => s.activeCity);
+  const searchOrigin = useMemo<SearchOrigin | null>(
+    () => (activeCity ? { lat: activeCity.lat, lng: activeCity.lng } : null),
+    [activeCity],
+  );
+  // The debouncer below is built once, so it reads the origin through a ref.
+  const searchOriginRef = useRef(searchOrigin);
+  searchOriginRef.current = searchOrigin;
   const sheetRef = useRef<BottomSheetModal>(null);
   const searchInputRef = useRef<any>(null);
   const snapPoints = useMemo(() => ["78%"], []);
@@ -300,12 +354,14 @@ export function LocationAutocompleteInstagram({
     if (!HAS_GOOGLE_PLACES_KEY) return null;
 
     try {
+      const origin = searchOriginRef.current;
       const url =
         "https://maps.googleapis.com/maps/api/place/autocomplete/json" +
         `?key=${GOOGLE_PLACES_API_KEY}` +
         `&input=${encodeURIComponent(text)}` +
         "&language=en" +
-        "&components=country:us";
+        "&components=country:us" +
+        (origin ? `&origin=${origin.lat},${origin.lng}` : "");
 
       const response = await fetch(url);
       if (!response.ok) return null;
@@ -327,7 +383,7 @@ export function LocationAutocompleteInstagram({
       );
       if (!response.ok) return null;
       const data = await response.json();
-      return normalizePhotonPredictions(data);
+      return normalizePhotonPredictions(data, searchOriginRef.current);
     } catch (error) {
       console.warn(
         "[LocationAutocompleteInstagram] Photon autocomplete failed:",
@@ -359,6 +415,14 @@ export function LocationAutocompleteInstagram({
                 input: normalizedText,
                 languageCode: "en",
                 includedRegionCodes: ["us"],
+                ...(searchOriginRef.current
+                  ? {
+                      origin: {
+                        latitude: searchOriginRef.current.lat,
+                        longitude: searchOriginRef.current.lng,
+                      },
+                    }
+                  : {}),
               }),
             },
           );
@@ -593,35 +657,54 @@ export function LocationAutocompleteInstagram({
   );
 
   const renderPredictionRow = useCallback(
-    (prediction: GooglePlace) => (
-      <TouchableOpacity
-        key={prediction.place_id}
-        onPress={() => void handleSelectPrediction(prediction)}
-        activeOpacity={0.8}
-        style={[styles.row, { backgroundColor: colors.card }]}
-      >
-        <View style={styles.rowIconWrap}>
-          {prediction.types?.includes("establishment") ? (
-            <Building size={16} color={colors.mutedForeground} />
-          ) : (
-            <MapPin size={16} color={colors.mutedForeground} />
-          )}
-        </View>
-        <View style={styles.rowTextWrap}>
-          <Text style={[styles.rowTitle, { color: colors.foreground }]}>
-            {prediction.structured_formatting.main_text}
-          </Text>
-          {prediction.structured_formatting.secondary_text ? (
-            <Text
-              style={[styles.rowSubtitle, { color: colors.mutedForeground }]}
-            >
-              {prediction.structured_formatting.secondary_text}
+    (prediction: GooglePlace) => {
+      const distance = placeDistanceLabel(
+        prediction.distanceMeters,
+        searchOrigin,
+      );
+      return (
+        <TouchableOpacity
+          key={prediction.place_id}
+          onPress={() => void handleSelectPrediction(prediction)}
+          activeOpacity={0.8}
+          style={[styles.row, { backgroundColor: colors.card }]}
+        >
+          <View style={styles.rowIconWrap}>
+            {prediction.types?.includes("establishment") ? (
+              <Building size={16} color={colors.mutedForeground} />
+            ) : (
+              <MapPin size={16} color={colors.mutedForeground} />
+            )}
+          </View>
+          <View style={styles.rowTextWrap}>
+            <Text style={[styles.rowTitle, { color: colors.foreground }]}>
+              {prediction.structured_formatting.main_text}
             </Text>
-          ) : null}
-        </View>
-      </TouchableOpacity>
-    ),
-    [colors.card, colors.foreground, colors.mutedForeground, handleSelectPrediction],
+            {prediction.structured_formatting.secondary_text ? (
+              <Text
+                style={[styles.rowSubtitle, { color: colors.mutedForeground }]}
+              >
+                {prediction.structured_formatting.secondary_text}
+              </Text>
+            ) : null}
+            {distance ? (
+              <Text
+                style={[styles.rowSubtitle, { color: colors.mutedForeground }]}
+              >
+                {distance}
+              </Text>
+            ) : null}
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [
+      colors.card,
+      colors.foreground,
+      colors.mutedForeground,
+      handleSelectPrediction,
+      searchOrigin,
+    ],
   );
 
   const displayValue = value?.trim() || "";

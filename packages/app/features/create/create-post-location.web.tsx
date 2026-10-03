@@ -4,6 +4,7 @@ import { MapPin } from "lucide-react";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { usePlacesAutocomplete } from "@dvnt/app/lib/hooks/use-places-autocomplete";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import { placeDistanceLabel } from "@dvnt/app/lib/proximity";
 
 const inputCls =
   "w-full h-11 px-3 rounded-xl bg-white/6 border border-white/10 text-[15px] text-white placeholder:text-white/35 outline-none focus:border-cyan-500/60";
@@ -16,6 +17,11 @@ export function CreatePostLocation() {
 
   const places = usePlacesAutocomplete({
     value: location,
+    // Distances are measured from the member's stored city, never from a
+    // browser geolocation fix.
+    origin: activeCity
+      ? { latitude: activeCity.lat, longitude: activeCity.lng }
+      : null,
     onLocationSelect: (loc) => {
       setLocationData({
         name: loc.name,
@@ -77,27 +83,33 @@ export function CreatePostLocation() {
             places.error ? (
               <p className="px-3 py-2.5 text-[13px] text-white/60">{places.error}</p>
             ) : places.predictions.length > 0 ? (
-              places.predictions.map((prediction) => (
-                <button
-                  key={prediction.placeId}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => places.selectPrediction(prediction)}
-                  className="flex w-full items-center gap-2.5 border-t border-white/6 px-3 py-2.5 text-left hover:bg-cyan-500/10"
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-500/12">
-                    <MapPin size={14} className="text-cyan-300" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-bold text-white">{prediction.mainText}</span>
-                    {prediction.secondaryText || prediction.fullText ? (
-                      <span className="block truncate text-xs text-white/55">
-                        {prediction.secondaryText || prediction.fullText}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-              ))
+              places.predictions.map((prediction) => {
+                const distance = placeDistanceLabel(prediction.distanceMeters, activeCity);
+                return (
+                  <button
+                    key={prediction.placeId}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => places.selectPrediction(prediction)}
+                    className="flex w-full items-center gap-2.5 border-t border-white/6 px-3 py-2.5 text-left hover:bg-cyan-500/10"
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-500/12">
+                      <MapPin size={14} className="text-cyan-300" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-bold text-white">{prediction.mainText}</span>
+                      {prediction.secondaryText || prediction.fullText ? (
+                        <span className="block truncate text-xs text-white/55">
+                          {prediction.secondaryText || prediction.fullText}
+                        </span>
+                      ) : null}
+                      {distance ? (
+                        <span className="block truncate text-xs text-white/55">{distance}</span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })
             ) : places.isLoading ? null : (
               <p className="px-3 py-2.5 text-[13px] text-white/60">No places found</p>
             )
