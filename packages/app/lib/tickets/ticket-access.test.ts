@@ -115,7 +115,7 @@ test("a missing ticket is refused", () => {
 // while the auth store's `user.id` is the users-table integer. All 304 ticket
 // rows in production carry the auth-id form, so comparing against `user.id`
 // alone refuses every real holder.
-const AUTH_ID = "pKa8v6movw4tdx0uhVN9v2IPiAEwD7ug";
+const AUTH_ID = "fixture_auth_id_0000000000000000";
 const USERS_ROW_ID = "613";
 
 test("a pass stamped with the auth id belongs to the viewer holding that auth id", () => {
