@@ -122,10 +122,18 @@ is unchanged. Client code that selected email now takes the member's own
 address from the Better Auth session (`ownEmailFor` in identity.ts) and shows
 "" for anyone else. `pnpm verify:users-lockdown` section 8 proves it.
 
+**users.sexuality, gender, event_audience.** After 20261003150400 the anon
+key still read every member's orientation, gender and event audience.
+`20261003150500_users_identity_columns_members_only.sql` revokes them from
+anon; signed-in members (authenticated) keep them. The client profile fetches
+behind the signed-out public profile no longer select gender (no profile
+screen shows it); the member's own values come from auth-sync and from
+own-row reads in welcome and edit-profile. pronouns stays public: the
+signed-out profile page shows it. `pnpm verify:users-lockdown` section 9
+and the source scan's signed-in allowlist prove it.
+
 Still open:
 
-- **users.sexuality, gender, event_audience** stay readable by anyone with
-  the anon key. Whether those belong on a public profile is a product call.
 - **lynk_cohost_invites.invitee_id**: why the cohost-invite function refuses
   member handles instead of resolving them.
 

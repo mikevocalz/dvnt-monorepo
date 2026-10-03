@@ -12,7 +12,9 @@
  * Reads: both tables granted table-wide SELECT, so the anon key read every
  * member's email, plus users.hash/salt (legacy passwords), reset tokens, API
  * keys and device coordinates. 20261003150400 limits client SELECT to the
- * remaining columns.
+ * remaining columns. 20261003150500 also takes users.sexuality, gender and
+ * event_audience away from anon (signed-out visitors); authenticated (signed-in
+ * members, via the JWT bridge) keeps them.
  *
  * Two parts:
  *
@@ -53,6 +55,10 @@ const READ_MIGRATION = join(
   root,
   "apps/mobile/supabase/migrations/20261003150400_users_contact_columns_private.sql",
 );
+const IDENTITY_MIGRATION = join(
+  root,
+  "apps/mobile/supabase/migrations/20261003150500_users_identity_columns_members_only.sql",
+);
 // Columns clients must not read. Everything else stays readable.
 const PRIVATE = {
   users: [
@@ -61,6 +67,13 @@ const PRIVATE = {
     "reset_password_token", "salt",
   ],
   user: ["banExpires", "banReason", "banned", "email", "emailVerified", "role"],
+};
+// Readable by signed-in members (authenticated), not by the bare anon key.
+const MEMBERS_ONLY = ["event_audience", "gender", "sexuality"];
+// Unreadable columns per role and table, after the migrations.
+const UNREADABLE = {
+  users: { anon: [...PRIVATE.users, ...MEMBERS_ONLY].sort(), authenticated: [...PRIVATE.users].sort() },
+  user: { anon: [...PRIVATE.user].sort(), authenticated: [...PRIVATE.user].sort() },
 };
 
 // ── 1. Source scan ───────────────────────────────────────────────────────────
@@ -79,6 +92,22 @@ const PRIVATE = {
     `\\bDB\\.users\\.email\\b|\\.select\\(\\s*["'\`]\\*["'\`]|["'\`.,(\\s](?:${[...new Set([...PRIVATE.users, ...PRIVATE.user])].join("|")})\\b`,
   );
   const reads = [];
+  // Files allowed to select a members-only column. Each read runs only for a
+  // signed-in member, on their own row, so it goes out as authenticated.
+  // Anything else (profile fetches that serve the signed-out public profile,
+  // SSR, share pages) must not select them: as anon the whole request is a
+  // 42501, not just a missing field.
+  const SIGNED_IN_READERS = new Map([
+    ["packages/app/features/routes/screens/(protected)/welcome.tsx", "onboarding prefill, own row, needs user.id"],
+    ["packages/app/features/auth/screens/WelcomeScreen.web.tsx", "onboarding prefill, own row, needs user.id"],
+    ["packages/app/features/profile/edit-profile.web.tsx", "edit own profile, own row, needs user.id"],
+    ["packages/app/lib/api/auth.ts", "auth.getProfile identity read, own row after sign-in"],
+    ["apps/mobile/lib/api/auth.ts", "legacy copy of auth.getProfile"],
+  ]);
+  const MEMBERS_ONLY_COL = new RegExp(
+    `\\bDB\\.users\\.(?:gender|sexuality|eventAudience)\\b|["'\`.,(\\s](?:${MEMBERS_ONLY.join("|")})\\b`,
+  );
+  const signedOutReads = [];
   const WRITE = /^\s*(?:\/\/[^\n]*\n\s*)*\.(update|insert|upsert|delete)\s*\(/;
 
   const hits = [];
@@ -101,6 +130,11 @@ const PRIVATE = {
           if (hit) {
             const line = src.slice(0, m.index).split("\n").length;
             reads.push(`${rel}:${line} ${hit[0].trim()}`);
+          }
+          const idHit = code.match(MEMBERS_ONLY_COL);
+          if (idHit && !SIGNED_IN_READERS.has(rel)) {
+            const line = src.slice(0, m.index).split("\n").length;
+            signedOutReads.push(`${rel}:${line} ${idHit[0].trim()}`);
           }
         }
         for (const m of src.matchAll(USERS_FROM)) {
@@ -127,7 +161,14 @@ const PRIVATE = {
     [],
     `client code reads a private column of users/"user" (use the session for the member's own email):\n  ${reads.join("\n  ")}`,
   );
-  console.log("1. OK: no client code writes public.users or reads a private users/\"user\" column");
+  assert.deepEqual(
+    signedOutReads,
+    [],
+    `client code outside the signed-in allowlist reads users.${MEMBERS_ONLY.join("/")}; anon cannot (42501), so a signed-out visitor's whole request fails:\n  ${signedOutReads.join("\n  ")}`,
+  );
+  console.log(
+    `1. OK: no client code writes public.users or reads a private users/"user" column; ${MEMBERS_ONLY.join(", ")} are read only by the ${SIGNED_IN_READERS.size} signed-in own-row readers`,
+  );
 }
 
 // ── Locating a Postgres server (same rules as verify-call-capacity) ──────────
@@ -261,8 +302,9 @@ CREATE POLICY "Users can update own profile" ON public.users FOR UPDATE TO publi
 CREATE POLICY users_insert_anon ON public.users FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY users_insert_authenticated ON public.users FOR INSERT TO authenticated WITH CHECK (true);
 
-INSERT INTO public.users (username, email, auth_id, bio, hash, salt)
-VALUES ('victim', 'victim@example.test', 'ba-victim', 'original bio', 'pbkdf2-hash', 'pbkdf2-salt');
+INSERT INTO public.users (username, email, auth_id, bio, hash, salt, gender, sexuality, event_audience)
+VALUES ('victim', 'victim@example.test', 'ba-victim', 'original bio', 'pbkdf2-hash', 'pbkdf2-salt',
+        'Nonbinary', ARRAY['Queer'], 'Queer folks');
 
 -- Better Auth's table: columns from information_schema, relacl anon=r
 -- authenticated=r, one SELECT policy for anon.
@@ -336,24 +378,25 @@ for (const [role, stmt, want] of [
   ["anon", "SELECT email, hash FROM public.users WHERE id = 1", { email: "victim@example.test", hash: "pbkdf2-hash" }],
   ["authenticated", "SELECT email FROM public.users WHERE id = 1", { email: "victim@example.test" }],
   ["anon", `SELECT email FROM public."user" WHERE id = 'ba-victim'`, { email: "victim@example.test" }],
+  ["anon", "SELECT gender, sexuality, event_audience FROM public.users WHERE id = 1", { gender: "Nonbinary", sexuality: ["Queer"], event_audience: "Queer folks" }],
 ]) {
   const r = await as(role, stmt);
   assert.deepEqual(r.rows, [want], `fixture is not faithful: ${role} could not read ${stmt} (${r.message})`);
 }
 console.log(
-  "2. OK: before the migrations, anon and authenticated write every users column and read email (and users.hash)",
+  "2. OK: before the migrations, anon and authenticated write every users column and read email (and users.hash); anon reads sexuality, gender, event_audience",
 );
 
 // ── 3. Apply the migration ───────────────────────────────────────────────────
 if (skipMigration) {
-  console.log("3. --skip-migration: NOT applying 20261003150000 or 20261003150400");
+  console.log("3. --skip-migration: NOT applying 20261003150000, 20261003150400 or 20261003150500");
 } else {
   // Idempotent: Supabase may replay them on a branch reset.
-  for (const m of [MIGRATION, READ_MIGRATION]) {
+  for (const m of [MIGRATION, READ_MIGRATION, IDENTITY_MIGRATION]) {
     await sql(readFileSync(m, "utf8"));
     await sql(readFileSync(m, "utf8"));
   }
-  console.log("3. OK: both migrations applied (twice, to prove they are re-runnable)");
+  console.log("3. OK: all three migrations applied (twice, to prove they are re-runnable)");
 }
 
 // ── 4. anon and authenticated: every write is a privilege error ──────────────
@@ -418,21 +461,22 @@ console.log("7. OK: service_role can still update, insert, upsert and delete");
       `SELECT attname FROM pg_attribute WHERE attrelid = '${rel}'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum`,
     );
     const names = cols.map((c) => c.attname);
-    for (const p of PRIVATE[key]) assert.ok(names.includes(p), `fixture ${rel} lacks ${p}`);
-    const pub = names.filter((n) => !PRIVATE[key].includes(n));
+    for (const p of UNREADABLE[key].anon) assert.ok(names.includes(p), `fixture ${rel} lacks ${p}`);
     const where = key === "users" ? "id = 1" : "id = 'ba-victim'";
     for (const role of ["anon", "authenticated"]) {
+      const hidden = UNREADABLE[key][role];
+      const pub = names.filter((n) => !hidden.includes(n));
       const priv = await sql(
         `SELECT attname FROM pg_attribute WHERE attrelid = '${rel}'::regclass AND attnum > 0 AND NOT attisdropped
            AND NOT has_column_privilege('${role}', '${rel}'::regclass, attname, 'SELECT') ORDER BY attname`,
       );
       assert.deepEqual(
         priv.map((c) => c.attname),
-        [...PRIVATE[key]].sort(),
-        `${role}: unreadable columns of ${rel} must be exactly the private list`,
+        hidden,
+        `${role}: unreadable columns of ${rel} must be exactly ${hidden.join(", ")}`,
       );
       for (const [label, stmt] of [
-        ...PRIVATE[key].map((c) => [`select ${c}`, `SELECT "${c}" FROM ${rel} WHERE ${where}`]),
+        ...hidden.map((c) => [`select ${c}`, `SELECT "${c}" FROM ${rel} WHERE ${where}`]),
         ["select *", `SELECT * FROM ${rel} WHERE ${where}`],
         ["filter on email", `SELECT id FROM ${rel} WHERE email = 'victim@example.test'`],
         ["order by email", `SELECT id FROM ${rel} ORDER BY email`],
@@ -456,7 +500,41 @@ console.log("7. OK: service_role can still update, insert, upsert and delete");
   assert.ok(join.ok && join.rowCount === 1, `auth_id lookup broke (${join.message})`);
 }
 console.log(
-  `8. OK: anon/authenticated get 42501 on ${PRIVATE.users.length} users and ${PRIVATE.user.length} "user" private columns (select, *, filter, order); every other column reads; service_role reads email`,
+  `8. OK: anon/authenticated get 42501 on ${PRIVATE.users.length} users and ${PRIVATE.user.length} "user" private columns, anon also on ${MEMBERS_ONLY.length} members-only users columns (select, *, filter, order); every other column reads; service_role reads email`,
+);
+
+// ── 9. sexuality, gender, event_audience: members only ──────────────────────
+{
+  for (const [label, stmt] of [
+    ["select all three", "SELECT gender, sexuality, event_audience FROM public.users WHERE id = 1"],
+    ["filter on sexuality", "SELECT id FROM public.users WHERE 'Queer' = ANY (sexuality)"],
+    ["filter on gender", "SELECT id FROM public.users WHERE gender = 'Nonbinary'"],
+    ["order by event_audience", "SELECT id FROM public.users ORDER BY event_audience"],
+  ]) {
+    const r = await as("anon", stmt);
+    assert.equal(r.code, "42501", `anon could ${label} (${r.ok ? JSON.stringify(r.rows) : r.message})`);
+  }
+  const member = await as(
+    "authenticated",
+    "SELECT gender, sexuality, event_audience FROM public.users WHERE 'Queer' = ANY (sexuality) ORDER BY gender",
+  );
+  assert.deepEqual(
+    member.rows,
+    [{ gender: "Nonbinary", sexuality: ["Queer"], event_audience: "Queer folks" }],
+    `authenticated lost sexuality/gender/event_audience (${member.message})`,
+  );
+  // The public profile page's select, without the members-only columns,
+  // still works for a signed-out visitor; pronouns stays public.
+  const publicProfile = await as(
+    "anon",
+    "SELECT id, auth_id, username, first_name, last_name, bio, location, website, links, pronouns, verified, followers_count, following_count, posts_count, is_private, created_at FROM public.users WHERE username = 'victim'",
+  );
+  assert.ok(publicProfile.ok && publicProfile.rowCount === 1, `anon lost the public profile select (${publicProfile.message})`);
+  const svc = await as("service_role", "SELECT gender, sexuality, event_audience FROM public.users WHERE id = 1");
+  assert.equal(svc.rowCount, 1, `service_role lost the identity columns (${svc.message})`);
+}
+console.log(
+  "9. OK: anon gets 42501 on sexuality, gender, event_audience (select, filter, order); authenticated and service_role read them; the public profile select (with pronouns) still works for anon",
 );
 
 console.log("\nverify-users-lockdown: all sections pass");
