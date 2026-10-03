@@ -107,7 +107,11 @@ type AgeRestriction = "none" | "18+" | "21+";
 // Canonical Event Type taxonomy lives in the shared form core (one schema,
 // two layouts). Imported for local use here and re-exported for existing
 // importers of this screen.
-import { EVENT_TYPE_LABELS } from "@dvnt/app/features/events/create/event-form";
+import {
+  EVENT_TYPE_LABELS,
+  describePromoTemplate,
+  sortPromoTemplates,
+} from "@dvnt/app/features/events/create/event-form";
 export { EVENT_TYPE_LABELS };
 
 interface TicketTier {
@@ -218,6 +222,9 @@ function CreateEventScreenContent() {
   const isSavingDraft = useCreateEventStore((s) => s.isSavingDraft);
   const setIsSavingDraft = useCreateEventStore((s) => s.setIsSavingDraft);
   const scheduleNeedsReview = useCreateEventStore((s) => s.scheduleNeedsReview);
+  const draftSourceEventId = useCreateEventStore((s) => s.draftSourceEventId);
+  const draftEventTz = useCreateEventStore((s) => s.eventTz);
+  const promoCodeTemplates = useCreateEventStore((s) => s.promoCodeTemplates);
   const uploadProgress = useCreateEventStore((s) => s.uploadProgress);
   const setUploadProgress = useCreateEventStore((s) => s.setUploadProgress);
   const ticketingEnabled = useCreateEventStore((s) => s.ticketingEnabled);
@@ -778,6 +785,9 @@ function CreateEventScreenContent() {
         lineup: lineup.length > 0 ? lineup : undefined,
         perks: perks.length > 0 ? perks : undefined,
         nsfw: isNsfw || undefined,
+        // A duplicated draft keeps its source event's zone; createEvent falls
+        // back to this device's zone only when it is absent.
+        eventTz: useCreateEventStore.getState().eventTz || undefined,
       };
 
       console.log("[CreateEvent] Creating event with data:", eventData);
@@ -944,6 +954,25 @@ function CreateEventScreenContent() {
             "Some promoters weren't recreated",
             failed.join(", "),
           );
+        }
+      }
+
+      // Standalone promo codes from the duplicated event. Copied on the
+      // server, idempotent, inactive codes stay inactive.
+      const promoSourceId = useCreateEventStore.getState().draftSourceEventId;
+      if (promoSourceId && data?.id) {
+        try {
+          const res = await eventDraftsApi.copyPromoCodes(Number(data.id), promoSourceId);
+          if (res.skipped.length > 0) {
+            showToast(
+              "warning",
+              "Some promo codes weren't copied",
+              `Add them from Promo codes: ${res.skipped.map((p) => p.code).join(", ")}.`,
+            );
+          }
+        } catch (promoErr) {
+          console.warn("[CreateEvent] promo code copy failed", promoErr);
+          showToast("warning", "Promo codes not copied", "Your event is live. Add codes from Promo codes.");
         }
       }
 
@@ -3340,8 +3369,39 @@ function CreateEventScreenContent() {
                     {coOrganizers.map((c) => `@${c.username}`).join(", ")}
                   </Text>
                 )}
+                {draftSourceEventId && draftEventTz ? (
+                  <Text className="text-sm text-foreground">
+                    Time zone: {draftEventTz}
+                  </Text>
+                ) : null}
               </View>
             </View>
+
+            {/* Promo codes the duplicated event carries */}
+            {draftSourceEventId && promoCodeTemplates.length > 0 ? (
+              <View className="bg-card rounded-2xl p-4">
+                <Text className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                  Promo codes from the original event
+                </Text>
+                <View className="gap-1.5">
+                  {sortPromoTemplates(promoCodeTemplates).map((p) => (
+                    <View key={p.code} className="flex-row items-center justify-between gap-3">
+                      <Text className="flex-1 text-sm text-foreground" numberOfLines={1}>
+                        <Text className="font-semibold">{p.code}</Text> {describePromoTemplate(p)}
+                      </Text>
+                      <Text
+                        className={p.active ? "text-xs font-semibold text-emerald-400" : "text-xs font-semibold text-muted-foreground"}
+                      >
+                        {p.active ? "Enabled" : "Off"}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                <Text className="mt-2 text-xs text-muted-foreground">
+                  Off codes were expired or used up on the original, and stay off on this event.
+                </Text>
+              </View>
+            ) : null}
           </View>
         )}
       </KeyboardAwareScrollView>

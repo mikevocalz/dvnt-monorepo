@@ -81,6 +81,8 @@ import {
   validateEventDraft,
   buildEventInsert,
   hasPaidTier,
+  describePromoTemplate,
+  sortPromoTemplates,
   type EventFormErrors,
 } from "@dvnt/app/features/events/create/event-form";
 
@@ -612,6 +614,25 @@ export function CreateEventScreen() {
         }
       }
 
+      // Standalone promo codes from the duplicated event. Copied on the
+      // server, idempotent, inactive codes stay inactive.
+      if (id && s.draftSourceEventId) {
+        try {
+          const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
+          const res = await eventDraftsApi.copyPromoCodes(Number(id), s.draftSourceEventId);
+          if (res.skipped.length > 0) {
+            showToast(
+              "warning",
+              "Some promo codes weren't copied",
+              `Add them from Promo codes: ${res.skipped.map((p) => p.code).join(", ")}.`,
+            );
+          }
+        } catch (error) {
+          console.warn("[create-event] promo code copy failed", error);
+          showToast("warning", "Promo codes not copied", "Your event is live. Add codes from Promo codes.");
+        }
+      }
+
       // Guest list. Same shape as the co-organizer write-back and for the same
       // reason: there was no event id to attach an invite to until now. One
       // batched call, and a guest who can't be added never rolls back a
@@ -760,6 +781,36 @@ export function CreateEventScreen() {
         {s.scheduleNeedsReview ? (
           <div role="alert" className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-sm text-amber-100">
             Duplicated event: choose and confirm a new date/time before publishing.
+          </div>
+        ) : null}
+        {s.draftSourceEventId && (s.promoCodeTemplates.length > 0 || s.eventTz) ? (
+          <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+            {s.eventTz ? (
+              <p className="text-white/70">Times publish in {s.eventTz}, the original event's zone.</p>
+            ) : null}
+            {s.promoCodeTemplates.length > 0 ? (
+              <>
+                <p className={`${s.eventTz ? "mt-2 " : ""}font-semibold text-white`}>
+                  Promo codes from the original event
+                </p>
+                <ul className="mt-1.5 flex flex-col gap-1">
+                  {sortPromoTemplates(s.promoCodeTemplates).map((p) => (
+                    <li key={p.code} className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-white/80">
+                        <span className="font-mono font-semibold text-white">{p.code}</span>{" "}
+                        {describePromoTemplate(p)}
+                      </span>
+                      <span className={`shrink-0 text-xs font-semibold ${p.active ? "text-emerald-300" : "text-white/45"}`}>
+                        {p.active ? "Enabled" : "Off"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1.5 text-xs text-white/45">
+                  Off codes were expired or used up on the original, and stay off on this event.
+                </p>
+              </>
+            ) : null}
           </div>
         ) : null}
         {publishing && (
