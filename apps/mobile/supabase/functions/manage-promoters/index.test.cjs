@@ -8,9 +8,34 @@ const ts = require('typescript');
 // query builder for the library-* actions and the add action. upsert
 // follows PostgREST: on a conflict over `onConflict` columns it merges
 // into the existing row, or skips it when ignoreDuplicates is set.
-function harness({ users = [], library = [], events = [{ id: 1, host_id: 'organizer' }] } = {}) {
+const path = require('node:path');
+
+// Loads a TS module and its relative .ts imports in this realm, so the real
+// email template runs inside the test.
+function loadTs(file, cache = new Map()) {
+  if (cache.has(file)) return cache.get(file).exports;
+  const mod = { exports: {} };
+  cache.set(file, mod);
+  const source = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const localRequire = (name) => loadTs(path.resolve(path.dirname(file), name), cache);
+  new Function('exports', 'module', 'require', 'Deno', source)(mod.exports, mod, localRequire, { env: { get: () => undefined } });
+  return mod.exports;
+}
+const templates = loadTs(path.join(__dirname, '../_shared/email/templates.ts'));
+
+function harness({
+  users = [],
+  accounts = [],
+  library = [],
+  events = [{ id: 1, host_id: 'organizer', title: 'Cookout' }],
+  sendResendEmail = async () => 'msg-1',
+} = {}) {
   let handler;
+  const sent = [];
   const tables = {
+    user: [...accounts],
     users: [...users],
     promoter_library_entries: library.map((row) => ({ ...row })),
     events: [...events],
@@ -82,13 +107,17 @@ function harness({ users = [], library = [], events = [{ id: 1, host_id: 'organi
     Deno: { env: { get: () => 'test' }, serve: (fn) => { handler = fn; } },
     require: (name) => name.includes('supabase-js') ? { createClient: () => client }
       : name.includes('verify-session') ? { verifySession: async () => 'organizer', corsHeaders: () => ({}), optionsResponse: () => new Response(null, { status: 204 }) }
+      : name.includes('send-resend-email') ? {
+        promoterInvite: templates.promoterInvite,
+        sendResendEmail: async (args) => { sent.push(args); return sendResendEmail(args); },
+      }
       : { withSentry: (_name, fn) => fn },
   });
   const call = async (body) => {
     const response = await handler(new Request('http://test', { method: 'POST', body: JSON.stringify(body) }));
     return { status: response.status, body: await response.json() };
   };
-  return { tables, call };
+  return { tables, call, sent };
 }
 
 const rates = { customer_discount_bps: 1000, promoter_commission_bps: 1000 };
@@ -169,4 +198,60 @@ test('library-save still updates an existing entry on purpose', async () => {
   assert.equal(entry.preferred_code, 'NEWCODE');
   assert.equal(entry.customer_discount_bps, 500);
   assert.equal(entry.promoter_commission_bps, 700);
+});
+
+// T07: an added DVNT member gets an invitation email at their account address.
+const micahAccount = { id: 'micah-auth', email: 'micah@example.com' };
+
+test('adding a linked promoter emails the account address with the code and dashboard link', async () => {
+  const h = harness({ users: [{ ...micah, id: 11 }, { id: 10, auth_id: 'organizer', username: 'host' }], accounts: [micahAccount] });
+  const result = await h.call({ action: 'add', event_id: 1, username: 'micah', code: 'MICAH20', ...rates });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.inviteEmail, 'sent');
+  assert.equal(h.sent.length, 1);
+  const [mail] = h.sent;
+  assert.equal(mail.to, 'micah@example.com');
+  assert.equal(mail.subject, "You're a promoter for Cookout");
+  assert.match(mail.html, /MICAH20/);
+  assert.match(mail.html, /https:\/\/dvntapp\.live\/feed\/events\/1\/promoter/);
+  assert.match(mail.html, /@host/);
+  // Activity + push still happen.
+  assert.equal(h.tables.notifications.length, 1);
+});
+
+test('the invite goes to the server-side address, never one the client supplies', async () => {
+  const h = harness({ users: [micah], accounts: [micahAccount] });
+  await h.call({ action: 'add', event_id: 1, username: 'micah', email: 'attacker@example.com', to: 'attacker@example.com', ...rates });
+  assert.deepEqual(h.sent.map((m) => m.to), ['micah@example.com']);
+});
+
+test('a failed send still adds the promoter and reports the status', async () => {
+  const h = harness({
+    users: [micah],
+    accounts: [micahAccount],
+    sendResendEmail: async () => { throw new Error('Resend 500'); },
+  });
+  const result = await h.call({ action: 'add', event_id: 1, username: 'micah', ...rates });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.inviteEmail, 'failed');
+  assert.equal(h.tables.event_promoters.length, 1);
+});
+
+test('an unset Resend key is reported as not_configured, not sent', async () => {
+  const h = harness({ users: [micah], accounts: [micahAccount], sendResendEmail: async () => null });
+  const result = await h.call({ action: 'add', event_id: 1, username: 'micah', ...rates });
+  assert.equal(result.body.inviteEmail, 'not_configured');
+});
+
+test('no account email and name-only promoters send nothing', async () => {
+  const noEmail = harness({ users: [micah] });
+  const a = await noEmail.call({ action: 'add', event_id: 1, username: 'micah', ...rates });
+  assert.equal(a.body.inviteEmail, 'no_email');
+  assert.equal(noEmail.sent.length, 0);
+
+  const nameOnly = harness();
+  const b = await nameOnly.call({ action: 'add', event_id: 1, display_name: 'Door Crew', ...rates });
+  assert.equal(b.status, 200);
+  assert.equal(b.body.inviteEmail, 'no_account');
+  assert.equal(nameOnly.sent.length, 0);
 });

@@ -30,6 +30,7 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { sendResendEmail, promoterInvite } from "../_shared/send-resend-email.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -161,6 +162,65 @@ async function notifyPromoterAdded(
     });
   } catch (err) {
     console.warn("[manage-promoters] notify failed (non-fatal):", err);
+  }
+}
+
+export type InviteEmailStatus =
+  | "sent"
+  | "no_account"
+  | "no_email"
+  | "not_configured"
+  | "failed";
+
+/**
+ * Email the linked promoter their invitation (T07). The address comes from
+ * the Better Auth `user` row for the promoter's auth id, never from the
+ * request. Never throws: the promoter row is already written, so a mail
+ * failure is reported in the response and the logs, not as a failed add.
+ */
+async function sendPromoterInviteEmail(
+  supabase: any,
+  params: {
+    recipientAuthId: string;
+    actorAuthId: string;
+    eventId: number;
+    eventTitle: string | null;
+    code: string;
+  },
+): Promise<InviteEmailStatus> {
+  try {
+    const { data: account, error: accountError } = await supabase
+      .from("user")
+      .select("id, email")
+      .eq("id", params.recipientAuthId)
+      .maybeSingle();
+    if (accountError) {
+      console.error("[manage-promoters] invite email lookup failed:", accountError);
+      return "failed";
+    }
+    const to = typeof account?.email === "string" ? account.email.trim() : "";
+    if (!to || !to.includes("@")) return "no_email";
+
+    const { data: actor } = await supabase
+      .from("users")
+      .select("username")
+      .eq("auth_id", params.actorAuthId)
+      .maybeSingle();
+
+    const messageId = await sendResendEmail({
+      to,
+      ...promoterInvite({
+        eventId: params.eventId,
+        eventTitle: params.eventTitle,
+        hostHandle: actor?.username ? `@${actor.username}` : null,
+        code: params.code,
+      }),
+    });
+    // sendResendEmail returns null without sending when RESEND_API_KEY is unset.
+    return messageId ? "sent" : "not_configured";
+  } catch (err) {
+    console.error("[manage-promoters] invite email failed (non-fatal):", err);
+    return "failed";
   }
 }
 
@@ -635,6 +695,8 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
 
       // Linked promoter → they've been added to the event; tell them.
       // The event_promoters row is the truth; this is the courtesy copy.
+      // A name-only promoter has no account and so no address to mail.
+      let inviteEmail: InviteEmailStatus = "no_account";
       if (userId) {
         const { data: ev } = await supabase
           .from("events")
@@ -649,6 +711,16 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
           promoterId: inserted.id,
           code: inserted.code,
         });
+        inviteEmail = await sendPromoterInviteEmail(supabase, {
+          recipientAuthId: userId,
+          actorAuthId: authId,
+          eventId: eventId!,
+          eventTitle: ev?.title ?? null,
+          code: inserted.code,
+        });
+        if (inviteEmail !== "sent") {
+          console.warn(`[manage-promoters] invite email not sent for promoter ${inserted.id}: ${inviteEmail}`);
+        }
       }
 
       return json(
@@ -671,6 +743,7 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
             earnedCents: 0,
             createdAt: inserted.created_at,
           },
+          inviteEmail,
         },
         200,
         req,
