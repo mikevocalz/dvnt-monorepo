@@ -6,6 +6,8 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
+import { resolveAdultVerificationState } from "../_shared/verification-state.ts";
+import { firstPostRefusal } from "../_shared/first-post-gate.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -56,10 +58,23 @@ Deno.serve(async (req: Request) => {
     return errorResponse("Could not load first-post offer", 500);
   }
 
+  // R04: the ticket post goes out only after adult verification. Checked
+  // before anything is offered, accepted or inserted, so an unverified member
+  // keeps an untouched offer they can take once their ID is approved. Dismiss
+  // stays open: saying no never needs verification.
+  const verificationGate = async () => {
+    const verification = await resolveAdultVerificationState(db, authId);
+    return firstPostRefusal({ verificationState: verification.state });
+  };
+
   if (action === "accept" || action === "dismiss") {
     if (!existing) return jsonResponse({ ok: true, offer: null, reason: "not_offered" });
     if (existing.state !== "offered") {
       return jsonResponse({ ok: true, offer: null, reason: existing.state });
+    }
+    if (action === "accept") {
+      const refusal = await verificationGate();
+      if (refusal) return jsonResponse({ ok: true, offer: null, reason: refusal.code, message: refusal.message });
     }
     const now = new Date().toISOString();
     const patch = action === "accept"
@@ -86,6 +101,9 @@ Deno.serve(async (req: Request) => {
   if (existing && existing.state !== "offered") {
     return jsonResponse({ ok: true, offer: null, reason: existing.state });
   }
+
+  const refusal = await verificationGate();
+  if (refusal) return jsonResponse({ ok: true, offer: null, reason: refusal.code, message: refusal.message });
 
   const cartId = String(body.cartId || "").trim();
   if (!UUID_RE.test(cartId)) {

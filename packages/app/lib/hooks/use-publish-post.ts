@@ -93,7 +93,12 @@ function usePublishTaskDeps(): PublishTaskDeps {
       // event at the actual publish boundary (after any media/upload delay).
       // The helper fails closed if visibility can no longer be proven public.
       await assertFirstPostPublishable();
-      const post = await createPost(input);
+      // The server repeats the check and adds the adult-verification gate, so a
+      // client that skips the recheck above is still refused.
+      const firstPostEventId = useFirstPostOfferStore.getState().pendingEventId ?? undefined;
+      const post = await createPost(
+        firstPostEventId == null ? input : { ...input, firstPostEventId },
+      );
       if (post?.id) useFirstPostOfferStore.getState().clearPending();
       return post;
     },
