@@ -184,15 +184,9 @@ export const auth = {
             .single();
           data = emailResult.data;
           error = emailResult.error;
-
-          // Update auth_id in database if found by email
-          if (data && !data[DB.users.authId]) {
-            console.log("[Auth] Updating auth_id for user:", data[DB.users.id]);
-            await supabase
-              .from(DB.users.table)
-              .update({ [DB.users.authId]: userId })
-              .eq(DB.users.id, data[DB.users.id]);
-          }
+          // Read only. Linking auth_id to this row happens in the auth-sync
+          // edge function, keyed on the verified Better Auth session. Clients
+          // cannot write public.users (20261003150000_users_anon_write_lockdown).
         } else {
           error = authIdResult.error;
         }
@@ -226,32 +220,6 @@ export const auth = {
       console.error("[Supabase Auth] Get profile error:", error);
       return null;
     }
-  },
-
-  /**
-   * Update user profile
-   */
-  async updateProfile(userId: string, updates: Partial<AppUser>) {
-    const dbUpdates: any = {};
-
-    if (updates.name) dbUpdates[DB.users.firstName] = updates.name;
-    if (updates.bio !== undefined) dbUpdates[DB.users.bio] = updates.bio;
-    if (updates.location !== undefined)
-      dbUpdates[DB.users.location] = updates.location;
-
-    const { data, error } = await supabase
-      .from(DB.users.table)
-      .update(dbUpdates)
-      .eq(DB.users.id, userId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error("[Supabase Auth] Update profile error:", error);
-      throw error;
-    }
-
-    return data;
   },
 
   /**
