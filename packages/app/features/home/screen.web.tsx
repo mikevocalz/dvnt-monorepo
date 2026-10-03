@@ -469,7 +469,6 @@ function MasonryCell({
   post: Post;
   fallbackHeight: number;
 }) {
-  const router = useRouter();
   const media = post.media?.[0];
   const isVideo = media?.type === "video";
   const isCarousel = (post.media?.length ?? 0) > 1;
@@ -491,11 +490,6 @@ function MasonryCell({
   const bookmarkedPosts = useBookmarkStore((s) => s.bookmarkedPosts);
   const isBookmarked = bookmarkedPosts.includes(post.id);
   const toggleBookmark = useToggleBookmark();
-  const stop = (fn: () => void) => (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    fn();
-  };
 
   // Text posts mirror the mobile TextPostSurface: themed gradient + the
   // resolved preview text (from textSlides, caption fallback).
@@ -503,81 +497,94 @@ function MasonryCell({
     ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
     : "";
 
-  // Instagram-style URL: /feed/{username}/post/{id} (Solito routing).
-  const open = () =>
-    router.push(
-      `/feed/${encodeURIComponent(post.author.username)}/post/${encodeURIComponent(post.id)}`,
-    );
-
   return (
-    // A post tile goes somewhere, so it is a link. It was `role="button"` with
-    // no tabIndex and no key handler: focusable by nothing, operable by nothing,
-    // and announced as a button it could never be.
-    <CardLink
-      href={`/feed/post/${post.id}`}
-      ariaLabel={post.caption || "Open post"}
-      className="group relative block overflow-hidden rounded-2xl bg-white/5 cursor-pointer"
-    >
-      {isText ? (
-        // Real shared surface (gradient + DVNT badge + glow + subtitle) so web
-        // text posts match mobile exactly — was a bare gradient div before.
-        <TextPostSurface
-          text={textPreview || post.caption || ""}
-          theme={post.textTheme}
-          variant="grid"
-          style={{ minHeight: fallbackHeight, height: fallbackHeight }}
-        />
-      ) : liveVideoUrl ? (
-        // Live Photo / animated video — auto-playing muted loop.
-        <video
-          src={liveVideoUrl}
-          poster={cover || undefined}
-          autoPlay
-          muted
-          loop
-          playsInline
-          className="block w-full object-cover"
-          style={{ height: fallbackHeight }}
-        />
-      ) : cover ? (
-        // Rendered at the height the packer RESERVED, not the image's natural
-        // one. `h-auto` let every photo flow to its true aspect while the
-        // packer placed it using a hash heuristic (estimateRatio), so the
-        // column heights it computed were fiction and the DOM's were real. A
-        // card spanning two columns is positioned from that arithmetic, so it
-        // landed on top of a post. The staggered rhythm is unchanged — it comes
-        // from the same heuristic either way, and it is what mobile uses too.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={cover}
-          alt={post.caption ?? ""}
-          loading="lazy"
-          className="block w-full object-cover"
-          style={{ height: fallbackHeight }}
-        />
-      ) : (
-        <div style={{ height: fallbackHeight }} className="bg-white/6" />
-      )}
+    // The tile is a wrapper with two siblings: the link (the post) and the
+    // actions layer (Like, Bookmark). The buttons used to sit INSIDE the link.
+    // nextjs-toploader starts its bar on any document click whose target has an
+    // `<a href>` ancestor and ignores defaultPrevented, and Next's App Router
+    // roots React at `document`, so stopPropagation in the button could not
+    // stop it: liking a post started a navigation progress bar. A button inside
+    // a link is also invalid interactive nesting. Keep controls OUT of the link;
+    // no-control-inside-link.test.ts enforces it.
+    <div className="group relative overflow-hidden rounded-2xl bg-white/5">
+      {/* A post tile goes somewhere, so it is a link. It was `role="button"` with
+          no tabIndex and no key handler: focusable by nothing, operable by
+          nothing, and announced as a button it could never be. */}
+      <CardLink
+        href={`/feed/post/${post.id}`}
+        ariaLabel={post.caption || "Open post"}
+        className="block cursor-pointer rounded-2xl focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#3FDCFF]"
+      >
+        {isText ? (
+          // Real shared surface (gradient + DVNT badge + glow + subtitle) so web
+          // text posts match mobile exactly — was a bare gradient div before.
+          <TextPostSurface
+            text={textPreview || post.caption || ""}
+            theme={post.textTheme}
+            variant="grid"
+            style={{ minHeight: fallbackHeight, height: fallbackHeight }}
+          />
+        ) : liveVideoUrl ? (
+          // Live Photo / animated video — auto-playing muted loop.
+          <video
+            src={liveVideoUrl}
+            poster={cover || undefined}
+            autoPlay
+            muted
+            loop
+            playsInline
+            className="block w-full object-cover"
+            style={{ height: fallbackHeight }}
+          />
+        ) : cover ? (
+          // Rendered at the height the packer RESERVED, not the image's natural
+          // one. `h-auto` let every photo flow to its true aspect while the
+          // packer placed it using a hash heuristic (estimateRatio), so the
+          // column heights it computed were fiction and the DOM's were real. A
+          // card spanning two columns is positioned from that arithmetic, so it
+          // landed on top of a post. The staggered rhythm is unchanged — it comes
+          // from the same heuristic either way, and it is what mobile uses too.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={cover}
+            alt={post.caption ?? ""}
+            loading="lazy"
+            className="block w-full object-cover"
+            style={{ height: fallbackHeight }}
+          />
+        ) : (
+          <div style={{ height: fallbackHeight }} className="bg-white/6" />
+        )}
 
-      {/* Top-right media indicator — Play for video, Grid for multi-image. */}
-      {isVideo || isCarousel ? (
-        <span className="absolute top-2 right-2 w-6 h-6 rounded-lg bg-black/50 flex items-center justify-center backdrop-blur-sm">
-          {isVideo ? (
-            <Play size={12} color="#fff" fill="#fff" />
-          ) : (
-            <Grid3x3 size={12} color="#fff" />
-          )}
-        </span>
-      ) : null}
+        {/* Top-right media indicator — Play for video, Grid for multi-image. */}
+        {isVideo || isCarousel ? (
+          <span className="absolute top-2 right-2 w-6 h-6 rounded-lg bg-black/50 flex items-center justify-center backdrop-blur-sm">
+            {isVideo ? (
+              <Play size={12} color="#fff" fill="#fff" />
+            ) : (
+              <Grid3x3 size={12} color="#fff" />
+            )}
+          </span>
+        ) : null}
+      </CardLink>
 
-      {/* Overlay: always visible on touch (no hover), hover-reveal on desktop. */}
-      <div className="absolute inset-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-150 pointer-events-none">
-        <span className="absolute inset-x-0 bottom-0 h-16 bg-linear-to-t from-black/70 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 px-3 py-2 pointer-events-auto">
+      {/* Actions layer: a sibling of the link, laid over its bottom edge.
+          Always visible on touch (no hover); on desktop it reveals on hover or
+          when keyboard focus is anywhere in the tile. The layer itself ignores
+          the pointer so a click on the gradient or the timestamp still opens
+          the post; only the buttons take clicks. */}
+      <div className="absolute inset-x-0 bottom-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition-opacity duration-150 pointer-events-none">
+        <span
+          aria-hidden
+          className="absolute inset-x-0 bottom-0 h-16 bg-linear-to-t from-black/70 to-transparent"
+        />
+        <div className="relative flex items-center gap-1 px-1">
           <button
-            onClick={stop(toggleLike)}
-            className="flex items-center gap-1 text-white text-xs font-medium"
+            type="button"
+            onClick={toggleLike}
+            className="pointer-events-auto flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-lg px-2 text-white text-xs font-medium focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
             aria-label="Like"
+            aria-pressed={hasLiked}
           >
             <Heart
               size={14}
@@ -587,10 +594,13 @@ function MasonryCell({
             {likes > 0 ? formatCount(likes) : ""}
           </button>
           <button
-            onClick={stop(() =>
-              toggleBookmark.mutate({ postId: post.id, isBookmarked }),
-            )}
+            type="button"
+            onClick={() =>
+              toggleBookmark.mutate({ postId: post.id, isBookmarked })
+            }
+            className="pointer-events-auto flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
             aria-label="Bookmark"
+            aria-pressed={isBookmarked}
           >
             <Bookmark
               size={14}
@@ -598,12 +608,12 @@ function MasonryCell({
               fill={isBookmarked ? "#3FDCFF" : "transparent"}
             />
           </button>
-          <span className="ml-auto text-white/85 text-[11px]">
+          <span className="ml-auto pr-2 text-white/85 text-[11px]">
             {post.timeAgo || ""}
           </span>
         </div>
       </div>
-    </CardLink>
+    </div>
   );
 }
 

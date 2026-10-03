@@ -170,7 +170,12 @@ function CinematicHero({ post }: { post: Post }) {
   const cat = post.categories?.[0]
   return (
     <section style={cinemaWrap as any} aria-label="Featured story">
-      <Link href={`/posts/${post.slug}`} style={{ display: 'block', textDecoration: 'none', height: '100%' }} className="dvnt-cinema">
+      {/* Card wrapper, not a link: the category chip is its own link, and a
+          link inside a link is invalid (the HTML parser closes the outer <a> at
+          the inner one). The post link is a sibling overlay; the body sits above
+          it with pointer-events off so only the chip takes clicks. */}
+      <div style={{ display: 'block', height: '100%' }} className="dvnt-cinema">
+        <Link href={`/posts/${post.slug}`} aria-label={post.title} className="dvnt-card-link" style={cardLinkOverlay} />
         {imgSrc ? (
           <div style={cinemaImgWrap as any}>
             <Image
@@ -186,7 +191,7 @@ function CinematicHero({ post }: { post: Post }) {
         ) : (
           <div style={{ ...cinemaImgWrap, background: 'linear-gradient(135deg,#0e1318,#07090c)' } as any} />
         )}
-        <div className="dvnt-cinema-body" style={cinemaBody as any}>
+        <div className="dvnt-cinema-body" style={{ ...cinemaBody, zIndex: 2, pointerEvents: 'none' } as any}>
           <div style={cinemaTopBar as any}>
             <span style={cinemaSiteName as any}>DVNT Magazine</span>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' as const }}>
@@ -204,7 +209,7 @@ function CinematicHero({ post }: { post: Post }) {
           </div>
           <span style={cinemaReadMore as any}>Read story →</span>
         </div>
-      </Link>
+      </div>
     </section>
   )
 }
@@ -215,20 +220,21 @@ function WideCard({ post }: { post: Post }) {
   const imgSrc = post.heroImage ? mediaUrl(post.heroImage, 'card') : (post.coverImage?.url ?? null)
   const cat = post.categories?.[0]
   return (
-    <article style={wideCard as any} className="dvnt-card">
-      <Link href={`/posts/${post.slug}`} style={{ display: 'flex', flexDirection: 'row', textDecoration: 'none', height: '100%' }}>
+    <article style={{ ...wideCard, position: 'relative' } as any} className="dvnt-card">
+      <Link href={`/posts/${post.slug}`} aria-label={post.title} className="dvnt-card-link" style={cardLinkOverlay} />
+      <div style={{ display: 'flex', flexDirection: 'row', height: '100%' }}>
         {imgSrc && (
           <div style={wideImgWrap as any}>
             <Image src={imgSrc} alt={post.heroImage?.alt ?? post.title} fill sizes="(max-width: 700px) 90vw, 360px" style={{ objectFit: 'cover' }} />
           </div>
         )}
-        <div style={wideBody as any}>
+        <div style={{ ...wideBody, ...aboveCardLink } as any}>
           {cat && <CatPill category={cat} />}
           <h2 style={wideTitle as any}>{post.title}</h2>
           {post.excerpt && <p style={wideExcerpt as any}>{post.excerpt}</p>}
           <BylineRow post={post} compact />
         </div>
-      </Link>
+      </div>
     </article>
   )
 }
@@ -239,21 +245,22 @@ function TallCard({ post }: { post: Post }) {
   const imgSrc = post.heroImage ? mediaUrl(post.heroImage, 'full') : (post.coverImage?.url ?? null)
   const cat = post.categories?.[0]
   return (
-    <article style={tallCard as any} className="dvnt-card">
-      <Link href={`/posts/${post.slug}`} style={{ display: 'flex', flexDirection: 'column', textDecoration: 'none', height: '100%' }}>
+    <article style={{ ...tallCard, position: 'relative' } as any} className="dvnt-card">
+      <Link href={`/posts/${post.slug}`} aria-label={post.title} className="dvnt-card-link" style={cardLinkOverlay} />
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {imgSrc && (
           <div style={tallImgWrap as any}>
             <Image src={imgSrc} alt={post.heroImage?.alt ?? post.title} fill sizes="(max-width: 700px) 90vw, 360px" style={{ objectFit: 'cover' }} />
             <div style={tallOverlay as any} />
           </div>
         )}
-        <div style={tallBody as any}>
+        <div style={{ ...tallBody, ...aboveCardLink } as any}>
           {cat && <CatPill category={cat} />}
           <h2 style={tallTitle as any}>{post.title}</h2>
           {post.excerpt && <p style={tallExcerpt as any}>{post.excerpt}</p>}
           <BylineRow post={post} compact />
         </div>
-      </Link>
+      </div>
     </article>
   )
 }
@@ -386,7 +393,7 @@ function CatPill({ category, size = 'md' }: { category: PostCategory; size?: 'sm
   const accent = category.accentColor ?? '#379ed8'
   return (
     <Link href={`/posts?category=${category.slug}`} style={{
-      display: 'inline-block', alignSelf: 'flex-start', width: 'fit-content', textDecoration: 'none',
+      display: 'inline-block', alignSelf: 'flex-start', width: 'fit-content', textDecoration: 'none', pointerEvents: 'auto',
       padding: size === 'sm' ? '3px 9px' : '3px 10px', borderRadius: 7,
       // `sm` lives over the hero image → dark glass chip + solid accent edge so
       // it stays legible; `md` sits on dark cards and keeps the soft tint.
@@ -422,6 +429,10 @@ const wash = {
 const main = { maxWidth: 1200, margin: '0 auto', width: '100%', padding: 'clamp(28px,5vw,48px) clamp(16px,4vw,24px) 128px', position: 'relative', display: 'flex', flexDirection: 'column', gap: 'clamp(44px,7vw,72px)' }
 
 // Cinema hero (full viewport)
+/** Full-card post link, laid under the card body (cards whose body holds a category chip link). */
+const cardLinkOverlay: React.CSSProperties = { position: 'absolute', inset: 0, zIndex: 1, borderRadius: 'inherit' }
+/** Content above the overlay link; clicks fall through except on its own links. */
+const aboveCardLink: React.CSSProperties = { position: 'relative', zIndex: 2, pointerEvents: 'none' }
 const cinemaWrap: React.CSSProperties = { position: 'relative', width: '100%', height: 'clamp(440px,72vh,600px)', overflow: 'hidden', cursor: 'pointer' }
 // `viewTransitionName` shared with the post hero → cross-fade morph on
 // supported (MPA / back-forward) navigations; ignored everywhere else.
@@ -527,6 +538,7 @@ const emptyMsg = { margin: 0, color: 'rgba(245,245,244,0.3)', fontSize: 15, font
 const CSS = `
 /* Cinema hero */
 .dvnt-cinema{display:block}
+.dvnt-card-link:focus-visible{outline:2px solid #379ed8;outline-offset:-2px}
 .dvnt-cinema img{transition:transform 6s cubic-bezier(0.25,0.46,0.45,0.94)}
 .dvnt-cinema:hover img{transform:scale(1.04)}
 
