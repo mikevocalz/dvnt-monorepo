@@ -2,8 +2,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isTicketActivityType, ticketActivityCopy } from "./ticket-activity.ts";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 const NEW_TYPES = [
   "ticket_claim_required",
@@ -23,11 +26,9 @@ test("every type the taxonomy migration adds has row copy", () => {
 
 test("the migration adds exactly the types the copy table covers", () => {
   const sql = readFileSync(
-    fileURLToPath(
-      new URL(
-        "../../../../apps/mobile/supabase/migrations/20261002173000_ticket_activity_taxonomy.sql",
-        import.meta.url,
-      ),
+    resolve(
+      HERE,
+      "../../../../apps/mobile/supabase/migrations/20261002173000_ticket_activity_taxonomy.sql",
     ),
     "utf8",
   );
@@ -48,7 +49,7 @@ for (const screen of [
   "../../features/routes/screens/(protected)/(tabs)/activity.tsx",
 ]) {
   test(`${screen} renders copy and counts the Tickets tab`, () => {
-    const source = readFileSync(fileURLToPath(new URL(screen, import.meta.url)), "utf8");
+    const source = readFileSync(resolve(HERE, screen), "utf8");
     assert.match(source, /return ticketActivityCopy\(activity\.type\)/);
     for (const type of NEW_TYPES) {
       assert.ok(source.includes(`case "${type}":`), `${type} missing from ${screen}`);
