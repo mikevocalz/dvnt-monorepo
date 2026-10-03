@@ -29,3 +29,32 @@ export function promoterCodeFieldError(
   if (error?.status === 409 || error?.status === 400) return message;
   return null;
 }
+
+/**
+ * The message to show under the invite email field (name-only promoters), or
+ * null when the failure is about something else. manage-promoters refuses a
+ * malformed address with a 400 that names the email.
+ */
+export function promoterInviteEmailFieldError(
+  error: { message?: string | null; status?: number | null } | null | undefined,
+): string | null {
+  const message = error?.message?.trim();
+  if (!message || error?.status !== 400 || !/\bemail\b/i.test(message)) return null;
+  return message;
+}
+
+/** Success toast copy for an add, from the server's inviteEmail status. */
+export function promoterAddedDescription(code: string, inviteEmail: string | null | undefined): string {
+  switch (inviteEmail) {
+    case "sent":
+      return `Code ${code}. We emailed them their invite.`;
+    case "no_account":
+      return `Code ${code}. Copy their link to share it.`;
+    case "not_configured":
+    case "failed":
+    case "no_email":
+      return `Code ${code}. The invite email didn't go out, so share their link.`;
+    default:
+      return `Code ${code}.`;
+  }
+}

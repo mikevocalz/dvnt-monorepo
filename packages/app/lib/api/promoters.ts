@@ -38,6 +38,14 @@ export interface EventPromoter {
   createdAt: string;
 }
 
+/** How the add went for the invite email; see manage-promoters. */
+export type PromoterInviteEmailStatus =
+  | "sent"
+  | "no_account"
+  | "no_email"
+  | "not_configured"
+  | "failed";
+
 export interface PromoterLibraryEntry {
   id: string;
   promoterAuthId: string;
@@ -97,7 +105,9 @@ export const promotersApi = {
     promoterCommissionBps?: number;
     code?: string;
     saveToLibrary?: boolean;
-  }): Promise<EventPromoter> {
+    /** Name-only promoters only: where to send the invite. Not stored. */
+    inviteEmail?: string;
+  }): Promise<EventPromoter & { inviteEmail: PromoterInviteEmailStatus | null }> {
     const customerDiscountBps = params.customerDiscountBps ?? params.revShareBps;
     const promoterCommissionBps = params.promoterCommissionBps ??
       params.revShareBps;
@@ -111,6 +121,7 @@ export const promotersApi = {
     const { data, error } = await invokeEdge<{
       ok: boolean;
       promoter: EventPromoter;
+      inviteEmail?: PromoterInviteEmailStatus;
       error?: string;
     }>("manage-promoters", {
       action: "add",
@@ -120,6 +131,9 @@ export const promotersApi = {
       customer_discount_bps: customerDiscountBps,
       promoter_commission_bps: promoterCommissionBps,
       ...(params.code ? { code: params.code } : {}),
+      ...(!params.username && params.inviteEmail?.trim()
+        ? { invite_email: params.inviteEmail.trim() }
+        : {}),
       save_to_library: params.saveToLibrary ?? true,
     });
     // Keep the HTTP status so the form can put a 409 code conflict under the
@@ -128,7 +142,7 @@ export const promotersApi = {
     if (!data?.ok || !data.promoter) {
       throw new Error(data?.error || "Could not add promoter");
     }
-    return data.promoter;
+    return { ...data.promoter, inviteEmail: data.inviteEmail ?? null };
   },
 
   async update(params: {
