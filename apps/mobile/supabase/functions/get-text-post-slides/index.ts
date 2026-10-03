@@ -89,8 +89,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    // SPICY slides go to any signed-in viewer (spicy-access.ts).
-    const maySeeSpicy = viewerMaySeeSpicy(viewerAuthId);
+    // SPICY slides go to a signed-in viewer with no under-18 ID on file
+    // (spicy-access.ts).
+    const maySeeSpicy = await viewerMaySeeSpicy(supabaseAdmin, viewerAuthId);
     const allowedPostIds = withoutHiddenSpicy(posts || [], { userId: viewerUserId, maySeeSpicy })
       .filter((post: any) => {
         const visibility = String(post?.visibility || "public");

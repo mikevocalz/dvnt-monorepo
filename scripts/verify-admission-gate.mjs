@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 /**
- * Runs 20261003170000_verified_admission_whole_membership.sql, then
- * 20261003170100_spicy_viewing_signed_in.sql, against a real Postgres and
- * checks what they do to row-level security, persona by persona.
+ * Runs 20261003170000_verified_admission_whole_membership.sql,
+ * 20261003170100_spicy_viewing_signed_in.sql and
+ * 20261003170200_spicy_viewing_excludes_minors.sql, in that order, against a
+ * real Postgres and checks what they do to row-level security, persona by
+ * persona.
  *
  * 170000 rewrites verified_participation_allowed(), drops the participation
  * boundary from tickets, ticket_holds and event_rsvps, and adds RESTRICTIVE
  * SPICY (is_nsfw) policies on posts, posts_media and post_text_slides. 170100
- * relaxes the read side of those policies to "signed in" (a JWT sub claim);
- * creating or marking a post SPICY still needs an approved adult ID. None of that is reachable from a unit test: whether a row
+ * relaxes the read side of those policies to "signed in" (a JWT sub claim),
+ * and 170200 takes SPICY reads away from a signed-in caller with an under-18
+ * identity document on file (viewer_is_flagged_minor()). Creating or marking
+ * a post SPICY still needs an approved adult ID. None of that is reachable
+ * from a unit test: whether a row
  * comes back depends on which permissive and restrictive policies Postgres
  * combines for the role and JWT claims PostgREST sets. So this harness boots a
  * throwaway cluster and asks Postgres.
@@ -21,8 +26,8 @@
  * the table grants for anon and authenticated.
  *
  *   pre   the fixture alone, i.e. production today
- *   post  the fixture plus both migrations in order, the pair applied twice
- *         (it must re-run)
+ *   post  the fixture plus the three migrations in order, the set applied
+ *         twice (it must re-run)
  *
  * Every section runs against both. On post every section must pass. On pre,
  * each section marked `changed` must FAIL, which proves the check can tell the
@@ -62,6 +67,7 @@ const TARGETS = process.env.ADMISSION_GATE_MIGRATION
   : [
       join(MIGRATIONS, "20261003170000_verified_admission_whole_membership.sql"),
       join(MIGRATIONS, "20261003170100_spicy_viewing_signed_in.sql"),
+      join(MIGRATIONS, "20261003170200_spicy_viewing_excludes_minors.sql"),
     ];
 
 // Same server discovery as verify-call-capacity.mjs: initdb, postgres and
@@ -661,13 +667,14 @@ async function each(names, fn) {
 // fail against production (pre) and pass after the migration (post).
 const SECTIONS = [
   {
-    name: "SPICY posts, media and slides are visible to every signed-in member and hidden from anon",
+    name: "SPICY posts, media and slides are visible to signed-in members, hidden from anon and from a member with an under-18 ID",
     changed: true,
     async fn(db) {
-      // Product rule (2026-10-03): signed in = may view SPICY. No ID check.
+      // Product rule (checklist A02, 2026-10-03): signed in with no under-18
+      // identity document on file = may view SPICY. No passed ID needed.
       const expected = {
         unverified: SPICY,
-        underage: SPICY,
+        underage: [],
         old: SPICY,
         adult: SPICY,
         anon: [],
@@ -945,11 +952,41 @@ const POST_ONLY = [
       assert.equal(c.userId, PERSONAS.old.auth);
       assert.deepEqual(Object.keys(c).sort(), ["denied", "exempt", "policy", "record", "userId"]);
       assert.deepEqual(Object.keys(c.policy).sort(), ["enforce", "grace_deadline"]);
-      // 170100: the SPICY read helper keys on a signed-in JWT, not the ID check.
+      // 170100 + 170200: the SPICY read helper keys on a signed-in JWT and
+      // an under-18 identity document, not on a passed ID check.
       for (const who of MEMBERS) {
-        const h = await as(db, who, `SELECT public.post_spicy_hidden($1::bigint) AS h`, [POST.spicyByAdult]);
-        assert.equal(h.rows?.[0]?.h, false, `${who}: post_spicy_hidden ${h.error ?? ""}`);
+        const h = await as(db, who, `SELECT public.post_spicy_hidden($1::bigint) AS h, public.viewer_is_flagged_minor() AS m`, [POST.spicyByAdult]);
+        const minor = who === "underage";
+        assert.deepEqual(h.rows?.[0], { h: minor, m: minor }, `${who}: post_spicy_hidden/viewer_is_flagged_minor ${h.error ?? ""}`);
       }
+      for (const who of ["anon", "service"]) {
+        const m = await as(db, who, `SELECT public.viewer_is_flagged_minor() AS m`);
+        assert.equal(m.rows?.[0]?.m, false, `${who}: viewer_is_flagged_minor ${m.error ?? ""}`);
+      }
+      // A flagged minor still sees a SPICY post they authored themselves.
+      {
+        const c = await db.connect();
+        try {
+          await c.query("BEGIN");
+          await c.query(`INSERT INTO public.posts (id, author_id, content, is_nsfw) VALUES (90, $1, 'own spicy', true)`, [PERSONAS.underage.id]);
+          await c.query("SELECT set_config('request.jwt.claims', $1, true)",
+            [JSON.stringify({ sub: PERSONAS.underage.auth, role: "authenticated" })]);
+          await c.query("SET LOCAL ROLE authenticated");
+          const own = await c.query(`SELECT id FROM public.posts WHERE is_nsfw IS TRUE ORDER BY id`);
+          assert.deepEqual(own.rows.map((r) => r.id), [90], "flagged minor: only their own SPICY post");
+          const hid = await c.query(`SELECT public.post_spicy_hidden(90) AS h`);
+          assert.equal(hid.rows[0].h, false, "flagged minor: own SPICY post not hidden");
+        } finally {
+          await c.query("ROLLBACK").catch(() => {});
+          c.release();
+        }
+      }
+      const [minorFn] = (await db.query(`
+        SELECT p.prosecdef AS definer, p.provolatile AS vol,
+          has_function_privilege('anon', p.oid, 'EXECUTE') AS anon,
+          has_function_privilege('authenticated', p.oid, 'EXECUTE') AS auth
+        FROM pg_proc p WHERE p.oid = 'public.viewer_is_flagged_minor()'::regprocedure`)).rows;
+      assert.deepEqual(minorFn, { definer: true, vol: "s", anon: true, auth: true }, "viewer_is_flagged_minor() shape and grants");
       const anonHidden = await as(db, "anon", `SELECT public.post_spicy_hidden($1::bigint) AS h`, [POST.spicyByAdult]);
       assert.equal(anonHidden.rows?.[0]?.h, true, `anon: post_spicy_hidden ${anonHidden.error ?? ""}`);
       const svcHidden = await as(db, "service", `SELECT public.post_spicy_hidden($1::bigint) AS h`, [POST.spicyByAdult]);

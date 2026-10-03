@@ -10,8 +10,9 @@
 //   legacy  account from 2023, never verified, holds a ticket
 //   adult   passed ID check with a 1990 date of birth
 //
-// Expected: everyone can check out and, being signed in, view SPICY posts.
-// Only the adult can post, comment, post a story, host an event, join a Lynk
+// Expected: everyone can check out. Buyer, legacy and adult, being signed in
+// with no under-18 ID on file, can view SPICY posts; the minor cannot. Only
+// the adult can post, comment, post a story, host an event, join a Lynk
 // room or publish a post as SPICY.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -98,6 +99,8 @@ function fakeDb(tables) {
           case 'delete': return () => { op = 'delete'; return builder; };
           case 'eq': return (k, v) => { filters.push(r => String(r[k]) === String(v)); return builder; };
           case 'neq': return (k, v) => { filters.push(r => String(r[k]) !== String(v)); return builder; };
+          // ISO dates and plain strings compare correctly as strings.
+          case 'gt': return (k, v) => { filters.push(r => r[k] != null && String(r[k]) > String(v)); return builder; };
           case 'in': return (k, vs) => { filters.push(r => vs.map(String).includes(String(r[k]))); return builder; };
           case 'is': return (k, v) => { filters.push(r => (r[k] ?? null) === v); return builder; };
           case 'not': return (k, o, v) => {
@@ -249,40 +252,49 @@ test('no ticket purchase, hold, RSVP or wallet rail imports the admission gate',
 });
 
 // ── SPICY reads ───────────────────────────────────────────────────────────
-// Product rule (2026-10-03): every signed-in member may view SPICY posts; a
-// signed-out caller may not. Viewing needs no ID check. Publishing SPICY still
+// Product rule (checklist A02, 2026-10-03): a signed-in member may view SPICY
+// posts unless they have an under-18 identity document on file. A signed-out
+// caller may not. Viewing needs no passed ID check. Publishing SPICY still
 // does (update-post section below).
 const spicyIds = posts => (posts || []).filter(p => p.isNSFW === true || p.is_nsfw === true).map(p => String(p.id));
+const VIEWERS = ['buyer', 'legacy', 'adult'];
 
 for (const who of ALL) {
-  test(`bootstrap-feed: signed-in ${who} receives a followed author's SPICY post`, async () => {
+  const sees = VIEWERS.includes(who);
+  const verb = sees ? 'receives' : 'does not receive';
+  test(`bootstrap-feed: signed-in ${who} ${verb} a followed author's SPICY post`, async () => {
     const res = await harness().call('bootstrap-feed', PERSONAS[who].authId, { include_nsfw: true });
     assert.equal(res.status, 200, JSON.stringify(res.json));
-    assert.ok(spicyIds(res.json.posts).includes('10'), JSON.stringify(spicyIds(res.json.posts)));
+    assert.equal(spicyIds(res.json.posts).includes('10'), sees, JSON.stringify(spicyIds(res.json.posts)));
   });
-  test(`bootstrap-profile: signed-in ${who} receives SPICY posts on a followed profile`, async () => {
+  test(`bootstrap-profile: signed-in ${who} ${verb} SPICY posts on a followed profile`, async () => {
     const res = await harness().call('bootstrap-profile', PERSONAS[who].authId, { user_id: SPICY_AUTHOR, include_nsfw: true });
     assert.equal(res.status, 200, JSON.stringify(res.json));
-    assert.ok(spicyIds(res.json.posts).includes('10'), JSON.stringify(res.json.posts));
+    assert.equal(spicyIds(res.json.posts).includes('10'), sees, JSON.stringify(res.json.posts));
   });
-  test(`get-text-post-slides: signed-in ${who} gets a SPICY post's slides`, async () => {
+  test(`get-text-post-slides: signed-in ${who} ${verb} a SPICY post's slides`, async () => {
     const res = await harness().call('get-text-post-slides', PERSONAS[who].authId, { postIds: [10, 11] });
     const ids = res.json.data.posts.map(p => p.postId);
     assert.ok(ids.includes('11'));
-    assert.ok(ids.includes('10'), JSON.stringify(ids));
+    assert.equal(ids.includes('10'), sees, JSON.stringify(ids));
   });
-  test(`get-bookmarks: signed-in ${who} gets a bookmarked SPICY post back`, async () => {
+  test(`get-bookmarks: signed-in ${who} ${verb} a bookmarked SPICY post`, async () => {
     const res = await harness().call('get-bookmarks', PERSONAS[who].authId, { withPosts: true });
     assert.equal(res.status, 200, JSON.stringify(res.json));
-    assert.ok(res.json.posts.some(p => String(p.id) === '10'), JSON.stringify(res.json));
+    assert.equal(res.json.posts.some(p => String(p.id) === '10'), sees, JSON.stringify(res.json));
   });
-  test(`get-liked-activity: signed-in ${who} sees a liked SPICY post's text and image`, async () => {
+  test(`get-liked-activity: signed-in ${who} ${verb} a liked SPICY post's text and image`, async () => {
     const res = await harness().call('get-liked-activity', PERSONAS[who].authId, {});
     assert.equal(res.status, 200, JSON.stringify(res.json));
     const item = res.json.items.find(i => i.entityId === '10');
-    assert.ok(item, JSON.stringify(res.json));
-    assert.equal(item.title, 'spicy');
-    assert.equal(item.previewImage, 'https://cdn.test/spicy.jpg');
+    if (sees) {
+      assert.ok(item, JSON.stringify(res.json));
+      assert.equal(item.title, 'spicy');
+      assert.equal(item.previewImage, 'https://cdn.test/spicy.jpg');
+    } else if (item) {
+      assert.notEqual(item.title, 'spicy', JSON.stringify(item));
+      assert.notEqual(item.previewImage, 'https://cdn.test/spicy.jpg', JSON.stringify(item));
+    }
   });
 }
 
@@ -306,9 +318,54 @@ test('SPICY viewing ignores the rollout switch: enforcement off, signed-in still
     .call('bootstrap-feed', PERSONAS.legacy.authId, { include_nsfw: true });
   assert.ok(spicyIds(res.json.posts).includes('10'), JSON.stringify(spicyIds(res.json.posts)));
 });
-test('spicy-access: signed-in means a non-empty Better Auth id', () => {
+test('SPICY viewing ignores the rollout switch for the minor too: enforcement off, still hidden', async () => {
+  const res = await harness({ policy: { ...ENFORCED, enforce: false } })
+    .call('bootstrap-feed', PERSONAS.minor.authId, { include_nsfw: true });
+  assert.ok(!spicyIds(res.json.posts).includes('10'), JSON.stringify(spicyIds(res.json.posts)));
+});
+
+// ── spicy-access.ts on its own ────────────────────────────────────────────
+function loadSpicyAccess() {
+  const exports = {};
+  const source = ts.transpileModule(fs.readFileSync(path.join(__dirname, 'spicy-access.ts'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  vm.runInNewContext(source, { exports, Date, Array, String, Number, console: { warn() {} } });
+  return exports;
+}
+test('spicy-access: viewing does not consult the passed-ID check', () => {
   const src = fs.readFileSync(path.join(__dirname, 'spicy-access.ts'), 'utf8');
-  assert.doesNotMatch(src, /resolveAdultVerificationState/, 'viewing must not consult the ID check');
+  assert.doesNotMatch(src, /resolveAdultVerificationState/, 'viewing must not need a passed ID');
+});
+test('spicy-access: signed-out is refused without a database read', async () => {
+  const { viewerMaySeeSpicy } = loadSpicyAccess();
+  let reads = 0;
+  const db = { from() { reads++; throw new Error('no read expected'); } };
+  assert.equal(await viewerMaySeeSpicy(db, null), false);
+  assert.equal(await viewerMaySeeSpicy(db, ''), false);
+  assert.equal(reads, 0);
+});
+test('spicy-access: one identity_verifications read per call', async () => {
+  const { viewerMaySeeSpicy } = loadSpicyAccess();
+  const fake = fakeDb(seed());
+  const tablesRead = [];
+  const db = { from: t => { tablesRead.push(t); return fake.db.from(t); } };
+  assert.equal(await viewerMaySeeSpicy(db, PERSONAS.adult.authId), true);
+  assert.deepEqual(tablesRead, ['identity_verifications']);
+});
+test('spicy-access: a failed identity_verifications read hides SPICY', async () => {
+  const { viewerMaySeeSpicy } = loadSpicyAccess();
+  const erroring = { from: () => new Proxy({}, { get: (_t, name) => name === 'then'
+    ? (res) => Promise.resolve({ data: null, error: { message: 'boom' } }).then(res)
+    : () => erroring.from() }) };
+  assert.equal(await viewerMaySeeSpicy(erroring, PERSONAS.adult.authId), false);
+  const throwing = { from: () => { throw new Error('network'); } };
+  assert.equal(await viewerMaySeeSpicy(throwing, PERSONAS.adult.authId), false);
+});
+test('spicy-access: the cutoff matches CURRENT_DATE - 18 years, including 29 Feb', () => {
+  const { adultCutoffDate } = loadSpicyAccess();
+  assert.equal(adultCutoffDate(new Date('2026-10-03T12:00:00Z')), '2008-10-03');
+  assert.equal(adultCutoffDate(new Date('2028-02-29T12:00:00Z')), '2010-02-28');
 });
 test('live-surface filters SPICY out of its public post query', () => {
   const src = fs.readFileSync(path.join(FUNCTIONS, 'live-surface', 'index.ts'), 'utf8');

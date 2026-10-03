@@ -272,9 +272,10 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
-      // Any signed-in member may view SPICY (spicy-access.ts). The follow
-      // gate below is the separate, deferred feed policy noted above.
-      if (!viewerMaySeeSpicy(sessionUserId)) {
+      // A signed-in member with no under-18 ID on file may view SPICY
+      // (spicy-access.ts). The follow gate below is the separate, deferred
+      // feed policy noted above.
+      if (!(await viewerMaySeeSpicy(supabase, sessionUserId))) {
         spicyAuthorIds = [intUserId];
       } else {
         // Fetch the set of author IDs the viewer follows + themselves

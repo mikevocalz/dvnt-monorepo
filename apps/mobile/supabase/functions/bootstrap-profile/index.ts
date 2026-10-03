@@ -100,8 +100,8 @@ Deno.serve(async (req: Request) => {
       if (!viewerUserId) {
         // Guest — never allow spicy
         effectiveIncludeNsfw = false;
-      } else if (!viewerMaySeeSpicy(sessionUserId)) {
-        // No signed-in session behind the viewer id.
+      } else if (!(await viewerMaySeeSpicy(supabase, sessionUserId))) {
+        // Signed out, or an under-18 ID on file (spicy-access.ts).
         effectiveIncludeNsfw = false;
       } else {
         const { data: followRow } = await supabase
