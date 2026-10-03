@@ -2,7 +2,8 @@
  * brand-outbox-worker Edge Function
  *
  * POST /brand-outbox-worker   (cron only, x-cron-secret)
- * Body: { limit?: number, cap?: number, lookback_days?: number }
+ * Body: { limit?: number, cap?: number, lookback_days?: number,
+ *         follow_backfill_limit?: number }
  *
  * Drains public.brand_message_outbox as the canonical Deviant account.
  * Claims rows atomically, sends each one with its stable provider idempotency
@@ -23,7 +24,13 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { brandSendGate, brandUnsubscribeUrl, verifyBrandSender } from "../_shared/brand-sender.ts";
+import {
+  brandSendGate,
+  brandUnsubscribeUrl,
+  resolveBrandSender,
+  verifyBrandSender,
+} from "../_shared/brand-sender.ts";
+import { NEW_PROFILE_WINDOW } from "../_shared/brand-follow.ts";
 import { campaignMessage, transition } from "../_shared/brand-outbox.ts";
 import {
   ensureDirectConversation,
@@ -48,6 +55,43 @@ function json(data: unknown, status = 200) {
   });
 }
 
+type BrandFollowResult =
+  | { status: "ran"; memberToBrandInserted: number; brandToNewMemberInserted: number; remaining: number; done: boolean }
+  | { status: "skipped"; reason: string }
+  | { status: "error"; error: string };
+
+async function runBrandFollowBackfill(
+  supabase: any,
+  limit: number,
+): Promise<BrandFollowResult> {
+  // Never guess the brand from @username: prove the configured ID pair first.
+  const resolved = resolveBrandSender();
+  const identity = resolved.ok
+    ? await verifyBrandSender(supabase, resolved.sender)
+    : resolved;
+  if (!identity.ok) {
+    console.warn(`[brand-outbox-worker] follow backfill skipped: ${identity.reason}`);
+    return { status: "skipped", reason: identity.reason };
+  }
+  const { data, error } = await supabase.rpc("backfill_brand_follows", {
+    p_brand_id: identity.sender.userId,
+    p_limit: limit,
+    p_new_profile_window: NEW_PROFILE_WINDOW,
+  });
+  if (error) {
+    console.error("[brand-outbox-worker] follow backfill failed:", error);
+    return { status: "error", error: error.message ?? String(error) };
+  }
+  const remaining = Number(data?.remaining ?? 0);
+  return {
+    status: "ran",
+    memberToBrandInserted: Number(data?.memberToBrandInserted ?? 0),
+    brandToNewMemberInserted: Number(data?.brandToNewMemberInserted ?? 0),
+    remaining,
+    done: remaining === 0,
+  };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: cors });
@@ -67,7 +111,12 @@ Deno.serve(async (req: Request) => {
       global: { headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } },
     });
 
-    let body: { limit?: number; cap?: number; lookback_days?: number } = {};
+    let body: {
+      limit?: number;
+      cap?: number;
+      lookback_days?: number;
+      follow_backfill_limit?: number;
+    } = {};
     try {
       body = await req.json();
     } catch {
@@ -78,6 +127,10 @@ Deno.serve(async (req: Request) => {
     const lookbackDays = Math.min(
       Math.max(Number(body.lookback_days) || 7, 1),
       90,
+    );
+    const followBackfillLimit = Math.min(
+      Math.max(Number(body.follow_backfill_limit) || 250, 1),
+      1000,
     );
 
     // Enqueue runs whether or not sending is enabled: the outbox can fill up
@@ -94,6 +147,13 @@ Deno.serve(async (req: Request) => {
       console.error("[brand-outbox-worker] enqueue failed:", enqueueError);
     }
 
+    // Follow backfill: every eligible member follows @DeviantEvents, up to
+    // followBackfillLimit per run, and the brand follows profiles created in
+    // the last NEW_PROFILE_WINDOW that skipped auth-sync. It needs the proven
+    // brand ID pair but not DVNT_BRAND_OUTBOX_ENABLED. Once nothing is missing
+    // the RPC inserts nothing and reports remaining: 0.
+    const brandFollows = await runBrandFollowBackfill(supabase, followBackfillLimit);
+
     const configured = brandSendGate();
     // Well-formed is not the same as correct: a typo in either id would pass
     // brandSendGate and then send as whatever account that id names. Prove the
@@ -109,6 +169,7 @@ Deno.serve(async (req: Request) => {
         ok: true,
         data: {
           enqueued: enqueued ?? 0,
+          brandFollows,
           claimed: 0,
           sent: 0,
           disabled: gate.reason,
@@ -139,6 +200,7 @@ Deno.serve(async (req: Request) => {
         ok: true,
         data: {
           enqueued: enqueued ?? 0,
+          brandFollows,
           claimed: 0,
           sent: 0,
         },
@@ -242,6 +304,7 @@ Deno.serve(async (req: Request) => {
       ok: true,
       data: {
         enqueued: enqueued ?? 0,
+        brandFollows,
         claimed: rows.length,
         sent,
         failed,

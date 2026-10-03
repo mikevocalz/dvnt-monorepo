@@ -242,30 +242,45 @@ test('the outbox carries no second welcome email', () => {
   assert.equal(outbox.campaignMessage('welcome_email_v2', 'https://dvntapp.live/u/x'), null);
 });
 
-// No retroactive follow graph. Existing members are not made to follow the
-// brand account, and the brand does not follow them back, unless they signed
-// up inside the onboarding window.
-test('no backfill makes existing members follow the brand', () => {
+// R05: every eligible member follows @DeviantEvents, including members who
+// joined before this shipped. The SQL behaviour (eligibility, idempotency,
+// counts, the brand never following old members) is proven against a real
+// Postgres by scripts/verify-brand-follows.mjs. These checks pin the wiring.
+test('the brand-outbox cron runs the follow backfill in batches', () => {
   const sql = fs.readFileSync(MIGRATION, 'utf8');
   const worker = fs.readFileSync(`${__dirname}/../brand-outbox-worker/index.ts`, 'utf8');
-  for (const [name, text] of [['migration', sql], ['worker', worker]]) {
-    assert.ok(!/backfill_brand_relationships/.test(text), `${name} still references the backfill`);
-    assert.ok(!/follow_backfill/.test(text), `${name} still passes a backfill limit`);
-  }
+  const sweep = sql.slice(sql.indexOf('FUNCTION public.cron_brand_outbox_sweep'));
+  assert.match(sweep, /body := '\{"follow_backfill_limit":250\}'::jsonb/);
+  assert.match(worker, /supabase\.rpc\("backfill_brand_follows", \{[\s\S]{0,160}p_limit: limit/);
+  assert.match(worker, /Number\(body\.follow_backfill_limit\) \|\| 250/);
+  // A failed backfill is reported in the response, not dropped.
+  assert.match(worker, /return \{ status: "error", error:/);
+  const responses = worker.match(/enqueued: enqueued \?\? 0,\s*brandFollows,/g) || [];
+  assert.equal(responses.length, 3, 'every worker response must report brandFollows');
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.backfill_brand_follows\(integer, integer, interval\) TO service_role/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.backfill_brand_follows\(integer, integer, interval\) FROM PUBLIC, anon, authenticated/);
 });
 
-test('the brand follow applies only to members inside the signup window', () => {
+test('member -> brand has no signup window; brand -> member keeps one', () => {
   const sql = fs.readFileSync(MIGRATION, 'utf8');
   const fn = sql.slice(
     sql.indexOf('FUNCTION public.ensure_brand_follow_relationships'),
-    sql.indexOf('FUNCTION public.enqueue_brand_onboarding'),
+    sql.indexOf('FUNCTION public.backfill_brand_follows'),
   ).replace(/\s+/g, ' ');
-  assert.match(fn, /p_lookback interval/);
-  assert.match(fn, /SELECT u\.created_at INTO v_member_created/);
-  assert.match(fn, /v_member_created IS NULL OR v_member_created < now\(\) - p_lookback THEN RETURN/);
+  // The old early return skipped BOTH directions for anyone outside the window.
+  assert.ok(!/v_member_created < now\(\) - p_lookback THEN RETURN/.test(fn));
+  assert.match(fn, /IF p_bidirectional AND v_member_created IS NOT NULL AND v_member_created >= now\(\) - p_lookback THEN/);
+});
+
+// Profiles created outside auth-sync (resolveOrProvisionUser runs in 30+ edge
+// functions) must get both directions too, without waiting for the cron.
+test('every profile-creation path calls ensureBrandFollows', () => {
+  const helper = fs.readFileSync(`${__dirname}/brand-follow.ts`, 'utf8');
+  assert.match(helper, /ensure_brand_follow_relationships[\s\S]{0,200}p_lookback: NEW_PROFILE_WINDOW/);
+  assert.match(helper, /NEW_PROFILE_WINDOW = "7 days"/);
   const authSync = fs.readFileSync(`${__dirname}/../auth-sync/index.ts`, 'utf8');
-  assert.match(
-    authSync,
-    /ensure_brand_follow_relationships[\s\S]{0,200}p_lookback: "7 days"/,
-  );
+  assert.match(authSync, /await ensureBrandFollows\(supabaseAdmin, memberId, /);
+  const resolveUser = fs.readFileSync(`${__dirname}/resolve-user.ts`, 'utf8');
+  const provisioned = resolveUser.slice(resolveUser.indexOf('if (newRow) {'));
+  assert.match(provisioned.slice(0, 600), /await ensureBrandFollows\(supabase, Number\(newRow\.id\), /);
 });

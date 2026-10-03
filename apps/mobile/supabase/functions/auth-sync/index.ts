@@ -13,10 +13,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import {
-  resolveBrandSender,
-  verifyBrandSender,
-} from "../_shared/brand-sender.ts";
+import { ensureBrandFollows } from "../_shared/brand-follow.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -68,31 +65,9 @@ async function applyBrandOnboarding(
     console.error("[Edge:auth-sync] brand onboarding enqueue failed:", enqueueError.message);
   }
 
-  // Automatic follow relationships need the real brand account. Never guess
-  // from @username: prove the configured public.users.id + auth_id pair first.
-  // New signups only: the RPC skips members created before p_lookback, so a
-  // returning member's sign-in never adds the follow retroactively.
-  const configured = resolveBrandSender();
-  const verified = configured.ok
-    ? await verifyBrandSender(supabaseAdmin, configured.sender)
-    : configured;
-  if (!verified.ok) {
-    console.warn("[Edge:auth-sync] brand follow skipped:", verified.reason);
-    return;
-  }
-
-  const { error: followError } = await supabaseAdmin.rpc(
-    "ensure_brand_follow_relationships",
-    {
-      p_member_id: memberId,
-      p_brand_id: verified.sender.userId,
-      p_bidirectional: true,
-      p_lookback: "7 days",
-    },
-  );
-  if (followError) {
-    console.error("[Edge:auth-sync] brand follow failed:", followError.message);
-  }
+  // Member -> brand for any eligible member still missing it; brand -> member
+  // only for profiles created inside NEW_PROFILE_WINDOW.
+  await ensureBrandFollows(supabaseAdmin, memberId, "Edge:auth-sync");
 }
 
 function normalizeLinks(value: unknown): string[] {
