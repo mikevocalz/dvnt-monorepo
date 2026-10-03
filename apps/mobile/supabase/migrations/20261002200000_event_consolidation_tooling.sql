@@ -79,6 +79,37 @@ $$;
 REVOKE ALL ON FUNCTION public.event_consolidation_snapshot(integer, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.event_consolidation_snapshot(integer, integer) TO service_role;
 
+-- events.total_attendees drifted permanently on any ticket move. The trigger
+-- was AFTER INSERT OR UPDATE OF status OR DELETE, so changing tickets.event_id
+-- never fired it, and the function only recounted COALESCE(NEW.event_id,
+-- OLD.event_id), which is the new event alone. The source kept counting every
+-- moved ticket and the destination counted none, and get-host-dashboard and
+-- get_event_detail both read that column. Now the trigger also fires on
+-- event_id, and an UPDATE that changes event_id recounts the old event as well.
+-- recompute_event_total_attendees is left exactly as production runs it.
+CREATE OR REPLACE FUNCTION public.maintain_event_total_attendees()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF TG_OP <> 'DELETE' AND NEW.event_id IS NOT NULL THEN
+    PERFORM public.recompute_event_total_attendees(NEW.event_id);
+  END IF;
+  IF TG_OP <> 'INSERT' AND OLD.event_id IS NOT NULL
+     AND (TG_OP = 'DELETE' OR OLD.event_id IS DISTINCT FROM NEW.event_id) THEN
+    PERFORM public.recompute_event_total_attendees(OLD.event_id);
+  END IF;
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_maintain_event_total_attendees ON public.tickets;
+CREATE TRIGGER trg_maintain_event_total_attendees
+  AFTER INSERT OR UPDATE OF status, event_id OR DELETE ON public.tickets
+  FOR EACH ROW EXECUTE FUNCTION public.maintain_event_total_attendees();
+
 CREATE OR REPLACE FUNCTION public.execute_event_consolidation(
   p_source_event_id integer,
   p_destination_event_id integer,
@@ -150,15 +181,23 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'Preflight is stale; run it again');
   END IF;
 
+  -- Pin the set being moved. Without this, a ticket issued into the source
+  -- after the guards below would be picked up by the move but never checked
+  -- against the tier map or the destination capacity.
+  PERFORM 1 FROM public.tickets t
+    WHERE t.event_id = p_source_event_id
+      AND t.status IN ('active','scanned','transfer_pending')
+    ORDER BY t.id FOR UPDATE;
+
   -- tickets.ticket_type_id is nullable on purpose, so free RSVP tickets can
   -- exist without a tier (20260334_tickets_nullable_ticket_type.sql). The
   -- original predicate was `NOT (map ? t.ticket_type_id::text)`, and
   -- `jsonb ? NULL` evaluates to NULL rather than true, so a NULL-tier row was
-  -- never flagged. The UPDATE below has no tier filter, so those tickets did
-  -- move, with `map->>NULL` giving them a NULL destination tier — invisible to
-  -- the per-tier quantity_sold recompute and to the capacity check above.
-  -- Refuse the whole operation instead: moving untracked admissions silently
-  -- is the defect, and a caller that wants them moved has to say where to.
+  -- never flagged. The move has no tier filter, so those tickets did move,
+  -- with `map->>NULL` giving them a NULL destination tier, invisible to the
+  -- per-tier quantity_sold recompute and to the capacity check below.
+  -- A JSON object key cannot be NULL, so there is no way to map them. Refuse
+  -- the whole operation rather than move untracked admissions.
   IF EXISTS (
     SELECT 1 FROM public.tickets t
     WHERE t.event_id = p_source_event_id
@@ -179,12 +218,22 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'Ticket type map contains a tier outside destination event');
   END IF;
 
-  -- Capacity. Both sibling issuance RPCs guard quantity_total; the move did
-  -- not reference it at all, so 200 source tickets could land in a 50-capacity
-  -- tier. quantity_sold then reads over quantity_total: the tier shows sold out
-  -- to buyers while the door admits every holder, with no way to unwind it.
-  -- NULL quantity_total means unlimited, so it is skipped rather than treated
-  -- as zero.
+  -- Capacity. The move did not reference quantity_total at all, so 200 source
+  -- tickets could land in a 50-capacity tier: sold out to buyers, 250 valid
+  -- QRs at the door, no way to unwind it.
+  --
+  -- This is the same arithmetic ticket_hold_create_atomic and cart_create_hold
+  -- use: lock the tier row FOR UPDATE, then available = quantity_total -
+  -- quantity_sold - live cart holds - live legacy holds. The lock is what makes
+  -- it atomic. Every buyer of a destination tier serialises on that row, so no
+  -- hold can be granted between this check and the move below. Tiers are
+  -- locked in id order so two consolidations into overlapping tiers cannot
+  -- deadlock. NULL quantity_total means unlimited and is skipped, not read as
+  -- zero.
+  PERFORM 1 FROM public.ticket_types tt
+    WHERE tt.id IN (SELECT m.value::uuid FROM jsonb_each_text(p_ticket_type_map) m)
+    ORDER BY tt.id FOR UPDATE;
+
   IF EXISTS (
     SELECT 1
     FROM (
@@ -197,7 +246,14 @@ BEGIN
     ) m
     JOIN public.ticket_types tt ON tt.id = m.dest_tier
     WHERE tt.quantity_total IS NOT NULL
-      AND COALESCE(tt.quantity_sold, 0) + m.incoming > tt.quantity_total
+      AND m.incoming > tt.quantity_total
+        - COALESCE(tt.quantity_sold, 0)
+        - COALESCE((SELECT sum(ch.qty) FROM public.cart_holds ch
+                    WHERE ch.tier_id = tt.id AND ch.released = false
+                      AND ch.expires_at > now()), 0)
+        - COALESCE((SELECT sum(th.quantity) FROM public.ticket_holds th
+                    WHERE th.ticket_type_id = tt.id AND th.status = 'active'
+                      AND th.expires_at > now()), 0)
   ) THEN
     RETURN jsonb_build_object('ok', false, 'error', 'Destination tier capacity would be exceeded');
   END IF;
@@ -220,11 +276,14 @@ BEGIN
   WHERE t.event_id = p_source_event_id
     AND t.status IN ('active','scanned','transfer_pending');
 
+  -- Move exactly the ledgered rows, so the ledger, the checks above and the
+  -- move all describe the same set.
   UPDATE public.tickets t
   SET event_id = p_destination_event_id,
-      ticket_type_id = (p_ticket_type_map->>t.ticket_type_id::text)::uuid
-  WHERE t.event_id = p_source_event_id
-    AND t.status IN ('active','scanned','transfer_pending');
+      ticket_type_id = l.destination_ticket_type_id
+  FROM public.event_consolidation_ticket_ledger l
+  WHERE l.operation_id = p_operation_id
+    AND l.ticket_id = t.id;
   GET DIAGNOSTICS v_moved = ROW_COUNT;
 
   -- Recompute sold inventory from authoritative active admission rows. Historical
@@ -237,20 +296,9 @@ BEGIN
   )
   WHERE tt.event_id IN (p_source_event_id, p_destination_event_id);
 
-  -- events.total_attendees has to be recomputed here too. Its maintaining
-  -- trigger is AFTER INSERT OR UPDATE OF status OR DELETE, so changing
-  -- tickets.event_id never fires it, and the body only branches on status
-  -- transitions. Left alone, the source keeps counting every moved ticket and
-  -- the destination never counts any, which both get-host-dashboard and
-  -- get_event_detail read. The drift is also self-sealing: a later refund
-  -- decrements the destination, which was never incremented, and GREATEST(,0)
-  -- floors it, so the source's inflation could never be worked off.
-  UPDATE public.events e
-  SET total_attendees = (
-    SELECT count(*)::integer FROM public.tickets t
-    WHERE t.event_id = e.id AND t.status = 'active'
-  )
-  WHERE e.id IN (p_source_event_id, p_destination_event_id);
+  -- events.total_attendees is maintained by trg_maintain_event_total_attendees,
+  -- which this migration extends (below) to fire on event_id changes and
+  -- recount both the old and the new event. Nothing to do here.
 
   v_after := public.event_consolidation_snapshot(p_source_event_id, p_destination_event_id);
   UPDATE public.event_consolidation_operations
