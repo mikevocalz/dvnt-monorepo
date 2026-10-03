@@ -30,9 +30,11 @@ import {
   ArrowLeft,
   Link2,
   Megaphone,
+  MessageSquare,
   Pause,
   Pencil,
   Play,
+  Share2,
   UserPlus,
   X,
 } from "lucide-react";
@@ -42,6 +44,13 @@ import {
   type EventPromoter,
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
+import { useEvent } from "@dvnt/app/lib/hooks/use-events";
+import { shareUrls } from "@dvnt/app/lib/deep-linking/share-link";
+import { shareMessage } from "@dvnt/app/lib/sharing";
+import {
+  buildPromoterShareMessage,
+  promoterSmsHref,
+} from "@dvnt/app/lib/events/promoter-share";
 import {
   normalizePromoterCodeInput,
   promoterCodeFieldError,
@@ -141,6 +150,8 @@ function PromoterRow({
   promoter,
   canManage,
   onCopyLink,
+  onShare,
+  smsHref,
   onEdit,
   onTogglePause,
   onRemove,
@@ -148,6 +159,8 @@ function PromoterRow({
   promoter: EventPromoter;
   canManage: boolean;
   onCopyLink: () => void;
+  onShare: () => void;
+  smsHref: string;
   onEdit: () => void;
   onTogglePause: () => void;
   onRemove: () => void;
@@ -219,6 +232,23 @@ function PromoterRow({
           >
             <Link2 size={14} color="#3FDCFF" />
           </button>
+          <button
+            type="button"
+            onClick={onShare}
+            aria-label={`Share ${name}'s code`}
+            title="Share code"
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/6 active:bg-white/10"
+          >
+            <Share2 size={14} color="#C084FC" />
+          </button>
+          <a
+            href={smsHref}
+            aria-label={`Text ${name}'s code`}
+            title="Text code"
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/6 active:bg-white/10"
+          >
+            <MessageSquare size={14} color="rgba(255,255,255,0.7)" />
+          </a>
           {canManage ? (
             <>
               <button
@@ -401,6 +431,33 @@ export function EventPromotersScreen() {
     overscan: 8,
   });
 
+  const eventQuery = useEvent(eventId > 0 ? String(eventId) : "");
+  const shareContentFor = (promoter: EventPromoter) =>
+    buildPromoterShareMessage({
+      code: promoter.code,
+      eventUrl: shareUrls.event(String(eventId)),
+      eventTitle: eventQuery.data?.title,
+      eventDescription: eventQuery.data?.description,
+    });
+
+  // T08: share sheet first; where the browser has none, copy the whole message.
+  // The Text button beside it opens the SMS composer with the same text.
+  const shareCode = async (promoter: EventPromoter) => {
+    const content = shareContentFor(promoter);
+    const outcome = await shareMessage(content);
+    if (outcome !== "unsupported") return;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(content.message);
+        showToast("success", "Message copied", "Paste it anywhere, or use Text to send it as an SMS.");
+        return;
+      } catch {
+        // fall through
+      }
+    }
+    showToast("error", "Couldn't share", content.message);
+  };
+
   const copyLink = (promoter: EventPromoter) => {
     const link = promoterShareLink(eventId, promoter.code);
     if (typeof navigator !== "undefined" && navigator.clipboard) {
@@ -540,6 +597,8 @@ export function EventPromotersScreen() {
                       promoter={promoter}
                       canManage={canManage}
                       onCopyLink={() => copyLink(promoter)}
+                      onShare={() => void shareCode(promoter)}
+                      smsHref={promoterSmsHref(shareContentFor(promoter).message)}
                       onEdit={() => setEditTarget(promoter)}
                       onTogglePause={() =>
                         updateMutation.mutate({

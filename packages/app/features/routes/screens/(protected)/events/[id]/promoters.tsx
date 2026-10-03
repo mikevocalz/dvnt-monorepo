@@ -22,6 +22,7 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -32,6 +33,7 @@ import {
   Megaphone,
   Pause,
   Play,
+  Share2,
   UserPlus,
   X,
 } from "lucide-react-native";
@@ -42,6 +44,13 @@ import {
   type EventPromoter,
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
+import { useEvent } from "@dvnt/app/lib/hooks/use-events";
+import { shareUrls } from "@dvnt/app/lib/deep-linking/share-link";
+import { shareMessage } from "@dvnt/app/lib/sharing";
+import {
+  buildPromoterShareMessage,
+  promoterSmsHref,
+} from "@dvnt/app/lib/events/promoter-share";
 import {
   normalizePromoterCodeInput,
   promoterCodeFieldError,
@@ -204,6 +213,32 @@ export default function EventPromotersScreen() {
   const promoters = promotersQuery.data?.promoters || [];
   const callerRole = promotersQuery.data?.callerRole || null;
   const canManage = callerRole === "owner" || callerRole === "admin";
+
+  const eventQuery = useEvent(eventId > 0 ? String(eventId) : "");
+
+  // T08: the share sheet (Messages included). If it can't open, go to the SMS
+  // composer, then to the clipboard.
+  const shareCode = async (promoter: EventPromoter) => {
+    const content = buildPromoterShareMessage({
+      code: promoter.code,
+      eventUrl: shareUrls.event(String(eventId)),
+      eventTitle: eventQuery.data?.title,
+      eventDescription: eventQuery.data?.description,
+    });
+    const outcome = await shareMessage(content);
+    if (outcome !== "unsupported") return;
+    const sms = promoterSmsHref(content.message);
+    // openURL directly: canOpenURL needs sms in LSApplicationQueriesSchemes on
+    // iOS, and openURL rejects anyway when nothing handles the scheme.
+    try {
+      await Linking.openURL(sms);
+      return;
+    } catch {
+      // fall through to copy
+    }
+    await Clipboard.setStringAsync(content.message);
+    showToast("success", "Message copied", "Paste it into any chat.");
+  };
 
   const copyLink = async (promoter: EventPromoter) => {
     const link = promoterShareLink(eventId, promoter.code);
@@ -470,6 +505,15 @@ export default function EventPromotersScreen() {
                       style={styles.actionBtn}
                     >
                       <Link2 size={14} color="#3FDCFF" />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => void shareCode(p)}
+                      hitSlop={8}
+                      style={styles.actionBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Share ${p.displayName}'s code`}
+                    >
+                      <Share2 size={14} color={ACCENT_TEXT} />
                     </Pressable>
                     {canManage && (
                       <>
