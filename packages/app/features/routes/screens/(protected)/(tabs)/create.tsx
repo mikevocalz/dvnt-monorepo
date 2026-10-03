@@ -448,7 +448,7 @@ function CreateScreenContent() {
           </View>
         </View>
 
-        {/* Meta block — Add tag, Add Media, Add location.
+        {/* Meta block — Add tag, Add Photos, Add location.
             Lifted above the per-mode content (text composer / media
             preview / caption) so this stays in the same spot whether
             the user is on the Media tab or the Text tab. */}
@@ -575,7 +575,7 @@ function CreateScreenContent() {
             >
               <ImageIcon size={20} color="#fff" />
               <Text style={{ color: "#fff", fontWeight: "600" }}>
-                Add Media
+                Add Photos
               </Text>
             </Pressable>
           </View>

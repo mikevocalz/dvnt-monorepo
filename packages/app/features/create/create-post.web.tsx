@@ -367,7 +367,7 @@ export function CreatePostScreen() {
               className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-500 py-3.5 font-semibold text-white"
             >
               <ImagePlus size={20} />
-              Add Media
+              Add Photos
             </button>
           </div>
         ) : null}
