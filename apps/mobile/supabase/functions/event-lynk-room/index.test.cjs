@@ -16,7 +16,9 @@ function transpile(file) {
 }
 function loadShared(name) {
   const exports = {};
-  vm.runInNewContext(transpile(path.join(SHARED, name)), { exports, Date, Promise, Number, String, Error, Math });
+  vm.runInNewContext(transpile(path.join(SHARED, name)), {
+    exports, Date, Promise, Number, String, Error, Math, console: { log() {}, warn() {}, error() {} },
+  });
   return exports;
 }
 
@@ -100,6 +102,7 @@ function harness({ actor = 'host-auth', failTables = [], event = {}, room = {}, 
   const shared = {
     'event-access.ts': loadShared('event-access.ts'),
     'event-lynk-host.ts': loadShared('event-lynk-host.ts'),
+    'event-lynk-start.ts': loadShared('event-lynk-start.ts'),
   };
   let who = actor;
   vm.runInNewContext(transpile(path.join(__dirname, 'index.ts')), {
@@ -264,11 +267,80 @@ test('mass admit does not bypass capacity: start writes no room membership', asy
 
 test('the lifecycle migration never makes a room live on its own', () => {
   const sql = fs.readFileSync(path.join(__dirname, '../../migrations/20261002210000_event_lynk_lifecycle.sql'), 'utf8');
-  const fn = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.sync_event_lynk_lifecycle'));
+  const fnStart = sql.indexOf('CREATE OR REPLACE FUNCTION public.sync_event_lynk_lifecycle');
+  const fn = sql.slice(fnStart, sql.indexOf('$$;', fnStart));
   // 'live' only appears as "keep what is there", never as an assigned value.
   assert.doesNotMatch(fn, /THEN 'live'/);
   assert.match(fn, /ELSE event_lynk_lifecycle\.state END/);
   assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.event_lynk_waiting/);
   assert.match(sql, /ALTER TABLE public\.event_lynk_waiting ENABLE ROW LEVEL SECURITY/);
   assert.match(sql, /REVOKE ALL ON public\.event_lynk_waiting FROM PUBLIC, anon, authenticated/);
+});
+
+// A host joining their own room starts it, as Zoom does. Same host rule as
+// the Start button; a scanner or a ticket holder joining changes nothing.
+test('a host joining their own room starts it and admits whoever was waiting', async () => {
+  const h = harness();
+  await h.wait('ann-auth');
+  const joined = await h.wait('host-auth');
+  assert.equal(joined.status, 200);
+  assert.equal(joined.body.admitted, true);
+  assert.equal(joined.body.state, 'live');
+  assert.equal(h.state(), 'live');
+  assert.equal((await h.wait('ann-auth')).body.admitted, true);
+});
+
+test('an accepted editor co-organizer joining starts the room too', async () => {
+  const h = harness({ coOrganizers: [{ event_id: 9, user_id: 'ed-auth', role: 'editor', accepted: true }] });
+  await h.wait('ed-auth');
+  assert.equal(h.state(), 'live');
+});
+
+test('a non-host join waits: a ticket holder and a scanner co-organizer never start the room', async () => {
+  const h = harness({ coOrganizers: [{ event_id: 9, user_id: 'scanner-auth', role: 'scanner', accepted: true }] });
+  const guest = await h.wait('ann-auth');
+  assert.equal(guest.body.admitted, false);
+  // A scanner is staff (organizer access) and gets in, but is not a host.
+  const scanner = await h.wait('scanner-auth');
+  assert.equal(scanner.status, 200);
+  assert.notEqual(h.state(), 'live');
+  assert.equal((await h.wait('ann-auth')).body.admitted, false);
+});
+
+test('a host joining twice is idempotent', async () => {
+  const h = harness();
+  await h.wait('host-auth');
+  const again = await h.wait('host-auth');
+  assert.equal(again.body.admitted, true);
+  assert.equal(h.state(), 'live');
+  assert.equal(h.writes.filter((w) => w.table === 'event_lynk_lifecycle' && w.value.state === 'live' && w.count > 0).length, 1);
+});
+
+test('a host joining a cancelled event does not start it', async () => {
+  const h = harness({ event: { status: 'cancelled' } });
+  const got = await h.wait('host-auth');
+  assert.equal(got.status, 409);
+  assert.notEqual(h.state(), 'live');
+});
+
+test('video_join_room starts the room when a host joins, after the join succeeds', () => {
+  const join = fs.readFileSync(path.join(__dirname, '../video_join_room/index.ts'), 'utf8');
+  assert.match(join, /from "\.\.\/_shared\/event-lynk-start\.ts"/);
+  assert.match(join, /from "\.\.\/_shared\/event-lynk-host\.ts"/);
+  const tokenStored = join.indexOf('.from("video_room_tokens")');
+  const hostCheck = join.indexOf('isEventLynkHost(supabase,');
+  const start = join.indexOf('startEventLynk(supabase,');
+  assert.ok(tokenStored > 0 && hostCheck > tokenStored && start > hostCheck,
+    'the host check and start must run after the peer token exists');
+});
+
+test('the migration marks events already in progress live and leaves future ones scheduled', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '../../migrations/20261002210000_event_lynk_lifecycle.sql'), 'utf8');
+  const backfill = sql.slice(sql.indexOf('-- Backfill'));
+  assert.ok(sql.indexOf('-- Backfill') > sql.indexOf('$$;'), 'backfill runs after the function exists');
+  assert.match(backfill, /'live'/);
+  assert.match(backfill, /e\.start_date <= now\(\)/);
+  assert.match(backfill, /now\(\) < COALESCE\(e\.end_date, e\.start_date \+ interval '6 hours'\)/);
+  assert.match(backfill, /NOT IN \('cancelled','deleted'\)/);
+  assert.match(backfill, /ON CONFLICT \(event_id\) DO UPDATE/);
 });

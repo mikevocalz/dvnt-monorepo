@@ -83,4 +83,33 @@ $$;
 REVOKE ALL ON FUNCTION public.sync_event_lynk_lifecycle(integer) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.sync_event_lynk_lifecycle(integer) TO service_role;
 
+-- Backfill: events already in progress when this ships.
+--
+-- Until now an event room opened on the clock, so guests of an event that is
+-- running right now are already in or on their way in. Without a row they
+-- would land in a waiting room for a Start nobody knows to press. Mark those
+-- events live (started_by stays NULL: no host pressed anything). Events that
+-- have not started, have ended, or are cancelled get no row here and stay
+-- 'scheduled' until sync_event_lynk_lifecycle or a host creates one. A room
+-- shared by more than one event is skipped: event-lynk-room refuses those,
+-- and two rows would break event_lynk_lifecycle_room_uidx.
+INSERT INTO public.event_lynk_lifecycle
+  (event_id, room_uuid, state, scheduled_start, scheduled_end, live_at, started_by, updated_at)
+SELECT e.id, e.lynk_room_id, 'live', e.start_date,
+       COALESCE(e.end_date, e.start_date + interval '6 hours'), now(), NULL, now()
+FROM public.events e
+WHERE e.lynk_room_id IS NOT NULL
+  AND COALESCE(e.status, '') NOT IN ('cancelled','deleted')
+  AND e.start_date <= now()
+  AND now() < COALESCE(e.end_date, e.start_date + interval '6 hours')
+  AND NOT EXISTS (
+    SELECT 1 FROM public.events other
+    WHERE other.lynk_room_id = e.lynk_room_id AND other.id <> e.id
+  )
+ON CONFLICT (event_id) DO UPDATE SET
+  state = 'live',
+  live_at = COALESCE(public.event_lynk_lifecycle.live_at, now()),
+  updated_at = now()
+WHERE public.event_lynk_lifecycle.state IN ('scheduled','ready');
+
 COMMIT;
