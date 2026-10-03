@@ -510,3 +510,6 @@ verify_jwt = false
 
 [functions.process-event-followups]
 verify_jwt = false
+
+[functions.event-followup-unsubscribe]
+verify_jwt = false

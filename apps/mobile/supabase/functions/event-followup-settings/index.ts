@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
+import { normaliseFollowupInput, planFollowupSave } from "../_shared/event-followup.ts";
 
 const SUPABASE_URL=Deno.env.get("SUPABASE_URL")||"";
 const SERVICE_KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
@@ -42,24 +43,20 @@ Deno.serve(async(req)=>{
     .eq("id",eventId).maybeSingle();
   if(!event) return json(req,{ok:false,error:"Event not found"},404);
   const end=canonicalEnd(event); if(!end) return json(req,{ok:false,error:"Event end time is missing"},409);
-  const delay=Math.max(0,Math.min(10080,Number(body.delay_minutes??600)));
-  const scheduledAt=new Date(end.getTime()+delay*60_000).toISOString();
+  const input=normaliseFollowupInput(body);
+  const scheduledAt=new Date(end.getTime()+input.delay_minutes*60_000).toISOString();
 
-  const {data:existing}=await s.from("event_followup_campaigns").select("campaign_version")
+  const {data:existing}=await s.from("event_followup_campaigns")
+    .select("enabled,subject,message,cta_label,delay_minutes,campaign_version,status,scheduled_at")
     .eq("event_id",eventId).maybeSingle();
-  const version=(existing?.campaign_version??0)+1;
-  const enabled=body.enabled===true;
-  const row={
-    event_id:eventId, enabled,
-    subject:typeof body.subject==="string"?body.subject.trim().slice(0,120):null,
-    message:typeof body.message==="string"?body.message.trim().slice(0,3000):"",
-    cta_label:typeof body.cta_label==="string"?body.cta_label.trim().slice(0,60)||"Leave a review":"Leave a review",
-    delay_minutes:delay, campaign_version:version,
-    scheduled_at:enabled?scheduledAt:null,
-    status:enabled?"scheduled":"disabled",
-    updated_by:authId, updated_at:new Date().toISOString(),
-  };
-  const {data,error}=await s.from("event_followup_campaigns").upsert(row).select("*").single();
+  const plan=planFollowupSave(existing||null,input,scheduledAt,authId,new Date().toISOString());
+  if(!plan.write){
+    const {data}=await s.from("event_followup_campaigns").select("*").eq("event_id",eventId).maybeSingle();
+    return json(req,{ok:true,data,unchanged:true});
+  }
+  const {data,error}=existing
+    ? await s.from("event_followup_campaigns").update(plan.row).eq("event_id",eventId).select("*").single()
+    : await s.from("event_followup_campaigns").insert({...plan.row,event_id:eventId}).select("*").single();
   if(error) return json(req,{ok:false,error:error.message},500);
   return json(req,{ok:true,data});
 });

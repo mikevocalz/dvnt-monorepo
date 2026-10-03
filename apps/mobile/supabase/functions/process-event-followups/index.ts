@@ -1,16 +1,39 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendResendEmail } from "../_shared/send-resend-email.ts";
+import {
+  buildFollowupEmail,
+  recipientsToEnqueue,
+  signUnsubscribeToken,
+  suppressionDecision,
+} from "../_shared/event-followup.ts";
 
 const SUPABASE_URL=Deno.env.get("SUPABASE_URL")||"";
 const SERVICE_KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
 const SITE=(Deno.env.get("PUBLIC_SITE_URL")||"https://dvntapp.live").replace(/\/$/,"");
 
-function escapeHtml(v:string){return v.replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]||c));}
+async function suppressionCheck(s:any,email:string,authId:string|null){
+  const {data:unsub,error:e1}=await s.from("event_followup_email_suppressions")
+    .select("email").eq("email",email).maybeSingle();
+  let memberOptedOut=false; let lookupFailed=!!e1;
+  if(!lookupFailed && authId){
+    const {data:member,error:e2}=await s.from("users").select("id").eq("auth_id",authId).maybeSingle();
+    if(e2) lookupFailed=true;
+    else if(member?.id){
+      const {data:opt,error:e3}=await s.from("brand_message_opt_outs")
+        .select("recipient_id").eq("recipient_id",member.id).maybeSingle();
+      if(e3) lookupFailed=true; else memberOptedOut=!!opt;
+    }
+  }
+  return suppressionDecision({lookupFailed,addressUnsubscribed:!!unsub,memberOptedOut});
+}
 
 Deno.serve(async(req)=>{
   const secret=Deno.env.get("CRON_SECRET")||"";
   if(!secret){ console.error("[process-event-followups] CRON_SECRET not set — rejecting request"); return new Response("Misconfigured",{status:500}); }
   if(req.headers.get("authorization")!==`Bearer ${secret}`) return new Response("Unauthorized",{status:401});
+  // No signing secret means no working unsubscribe link, so nothing goes out.
+  const unsubSecret=Deno.env.get("EVENT_FOLLOWUP_UNSUBSCRIBE_SECRET")||"";
+  if(!unsubSecret){ console.error("[process-event-followups] EVENT_FOLLOWUP_UNSUBSCRIBE_SECRET not set — refusing to send"); return new Response("Misconfigured",{status:500}); }
   const s=createClient(SUPABASE_URL, SERVICE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
   const now=new Date().toISOString();
   const {data:campaigns,error}=await s.from("event_followup_campaigns")
@@ -36,11 +59,16 @@ Deno.serve(async(req)=>{
       for(const u of authRows||[]) if(u.email) emailByAuth.set(String(u.id),String(u.email).toLowerCase());
     }
 
-    const recipients=new Map<string,{ticketId:string,userId:string|null}>();
-    for(const t of tickets||[]){
-      const email=String(t.guest_email||emailByAuth.get(String(t.user_id))||"").trim().toLowerCase();
-      if(email && !recipients.has(email)) recipients.set(email,{ticketId:t.id,userId:t.user_id||null});
+    // Anyone mailed (or being mailed) for this event under an earlier version
+    // is left out, so editing the copy never re-sends to past recipients.
+    const {data:prior,error:priorErr}=await s.from("event_followup_outbox")
+      .select("recipient_email").eq("event_id",campaign.event_id).in("status",["sent","sending"]);
+    if(priorErr){
+      await s.from("event_followup_campaigns").update({status:"partial_failure",updated_at:new Date().toISOString()}).eq("event_id",campaign.event_id);
+      continue;
     }
+    const alreadyMailed=new Set<string>((prior||[]).map((r:any)=>String(r.recipient_email).toLowerCase()));
+    const recipients=recipientsToEnqueue(tickets||[],emailByAuth,alreadyMailed);
     for(const [email,meta] of recipients){
       await s.from("event_followup_outbox").upsert({
         event_id:campaign.event_id,campaign_version:campaign.campaign_version,
@@ -59,13 +87,22 @@ Deno.serve(async(req)=>{
         .eq("id",row.id).in("status",["pending","failed"]).select("id").maybeSingle();
       if(!claimed) continue;
       try{
-        const reviewUrl=`${SITE}/feed/events/${campaign.event_id}/reviews`;
-        const message=escapeHtml(campaign.message||`Thanks for coming to ${event.title}.`);
-        const id=await sendResendEmail({
-          to:row.recipient_email,
-          subject:campaign.subject||`How was ${event.title}?`,
-          html:`<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto"><h2>${escapeHtml(event.title||"Thanks for coming")}</h2><p style="white-space:pre-wrap">${message}</p><p><a href="${reviewUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#111;color:#fff;text-decoration:none">${escapeHtml(campaign.cta_label||"Leave a review")}</a></p></div>`,
+        const gate=await suppressionCheck(s,row.recipient_email,row.recipient_user_id);
+        if(gate==="suppress"){
+          await s.from("event_followup_outbox").update({status:"suppressed",last_error:"unsubscribed",updated_at:new Date().toISOString()}).eq("id",row.id);
+          continue;
+        }
+        if(gate==="retry") throw new Error("suppression lookup failed");
+        const token=await signUnsubscribeToken(unsubSecret,row.recipient_email);
+        const email=buildFollowupEmail({
+          eventTitle:event.title,
+          subject:campaign.subject,
+          message:campaign.message,
+          ctaLabel:campaign.cta_label,
+          reviewUrl:`${SITE}/feed/events/${campaign.event_id}/reviews`,
+          unsubscribeUrl:`${SUPABASE_URL}/functions/v1/event-followup-unsubscribe?token=${encodeURIComponent(token)}`,
         });
+        const id=await sendResendEmail({to:row.recipient_email,subject:email.subject,html:email.html,headers:email.headers});
         if(!id) throw new Error("Email provider not configured");
         await s.from("event_followup_outbox").update({status:"sent",provider_message_id:id,sent_at:new Date().toISOString(),last_error:null,updated_at:new Date().toISOString()}).eq("id",row.id);
         sent++;
