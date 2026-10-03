@@ -509,3 +509,6 @@ verify_jwt = false
 
 [functions.event-reminders]
 verify_jwt = false
+
+[functions.first-post-offer]
+verify_jwt = false

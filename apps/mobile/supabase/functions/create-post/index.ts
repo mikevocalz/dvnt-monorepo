@@ -8,6 +8,7 @@ import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { resolveAdultVerificationState } from "../_shared/verification-state.ts";
+import { firstPostRefusal } from "../_shared/first-post-gate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -53,6 +54,8 @@ interface CreatePostBody {
   isNSFW?: boolean;
   visibility?: "public" | "followers" | "private";
   media?: MediaItem[];
+  /** Set by the composer when the draft came from the ticket first-post offer. */
+  firstPostEventId?: number | string | null;
 }
 
 const TEXT_POST_MAX_SLIDES = 6;
@@ -146,6 +149,28 @@ Deno.serve(async (req) => {
           403,
         );
       }
+    }
+
+    // Ticket first-post drafts (R04) publish only for an approved adult and
+    // only while the event is public. This runs even when the admission policy
+    // is off, because the checklist ties this post to verification.
+    if (body.firstPostEventId != null) {
+      const eventId = Number(body.firstPostEventId);
+      if (!Number.isSafeInteger(eventId) || eventId <= 0) {
+        return errorResponse("validation_error", "Invalid first-post event", 400);
+      }
+      const verification = await resolveAdultVerificationState(supabaseAdmin, authUserId);
+      const { data: event, error: eventError } = await supabaseAdmin
+        .from("events")
+        .select("id, visibility")
+        .eq("id", eventId)
+        .maybeSingle();
+      const refusal = firstPostRefusal({
+        verificationState: verification.state,
+        eventVisibility: event?.visibility ?? null,
+        eventFound: !eventError && Boolean(event),
+      });
+      if (refusal) return errorResponse(refusal.code, refusal.message, 403);
     }
 
     const normalizedTheme =

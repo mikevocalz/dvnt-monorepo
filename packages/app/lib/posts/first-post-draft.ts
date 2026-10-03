@@ -104,6 +104,7 @@ export function buildFirstPostDraft(
 
   return {
     eventId,
-    content: `Hey, I just punched my ticket for "${title}" 🎟️\n\n${tags}`,
+    // R04 template, exactly: no quotes, no emoji, no line break.
+    content: `Hey, I just punched my ticket for ${title}! ${tags}`,
   };
 }
