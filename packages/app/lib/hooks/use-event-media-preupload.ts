@@ -6,6 +6,7 @@ import {
 } from "@dvnt/app/lib/media/persist-local-selection";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import { useEventMediaPreuploadStore } from "@dvnt/app/lib/media/event-media-preupload-store";
+import { runEventMediaPreupload } from "@dvnt/app/lib/media/event-media-preupload-run";
 
 const LOCAL_MEDIA = /^(blob:|data:|file:|ph:|content:|assets-library:)/i;
 
@@ -47,69 +48,45 @@ export function useEventMediaPreupload() {
 
   useEffect(() => {
     let cancelled = false;
-    const run = async () => {
-      // Serial by design: avoids saturating mobile radios and gives the primary
-      // flyer priority while the organizer continues filling the form.
-      for (const item of desired) {
-        if (cancelled) return;
-        const current = useEventMediaPreuploadStore.getState().jobs[item.uri];
-        if (!current || !["queued", "failed"].includes(current.state)) continue;
-        // Do not spin forever on a permanent server rejection. The explicit
-        // retry action can move a failed job back to queued.
-        if (current.state === "failed" && current.attempts >= 2) continue;
-
-        patch(item.uri, {
-          state: "uploading",
-          attempts: current.attempts + 1,
-          error: undefined,
-        });
-        try {
-          const durableUri = item.uri.startsWith("blob:") || item.uri.startsWith("data:")
-            ? item.uri
-            : await persistLocalMediaSelection(item.uri, {
+    // Serial by design: avoids saturating mobile radios and gives the primary
+    // flyer priority while the organizer continues filling the form.
+    void runEventMediaPreupload(
+      desired,
+      {
+        getJob: (uri) => useEventMediaPreuploadStore.getState().jobs[uri],
+        patch,
+        persist: (item) =>
+          item.uri.startsWith("blob:") || item.uri.startsWith("data:")
+            ? Promise.resolve(item.uri)
+            : persistLocalMediaSelection(item.uri, {
                 scope: item.slot === "gallery"
                   ? "event-drafts/images"
                   : "event-drafts/flyers",
-              });
-          const result = await uploadToServer(
-            durableUri,
+              }),
+        upload: (uri, item, onProgress) =>
+          uploadToServer(
+            uri,
             "events",
-            (p) => {
-              patch(item.uri, { progress: p.percentage });
-              if (item.slot === "flyer") setProgress(p.percentage);
-            },
+            (p) => onProgress(p.percentage),
             { mimeType: item.mediaType === "video" ? "video/mp4" : undefined },
-          );
-          if (!result.success || !result.url) {
-            throw new Error(result.error || "Media upload failed");
-          }
-          if (cancelled) return;
-          patch(item.uri, {
-            state: "uploaded",
-            progress: 100,
-            remoteUrl: result.url,
-            error: undefined,
-          });
-          // Bank the CDN URL in the persisted event draft immediately. Publish
-          // can now use it without waiting for this upload again.
+          ),
+        onProgress: (item, percentage) => {
+          if (item.slot === "flyer") setProgress(percentage);
+        },
+        // Bank the CDN URL in the persisted event draft immediately. Publish
+        // can then use it without waiting for this upload again.
+        bank: (item, url) => {
           if (item.slot === "flyer") {
-            if (useCreateEventStore.getState().flyerImage === item.uri) setFlyer(result.url);
+            if (useCreateEventStore.getState().flyerImage === item.uri) setFlyer(url);
           } else if (item.slot === "poster") {
-            if (useCreateEventStore.getState().flyerFallbackImage === item.uri) setPoster(result.url);
+            if (useCreateEventStore.getState().flyerFallbackImage === item.uri) setPoster(url);
           } else {
-            setGallery((prev) => prev.map((uri) => uri === item.uri ? result.url : uri));
+            setGallery((prev) => prev.map((uri) => uri === item.uri ? url : uri));
           }
-        } catch (error) {
-          if (cancelled) return;
-          patch(item.uri, {
-            state: "failed",
-            progress: 0,
-            error: error instanceof Error ? error.message : "Media upload failed",
-          });
-        }
-      }
-    };
-    void run();
+        },
+      },
+      () => cancelled,
+    );
     return () => { cancelled = true; };
   }, [desired, patch, setFlyer, setGallery, setPoster, setProgress]);
 
