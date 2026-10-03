@@ -10,6 +10,8 @@ import { useEffect } from "react";
 import { Minus, Plus, Lock, CheckCircle2 } from "lucide-react";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useGuestCheckoutStore } from "@dvnt/app/lib/stores/guest-checkout-store";
+import { useEvent } from "@dvnt/app/lib/hooks/use-events";
+import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
 import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 
@@ -17,6 +19,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function GuestCheckoutSheet() {
   const s = useGuestCheckoutStore();
+  // Door time in the venue's zone, from the detail query the sheet opened on.
+  const { data: event } = useEvent(s.eventId);
+  const eventWhen = formatEventWhen((event as any)?.fullDate, event as any);
   const patch = s.patch;
   const eventId = s.eventId;
   const open = s.open;
@@ -136,6 +141,7 @@ export function GuestCheckoutSheet() {
         <div>
           <div className="font-bold">{s.tierName || "Ticket"}</div>
           <div className="text-sm text-white/50">{s.eventTitle}</div>
+          {eventWhen ? <div className="text-sm text-white/50">{eventWhen}</div> : null}
         </div>
 
         <label className="flex flex-col gap-1.5">

@@ -35,6 +35,7 @@ import {
 } from "@stripe/react-stripe-js";
 import {
   ArrowLeft,
+  CalendarDays,
   CreditCard,
   Minus,
   Plus,
@@ -63,6 +64,8 @@ import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
+import { useEvent } from "@dvnt/app/lib/hooks/use-events";
+import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
 import {
   effectiveAddonUnitPriceCents,
   filterEligibleAddons,
@@ -231,6 +234,30 @@ function metadataText(
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return fallback;
+}
+
+/**
+ * When the event is, in the venue's zone ("Fri, Jul 10 at 8:00 PM PDT"), so a
+ * buyer in another zone sees the door time the host set, not a converted one.
+ * Reads the cached detail query the buyer came from; renders nothing until it
+ * has a start.
+ */
+function CheckoutEventWhen({ eventId }: { eventId: string }) {
+  const { data: event } = useEvent(String(eventId));
+  const start = (event as any)?.fullDate as string | undefined;
+  const when = formatEventWhen(start, event as any);
+  if (!when) return null;
+  return (
+    <section className="mb-5 flex items-center gap-2.5 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+      <CalendarDays size={18} className="shrink-0 text-[#3FDCFF]" />
+      <div className="min-w-0">
+        {event?.title ? (
+          <p className="truncate text-sm font-semibold text-white">{event.title}</p>
+        ) : null}
+        <p className="text-xs text-white/70">{when}</p>
+      </div>
+    </section>
+  );
 }
 
 /**
@@ -772,6 +799,8 @@ export function CheckoutReviewScreen() {
           </div>
         ) : (
           <>
+            {cart?.eventId ? <CheckoutEventWhen eventId={cart.eventId} /> : null}
+
             {/* Order summary — grouped line items */}
             {groups.map((group) => (
               <section key={group.category} className="mb-5">

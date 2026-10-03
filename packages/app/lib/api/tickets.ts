@@ -50,6 +50,9 @@ export interface TicketRecord {
    */
   event_dominant_color?: string | null;
   event_date?: string;
+  /** IANA venue zone; null on older events (render unlabelled). */
+  event_tz?: string | null;
+  event_is_online?: boolean;
   event_location?: string;
   username?: string;
   /** Holder display name, resolved server-side. Guests carry `guest_name`. */

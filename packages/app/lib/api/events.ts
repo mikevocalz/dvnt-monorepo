@@ -15,7 +15,12 @@ import {
   filterDiscoverableEvents,
   filterPubliclyListableEvents,
 } from "../events/event-discovery";
-import { eventSalesClosed } from "../events/event-time";
+import {
+  eventSalesClosed,
+  formatEventClock,
+  formatEventDay,
+  type EventZoneFields,
+} from "../events/event-time";
 import type { TicketTypeCategory } from "./ticket-types";
 import type { TierType, TierVisibility } from "../tickets/pricing";
 import type { DraftAddon } from "../../features/events/create/addon-form";
@@ -148,7 +153,16 @@ function normalizeVisibility(
 }
 
 /** Format a raw ISO date into the fields the EventCard UI expects */
-export function formatEventDate(isoDate: string | null | undefined) {
+/**
+ * Card date parts. With the event row passed in, day/month/time come from the
+ * event's zone and `time` carries its abbreviation ("8:00 PM PDT"). Rows with
+ * no recorded zone (and the RPC lists, which do not return event_tz) keep the
+ * viewer-local, unlabelled output.
+ */
+export function formatEventDate(
+  isoDate: string | null | undefined,
+  zoneOf?: EventZoneFields | null,
+) {
   if (!isoDate) {
     return {
       date: "--",
@@ -167,10 +181,10 @@ export function formatEventDate(isoDate: string | null | undefined) {
     };
   }
   return {
-    date: d.getDate().toString().padStart(2, "0"),
-    month: d.toLocaleString("en-US", { month: "short" }).toUpperCase(),
+    date: formatEventDay(d, zoneOf, { day: "2-digit" }),
+    month: formatEventDay(d, zoneOf, { month: "short" }).toUpperCase(),
     fullDate: d.toISOString(),
-    time: d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+    time: formatEventClock(d, zoneOf),
   };
 }
 
@@ -499,7 +513,7 @@ export const eventsApi = {
       );
 
       const mapped = visible.map((event: any) => {
-        const dateParts = formatEventDate(event[DB.events.startDate]);
+        const dateParts = formatEventDate(event[DB.events.startDate], event);
         return {
           id: String(event[DB.events.id]),
           title: event[DB.events.title],
@@ -548,7 +562,7 @@ export const eventsApi = {
       // getMyEvents — `.neq()` would drop the legacy NULL rows too.
       const mapped = filterPubliclyListableEvents(data || [])
         .map((event: any) => {
-        const dateParts = formatEventDate(event[DB.events.startDate]);
+        const dateParts = formatEventDate(event[DB.events.startDate], event);
         return {
           id: String(event[DB.events.id]),
           title: event[DB.events.title],
@@ -628,7 +642,7 @@ export const eventsApi = {
 
       const mapped = rows.map((event: any) => {
         const host = hostsMap.get(event[DB.events.hostId]);
-        const dateParts = formatEventDate(event[DB.events.startDate]);
+        const dateParts = formatEventDate(event[DB.events.startDate], event);
         return {
           id: String(event[DB.events.id]),
           title: event[DB.events.title],
@@ -699,7 +713,7 @@ export const eventsApi = {
 
       const ev = data.event;
       const host = data.host || {};
-      const dateParts = formatEventDate(ev.start_date);
+      const dateParts = formatEventDate(ev.start_date, ev);
 
       // dominant_color isn't in the detail RPC's column list — read it directly
       // (cheap, RLS-visible) so <EventFlyer>/cover can use the edge-fn color and
@@ -975,7 +989,7 @@ export const eventsApi = {
       }
 
       // Return formatted event data for optimistic updates
-      const dateParts = formatEventDate(data[DB.events.startDate]);
+      const dateParts = formatEventDate(data[DB.events.startDate], data);
       return {
         replayed: result.data.data.replayed === true,
         id: String(data[DB.events.id]),

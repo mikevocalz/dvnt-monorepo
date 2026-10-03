@@ -9,7 +9,7 @@ import { SafeAreaView } from "@dvnt/app/components/ui/html";
  * Route: /(protected)/events/[id]/edit
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
 import {
   View,
@@ -60,6 +60,13 @@ import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { Progress } from "@dvnt/app/components/ui/progress";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { eventsApi, formatEventDate } from "@dvnt/app/lib/api/events";
+import { resolveEventSchedule } from "@dvnt/app/features/events/create/event-form";
+import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
+import {
+  deviceTimeZone,
+  normalizeTimeZone,
+  zonedIsoToLocalIso,
+} from "@dvnt/app/lib/events/event-zone";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { useQueryClient } from "@tanstack/react-query";
@@ -116,6 +123,18 @@ function EditEventScreenContent() {
   const [eventImages, setEventImages] = useState<string[]>([]);
   const [eventDate, setEventDate] = useState(new Date());
   const [endDate, setEndDate] = useState<Date | null>(null);
+  // Zone the pickers above are read in. eventDate/endDate hold that zone's
+  // wall clock as device-local Dates; save converts back to instants.
+  const [eventTz, setEventTz] = useState(deviceTimeZone);
+  const schedule = useMemo(
+    () =>
+      resolveEventSchedule({
+        eventDate: eventDate.toISOString(),
+        endDate: endDate ? endDate.toISOString() : null,
+        eventTz,
+      }),
+    [eventDate, endDate, eventTz],
+  );
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
@@ -243,9 +262,16 @@ function EditEventScreenContent() {
         setEventImages(images);
 
         // Parse dates
+        // Reopen the stored instants as wall-clock times in the event's
+        // zone, so a 9 PM Pacific event reads 9 PM here wherever this phone
+        // is. No recorded zone: this phone's zone, as the old editor did.
         const isoDate = ev.fullDate || ev.startDate || ev.date;
-        if (isoDate) setEventDate(new Date(isoDate));
-        if (ev.endDate) setEndDate(new Date(ev.endDate));
+        const tz = normalizeTimeZone((ev as any).event_tz) ?? deviceTimeZone();
+        setEventTz(tz);
+        if (isoDate) {
+          setEventDate(new Date(zonedIsoToLocalIso(new Date(isoDate).toISOString(), tz)));
+        }
+        if (ev.endDate) setEndDate(new Date(zonedIsoToLocalIso(ev.endDate, tz)));
 
         // V2 fields
         setPrice(ev.price != null ? String(ev.price) : "");
@@ -326,8 +352,10 @@ function EditEventScreenContent() {
       title !== (od.title || "") ||
       description !== (od.description || "") ||
       location !== (od.location || "") ||
-      eventDate.toISOString() !==
-        new Date(isoDate || Date.now()).toISOString() ||
+      schedule.startIso !== new Date(isoDate || Date.now()).toISOString() ||
+      (schedule.endIso ?? null) !==
+        (od.endDate ? new Date(od.endDate).toISOString() : null) ||
+      eventTz !== (normalizeTimeZone((od as any).event_tz) ?? deviceTimeZone()) ||
       price !== (od.price != null ? String(od.price) : "") ||
       maxAttendees !==
         (od.maxAttendees != null ? String(od.maxAttendees) : "") ||
@@ -347,6 +375,8 @@ function EditEventScreenContent() {
     location,
     eventDate,
     endDate,
+    schedule,
+    eventTz,
     price,
     maxAttendees,
     category,
@@ -456,6 +486,10 @@ function EditEventScreenContent() {
 
     if (!title.trim()) {
       showToast("error", "Error", "Title is required");
+      return;
+    }
+    if (schedule.error) {
+      showToast("error", "Check the time", schedule.error);
       return;
     }
 
@@ -573,8 +607,9 @@ function EditEventScreenContent() {
         title: title.trim(),
         description: description.trim(),
         location: locationData?.name || location,
-        startDate: eventDate.toISOString(),
-        endDate: endDate ? endDate.toISOString() : undefined,
+        startDate: schedule.startIso,
+        endDate: schedule.endIso || undefined,
+        eventTz: schedule.eventTz,
         price: price ? parseFloat(price) : 0,
         maxAttendees: maxAttendees ? parseInt(maxAttendees) : undefined,
         category: category || undefined,
@@ -616,7 +651,9 @@ function EditEventScreenContent() {
       // pill updates the instant the user taps back — without waiting
       // on the useUpdateEvent mutation's onMutate to compute them.
       const dateParts = updateData.startDate
-        ? formatEventDate(updateData.startDate as string)
+        ? formatEventDate(updateData.startDate as string, {
+            event_tz: schedule.eventTz,
+          })
         : null;
       const optimisticPatch: Record<string, unknown> = {
         title: updateData.title,
@@ -624,6 +661,7 @@ function EditEventScreenContent() {
         location: updateData.location,
         fullDate: updateData.startDate,
         endDate: updateData.endDate || null,
+        event_tz: schedule.eventTz,
         price: updateData.price,
         maxAttendees: updateData.maxAttendees,
         category: updateData.category || null,
@@ -824,6 +862,7 @@ function EditEventScreenContent() {
     locationData,
     eventDate,
     endDate,
+    schedule,
     eventImages,
     price,
     maxAttendees,
@@ -1243,6 +1282,23 @@ function EditEventScreenContent() {
               <Text className="text-xs text-destructive">Clear end date</Text>
             </Pressable>
           )}
+          {schedule.error && endDate ? (
+            <Text
+              className="text-xs text-destructive mt-2"
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+              selectable
+            >
+              {schedule.error}
+            </Text>
+          ) : null}
+          <EventZonePicker
+            value={eventTz}
+            onChange={setEventTz}
+            at={schedule.startIso}
+            accent={colors.primary}
+            muted={colors.mutedForeground}
+          />
         </View>
 
         {showEndDatePicker && (

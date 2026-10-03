@@ -56,6 +56,14 @@ interface EventEditState {
   location: string;
   eventDate: string; // ISO
   endDate: string | null; // ISO
+  /**
+   * IANA zone the editor's date inputs are read in. eventDate/endDate hold
+   * that zone's wall clock as a device-local ISO (see event-zone.ts); save
+   * converts them back to instants in this zone.
+   */
+  eventTz: string;
+  /** Inline error under the date fields (end before start). */
+  dateError: string | null;
   price: string;
   maxAttendees: string;
   category: string;
@@ -89,6 +97,8 @@ interface EventEditState {
   setLocation: (v: string) => void;
   setEventDate: (v: string) => void;
   setEndDate: (v: string | null) => void;
+  setEventTz: (v: string) => void;
+  setDateError: (v: string | null) => void;
   setPrice: (v: string) => void;
   setMaxAttendees: (v: string) => void;
   setCategory: (v: string) => void;
@@ -125,6 +135,8 @@ const initial = {
   location: "",
   eventDate: new Date().toISOString(),
   endDate: null as string | null,
+  eventTz: "UTC",
+  dateError: null as string | null,
   price: "",
   maxAttendees: "",
   category: "",
@@ -152,8 +164,10 @@ export const useEventEditStore = create<EventEditState>((set) => ({
   setTitle: (v) => set({ title: v }),
   setDescription: (v) => set({ description: v }),
   setLocation: (v) => set({ location: v }),
-  setEventDate: (v) => set({ eventDate: v }),
-  setEndDate: (v) => set({ endDate: v }),
+  setEventDate: (v) => set({ eventDate: v, dateError: null }),
+  setEndDate: (v) => set({ endDate: v, dateError: null }),
+  setEventTz: (v) => set({ eventTz: v, dateError: null }),
+  setDateError: (v) => set({ dateError: v }),
   setPrice: (v) => set({ price: v }),
   setMaxAttendees: (v) => set({ maxAttendees: v }),
   setCategory: (v) => set({ category: v }),

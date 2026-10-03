@@ -64,6 +64,13 @@ import {
   draftAddonToCreateParams,
 } from "@dvnt/app/features/events/create/addon-form";
 import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web";
+import { resolveEventSchedule } from "@dvnt/app/features/events/create/event-form";
+import { EventZonePickerWeb } from "@dvnt/app/features/events/ui/event-zone-picker.web";
+import {
+  deviceTimeZone,
+  normalizeTimeZone,
+  zonedIsoToLocalIso,
+} from "@dvnt/app/lib/events/event-zone";
 
 const inputCls =
   "w-full bg-white/[0.05] border border-white/12 rounded-xl px-3 h-11 text-[15px] text-white placeholder:text-white/40 outline-none focus:border-[#3FDCFF]/60";
@@ -145,6 +152,11 @@ export function EventEditScreen() {
     }
 
     const isoDate = ev.fullDate || ev.startDate || ev.date;
+    // Reopen the stored instants as wall-clock times in the event's zone, so
+    // a 9 PM Pacific event reads 9 PM here whatever zone this browser is in.
+    // An event with no recorded zone opens in this browser's zone, which is
+    // the zone the old editor showed it in.
+    const eventTz = normalizeTimeZone(ev.event_tz ?? ev.eventTz) ?? deviceTimeZone();
     // Video FIRST. This read `ev.flyerImageUrl` only, so opening Edit on an
     // event with a video flyer showed the still (or an empty box) and the
     // editor had no idea a video existed — which is how saving could leave the
@@ -161,10 +173,11 @@ export function EventEditScreen() {
       title: ev.title || "",
       description: ev.description || "",
       location: ev.location || "",
+      eventTz,
       eventDate: isoDate
-        ? new Date(isoDate).toISOString()
+        ? zonedIsoToLocalIso(new Date(isoDate).toISOString(), eventTz)
         : new Date().toISOString(),
-      endDate: ev.endDate ? new Date(ev.endDate).toISOString() : null,
+      endDate: ev.endDate ? zonedIsoToLocalIso(ev.endDate, eventTz) || null : null,
       price: ev.price != null ? String(ev.price) : "",
       maxAttendees: ev.maxAttendees != null ? String(ev.maxAttendees) : "",
       category: ev.category || "",
@@ -251,6 +264,12 @@ export function EventEditScreen() {
       showToast("error", "Error", "Title is required");
       return;
     }
+    const schedule = resolveEventSchedule(s);
+    if (schedule.error) {
+      s.setDateError(schedule.error);
+      showToast("error", "Check the time", schedule.error);
+      return;
+    }
 
     saveLock.current = true;
     setUploadPct(0);
@@ -302,8 +321,9 @@ export function EventEditScreen() {
         title: s.title.trim(),
         description: s.description.trim(),
         location: s.location,
-        startDate: s.eventDate,
-        endDate: s.endDate || undefined,
+        startDate: schedule.startIso,
+        endDate: schedule.endIso || undefined,
+        eventTz: schedule.eventTz,
         price: s.price ? parseFloat(s.price) : 0,
         maxAttendees: s.maxAttendees ? parseInt(s.maxAttendees) : undefined,
         category: s.category || undefined,
@@ -786,7 +806,7 @@ export function EventEditScreen() {
               onChange={(e) => s.setEventDate(fromLocalInput(e.target.value))}
             />
           </FormField>
-          <FormField label="Ends (optional)">
+          <FormField label="Ends (optional)" error={s.dateError ?? undefined}>
             <input
               type="datetime-local"
               className={inputCls}
@@ -804,6 +824,11 @@ export function EventEditScreen() {
               Clear end date
             </button>
           ) : null}
+          <EventZonePickerWeb
+            value={s.eventTz}
+            onChange={s.setEventTz}
+            at={resolveEventSchedule(s).startIso}
+          />
         </Section>
 
         {/* Pricing & Visibility */}

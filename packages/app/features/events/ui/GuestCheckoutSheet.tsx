@@ -33,6 +33,8 @@ interface GuestCheckoutSheetProps {
   onClose: () => void;
   eventId: string;
   eventTitle: string;
+  /** "Fri, Jul 10 at 8:00 PM PDT", already in the event's zone. */
+  eventWhen?: string;
   ticketTypeId: string;
   ticketTypeName: string;
   pricePerTicketCents: number;
@@ -50,6 +52,7 @@ export function GuestCheckoutSheet({
   onClose,
   eventId,
   eventTitle,
+  eventWhen,
   ticketTypeId,
   ticketTypeName,
   pricePerTicketCents,
@@ -200,6 +203,14 @@ export function GuestCheckoutSheet({
               <Text style={[styles.summaryEvent, { color: colors.foreground }]}>
                 {eventTitle}
               </Text>
+              {eventWhen ? (
+                <Text
+                  style={[styles.summaryTier, { color: colors.mutedForeground }]}
+                  selectable
+                >
+                  {eventWhen}
+                </Text>
+              ) : null}
               <View style={styles.summaryRow}>
                 <Text style={[styles.summaryTier, { color: colors.mutedForeground }]}>
                   {ticketTypeName}

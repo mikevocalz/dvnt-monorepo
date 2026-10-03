@@ -8,6 +8,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
+import { deviceTimeZone } from "@dvnt/app/lib/events/event-zone";
 import type { DraftAddon } from "@dvnt/app/features/events/create/addon-form";
 
 type VisibilityOption = "public" | "private" | "link_only";
@@ -113,6 +114,12 @@ interface DraftFields {
   tags: string[];
   eventDate: string; // ISO string — Date can't be serialized
   endDate: string | null;
+  /**
+   * IANA zone the picked date/time belongs to. eventDate/endDate hold the
+   * wall clock as a device-local ISO; event-form.ts re-reads that wall clock
+   * in this zone when it builds the stored instant.
+   */
+  eventTz: string;
   ticketPrice: string;
   maxAttendees: string;
   youtubeUrl: string;
@@ -187,6 +194,7 @@ interface CreateEventActions {
   setTags: (v: string[] | ((prev: string[]) => string[])) => void;
   setEventDate: (v: string) => void;
   setEndDate: (v: string | null) => void;
+  setEventTz: (v: string) => void;
   setTicketPrice: (v: string) => void;
   setMaxAttendees: (v: string) => void;
   setYoutubeUrl: (v: string) => void;
@@ -275,6 +283,7 @@ const DRAFT_DEFAULTS: DraftFields = {
   tags: [],
   eventDate: new Date().toISOString(),
   endDate: null,
+  eventTz: deviceTimeZone(),
   ticketPrice: "",
   maxAttendees: "",
   youtubeUrl: "",
@@ -342,6 +351,7 @@ export const useCreateEventStore = create<CreateEventState>()(
       setTags: (v) => set((s) => ({ tags: resolve(v, s.tags) })),
       setEventDate: (v) => set({ eventDate: v }),
       setEndDate: (v) => set({ endDate: v }),
+      setEventTz: (v) => set({ eventTz: v }),
       setTicketPrice: (v) => set({ ticketPrice: v }),
       setMaxAttendees: (v) => set({ maxAttendees: v }),
       setYoutubeUrl: (v) => set({ youtubeUrl: v }),
@@ -499,7 +509,8 @@ export const useCreateEventStore = create<CreateEventState>()(
         );
       },
 
-      resetDraft: () => set({ ...DRAFT_DEFAULTS, ...UI_DEFAULTS }),
+      resetDraft: () =>
+        set({ ...DRAFT_DEFAULTS, eventTz: deviceTimeZone(), ...UI_DEFAULTS }),
     }),
     {
       name: "create-event-draft",
@@ -536,6 +547,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         tags: state.tags,
         eventDate: state.eventDate,
         endDate: state.endDate,
+        eventTz: state.eventTz,
         ticketPrice: state.ticketPrice,
         maxAttendees: state.maxAttendees,
         youtubeUrl: state.youtubeUrl,

@@ -92,6 +92,8 @@ function dbToTicket(rec: TicketRecord): Ticket {
     tierName: rec.ticket_type_name || "General Admission",
     eventTitle: rec.event_title || "",
     eventDate: rec.event_date || "",
+    eventTz: rec.event_tz ?? null,
+    eventIsOnline: rec.event_is_online ?? false,
     eventLocation: rec.event_location || "",
     eventImage: rec.event_image || "",
     /**

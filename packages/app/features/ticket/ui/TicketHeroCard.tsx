@@ -10,6 +10,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Motion } from "@legendapp/motion";
 import { Crown, Gem, Star, Ticket as TicketIcon } from "lucide-react-native";
 import type { Ticket, TicketTierLevel } from "@dvnt/app/lib/stores/ticket-store";
+import { formatEventClock, formatEventDay } from "@dvnt/app/lib/events/event-time";
 
 interface TicketHeroCardProps {
   ticket: Ticket;
@@ -61,21 +62,22 @@ const TIER_CONFIG: Record<
   },
 };
 
-function formatDate(dateString: string) {
-  const date = new Date(dateString);
-  return date.toLocaleDateString("en-US", {
+// Day and door time in the venue's zone ("8:00 PM PDT"); unlabelled when
+// the ticket carries no zone (older events, cached store tickets).
+function zoneOf(ticket: Ticket) {
+  return { eventTz: ticket.eventTz ?? null, isOnline: ticket.eventIsOnline ?? false };
+}
+
+function formatDate(dateString: string, ticket: Ticket) {
+  return formatEventDay(dateString, zoneOf(ticket), {
     weekday: "long",
     month: "long",
     day: "numeric",
   });
 }
 
-function formatTime(dateString: string) {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+function formatTime(dateString: string, ticket: Ticket) {
+  return formatEventClock(dateString, zoneOf(ticket));
 }
 
 export const TicketHeroCard = memo(function TicketHeroCard({
@@ -175,12 +177,12 @@ export const TicketHeroCard = memo(function TicketHeroCard({
         >
           {ticket.eventDate && (
             <Text style={styles.detailText}>
-              {formatDate(ticket.eventDate)}
+              {formatDate(ticket.eventDate, ticket)}
             </Text>
           )}
           {ticket.eventDate && (
             <Text style={styles.detailText}>
-              {formatTime(ticket.eventDate)}
+              {formatTime(ticket.eventDate, ticket)}
             </Text>
           )}
           {ticket.eventLocation && (

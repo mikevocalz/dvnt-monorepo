@@ -16,6 +16,11 @@
  */
 
 import type { EventType } from "@dvnt/app/lib/stores/create-event-store";
+import {
+  deviceTimeZone,
+  localIsoToZonedIso,
+  normalizeTimeZone,
+} from "../../../lib/events/event-zone.ts";
 
 // ── Event Type taxonomy (canonical) ─────────────────────────────────────────
 export const EVENT_TYPE_LABELS: Record<EventType, string> = {
@@ -77,8 +82,15 @@ export interface TicketTierLike {
 export interface EventFormDraft {
   title: string;
   description: string;
+  /** Picker value: a device-local ISO whose wall clock the organizer typed. */
   eventDate: string;
   endDate: string | null;
+  /**
+   * IANA zone the typed wall clock belongs to. Missing on drafts saved before
+   * the zone picker existed; those fall back to the device zone, which is what
+   * they were typed in.
+   */
+  eventTz?: string | null;
   location: string;
   locationData: {
     name?: string;
@@ -129,6 +141,31 @@ export function belowFloor(d: EventFormDraft): boolean {
   return Number.isFinite(flat) && flat > 0 && flat < MIN_PAID_TIER_CENTS / 100;
 }
 
+// ── Schedule: wall clock + zone -> stored instants ───────────────────────────
+
+export const END_BEFORE_START_MESSAGE = "End time must be after the start.";
+
+/**
+ * Turn the picked wall-clock start/end plus the event's zone into the UTC
+ * instants that get stored, and check end against start on those instants.
+ * Comparing instants (not wall clocks) keeps the check honest across a DST
+ * change inside the event.
+ */
+export function resolveEventSchedule(d: {
+  eventDate: string;
+  endDate: string | null;
+  eventTz?: string | null;
+}): { eventTz: string; startIso: string; endIso: string | null; error?: string } {
+  const eventTz = normalizeTimeZone(d.eventTz) ?? deviceTimeZone();
+  const startIso = d.eventDate ? localIsoToZonedIso(d.eventDate, eventTz) : "";
+  const endIso = d.endDate ? localIsoToZonedIso(d.endDate, eventTz) || null : null;
+  if (!startIso) return { eventTz, startIso, endIso, error: "Choose when it starts." };
+  if (endIso && new Date(endIso).getTime() <= new Date(startIso).getTime()) {
+    return { eventTz, startIso, endIso, error: END_BEFORE_START_MESSAGE };
+  }
+  return { eventTz, startIso, endIso };
+}
+
 // ── Validation (unified required set, signed off 2026-06-20) ─────────────────
 // Required to publish: Title, Event Type, Date/Start, Location (or Virtual),
 // plus accepted terms when the event is paid. Everything else is optional.
@@ -151,15 +188,8 @@ export function validateEventDraft(d: EventFormDraft): {
   if (!d.title.trim()) errors.title = "Give your event a title.";
   if (!d.eventType) errors.eventType = "Pick an event type.";
 
-  const start = d.eventDate ? new Date(d.eventDate) : null;
-  if (!start || Number.isNaN(start.getTime())) {
-    errors.date = "Choose when it starts.";
-  } else if (d.endDate) {
-    const end = new Date(d.endDate);
-    if (!Number.isNaN(end.getTime()) && end.getTime() <= start.getTime()) {
-      errors.date = "End time must be after the start.";
-    }
-  }
+  const schedule = resolveEventSchedule(d);
+  if (schedule.error) errors.date = schedule.error;
 
   if (!d.isOnline && !d.location.trim()) {
     errors.location = "Add a venue, or mark the event online.";
@@ -201,12 +231,14 @@ export interface BuiltEventMedia {
 export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {}) {
   const maxAttendees = d.maxAttendees ? parseInt(d.maxAttendees, 10) : undefined;
   const price = d.ticketingEnabled ? parseFloat(d.ticketPrice) || 0 : 0;
+  const schedule = resolveEventSchedule(d);
 
   return {
     title: d.title.trim(),
     description: d.description.trim(),
-    date: d.eventDate,
-    endDate: d.endDate || undefined,
+    date: schedule.startIso,
+    endDate: schedule.endIso || undefined,
+    eventTz: schedule.eventTz,
     location: d.isOnline ? "Online" : d.location.trim(),
     price,
     maxAttendees: Number.isFinite(maxAttendees as number) ? maxAttendees : undefined,

@@ -45,6 +45,7 @@ import {
   Search,
 } from "lucide-react";
 import { VenueSearchInput } from "@dvnt/ui";
+import { EventZonePickerWeb } from "@dvnt/app/features/events/ui/event-zone-picker.web";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import { useCreateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { usePlacesAutocomplete } from "@dvnt/app/lib/hooks/use-places-autocomplete";
@@ -80,6 +81,7 @@ import {
   SUGGESTED_TAGS,
   validateEventDraft,
   buildEventInsert,
+  resolveEventSchedule,
   hasPaidTier,
   type EventFormErrors,
 } from "@dvnt/app/features/events/create/event-form";
@@ -683,6 +685,11 @@ export function CreateEventScreen() {
                   }
                 />
               </Field>
+              <EventZonePickerWeb
+                value={s.eventTz}
+                onChange={s.setEventTz}
+                at={resolveEventSchedule(s).startIso}
+              />
               <label className="flex items-center gap-2 mt-1 text-sm text-white/75">
                 <input
                   type="checkbox"

@@ -32,6 +32,9 @@ export interface Ticket {
   // Event snapshot (denormalized for offline access)
   eventTitle?: string;
   eventDate?: string;
+  /** IANA venue zone for eventDate; null/absent on older events. */
+  eventTz?: string | null;
+  eventIsOnline?: boolean;
   eventEndDate?: string;
   eventLocation?: string;
   eventImage?: string;

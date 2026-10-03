@@ -105,7 +105,12 @@ type AgeRestriction = "none" | "18+" | "21+";
 // Canonical Event Type taxonomy lives in the shared form core (one schema,
 // two layouts). Imported for local use here and re-exported for existing
 // importers of this screen.
-import { EVENT_TYPE_LABELS } from "@dvnt/app/features/events/create/event-form";
+import {
+  EVENT_TYPE_LABELS,
+  resolveEventSchedule,
+} from "@dvnt/app/features/events/create/event-form";
+import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
+import { zoneDisplayName } from "@dvnt/app/lib/events/event-zone";
 export { EVENT_TYPE_LABELS };
 
 interface TicketTier {
@@ -203,6 +208,8 @@ function CreateEventScreenContent() {
   const setEventDateISO = useCreateEventStore((s) => s.setEventDate);
   const endDateISO = useCreateEventStore((s) => s.endDate);
   const setEndDateISO = useCreateEventStore((s) => s.setEndDate);
+  const eventTz = useCreateEventStore((s) => s.eventTz);
+  const setEventTz = useCreateEventStore((s) => s.setEventTz);
   const ticketPrice = useCreateEventStore((s) => s.ticketPrice);
   const setTicketPrice = useCreateEventStore((s) => s.setTicketPrice);
   const maxAttendees = useCreateEventStore((s) => s.maxAttendees);
@@ -304,6 +311,17 @@ function CreateEventScreenContent() {
   const endDate = useMemo(
     () => (endDateISO ? new Date(endDateISO) : null),
     [endDateISO],
+  );
+  // The pickers hold a wall clock; this is that wall clock read in the
+  // event's zone, i.e. what gets stored, plus the end-before-start check.
+  const schedule = useMemo(
+    () =>
+      resolveEventSchedule({
+        eventDate: eventDateISO,
+        endDate: endDateISO,
+        eventTz,
+      }),
+    [eventDateISO, endDateISO, eventTz],
   );
 
   useEffect(() => {
@@ -480,6 +498,10 @@ function CreateEventScreenContent() {
       }
       if (!eventType) {
         showToast("error", "Pick a type", "Choose what kind of event this is");
+        return;
+      }
+      if (schedule.error) {
+        showToast("error", "Check the time", schedule.error);
         return;
       }
       // Honor virtual events — an online event doesn't need a typed location.
@@ -711,8 +733,9 @@ function CreateEventScreenContent() {
         expectedAuthId: publishingAuthId,
         title: title.trim(),
         description: description.trim(),
-        date: eventDateISO,
+        date: schedule.startIso,
         time: formatTime(eventDate),
+        eventTz: schedule.eventTz,
         location: location.trim(),
         price: ticketPrice ? parseFloat(ticketPrice) : 0,
         image: mainEventImageUrl,
@@ -734,7 +757,7 @@ function CreateEventScreenContent() {
         event_type: eventType || undefined,
         disclaimers: disclaimers.trim() || undefined,
         // V2 fields — new
-        endDate: endDateISO || undefined,
+        endDate: schedule.endIso || undefined,
         visibility,
         ageRestriction: ageRestriction !== "none" ? ageRestriction : undefined,
         dressCode: dressCode.trim() || undefined,
@@ -1265,6 +1288,25 @@ function CreateEventScreenContent() {
                   )}
                 </>
               )}
+
+              {schedule.error && endDate ? (
+                <Text
+                  className="text-xs text-destructive mt-2 px-1"
+                  accessibilityRole="alert"
+                  accessibilityLiveRegion="polite"
+                  selectable
+                >
+                  {schedule.error}
+                </Text>
+              ) : null}
+
+              <EventZonePicker
+                value={eventTz}
+                onChange={setEventTz}
+                at={schedule.startIso}
+                accent={colors.primary}
+                muted={colors.mutedForeground}
+              />
             </View>
           </>
         )}
@@ -3178,6 +3220,9 @@ function CreateEventScreenContent() {
                 {endDate
                   ? ` — ${formatDate(endDate)} at ${formatTime(endDate)}`
                   : ""}
+              </Text>
+              <Text className="text-xs text-muted-foreground mt-1">
+                {zoneDisplayName(eventTz, schedule.startIso ? Date.parse(schedule.startIso) : Date.now())}
               </Text>
             </View>
 
