@@ -204,6 +204,16 @@ const nextConfig: NextConfig = {
         destination: '/feed/sneaky-lynk/:path*',
         permanent: false,
       },
+      // Phone comp claim links (packages/app/lib/tickets/comp-claim-message.ts,
+      // _shared/comp-claim-links.ts). Must come before /ticket/:path*: the
+      // claim page is public so a signed-out recipient can sign in from it,
+      // and the /feed shell would bounce them to the landing page and lose
+      // the link.
+      {
+        source: '/ticket/claim/:token',
+        destination: '/public/tickets/claim/:token',
+        permanent: false,
+      },
       // Same deal for tickets: native routes the pass at /(protected)/ticket/[id],
       // and shared "View ticket" links go out with that bare path. Without this
       // they land on the Next 404.
