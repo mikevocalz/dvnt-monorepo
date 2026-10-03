@@ -233,8 +233,9 @@ test('the outbox carries no second welcome email', () => {
   const sql = fs.readFileSync(MIGRATION, 'utf8');
   const fn = sql.slice(
     sql.indexOf('FUNCTION public.enqueue_brand_onboarding'),
-    sql.indexOf('FUNCTION public.claim_brand_messages'),
+    sql.indexOf('FUNCTION public.brand_member_adult_verified'),
   );
+  assert.ok(fn.includes('RETURN v_count;'), 'slice must cover the whole function');
   assert.ok(!/welcome_email/.test(fn), 'enqueue_brand_onboarding must not queue a welcome email');
   assert.ok(!/'email'/.test(fn), 'enqueue_brand_onboarding must not queue any email row');
   assert.match(fn, /'welcome_dm_v2'/);
@@ -283,4 +284,14 @@ test('every profile-creation path calls ensureBrandFollows', () => {
   const resolveUser = fs.readFileSync(`${__dirname}/resolve-user.ts`, 'utf8');
   const provisioned = resolveUser.slice(resolveUser.indexOf('if (newRow) {'));
   assert.match(provisioned.slice(0, 600), /await ensureBrandFollows\(supabase, Number\(newRow\.id\), /);
+});
+
+// R03/R07: the prompt queued after adult verification has its own copy. The
+// queue/skip rules run against Postgres in scripts/verify-brand-follows.mjs.
+test('first_post_v2 tells a newly verified member that posting is open', () => {
+  const msg = outbox.campaignMessage('first_post_v2');
+  assert.equal(msg.subject, 'Make your first DVNT post');
+  assert.match(msg.body, /^Deviant announcement — automated\n\n/);
+  assert.ok(msg.body.includes("You're verified."));
+  assert.equal(outbox.campaignMessage('first_post_v3'), null);
 });

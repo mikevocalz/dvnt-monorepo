@@ -232,7 +232,81 @@ BEGIN
 END;
 $$;
 
+-- Adult verification, same test as public.is_verified(text): a passed
+-- identity_verifications row with a date of birth 18 to 120 years back.
+-- is_verified also checks the caller's JWT, which a cron call or a webhook's
+-- SQL does not carry, so the outbox needs its own copy keyed by member id.
+CREATE OR REPLACE FUNCTION public.brand_member_adult_verified(p_member_id integer)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.users u
+    JOIN public.identity_verifications v ON v.user_id = u.auth_id
+    WHERE u.id = p_member_id
+      AND v.status = 'passed'
+      AND v.date_of_birth <= (CURRENT_DATE - INTERVAL '18 years')::date
+      AND v.date_of_birth > (CURRENT_DATE - INTERVAL '121 years')::date
+  );
+$$;
+
+-- R03/R07: the first-post prompt sent right after a member passes adult
+-- verification. first_post_v2 because the moment differs from first_post_v1
+-- (the 24h reminder): posting has just opened for this member. Called by the
+-- verification path (run_verified_onboarding on the checkout branch). It
+-- queues nothing for an unverified member, one who has posted, or one who
+-- already received a first-post message; the unique key
+-- (campaign_version, recipient_id, channel) makes a repeat call a no-op.
+CREATE OR REPLACE FUNCTION public.enqueue_first_post_prompt(p_auth_id text)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_member_id integer;
+  v_count integer := 0;
+BEGIN
+  IF p_auth_id IS NULL OR btrim(p_auth_id) = '' THEN
+    RETURN 0;
+  END IF;
+  SELECT u.id INTO v_member_id FROM public.users u WHERE u.auth_id = p_auth_id;
+  IF v_member_id IS NULL
+     OR NOT public.brand_member_adult_verified(v_member_id)
+     OR EXISTS (SELECT 1 FROM public.posts p WHERE p.author_id = v_member_id)
+     OR EXISTS (SELECT 1 FROM public.brand_message_outbox o
+                 WHERE o.recipient_id = v_member_id
+                   AND o.campaign = 'first_post_reminder'
+                   AND o.state = 'sent') THEN
+    RETURN 0;
+  END IF;
+
+  INSERT INTO public.brand_message_outbox
+    (campaign, campaign_version, recipient_id, channel, provider_idempotency_key, available_at)
+  VALUES
+    ('first_post_reminder', 'first_post_v2', v_member_id, 'dm',
+     'first_post_v2:' || v_member_id::text || ':dm', now())
+  ON CONFLICT ON CONSTRAINT brand_message_outbox_campaign_recipient_channel_key
+  DO NOTHING;
+
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count;
+END;
+$$;
+
 -- Preserve existing suppression/cap behavior, but do not claim delayed rows early.
+-- First-post rows (campaign first_post_reminder) are also stopped when:
+--   - first_post_v1 (the 24h reminder) is due for a member who has not passed
+--     adult verification (R03). There is no verify-first prompt campaign, so
+--     the reminder is skipped, not swapped. first_post_v2 is queued when they
+--     verify;
+--   - another first-post message already went to the member, or first_post_v2
+--     is queued or in flight beside a due first_post_v1, so a member who
+--     verifies inside the first day gets one first-post message, not two.
 CREATE OR REPLACE FUNCTION public.claim_brand_messages(
   p_sender_id integer,
   p_limit integer DEFAULT 20,
@@ -257,6 +331,17 @@ BEGIN
                          OR (b.blocker_id = p_sender_id AND b.blocked_id = q.recipient_id)) THEN 'blocked'
         WHEN q.campaign = 'first_post_reminder'
              AND EXISTS (SELECT 1 FROM public.posts p WHERE p.author_id = q.recipient_id) THEN 'already_posted'
+        WHEN q.campaign_version = 'first_post_v1'
+             AND NOT public.brand_member_adult_verified(q.recipient_id) THEN 'unverified'
+        WHEN q.campaign = 'first_post_reminder'
+             AND EXISTS (SELECT 1 FROM public.brand_message_outbox o
+                          WHERE o.recipient_id = q.recipient_id
+                            AND o.campaign = 'first_post_reminder'
+                            AND o.id <> q.id
+                            AND (o.state = 'sent'
+                                 OR (q.campaign_version = 'first_post_v1'
+                                     AND o.campaign_version = 'first_post_v2'
+                                     AND o.state IN ('queued', 'sending')))) THEN 'already_prompted'
         WHEN (SELECT count(*) FROM public.brand_message_outbox c
                WHERE c.recipient_id = q.recipient_id AND c.state = 'sent'
                  AND c.sent_at >= now() - p_window) >= p_cap THEN 'frequency_cap'
@@ -292,6 +377,12 @@ GRANT EXECUTE ON FUNCTION public.brand_follow_eligible(integer, integer) TO serv
 GRANT EXECUTE ON FUNCTION public.ensure_brand_follow_relationships(integer, integer, boolean, interval) TO service_role;
 GRANT EXECUTE ON FUNCTION public.backfill_brand_follows(integer, integer, interval) TO service_role;
 GRANT EXECUTE ON FUNCTION public.enqueue_brand_onboarding(text, interval, interval) TO service_role;
+REVOKE ALL ON FUNCTION public.brand_member_adult_verified(integer) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.enqueue_first_post_prompt(text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.claim_brand_messages(integer, integer, integer, interval) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.brand_member_adult_verified(integer) TO service_role;
+GRANT EXECUTE ON FUNCTION public.enqueue_first_post_prompt(text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.claim_brand_messages(integer, integer, integer, interval) TO service_role;
 
 -- Schedule the existing worker. It remains fail-closed until the brand sender,
 -- unsubscribe URL, CRON_SECRET and DVNT_BRAND_OUTBOX_ENABLED are configured.

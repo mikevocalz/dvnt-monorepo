@@ -106,6 +106,10 @@ export const WELCOME_DM = [
 export const WELCOME_BROADCAST =
   "Welcome to the cookout 🖤 Your first DVNT post can be a hello, a look, or your next event. Add a photo, tell us a little about yourself, and let your people find you. Ready? Create your first post.";
 
+// first_post_v2: sent when a member passes adult verification (R03/R07).
+export const FIRST_POST_AFTER_VERIFICATION =
+  "You're verified. Posting, comments, messages and Lynk rooms are open. Your first DVNT post can be a hello, a look, or your next event. Ready? Create your first post.";
+
 export interface CampaignMessage {
   subject: string;
   body: string;
@@ -128,7 +132,9 @@ export function campaignMessage(
     ? WELCOME_DM
     : campaignVersion === "first_post_v1"
       ? WELCOME_BROADCAST
-      : null;
+      : campaignVersion === "first_post_v2"
+        ? FIRST_POST_AFTER_VERIFICATION
+        : null;
   if (!copy) return null;
   const footer = unsubscribeUrl
     ? `\n\nStop these messages: ${unsubscribeUrl}`

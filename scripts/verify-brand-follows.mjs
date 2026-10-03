@@ -21,7 +21,12 @@
  *   5. the brand follows no old member, through the backfill or on sign-in;
  *   6. a profile created outside auth-sync gets both directions;
  *   7. a returning old member missing the follow gets member -> brand only;
- *   8. the functions stay service_role only.
+ *   8. the functions stay service_role only;
+ *   9. enqueue_first_post_prompt queues first_post_v2 once for a member who
+ *      passed adult verification, and nothing for an unverified member or one
+ *      who has posted;
+ *  10. the 24h first_post_v1 reminder is suppressed for an unverified member,
+ *      and beside first_post_v2 so a member gets one first-post message.
  *
  *   node scripts/verify-brand-follows.mjs
  *   node scripts/verify-brand-follows.mjs --allow-skip   # CI without Postgres
@@ -130,9 +135,22 @@ CREATE TABLE public.users (
 
 CREATE TABLE public."user" (
   id TEXT PRIMARY KEY,
+  name TEXT,
+  email TEXT,
+  username TEXT,
   banned BOOLEAN,
   "banExpires" TIMESTAMPTZ
 );
+
+CREATE TABLE public.identity_verifications (
+  user_id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL DEFAULT 'didit',
+  status TEXT NOT NULL,
+  date_of_birth DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 
 CREATE SCHEMA payload;
 CREATE TYPE payload.enum_members_status AS ENUM
@@ -199,7 +217,11 @@ async function member(name, { created = OLD, banned = false, authBanned = false,
      VALUES ($1::text, $1::text, ${banned ? "now()" : "NULL"}, ${created}) RETURNING id`,
     [`auth_${name}`],
   );
-  if (!noAuth) await sql(`INSERT INTO public."user" (id, banned) VALUES ($1, $2)`, [`auth_${name}`, authBanned]);
+  if (!noAuth) {
+    await sql(`INSERT INTO public."user" (id, name, email, username, banned) VALUES ($1, $2, $3, $2, $4)`, [
+      `auth_${name}`, name, `${name}@example.test`, authBanned,
+    ]);
+  }
   if (status) await sql(`INSERT INTO payload.members (app_user_id, status) VALUES ($1, $2)`, [String(row.id), status]);
   return row.id;
 }
@@ -341,6 +363,77 @@ await section("follow functions are service_role only", async () => {
     "public.backfill_brand_follows(integer, integer, interval)",
     "public.ensure_brand_follow_relationships(integer, integer, boolean, interval)",
     "public.brand_follow_eligible(integer, integer)",
+  ]) {
+    const [p] = await sql(
+      `SELECT has_function_privilege('anon', $1, 'execute') AS anon,
+              has_function_privilege('authenticated', $1, 'execute') AS authed,
+              has_function_privilege('service_role', $1, 'execute') AS svc`,
+      [sig],
+    );
+    assert.deepEqual(p, { anon: false, authed: false, svc: true }, sig);
+  }
+});
+
+// ── 9. First-post prompt after adult verification ──────────────────────────
+const verify = (name, dob = "1990-01-01", status = "passed") =>
+  sql(`INSERT INTO public.identity_verifications (user_id, status, date_of_birth) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id) DO UPDATE SET status = EXCLUDED.status, date_of_birth = EXCLUDED.date_of_birth`,
+      [`auth_${name}`, status, dob]);
+const prompt = async (name) =>
+  (await sql(`SELECT public.enqueue_first_post_prompt($1) AS n`, [`auth_${name}`]))[0].n;
+const outboxRows = async (id, version) =>
+  sql(`SELECT state, last_error FROM public.brand_message_outbox WHERE recipient_id = $1 AND campaign_version = $2`, [id, version]);
+
+await section("the first-post prompt is queued once after verification, never for unverified or posting members", async () => {
+  const verified = await member("verifiedfresh", { created: "now()" });
+  assert.equal(await prompt("verifiedfresh"), 0, "queued before the member passed verification");
+  await verify("verifiedfresh", "2010-01-01");
+  assert.equal(await prompt("verifiedfresh"), 0, "queued for a minor's passed verification");
+  await verify("verifiedfresh", "1990-01-01", "failed");
+  assert.equal(await prompt("verifiedfresh"), 0, "queued for a failed verification");
+  await verify("verifiedfresh");
+  assert.equal(await prompt("verifiedfresh"), 1, "not queued after adult verification");
+  assert.equal(await prompt("verifiedfresh"), 0, "queued twice");
+  const rows = await outboxRows(verified, "first_post_v2");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].state, "queued");
+
+  const poster = await member("poster", { created: "now()" });
+  await verify("poster");
+  await sql(`INSERT INTO public.posts (author_id) VALUES ($1)`, [poster]);
+  assert.equal(await prompt("poster"), 0, "queued for a member who already posted");
+  assert.equal(await prompt("nobody"), 0, "queued for an unknown auth id");
+});
+
+// ── 10. The 24h reminder skips unverified members ──────────────────────────
+await section("the 24h first-post reminder is suppressed for unverified members and beside the prompt", async () => {
+  const unverified = await member("unverified24", { created: "now() - interval '2 days'" });
+  const verifiedOld = await member("verified24", { created: "now() - interval '2 days'" });
+  await verify("verified24");
+  const both = await member("both24", { created: "now() - interval '2 days'" });
+  await verify("both24");
+  for (const name of ["unverified24", "verified24", "both24"]) {
+    await sql(`SELECT public.enqueue_brand_onboarding($1, interval '7 days', interval '0 seconds')`, [`auth_${name}`]);
+  }
+  assert.equal(await prompt("both24"), 1);
+  // Only first-post rows are claimable for this check.
+  await sql(`UPDATE public.brand_message_outbox SET state = 'suppressed' WHERE campaign <> 'first_post_reminder' AND state = 'queued'`);
+  await sql(`SELECT * FROM public.claim_brand_messages($1, 100, 2, interval '7 days')`, [brand]);
+
+  assert.deepEqual(await outboxRows(unverified, "first_post_v1"), [{ state: "suppressed", last_error: "unverified" }]);
+  assert.equal((await outboxRows(verifiedOld, "first_post_v1"))[0].state, "sending", "a verified member lost the reminder");
+  assert.deepEqual(await outboxRows(both, "first_post_v1"), [{ state: "suppressed", last_error: "already_prompted" }]);
+  assert.equal((await outboxRows(both, "first_post_v2"))[0].state, "sending");
+
+  // A prompt that already went out stops a later reminder and a second prompt.
+  await sql(`UPDATE public.brand_message_outbox SET state = 'sent', sent_at = now() WHERE state = 'sending'`);
+  assert.equal(await prompt("verified24"), 0, "prompted after the reminder was sent");
+});
+
+await section("onboarding functions are service_role only", async () => {
+  for (const sig of [
+    "public.enqueue_first_post_prompt(text)",
+    "public.brand_member_adult_verified(integer)",
   ]) {
     const [p] = await sql(
       `SELECT has_function_privilege('anon', $1, 'execute') AS anon,
