@@ -184,14 +184,28 @@ export async function resolveVerifiedAdmission(
     db.from("user").select("createdAt").eq("id", userId).maybeSingle(),
   ]);
 
-  // ponytail: an unreadable policy row falls back to enforcement off, which is
-  // exactly the behaviour shipping today. Failing closed on a config read would
-  // take the whole app down over a gate the operator has not switched on.
+  // An unreadable policy row used to fall back to enforcement off, on the
+  // reasoning that failing closed would take the app down over a gate nobody
+  // had switched on. That held while `enforce` was false everywhere. This
+  // branch's migration (20261001190000_new_signup_verified_admission.sql) sets
+  // `enforce = true`, so the fallback stopped being inert: a transient read
+  // failure now admits every unverified in-scope account to posting,
+  // comments, tickets and messaging. A proven-underage record still blocks,
+  // because the AGE_RESTRICTED branch runs first, but a new signup with no
+  // verification record at all - the exact case this gate exists for - would
+  // sail through. Refuse instead, and say it is a config read rather than
+  // claiming anything about the account's verification state.
   if (policyResult?.error) {
     console.error("[verified-admission] policy read failed:", policyResult.error.message);
+    return {
+      state: "blocked",
+      reason: "verification_required",
+      deadline: null,
+      message: `We can't confirm your access right now. Try again in a moment and ${PARTICIPATION} will open if your account is verified.`,
+    };
   }
   const policy: AdmissionPolicy & { allowlist?: unknown; denylist?: unknown } | null =
-    policyResult?.error ? null : policyResult?.data ?? null;
+    policyResult?.data ?? null;
   const has = (list: unknown) => Array.isArray(list) && list.map(String).includes(userId);
 
   return decideVerifiedAdmission({
