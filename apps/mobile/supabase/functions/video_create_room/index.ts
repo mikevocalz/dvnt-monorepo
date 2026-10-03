@@ -11,6 +11,10 @@ import {
   CALL_HUMAN_CAPACITY,
   CALL_MAX_INVITEES,
 } from "../_shared/call-capacity.ts";
+import {
+  creatorStandingRefusal,
+  resolveCreatorStanding,
+} from "../_shared/creator-standing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -244,6 +248,27 @@ Deno.serve(async (req) => {
       isPublic,
       maxParticipants,
     });
+
+    // ── Creator standing ─────────────────────────────────────────────────────
+    // creator_hosts.status used to be read in exactly one place, the
+    // creator-program `schedule` action, so a suspended creator simply came
+    // here instead and kept minting Lynk rooms. The gate runs before the
+    // rate-limit record and before the room insert, so a refusal writes
+    // nothing and costs the caller nothing.
+    //
+    // Scoped to `lynk`: suspension closes audience hosting. A personal call
+    // (roomKind 'call') is a 1:1 conversation, not a hosted room, and cutting
+    // it off would be a messaging ban — a different control, not this one.
+    if (roomKind === "lynk") {
+      const standing = await resolveCreatorStanding(supabase, userId);
+      if (standing.state === "refused") {
+        const refusal = creatorStandingRefusal(standing);
+        console.log(
+          `[video_create_room] Refused Lynk creation for ${userId}: ${refusal.reason}`,
+        );
+        return errorResponse("forbidden", refusal.message);
+      }
+    }
 
     let endsAt: string | null = null;
     if (roomKind === "call") {

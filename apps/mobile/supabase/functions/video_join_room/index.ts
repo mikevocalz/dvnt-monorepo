@@ -12,6 +12,10 @@ import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { CALL_HUMAN_CAPACITY } from "../_shared/call-capacity.ts";
+import {
+  creatorStandingRefusal,
+  resolveCreatorStanding,
+} from "../_shared/creator-standing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -332,11 +336,28 @@ Deno.serve(async (req) => {
         return errorResponse("forbidden", "You are banned from this room");
       }
 
-      if (!room.is_public && !eventAccess.linked) {
-        const isHostOrCoHost = userId === room.created_by ||
-          existingMember?.role === "host" ||
-          existingMember?.role === "co-host";
+      const isHostOrCoHost = userId === room.created_by ||
+        existingMember?.role === "host" ||
+        existingMember?.role === "co-host";
 
+      // ── Creator standing ───────────────────────────────────────────────────
+      // Refusing room CREATION is not enough on its own: a creator suspended
+      // after opening a Lynk would otherwise keep hosting it across every
+      // reconnect. The gate closes the host chair, not the door — a suspended
+      // creator can still join someone else's Lynk as a participant, and
+      // personal calls (handled in the isCall branch above) are untouched.
+      if (isHostOrCoHost) {
+        const standing = await resolveCreatorStanding(supabase, userId);
+        if (standing.state === "refused") {
+          const refusal = creatorStandingRefusal(standing);
+          return errorResponse("forbidden", refusal.message, {
+            reason: refusal.reason,
+            code: refusal.code,
+          });
+        }
+      }
+
+      if (!room.is_public && !eventAccess.linked) {
         const hasPriorAccess = !!existingMember &&
           existingMember.status !== "banned" &&
           existingMember.status !== "kicked";
