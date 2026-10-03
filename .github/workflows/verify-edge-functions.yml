@@ -16,6 +16,8 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-event-consolidation.mjs"
+      - "scripts/verify-call-capacity.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -25,6 +27,8 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-event-consolidation.mjs"
+      - "scripts/verify-call-capacity.mjs"
 
 jobs:
   verify:
