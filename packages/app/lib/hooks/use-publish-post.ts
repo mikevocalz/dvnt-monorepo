@@ -15,6 +15,7 @@ import {
   persistLocalMediaSelection,
 } from "@dvnt/app/lib/media/persist-local-selection";
 import { storage } from "@dvnt/app/lib/utils/storage";
+import { friendlyUploadError } from "@dvnt/app/lib/media/video-pick-policy";
 
 type Draft = ReturnType<typeof useCreatePostStore.getState>;
 
@@ -83,7 +84,7 @@ function usePublishTaskDeps(): PublishTaskDeps {
               ...(result.thumbnail && { thumbnail: result.thumbnail }),
               ...(result.livePhotoVideoUrl && { livePhotoVideoUrl: result.livePhotoVideoUrl }),
             }
-          : { error: result.error || "Media upload failed. Try again." },
+          : { error: friendlyUploadError(result.error) },
       );
     },
     createPost: (input) => createPost(input),
