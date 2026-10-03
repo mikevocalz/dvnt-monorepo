@@ -6,8 +6,12 @@
  * driven without a verified email), then calls issue_guest_rsvp_tickets (capacity
  * + per-guest cap serialized in SQL) and emails the ticket links.
  *
- *   POST { grant, event_id, quantity?, guest_name?, attendee_names?[] }
+ *   POST { grant, event_id, quantity?, guest_name?, attendee_names?[],
+ *          username?, full_name?, phone? }
  *   -> { ok, order_id, count, tickets: [{ guest_lookup_token, order_index, ... }] }
+ *
+ * username/full_name/phone: all three or none. With them the guest gets a
+ * restricted profile for the grant's email (_shared/checkout-profile.ts).
  *
  * Deno env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY,
  *           RESEND_FROM_EMAIL, TICKET_HMAC_SECRET, PUBLIC_SITE_URL.
@@ -18,6 +22,8 @@ import {
   ticketConfirmation,
 } from "../_shared/send-resend-email.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { parseCheckoutProfileFields } from "../_shared/checkout-profile-fields.ts";
+import { provisionCheckoutProfile } from "../_shared/checkout-profile.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -115,6 +121,9 @@ Deno.serve(async (req) => {
     if (!grant) return err("invalid_grant", "Verification expired. Confirm your email again.", 401);
     if (grant.event_id !== eventId)
       return err("grant_mismatch", "Verification doesn't match this event.", 401);
+    // The email is the one the grant proved, never a body field.
+    const profile = parseCheckoutProfileFields({ ...body, guest_email: grant.destination });
+    if (!profile.ok) return err(profile.code, profile.message);
 
     // Idempotency: the grant's hash is the order's dedupe key — a
     // double-tap Confirm or a retried request with the same grant returns
@@ -172,6 +181,10 @@ Deno.serve(async (req) => {
         })
       : null;
 
+    const created = !isIdempotentReplay && profile.fields
+      ? await provisionCheckoutProfile(supabase, profile.fields, "[rsvp-issue-guest]")
+      : null;
+
     if (!isIdempotentReplay) await sendResendEmail({
       to: grant.destination,
       ...ticketConfirmation({
@@ -182,6 +195,7 @@ Deno.serve(async (req) => {
         location: ev?.location ?? null,
         toEmail: grant.destination,
         guestNudge: true,
+        profileUsername: created?.status === "created" ? created.username : null,
         greeting: `Your RSVP for ${evTitle} is confirmed. Open your ticket${
           tickets.length > 1 ? "s" : ""
         } below — each has its own QR for the door.`,

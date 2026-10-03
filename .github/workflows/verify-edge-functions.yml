@@ -23,6 +23,7 @@ on:
       - "packages/app/lib/api/**"
       - "apps/mobile/lib/api/**"
       - "scripts/verify-admission-gate.mjs"
+      - "scripts/verify-checkout-profile.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -39,6 +40,7 @@ on:
       - "packages/app/lib/api/**"
       - "apps/mobile/lib/api/**"
       - "scripts/verify-admission-gate.mjs"
+      - "scripts/verify-checkout-profile.mjs"
 
 jobs:
   verify:
@@ -136,3 +138,19 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-admission-gate.mjs
+
+  checkout-profile-sql:
+    # Guest checkout creates or reuses a restricted profile. Duplicate
+    # accounts under concurrent checkouts, contact fields readable by client
+    # roles, and a restricted profile passing the RLS boundary are database
+    # behaviour, so this replays the migrations on a throwaway cluster. Same
+    # rule as above: no --allow-skip, a runner without Postgres fails.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-checkout-profile.mjs

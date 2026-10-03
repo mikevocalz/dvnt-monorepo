@@ -19,6 +19,7 @@ import {
   ticketConfirmation,
 } from "./send-resend-email.ts";
 import { deliverTicketBundleEmail } from "./ticket-email-delivery.ts";
+import { finalizeCheckoutProfile } from "./checkout-profile.ts";
 import {
   recordPromoterEarning,
   upsertOrderMoneyState,
@@ -235,9 +236,14 @@ export async function issueTicketsForCheckoutSession(
     // Delivery state persists on the order; failure never rolls back
     // fulfillment.
     if (isGuestPurchase && orderRow?.id) {
+      // The guest's restricted profile, from the fields stored when the
+      // session was created. Idempotent, best-effort, and before the email so
+      // the email can name the account. No intake row means an older client.
+      const profile = await finalizeCheckoutProfile(supabase, session.id, logPrefix);
       await deliverTicketBundleEmail(supabase, orderRow.id, {
         kind: "fulfillment",
         logPrefix,
+        profileUsername: profile.status === "created" ? profile.username : null,
       });
     }
   }
@@ -252,9 +258,13 @@ export async function issueTicketsForCheckoutSession(
     // out (Resend down, crash mid-send), this replay retries it. The
     // delivery module no-ops when status is already 'sent'.
     if (isGuestPurchase && issued === 0) {
+      // A crash between issuance and finalize leaves the intake pending; the
+      // replay finishes it. Already-finalized intakes return their result.
+      const profile = await finalizeCheckoutProfile(supabase, session.id, logPrefix);
       await deliverTicketBundleEmail(supabase, orderRow.id, {
         kind: "retry",
         logPrefix,
+        profileUsername: profile.status === "created" ? profile.username : null,
       });
     }
 

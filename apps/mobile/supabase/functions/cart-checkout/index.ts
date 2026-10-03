@@ -27,6 +27,7 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { requireMemberPhone } from "../_shared/member-phone.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
@@ -184,6 +185,18 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
 
     const cartId = parseCartId(parsed);
     if (!cartId) return errorResponse("Invalid cartId", 400);
+
+    // A buyer with no phone on file gives one before paying. Stored
+    // server-side; a number already on file is never replaced.
+    const memberPhone = await requireMemberPhone(
+      supabase,
+      authId,
+      parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).phone : undefined,
+      "[cart-checkout]",
+    );
+    if (!memberPhone.ok) {
+      return jsonResponse({ error: memberPhone.message, code: memberPhone.code }, memberPhone.status);
+    }
 
     const promoCode =
       parsed && typeof parsed === "object"

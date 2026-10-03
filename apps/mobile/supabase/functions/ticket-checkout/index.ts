@@ -8,7 +8,10 @@ import { canAccessEvent } from "../_shared/event-access.ts";
  *     { event_id, ticket_type_id, quantity, promo_code? }
  *   Guest:
  *     { event_id, ticket_type_id, quantity, promo_code?,
- *       guest_email, guest_name? }
+ *       guest_email, guest_name?, username?, full_name?, phone? }
+ *
+ * username/full_name/phone: all three or none. With them, a guest buyer gets
+ * a restricted profile once the ticket is issued (_shared/checkout-profile.ts).
  *
  * Creates a Stripe Checkout Session with:
  *   - Destination charge to the connected organizer account
@@ -42,6 +45,15 @@ import {
 } from "../_shared/apply-promoter-code.ts";
 import { maybeFireCapacityAlerts } from "../_shared/capacity-alerts.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
+import {
+  parseCheckoutProfileFields,
+  type CheckoutProfileFields,
+} from "../_shared/checkout-profile-fields.ts";
+import {
+  provisionCheckoutProfile,
+  recordCheckoutProfileIntake,
+} from "../_shared/checkout-profile.ts";
+import { requireMemberPhone } from "../_shared/member-phone.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { checkoutTicketLines } from "../_shared/checkout-line-items.ts";
 import { withSentry } from "../_shared/sentry.ts";
@@ -112,6 +124,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       global: { headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } },
     });
 
+    const requestBody = await req.json();
     const {
       event_id,
       ticket_type_id,
@@ -122,7 +135,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       guest_email,
       guest_name,
       idempotency_key,
-    } = await req.json();
+    } = requestBody;
 
     // ── Promoter attribution code (WS-4 / Phase 2) ─────────────
     // Arrives from a tracked share link (?ref=CODE) or manual entry.
@@ -156,6 +169,19 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
 
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedGuestEmail);
     const isGuest = !user_id && !!trimmedGuestEmail && isValidEmail;
+    // Profile fields only matter for guests: a signed-in buyer already has
+    // the account, so whatever a client sends for them is ignored.
+    let profileFields: CheckoutProfileFields | null = null;
+    if (isGuest) {
+      const profile = parseCheckoutProfileFields(requestBody);
+      if (!profile.ok) {
+        return new Response(
+          JSON.stringify({ error: profile.message, code: profile.code }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      profileFields = profile.fields;
+    }
     // Idempotency: one key per checkout attempt — double-tap/retry returns
     // the SAME order+tickets instead of minting a duplicate set.
     const idemKey =
@@ -205,6 +231,19 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
     // No verified-admission check here. Buying a ticket is open to unverified
     // and guest buyers (checklist A01/A03); the adult gate sits on what the
     // ticket is used for (joining a Lynk room, posting), not on the purchase.
+    // Signed-in buyers still need a phone on file before inventory moves.
+    // Guest checkout keeps its own identity rules.
+    if (user_id) {
+      const memberPhone = await requireMemberPhone(
+        supabase, user_id, requestBody?.phone, "[ticket-checkout]",
+      );
+      if (!memberPhone.ok) {
+        return new Response(
+          JSON.stringify({ error: memberPhone.message, code: memberPhone.code }),
+          { status: memberPhone.status, headers: { "Content-Type": "application/json" } },
+        );
+      }
+    }
 
     const buyerKey = user_id || `guest:${trimmedGuestEmail}`;
 
@@ -573,9 +612,13 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
         // delivery. Authed free orders have no guest_email; the delivery
         // helper returns no_recipient and skips cleanly.
         if (isGuest) {
+          const created = profileFields
+            ? await provisionCheckoutProfile(supabase, profileFields, "[ticket-checkout]")
+            : null;
           await deliverTicketBundleEmail(supabase, freeOrder.id, {
             kind: "fulfillment",
             logPrefix: "[ticket-checkout]",
+            profileUsername: created?.status === "created" ? created.username : null,
           });
         }
       }
@@ -794,6 +837,11 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
           }
         : {}),
     });
+
+    // Made by the webhook once payment lands, never for an abandoned session.
+    if (isGuest && profileFields) {
+      await recordCheckoutProfileIntake(supabase, session.id, profileFields, "[ticket-checkout]");
+    }
 
     return new Response(
       JSON.stringify({ url: session.url, session_id: session.id }),

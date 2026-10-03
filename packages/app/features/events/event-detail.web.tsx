@@ -81,6 +81,7 @@ import {
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
+import { CheckoutPhoneField } from "./checkout-phone-field.web";
 import {
   useTicketUpgradeOptions,
   useInitiateUpgrade,
@@ -2794,6 +2795,9 @@ function CheckoutSheet({
             <span className="font-bold">{totalCents ? money(totalCents) : "Free"}</span>
           </div>
         </div>
+
+        {/* Signed-in buyer with no phone on file: shown after checkout asks. */}
+        <CheckoutPhoneField />
 
         <button
           onClick={onCheckout}

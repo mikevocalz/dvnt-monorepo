@@ -38,6 +38,11 @@ export interface AdmissionContext {
   exempt?: boolean;
   /** Operator denylist hit: refused even when allowlisted. */
   denied?: boolean;
+  /**
+   * Profile created by guest checkout with no date of birth. Locked out of
+   * participation until verification passes, whatever the rollout says.
+   */
+  restricted?: boolean;
   now?: Date;
 }
 
@@ -49,7 +54,8 @@ export type AdmissionReason =
   | "verification_required"
   | "verification_incomplete"
   | "age_evidence_missing"
-  | "underage";
+  | "underage"
+  | "restricted_profile";
 
 export interface AdmissionVerdict {
   state: "allowed" | "grace" | "blocked";
@@ -87,6 +93,8 @@ function blockedMessage(reason: AdmissionReason): string {
       return `Your ID didn't show a readable date of birth. Submit it again to reopen ${PARTICIPATION}.`;
     case "underage":
       return `Your ID shows you're under 18. DVNT is 18+, so ${PARTICIPATION} stay closed.`;
+    case "restricted_profile":
+      return "Verify your ID to start posting, commenting, messaging and joining rooms. Your tickets are already in your account.";
     default:
       return `Verify your ID to continue ${PARTICIPATION}. Your account, your tickets and the verification flow stay open.`;
   }
@@ -117,6 +125,19 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
   const policy = input.policy ?? null;
   const allowed = (reason: AdmissionReason): AdmissionVerdict =>
     ({ state: "allowed", reason, deadline: null, message: null });
+
+  // A profile made at guest checkout never gave a date of birth. It stays
+  // locked until an adult document passes, even with the rollout switched off
+  // and even for an allowlisted id: the allowlist exempts members, and this
+  // account has not been through signup's age check.
+  if (input.restricted && !(status === "passed" && documentAge.allowed)) {
+    return {
+      state: "blocked",
+      reason: "restricted_profile",
+      deadline: null,
+      message: blockedMessage("restricted_profile"),
+    };
+  }
 
   if (!policy?.enforce) return allowed("not_enforced");
   if (input.exempt && !input.denied) return allowed("exempt");
@@ -162,15 +183,32 @@ export async function resolveVerifiedAdmission(
   db: any,
   userId: string | null | undefined,
   now = new Date(),
+  opts: { purpose?: "participation" | "ticket_purchase" } = {},
 ): Promise<AdmissionVerdict> {
   if (!userId) return decideVerifiedAdmission({ userId, now });
-  const [policyResult, recordResult] = await Promise.all([
+  // Buying a ticket is the one thing a checkout-created profile can always do
+  // (checklist A01), so the ticket rails skip the restricted read entirely.
+  const checkRestricted = opts.purpose !== "ticket_purchase";
+  const [policyResult, recordResult, restrictedResult] = await Promise.all([
     db.from("verified_admission_policy")
       .select("enforce, grace_deadline, allowlist, denylist")
       .eq("id", 1).maybeSingle(),
     db.from("identity_verifications")
       .select("user_id, status, date_of_birth").eq("user_id", userId).maybeSingle(),
+    checkRestricted
+      ? db.rpc("is_checkout_restricted", { p_auth_id: userId })
+      : Promise.resolve({ data: false, error: null }),
   ]);
+
+  const restricted = readRestricted(restrictedResult);
+  if (restricted === null) {
+    return {
+      state: "blocked",
+      reason: "verification_required",
+      deadline: null,
+      message: `We can't confirm your access right now. Try again in a moment and ${PARTICIPATION} will open if your account is verified.`,
+    };
+  }
 
   // An unreadable policy row refuses rather than falling back to enforcement
   // off. Once `enforce` is true, an open fallback would let a transient read
@@ -198,6 +236,27 @@ export async function resolveVerifiedAdmission(
     record: recordResult?.error ? null : recordResult?.data ?? null,
     exempt: has(policy?.allowlist),
     denied: has(policy?.denylist),
+    restricted,
     now,
   });
+}
+
+/**
+ * true/false from is_checkout_restricted, or null when the answer is unknown.
+ *
+ * A missing function means this code shipped before its migration did: no
+ * restricted profile can exist yet, so it reads as false. Any other error is
+ * unknown, and the caller refuses rather than admitting a profile that may be
+ * locked, the same direction as the policy read above.
+ */
+export function readRestricted(
+  result: { data?: unknown; error?: { code?: string; message?: string } | null } | null | undefined,
+): boolean | null {
+  const error = result?.error;
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") return false;
+    console.error("[verified-admission] restricted read failed:", error.message);
+    return null;
+  }
+  return result?.data === true;
 }

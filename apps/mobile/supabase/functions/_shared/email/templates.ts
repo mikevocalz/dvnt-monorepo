@@ -174,6 +174,12 @@ export interface TicketConfirmationOpts {
    * re-parents the guest orders. Pass null to suppress entirely.
    */
   claimUrl?: string | null;
+  /**
+   * Username of the restricted profile this checkout created. Swaps the
+   * "Add to my account" nudge for "Finish your profile", which goes through
+   * the same one-tap sign-in link.
+   */
+  profileUsername?: string | null;
   /** Machine-readable event time → renders Google Calendar + .ics links. */
   calendar?: { startIso: string; endIso?: string | null } | null;
   /** Overrides for non-confirmation sends (e.g. the 3-hour reminder) that
@@ -304,7 +310,24 @@ export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
         ? `${SITE_URL}/api/auth/guest-claim?email=${encodeURIComponent(opts.toEmail)}`
         : null;
 
-  const nudge = claimUrl
+  const profileNudge = claimUrl && opts.profileUsername
+    ? [
+        divider(),
+        paragraph(
+          `We made <strong style="color:${COLORS.text}">@${esc(opts.profileUsername)}</strong> for you on ${BRAND.name}, and your ${multi ? "tickets are" : "ticket is"} waiting there. Sign in with one tap to finish your profile.`,
+          { size: 13, color: COLORS.textMuted },
+        ),
+        button(claimUrl, "Finish your profile", { gradient: "brand" }),
+        paragraph(
+          "Posting, comments, messages and Lynk rooms open after you verify your ID. Your tickets work at the door either way.",
+          { size: 12, color: COLORS.textFaint, align: "center", margin: "4px 0 0" },
+        ),
+      ].join("")
+    : null;
+
+  const nudge = profileNudge
+    ? profileNudge
+    : claimUrl
     ? [
         divider(),
         paragraph(
