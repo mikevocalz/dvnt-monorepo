@@ -42,7 +42,7 @@ function safeClientPayload(input: unknown): Record<string, unknown> | null {
     "isOnline","dressCode","doorPolicy","lineup","perks","ticketTiers",
     "addons","coOrganizers","guests","flyerImage","flyerMediaType","flyerFallbackImage",
     "eventType","disclaimers","isNsfw","currentStep","scheduleNeedsReview",
-    "draftSourceEventId","promoterTemplates"
+    "draftSourceEventId","promoterTemplates","eventTz","promoCodeTemplates"
   ];
   const out: Record<string, unknown> = {};
   for (const key of allowed) if (key in raw) out[key] = raw[key];
@@ -57,6 +57,119 @@ function safeClientPayload(input: unknown): Record<string, unknown> | null {
   return out;
 }
 
+type PromoRow = {
+  code: string;
+  ticket_type_id: string | null;
+  discount_type: string;
+  discount_value: number;
+  max_uses: number | null;
+  uses_count: number | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  max_per_user: number | null;
+};
+
+/**
+ * A code is active when a buyer could redeem it now, by the same rules as
+ * _shared/apply-promo-code.ts: inside its window and not fully redeemed.
+ */
+function promoIsActive(p: PromoRow, now: Date): boolean {
+  if (p.valid_from && new Date(p.valid_from) > now) return false;
+  if (p.valid_until && new Date(p.valid_until) < now) return false;
+  if (p.max_uses && Number(p.uses_count || 0) >= p.max_uses) return false;
+  return true;
+}
+
+function promoTemplate(p: PromoRow, tierNameById: Map<string, string>, now: Date) {
+  return {
+    code: p.code,
+    discountType: p.discount_type,
+    discountValue: Number(p.discount_value) || 0,
+    maxUses: p.max_uses ?? null,
+    validFrom: p.valid_from ?? null,
+    validUntil: p.valid_until ?? null,
+    ticketTierName: p.ticket_type_id ? tierNameById.get(String(p.ticket_type_id)) ?? null : null,
+    active: promoIsActive(p, now),
+  };
+}
+
+const PROMO_COLUMNS =
+  "code,ticket_type_id,discount_type,discount_value,max_uses,uses_count,valid_from,valid_until,max_per_user";
+
+/**
+ * Copy the source event's standalone promo_codes onto the event published from
+ * its duplicate. Server-side and idempotent: a code already on the target
+ * (matched case-insensitively, like idx_promo_codes_event_code) is left alone,
+ * so a retried publish copies nothing twice. uses_count starts at zero. A code
+ * that was inactive on the source stays inactive: an expired window is kept,
+ * and a fully redeemed code gets valid_until = now, since resetting its use
+ * count would otherwise switch it back on. A code scoped to a ticket tier is
+ * moved to the target tier with the same name, or skipped when there is none,
+ * so a tier discount never widens to the whole event.
+ */
+async function copyPromoCodes(db: any, authId: string, eventId: number, sourceEventId: number) {
+  const { data: events } = await db.from("events").select("id,host_id").in("id", [eventId, sourceEventId]);
+  const owned = (id: number) =>
+    (events || []).some((e: any) => Number(e.id) === id && String(e.host_id) === authId);
+  if (eventId === sourceEventId || !owned(eventId) || !owned(sourceEventId)) return null;
+
+  const [{ data: sourceCodes, error: sourceError }, { data: targetCodes, error: targetError },
+    { data: sourceTiers }, { data: targetTiers }] = await Promise.all([
+    db.from("promo_codes").select(PROMO_COLUMNS).eq("event_id", sourceEventId),
+    db.from("promo_codes").select("code").eq("event_id", eventId),
+    db.from("ticket_types").select("id,name").eq("event_id", sourceEventId),
+    db.from("ticket_types").select("id,name").eq("event_id", eventId),
+  ]);
+  if (sourceError || targetError) return { error: true as const };
+
+  const sourceTierName = new Map<string, string>(
+    (sourceTiers || []).map((t: any) => [String(t.id), String(t.name || "")]),
+  );
+  const targetTierByName = new Map<string, string>();
+  for (const t of targetTiers || []) {
+    const key = String(t.name || "").trim().toLowerCase();
+    if (key && !targetTierByName.has(key)) targetTierByName.set(key, String(t.id));
+  }
+  const existing = new Set((targetCodes || []).map((r: any) => String(r.code).toUpperCase()));
+
+  const now = new Date();
+  const copied: { code: string; active: boolean }[] = [];
+  const kept: string[] = [];
+  const skipped: { code: string; reason: string }[] = [];
+  for (const p of (sourceCodes || []) as PromoRow[]) {
+    const upper = String(p.code).toUpperCase();
+    if (existing.has(upper)) { kept.push(p.code); continue; }
+
+    let ticketTypeId: string | null = null;
+    if (p.ticket_type_id) {
+      const name = (sourceTierName.get(String(p.ticket_type_id)) || "").trim().toLowerCase();
+      ticketTypeId = name ? targetTierByName.get(name) ?? null : null;
+      if (!ticketTypeId) { skipped.push({ code: p.code, reason: "ticket_tier_missing" }); continue; }
+    }
+
+    const active = promoIsActive(p, now);
+    const exhausted = Boolean(p.max_uses && Number(p.uses_count || 0) >= p.max_uses);
+    const { error } = await db.from("promo_codes").insert({
+      event_id: eventId,
+      ticket_type_id: ticketTypeId,
+      code: p.code,
+      discount_type: p.discount_type,
+      discount_value: p.discount_value,
+      max_uses: p.max_uses,
+      uses_count: 0,
+      valid_from: p.valid_from,
+      valid_until: exhausted ? now.toISOString() : p.valid_until,
+      max_per_user: p.max_per_user,
+      created_by: authId,
+    });
+    if (error?.code === "23505") { kept.push(p.code); existing.add(upper); continue; }
+    if (error) { skipped.push({ code: p.code, reason: "insert_failed" }); continue; }
+    existing.add(upper);
+    copied.push({ code: p.code, active });
+  }
+  return { copied, kept, skipped };
+}
+
 async function duplicatePayload(db: any, authId: string, eventId: number) {
   const { data: event, error } = await db
     .from("events")
@@ -65,7 +178,7 @@ async function duplicatePayload(db: any, authId: string, eventId: number) {
     .maybeSingle();
   if (error || !event || String(event.host_id) !== authId) return null;
 
-  const [{ data: tiers }, { data: addons }, { data: coorgs }, { data: promoters }] =
+  const [{ data: tiers }, { data: addons }, { data: coorgs }, { data: promoters }, { data: promoCodes }] =
     await Promise.all([
       db.from("ticket_types").select("*").eq("event_id", eventId).order("created_at"),
       db.from("ticket_addons").select("*, ticket_addon_variants(*)").eq("event_id", eventId).order("sort_order"),
@@ -73,6 +186,7 @@ async function duplicatePayload(db: any, authId: string, eventId: number) {
       db.from("event_promoters")
         .select("user_id,display_name,code,customer_discount_bps,promoter_commission_bps,status")
         .eq("event_id", eventId).neq("status", "removed"),
+      db.from("promo_codes").select(PROMO_COLUMNS).eq("event_id", eventId).order("created_at"),
     ]);
 
   const authIds = [
@@ -158,6 +272,16 @@ async function duplicatePayload(db: any, authId: string, eventId: number) {
     };
   });
 
+  // Shown on the review step so the host sees which codes the copy will carry
+  // and which of them can be redeemed. copy_promo_codes re-reads the source on
+  // publish; this list is display only and is never trusted for the copy.
+  const promoNow = new Date();
+  const tierNameById = new Map<string, string>(
+    (tiers || []).map((t: any) => [String(t.id), String(t.name || "")]),
+  );
+  const promoCodeTemplates = ((promoCodes || []) as PromoRow[])
+    .map((p) => promoTemplate(p, tierNameById, promoNow));
+
   const primaryVideo = hosted(event.video_flyer_url);
   const flyerImage = hosted(event.flyer_image_url) || hosted(event.cover_image_url) || hosted(event.image);
   const eventImages = Array.isArray(event.images)
@@ -179,6 +303,9 @@ async function duplicatePayload(db: any, authId: string, eventId: number) {
     // Preserve the old time as reference but force explicit review before publish.
     eventDate: event.start_date || new Date().toISOString(),
     endDate: event.end_date || null,
+    // The venue's zone travels with the copy. Without it, publish fell back
+    // to the publisher's device zone.
+    eventTz: typeof event.event_tz === "string" && event.event_tz.trim() ? event.event_tz.trim() : null,
     ticketPrice: event.price == null ? "" : String(event.price),
     maxAttendees: event.max_attendees == null ? "" : String(event.max_attendees),
     youtubeUrl: event.youtube_video_url || "",
@@ -205,6 +332,7 @@ async function duplicatePayload(db: any, authId: string, eventId: number) {
     scheduleNeedsReview: true,
     draftSourceEventId: eventId,
     promoterTemplates,
+    promoCodeTemplates,
   };
 }
 
@@ -263,6 +391,18 @@ Deno.serve(async (req: Request) => {
     }).select("*").single();
     if (error) return errorResponse("Could not duplicate event", 500);
     return jsonResponse({ ok: true, draft: data });
+  }
+
+  if (action === "copy_promo_codes") {
+    const eventId = Number(body.eventId);
+    const sourceEventId = Number(body.sourceEventId);
+    if (!Number.isSafeInteger(eventId) || eventId <= 0 || !Number.isSafeInteger(sourceEventId) || sourceEventId <= 0) {
+      return errorResponse("Invalid eventId or sourceEventId", 400);
+    }
+    const result = await copyPromoCodes(db, authId, eventId, sourceEventId);
+    if (!result) return errorResponse("Event not found or not owned by you", 404);
+    if ("error" in result) return errorResponse("Could not copy promo codes", 500);
+    return jsonResponse({ ok: true, ...result });
   }
 
   if (action === "save") {
