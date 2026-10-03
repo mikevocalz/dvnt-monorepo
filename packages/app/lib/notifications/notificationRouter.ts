@@ -14,6 +14,7 @@
  * Returns null when the payload carries no actionable route (e.g. bare alerts).
  */
 
+import { ticketActivityRoute } from "@dvnt/app/lib/activity/ticket-activity";
 import { parseIncomingUrl } from "@dvnt/app/lib/deep-linking/link-engine";
 
 // ── Supported notification payload types ──────────────────────────────────────
@@ -184,8 +185,22 @@ export function routeFromNotification(
       return null;
     }
 
-    default:
+    default: {
+      // Ticket pushes (comp, refund, transfer, claim) open the pass or My
+      // Tickets, matching the Activity row (T04).
+      const ticketRoute = ticketActivityRoute(
+        {
+          type,
+          entityType: data.entityType,
+          entityId: data.entityId,
+          eventId: data.eventId,
+          payload: { ticket_id: data.ticketId },
+        },
+        "native",
+      );
+      if (ticketRoute) return ticketRoute;
       console.log("[NotificationRouter] Unknown notification type:", type);
       return null;
+    }
   }
 }

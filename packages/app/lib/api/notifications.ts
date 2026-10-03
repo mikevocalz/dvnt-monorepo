@@ -58,6 +58,8 @@ export interface Notification {
     body?: string;
     summary?: string;
     changes?: string[];
+    /** Specific pass for ticket rows, when the emitter sends one. */
+    ticket_id?: string;
   } | null;
 }
 

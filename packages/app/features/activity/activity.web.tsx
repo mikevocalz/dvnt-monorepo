@@ -61,7 +61,11 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import * as privileged from "@dvnt/app/lib/api/privileged";
-import { isTicketActivityType, ticketActivityCopy } from "@dvnt/app/lib/activity/ticket-activity";
+import {
+  isTicketActivityType,
+  ticketActivityCopy,
+  ticketActivityRoute,
+} from "@dvnt/app/lib/activity/ticket-activity";
 
 const TABS = [
   "All",
@@ -181,6 +185,15 @@ function webRouteForActivity(activity: Activity): string {
   // page — must run before the generic entityType "event" branch below.
   if (type === "event_promoter_added" && entityId)
     return `/feed/events/${entityId}/promoter`;
+
+  // Ticket rows open the pass or the transfer/claim screen (T04). Must run
+  // before the generic entityType "event" branch, which comp and refund rows
+  // would otherwise hit.
+  const ticketRoute = ticketActivityRoute(
+    { type, entityType, entityId, eventId: event?.id, payload: activity.payload },
+    "web",
+  );
+  if (ticketRoute) return ticketRoute;
 
   if (entityType === "event" && entityId) return `/events/${entityId}`;
   if (entityType === "room" && entityId) return `/sneaky-lynk/room/${entityId}`;

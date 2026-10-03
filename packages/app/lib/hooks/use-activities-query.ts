@@ -9,6 +9,7 @@
  * toggleFollow) and realtime subscriptions. This hook provides the READ path.
  */
 
+import { ticketActivityRoute } from "@dvnt/app/lib/activity/ticket-activity";
 import { useQuery } from "@tanstack/react-query";
 import {
   getPostDetailCommentsRoute,
@@ -96,6 +97,8 @@ export interface Activity {
     body?: string;
     summary?: string;
     changes?: string[];
+    /** Specific pass for ticket rows, when the emitter sends one. */
+    ticket_id?: string;
   } | null;
 }
 
@@ -285,6 +288,14 @@ export function getRouteForActivity(activity: Activity): string {
   if (type === "event_promoter_added" && entityId) {
     return `/(protected)/events/${entityId}/promoter`;
   }
+
+  // Ticket rows open the pass or the transfer/claim screen (T04), ahead of
+  // the generic entityType "event" branch that comp and refund rows hit.
+  const ticketRoute = ticketActivityRoute(
+    { type, entityType, entityId, eventId: event?.id, payload: activity.payload },
+    "native",
+  );
+  if (ticketRoute) return ticketRoute;
 
   // Use entityType/entityId if available (preferred routing)
   if (entityType && entityId) {

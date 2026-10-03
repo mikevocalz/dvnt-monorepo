@@ -57,3 +57,55 @@ for (const screen of [
     assert.match(source, /Tickets: activities\.filter\(/);
   });
 }
+
+// T04: ticket notifications open the pass or the claim screen, not the event.
+import { ticketActivityRoute } from "./ticket-activity.ts";
+
+const TICKET_UUID = "0b3f8c1e-6a2d-4c55-9e1f-2d7a9b6c4e10";
+
+test("comp, refund, void and delivery rows open the viewer's pass for the event", () => {
+  for (const type of ["ticket_comped", "ticket_refunded", "ticket_voided", "ticket_delivery_failed"]) {
+    const row = { type, entityType: "event", entityId: "4821" };
+    assert.equal(ticketActivityRoute(row, "native"), "/(protected)/ticket/4821");
+    assert.equal(ticketActivityRoute(row, "web"), "/feed/ticket/4821");
+  }
+});
+
+test("a ticket id in the payload opens that exact pass", () => {
+  const row = { type: "ticket_comped", entityType: "event", entityId: "4821", payload: { ticket_id: TICKET_UUID } };
+  assert.equal(ticketActivityRoute(row, "native"), `/(protected)/ticket/${TICKET_UUID}`);
+  assert.equal(ticketActivityRoute(row, "web"), `/feed/ticket/${TICKET_UUID}`);
+  // A payload id that is not a uuid is ignored, never interpolated.
+  assert.equal(
+    ticketActivityRoute({ ...row, payload: { ticket_id: "../admin" } }, "web"),
+    "/feed/ticket/4821",
+  );
+});
+
+test("transfers and claims open My Tickets, where they are accepted", () => {
+  for (const type of [
+    "ticket_transfer_initiated",
+    "ticket_transfer_accepted",
+    "ticket_transfer_declined",
+    "ticket_transfer_cancelled",
+    "ticket_claim_required",
+  ]) {
+    const row = { type, entityType: "ticket_transfer", entityId: "991" };
+    assert.equal(ticketActivityRoute(row, "native"), "/(protected)/events/my-tickets");
+    assert.equal(ticketActivityRoute(row, "web"), "/feed/events/my-tickets");
+  }
+});
+
+test("a pass row with no usable id falls back to My Tickets, not an event page", () => {
+  assert.equal(ticketActivityRoute({ type: "ticket_refunded" }, "web"), "/feed/events/my-tickets");
+  assert.equal(
+    ticketActivityRoute({ type: "ticket_refunded", entityType: "event", entityId: "abc" }, "native"),
+    "/(protected)/events/my-tickets",
+  );
+});
+
+test("other types keep their existing routing", () => {
+  for (const type of ["event_cancelled", "event_postponed", "event_venue_changed", "like", "event_promoter_added"]) {
+    assert.equal(ticketActivityRoute({ type, entityType: "event", entityId: "4821" }, "web"), null);
+  }
+});
