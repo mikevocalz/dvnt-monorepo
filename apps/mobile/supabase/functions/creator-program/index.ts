@@ -23,6 +23,11 @@ import {
   decideCreatorStanding,
 } from "../_shared/creator-standing.ts";
 import { parseCreatorSessionInput } from "../_shared/creator-session-input.ts";
+import {
+  applyForCreatorProgram,
+  CREATOR_COLUMNS,
+  type CreatorRecord,
+} from "../_shared/creator-apply.ts";
 import { eventRelationships } from "../_shared/event-access.ts";
 import { withSentry } from "../_shared/sentry.ts";
 
@@ -30,9 +35,6 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const CURRENT_TERMS_VERSION = "creator-host-v1";
 
-const CREATOR_COLUMNS = "user_id,status,payout_status,terms_version,terms_accepted_at";
-/** Postgres unique_violation. The primary key is what makes `apply` idempotent. */
-const UNIQUE_VIOLATION = "23505";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function json(body: unknown, status = 200, req?: Request) {
@@ -45,13 +47,7 @@ function json(body: unknown, status = 200, req?: Request) {
   });
 }
 
-interface CreatorRow {
-  user_id: string;
-  status: string;
-  payout_status: string;
-  terms_version: string | null;
-  terms_accepted_at: string | null;
-}
+type CreatorRow = CreatorRecord;
 
 interface Ctx {
   db: any;
@@ -75,28 +71,22 @@ function readCreator(db: any, authId: string) {
 
 // ── apply ───────────────────────────────────────────────────────────────────
 async function handleApply({ db, req, authId }: Ctx) {
-  // Insert, never upsert, and never a client-supplied status. The column's
-  // DEFAULT 'applied' is the only status this path can produce, so the one
-  // thing a creator cannot do here is change their own standing. A second
-  // call is a read: 23505 means the row already exists, and it comes back
-  // untouched — reinstatement after a suspension is a moderator action and
-  // is not reachable from a user action.
-  const inserted = await db.from("creator_hosts").insert({ user_id: authId })
-    .select(CREATOR_COLUMNS).single();
-  if (!inserted.error) {
-    return json({ ok: true, creator: inserted.data, created: true }, 200, req);
+  // The request body is never read here. See _shared/creator-apply.ts: a new
+  // row gets the column DEFAULT, an existing row is refused with 409 and left
+  // as it was, so a suspended or rejected creator cannot reset their status.
+  const outcome = await applyForCreatorProgram(db, authId);
+  switch (outcome.kind) {
+    case "created":
+      return json({ ok: true, creator: outcome.creator, created: true }, 200, req);
+    case "exists":
+      return json(
+        { ok: false, error: outcome.message, code: outcome.code, creator: outcome.creator },
+        409,
+        req,
+      );
+    case "failed":
+      return json({ ok: false, error: outcome.message }, 500, req);
   }
-  if (inserted.error.code !== UNIQUE_VIOLATION) {
-    console.error("[creator-program] apply failed", inserted.error.message);
-    return json({ ok: false, error: "Could not submit creator application" }, 500, req);
-  }
-
-  const existing = await readCreator(db, authId);
-  if (existing.error) {
-    console.error("[creator-program] apply re-read failed", existing.error.message);
-    return json({ ok: false, error: "Could not submit creator application" }, 500, req);
-  }
-  return json({ ok: true, creator: existing.data ?? null, created: false }, 200, req);
 }
 
 // ── dashboard ───────────────────────────────────────────────────────────────
