@@ -3,7 +3,7 @@
  *
  * POST /manage-promoters
  *   { action: "list",        event_id }
- *   { action: "add",         event_id, display_name?, username?, rev_share_bps, code? }
+ *   { action: "add",         event_id, display_name?, username?, rev_share_bps, code?, invite_email? }
  *   { action: "update",      promoter_id, rev_share_bps?, status?, display_name? }
  *   { action: "remove",      promoter_id }
  *   { action: "leaderboard", event_id }
@@ -40,6 +40,17 @@ const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 // (event_id, upper(code)), checkout uses ilike, attribution compares UPPER().
 const CODE_RE = /^[A-Za-z0-9_-]{2,32}$/;
 const VALID_UPDATE_STATUSES = new Set(["active", "paused"]);
+
+// Host-typed invite address for a name-only promoter. Deliberately plain:
+// one @, a dot in the domain, no whitespace, within the RFC 5321 length cap.
+const INVITE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const INVITE_EMAIL_MAX = 254;
+// Per organizer, through the DB-backed check_rate_limit / record_rate_limit
+// RPCs (record_rate_limit prunes rows older than an hour, so the window can't
+// be longer than that).
+const INVITE_EMAIL_ACTION = "promoter-invite-email";
+const INVITE_EMAIL_LIMIT = 20;
+const INVITE_EMAIL_WINDOW_SECONDS = 3600;
 
 function json(data: unknown, status = 200, req?: Request) {
   const headers = req
@@ -176,10 +187,43 @@ export type InviteEmailStatus =
   | "failed";
 
 /**
+ * Send the promoterInvite template to `to`. Never throws: the promoter row is
+ * already written, so a mail failure is reported in the response and the
+ * logs, not as a failed add.
+ */
+async function deliverPromoterInvite(
+  supabase: any,
+  to: string,
+  params: { actorAuthId: string; eventId: number; eventTitle: string | null; code: string },
+): Promise<InviteEmailStatus> {
+  try {
+    const { data: actor } = await supabase
+      .from("users")
+      .select("username")
+      .eq("auth_id", params.actorAuthId)
+      .maybeSingle();
+
+    const messageId = await sendResendEmail({
+      to,
+      ...promoterInvite({
+        eventId: params.eventId,
+        eventTitle: params.eventTitle,
+        hostHandle: actor?.username ? `@${actor.username}` : null,
+        code: params.code,
+      }),
+    });
+    // sendResendEmail returns null without sending when RESEND_API_KEY is unset.
+    return messageId ? "sent" : "not_configured";
+  } catch (err) {
+    console.error("[manage-promoters] invite email failed (non-fatal):", err);
+    return "failed";
+  }
+}
+
+/**
  * Email the linked promoter their invitation (T07). The address comes from
  * the Better Auth `user` row for the promoter's auth id, never from the
- * request. Never throws: the promoter row is already written, so a mail
- * failure is reported in the response and the logs, not as a failed add.
+ * request.
  */
 async function sendPromoterInviteEmail(
   supabase: any,
@@ -203,24 +247,7 @@ async function sendPromoterInviteEmail(
     }
     const to = typeof account?.email === "string" ? account.email.trim() : "";
     if (!to || !to.includes("@")) return "no_email";
-
-    const { data: actor } = await supabase
-      .from("users")
-      .select("username")
-      .eq("auth_id", params.actorAuthId)
-      .maybeSingle();
-
-    const messageId = await sendResendEmail({
-      to,
-      ...promoterInvite({
-        eventId: params.eventId,
-        eventTitle: params.eventTitle,
-        hostHandle: actor?.username ? `@${actor.username}` : null,
-        code: params.code,
-      }),
-    });
-    // sendResendEmail returns null without sending when RESEND_API_KEY is unset.
-    return messageId ? "sent" : "not_configured";
+    return await deliverPromoterInvite(supabase, to, params);
   } catch (err) {
     console.error("[manage-promoters] invite email failed (non-fatal):", err);
     return "failed";
@@ -615,6 +642,39 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
       }
       if (displayName.length > 80) displayName = displayName.slice(0, 80);
 
+      // Name-only promoter: the host may give an address for the invite. It
+      // is used for this one send and not stored (event_promoters has no
+      // private column for it). Ignored for a linked promoter, whose address
+      // always comes from their account. The address is never looked up, so
+      // the response can't reveal whether it belongs to a DVNT account.
+      let inviteEmailTo = "";
+      if (!userId && body.invite_email !== undefined && body.invite_email !== null) {
+        const raw = typeof body.invite_email === "string" ? body.invite_email.trim() : null;
+        if (raw === null || (raw && (raw.length > INVITE_EMAIL_MAX || !INVITE_EMAIL_RE.test(raw)))) {
+          return json({ error: "Enter a valid email address" }, 400, req);
+        }
+        inviteEmailTo = raw;
+      }
+      if (inviteEmailTo) {
+        // Checked before the insert so a refused send leaves nothing behind.
+        // A failed check reads as "not allowed": fail closed.
+        const { data: allowed, error: limitError } = await supabase.rpc("check_rate_limit", {
+          p_user_id: authId,
+          p_action: INVITE_EMAIL_ACTION,
+          p_room_id: null,
+          p_max_attempts: INVITE_EMAIL_LIMIT,
+          p_window_seconds: INVITE_EMAIL_WINDOW_SECONDS,
+        });
+        if (limitError) console.error("[manage-promoters] invite rate check failed:", limitError);
+        if (allowed !== true) {
+          return json(
+            { error: "Too many invite emails. Add them without an email or try again in an hour." },
+            429,
+            req,
+          );
+        }
+      }
+
       // Code: caller-supplied (validated) or generated. Retry on the
       // per-event uniq index for generated codes.
       const suppliedCode =
@@ -700,6 +760,28 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
       // The event_promoters row is the truth; this is the courtesy copy.
       // A name-only promoter has no account and so no address to mail.
       let inviteEmail: InviteEmailStatus = "no_account";
+      if (!userId && inviteEmailTo) {
+        const { error: recordError } = await supabase.rpc("record_rate_limit", {
+          p_user_id: authId,
+          p_action: INVITE_EMAIL_ACTION,
+          p_room_id: null,
+        });
+        if (recordError) console.error("[manage-promoters] invite rate record failed:", recordError);
+        const { data: ev } = await supabase
+          .from("events")
+          .select("title")
+          .eq("id", eventId)
+          .maybeSingle();
+        inviteEmail = await deliverPromoterInvite(supabase, inviteEmailTo, {
+          actorAuthId: authId,
+          eventId: eventId!,
+          eventTitle: ev?.title ?? null,
+          code: inserted.code,
+        });
+        if (inviteEmail !== "sent") {
+          console.warn(`[manage-promoters] invite email not sent for promoter ${inserted.id}: ${inviteEmail}`);
+        }
+      }
       if (userId) {
         const { data: ev } = await supabase
           .from("events")

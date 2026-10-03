@@ -31,9 +31,11 @@ function harness({
   library = [],
   events = [{ id: 1, host_id: 'organizer', title: 'Cookout' }],
   sendResendEmail = async () => 'msg-1',
+  inviteAllowed = true,
 } = {}) {
   let handler;
   const sent = [];
+  const rpcs = [];
   const tables = {
     user: [...accounts],
     users: [...users],
@@ -45,6 +47,10 @@ function harness({
     push_tokens: [],
   };
   const client = {
+    rpc: async (name, args) => {
+      rpcs.push({ name, args });
+      return name === 'check_rate_limit' ? { data: inviteAllowed, error: null } : { data: null, error: null };
+    },
     from: (table) => {
       const filters = [];
       let op = 'select';
@@ -122,7 +128,7 @@ function harness({
     const response = await handler(new Request('http://test', { method: 'POST', body: JSON.stringify(body) }));
     return { status: response.status, body: await response.json() };
   };
-  return { tables, call, sent };
+  return { tables, call, sent, rpcs };
 }
 
 const rates = { customer_discount_bps: 1000, promoter_commission_bps: 1000 };
@@ -277,4 +283,75 @@ test('a code differing only in case is a 409 conflict', async () => {
   const dupe = await h.call({ action: 'add', event_id: 1, display_name: 'Other', code: 'TRE151SHARE', ...rates });
   assert.equal(dupe.status, 409);
   assert.equal(dupe.body.error, 'That code is already in use for this event');
+});
+
+// A promoter added by name only has no account to mail, so the host can give
+// an address. It is used for this one send and never stored.
+const nameOnly = { action: 'add', event_id: 1, display_name: 'Door Crew', ...rates };
+
+test('a name-only promoter with an invite email gets the invite at that address', async () => {
+  const h = harness({ users: [{ id: 10, auth_id: 'organizer', username: 'host' }] });
+  const result = await h.call({ ...nameOnly, code: 'DOOR1', invite_email: '  crew@example.com ' });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.inviteEmail, 'sent');
+  assert.equal(h.sent.length, 1);
+  assert.equal(h.sent[0].to, 'crew@example.com');
+  assert.equal(h.sent[0].subject, "You're a promoter for Cookout");
+  assert.match(h.sent[0].html, /DOOR1/);
+  assert.equal(h.tables.event_promoters.length, 1);
+  assert.equal(h.tables.event_promoters[0].user_id, null);
+  assert.ok(!JSON.stringify(h.tables.event_promoters).includes('crew@example.com'));
+  assert.deepEqual(h.rpcs.map((r) => [r.name, r.args.p_user_id, r.args.p_action]), [
+    ['check_rate_limit', 'organizer', 'promoter-invite-email'],
+    ['record_rate_limit', 'organizer', 'promoter-invite-email'],
+  ]);
+});
+
+test('the response is the same whether or not the address has an account', async () => {
+  const stranger = await harness().call({ ...nameOnly, invite_email: 'micah@example.com' });
+  const member = await harness({ users: [micah], accounts: [micahAccount] })
+    .call({ ...nameOnly, invite_email: 'micah@example.com' });
+  assert.equal(stranger.body.inviteEmail, 'sent');
+  assert.deepEqual(Object.keys(member.body).sort(), Object.keys(stranger.body).sort());
+  assert.equal(member.body.inviteEmail, stranger.body.inviteEmail);
+  assert.equal(member.body.promoter.userId, null);
+});
+
+test('an invalid invite email is a 400 and adds nobody', async () => {
+  for (const bad of ['not-an-email', 'a@b', 'two@@example.com', 'sp ace@example.com', `${'x'.repeat(250)}@example.com`, 42]) {
+    const h = harness();
+    const result = await h.call({ ...nameOnly, invite_email: bad });
+    assert.equal(result.status, 400, String(bad));
+    assert.equal(result.body.error, 'Enter a valid email address');
+    assert.equal(h.tables.event_promoters.length, 0);
+    assert.equal(h.sent.length, 0);
+    assert.equal(h.rpcs.length, 0);
+  }
+});
+
+test('a name-only promoter with no invite email sends nothing and spends no rate budget', async () => {
+  for (const blank of [undefined, '', '   ']) {
+    const h = harness();
+    const result = await h.call({ ...nameOnly, invite_email: blank });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.inviteEmail, 'no_account');
+    assert.equal(h.sent.length, 0);
+    assert.equal(h.rpcs.length, 0);
+  }
+});
+
+test('an organizer over the invite email limit gets a 429 before anything is written', async () => {
+  const h = harness({ inviteAllowed: false });
+  const result = await h.call({ ...nameOnly, invite_email: 'crew@example.com' });
+  assert.equal(result.status, 429);
+  assert.equal(h.tables.event_promoters.length, 0);
+  assert.equal(h.sent.length, 0);
+  assert.deepEqual(h.rpcs.map((r) => r.name), ['check_rate_limit']);
+});
+
+test('a linked promoter ignores invite_email and uses the account address', async () => {
+  const h = harness({ users: [micah], accounts: [micahAccount] });
+  await h.call({ action: 'add', event_id: 1, username: 'micah', invite_email: 'attacker@example.com', ...rates });
+  assert.deepEqual(h.sent.map((m) => m.to), ['micah@example.com']);
+  assert.equal(h.rpcs.length, 0);
 });
