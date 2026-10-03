@@ -53,7 +53,7 @@ export async function canAccessEvent(db: any, eventId: number, userId: string | 
 const ASSUMED_EVENT_LENGTH_MS = 6 * 60 * 60 * 1000;
 
 export type EventRoomAccess =
-  | { ok: true; linked: boolean; endsAt: string | null }
+  | { ok: true; linked: boolean; endsAt: string | null; event?: EventAccessRow & { lynk_room_id?: string | null } }
   | { ok: false; code: "forbidden" | "conflict"; message: string; detail: Record<string, unknown> };
 
 /** Pure decision function, shared by all token rails through the resolver below. */
@@ -123,5 +123,7 @@ export async function resolveEventRoomAccess(db: any, room: any, userId: string)
     if (lifecycleError) throw new Error("Could not verify the event room state");
     started = lifecycle?.state === "live";
   }
-  return decideEventRoomAccess(event, access, room, Date.now(), started);
+  const decision = decideEventRoomAccess(event, access, room, Date.now(), started);
+  // video_join_room needs the row to start the room when a host joins.
+  return decision.ok && event ? { ...decision, event: { ...event, lynk_room_id: room.uuid } } : decision;
 }

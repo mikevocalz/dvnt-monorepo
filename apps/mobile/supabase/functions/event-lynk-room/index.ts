@@ -5,6 +5,8 @@
  * room opens when a host starts it, and nobody else gets in before that.
  *
  *   action "wait"  (any eligible guest, body { room_id })
+ *     A host who calls "wait" (opens their own room) starts it, as Zoom does
+ *     when the host joins: same lifecycle change as "start", idempotent.
  *     Before the host starts, records the caller in event_lynk_waiting and
  *     answers { state: "scheduled", admitted: false }. Clients call it every
  *     WAIT_HEARTBEAT_MS while they sit in the waiting room. Once the room is
@@ -28,6 +30,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
 import { eventRelationships, decideEventRoomAccess } from "../_shared/event-access.ts";
 import { isEventLynkHost } from "../_shared/event-lynk-host.ts";
+import { startEventLynk } from "../_shared/event-lynk-start.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -36,7 +39,6 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 export const WAIT_HEARTBEAT_MS = 5_000;
 /** A guest not seen for this long has left the waiting room. */
 export const WAITING_FRESH_MS = 30_000;
-const ASSUMED_EVENT_LENGTH_MS = 6 * 60 * 60 * 1000;
 const EVENT_COLUMNS =
   "id,host_id,visibility,status,ticketing_enabled,start_date,end_date,lynk_room_id";
 
@@ -58,12 +60,6 @@ async function lifecycleState(db: any, eventId: number): Promise<string> {
   return data?.state || "scheduled";
 }
 
-function eventEnd(event: any): number {
-  const start = Date.parse(event.start_date ?? "");
-  const end = Date.parse(event.end_date ?? "");
-  return Number.isFinite(end) ? end : start + ASSUMED_EVENT_LENGTH_MS;
-}
-
 async function handleWait(req: Request, db: any, actor: string, body: any) {
   const roomId = typeof body.room_id === "string" ? body.room_id : "";
   if (!roomId) return fail(req, 400, "room_id required");
@@ -76,7 +72,26 @@ async function handleWait(req: Request, db: any, actor: string, body: any) {
   const state = await lifecycleState(db, event.id);
   const access = await eventRelationships(db, event, actor);
   const decision = decideEventRoomAccess(event, access, {}, Date.now(), state === "live");
-  if (decision.ok) return json(req, { ok: true, state, admitted: true });
+  if (decision.ok) {
+    // A host opening their own room starts it. An organizer who is not a
+    // host (a scanner) gets in without starting anything.
+    if (state !== "live" && access.organizer) {
+      let host: boolean;
+      try {
+        host = await isEventLynkHost(db, event, actor);
+      } catch {
+        throw new ReadError("host");
+      }
+      if (host) {
+        const result = await startEventLynk(db, event, actor);
+        if (!result.ok) {
+          return fail(req, 409, result.message, result.reason, result.state ? { state: result.state } : {});
+        }
+        return json(req, { ok: true, state: "live", admitted: true, started: result.started });
+      }
+    }
+    return json(req, { ok: true, state, admitted: true });
+  }
 
   const reason = String(decision.detail.reason);
   if (reason !== "waiting_for_host") {
@@ -147,41 +162,16 @@ async function handleList(req: Request, db: any, actor: string, body: any) {
 async function handleStart(req: Request, db: any, actor: string, body: any) {
   const { res, event } = await loadHostedEvent(req, db, actor, body);
   if (res) return res;
-  if (["cancelled", "deleted"].includes(String(event.status)))
-    return fail(req, 409, "This event was cancelled", "event_unavailable");
-  if (Date.now() >= eventEnd(event))
-    return fail(req, 409, "This event has ended", "event_ended");
-
-  const { data: room, error: roomError } = await db.from("video_rooms").select("status")
-    .eq("uuid", event.lynk_room_id).maybeSingle();
-  if (roomError) throw new ReadError("room");
-  if (!room || room.status !== "open")
-    return fail(req, 409, "This Lynk has ended", "room_ended");
-
-  const { data: synced, error: syncError } = await db.rpc("sync_event_lynk_lifecycle", { p_event_id: event.id });
-  if (syncError || (synced && synced.ok === false)) throw new ReadError("sync");
-
-  const now = new Date().toISOString();
-  const { data: flipped, error: flipError } = await db.from("event_lynk_lifecycle")
-    .update({ state: "live", live_at: now, started_by: actor, updated_at: now })
-    .eq("event_id", event.id).in("state", ["scheduled", "ready"])
-    .select("state").maybeSingle();
-  if (flipError) throw new ReadError("start");
-  let started = !!flipped;
-  if (!started) {
-    const state = await lifecycleState(db, event.id);
-    if (state !== "live") return fail(req, 409, "This Lynk has ended", "room_ended", { state });
+  let result;
+  try {
+    result = await startEventLynk(db, event, actor);
+  } catch (err) {
+    throw new ReadError((err as Error).message);
   }
-
-  // Bookkeeping only: the guests learn the room is live from their next
-  // "wait" heartbeat and then join through video_join_room.
-  const { data: admittedRows, error: admitError } = await db.from("event_lynk_waiting")
-    .update({ admitted_at: now }).eq("event_id", event.id).is("admitted_at", null)
-    .select("user_id");
-  if (admitError) console.error("[event-lynk-room] marking waiters admitted failed:", admitError.message);
-  return json(req, {
-    ok: true, state: "live", started, admitted: admitError ? 0 : (admittedRows || []).length,
-  });
+  if (!result.ok) {
+    return fail(req, 409, result.message, result.reason, result.state ? { state: result.state } : {});
+  }
+  return json(req, { ok: true, state: "live", started: result.started, admitted: result.admitted });
 }
 
 Deno.serve(async (req: Request) => {
