@@ -174,7 +174,9 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
     if (!authId) return errorResponse("Unauthorized", 401);
 
     // Verified-only admission. A client that skips the banner is still refused.
-    const cartAdmission = await resolveVerifiedAdmission(supabase, authId);
+    const cartAdmission = await resolveVerifiedAdmission(supabase, authId, undefined, {
+      purpose: "ticket_purchase",
+    });
     if (cartAdmission.state === "blocked") {
       return errorResponse(admissionRefusal(cartAdmission).message, 403);
     }

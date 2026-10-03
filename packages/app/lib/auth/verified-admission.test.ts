@@ -132,3 +132,32 @@ test("verification status is never inherited across an account switch", () => {
     "allowed",
   );
 });
+
+test("a checkout-created profile stays locked until an adult document passes, on both sides", () => {
+  for (const policy of [null, { enforce: false }, ENFORCED]) {
+    const locked = decide({ userId: MEMBER, policy, record: null, restricted: true });
+    assert.equal(locked.state, "blocked", JSON.stringify(policy));
+    assert.equal(locked.reason, "restricted_profile");
+    assert.match(locked.message ?? "", /Verify your ID/);
+  }
+  // The allowlist exempts members from the rollout, not from signup's age check.
+  assert.equal(
+    decide({ userId: MEMBER, policy: ENFORCED, exempt: true, record: null, restricted: true }).state,
+    "blocked",
+  );
+  // A pending check does not unlock it.
+  assert.equal(
+    decide({ userId: MEMBER, policy: null, record: { user_id: MEMBER, status: "review" }, restricted: true }).reason,
+    "restricted_profile",
+  );
+  // A passed adult verification does.
+  assert.equal(
+    decide({
+      userId: MEMBER,
+      policy: null,
+      record: { user_id: MEMBER, status: "passed", date_of_birth: "1990-01-01" },
+      restricted: true,
+    }).state,
+    "allowed",
+  );
+});
