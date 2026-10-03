@@ -72,3 +72,18 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-call-capacity.mjs
+
+  event-consolidation:
+    # Replays the consolidation migration on a throwaway cluster: destination
+    # authorization, tier capacity against live holds and racing buyers,
+    # NULL-tier tickets, and total_attendees on event_id moves. No
+    # --allow-skip, for the same reason as the job above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-event-consolidation.mjs
