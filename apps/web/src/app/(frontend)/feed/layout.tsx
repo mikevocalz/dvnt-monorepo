@@ -5,16 +5,21 @@ import { useEffect } from 'react';
 import { registerWebPushIfGranted } from '@dvnt/app/lib/web-push';
 
 const PwaInstallPrompt = dynamic(
-  () => import('@dvnt/app/components/pwa-install.web').then((m) => m.PwaInstallPrompt),
-  { ssr: false },
-);
-const IncomingCallOverlay = dynamic(
   () =>
-    import('@dvnt/app/features/call/ui/incoming-call-overlay.web').then(
-      (m) => m.IncomingCallOverlay,
+    import('@dvnt/app/components/pwa-install.web').then(
+      (module) => module.PwaInstallPrompt,
     ),
   { ssr: false },
 );
+
+const IncomingCallOverlay = dynamic(
+  () =>
+    import('@dvnt/app/features/call/ui/incoming-call-overlay.web').then(
+      (module) => module.IncomingCallOverlay,
+    ),
+  { ssr: false },
+);
+
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
   // Web push: silently (re)subscribe when permission was already granted.
   useEffect(() => {
