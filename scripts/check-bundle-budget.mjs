@@ -92,10 +92,18 @@ function measure() {
 }
 
 function main() {
-  const args = new Set(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const args = new Set(argv);
   const { rows, shared, probe } = measure();
 
-  if (args.has('--attribute')) return attribute(probe);
+  // --attribute          the shared payload, as before
+  // --attribute --route  the worst route's own chunks
+  // --attribute --route=feed   a named route's own chunks
+  const routeFlag = argv.find((a) => a === '--route' || a.startsWith('--route='));
+  if (args.has('--attribute')) {
+    const route = !routeFlag ? null : routeFlag.includes('=') ? routeFlag.split('=')[1] : rows[0]?.route;
+    return attribute(probe, route);
+  }
 
   if (args.has('--report')) {
     console.log('First Load JS per route (uncompressed)\n');
@@ -111,9 +119,11 @@ function main() {
   ];
 
   let failed = false;
+  const overBy = {};
   for (const [label, actual, budget, detail] of checks) {
     const over = actual > budget;
     failed ||= over;
+    overBy[label] = over;
     console.log(
       `${over ? 'FAIL' : 'ok  '}  ${label.padEnd(15)} ${KB(actual).toFixed(0).padStart(6)} KB ` +
         `/ ${KB(budget).toFixed(0)} KB budget  (${detail})`,
@@ -121,10 +131,15 @@ function main() {
   }
 
   if (failed) {
+    // Point at the view that can actually see the failure. --attribute alone
+    // reports the shared intersection, which excludes a route's own chunks.
+    const how = overBy['worst route']
+      ? `  node scripts/check-bundle-budget.mjs --attribute --route=${rows[0].route}`
+      : '  node scripts/check-bundle-budget.mjs --attribute';
     console.error(
       '\nFirst Load JS is over budget. Find out what grew:\n' +
         '  ANALYZE_SOURCEMAPS=1 pnpm --filter web build\n' +
-        '  node scripts/check-bundle-budget.mjs --attribute',
+        how,
     );
     process.exit(1);
   }
@@ -197,14 +212,51 @@ function bucket(source) {
   return `unresolved: ${k}`;
 }
 
-function attribute(probe) {
+/**
+ * Attribute shipped bytes to packages.
+ *
+ * With no route, this reports the shared payload: the chunks every public route
+ * loads. That is the right view for a shared-payload regression and the wrong
+ * one for a single route, because a route's own chunks are excluded from the
+ * intersection by construction. A worst-route failure used to print "run
+ * --attribute", which could not see a single byte of the thing that failed.
+ *
+ * With a route, it reports that route's chunks MINUS the shared set, which is
+ * the only place a route-specific regression can live.
+ */
+function attribute(probe, route) {
   const sets = probe.map((r) => new Set(chunksFor(`${r}.html`)));
-  const shared = [...sets[0]].filter((c) => sets.every((s) => s.has(c)));
+  const sharedSet = new Set(
+    sets.length >= 2 ? [...sets[0]].filter((c) => sets.every((s) => s.has(c))) : [],
+  );
+
+  let target;
+  let label;
+  if (route) {
+    const html = `${route}.html`;
+    if (!fs.existsSync(path.join(APP_DIR, html))) {
+      console.error(`No prerendered route "${route}" in ${APP_DIR}.`);
+      process.exit(2);
+    }
+    const all = chunksFor(html);
+    target = all.filter((c) => !sharedSet.has(c));
+    label =
+      `/${route} route-only payload — ${target.length} of ${all.length} chunks ` +
+      `(${sharedSet.size} shared chunks excluded)`;
+  } else {
+    target = [...sharedSet];
+    label = `shared payload — ${target.length} chunks`;
+  }
+
+  // Print the selection before touching source maps, so `--route` is
+  // verifiable against a normal build: you can see which chunks it would
+  // attribute even when the maps are absent.
+  console.log(label);
 
   const by = new Map();
   let attributed = 0;
   let mapless = 0;
-  for (const c of shared) {
+  for (const c of target) {
     const js = path.join(CHUNK_DIR, c);
     const mp = `${js}.map`;
     if (!fs.existsSync(mp)) {
@@ -225,8 +277,8 @@ function attribute(probe) {
     process.exit(2);
   }
 
-  console.log(`shared payload attributed: ${KB(attributed).toFixed(0)} KB shipped`);
-  if (mapless) console.log(`(${mapless} shared chunks had no map and are excluded)`);
+  console.log(`attributed: ${KB(attributed).toFixed(0)} KB shipped`);
+  if (mapless) console.log(`(${mapless} chunks had no map and are excluded)`);
   console.log('\nshare   shipped KB  package');
   for (const [k, v] of [...by].sort((a, b) => b[1] - a[1]).slice(0, 25)) {
     console.log(`${((v * 100) / attributed).toFixed(1).padStart(5)}% ${KB(v).toFixed(1).padStart(11)}  ${k}`);
