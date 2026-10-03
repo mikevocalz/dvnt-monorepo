@@ -276,6 +276,8 @@ export function transformPost(
     timeAgo: formatTimeAgo(dbPost[DB.posts.createdAt]),
     location: dbPost[DB.posts.location],
     isNSFW: dbPost[DB.posts.isNsfw] || false,
+    editorialJobId: dbPost[DB.posts.editorialJobId] || undefined,
+    disclosureLabel: dbPost[DB.posts.disclosureLabel] || undefined,
     thumbnail,
     type: postKind === "text" ? undefined : type,
     hasMultipleImages,

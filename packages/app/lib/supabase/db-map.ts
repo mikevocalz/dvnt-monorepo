@@ -41,6 +41,8 @@ export const DB = {
     bookmarksCount: "bookmarks_count",
     visibility: "visibility",
     isNsfw: "is_nsfw",
+    editorialJobId: "editorial_job_id",
+    disclosureLabel: "disclosure_label",
     createdAt: "created_at",
     updatedAt: "updated_at",
   },

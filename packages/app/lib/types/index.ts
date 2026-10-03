@@ -59,6 +59,15 @@ export type Post = {
   createdAt?: string;
   location?: string;
   isNSFW?: boolean;
+  /**
+   * Set only on a post written by the AI editorial automation, from
+   * posts.editorial_job_id. Members cannot read editorial_jobs, so a real job
+   * id is not something a client can supply — which is why the feed keys the
+   * disclosure badge on this and not on the label string alone.
+   */
+  editorialJobId?: string;
+  /** posts.disclosure_label, e.g. "DVNT Editorial · AI-assisted". */
+  disclosureLabel?: string;
   thumbnail?: string; // First media thumbnail for grid display
   type?: MediaKind; // Primary media type
   hasMultipleImages?: boolean; // Has carousel/multiple media

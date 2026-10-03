@@ -503,3 +503,10 @@ verify_jwt = false
 
 [functions.event-reminders]
 verify_jwt = false
+
+
+[functions.editorial-admin]
+verify_jwt = false
+
+[functions.process-editorial-jobs]
+verify_jwt = false
