@@ -10,7 +10,7 @@
  * check being allowed to post because the rollout switch is off. Mocks cannot
  * see any of that, so this harness boots a throwaway cluster, replays the
  * real migrations the new SQL depends on, applies
- * 20261003170000_checkout_restricted_profiles.sql, and drives it with real
+ * 20261003180000_checkout_restricted_profiles.sql, and drives it with real
  * parallel connections and real role switches.
  *
  *   node scripts/verify-checkout-profile.mjs
@@ -30,7 +30,7 @@ import pg from "pg";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const allowSkip = process.argv.includes("--allow-skip");
 const MIGRATIONS = join(root, "apps/mobile/supabase/migrations");
-const MIGRATION = "20261003170000_checkout_restricted_profiles.sql";
+const MIGRATION = "20261003180000_checkout_restricted_profiles.sql";
 
 // ── Locating a Postgres server (same rule as verify-call-capacity.mjs) ──────
 function serverBin() {

@@ -10,7 +10,7 @@
  * Both are best-effort. The ticket is issued and emailed whether or not the
  * profile step works, because the buyer has paid and the ticket is the
  * contract. The SQL owns create-or-reuse, idempotency and the race handling
- * (20261003170000_checkout_restricted_profiles.sql); this file only calls it
+ * (20261003180000_checkout_restricted_profiles.sql); this file only calls it
  * and runs the onboarding hooks for a profile it just created.
  */
 import type { CheckoutProfileFields } from "./checkout-profile-fields.ts";
