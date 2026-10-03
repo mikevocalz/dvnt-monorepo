@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { VisionCamera } from "react-native-vision-camera";
+import * as WebBrowser from "expo-web-browser";
 import {
   Button,
   Tabs,
@@ -43,6 +44,9 @@ import {
 } from "@dvnt/app/lib/utils/age-verification";
 import { AppTrace, getErrorMessage } from "@dvnt/app/lib/diagnostics/app-trace";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
+import { useStartVerification } from "@dvnt/app/lib/hooks/use-age-verification";
+import { supabase } from "@dvnt/app/lib/supabase/client";
+import { normalizeVerificationState } from "@dvnt/app/lib/auth/verification-state";
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -100,6 +104,8 @@ export function SignUpStep2() {
   const [dobMismatch, setDobMismatch] = useState<string | null>(null);
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [manualReviewSubmitted, setManualReviewSubmitted] = useState(false);
+  const [createdAuthId, setCreatedAuthId] = useState<string | null>(null);
+  const startServerVerification = useStartVerification();
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -144,6 +150,39 @@ export function SignUpStep2() {
     }
   };
 
+  const completeHostedAdultVerification = async (authId: string): Promise<boolean> => {
+    const session = await startServerVerification.mutateAsync({
+      returnUrl: "dvnt://auth/verify",
+    });
+    if (session.status === "passed") return true;
+    if (!session.url) throw new Error("Verification session did not include a secure capture URL.");
+
+    await WebBrowser.openBrowserAsync(session.url);
+
+    // The provider webhook is authoritative. Poll briefly after returning so a
+    // fast approval finishes signup without asking the member to restart.
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 1500));
+      const { data, error } = await supabase
+        .from("identity_verifications")
+        .select("user_id,status,date_of_birth,failure_code,failure_message,provider_ref")
+        .eq("user_id", authId)
+        .maybeSingle();
+      if (error) continue;
+      const normalized = normalizeVerificationState(data);
+      if (normalized.state === "approved") return true;
+      if (normalized.state === "rejected") {
+        throw new Error(normalized.message || "This account is not eligible for DVNT.");
+      }
+    }
+
+    toast.info("Verification is still processing", {
+      description:
+        "Your account is created, but DVNT participation stays locked until the secure ID check is approved. Tap Complete Signup again to check.",
+    });
+    return false;
+  };
+
   // Create account after verification succeeds
   const createAccount = async () => {
     const age = validateDateOfBirth(formData.dateOfBirth);
@@ -152,6 +191,29 @@ export function SignUpStep2() {
       setActiveStep(0);
       return;
     }
+
+    // If Better Auth already created the account on a previous attempt, never
+    // submit signup again. Resume only the server-authoritative ID check.
+    if (createdAuthId) {
+      setIsSubmitting(true);
+      try {
+        const approved = await completeHostedAdultVerification(createdAuthId);
+        if (!approved) return;
+        await recordTermsAcceptance(createdAuthId, formData.email);
+        toast.success("Welcome to DVNT!", { description: "Your adult identity is verified." });
+        resetSignup();
+        resetVerification();
+        router.replace("/(protected)/(tabs)" as any);
+      } catch (error) {
+        toast.error("Verification not complete", {
+          description: error instanceof Error ? error.message : "Try verification again.",
+        });
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     setIsSubmitting(true);
     const startedAt = Date.now();
     AppTrace.trace("SIGNUP", "account_create_started", {
@@ -274,9 +336,16 @@ export function SignUpStep2() {
         });
       }
 
-      // Welcome email is sent server-side by Better Auth's user.create hook
-      // (auth edge fn) for every signup method — no client call needed. The old
-      // POST /send-welcome here caused a duplicate welcome and was removed.
+      // Better Auth must exist before the hosted provider session can bind to
+      // the account. From this point onward, retrying the button resumes the
+      // verification check rather than attempting a duplicate signup.
+      const verificationAuthId = String(profile?.authId || data.user.id);
+      setCreatedAuthId(verificationAuthId);
+      const approved = await completeHostedAdultVerification(verificationAuthId);
+      if (!approved) return;
+
+      // Welcome email is queued server-side through the canonical onboarding
+      // path; the client never sends a duplicate welcome.
 
       // Record terms acceptance
       recordTermsAcceptance(profile?.id || data.user.id, formData.email).catch(
