@@ -101,6 +101,10 @@ import {
 } from "react-native-reanimated";
 import { Volume2, VolumeX } from "lucide-react-native";
 import { resolveRenderableTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
+import {
+  editorialDisclosureA11y,
+  editorialDisclosureLabel,
+} from "@dvnt/app/lib/posts/editorial-disclosure";
 import type { PublicGateReason } from "@dvnt/app/lib/access/public-gates";
 import { shouldHydrateFeedTextSlides } from "@dvnt/app/lib/feed/text-hydration";
 import { useTranslation } from "react-i18next";
@@ -143,13 +147,8 @@ interface FeedPostProps {
 // ─────────────────────────────── helpers ────────────────────────────────────
 
 /**
- * The AI-editorial disclosure a lane publishes under.
- *
- * Both fields are required. `disclosureLabel` alone is a plain text column a
- * member could write on a post they own; `editorialJobId` is a FK into
- * editorial_jobs, which anon and authenticated have no grant to read, so a
- * client cannot supply a real one. Requiring the pair means the badge appears
- * on editorial output and nowhere else.
+ * The AI-editorial disclosure a lane publishes under, overlaid on media posts
+ * under the author chip. editorialDisclosureLabel decides whether it shows.
  */
 function EditorialDisclosure({
   editorialJobId,
@@ -158,8 +157,8 @@ function EditorialDisclosure({
   editorialJobId?: string;
   disclosureLabel?: string;
 }) {
-  const label = disclosureLabel?.trim();
-  if (!editorialJobId || !label) return null;
+  const label = editorialDisclosureLabel({ editorialJobId, disclosureLabel });
+  if (!label) return null;
   return (
     <View
       style={{
@@ -176,7 +175,7 @@ function EditorialDisclosure({
         <Text
           numberOfLines={1}
           accessibilityRole="text"
-          accessibilityLabel={`${label}. This post was produced by DVNT editorial automation.`}
+          accessibilityLabel={editorialDisclosureA11y(label)}
           style={{
             color: "#fff",
             fontSize: 10,
@@ -554,6 +553,10 @@ function FeedPostComponent({
   const cardInnerWidthRef = useRef(mediaSize);
 
   const isTextPost = kind === "text";
+  const textDisclosure = editorialDisclosureLabel({
+    editorialJobId,
+    disclosureLabel,
+  });
   const initialTextPresentation = useMemo(
     () => resolveRenderableTextPostPresentation(textSlides, caption),
     [caption, textSlides],
@@ -898,6 +901,29 @@ function FeedPostComponent({
                       .filter(Boolean)
                       .join(" · ")}
                   </Text>
+                  {textDisclosure ? (
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 4,
+                        marginTop: 3,
+                      }}
+                    >
+                      <Sparkles size={11} color="rgba(226,232,240,0.68)" />
+                      <Text
+                        numberOfLines={1}
+                        accessibilityLabel={editorialDisclosureA11y(textDisclosure)}
+                        style={{
+                          color: "rgba(226,232,240,0.68)",
+                          fontSize: 11,
+                          fontWeight: "600",
+                        }}
+                      >
+                        {textDisclosure}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               </Pressable>
 

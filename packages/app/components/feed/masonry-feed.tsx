@@ -22,7 +22,11 @@ import { Image } from "expo-image";
 import { useMemo, useCallback, memo, useEffect, useRef, useState } from "react";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Heart, Bookmark, Play, Grid3x3 } from "lucide-react-native";
+import { Heart, Bookmark, Play, Grid3x3, Sparkles } from "lucide-react-native";
+import {
+  editorialDisclosureA11y,
+  editorialDisclosureLabel,
+} from "@dvnt/app/lib/posts/editorial-disclosure";
 import { LinearGradient } from "expo-linear-gradient";
 import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
 import { usePrefetchComments } from "@dvnt/app/lib/hooks/use-comments";
@@ -362,6 +366,7 @@ const MasonryCell = memo(function MasonryCell({
   const isGif = media?.type === "gif";
   const isAnimatedVideo = media?.type === "animated_video";
   const isLivePhoto = media?.type === "livePhoto";
+  const disclosure = editorialDisclosureLabel(post);
   const coverUrl = isVideo
     ? post.thumbnail || media?.thumbnail || null
     : media?.thumbnail || media?.url || null;
@@ -436,6 +441,20 @@ const MasonryCell = memo(function MasonryCell({
             <Text style={styles.emptyCellText}>No preview</Text>
           </View>
         )}
+
+        {disclosure ? (
+          <View
+            style={styles.badgeTopLeft}
+            pointerEvents="none"
+            accessible
+            accessibilityLabel={editorialDisclosureA11y(disclosure)}
+          >
+            <Sparkles size={10} color="#fff" />
+            <Text numberOfLines={1} style={styles.badgeText}>
+              {disclosure}
+            </Text>
+          </View>
+        ) : null}
 
         {isVideo && (
           <View style={styles.badgeTopRight}>
@@ -897,6 +916,27 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.5)",
     borderRadius: 10,
     padding: 4,
+  },
+  // Same chip as badgeTopRight, on the left so the two never collide, and
+  // capped so a long label truncates instead of crossing the media badge.
+  badgeTopLeft: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    maxWidth: "70%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  badgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "600",
+    flexShrink: 1,
   },
   overlay: {
     position: "absolute",

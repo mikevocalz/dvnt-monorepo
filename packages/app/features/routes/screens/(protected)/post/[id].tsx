@@ -102,6 +102,10 @@ import {
 import { normalizePost } from "@dvnt/app/lib/normalization/safe-entity";
 import { validatePostParams } from "@dvnt/app/lib/validation/post-params";
 import { resolveRenderableTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
+import {
+  editorialDisclosureA11y,
+  editorialDisclosureLabel,
+} from "@dvnt/app/lib/posts/editorial-disclosure";
 import { TranslateButton } from "@dvnt/app/components/ui/translate-button";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { useTranslation } from "react-i18next";
@@ -1116,6 +1120,7 @@ function PostDetailScreenContent() {
   // NORMALIZATION: Create safePost with guaranteed non-null values
   // This prevents crashes if TanStack Query updates post to null during render
   const safePost = useMemo(() => normalizePost(post, postId), [post, postId]);
+  const detailDisclosure = editorialDisclosureLabel(safePost);
   const baseTextPresentation = useMemo(
     () =>
       resolveRenderableTextPostPresentation(
@@ -1644,19 +1649,13 @@ function PostDetailScreenContent() {
                     {safePost.location}
                   </Text>
                 )}
-                {/*
-                  AI-editorial disclosure. Both fields are required: the label
-                  is a plain text column an author could write on their own
-                  post, while editorial_job_id is a FK into editorial_jobs,
-                  which no client role can read.
-                */}
-                {safePost.editorialJobId &&
-                safePost.disclosureLabel?.trim() ? (
+                {/* AI-editorial disclosure; see lib/posts/editorial-disclosure. */}
+                {detailDisclosure ? (
                   <Text
                     className="text-xs font-semibold text-muted-foreground"
-                    accessibilityLabel={`${safePost.disclosureLabel.trim()}. This post was produced by DVNT editorial automation.`}
+                    accessibilityLabel={editorialDisclosureA11y(detailDisclosure)}
                   >
-                    ✦ {safePost.disclosureLabel.trim()}
+                    ✦ {detailDisclosure}
                   </Text>
                 ) : null}
               </View>
