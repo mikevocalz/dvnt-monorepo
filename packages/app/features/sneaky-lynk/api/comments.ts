@@ -1,13 +1,26 @@
 /**
  * Room Comments API
- * CRUD + real-time subscription for threaded room comments.
- * Uses Supabase directly (no edge function needed for simple CRUD).
+ * Threaded Sneaky Lynk room chat: read, real-time subscription, and writes.
+ *
+ * Writes go through the lynk-room-comment edge function; clients have no
+ * write privilege on room_comments and cannot read its author_id (migration
+ * 20261003150300). Rows carry author_handle, resolved against the room roster
+ * in comment-anonymity.ts.
  */
 
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
+import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import type { SneakyUser } from "../types";
-import { commentAnonymity, type RosterRow } from "./comment-anonymity";
+import {
+  isMemberHandle,
+  resolveCommentAuthor,
+  type RosterRow,
+} from "./comment-anonymity";
+
+/** Columns a client may read. author_id is not granted. */
+const COMMENT_COLUMNS =
+  "id, room_id, author_handle, body, parent_id, root_id, depth, mentions, created_at";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -23,6 +36,8 @@ export interface Mention {
 export interface RoomComment {
   id: number;
   roomId: string;
+  /** The author's auth id when they are named or are the viewer, otherwise
+   *  their `member:<id>` handle. Pass it as targetUserId to kick/ban. */
   authorId: string;
   body: string;
   parentId: number | null;
@@ -68,30 +83,43 @@ async function fetchRoomRoster(roomUuid: string): Promise<RosterRow[] | null> {
 }
 
 async function lookupRoomCommentAuthor(
-  authorId: string,
-  roomId?: string,
-): Promise<RoomCommentAuthor | undefined> {
+  authorHandle: string,
+  roomId: string,
+): Promise<{ authorId: string; author: RoomCommentAuthor | undefined }> {
+  const resolved = resolveCommentAuthor(await fetchRoomRoster(roomId), authorHandle);
+  // An anonymous author (or one the roster cannot place) is shown by label
+  // only. A handle is never looked up in users.
+  if (resolved.isAnonymous || isMemberHandle(resolved.authorId)) {
+    return { authorId: resolved.authorId, author: anonymousAuthor(resolved.anonLabel) };
+  }
   const { data: userData } = await supabase
     .from("users")
     .select("username, first_name, avatar:avatar_id(url), verified")
-    .eq("auth_id", authorId)
+    .eq("auth_id", resolved.authorId)
     .single();
-
-  if (!userData) return undefined;
-
-  // Live messages go through here, so without this an anonymous author is
-  // named the moment they speak even though the initial fetch hid them.
-  const anon = roomId
-    ? commentAnonymity(await fetchRoomRoster(roomId), authorId)
-    : { isAnonymous: false, anonLabel: null };
-
+  if (!userData) return { authorId: resolved.authorId, author: undefined };
   return {
-    username: userData.username || "unknown",
-    displayName: userData.first_name || userData.username || "unknown",
-    avatar: anon.isAnonymous ? "" : (userData.avatar as any)?.url || "",
-    isVerified: userData.verified || false,
-    isAnonymous: anon.isAnonymous,
-    anonLabel: anon.anonLabel,
+    authorId: resolved.authorId,
+    author: {
+      username: userData.username || "unknown",
+      displayName: userData.first_name || userData.username || "unknown",
+      avatar: (userData.avatar as any)?.url || "",
+      isVerified: userData.verified || false,
+      isAnonymous: false,
+      anonLabel: null,
+    },
+  };
+}
+
+function anonymousAuthor(anonLabel: string | null): RoomCommentAuthor {
+  const label = anonLabel || "Anonymous";
+  return {
+    username: label,
+    displayName: label,
+    avatar: "",
+    isVerified: false,
+    isAnonymous: true,
+    anonLabel,
   };
 }
 
@@ -102,7 +130,7 @@ export async function fetchRoomComments(
 ): Promise<RoomComment[]> {
   const { data, error } = await supabase
     .from("room_comments")
-    .select("*")
+    .select(COMMENT_COLUMNS)
     .eq("room_id", roomId)
     .order("created_at", { ascending: true })
     .limit(200);
@@ -111,111 +139,134 @@ export async function fetchRoomComments(
     console.error("[RoomComments] fetch error:", error.message);
     return [];
   }
+  const rows = (data || []) as any[];
+  if (rows.length === 0) return [];
 
-  // Batch-lookup authors
-  const authorIds = [...new Set((data || []).map((c: any) => c.author_id))];
+  // Anonymity is per ROOM (video_room_members.is_anonymous), and the handle
+  // on each row only resolves against this room's roster.
+  const roster = await fetchRoomRoster(roomId);
+  const resolved = new Map(
+    [...new Set(rows.map((r) => r.author_handle as string))].map((h) => [
+      h,
+      resolveCommentAuthor(roster, h),
+    ]),
+  );
+  const namedIds = [...resolved.values()]
+    .filter((r) => !r.isAnonymous && !isMemberHandle(r.authorId))
+    .map((r) => r.authorId);
 
-  // Anonymity is per-ROOM, not per-user — video_room_members.is_anonymous /
-  // anon_label (migration 20260314_anon_lynk_members). Joining the author
-  // against `users` alone, as this did, cannot know that the person is
-  // anonymous in THIS room, so every chat message rendered their real name.
-  // The old lookup here filtered video_room_members on user_id with the room
-  // uuid against an integer column, so it always failed and every anonymous
-  // author was printed by name. Clients can no longer read user_id at all;
-  // the roster RPC is the only source (see comment-anonymity.ts).
-  const roster = authorIds.length > 0 ? await fetchRoomRoster(roomId) : null;
-  const anonMap: Record<string, { isAnonymous: boolean; anonLabel: string | null }> = {};
-  for (const id of authorIds as string[]) {
-    anonMap[id] = commentAnonymity(roster, id);
-  }
-  let authorsMap: Record<string, any> = {};
-  if (authorIds.length > 0) {
+  const authorsMap: Record<string, any> = {};
+  if (namedIds.length > 0) {
     const { data: users } = await supabase
       .from("users")
-      .select(
-        "id, auth_id, username, first_name, avatar:avatar_id(url), verified",
-      )
-      .in("auth_id", authorIds);
-    if (users) {
-      for (const u of users) {
-        authorsMap[u.auth_id] = u;
-      }
-    }
+      .select("auth_id, username, first_name, avatar:avatar_id(url), verified")
+      .in("auth_id", namedIds);
+    for (const u of users || []) authorsMap[u.auth_id] = u;
   }
 
-  return (data || []).map((row: any) => {
-    const author = authorsMap[row.author_id];
+  return rows.map((row) => {
+    const who = resolved.get(row.author_handle)!;
+    const user = who.isAnonymous ? undefined : authorsMap[who.authorId];
     return {
-      id: row.id,
-      roomId: row.room_id,
-      authorId: row.author_id,
-      body: row.body,
-      parentId: row.parent_id,
-      rootId: row.root_id,
-      depth: row.depth,
-      mentions: row.mentions || [],
-      createdAt: row.created_at,
-      author: author
-        ? {
-            username: author.username || "unknown",
-            displayName: author.first_name || author.username || "unknown",
-            // An anonymous author gets no avatar: the picture identifies them
-            // just as surely as the name does.
-            avatar: anonMap[row.author_id]?.isAnonymous
-              ? ""
-              : (author.avatar as any)?.url || "",
-            isVerified: author.verified || false,
-            isAnonymous: anonMap[row.author_id]?.isAnonymous ?? false,
-            anonLabel: anonMap[row.author_id]?.anonLabel ?? null,
-          }
-        : undefined,
+      ...toRoomComment(row, who.authorId),
+      author: who.isAnonymous
+        ? anonymousAuthor(who.anonLabel)
+        : user
+          ? {
+              username: user.username || "unknown",
+              displayName: user.first_name || user.username || "unknown",
+              avatar: (user.avatar as any)?.url || "",
+              isVerified: user.verified || false,
+              isAnonymous: false,
+              anonLabel: null,
+            }
+          : undefined,
     };
   });
+}
+
+function toRoomComment(row: any, authorId: string): RoomComment {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    authorId,
+    body: row.body,
+    parentId: row.parent_id ?? null,
+    rootId: row.root_id ?? null,
+    depth: row.depth ?? 0,
+    mentions: row.mentions || [],
+    createdAt: row.created_at,
+  };
+}
+
+/** POST to lynk-room-comment with the Better Auth token. */
+async function invokeRoomComment<T>(
+  body: Record<string, unknown>,
+): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
+  try {
+    const token = await requireBetterAuthToken();
+    const { data, error } = await supabase.functions.invoke("lynk-room-comment", {
+      body,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (error) return { ok: false, message: error.message || "Edge function error" };
+    if (!data?.ok) return { ok: false, message: data?.error?.message || "Request failed" };
+    return { ok: true, data: data.data as T };
+  } catch (err: any) {
+    return { ok: false, message: err?.message || "Request failed" };
+  }
 }
 
 // ── Post a comment ───────────────────────────────────────────────────
 
 export async function postRoomComment(params: {
   roomId: string;
+  /** The local user's auth id. Not sent: the server takes the author from
+   *  the session. Used as the returned comment's authorId so "is this mine"
+   *  checks keep working for anonymous senders. */
   authorId: string;
   body: string;
   parentId?: number | null;
+  /** Ignored: the server derives thread position from parentId. */
   rootId?: number | null;
+  /** Ignored: the server derives thread position from parentId. */
   depth?: number;
   mentions?: Mention[];
   author?: RoomCommentAuthor;
 }): Promise<RoomComment | null> {
-  const { data, error } = await supabase
-    .from("room_comments")
-    .insert({
-      room_id: params.roomId,
-      author_id: params.authorId,
-      body: params.body,
-      parent_id: params.parentId || null,
-      root_id: params.rootId || null,
-      depth: params.depth || 0,
-      mentions: params.mentions || [],
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error("[RoomComments] post error:", error.message);
+  const res = await invokeRoomComment<{ comment: any }>({
+    action: "post",
+    roomId: params.roomId,
+    body: params.body,
+    parentId: params.parentId || null,
+    mentions: params.mentions || [],
+  });
+  if (!res.ok) {
+    console.error("[RoomComments] post error:", res.message);
     return null;
   }
+  return { ...toRoomComment(res.data.comment, params.authorId), author: params.author };
+}
 
-  return {
-    id: data.id,
-    roomId: data.room_id,
-    authorId: data.author_id,
-    body: data.body,
-    parentId: data.parent_id,
-    rootId: data.root_id,
-    depth: data.depth,
-    mentions: data.mentions || [],
-    createdAt: data.created_at,
-    author: params.author,
-  };
+/**
+ * Delete a message. Allowed for its author and for room moderators; the
+ * server checks both. To ban the author, pass `comment.authorId` (a handle for
+ * anonymous authors) to videoApi.banUser, which resolves it inside the room.
+ */
+export async function deleteRoomComment(params: {
+  roomId: string;
+  commentId: number;
+}): Promise<boolean> {
+  const res = await invokeRoomComment<{ deleted: boolean }>({
+    action: "delete",
+    roomId: params.roomId,
+    commentId: params.commentId,
+  });
+  if (!res.ok) {
+    console.error("[RoomComments] delete error:", res.message);
+    return false;
+  }
+  return true;
 }
 
 // ── Real-time subscription ───────────────────────────────────────────
@@ -225,6 +276,7 @@ export function subscribeToRoomComments(
   onNewComment: (comment: RoomComment) => void,
   options?: {
     resolveAuthor?: (authorId: string) => RoomCommentAuthor | undefined;
+    onDeleted?: (commentId: number) => void;
   },
 ): () => void {
   const channel = freshChannel(`room-comments:${roomId}`)
@@ -237,29 +289,32 @@ export function subscribeToRoomComments(
         filter: `room_id=eq.${roomId}`,
       },
       async (payload) => {
+        // The payload has no author_id: realtime drops columns the subscriber
+        // cannot SELECT. author_handle is resolved against the roster first,
+        // so a cached directory entry can never name an anonymous author.
         const row = payload.new as any;
-
-        // Lookup author
-        const author =
-          (row.author_id
-            ? options?.resolveAuthor?.(row.author_id)
-            : undefined) ||
-          (row.author_id
-            ? await lookupRoomCommentAuthor(row.author_id, roomId)
-            : undefined);
-
-        onNewComment({
-          id: row.id,
-          roomId: row.room_id,
-          authorId: row.author_id,
-          body: row.body,
-          parentId: row.parent_id,
-          rootId: row.root_id,
-          depth: row.depth,
-          mentions: row.mentions || [],
-          createdAt: row.created_at,
-          author,
-        });
+        if (!row?.author_handle) return;
+        const { authorId, author: looked } = await lookupRoomCommentAuthor(
+          row.author_handle,
+          roomId,
+        );
+        const author = looked?.isAnonymous
+          ? looked
+          : (options?.resolveAuthor?.(authorId) ?? looked);
+        onNewComment({ ...toRoomComment(row, authorId), author });
+      },
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "DELETE",
+        schema: "public",
+        table: "room_comments",
+        filter: `room_id=eq.${roomId}`,
+      },
+      (payload) => {
+        const id = (payload.old as any)?.id;
+        if (typeof id === "number") options?.onDeleted?.(id);
       },
     )
     .subscribe();

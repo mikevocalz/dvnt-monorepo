@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import type { SneakyUser } from "../types";
+import { broadcastSenderId } from "../api/comment-anonymity";
 
 const REACTION_TTL_MS = 2400;
 
@@ -71,6 +72,11 @@ export function useRoomReactions({
     [removeReaction, cap],
   );
 
+  // Reaction broadcasts reach the whole channel. An anonymous member sends a
+  // per-session token, never their auth id.
+  const sessionTokenRef = useRef(Math.random().toString(36).slice(2, 12));
+  const senderId = broadcastSenderId(currentUser, sessionTokenRef.current);
+
   const ensureChannel = useCallback(() => {
     if (!roomId || !currentUser.id) return null;
     if (channelRef.current) return channelRef.current;
@@ -78,14 +84,14 @@ export function useRoomReactions({
     channel
       .on("broadcast", { event: "reaction" }, (payload) => {
         const reaction = payload.payload as ReactionBroadcastPayload;
-        if (!reaction?.id || reaction.userId === currentUser.id) return;
+        if (!reaction?.id || reaction.userId === senderId) return;
         enqueueReaction({ ...reaction, isOwn: false });
       })
       .subscribe();
 
     channelRef.current = channel;
     return channel;
-  }, [roomId, currentUser.id, enqueueReaction]);
+  }, [roomId, currentUser.id, senderId, enqueueReaction]);
 
   useEffect(() => {
     const channel = ensureChannel();
@@ -107,10 +113,11 @@ export function useRoomReactions({
       if (!emoji || !roomId || !currentUser.id) return;
 
       const payload: ReactionBroadcastPayload = {
-        id: `${currentUser.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: `${senderId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         roomId,
-        userId: currentUser.id,
+        userId: senderId,
         senderLabel:
+          (currentUser.isAnonymous ? currentUser.anonLabel || "Anonymous" : null) ||
           currentUser.anonLabel ||
           currentUser.displayName ||
           currentUser.username ||
@@ -130,7 +137,7 @@ export function useRoomReactions({
         payload,
       });
     },
-    [currentUser, roomId, enqueueReaction, ensureChannel],
+    [currentUser, senderId, roomId, enqueueReaction, ensureChannel],
   );
 
   return {
