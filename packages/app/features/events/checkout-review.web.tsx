@@ -59,6 +59,11 @@ import {
   computePromoDiscountCents,
   promoLabel,
 } from "@dvnt/app/lib/payments/promo-discount";
+import {
+  isPromoCheckoutError,
+  promoForCart,
+  type ScopedPromo,
+} from "@dvnt/app/lib/payments/checkout-promo";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -69,20 +74,18 @@ import {
 } from "@dvnt/app/lib/tickets/pricing";
 
 // ── Promo input: tiny local Zustand store (no useState, Law 2) ──────────
-type AppliedPromo = {
-  type: "percent" | "fixed_cents" | "bogo";
-  value: number;
-  code: string;
-};
+// Module-level, so it outlives the screen: the applied promo carries the event
+// it was validated for, and the screen resets the store per cart.
 interface PromoState {
   promoCode: string;
   setPromoCode: (value: string) => void;
-  appliedPromo: AppliedPromo | null;
-  setAppliedPromo: (p: AppliedPromo | null) => void;
+  appliedPromo: ScopedPromo | null;
+  setAppliedPromo: (p: ScopedPromo | null) => void;
   promoError: string | null;
   setPromoError: (e: string | null) => void;
   promoApplying: boolean;
   setPromoApplying: (v: boolean) => void;
+  reset: () => void;
 }
 const usePromoStore = create<PromoState>((set) => ({
   promoCode: "",
@@ -93,6 +96,13 @@ const usePromoStore = create<PromoState>((set) => ({
   setPromoError: (promoError) => set({ promoError }),
   promoApplying: false,
   setPromoApplying: (promoApplying) => set({ promoApplying }),
+  reset: () =>
+    set({
+      promoCode: "",
+      appliedPromo: null,
+      promoError: null,
+      promoApplying: false,
+    }),
 }));
 
 /**
@@ -499,12 +509,16 @@ export function CheckoutReviewScreen() {
 
   const promoCode = usePromoStore((s) => s.promoCode);
   const setPromoCode = usePromoStore((s) => s.setPromoCode);
-  const appliedPromo = usePromoStore((s) => s.appliedPromo);
+  const storedPromo = usePromoStore((s) => s.appliedPromo);
   const setAppliedPromo = usePromoStore((s) => s.setAppliedPromo);
   const promoError = usePromoStore((s) => s.promoError);
   const setPromoError = usePromoStore((s) => s.setPromoError);
   const promoApplying = usePromoStore((s) => s.promoApplying);
   const setPromoApplying = usePromoStore((s) => s.setPromoApplying);
+  const resetPromo = usePromoStore((s) => s.reset);
+  // A code validated for another event's cart is not applied here; the
+  // server would reject it with "Invalid promo code".
+  const appliedPromo = promoForCart(storedPromo, cart?.eventId);
 
   const lineItems = cart?.lineItems ?? [];
 
@@ -558,13 +572,18 @@ export function CheckoutReviewScreen() {
     [quantity, effectiveSubtotal],
   );
 
-  // Seed the field from ?promo= — the code the buyer typed in the event's
-  // checkout sheet before being routed here. Runs once, and never clobbers
-  // something they have already typed on this screen.
+  // Fresh promo state per cart, and none left behind on unmount. Then seed
+  // the field from ?promo=, the code the buyer typed in the event's checkout
+  // sheet before being routed here. Seeding fills the text only; the code
+  // still has to be validated against this cart's event with Apply.
+  const cartId = cart?.cartId;
+  const cartEventId = cart?.eventId;
   useEffect(() => {
+    resetPromo();
     const seeded = new URLSearchParams(window.location.search).get("promo");
-    if (seeded && !usePromoStore.getState().promoCode) setPromoCode(seeded);
-  }, [setPromoCode]);
+    if (seeded) setPromoCode(seeded);
+    return resetPromo;
+  }, [cartId, cartEventId, resetPromo, setPromoCode]);
 
   // Drop a validated promo when the buyer edits the code away from it.
   useEffect(() => {
@@ -603,6 +622,7 @@ export function CheckoutReviewScreen() {
       type: data.discount_type,
       value: data.discount_value ?? 0,
       code: data.code || code,
+      eventId: String(cart.eventId),
     });
   }, [promoCode, cart, setAppliedPromo, setPromoError, setPromoApplying]);
 
@@ -702,6 +722,12 @@ export function CheckoutReviewScreen() {
         cartId: cart?.cartId,
         error: message,
       });
+      // A rejected promo shows under the field it came from and stops being
+      // sent, so the next tap can go through at full price.
+      if (isPromoCheckoutError(message)) {
+        setAppliedPromo(null);
+        setPromoError(message);
+      }
       showToast("error", "Checkout failed", message);
     } finally {
       setCheckoutLoading(false);
@@ -711,6 +737,8 @@ export function CheckoutReviewScreen() {
     lineItems.length,
     fees.customer_charge_amount,
     appliedPromo,
+    setAppliedPromo,
+    setPromoError,
     setCheckoutLoading,
     setHold,
     setPaymentIntent,
