@@ -18,7 +18,10 @@ on:
       - "scripts/verify-edge-functions.mjs"
       - "scripts/verify-users-lockdown.mjs"
       - "scripts/verify-content-lockdown.mjs"
-      - "packages/app/features/sneaky-lynk/api/comment-anonymity.ts"
+      - "packages/app/features/sneaky-lynk/api/**"
+      - "packages/app/features/video/api.ts"
+      - "packages/app/lib/api/**"
+      - "apps/mobile/lib/api/**"
       - ".github/workflows/verify-edge-functions.yml"
   push:
     # Both branch names: `master` is the repo default, `main` is what
@@ -30,7 +33,10 @@ on:
       - "scripts/verify-edge-functions.mjs"
       - "scripts/verify-users-lockdown.mjs"
       - "scripts/verify-content-lockdown.mjs"
-      - "packages/app/features/sneaky-lynk/api/comment-anonymity.ts"
+      - "packages/app/features/sneaky-lynk/api/**"
+      - "packages/app/features/video/api.ts"
+      - "packages/app/lib/api/**"
+      - "apps/mobile/lib/api/**"
 
 jobs:
   verify:
