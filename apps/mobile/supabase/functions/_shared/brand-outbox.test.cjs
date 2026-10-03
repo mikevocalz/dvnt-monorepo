@@ -128,10 +128,7 @@ test('growth email stays shut until an unsubscribe URL exists', () => {
 
 test('brand copy is labelled automated and an unknown campaign version sends nothing', () => {
   const welcome = outbox.campaignMessage('welcome_dm_v2');
-  const welcomeEmail = outbox.campaignMessage('welcome_email_v2', 'https://dvntapp.live/u/x');
   assert.match(welcome.body, /^Deviant announcement — automated\n\n/);
-  assert.match(welcomeEmail.body, /^Deviant announcement — automated\n\n/);
-  assert.equal(welcomeEmail.subject, 'Welcome to the cookout — DVNT');
   assert.ok(welcome.body.includes('Welcome to the cookout! (The Black, Brown & Queer cookout aka B.B.Q.)'));
   assert.ok(!welcome.body.includes('Stop these messages'));
   const withLink = outbox.campaignMessage('first_post_v1', 'https://dvntapp.live/u/x');
@@ -200,7 +197,7 @@ test("enqueue_brand_onboarding applies the lookback to the single-member path", 
   );
   const fn = sql.slice(
     sql.indexOf('FUNCTION public.enqueue_brand_onboarding'),
-    sql.indexOf('FUNCTION public.backfill_brand_relationships'),
+    sql.indexOf('FUNCTION public.claim_brand_messages'),
   );
   const recipients = fn.slice(fn.indexOf('recipients AS ('), fn.indexOf('rows_to_insert AS ('));
   const where = recipients.slice(recipients.indexOf('WHERE')).replace(/\s+/g, ' ');
@@ -209,4 +206,66 @@ test("enqueue_brand_onboarding applies the lookback to the single-member path", 
 
   const authSync = fs.readFileSync(`${__dirname}/../auth-sync/index.ts`, 'utf8');
   assert.match(authSync, /enqueue_brand_onboarding[\s\S]{0,120}p_lookback: "7 days"/);
+});
+
+// The welcome email goes out directly from the auth function's
+// user.create.after hook, as it did on master. The outbox only sends once the
+// brand sender, unsubscribe URL and DVNT_BRAND_OUTBOX_ENABLED are configured,
+// so routing the email through it meant new members got none. The outbox must
+// not queue or render a second welcome email either.
+const MIGRATION = `${__dirname}/../../migrations/20261001194000_deviantevents_onboarding_retention.sql`;
+
+function createAfterHook() {
+  const src = fs.readFileSync(`${__dirname}/../auth/index.ts`, 'utf8');
+  const start = src.indexOf('after: async (user: any) => {');
+  assert.ok(start > 0, 'user.create.after hook not found');
+  return { src, hook: src.slice(start, src.indexOf('session: {', start)) };
+}
+
+test('signup sends the welcome email directly from user.create.after', () => {
+  const { src, hook } = createAfterHook();
+  assert.match(src, /welcome as welcomeEmail/);
+  assert.match(hook, /welcomeEmail\(name\)/);
+  assert.match(hook, /await sendEmail\(user\.email, subject, html\)/);
+});
+
+test('the outbox carries no second welcome email', () => {
+  const sql = fs.readFileSync(MIGRATION, 'utf8');
+  const fn = sql.slice(
+    sql.indexOf('FUNCTION public.enqueue_brand_onboarding'),
+    sql.indexOf('FUNCTION public.claim_brand_messages'),
+  );
+  assert.ok(!/welcome_email/.test(fn), 'enqueue_brand_onboarding must not queue a welcome email');
+  assert.ok(!/'email'/.test(fn), 'enqueue_brand_onboarding must not queue any email row');
+  assert.match(fn, /'welcome_dm_v2'/);
+  assert.match(fn, /'first_post_v1'/);
+  assert.equal(outbox.campaignMessage('welcome_email_v2', 'https://dvntapp.live/u/x'), null);
+});
+
+// No retroactive follow graph. Existing members are not made to follow the
+// brand account, and the brand does not follow them back, unless they signed
+// up inside the onboarding window.
+test('no backfill makes existing members follow the brand', () => {
+  const sql = fs.readFileSync(MIGRATION, 'utf8');
+  const worker = fs.readFileSync(`${__dirname}/../brand-outbox-worker/index.ts`, 'utf8');
+  for (const [name, text] of [['migration', sql], ['worker', worker]]) {
+    assert.ok(!/backfill_brand_relationships/.test(text), `${name} still references the backfill`);
+    assert.ok(!/follow_backfill/.test(text), `${name} still passes a backfill limit`);
+  }
+});
+
+test('the brand follow applies only to members inside the signup window', () => {
+  const sql = fs.readFileSync(MIGRATION, 'utf8');
+  const fn = sql.slice(
+    sql.indexOf('FUNCTION public.ensure_brand_follow_relationships'),
+    sql.indexOf('FUNCTION public.enqueue_brand_onboarding'),
+  ).replace(/\s+/g, ' ');
+  assert.match(fn, /p_lookback interval/);
+  assert.match(fn, /SELECT u\.created_at INTO v_member_created/);
+  assert.match(fn, /v_member_created IS NULL OR v_member_created < now\(\) - p_lookback THEN RETURN/);
+  const authSync = fs.readFileSync(`${__dirname}/../auth-sync/index.ts`, 'utf8');
+  assert.match(
+    authSync,
+    /ensure_brand_follow_relationships[\s\S]{0,200}p_lookback: "7 days"/,
+  );
 });

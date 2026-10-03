@@ -70,6 +70,8 @@ async function applyBrandOnboarding(
 
   // Automatic follow relationships need the real brand account. Never guess
   // from @username: prove the configured public.users.id + auth_id pair first.
+  // New signups only: the RPC skips members created before p_lookback, so a
+  // returning member's sign-in never adds the follow retroactively.
   const configured = resolveBrandSender();
   const verified = configured.ok
     ? await verifyBrandSender(supabaseAdmin, configured.sender)
@@ -85,6 +87,7 @@ async function applyBrandOnboarding(
       p_member_id: memberId,
       p_brand_id: verified.sender.userId,
       p_bidirectional: true,
+      p_lookback: "7 days",
     },
   );
   if (followError) {

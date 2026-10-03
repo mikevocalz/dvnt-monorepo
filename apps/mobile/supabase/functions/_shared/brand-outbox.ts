@@ -120,10 +120,10 @@ export function campaignMessage(
   campaignVersion: string,
   unsubscribeUrl?: string | null,
 ): CampaignMessage | null {
+  // No welcome_email_* version: the auth function sends the welcome email
+  // directly, and an outbox copy would be a second one.
   const isWelcome =
-    campaignVersion === "welcome_dm_v1" ||
-    campaignVersion === "welcome_dm_v2" ||
-    campaignVersion === "welcome_email_v2";
+    campaignVersion === "welcome_dm_v1" || campaignVersion === "welcome_dm_v2";
   const copy = isWelcome
     ? WELCOME_DM
     : campaignVersion === "first_post_v1"

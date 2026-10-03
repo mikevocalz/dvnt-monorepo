@@ -11,10 +11,13 @@ CREATE INDEX IF NOT EXISTS brand_message_outbox_available_idx
 
 -- Idempotent follow graph write. Direct DB insert is deliberate: the automatic
 -- onboarding relationship must not fan out "new follower" push notifications.
+-- New signups only: auth-sync calls this on every sign-in, so a member created
+-- before the lookback window is skipped. There is no retroactive backfill.
 CREATE OR REPLACE FUNCTION public.ensure_brand_follow_relationships(
   p_member_id integer,
   p_brand_id integer,
-  p_bidirectional boolean DEFAULT true
+  p_bidirectional boolean DEFAULT true,
+  p_lookback interval DEFAULT interval '7 days'
 ) RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -23,16 +26,24 @@ AS $$
 DECLARE
   v_member_to_brand integer := 0;
   v_brand_to_member integer := 0;
+  v_member_created timestamptz;
 BEGIN
   IF p_member_id IS NULL OR p_brand_id IS NULL OR p_member_id <= 0 OR p_brand_id <= 0 THEN
     RAISE EXCEPTION 'valid member and brand ids are required';
   END IF;
+  IF p_lookback IS NULL THEN
+    RAISE EXCEPTION 'a signup lookback window is required';
+  END IF;
   IF p_member_id = p_brand_id THEN
     RETURN jsonb_build_object('memberToBrand', 0, 'brandToMember', 0, 'self', true);
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM public.users WHERE id = p_member_id)
-     OR NOT EXISTS (SELECT 1 FROM public.users WHERE id = p_brand_id) THEN
+  SELECT u.created_at INTO v_member_created FROM public.users u WHERE u.id = p_member_id;
+  IF NOT FOUND OR NOT EXISTS (SELECT 1 FROM public.users WHERE id = p_brand_id) THEN
     RAISE EXCEPTION 'member or brand profile missing';
+  END IF;
+  -- A NULL created_at is treated as old: fail closed, no follow.
+  IF v_member_created IS NULL OR v_member_created < now() - p_lookback THEN
+    RETURN jsonb_build_object('memberToBrand', 0, 'brandToMember', 0, 'self', false, 'outsideWindow', true);
   END IF;
 
   INSERT INTO public.follows (follower_id, following_id)
@@ -70,7 +81,9 @@ DECLARE
 BEGIN
   -- auth-sync calls this on every sign-in, not only at signup, so the
   -- lookback bounds the single-member path too. Without it every legacy
-  -- member who signs in gets a "welcome" DM, email and first-post reminder.
+  -- member who signs in gets a "welcome" DM and first-post reminder.
+  -- The welcome email is not queued here: the auth function's user.create.after
+  -- hook sends it directly, so queuing it would send it twice.
   WITH recipients AS (
     SELECT u.id
     FROM public.users u
@@ -79,9 +92,6 @@ BEGIN
   ), rows_to_insert AS (
     SELECT 'welcome'::text AS campaign, 'welcome_dm_v2'::text AS campaign_version,
            r.id AS recipient_id, 'dm'::text AS channel, now() AS available_at
-      FROM recipients r
-    UNION ALL
-    SELECT 'welcome', 'welcome_email_v2', r.id, 'email', now()
       FROM recipients r
     UNION ALL
     SELECT 'first_post_reminder', 'first_post_v1', r.id, 'dm',
@@ -99,62 +109,6 @@ BEGIN
 
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RETURN v_count;
-END;
-$$;
-
--- Progressive legacy backfill. Each call selects only profiles still missing at
--- least one required relationship, so repeated worker runs advance naturally.
-CREATE OR REPLACE FUNCTION public.backfill_brand_relationships(
-  p_brand_id integer,
-  p_bidirectional boolean DEFAULT true,
-  p_limit integer DEFAULT 250
-) RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_row record;
-  v_processed integer := 0;
-  v_member_to_brand integer := 0;
-  v_brand_to_member integer := 0;
-  v_result jsonb;
-BEGIN
-  IF p_brand_id IS NULL OR p_brand_id <= 0
-     OR NOT EXISTS (SELECT 1 FROM public.users WHERE id = p_brand_id) THEN
-    RAISE EXCEPTION 'valid brand profile required';
-  END IF;
-
-  FOR v_row IN
-    SELECT u.id
-    FROM public.users u
-    WHERE u.id <> p_brand_id
-      AND (
-        NOT EXISTS (
-          SELECT 1 FROM public.follows f
-          WHERE f.follower_id = u.id AND f.following_id = p_brand_id
-        )
-        OR (
-          p_bidirectional AND NOT EXISTS (
-            SELECT 1 FROM public.follows f
-            WHERE f.follower_id = p_brand_id AND f.following_id = u.id
-          )
-        )
-      )
-    ORDER BY u.id
-    LIMIT LEAST(GREATEST(p_limit, 1), 1000)
-  LOOP
-    v_result := public.ensure_brand_follow_relationships(v_row.id, p_brand_id, p_bidirectional);
-    v_processed := v_processed + 1;
-    v_member_to_brand := v_member_to_brand + COALESCE((v_result->>'memberToBrand')::integer, 0);
-    v_brand_to_member := v_brand_to_member + COALESCE((v_result->>'brandToMember')::integer, 0);
-  END LOOP;
-
-  RETURN jsonb_build_object(
-    'processed', v_processed,
-    'memberToBrandInserted', v_member_to_brand,
-    'brandToMemberInserted', v_brand_to_member
-  );
 END;
 $$;
 
@@ -210,12 +164,10 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.ensure_brand_follow_relationships(integer, integer, boolean) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ensure_brand_follow_relationships(integer, integer, boolean, interval) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.enqueue_brand_onboarding(text, interval, interval) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.backfill_brand_relationships(integer, boolean, integer) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.ensure_brand_follow_relationships(integer, integer, boolean) TO service_role;
+GRANT EXECUTE ON FUNCTION public.ensure_brand_follow_relationships(integer, integer, boolean, interval) TO service_role;
 GRANT EXECUTE ON FUNCTION public.enqueue_brand_onboarding(text, interval, interval) TO service_role;
-GRANT EXECUTE ON FUNCTION public.backfill_brand_relationships(integer, boolean, integer) TO service_role;
 
 -- Schedule the existing worker. It remains fail-closed until the brand sender,
 -- unsubscribe URL, CRON_SECRET and DVNT_BRAND_OUTBOX_ENABLED are configured.
@@ -244,7 +196,7 @@ BEGIN
       'Content-Type', 'application/json',
       'x-cron-secret', v_secret
     ),
-    body := '{"follow_backfill_limit":250}'::jsonb,
+    body := '{}'::jsonb,
     timeout_milliseconds := 120000
   );
 END;

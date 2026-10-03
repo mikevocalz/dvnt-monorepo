@@ -14,6 +14,7 @@
  */
 
 import {
+  welcome as welcomeEmail,
   resetPassword as resetPasswordEmail,
   verifyEmailLink,
   accountLinked as accountLinkedEmail,
@@ -413,15 +414,18 @@ async function getAuth() {
             },
             // Canonical welcome trigger after successful age-gated creation.
             // The legacy /auth/send-welcome route stays a no-op to avoid duplicates.
+            // The welcome email is sent here, directly. It does not go through
+            // the brand outbox, which stays silent until the brand sender,
+            // unsubscribe URL and DVNT_BRAND_OUTBOX_ENABLED are configured.
+            // The welcome DM, first-post reminder and brand follow run in
+            // auth-sync once the public.users row exists.
             after: async (user: any) => {
-              // Public DVNT profile provisioning happens after Better Auth user
-              // creation. auth-sync is therefore the reliable point for
-              // exactly-once welcome DM/email + DeviantEvents follow wiring.
-              // Sending here raced the users row and previously made onboarding
-              // delivery dependent on client timing.
               console.log(
-                `[Auth] New user created: ${user.email}; onboarding deferred to auth-sync`,
+                `[Auth] New user created: ${user.email}, sending welcome email`,
               );
+              const name = user.name || user.email.split("@")[0];
+              const { subject, html } = welcomeEmail(name);
+              await sendEmail(user.email, subject, html);
             },
           },
         },
