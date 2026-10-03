@@ -42,6 +42,10 @@ import {
   type EventPromoter,
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
+import {
+  normalizePromoterCodeInput,
+  promoterCodeFieldError,
+} from "@dvnt/app/lib/events/promoter-code";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { toast } from "sonner";
 import { UserPicker } from "./ui/user-picker.web";
@@ -69,6 +73,8 @@ interface PromotersUIState {
   customerDiscountInput: string;
   promoterCommissionInput: string;
   codeInput: string;
+  /** Server refusal about the code (409 duplicate, 400 format), shown inline. */
+  codeError: string | null;
   editTarget: EventPromoter | null;
   editCustomerDiscountInput: string;
   editPromoterCommissionInput: string;
@@ -80,6 +86,7 @@ interface PromotersUIState {
   setCustomerDiscountInput: (v: string) => void;
   setPromoterCommissionInput: (v: string) => void;
   setCodeInput: (v: string) => void;
+  setCodeError: (v: string | null) => void;
   setEditTarget: (p: EventPromoter | null) => void;
   setEditCustomerDiscountInput: (v: string) => void;
   setEditPromoterCommissionInput: (v: string) => void;
@@ -94,6 +101,7 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   customerDiscountInput: "10",
   promoterCommissionInput: "10",
   codeInput: "",
+  codeError: null,
   editTarget: null,
   editCustomerDiscountInput: "",
   editPromoterCommissionInput: "",
@@ -104,7 +112,9 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   setSelectedUser: (u) => set({ selectedUser: u }),
   setCustomerDiscountInput: (v) => set({ customerDiscountInput: v }),
   setPromoterCommissionInput: (v) => set({ promoterCommissionInput: v }),
-  setCodeInput: (v) => set({ codeInput: v.toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 32) }),
+  // Case is kept as typed; the server matches codes case-insensitively.
+  setCodeInput: (v) => set({ codeInput: normalizePromoterCodeInput(v), codeError: null }),
+  setCodeError: (v) => set({ codeError: v }),
   setEditTarget: (p) =>
     set({
       editTarget: p,
@@ -123,6 +133,7 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
       customerDiscountInput: "10",
       promoterCommissionInput: "10",
       codeInput: "",
+      codeError: null,
     }),
 }));
 
@@ -265,6 +276,8 @@ export function EventPromotersScreen() {
   const customerDiscountInput = usePromotersUIStore((s) => s.customerDiscountInput);
   const promoterCommissionInput = usePromotersUIStore((s) => s.promoterCommissionInput);
   const codeInput = usePromotersUIStore((s) => s.codeInput);
+  const codeError = usePromotersUIStore((s) => s.codeError);
+  const setCodeError = usePromotersUIStore((s) => s.setCodeError);
   const editTarget = usePromotersUIStore((s) => s.editTarget);
   const editCustomerDiscountInput = usePromotersUIStore((s) => s.editCustomerDiscountInput);
   const editPromoterCommissionInput = usePromotersUIStore((s) => s.editPromoterCommissionInput);
@@ -322,6 +335,11 @@ export function EventPromotersScreen() {
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (err: any) => {
+      const fieldError = promoterCodeFieldError(err);
+      if (fieldError) {
+        setCodeError(fieldError);
+        return;
+      }
       showToast("error", "Couldn't add promoter", err?.message || "Try again.");
     },
   });
@@ -625,13 +643,24 @@ export function EventPromotersScreen() {
           <input
             value={codeInput}
             onChange={(e) => setCodeInput(e.target.value)}
-            placeholder="MIKEVIP"
+            placeholder="MikeVIP"
             disabled={addMutation.isPending}
-            className="mt-1.5 w-full rounded-xl bg-white/6 px-3 py-2.5 font-mono text-[15px] uppercase text-white outline-none placeholder:text-white/30 disabled:opacity-50"
+            aria-invalid={codeError ? true : undefined}
+            aria-describedby="promoter-code-hint"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            className={`mt-1.5 w-full rounded-xl bg-white/6 px-3 py-2.5 font-mono text-[15px] text-white outline-none placeholder:text-white/30 disabled:opacity-50 ${codeError ? "ring-1 ring-red-500" : ""}`}
           />
-          <p className="mt-1 text-[11px] text-white/35">
-            Leave blank to generate a unique event code.
-          </p>
+          {codeError ? (
+            <p id="promoter-code-hint" role="alert" className="mt-1 text-[11px] text-red-400">
+              {codeError}
+            </p>
+          ) : (
+            <p id="promoter-code-hint" className="mt-1 text-[11px] text-white/35">
+              Shown as you type it. Buyers can enter it in any case. Leave blank to generate one.
+            </p>
+          )}
         </label>
 
         <label className="mt-4 block">

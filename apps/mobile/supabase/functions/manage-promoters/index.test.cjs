@@ -55,7 +55,11 @@ function harness({
       const write = () => {
         if (done) return done;
         const rows = tables[table];
-        if (op === 'insert') {
+        if (op === 'insert' && table === 'event_promoters' && rows.some((row) =>
+          row.event_id === payload.event_id && String(row.code).toUpperCase() === String(payload.code).toUpperCase())) {
+          // uniq_event_promoters_event_code is ON (event_id, upper(code)).
+          done = { data: null, error: { code: '23505' } };
+        } else if (op === 'insert') {
           const saved = { id: `${table}-${rows.length + 1}`, created_at: 'now', ...payload };
           rows.push(saved);
           done = { data: saved, error: null };
@@ -90,7 +94,8 @@ function harness({
           return { data: Array.isArray(data) ? data[0] || null : data, error: null };
         },
         single: async () => {
-          const { data } = write();
+          const { data, error } = write();
+          if (error) return { data: null, error };
           const row = Array.isArray(data) ? data[0] : data;
           return row ? { data: row, error: null } : { data: null, error: { code: 'PGRST116' } };
         },
@@ -195,7 +200,8 @@ test('library-save still updates an existing entry on purpose', async () => {
   assert.equal(h.tables.promoter_library_entries.length, 1);
   const [entry] = h.tables.promoter_library_entries;
   assert.equal(entry.display_name, 'Micah New');
-  assert.equal(entry.preferred_code, 'NEWCODE');
+  // T06: saved as typed; matching is case-insensitive downstream.
+  assert.equal(entry.preferred_code, 'newcode');
   assert.equal(entry.customer_discount_bps, 500);
   assert.equal(entry.promoter_commission_bps, 700);
 });
@@ -254,4 +260,21 @@ test('no account email and name-only promoters send nothing', async () => {
   assert.equal(b.status, 200);
   assert.equal(b.body.inviteEmail, 'no_account');
   assert.equal(nameOnly.sent.length, 0);
+});
+
+// T06: a custom code keeps the host's case; uniqueness ignores case.
+test('a custom code is stored and returned as typed', async () => {
+  const h = harness({ users: [micah] });
+  const result = await h.call({ action: 'add', event_id: 1, username: 'micah', code: 'Tre151Share', ...rates });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.promoter.code, 'Tre151Share');
+  assert.equal(h.tables.event_promoters[0].code, 'Tre151Share');
+});
+
+test('a code differing only in case is a 409 conflict', async () => {
+  const h = harness({ users: [micah] });
+  await h.call({ action: 'add', event_id: 1, display_name: 'Tre', code: 'Tre151Share', ...rates });
+  const dupe = await h.call({ action: 'add', event_id: 1, display_name: 'Other', code: 'TRE151SHARE', ...rates });
+  assert.equal(dupe.status, 409);
+  assert.equal(dupe.body.error, 'That code is already in use for this event');
 });

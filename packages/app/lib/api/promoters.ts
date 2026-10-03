@@ -122,7 +122,9 @@ export const promotersApi = {
       ...(params.code ? { code: params.code } : {}),
       save_to_library: params.saveToLibrary ?? true,
     });
-    if (error) throw new Error(error.message);
+    // Keep the HTTP status so the form can put a 409 code conflict under the
+    // code field instead of in a toast.
+    if (error) throw Object.assign(new Error(error.message), { status: error.status });
     if (!data?.ok || !data.promoter) {
       throw new Error(data?.error || "Could not add promoter");
     }

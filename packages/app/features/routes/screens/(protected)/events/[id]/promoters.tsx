@@ -42,6 +42,10 @@ import {
   type EventPromoter,
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
+import {
+  normalizePromoterCodeInput,
+  promoterCodeFieldError,
+} from "@dvnt/app/lib/events/promoter-code";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
@@ -67,12 +71,17 @@ interface PromotersUIState {
   nameInput: string;
   customerDiscountInput: string;
   promoterCommissionInput: string;
+  codeInput: string;
+  /** Server refusal about the code (409 duplicate, 400 format), shown inline. */
+  codeError: string | null;
   toggleAdd: () => void;
   setAddMode: (m: "linked" | "external") => void;
   setUsernameInput: (v: string) => void;
   setNameInput: (v: string) => void;
   setCustomerDiscountInput: (v: string) => void;
   setPromoterCommissionInput: (v: string) => void;
+  setCodeInput: (v: string) => void;
+  setCodeError: (v: string | null) => void;
   resetAdd: () => void;
 }
 
@@ -83,12 +92,17 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
   nameInput: "",
   customerDiscountInput: "10",
   promoterCommissionInput: "10",
+  codeInput: "",
+  codeError: null,
   toggleAdd: () => set((s) => ({ addOpen: !s.addOpen })),
   setAddMode: (m) => set({ addMode: m }),
   setUsernameInput: (v) => set({ usernameInput: v }),
   setNameInput: (v) => set({ nameInput: v }),
   setCustomerDiscountInput: (v) => set({ customerDiscountInput: v }),
   setPromoterCommissionInput: (v) => set({ promoterCommissionInput: v }),
+  // Case is kept as typed; the server matches codes case-insensitively.
+  setCodeInput: (v) => set({ codeInput: normalizePromoterCodeInput(v), codeError: null }),
+  setCodeError: (v) => set({ codeError: v }),
   resetAdd: () =>
     set({
       addOpen: false,
@@ -97,6 +111,8 @@ const usePromotersUIStore = create<PromotersUIState>((set) => ({
       nameInput: "",
       customerDiscountInput: "10",
       promoterCommissionInput: "10",
+      codeInput: "",
+      codeError: null,
     }),
 }));
 
@@ -119,6 +135,10 @@ export default function EventPromotersScreen() {
   const setNameInput = usePromotersUIStore((s) => s.setNameInput);
   const setCustomerDiscountInput = usePromotersUIStore((s) => s.setCustomerDiscountInput);
   const setPromoterCommissionInput = usePromotersUIStore((s) => s.setPromoterCommissionInput);
+  const codeInput = usePromotersUIStore((s) => s.codeInput);
+  const codeError = usePromotersUIStore((s) => s.codeError);
+  const setCodeInput = usePromotersUIStore((s) => s.setCodeInput);
+  const setCodeError = usePromotersUIStore((s) => s.setCodeError);
   const resetAdd = usePromotersUIStore((s) => s.resetAdd);
 
   const promotersQuery = useQuery({
@@ -137,6 +157,7 @@ export default function EventPromotersScreen() {
       displayName?: string;
       customerDiscountBps: number;
       promoterCommissionBps: number;
+      code?: string;
     }) => promotersApi.add({ eventId, ...input }),
     onSuccess: (promoter) => {
       showToast(
@@ -148,6 +169,11 @@ export default function EventPromotersScreen() {
       invalidate();
     },
     onError: (err: any) => {
+      const fieldError = promoterCodeFieldError(err);
+      if (fieldError) {
+        setCodeError(fieldError);
+        return;
+      }
       showToast("error", "Couldn't add promoter", err?.message || "Try again.");
     },
   });
@@ -202,6 +228,7 @@ export default function EventPromotersScreen() {
         username: u,
         customerDiscountBps,
         promoterCommissionBps,
+        ...(codeInput.trim() ? { code: codeInput.trim() } : {}),
       });
     } else {
       const n = nameInput.trim();
@@ -213,6 +240,7 @@ export default function EventPromotersScreen() {
         displayName: n,
         customerDiscountBps,
         promoterCommissionBps,
+        ...(codeInput.trim() ? { code: codeInput.trim() } : {}),
       });
     }
   };
@@ -289,6 +317,32 @@ export default function EventPromotersScreen() {
                 style={styles.input}
               />
             </View>
+          )}
+
+          <Text style={styles.fieldLabel}>CUSTOM PROMOTER CODE (OPTIONAL)</Text>
+          <View style={[styles.inputRow, codeError ? styles.inputRowError : null]}>
+            <TextInput
+              value={codeInput}
+              onChangeText={setCodeInput}
+              placeholder="MikeVIP"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={32}
+              accessibilityLabel="Custom promoter code"
+              accessibilityHint="Leave blank to generate one"
+              style={[styles.input, styles.mono]}
+            />
+          </View>
+          {codeError ? (
+            <Text style={styles.fieldError} accessibilityRole="alert">
+              {codeError}
+            </Text>
+          ) : (
+            <Text style={styles.hint}>
+              Shown as you type it. Buyers can enter it in any case. Leave
+              blank to generate one.
+            </Text>
           )}
 
           <Text style={styles.fieldLabel}>
@@ -519,6 +573,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "transparent",
   },
   inputPrefix: {
     color: "rgba(255,255,255,0.5)",
@@ -542,6 +598,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     letterSpacing: 0.3,
+  },
+  inputRowError: {
+    borderColor: "#ef4444",
+  },
+  fieldError: {
+    color: "#f87171",
+    fontSize: 12,
+    marginTop: 6,
   },
   hint: {
     color: "rgba(255,255,255,0.35)",

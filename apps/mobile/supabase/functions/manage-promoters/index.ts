@@ -35,7 +35,10 @@ import { sendResendEmail, promoterInvite } from "../_shared/send-resend-email.ts
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-const CODE_RE = /^[A-Z0-9_-]{2,32}$/;
+// Case is kept as typed (T06: "Tre151Share" stays "Tre151Share"). Matching is
+// case-insensitive everywhere it matters: the unique index is
+// (event_id, upper(code)), checkout uses ilike, attribution compares UPPER().
+const CODE_RE = /^[A-Za-z0-9_-]{2,32}$/;
 const VALID_UPDATE_STATUSES = new Set(["active", "paused"]);
 
 function json(data: unknown, status = 200, req?: Request) {
@@ -338,7 +341,7 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
       const preferredCode =
         typeof body.preferred_code === "string" &&
         body.preferred_code.trim().length > 0
-          ? body.preferred_code.trim().toUpperCase()
+          ? body.preferred_code.trim()
           : null;
       if (preferredCode && !CODE_RE.test(preferredCode)) {
         return json(
@@ -616,7 +619,7 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
       // per-event uniq index for generated codes.
       const suppliedCode =
         typeof body.code === "string"
-          ? body.code.trim().toUpperCase()
+          ? body.code.trim()
           : "";
       if (suppliedCode && !CODE_RE.test(suppliedCode)) {
         return json(
