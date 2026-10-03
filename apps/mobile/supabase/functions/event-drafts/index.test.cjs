@@ -244,3 +244,58 @@ test("copy_promo_codes refuses events the caller does not host", async () => {
   assert.equal((await h.call({ action: 'copy_promo_codes', eventId: 77, sourceEventId: 99 })).status, 404);
   assert.equal(h.tables.promo_codes.length, 1);
 });
+
+// The copy's window moves with the event. Source starts 2026-11-01T01:00Z; the
+// new event starts exactly 30 days later, so every window bound moves 30 days.
+function shiftedEvents(codes) {
+  const tables = eventsWithCodes(codes);
+  tables.events = tables.events.map((e) => (e.id === 77 ? { ...e, start_date: '2999-12-01T01:00:00Z' } : e));
+  tables.events.find((e) => e.id === 42).start_date = '2999-11-01T01:00:00Z';
+  return tables;
+}
+const DAY = 24 * 60 * 60 * 1000;
+const iso = (s) => new Date(s).toISOString();
+
+test('copy_promo_codes shifts each window by the gap between the two event starts', async () => {
+  const h = tableHarness(shiftedEvents([
+    promo({ code: 'EARLY', valid_from: '2999-10-01T00:00:00Z', valid_until: '2999-10-25T00:00:00Z' }),
+  ]));
+  const got = await h.call({ action: 'copy_promo_codes', eventId: 77, sourceEventId: 42 });
+  assert.equal(got.status, 200);
+  const row = h.tables.promo_codes.find((r) => r.event_id === 77 && r.code === 'EARLY');
+  assert.equal(row.valid_from, iso(Date.parse('2999-10-01T00:00:00Z') + 30 * DAY));
+  assert.equal(row.valid_until, iso(Date.parse('2999-10-25T00:00:00Z') + 30 * DAY));
+});
+
+test('a code that expired with a past event is live again on the future copy', async () => {
+  const tables = eventsWithCodes([
+    promo({ code: 'EARLY', valid_from: '2020-01-01T00:00:00Z', valid_until: '2020-01-20T00:00:00Z' }),
+  ]);
+  tables.events.find((e) => e.id === 42).start_date = '2020-02-01T00:00:00Z';
+  const future = new Date(Date.now() + 20 * DAY);
+  tables.events.find((e) => e.id === 77).start_date = future.toISOString();
+  const h = tableHarness(tables);
+  const got = await h.call({ action: 'copy_promo_codes', eventId: 77, sourceEventId: 42 });
+  assert.deepEqual(got.body.copied, [{ code: 'EARLY', active: true }]);
+  const row = h.tables.promo_codes.find((r) => r.event_id === 77);
+  // Window ended 12 days before the old event, so it ends 12 days before the new one.
+  assert.equal(row.valid_until, iso(future.getTime() - 12 * DAY));
+});
+
+test('null window bounds stay null when the window shifts', async () => {
+  const h = tableHarness(shiftedEvents([promo({ code: 'OPEN' })]));
+  await h.call({ action: 'copy_promo_codes', eventId: 77, sourceEventId: 42 });
+  const row = h.tables.promo_codes.find((r) => r.event_id === 77 && r.code === 'OPEN');
+  assert.equal(row.valid_from, null);
+  assert.equal(row.valid_until, null);
+});
+
+test('a fully redeemed code stays off on the copy even after the shift', async () => {
+  const h = tableHarness(shiftedEvents([
+    promo({ code: 'GONE', max_uses: 5, uses_count: 5, valid_until: '2999-10-25T00:00:00Z' }),
+  ]));
+  const got = await h.call({ action: 'copy_promo_codes', eventId: 77, sourceEventId: 42 });
+  assert.deepEqual(got.body.copied, [{ code: 'GONE', active: false }]);
+  const row = h.tables.promo_codes.find((r) => r.event_id === 77 && r.code === 'GONE');
+  assert.ok(new Date(row.valid_until) <= new Date());
+});

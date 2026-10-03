@@ -96,6 +96,13 @@ function promoTemplate(p: PromoRow, tierNameById: Map<string, string>, now: Date
 const PROMO_COLUMNS =
   "code,ticket_type_id,discount_type,discount_value,max_uses,uses_count,valid_from,valid_until,max_per_user";
 
+/** Move an ISO timestamp by offsetMs; null and unparseable values pass through. */
+function shiftIso(value: string | null, offsetMs: number): string | null {
+  if (!value || !offsetMs) return value;
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? new Date(t + offsetMs).toISOString() : value;
+}
+
 /**
  * Copy the source event's standalone promo_codes onto the event published from
  * its duplicate. Server-side and idempotent: a code already on the target
@@ -105,13 +112,20 @@ const PROMO_COLUMNS =
  * and a fully redeemed code gets valid_until = now, since resetting its use
  * count would otherwise switch it back on. A code scoped to a ticket tier is
  * moved to the target tier with the same name, or skipped when there is none,
- * so a tier discount never widens to the whole event.
+ * so a tier discount never widens to the whole event. Each window moves by the
+ * gap between the two events' start dates, so an early-bird code that ended a
+ * week before the old event ends a week before the new one instead of being
+ * born expired. Null bounds stay null; without both start dates nothing moves.
  */
 async function copyPromoCodes(db: any, authId: string, eventId: number, sourceEventId: number) {
-  const { data: events } = await db.from("events").select("id,host_id").in("id", [eventId, sourceEventId]);
+  const { data: events } = await db.from("events").select("id,host_id,start_date").in("id", [eventId, sourceEventId]);
   const owned = (id: number) =>
     (events || []).some((e: any) => Number(e.id) === id && String(e.host_id) === authId);
   if (eventId === sourceEventId || !owned(eventId) || !owned(sourceEventId)) return null;
+  const startOf = (id: number) =>
+    Date.parse((events || []).find((e: any) => Number(e.id) === id)?.start_date ?? "");
+  const startGap = startOf(eventId) - startOf(sourceEventId);
+  const offsetMs = Number.isFinite(startGap) ? startGap : 0;
 
   const [{ data: sourceCodes, error: sourceError }, { data: targetCodes, error: targetError },
     { data: sourceTiers }, { data: targetTiers }] = await Promise.all([
@@ -147,8 +161,11 @@ async function copyPromoCodes(db: any, authId: string, eventId: number, sourceEv
       if (!ticketTypeId) { skipped.push({ code: p.code, reason: "ticket_tier_missing" }); continue; }
     }
 
-    const active = promoIsActive(p, now);
     const exhausted = Boolean(p.max_uses && Number(p.uses_count || 0) >= p.max_uses);
+    const validFrom = shiftIso(p.valid_from, offsetMs);
+    const validUntil = exhausted ? now.toISOString() : shiftIso(p.valid_until, offsetMs);
+    const active = !exhausted &&
+      promoIsActive({ ...p, valid_from: validFrom, valid_until: validUntil, uses_count: 0 }, now);
     const { error } = await db.from("promo_codes").insert({
       event_id: eventId,
       ticket_type_id: ticketTypeId,
@@ -157,8 +174,8 @@ async function copyPromoCodes(db: any, authId: string, eventId: number, sourceEv
       discount_value: p.discount_value,
       max_uses: p.max_uses,
       uses_count: 0,
-      valid_from: p.valid_from,
-      valid_until: exhausted ? now.toISOString() : p.valid_until,
+      valid_from: validFrom,
+      valid_until: validUntil,
       max_per_user: p.max_per_user,
       created_by: authId,
     });
