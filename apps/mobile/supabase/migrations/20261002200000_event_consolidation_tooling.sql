@@ -66,6 +66,10 @@ SELECT jsonb_build_object(
   'source_order_count', (SELECT count(*) FROM source_orders),
   'source_order_total_cents', (SELECT COALESCE(sum(total_cents),0) FROM source_orders WHERE status IN ('paid','refunded','partially_refunded')),
   'destination_order_count', (SELECT count(*) FROM destination_orders),
+  'source_order_addon_count', (SELECT count(*) FROM public.order_addons WHERE event_id = p_source_event_id),
+  'destination_order_addon_count', (SELECT count(*) FROM public.order_addons WHERE event_id = p_destination_event_id),
+  'source_checkin_count', (SELECT count(*) FROM public.checkins WHERE event_id = p_source_event_id),
+  'destination_checkin_count', (SELECT count(*) FROM public.checkins WHERE event_id = p_destination_event_id),
   'fingerprint', md5(COALESCE((
     SELECT string_agg(
       id::text || ':' || COALESCE(ticket_type_id::text,'') || ':' || status || ':' ||
@@ -126,6 +130,9 @@ DECLARE
   v_before jsonb;
   v_after jsonb;
   v_moved integer := 0;
+  v_moved_addons integer := 0;
+  v_moved_checkins integer := 0;
+  v_attendees integer;
   v_existing public.event_consolidation_operations%ROWTYPE;
 BEGIN
   IF p_source_event_id = p_destination_event_id THEN
@@ -258,6 +265,29 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'Destination tier capacity would be exceeded');
   END IF;
 
+  -- Event cap. Tier capacity alone let a move push the destination past
+  -- events.max_attendees: two tiers with room each could together exceed the
+  -- event. The count uses recompute_event_total_attendees's rule (distinct
+  -- user over active and scanned tickets plus going RSVPs), so it predicts
+  -- the total_attendees the trigger will write after the move. Both event
+  -- rows are already locked FOR UPDATE above. NULL max_attendees means no cap.
+  IF v_destination.max_attendees IS NOT NULL THEN
+    SELECT count(DISTINCT u) INTO v_attendees
+    FROM (
+      SELECT user_id::text AS u FROM public.tickets
+        WHERE event_id IN (p_source_event_id, p_destination_event_id)
+          AND status IN ('active', 'scanned')
+      UNION
+      SELECT user_id::text AS u FROM public.event_rsvps
+        WHERE event_id = p_destination_event_id AND status = 'going'
+    ) merged;
+    IF v_attendees > v_destination.max_attendees THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', format('Destination event is capped at %s attendees; consolidating would make it %s',
+                        v_destination.max_attendees, v_attendees));
+    END IF;
+  END IF;
+
   INSERT INTO public.event_consolidation_operations(
     operation_id, source_event_id, destination_event_id, actor_auth_id,
     preflight_hash, ticket_type_map, before_snapshot
@@ -286,6 +316,32 @@ BEGIN
     AND l.ticket_id = t.id;
   GET DIAGNOSTICS v_moved = ROW_COUNT;
 
+  -- Add-ons and door audit rows follow their ticket. Left behind, a moved
+  -- ticket's drink or merch QR fails redeem_addon at the new door as
+  -- wrong_event, and the source keeps check-in history for admissions it no
+  -- longer holds. Only rows already on the source move: a checkin recorded
+  -- at some other event's door (result wrong_event) stays where it was
+  -- scanned. Add-on scans can carry order_addon_id with no ticket_id, so
+  -- those follow the add-on.
+  UPDATE public.order_addons oa
+  SET event_id = p_destination_event_id
+  FROM public.event_consolidation_ticket_ledger l
+  WHERE l.operation_id = p_operation_id
+    AND oa.ticket_id = l.ticket_id
+    AND oa.event_id = p_source_event_id;
+  GET DIAGNOSTICS v_moved_addons = ROW_COUNT;
+
+  UPDATE public.checkins c
+  SET event_id = p_destination_event_id
+  WHERE c.event_id = p_source_event_id
+    AND (c.ticket_id IN (SELECT l.ticket_id FROM public.event_consolidation_ticket_ledger l
+                          WHERE l.operation_id = p_operation_id)
+         OR c.order_addon_id IN (SELECT oa.id FROM public.order_addons oa
+                                  JOIN public.event_consolidation_ticket_ledger l
+                                    ON l.ticket_id = oa.ticket_id
+                                 WHERE l.operation_id = p_operation_id));
+  GET DIAGNOSTICS v_moved_checkins = ROW_COUNT;
+
   -- Recompute sold inventory from authoritative active admission rows. Historical
   -- orders/payment/refund rows remain on their original event intentionally.
   UPDATE public.ticket_types tt
@@ -301,11 +357,49 @@ BEGIN
   -- recount both the old and the new event. Nothing to do here.
 
   v_after := public.event_consolidation_snapshot(p_source_event_id, p_destination_event_id);
+
+  -- Reconcile. Every count must have moved by exactly what this function
+  -- moved, and nothing else may have changed. Orders stay on their original
+  -- event by design, so their counts must not move at all. A mismatch means
+  -- something other than this function wrote to these events mid-move (a
+  -- trigger, a cascade, a path that skipped the locks), and the ledger no
+  -- longer describes what happened. RAISE so the whole move rolls back,
+  -- operation row included, and the same operation_id can be retried.
+  IF v_moved IS DISTINCT FROM (v_before->>'source_active_ticket_count')::integer
+     OR (v_after->>'source_active_ticket_count')::integer <> 0
+     OR (v_after->>'source_ticket_count')::integer
+        <> (v_before->>'source_ticket_count')::integer - v_moved
+     OR (v_after->>'destination_ticket_count')::integer
+        <> (v_before->>'destination_ticket_count')::integer + v_moved
+     OR (v_after->>'source_refunded_void_count')::integer
+        <> (v_before->>'source_refunded_void_count')::integer
+     OR (v_after->>'source_order_count')::integer
+        <> (v_before->>'source_order_count')::integer
+     OR (v_after->>'source_order_total_cents')::bigint
+        <> (v_before->>'source_order_total_cents')::bigint
+     OR (v_after->>'destination_order_count')::integer
+        <> (v_before->>'destination_order_count')::integer
+     OR (v_after->>'source_order_addon_count')::integer
+        <> (v_before->>'source_order_addon_count')::integer - v_moved_addons
+     OR (v_after->>'destination_order_addon_count')::integer
+        <> (v_before->>'destination_order_addon_count')::integer + v_moved_addons
+     OR (v_after->>'source_checkin_count')::integer
+        <> (v_before->>'source_checkin_count')::integer - v_moved_checkins
+     OR (v_after->>'destination_checkin_count')::integer
+        <> (v_before->>'destination_checkin_count')::integer + v_moved_checkins
+  THEN
+    RAISE EXCEPTION 'event_consolidation_snapshot_mismatch: moved % tickets, % add-ons, % check-ins; before=% after=%',
+      v_moved, v_moved_addons, v_moved_checkins, v_before, v_after
+      USING ERRCODE = 'P0001';
+  END IF;
+
   UPDATE public.event_consolidation_operations
   SET status='completed', moved_count=v_moved, after_snapshot=v_after, completed_at=now()
   WHERE operation_id=p_operation_id;
 
-  RETURN jsonb_build_object('ok', true, 'moved_count', v_moved, 'after', v_after);
+  RETURN jsonb_build_object('ok', true, 'moved_count', v_moved,
+    'moved_addon_count', v_moved_addons, 'moved_checkin_count', v_moved_checkins,
+    'after', v_after);
 END;
 $$;
 REVOKE ALL ON FUNCTION public.execute_event_consolidation(integer, integer, text, uuid, text, jsonb)

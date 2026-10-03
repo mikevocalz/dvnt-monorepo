@@ -18,6 +18,12 @@
  *   3. NULL tier: a tier-less RSVP ticket blocks the move instead of slipping
  *      past the map guard.
  *   4. total_attendees: moving a ticket between events recounts both.
+ *   5. max_attendees: a move that would put the destination over its event
+ *      cap (distinct attendees, as the trigger counts them) is refused; NULL
+ *      is unlimited.
+ *   6. order_addons and checkins of moved tickets move with them.
+ *   7. a before/after snapshot that does not reconcile raises, and the whole
+ *      move rolls back.
  *
  *   node scripts/verify-event-consolidation.mjs
  *   node scripts/verify-event-consolidation.mjs --allow-skip   # no Postgres
@@ -106,7 +112,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE public.events (
   id SERIAL PRIMARY KEY,
   host_id TEXT,
-  total_attendees INTEGER DEFAULT 0
+  total_attendees INTEGER DEFAULT 0,
+  max_attendees NUMERIC
 );
 CREATE TABLE public.event_co_organizers (
   event_id INTEGER NOT NULL REFERENCES public.events(id),
@@ -138,6 +145,28 @@ CREATE TABLE public.orders (
   total_cents INTEGER,
   stripe_payment_intent_id TEXT,
   stripe_checkout_session_id TEXT
+);
+-- order_addons and checkins as production has them (20260613145014,
+-- 20260313_catchup_all, 20260806100200, 20260806300000; checked live with
+-- information_schema). Live has no FK from checkins to tickets or events.
+CREATE TABLE public.order_addons (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id UUID REFERENCES public.orders(id) ON DELETE SET NULL,
+  event_id INTEGER NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
+  addon_id UUID NOT NULL,
+  ticket_id UUID REFERENCES public.tickets(id) ON DELETE SET NULL,
+  user_id TEXT,
+  guest_email TEXT,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'unfulfilled',
+  qr_token TEXT
+);
+CREATE TABLE public.checkins (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticket_id UUID,
+  event_id INTEGER NOT NULL,
+  result TEXT NOT NULL,
+  order_addon_id UUID REFERENCES public.order_addons(id) ON DELETE SET NULL
 );
 CREATE TABLE public.event_rsvps (
   id SERIAL PRIMARY KEY,
@@ -405,6 +434,143 @@ const attendees = async (eventId) =>
   const [{ sold }] = await sql(`SELECT quantity_sold AS sold FROM ticket_types WHERE id = $1`, [dstTier]);
   assert.equal(sold, 3);
   console.log("-. OK: total_attendees recounts both events when tickets change event");
+}
+
+// ── 5. events.max_attendees ──────────────────────────────────────────────────
+{
+  // Destination capped at 3. It already has u1 (ticket) and u2 (going RSVP).
+  // The source brings u1 again (counted once), u3 and u4: 4 distinct, over.
+  const src = await event("host");
+  const dst = await event("host");
+  await sql(`UPDATE events SET max_attendees = 3 WHERE id = $1`, [dst]);
+  const srcTier = await tier(src);
+  const dstTier = await tier(dst);
+  await ticket(dst, dstTier, "u1");
+  await sql(`INSERT INTO event_rsvps (event_id, user_id) VALUES ($1, 'u2')`, [dst]);
+  await ticket(src, srcTier, "u1");
+  await ticket(src, srcTier, "u3");
+  const u4 = await ticket(src, srcTier, "u4");
+
+  const capped = await consolidate(src, dst, "host", { [srcTier]: dstTier });
+  assert.equal(capped.ok, false, JSON.stringify(capped));
+  assert.match(capped.error, /capped at 3 attendees; consolidating would make it 4/);
+  assert.equal(await countOn(dst), 1, "a move over max_attendees still moved tickets");
+
+  // Drop u4 to void: u1, u2, u3 is exactly 3, which fits. The duplicate u1
+  // proves the count is distinct users, not tickets (tickets alone would be 4).
+  await sql(`UPDATE tickets SET status = 'void' WHERE id = $1`, [u4]);
+  const fits = await consolidate(src, dst, "host", { [srcTier]: dstTier });
+  assert.equal(fits.ok, true, JSON.stringify(fits));
+  assert.equal(await attendees(dst), 3);
+  console.log("-. OK: max_attendees refuses a move past the cap, counting distinct attendees");
+
+  // NULL max_attendees is unlimited, not zero.
+  const src2 = await event("host");
+  const open = await event("host");
+  const t2 = await tier(src2);
+  const openTier = await tier(open);
+  for (const u of ["p", "q", "r"]) await ticket(src2, t2, u);
+  const unlimited = await consolidate(src2, open, "host", { [t2]: openTier });
+  assert.equal(unlimited.ok, true, JSON.stringify(unlimited));
+  assert.equal(await countOn(open), 3);
+  console.log("-. OK: NULL max_attendees is unlimited");
+}
+
+// ── 6. add-ons and check-ins follow their tickets ────────────────────────────
+{
+  const src = await event("host");
+  const dst = await event("host");
+  const other = await event("host");
+  const srcTier = await tier(src);
+  const dstTier = await tier(dst);
+  const moving = await ticket(src, srcTier, "m");
+  const voided = await ticket(src, srcTier, "v");
+  await sql(`UPDATE tickets SET status = 'void' WHERE id = $1`, [voided]);
+
+  const addon = (
+    await sql(
+      `INSERT INTO order_addons (event_id, addon_id, ticket_id, user_id) VALUES ($1, gen_random_uuid(), $2, 'm') RETURNING id`,
+      [src, moving],
+    )
+  )[0].id;
+  // An add-on on the void ticket stays: that ticket does not move.
+  await sql(
+    `INSERT INTO order_addons (event_id, addon_id, ticket_id, user_id) VALUES ($1, gen_random_uuid(), $2, 'v')`,
+    [src, voided],
+  );
+  await sql(`INSERT INTO checkins (ticket_id, event_id, result) VALUES ($1, $2, 'valid')`, [moving, src]);
+  // An add-on scan with no ticket_id follows the add-on.
+  await sql(`INSERT INTO checkins (event_id, result, order_addon_id) VALUES ($1, 'valid', $2)`, [src, addon]);
+  // Scanned at another event's door: that audit row belongs to that door.
+  await sql(`INSERT INTO checkins (ticket_id, event_id, result) VALUES ($1, $2, 'wrong_event')`, [moving, other]);
+
+  const moved = await consolidate(src, dst, "host", { [srcTier]: dstTier });
+  assert.equal(moved.ok, true, JSON.stringify(moved));
+  assert.equal(moved.moved_addon_count, 1);
+  assert.equal(moved.moved_checkin_count, 2);
+  const addonsOn = async (e) =>
+    Number((await sql(`SELECT count(*) AS n FROM order_addons WHERE event_id = $1`, [e]))[0].n);
+  const checkinsOn = async (e) =>
+    Number((await sql(`SELECT count(*) AS n FROM checkins WHERE event_id = $1`, [e]))[0].n);
+  assert.equal(await addonsOn(dst), 1, "the moved ticket's add-on stayed on the source");
+  assert.equal(await addonsOn(src), 1, "the void ticket's add-on moved");
+  assert.equal(await checkinsOn(dst), 2, "check-ins for the moved ticket stayed on the source");
+  assert.equal(await checkinsOn(src), 0);
+  assert.equal(await checkinsOn(other), 1, "a wrong_event scan left the door it happened at");
+  console.log("-. OK: order_addons and checkins of moved tickets move with them");
+}
+
+// ── 7. snapshot mismatch rolls the whole move back ───────────────────────────
+{
+  // Stand-in for a writer the function does not control: whenever a ticket
+  // changes event, something also books an order on the destination. Orders
+  // must not move, so the after snapshot cannot reconcile.
+  await sql(`
+    CREATE FUNCTION harness_interfere() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      INSERT INTO orders (event_id, status, total_cents) VALUES (NEW.event_id, 'paid', 100);
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER harness_interfere AFTER UPDATE OF event_id ON tickets
+      FOR EACH ROW WHEN (current_setting('harness.interfere', true) = 'on')
+      EXECUTE FUNCTION harness_interfere();
+  `);
+  const src = await event("host");
+  const dst = await event("host");
+  const srcTier = await tier(src);
+  const dstTier = await tier(dst);
+  const t = await ticket(src, srcTier, "s");
+  await sql(`INSERT INTO order_addons (event_id, addon_id, ticket_id, user_id) VALUES ($1, gen_random_uuid(), $2, 's')`, [src, t]);
+  await sql(`INSERT INTO checkins (ticket_id, event_id, result) VALUES ($1, $2, 'valid')`, [t, src]);
+
+  const client = await pool.connect();
+  const opId = (await sql(`SELECT gen_random_uuid() AS id`))[0].id;
+  try {
+    await client.query(`SET harness.interfere = 'on'`);
+    await assert.rejects(
+      client.query(
+        `SELECT execute_event_consolidation($1,$2,'host',$3,$4,$5::jsonb) AS r`,
+        [src, dst, opId, await hash(src, dst), JSON.stringify({ [srcTier]: dstTier })],
+      ),
+      /event_consolidation_snapshot_mismatch/,
+    );
+    await client.query(`RESET harness.interfere`);
+  } finally {
+    client.release();
+  }
+  assert.equal(await countOn(dst), 0, "a mismatched move left tickets on the destination");
+  assert.equal(await countOn(src), 1);
+  const [{ n: addonsLeft }] = await sql(`SELECT count(*)::int AS n FROM order_addons WHERE event_id = $1`, [src]);
+  const [{ n: checkinsLeft }] = await sql(`SELECT count(*)::int AS n FROM checkins WHERE event_id = $1`, [src]);
+  assert.equal(addonsLeft, 1);
+  assert.equal(checkinsLeft, 1);
+  const [{ n: ordersOnDst }] = await sql(`SELECT count(*)::int AS n FROM orders WHERE event_id = $1`, [dst]);
+  assert.equal(ordersOnDst, 0, "the interfering write survived the rollback");
+  const [{ n: ops }] = await sql(`SELECT count(*)::int AS n FROM event_consolidation_operations WHERE operation_id = $1`, [opId]);
+  assert.equal(ops, 0, "a rolled-back move left an operation row, blocking a retry");
+  const [{ n: ledger }] = await sql(`SELECT count(*)::int AS n FROM event_consolidation_ticket_ledger WHERE operation_id = $1`, [opId]);
+  assert.equal(ledger, 0);
+  console.log("-. OK: a snapshot mismatch raises and nothing moves");
 }
 
 await pool.end();
