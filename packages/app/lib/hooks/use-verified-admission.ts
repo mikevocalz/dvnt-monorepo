@@ -12,7 +12,7 @@ import {
  * Verified-only admission, read from the server.
  *
  * `verified_admission_context()` returns the caller's own inputs — rollout
- * configuration, account age, verification record — taken from the JWT, never
+ * configuration and verification record — taken from the JWT, never
  * from a parameter. The verdict is drawn from those inputs so the banner says
  * what the edge functions will say. The edge functions remain the gate.
  */

@@ -147,7 +147,7 @@ Set `DVNT_BRAND_USER_ID` and `DVNT_BRAND_AUTH_ID` from that result in server-onl
 
 Two things to settle before enabling it. The account has `verified = false`, while the proposed DM copy describes itself as coming from the verified Deviant account — either verify the account or drop that claim. And the account was created on 12 September 2026, after most of the membership, so an unbounded first send would reach people who predate it; scope the first campaign's audience deliberately rather than letting it default to everyone.
 
-Verified-only admission stays off until `verified_admission_policy` is updated. Leave `cohort_created_after` NULL: checklist A03 puts existing unverified accounts in scope too. A NULL `grace_deadline` means no grace, so `enforce = true` refuses unverified accounts at once; set a future deadline only if members should get a prompt first. Rollback is `enforce = false`. The runbook, including a count of who would be refused, is in the footer of `20261003170000_verified_admission_whole_membership.sql`.
+Verified-only admission stays off until `verified_admission_policy` is updated. Every account is in scope once it is on, existing unverified accounts included (checklist A03). There is no account-age exemption: `cohort_created_after` is still a column but nothing reads it. A NULL `grace_deadline` means no grace, so `enforce = true` refuses unverified accounts at once; set a future deadline only if members should get a prompt first. Rollback is `enforce = false`. The runbook, including a count of who would be refused, is in the footer of `20261003170000_verified_admission_whole_membership.sql`.
 
 ### Known ceilings
 

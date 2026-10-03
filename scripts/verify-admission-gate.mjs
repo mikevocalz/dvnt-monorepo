@@ -386,6 +386,32 @@ $function$;
 REVOKE ALL ON FUNCTION public.verified_participation_allowed() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.verified_participation_allowed() TO anon, authenticated, service_role;
 
+CREATE FUNCTION public.verified_admission_context()
+ RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT jsonb_build_object(
+    'userId', sub.id,
+    'accountCreatedAt', (SELECT u."createdAt" FROM public."user" u WHERE u.id = sub.id),
+    'policy', jsonb_build_object(
+      'enforce', p.enforce,
+      'cohort_created_after', p.cohort_created_after,
+      'grace_deadline', p.grace_deadline
+    ),
+    'exempt', sub.id = ANY (p.allowlist),
+    'denied', sub.id = ANY (p.denylist),
+    'record', (
+      SELECT jsonb_build_object('user_id', v.user_id, 'status', v.status, 'date_of_birth', v.date_of_birth)
+      FROM public.identity_verifications v WHERE v.user_id = sub.id
+    )
+  )
+  FROM public.verified_admission_policy p,
+       LATERAL (SELECT NULLIF(current_setting('request.jwt.claims', true), '')::json ->> 'sub' AS id) sub
+  WHERE p.id = 1 AND sub.id IS NOT NULL;
+$function$;
+REVOKE ALL ON FUNCTION public.verified_admission_context() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.verified_admission_context() TO authenticated, service_role;
+
 -- ── Live policies (pg_policies) ──
 CREATE POLICY "Users are viewable by everyone" ON public.users FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON public.users FOR UPDATE USING (true);
@@ -585,6 +611,14 @@ async function withPolicy(db, patch, fn) {
        WHERE id = 1`,
     );
   }
+}
+
+async function withPolicyResult(db, patch, fn) {
+  let out;
+  await withPolicy(db, patch, async () => {
+    out = await fn();
+  });
+  return out;
 }
 
 const userIdOf = (who) => (who === "anon" ? null : PERSONAS[who].id);
@@ -826,33 +860,40 @@ const SECTIONS = [
     },
   },
   {
-    name: "enforce = true: a cohort date exempts older accounts only; the allowlist admits",
+    name: "enforce = true: the allowlist admits",
     changed: false,
     async fn(db) {
-      // A past grace deadline isolates the cohort and allowlist rules from the
-      // NULL-grace meaning, which is what the migration changes.
+      // A past grace deadline keeps this independent of what NULL grace means.
       const PAST = new Date(Date.now() - 86_400_000);
-      await withPolicy(db, { enforce: true, grace_deadline: PAST, cohort_created_after: new Date(Date.now() - 365 * 86_400_000) }, async () => {
-        expectOutcomes(
-          await each(["unverified", "old"], (who) => insertPost(db, who)),
-          { unverified: false, old: true },
-          "cohort one year back",
-        );
-      });
       await withPolicy(db, { enforce: true, grace_deadline: PAST, allowlist: ["u_unverified"] }, async () => {
         expectOutcomes(await each(["unverified", "old"], (who) => insertPost(db, who)), { unverified: true, old: false }, "allowlist");
       });
     },
   },
   {
-    name: "enforce = true: the denylist wins over the allowlist and the cohort, with no grace",
+    name: "enforce = true: a cohort_created_after left on the row exempts nobody",
+    changed: true,
+    async fn(db) {
+      const PAST = new Date(Date.now() - 86_400_000);
+      await withPolicy(db, { enforce: true, grace_deadline: PAST, cohort_created_after: new Date() }, async () => {
+        // Every member account predates this cohort date. Production today
+        // exempts all of them; after the migration only the adult is admitted.
+        expectOutcomes(
+          await each(MEMBERS, (who) => insertPost(db, who)),
+          { unverified: false, underage: false, old: false, adult: true },
+          "posts INSERT with cohort_created_after = now()",
+        );
+      });
+    },
+  },
+  {
+    name: "enforce = true: the denylist wins over the allowlist, with no grace",
     changed: true,
     async fn(db) {
       await withPolicy(db, {
         enforce: true,
         allowlist: ["u_old"],
         denylist: ["u_old"],
-        cohort_created_after: new Date(Date.now() - 365 * 86_400_000),
       }, async () => {
         expectOutcomes(await each(["old"], (who) => insertPost(db, who)), { old: false }, "denied old account");
       });
@@ -879,7 +920,7 @@ const SECTIONS = [
 // Post-migration only: what the new functions promise about themselves.
 const POST_ONLY = [
   {
-    name: "the SPICY helper functions follow the JWT, never a parameter, and keep their grants",
+    name: "the SPICY helpers and verified_admission_context() follow the JWT and keep their grants; the context no longer carries a cohort",
     async fn(db) {
       const adult = await as(db, "adult", `SELECT public.viewer_is_verified_adult() AS a, public.viewer_user_id() AS u`);
       assert.deepEqual(adult.rows?.[0], { a: true, u: PERSONAS.adult.id }, adult.error);
@@ -889,6 +930,15 @@ const POST_ONLY = [
       assert.deepEqual(anon.rows?.[0], { a: false, u: null }, anon.error);
       const svc = await as(db, "service", `SELECT public.viewer_is_verified_adult() AS a`);
       assert.equal(svc.rows?.[0]?.a, true, svc.error);
+      const ctx = await withPolicyResult(db, { enforce: true, cohort_created_after: new Date() }, () =>
+        as(db, "old", `SELECT public.verified_admission_context() AS c`));
+      assert.ok(ctx.ok, ctx.error);
+      const c = ctx.rows[0].c;
+      assert.equal(c.userId, PERSONAS.old.auth);
+      assert.deepEqual(Object.keys(c).sort(), ["denied", "exempt", "policy", "record", "userId"]);
+      assert.deepEqual(Object.keys(c.policy).sort(), ["enforce", "grace_deadline"]);
+      const anonCtx = await as(db, "anon", `SELECT public.verified_admission_context() AS c`);
+      assert.ok(!anonCtx.ok, "anon must not execute verified_admission_context()");
       const [dup] = (await db.query(`
         SELECT count(*)::int AS n FROM pg_policies
         WHERE schemaname = 'public' AND policyname LIKE 'spicy_%'`)).rows;

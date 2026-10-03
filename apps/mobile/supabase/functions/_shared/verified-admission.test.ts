@@ -27,7 +27,6 @@ function fakeDb(results: Record<string, Result>) {
 /** Enforcing, with a grace window that has already closed. */
 const ENFORCING_POLICY = {
   enforce: true,
-  cohort_created_after: null,
   grace_deadline: "2026-01-01T00:00:00Z",
   allowlist: [],
   denylist: [],
@@ -99,7 +98,12 @@ Deno.test("with no deadline set, an unverified account is blocked: grace is off 
 Deno.test("an existing unverified account is blocked too, not grandfathered", async () => {
   const verdict = await resolveVerifiedAdmission(
     fakeDb({
-      verified_admission_policy: { data: NO_GRACE_POLICY, error: null },
+      // A cohort date left on the row from an earlier rollout plan exempts
+      // nobody: the gate no longer reads it.
+      verified_admission_policy: {
+        data: { ...NO_GRACE_POLICY, cohort_created_after: "2026-09-10T00:00:00Z" },
+        error: null,
+      },
       identity_verifications: { data: null, error: null },
       user: { data: EXISTING_ACCOUNT, error: null },
     }),

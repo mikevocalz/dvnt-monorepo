@@ -1,7 +1,7 @@
 // Checklist section 1 acceptance, run against the edge functions themselves.
 //
 // Four personas, with verified_admission_policy enforced (enforce = true, no
-// cohort, no grace). The gate modules are the real ones (verified-admission,
+// grace). The gate modules are the real ones (verified-admission,
 // verification-state, age-policy, spicy-access); only the session lookup,
 // the database and third-party SDKs are stand-ins.
 //
@@ -33,7 +33,7 @@ const PERSONAS = {
     record: { status: 'passed', date_of_birth: '1990-05-04' } },
 };
 const SPICY_AUTHOR = 9;
-const ENFORCED = { id: 1, enforce: true, cohort_created_after: null, grace_deadline: null, allowlist: [], denylist: [] };
+const ENFORCED = { id: 1, enforce: true, grace_deadline: null, allowlist: [], denylist: [] };
 
 function seed(policy = ENFORCED) {
   const users = Object.values(PERSONAS).map(p => ({ id: p.userId, auth_id: p.authId, username: p.authId }));

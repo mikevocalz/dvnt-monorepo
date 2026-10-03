@@ -50,7 +50,7 @@ Ticket purchase, holds, RSVPs, the ticket wallet and likes (posts, comments, eve
 Client UI is explanatory only; edge functions/RLS/API authorization are the enforcement layer.
 
 ### 5. Existing-member rollout
-- Existing unverified accounts are in scope (checklist A03), including returning users and direct links. Keep `cohort_created_after` NULL.
+- Existing unverified accounts are in scope (checklist A03), including returning users and direct links. There is no cohort or account-age exemption; the only exemption is the operator allowlist, and the denylist overrides it. `cohort_created_after` remains as an unused column because already-deployed edge functions select it by name.
 - Grace is opt-in: a NULL `grace_deadline` refuses as soon as `enforce = true`; a future deadline shows a prompt until then.
 - Add explicit rollout telemetry: eligible, prompted, pending, approved, blocked.
 - Provide a safe admin rollback/kill switch that disables enforcement without destroying verification records.

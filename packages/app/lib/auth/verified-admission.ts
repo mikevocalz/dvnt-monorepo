@@ -12,13 +12,11 @@ import { calculateAge, validateDateOfBirth } from "../utils/age-verification.ts"
 
 export interface AdmissionPolicy {
   enforce?: boolean | null;
-  cohort_created_after?: string | null;
   grace_deadline?: string | null;
 }
 
 export interface AdmissionContext {
   userId: string | null | undefined;
-  accountCreatedAt?: string | null;
   policy?: AdmissionPolicy | null;
   record?: { user_id?: string | null; status?: string | null; date_of_birth?: unknown } | null;
   exempt?: boolean;
@@ -28,7 +26,6 @@ export interface AdmissionContext {
 
 export type AdmissionReason =
   | "not_enforced"
-  | "out_of_cohort"
   | "exempt"
   | "verified"
   | "unauthenticated"
@@ -56,14 +53,6 @@ function formatDeadline(deadline: string | null): string | null {
     year: "numeric",
     timeZone: "UTC",
   });
-}
-
-function inCohort(createdAt: string | null | undefined, after: string | null | undefined): boolean {
-  if (!after) return true;
-  const start = Date.parse(after);
-  if (!Number.isFinite(start)) return true;
-  const created = Date.parse(createdAt ?? "");
-  return Number.isFinite(created) ? created >= start : true;
 }
 
 function blockedMessage(reason: AdmissionReason): string {
@@ -110,9 +99,6 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
 
   if (!policy?.enforce) return allowed("not_enforced");
   if (input.exempt && !input.denied) return allowed("exempt");
-  if (!input.denied && !inCohort(input.accountCreatedAt, policy.cohort_created_after)) {
-    return allowed("out_of_cohort");
-  }
   if (status === "passed" && adultDocument) return allowed("verified");
 
   const reason: AdmissionReason = status === null || status === "none"

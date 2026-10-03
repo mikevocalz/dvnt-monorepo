@@ -12,13 +12,13 @@
  */
 import { checkAdultBirthDate } from "./age-policy.ts";
 
+/**
+ * Every account is in scope once `enforce` is on (checklist A03). There is no
+ * account-age exemption: the `cohort_created_after` column still exists in
+ * verified_admission_policy but nothing reads it.
+ */
 export interface AdmissionPolicy {
   enforce?: boolean | null;
-  /**
-   * Accounts created before this instant stay out of scope. Null = whole
-   * membership, which is what checklist A03 requires; leave it null.
-   */
-  cohort_created_after?: string | null;
   /** Prompt-only until this instant, refused after it. Null = no grace: refused as soon as enforce is on. */
   grace_deadline?: string | null;
 }
@@ -31,21 +31,18 @@ export interface AdmissionRecord {
 
 export interface AdmissionContext {
   userId: string | null | undefined;
-  /** Better Auth `user.createdAt`. Unknown means in scope. */
-  accountCreatedAt?: string | null;
   policy?: AdmissionPolicy | null;
   /** The account's own identity_verifications row. A row carrying a different user_id is discarded. */
   record?: AdmissionRecord | null;
   /** Operator allowlist hit: admitted while enforcement runs. */
   exempt?: boolean;
-  /** Operator denylist hit: in scope whatever the cohort date says. */
+  /** Operator denylist hit: refused even when allowlisted. */
   denied?: boolean;
   now?: Date;
 }
 
 export type AdmissionReason =
   | "not_enforced"
-  | "out_of_cohort"
   | "exempt"
   | "verified"
   | "unauthenticated"
@@ -78,16 +75,6 @@ function formatDeadline(deadline: string | null): string | null {
     year: "numeric",
     timeZone: "UTC",
   });
-}
-
-function inCohort(createdAt: string | null | undefined, after: string | null | undefined): boolean {
-  if (!after) return true;
-  const start = Date.parse(after);
-  // An unusable cohort date or an unknown account age puts the account in
-  // scope: the safe direction is a verification prompt, not a silent pass.
-  if (!Number.isFinite(start)) return true;
-  const created = Date.parse(createdAt ?? "");
-  return Number.isFinite(created) ? created >= start : true;
 }
 
 function blockedMessage(reason: AdmissionReason): string {
@@ -133,9 +120,6 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
 
   if (!policy?.enforce) return allowed("not_enforced");
   if (input.exempt && !input.denied) return allowed("exempt");
-  if (!input.denied && !inCohort(input.accountCreatedAt, policy.cohort_created_after)) {
-    return allowed("out_of_cohort");
-  }
   if (status === "passed" && documentAge.allowed) return allowed("verified");
 
   const reason: AdmissionReason = status === null || status === "none"
@@ -180,13 +164,12 @@ export async function resolveVerifiedAdmission(
   now = new Date(),
 ): Promise<AdmissionVerdict> {
   if (!userId) return decideVerifiedAdmission({ userId, now });
-  const [policyResult, recordResult, accountResult] = await Promise.all([
+  const [policyResult, recordResult] = await Promise.all([
     db.from("verified_admission_policy")
-      .select("enforce, cohort_created_after, grace_deadline, allowlist, denylist")
+      .select("enforce, grace_deadline, allowlist, denylist")
       .eq("id", 1).maybeSingle(),
     db.from("identity_verifications")
       .select("user_id, status, date_of_birth").eq("user_id", userId).maybeSingle(),
-    db.from("user").select("createdAt").eq("id", userId).maybeSingle(),
   ]);
 
   // An unreadable policy row refuses rather than falling back to enforcement
@@ -210,7 +193,6 @@ export async function resolveVerifiedAdmission(
 
   return decideVerifiedAdmission({
     userId,
-    accountCreatedAt: accountResult?.data?.createdAt ?? null,
     policy,
     // A failed read is no record, so an enforced account is refused rather than admitted.
     record: recordResult?.error ? null : recordResult?.data ?? null,

@@ -17,6 +17,13 @@
 --   1. A NULL grace_deadline now means no grace. With enforce = true and no
 --      deadline, unverified accounts are refused at once. Matches
 --      decideVerifiedAdmission in functions/_shared/verified-admission.ts.
+--      The cohort_created_after lever is gone (product decision 2026-10-03):
+--      neither verified_participation_allowed() nor
+--      verified_admission_context() reads it, so no account is exempt by
+--      age. The column stays, documented as unused: the edge functions
+--      deployed today select it by name, and dropping it before they are
+--      redeployed would make their policy read fail, which refuses every
+--      participation write even with enforce = false.
 --   2. Ticket purchase, ticket holds, RSVPs and likes leave the participation
 --      boundary (checklist A01/A03). Buying or holding a ticket never needs
 --      verification; using it for an adult surface (Lynk rooms) still does.
@@ -47,12 +54,6 @@ SET search_path = public, pg_temp AS $$
           WHEN NOT p.enforce THEN true
           WHEN sub.id IS NULL THEN false
           WHEN sub.id = ANY (p.allowlist) AND NOT sub.id = ANY (p.denylist) THEN true
-          WHEN NOT sub.id = ANY (p.denylist)
-            AND p.cohort_created_after IS NOT NULL
-            AND EXISTS (
-              SELECT 1 FROM public."user" u
-              WHERE u.id = sub.id AND u."createdAt" < p.cohort_created_after
-            ) THEN true
           -- Grace is opt-in: only a deadline still in the future admits an
           -- unverified account. NULL means refuse.
           ELSE public.is_verified_self()
@@ -67,14 +68,41 @@ $$;
 REVOKE ALL ON FUNCTION public.verified_participation_allowed() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.verified_participation_allowed() TO anon, authenticated, service_role;
 
+-- The client's banner reads its inputs here. Same shape as before minus
+-- accountCreatedAt and policy.cohort_created_after; an app build that still
+-- looks for them reads undefined, which its own mirror treats as in scope.
+CREATE OR REPLACE FUNCTION public.verified_admission_context()
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp AS $$
+  SELECT jsonb_build_object(
+    'userId', sub.id,
+    'policy', jsonb_build_object(
+      'enforce', p.enforce,
+      'grace_deadline', p.grace_deadline
+    ),
+    'exempt', sub.id = ANY (p.allowlist),
+    'denied', sub.id = ANY (p.denylist),
+    'record', (
+      SELECT jsonb_build_object('user_id', v.user_id, 'status', v.status, 'date_of_birth', v.date_of_birth)
+      FROM public.identity_verifications v WHERE v.user_id = sub.id
+    )
+  )
+  FROM public.verified_admission_policy p,
+       LATERAL (SELECT NULLIF(current_setting('request.jwt.claims', true), '')::json ->> 'sub' AS id) sub
+  WHERE p.id = 1 AND sub.id IS NOT NULL;
+$$;
+REVOKE ALL ON FUNCTION public.verified_admission_context() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.verified_admission_context() TO authenticated, service_role;
+
 COMMENT ON TABLE public.verified_admission_policy IS
   'Single-row rollout configuration for verified-only participation. enforce=false is inert. '
-  'With enforce=true: cohort_created_after NULL = every account in scope (checklist A03, keep it NULL); '
+  'With enforce=true every account is in scope (checklist A03); '
   'grace_deadline NULL = no grace, refused at once; a future grace_deadline = prompt until then.';
 COMMENT ON COLUMN public.verified_admission_policy.grace_deadline IS
   'Prompt-only until this instant, refused after it. NULL = no grace.';
 COMMENT ON COLUMN public.verified_admission_policy.cohort_created_after IS
-  'Accounts created before this instant are exempt. NULL = whole membership. Checklist A03 requires NULL.';
+  'UNUSED since 20261003170000. Nothing reads it; setting it exempts nobody. '
+  'Kept only because edge functions deployed before that migration select it by name.';
 
 -- ── 2. Tickets, holds, RSVPs and likes are not participation ─────────────
 -- likes covers post and comment likes (likes.post_id / likes.comment_id);
@@ -181,7 +209,7 @@ NOTIFY pgrst, 'reload schema';
 -- ticket-checkout and cart-checkout no longer consult the gate and
 -- add-comment, create-story and update-post do.
 --
--- Who enforcement would refuse (every account, no cohort):
+-- Who enforcement would refuse (every account):
 --   SELECT count(*) FROM public."user" u
 --   WHERE NOT EXISTS (
 --     SELECT 1 FROM public.identity_verifications v
@@ -189,9 +217,9 @@ NOTIFY pgrst, 'reload schema';
 --       AND v.date_of_birth <= (CURRENT_DATE - INTERVAL '18 years')::date
 --   );
 --
--- Switch on, no cohort, no grace:
+-- Switch on, no grace:
 --   UPDATE public.verified_admission_policy
---   SET enforce = true, cohort_created_after = NULL, grace_deadline = NULL, updated_at = now()
+--   SET enforce = true, grace_deadline = NULL, updated_at = now()
 --   WHERE id = 1;
 --
 -- Optional grace window instead (prompt until the date, refuse after):
