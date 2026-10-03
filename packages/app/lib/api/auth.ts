@@ -140,7 +140,6 @@ export const auth = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -186,6 +185,15 @@ export const auth = {
         return null;
       }
 
+      // gender is members-only (20261003150500): anon gets 42501. It is read
+      // on its own so a call that goes out before the JWT bridge has attached
+      // still returns the rest of the member's profile.
+      const { data: identity } = await supabase
+        .from(DB.users.table)
+        .select(DB.users.gender)
+        .eq(DB.users.id, data[DB.users.id])
+        .maybeSingle();
+
       return {
         id: String(data[DB.users.id]),
         authId: data[DB.users.authId] || userId,
@@ -201,7 +209,7 @@ export const auth = {
         postsCount: Number(data[DB.users.postsCount]) || 0,
         followersCount: Number(data[DB.users.followersCount]) || 0,
         followingCount: Number(data[DB.users.followingCount]) || 0,
-        gender: data[DB.users.gender] || "",
+        gender: (identity as any)?.[DB.users.gender] || "",
         pronouns: data[DB.users.pronouns] || "",
         hashtags: [],
       };

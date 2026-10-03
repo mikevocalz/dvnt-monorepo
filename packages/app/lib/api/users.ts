@@ -163,6 +163,9 @@ export const usersApi = {
 
       const currentUserId = await getViewerIdForRelationshipChecks();
 
+      // No gender, sexuality or event_audience: this serves the signed-out
+      // public profile too, and anon cannot read them (20261003150500), so
+      // selecting one fails the whole request. No profile screen shows them.
       // Fire user fetch + follow check in parallel (no waterfall)
       const userFetch = supabase
         .from(DB.users.table)
@@ -178,7 +181,6 @@ export const usersApi = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -224,7 +226,6 @@ export const usersApi = {
           website: data[DB.users.website] || "",
           links: normalizeUserLinks(data[DB.users.links]),
           pronouns: data[DB.users.pronouns] || "",
-          gender: data[DB.users.gender] || "",
           avatar: dbAvatar || betterAuthUser?.image || "",
           verified: data[DB.users.verified] || false,
           followersCount:
@@ -299,7 +300,6 @@ export const usersApi = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -348,7 +348,6 @@ export const usersApi = {
         website: data[DB.users.website] || "",
         links: normalizeUserLinks(data[DB.users.links]),
         pronouns: data[DB.users.pronouns] || "",
-        gender: data[DB.users.gender] || "",
         avatar: dbAvatar || betterAuthUser?.image || "",
         verified: data[DB.users.verified] || false,
         followersCount:
@@ -396,7 +395,6 @@ export const usersApi = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -443,7 +441,6 @@ export const usersApi = {
           website: profile[DB.users.website] || "",
           links: normalizeUserLinks(profile[DB.users.links]),
           pronouns: profile[DB.users.pronouns] || "",
-          gender: profile[DB.users.gender] || "",
           avatar: dbAvatar || betterAuthUser?.image || "",
           verified: profile[DB.users.verified] || false,
           followersCount:
