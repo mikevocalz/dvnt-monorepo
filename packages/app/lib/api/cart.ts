@@ -42,6 +42,8 @@ export const cartApi = {
      * eventId); never affects pricing.
      */
     promoterCode?: string | null,
+    /** Normalized phone, sent once the server has asked for one. */
+    phone?: string,
   ): Promise<CartCheckoutResponse> {
     // Fallback: when the caller doesn't pass a code, resolve the
     // pending ?ref= for the ACTIVE cart's event from the persisted
@@ -57,6 +59,7 @@ export const cartApi = {
       cartId,
       ...(promoCode?.trim() ? { promoCode: promoCode.trim() } : {}),
       ...(resolvedPromoterCode ? { promoterCode: resolvedPromoterCode } : {}),
+      ...(phone ? { phone } : {}),
     });
     if (error) throw new Error(error.message);
     return parseDTO(CartCheckoutResponseDTO, data);

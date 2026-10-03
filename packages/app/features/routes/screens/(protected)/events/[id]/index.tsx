@@ -95,6 +95,7 @@ import { useSaleNotifyStore } from "@dvnt/app/lib/stores/sale-notify-store";
 import { SafeCalendar as Calendar } from "@dvnt/app/lib/safe-native-modules";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
+import { CheckoutPhoneField } from "@dvnt/app/features/events/checkout-phone-field";
 import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 import { usePromotionStore } from "@dvnt/app/lib/stores/promotion-store";
 import { PromoteEventSheet } from "@dvnt/app/features/events";
@@ -2172,6 +2173,9 @@ function EventDetailScreenContent() {
                   ) : null}
                 </View>
               )}
+
+              {/* Signed-in buyer with no phone on file: shown after checkout asks. */}
+              {selectedTier && !hasTicket ? <CheckoutPhoneField /> : null}
 
               {/* Quantity selector — shown for all real DB tiers (free and paid).
                   Excluded for the synthetic "free" id which uses the legacy RSVP path. */}

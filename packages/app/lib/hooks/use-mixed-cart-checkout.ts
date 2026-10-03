@@ -8,6 +8,8 @@ import { cartApi } from "@dvnt/app/lib/api/cart";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
+import { useCheckoutPhoneStore } from "@dvnt/app/lib/stores/checkout-phone-store";
+import { isPhoneRequiredError } from "@dvnt/app/lib/checkout/member-phone";
 
 interface MixedCartCheckoutResult {
   success: boolean;
@@ -42,6 +44,13 @@ export function useMixedCartCheckout() {
       return { success: false, error: "Cart is empty" };
     }
 
+    // A buyer the server already asked for a phone must have typed one.
+    const phone = useCheckoutPhoneStore.getState().forRequest();
+    if (!phone.ok) {
+      toast.error(phone.message);
+      return { success: false, error: phone.message };
+    }
+
     setCheckoutLoading(true);
     AppTrace.trace("CART", "mixed_cart_checkout_started", {
       cartId: cart.cartId,
@@ -63,11 +72,21 @@ export function useMixedCartCheckout() {
 
       // Promoter attribution (WS-4): pending ?ref= for this cart's
       // event, MMKV-persisted across the PaymentSheet round-trip.
-      const payment = await cartApi.checkout(
-        cart.cartId,
-        undefined,
-        getPendingPromoterRef(cart.eventId),
-      );
+      let payment;
+      try {
+        payment = await cartApi.checkout(
+          cart.cartId,
+          undefined,
+          getPendingPromoterRef(cart.eventId),
+          phone.phone,
+        );
+      } catch (err) {
+        // No phone on file: show the field; the next tap sends it.
+        if (isPhoneRequiredError(err)) useCheckoutPhoneStore.getState().markNeeded();
+        throw err;
+      }
+      // Past the phone check: the number is on file now.
+      useCheckoutPhoneStore.getState().reset();
       setPaymentIntent(payment.paymentIntentId);
       AppTrace.trace("CART", "mixed_cart_payment_intent_ready", {
         cartId: cart.cartId,

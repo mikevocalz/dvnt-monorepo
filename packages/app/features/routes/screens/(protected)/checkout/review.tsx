@@ -19,6 +19,7 @@ import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
 import type { CartLineItem, LineItemCategory } from "@dvnt/app/lib/contracts/dto";
 import { calculateCartSubtotalCents } from "@dvnt/app/lib/contracts/invariants";
 import { useMixedCartCheckout } from "@dvnt/app/lib/hooks/use-mixed-cart-checkout";
+import { CheckoutPhoneField } from "@dvnt/app/features/events/checkout-phone-field";
 import { computeFees, formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
@@ -502,6 +503,9 @@ export default function CartReviewScreen() {
             {formatCents(fees.customer_charge_amount)}
           </Text>
         </View>
+
+        {/* Signed-in buyer with no phone on file: shown after checkout asks. */}
+        <CheckoutPhoneField />
 
         <Pressable
           onPress={handleContinue}

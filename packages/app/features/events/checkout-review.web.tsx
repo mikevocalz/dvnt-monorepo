@@ -54,6 +54,9 @@ import type {
 import { calculateCartSubtotalCents } from "@dvnt/app/lib/contracts/invariants";
 import { computeFees, formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { cartApi } from "@dvnt/app/lib/api/cart";
+import { useCheckoutPhoneStore } from "@dvnt/app/lib/stores/checkout-phone-store";
+import { isPhoneRequiredError } from "@dvnt/app/lib/checkout/member-phone";
+import { CheckoutPhoneField } from "./checkout-phone-field.web";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import {
   computePromoDiscountCents,
@@ -645,6 +648,12 @@ export function CheckoutReviewScreen() {
       showToast("error", "Your cart is empty");
       return;
     }
+    // A buyer the server already asked for a phone must have typed one.
+    const phone = useCheckoutPhoneStore.getState().forRequest();
+    if (!phone.ok) {
+      showToast("error", phone.message);
+      return;
+    }
 
     setCheckoutLoading(true);
     AppTrace.trace("CART", "cart_review_continue_pressed", {
@@ -661,10 +670,21 @@ export function CheckoutReviewScreen() {
       }
       setHold(holdExpiresAt);
 
-      const payment = await cartApi.checkout(
-        cart.cartId,
-        appliedPromo ? appliedPromo.code : undefined,
-      );
+      let payment;
+      try {
+        payment = await cartApi.checkout(
+          cart.cartId,
+          appliedPromo ? appliedPromo.code : undefined,
+          undefined,
+          phone.phone,
+        );
+      } catch (err) {
+        // No phone on file: show the field; the next press sends it.
+        if (isPhoneRequiredError(err)) useCheckoutPhoneStore.getState().markNeeded();
+        throw err;
+      }
+      // Past the phone check: the number is on file now.
+      useCheckoutPhoneStore.getState().reset();
       setPaymentIntent(payment.paymentIntentId);
       AppTrace.trace("CART", "mixed_cart_payment_intent_ready", {
         cartId: cart.cartId,
@@ -898,6 +918,10 @@ export function CheckoutReviewScreen() {
                   />
                 </Elements>
               ) : (
+                <>
+                <div className="mt-4">
+                  <CheckoutPhoneField />
+                </div>
                 <button
                   type="button"
                   onClick={handlePlaceOrder}
@@ -909,6 +933,7 @@ export function CheckoutReviewScreen() {
                     {isLoading ? "Processing…" : "Continue to payment"}
                   </span>
                 </button>
+                </>
               )}
 
               {/* Terms */}

@@ -397,6 +397,8 @@ export const ticketsApi = {
     userId?: string; // deprecated — server derives from session
     promoCode?: string;
     idempotencyKey?: string;
+    /** Normalized phone, sent once the server has asked for one. */
+    phone?: string;
   }): Promise<{
     url?: string;
     tickets?: any[];
@@ -421,6 +423,7 @@ export const ticketsApi = {
             ...(params.idempotencyKey
               ? { idempotency_key: params.idempotencyKey }
               : {}),
+            ...(params.phone ? { phone: params.phone } : {}),
           },
           headers: { Authorization: `Bearer ${token}` },
         },
