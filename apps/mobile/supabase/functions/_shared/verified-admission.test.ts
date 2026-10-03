@@ -1,10 +1,9 @@
 // resolveVerifiedAdmission's behaviour when the policy row cannot be read.
 //
 // This gate used to fall back to "enforcement off" on a failed policy read,
-// which was inert while `enforce` was false everywhere. Once
-// 20261001190000_new_signup_verified_admission.sql sets `enforce = true`, that
-// fallback admits every unverified in-scope account. These cases pin the
-// direction so the lenient version cannot come back unnoticed.
+// which was inert while `enforce` was false everywhere. Once an operator sets
+// `enforce = true`, that fallback would admit every unverified account. These
+// cases pin the direction so the lenient version cannot come back unnoticed.
 
 import { assertEquals } from "jsr:@std/assert@1";
 import { resolveVerifiedAdmission } from "./verified-admission.ts";
@@ -25,21 +24,24 @@ function fakeDb(results: Record<string, Result>) {
   };
 }
 
-/** Enforcing, with the grace window already over. This is the state the
- *  migration produces: it sets `grace_deadline = now()`, so by the time any
- *  request arrives the deadline is in the past. */
+/** Enforcing, with a grace window that has already closed. */
 const ENFORCING_POLICY = {
   enforce: true,
-  cohort_created_after: "2020-01-01T00:00:00Z",
+  cohort_created_after: null,
   grace_deadline: "2026-01-01T00:00:00Z",
   allowlist: [],
   denylist: [],
 };
 
-/** Enforcing with no deadline set. An unverified in-scope account gets `grace`
- *  here rather than `blocked`, which is deliberate: the operator has turned
- *  enforcement on but has not said when the window closes. */
-const OPEN_ENDED_GRACE_POLICY = { ...ENFORCING_POLICY, grace_deadline: null };
+/** Enforcing with no deadline set: the default once the operator flips
+ *  `enforce`. Grace is opt-in, so this refuses at once. */
+const NO_GRACE_POLICY = { ...ENFORCING_POLICY, grace_deadline: null };
+
+/** Enforcing with a grace window still open. */
+const OPEN_GRACE_POLICY = { ...ENFORCING_POLICY, grace_deadline: "2999-01-01T00:00:00Z" };
+
+/** An account that predates any rollout. Checklist A03: still in scope. */
+const EXISTING_ACCOUNT = { createdAt: "2024-03-01T00:00:00Z" };
 
 const ACCOUNT = { createdAt: "2026-09-01T00:00:00Z" };
 
@@ -81,18 +83,41 @@ Deno.test("an unverified in-scope account is blocked once the grace window has c
   assertEquals(verdict.state, "blocked");
 });
 
-Deno.test("with no deadline set, an unverified in-scope account gets grace, not a block", async () => {
+Deno.test("with no deadline set, an unverified account is blocked: grace is off by default", async () => {
   const verdict = await resolveVerifiedAdmission(
     fakeDb({
-      verified_admission_policy: { data: OPEN_ENDED_GRACE_POLICY, error: null },
+      verified_admission_policy: { data: NO_GRACE_POLICY, error: null },
       identity_verifications: { data: null, error: null },
       user: { data: ACCOUNT, error: null },
     }),
     "user_abc",
   );
-  // Pins the distinction the fail-closed change must not blur: a readable
-  // policy with an open-ended window still lets the account participate, while
-  // an UNREADABLE policy does not.
+  assertEquals(verdict.state, "blocked");
+  assertEquals(verdict.deadline, null);
+});
+
+Deno.test("an existing unverified account is blocked too, not grandfathered", async () => {
+  const verdict = await resolveVerifiedAdmission(
+    fakeDb({
+      verified_admission_policy: { data: NO_GRACE_POLICY, error: null },
+      identity_verifications: { data: null, error: null },
+      user: { data: EXISTING_ACCOUNT, error: null },
+    }),
+    "user_old",
+  );
+  assertEquals(verdict.state, "blocked");
+  assertEquals(verdict.reason, "verification_required");
+});
+
+Deno.test("an operator-set future deadline still gives grace", async () => {
+  const verdict = await resolveVerifiedAdmission(
+    fakeDb({
+      verified_admission_policy: { data: OPEN_GRACE_POLICY, error: null },
+      identity_verifications: { data: null, error: null },
+      user: { data: ACCOUNT, error: null },
+    }),
+    "user_abc",
+  );
   assertEquals(verdict.state, "grace");
 });
 

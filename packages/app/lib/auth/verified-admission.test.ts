@@ -40,12 +40,18 @@ test("an in-scope unverified account is in grace until the deadline", () => {
   assert.equal(verdict.reason, "verification_required");
   assert.equal(verdict.deadline, "2026-12-01T00:00:00.000Z");
   assert.match(verdict.message ?? "", /verified-only from December 1, 2026/);
-  assert.match(verdict.message ?? "", /posting, buying tickets, joining rooms and messaging/);
+  assert.match(verdict.message ?? "", /posting, commenting, messaging, hosting and joining rooms/);
+  assert.doesNotMatch(verdict.message ?? "", /ticket/);
 
-  // No deadline set: prompt only, never a refusal.
-  const open = decide({ userId: MEMBER, policy: { enforce: true, grace_deadline: null }, record: null });
-  assert.equal(open.state, "grace");
-  assert.equal(open.deadline, null);
+  // No deadline set: grace is opt-in, so an enforced policy refuses at once.
+  const noGrace = decide({ userId: MEMBER, policy: { enforce: true, grace_deadline: null }, record: null });
+  assert.equal(noGrace.state, "blocked");
+  assert.equal(noGrace.deadline, null);
+  // The same holds for an account that predates the rollout (checklist A03).
+  assert.equal(
+    decide({ userId: MEMBER, accountCreatedAt: "2019-04-02T10:00:00Z", policy: { enforce: true, cohort_created_after: null, grace_deadline: null }, record: null }).state,
+    "blocked",
+  );
 
   // A submitted-but-undecided check is still inside grace, with its own reason.
   for (const status of ["pending", "submitted", "review"]) {

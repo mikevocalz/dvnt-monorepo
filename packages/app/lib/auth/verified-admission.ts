@@ -44,7 +44,7 @@ export interface AdmissionVerdict {
   message: string | null;
 }
 
-const PARTICIPATION = "posting, buying tickets, joining rooms and messaging";
+const PARTICIPATION = "posting, commenting, messaging, hosting and joining rooms";
 
 function formatDeadline(deadline: string | null): string | null {
   if (!deadline) return null;
@@ -121,17 +121,16 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
       ? (adultDocument ? "verification_required" : "age_evidence_missing")
       : "verification_incomplete";
 
+  // Grace is opt-in. With no deadline set, an enforced policy refuses at once;
+  // only a future grace_deadline turns the refusal into a prompt.
   const deadlineAt = policy.grace_deadline ? Date.parse(policy.grace_deadline) : NaN;
   const deadline = Number.isFinite(deadlineAt) ? new Date(deadlineAt).toISOString() : null;
-  if (deadline === null || now.getTime() < deadlineAt) {
-    const by = formatDeadline(deadline);
+  if (deadline !== null && now.getTime() < deadlineAt) {
     return {
       state: "grace",
       reason,
       deadline,
-      message: by
-        ? `DVNT is verified-only from ${by}. Verify your ID before then to keep ${PARTICIPATION}.`
-        : `DVNT is moving to verified-only. Verify your ID to keep ${PARTICIPATION}.`,
+      message: `DVNT is verified-only from ${formatDeadline(deadline)}. Verify your ID before then to keep ${PARTICIPATION}.`,
     };
   }
   return { state: "blocked", reason, deadline, message: blockedMessage(reason) };

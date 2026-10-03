@@ -14,9 +14,12 @@ import { checkAdultBirthDate } from "./age-policy.ts";
 
 export interface AdmissionPolicy {
   enforce?: boolean | null;
-  /** Accounts created before this instant stay out of scope. Null = whole membership. */
+  /**
+   * Accounts created before this instant stay out of scope. Null = whole
+   * membership, which is what checklist A03 requires; leave it null.
+   */
   cohort_created_after?: string | null;
-  /** Participation is refused from this instant. Null = prompt only, never refuse. */
+  /** Prompt-only until this instant, refused after it. Null = no grace: refused as soon as enforce is on. */
   grace_deadline?: string | null;
 }
 
@@ -59,8 +62,11 @@ export interface AdmissionVerdict {
   message: string | null;
 }
 
-/** What the gate closes. Read access and the verification flow stay open. */
-const PARTICIPATION = "posting, buying tickets, joining rooms and messaging";
+/**
+ * What the gate closes. Read access, ticket purchase, the ticket wallet and the
+ * verification flow stay open (checklist A01/A03).
+ */
+const PARTICIPATION = "posting, commenting, messaging, hosting and joining rooms";
 
 function formatDeadline(deadline: string | null): string | null {
   if (!deadline) return null;
@@ -140,17 +146,16 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
         : "verification_required")
       : "verification_incomplete";
 
+  // Grace is opt-in. With no deadline set, an enforced policy refuses at once;
+  // only a future grace_deadline turns the refusal into a prompt.
   const deadlineAt = policy.grace_deadline ? Date.parse(policy.grace_deadline) : NaN;
   const deadline = Number.isFinite(deadlineAt) ? new Date(deadlineAt).toISOString() : null;
-  if (deadline === null || now.getTime() < deadlineAt) {
-    const by = formatDeadline(deadline);
+  if (deadline !== null && now.getTime() < deadlineAt) {
     return {
       state: "grace",
       reason,
       deadline,
-      message: by
-        ? `DVNT is verified-only from ${by}. Verify your ID before then to keep ${PARTICIPATION}.`
-        : `DVNT is moving to verified-only. Verify your ID to keep ${PARTICIPATION}.`,
+      message: `DVNT is verified-only from ${formatDeadline(deadline)}. Verify your ID before then to keep ${PARTICIPATION}.`,
     };
   }
   return { state: "blocked", reason, deadline, message: blockedMessage(reason) };
@@ -184,17 +189,12 @@ export async function resolveVerifiedAdmission(
     db.from("user").select("createdAt").eq("id", userId).maybeSingle(),
   ]);
 
-  // An unreadable policy row used to fall back to enforcement off, on the
-  // reasoning that failing closed would take the app down over a gate nobody
-  // had switched on. That held while `enforce` was false everywhere. This
-  // branch's migration (20261001190000_new_signup_verified_admission.sql) sets
-  // `enforce = true`, so the fallback stopped being inert: a transient read
-  // failure now admits every unverified in-scope account to posting,
-  // comments, tickets and messaging. A proven-underage record still blocks,
-  // because the AGE_RESTRICTED branch runs first, but a new signup with no
-  // verification record at all - the exact case this gate exists for - would
-  // sail through. Refuse instead, and say it is a config read rather than
-  // claiming anything about the account's verification state.
+  // An unreadable policy row refuses rather than falling back to enforcement
+  // off. Once `enforce` is true, an open fallback would let a transient read
+  // failure admit every unverified account. A proven-underage record would
+  // still block (the AGE_RESTRICTED branch runs first), but a signup with no
+  // verification record, the case this gate exists for, would pass. The
+  // message says it is a config read and claims nothing about the account.
   if (policyResult?.error) {
     console.error("[verified-admission] policy read failed:", policyResult.error.message);
     return {
