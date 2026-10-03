@@ -210,6 +210,8 @@ async function buildTile2(
     )
     .gte("created_at", sevenDaysAgo)
     .eq("visibility", "public")
+    // A public surface with no viewer gate, so SPICY never appears here.
+    .or("is_nsfw.is.false,is_nsfw.is.null")
     .order("likes_count", { ascending: false })
     .limit(24);
 

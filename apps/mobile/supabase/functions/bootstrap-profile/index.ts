@@ -18,6 +18,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
+import { viewerMaySeeSpicy } from "../_shared/spicy-access.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -88,13 +89,19 @@ Deno.serve(async (req: Request) => {
     const viewerUserId = await resolveUserId(sessionUserId);
     const isOwnProfile = !viewerUserId || viewerUserId === profileUserId;
 
-    // ── NSFW follow gate ──────────────────────────────────────────
-    // Viewer may only see spicy posts from a profile if they follow that
-    // profile's owner (or they ARE the owner). Force safe mode otherwise.
-    let effectiveIncludeNsfw = include_nsfw;
-    if (effectiveIncludeNsfw && !isOwnProfile) {
+    // ── NSFW gate ─────────────────────────────────────────────────
+    // Spicy posts from a profile go to its owner, or to a viewer who has an
+    // approved adult ID AND follows the owner. Force safe mode otherwise.
+    // isOwnProfile is also true for a guest (it gates the follow-state reads
+    // below), so the owner check here needs a real signed-in viewer.
+    const viewerOwnsProfile = viewerUserId !== null && viewerUserId === profileUserId;
+    let effectiveIncludeNsfw = Boolean(include_nsfw);
+    if (effectiveIncludeNsfw && !viewerOwnsProfile) {
       if (!viewerUserId) {
         // Guest — never allow spicy
+        effectiveIncludeNsfw = false;
+      } else if (!(await viewerMaySeeSpicy(supabase, sessionUserId))) {
+        // No approved adult ID: same rule create-post applies to publishing.
         effectiveIncludeNsfw = false;
       } else {
         const { data: followRow } = await supabase
