@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS public.user_private_profile (
   full_name text,
   phone_e164 text CHECK (phone_e164 IS NULL OR phone_e164 ~ '^\+[1-9][0-9]{7,14}$'),
   -- 'checkout': created by ensure_checkout_profile without a date of birth.
-  source text NOT NULL CHECK (source IN ('checkout')),
+  -- 'member': an existing account that gave a phone at checkout
+  -- (ensure_member_phone). Never restricted.
+  source text NOT NULL CHECK (source IN ('checkout', 'member')),
   -- Locked out of participation until verified. Never flipped by hand:
   -- is_checkout_restricted() reads verification state, so passing ID
   -- verification is what unlocks the account.
@@ -45,7 +47,7 @@ REVOKE ALL ON TABLE public.user_private_profile FROM PUBLIC, anon, authenticated
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_private_profile TO service_role;
 
 COMMENT ON TABLE public.user_private_profile IS
-  'Phone and full name captured at guest checkout. Service role only; never exposed to anon or authenticated.';
+  'Phone and full name captured at checkout. Service role only; never exposed to anon or authenticated.';
 
 -- ── Pending profile fields for paid checkouts ───────────────────────────────
 -- A paid checkout redirects to Stripe before anything is issued, so the
@@ -242,6 +244,64 @@ BEGIN
       RETURN jsonb_build_object('ok', false, 'error', 'username_unavailable');
     END IF;
   END LOOP attempt;
+END;
+$$;
+
+-- ── Phone for signed-in buyers ─────────────────────────────────────────────
+-- A signed-in buyer whose account has no phone gives one at checkout. The
+-- checkout functions call this before any payment is created, with the
+-- normalized number or NULL:
+--   phone already on file   -> present (the argument is ignored; checkout
+--                              never overwrites a stored number)
+--   none on file, none sent -> phone_required, and the function refuses
+--   none on file, one sent  -> stored, in a 'member' row that is never
+--                              checkout_restricted
+-- A checkout-created row with a NULL phone gets the number and keeps its
+-- restriction. Clients never write this table.
+CREATE OR REPLACE FUNCTION public.ensure_member_phone(
+  p_auth_id text,
+  p_phone_e164 text
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_phone text := nullif(btrim(coalesce(p_phone_e164, '')), '');
+  v_email text;
+BEGIN
+  IF p_auth_id IS NULL OR btrim(p_auth_id) = '' THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'no_account');
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.user_private_profile p
+              WHERE p.auth_id = p_auth_id AND p.phone_e164 IS NOT NULL) THEN
+    RETURN jsonb_build_object('ok', true, 'status', 'present');
+  END IF;
+  IF v_phone IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'phone_required');
+  END IF;
+  IF v_phone !~ '^\+[1-9][0-9]{7,14}$' THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'invalid_phone');
+  END IF;
+
+  SELECT lower(btrim(u.email)) INTO v_email FROM public."user" u WHERE u.id = p_auth_id;
+  IF v_email IS NULL OR v_email = '' THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'no_account');
+  END IF;
+
+  BEGIN
+    INSERT INTO public.user_private_profile
+      (auth_id, email_normalized, phone_e164, source, checkout_restricted)
+    VALUES
+      (p_auth_id, v_email, v_phone, 'member', false)
+    ON CONFLICT (auth_id) DO UPDATE
+      SET phone_e164 = EXCLUDED.phone_e164, updated_at = now()
+      WHERE public.user_private_profile.phone_e164 IS NULL;
+  EXCEPTION WHEN unique_violation THEN
+    -- Another row already holds this email: refuse rather than guess.
+    RETURN jsonb_build_object('ok', false, 'error', 'conflict');
+  END;
+  RETURN jsonb_build_object('ok', true, 'status', 'stored');
 END;
 $$;
 
@@ -451,6 +511,7 @@ REVOKE ALL ON FUNCTION public.record_checkout_profile_intake(text, text, text, t
 REVOKE ALL ON FUNCTION public.finalize_checkout_profile(text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.run_new_profile_onboarding(text, integer, integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.run_verified_onboarding(text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ensure_member_phone(text, text) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.checkout_username_available(text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.is_checkout_restricted(text) TO service_role;
@@ -459,6 +520,7 @@ GRANT EXECUTE ON FUNCTION public.record_checkout_profile_intake(text, text, text
 GRANT EXECUTE ON FUNCTION public.finalize_checkout_profile(text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.run_new_profile_onboarding(text, integer, integer) TO service_role;
 GRANT EXECUTE ON FUNCTION public.run_verified_onboarding(text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.ensure_member_phone(text, text) TO service_role;
 
 -- Unchanged from 20260916170000: both stay callable where they were.
 REVOKE ALL ON FUNCTION public.verified_participation_allowed() FROM PUBLIC;

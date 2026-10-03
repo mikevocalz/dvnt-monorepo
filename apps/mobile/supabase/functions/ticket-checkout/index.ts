@@ -54,6 +54,7 @@ import {
   provisionCheckoutProfile,
   recordCheckoutProfileIntake,
 } from "../_shared/checkout-profile.ts";
+import { requireMemberPhone } from "../_shared/member-phone.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { checkoutTicketLines } from "../_shared/checkout-line-items.ts";
 import { withSentry } from "../_shared/sentry.ts";
@@ -238,6 +239,15 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
         return new Response(
           JSON.stringify({ error: admissionRefusal(admission).message }),
           { status: 403, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      const memberPhone = await requireMemberPhone(
+        supabase, user_id, requestBody?.phone, "[ticket-checkout]",
+      );
+      if (!memberPhone.ok) {
+        return new Response(
+          JSON.stringify({ error: memberPhone.message, code: memberPhone.code }),
+          { status: memberPhone.status, headers: { "Content-Type": "application/json" } },
         );
       }
     }

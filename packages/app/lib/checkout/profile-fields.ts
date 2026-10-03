@@ -145,6 +145,14 @@ export function normalizePhoneE164(value: unknown): string | null {
   return E164_RE.test(candidate) ? candidate : null;
 }
 
+/**
+ * A signed-in buyer whose account has no phone on file. The checkout
+ * functions answer 400 with this code and message, and the app shows the
+ * phone field and retries with it.
+ */
+export const PHONE_REQUIRED_CODE = "phone_required";
+export const PHONE_REQUIRED_MESSAGE = "Add your mobile number to finish checkout.";
+
 export function checkPhone(value: unknown): { ok: true; value: string } | FieldError {
   const phone = normalizePhoneE164(value);
   if (!phone) {

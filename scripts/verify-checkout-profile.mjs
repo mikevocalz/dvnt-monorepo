@@ -303,6 +303,7 @@ let owl;
       `SELECT public.is_checkout_restricted('${owl.authId}')`,
       `SELECT public.run_new_profile_onboarding('a', 1, 2)`,
       `SELECT public.run_verified_onboarding('a')`,
+      `SELECT public.ensure_member_phone('${owl.authId}', '+12125550100')`,
     ]) {
       const code = await as(role, claims, (q) => failsWith(q(call)));
       assert.equal(code, "42501", `${role} can run: ${call} (got ${code})`);
@@ -311,7 +312,7 @@ let owl;
     const rows = await as(role, claims, (q) => q(`SELECT username FROM public.users WHERE auth_id = $1`, [owl.authId]));
     assert.equal(rows.rows.length, 1, `${role} lost read access to public profiles`);
   }
-  console.log("2. OK: anon and authenticated get permission denied on the private tables and all 7 functions");
+  console.log("2. OK: anon and authenticated get permission denied on the private tables and all 8 functions");
 }
 
 // ── 3. The same email again reuses, whatever the case ───────────────────────
@@ -512,6 +513,52 @@ let owl;
     { firstPostPrompt: "error:P0001" },
   );
   console.log("10. OK: hooks skip when missing, pass the right arguments when present, and contain failures");
+}
+
+// ── 11. A signed-in buyer without a phone is asked for one, stored privately ─
+{
+  const phone = async (authId, value) =>
+    (await sql(`SELECT public.ensure_member_phone($1, $2) AS r`, [authId, value]))[0].r;
+  const priv = async (authId) =>
+    (await sql(`SELECT phone_e164, source, checkout_restricted FROM public.user_private_profile WHERE auth_id = $1`, [authId]))[0];
+
+  // Vera signed up normally: no private row, so no phone.
+  assert.deepEqual(await phone("auth_verified", null), { ok: false, error: "phone_required" });
+  assert.deepEqual(await phone("auth_verified", "   "), { ok: false, error: "phone_required" });
+  assert.deepEqual(await phone("auth_verified", "212-555-0199"), { ok: false, error: "invalid_phone" });
+  assert.equal(await priv("auth_verified"), undefined, "a refused call wrote a row");
+  assert.deepEqual(await phone("auth_verified", "+12125550199"), { ok: true, status: "stored" });
+  assert.deepEqual(await priv("auth_verified"), { phone_e164: "+12125550199", source: "member", checkout_restricted: false });
+  assert.equal((await sql(`SELECT public.is_checkout_restricted('auth_verified') AS r`))[0].r, false,
+    "giving a phone at checkout restricted a normal member");
+  // On file now: no prompt, and a second number never overwrites the first.
+  assert.deepEqual(await phone("auth_verified", null), { ok: true, status: "present" });
+  assert.deepEqual(await phone("auth_verified", "+447700900123"), { ok: true, status: "present" });
+  assert.equal((await priv("auth_verified")).phone_e164, "+12125550199");
+
+  // Concurrent first calls store one number.
+  const results = await Promise.all(
+    ["+12125550101", "+12125550102", "+12125550103", "+12125550104"].map((n) => phone("auth_unverified", n)),
+  );
+  assert.ok(results.every((r) => r.ok), JSON.stringify(results));
+  assert.equal(await count(`SELECT count(*) AS n FROM public.user_private_profile WHERE auth_id = 'auth_unverified'`), 1);
+
+  // A checkout-created profile that somehow lacks a phone keeps its lock.
+  await sql(`UPDATE public.user_private_profile SET phone_e164 = NULL WHERE auth_id = $1`, [owl.authId]);
+  assert.deepEqual(await phone(owl.authId, "+12125550142"), { ok: true, status: "stored" });
+  assert.deepEqual(await priv(owl.authId), { phone_e164: "+12125550142", source: "checkout", checkout_restricted: true });
+
+  assert.deepEqual(await phone("no_such_auth", "+12125550100"), { ok: false, error: "no_account" });
+
+  // No phone or member row is visible to client roles.
+  for (const role of ["anon", "authenticated"]) {
+    const claims = role === "anon" ? { role } : { role, sub: "auth_verified" };
+    const leaked = await as(role, claims, (q) =>
+      q(`SELECT row_to_json(u)::text AS t FROM public."user" u WHERE u.id = 'auth_verified'
+         UNION ALL SELECT row_to_json(m)::text FROM public.users m WHERE m.auth_id = 'auth_verified'`));
+    assert.ok(leaked.rows.every((r) => !r.t.includes("5550199")), `${role} can see the stored phone`);
+  }
+  console.log("11. OK: phone required once, stored server-side as an unrestricted member row, never overwritten");
 }
 
 console.log("\nverify-checkout-profile: all sections pass");
