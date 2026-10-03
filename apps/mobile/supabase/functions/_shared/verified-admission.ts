@@ -12,11 +12,14 @@
  */
 import { checkAdultBirthDate } from "./age-policy.ts";
 
+/**
+ * Every account is in scope once `enforce` is on (checklist A03). There is no
+ * account-age exemption: the `cohort_created_after` column still exists in
+ * verified_admission_policy but nothing reads it.
+ */
 export interface AdmissionPolicy {
   enforce?: boolean | null;
-  /** Accounts created before this instant stay out of scope. Null = whole membership. */
-  cohort_created_after?: string | null;
-  /** Participation is refused from this instant. Null = prompt only, never refuse. */
+  /** Prompt-only until this instant, refused after it. Null = no grace: refused as soon as enforce is on. */
   grace_deadline?: string | null;
 }
 
@@ -28,14 +31,12 @@ export interface AdmissionRecord {
 
 export interface AdmissionContext {
   userId: string | null | undefined;
-  /** Better Auth `user.createdAt`. Unknown means in scope. */
-  accountCreatedAt?: string | null;
   policy?: AdmissionPolicy | null;
   /** The account's own identity_verifications row. A row carrying a different user_id is discarded. */
   record?: AdmissionRecord | null;
   /** Operator allowlist hit: admitted while enforcement runs. */
   exempt?: boolean;
-  /** Operator denylist hit: in scope whatever the cohort date says. */
+  /** Operator denylist hit: refused even when allowlisted. */
   denied?: boolean;
   /**
    * Profile created by guest checkout with no date of birth. Locked out of
@@ -47,7 +48,6 @@ export interface AdmissionContext {
 
 export type AdmissionReason =
   | "not_enforced"
-  | "out_of_cohort"
   | "exempt"
   | "verified"
   | "unauthenticated"
@@ -65,8 +65,11 @@ export interface AdmissionVerdict {
   message: string | null;
 }
 
-/** What the gate closes. Read access and the verification flow stay open. */
-const PARTICIPATION = "posting, buying tickets, joining rooms and messaging";
+/**
+ * What the gate closes. Read access, ticket purchase, the ticket wallet and the
+ * verification flow stay open (checklist A01/A03).
+ */
+const PARTICIPATION = "posting, commenting, messaging, hosting and joining rooms";
 
 function formatDeadline(deadline: string | null): string | null {
   if (!deadline) return null;
@@ -78,16 +81,6 @@ function formatDeadline(deadline: string | null): string | null {
     year: "numeric",
     timeZone: "UTC",
   });
-}
-
-function inCohort(createdAt: string | null | undefined, after: string | null | undefined): boolean {
-  if (!after) return true;
-  const start = Date.parse(after);
-  // An unusable cohort date or an unknown account age puts the account in
-  // scope: the safe direction is a verification prompt, not a silent pass.
-  if (!Number.isFinite(start)) return true;
-  const created = Date.parse(createdAt ?? "");
-  return Number.isFinite(created) ? created >= start : true;
 }
 
 function blockedMessage(reason: AdmissionReason): string {
@@ -148,9 +141,6 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
 
   if (!policy?.enforce) return allowed("not_enforced");
   if (input.exempt && !input.denied) return allowed("exempt");
-  if (!input.denied && !inCohort(input.accountCreatedAt, policy.cohort_created_after)) {
-    return allowed("out_of_cohort");
-  }
   if (status === "passed" && documentAge.allowed) return allowed("verified");
 
   const reason: AdmissionReason = status === null || status === "none"
@@ -161,17 +151,16 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
         : "verification_required")
       : "verification_incomplete";
 
+  // Grace is opt-in. With no deadline set, an enforced policy refuses at once;
+  // only a future grace_deadline turns the refusal into a prompt.
   const deadlineAt = policy.grace_deadline ? Date.parse(policy.grace_deadline) : NaN;
   const deadline = Number.isFinite(deadlineAt) ? new Date(deadlineAt).toISOString() : null;
-  if (deadline === null || now.getTime() < deadlineAt) {
-    const by = formatDeadline(deadline);
+  if (deadline !== null && now.getTime() < deadlineAt) {
     return {
       state: "grace",
       reason,
       deadline,
-      message: by
-        ? `DVNT is verified-only from ${by}. Verify your ID before then to keep ${PARTICIPATION}.`
-        : `DVNT is moving to verified-only. Verify your ID to keep ${PARTICIPATION}.`,
+      message: `DVNT is verified-only from ${formatDeadline(deadline)}. Verify your ID before then to keep ${PARTICIPATION}.`,
     };
   }
   return { state: "blocked", reason, deadline, message: blockedMessage(reason) };
@@ -200,13 +189,12 @@ export async function resolveVerifiedAdmission(
   // Buying a ticket is the one thing a checkout-created profile can always do
   // (checklist A01), so the ticket rails skip the restricted read entirely.
   const checkRestricted = opts.purpose !== "ticket_purchase";
-  const [policyResult, recordResult, accountResult, restrictedResult] = await Promise.all([
+  const [policyResult, recordResult, restrictedResult] = await Promise.all([
     db.from("verified_admission_policy")
-      .select("enforce, cohort_created_after, grace_deadline, allowlist, denylist")
+      .select("enforce, grace_deadline, allowlist, denylist")
       .eq("id", 1).maybeSingle(),
     db.from("identity_verifications")
       .select("user_id, status, date_of_birth").eq("user_id", userId).maybeSingle(),
-    db.from("user").select("createdAt").eq("id", userId).maybeSingle(),
     checkRestricted
       ? db.rpc("is_checkout_restricted", { p_auth_id: userId })
       : Promise.resolve({ data: false, error: null }),
@@ -222,17 +210,12 @@ export async function resolveVerifiedAdmission(
     };
   }
 
-  // An unreadable policy row used to fall back to enforcement off, on the
-  // reasoning that failing closed would take the app down over a gate nobody
-  // had switched on. That held while `enforce` was false everywhere. This
-  // branch's migration (20261001190000_new_signup_verified_admission.sql) sets
-  // `enforce = true`, so the fallback stopped being inert: a transient read
-  // failure now admits every unverified in-scope account to posting,
-  // comments, tickets and messaging. A proven-underage record still blocks,
-  // because the AGE_RESTRICTED branch runs first, but a new signup with no
-  // verification record at all - the exact case this gate exists for - would
-  // sail through. Refuse instead, and say it is a config read rather than
-  // claiming anything about the account's verification state.
+  // An unreadable policy row refuses rather than falling back to enforcement
+  // off. Once `enforce` is true, an open fallback would let a transient read
+  // failure admit every unverified account. A proven-underage record would
+  // still block (the AGE_RESTRICTED branch runs first), but a signup with no
+  // verification record, the case this gate exists for, would pass. The
+  // message says it is a config read and claims nothing about the account.
   if (policyResult?.error) {
     console.error("[verified-admission] policy read failed:", policyResult.error.message);
     return {
@@ -248,7 +231,6 @@ export async function resolveVerifiedAdmission(
 
   return decideVerifiedAdmission({
     userId,
-    accountCreatedAt: accountResult?.data?.createdAt ?? null,
     policy,
     // A failed read is no record, so an enforced account is refused rather than admitted.
     record: recordResult?.error ? null : recordResult?.data ?? null,

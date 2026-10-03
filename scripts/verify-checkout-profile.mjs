@@ -225,6 +225,71 @@ for (const file of [
 ]) {
   await apply(file);
 }
+// The two admission functions as 20261003170000_verified_admission_whole_membership.sql
+// (feat gate branch, applied before this migration) leaves them, copied
+// verbatim. The rest of that file (policy drops, SPICY reads) touches tables
+// this fixture does not model. Once the gate file is merged here, section 12
+// fails if this copy drifts from it.
+const GATE_MIGRATION = "20261003170000_verified_admission_whole_membership.sql";
+const GATE_ADMISSION_FUNCTIONS = `
+CREATE OR REPLACE FUNCTION public.verified_participation_allowed()
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp AS $$
+  SELECT CASE
+    WHEN COALESCE(auth.jwt() ->> 'role', '') = 'service_role' THEN true
+    ELSE (
+      SELECT
+        CASE
+          -- An under-18 document closes participation whatever the config says.
+          WHEN EXISTS (
+            SELECT 1 FROM public.identity_verifications v
+            WHERE v.user_id = sub.id AND v.date_of_birth IS NOT NULL
+              AND v.date_of_birth > (CURRENT_DATE - INTERVAL '18 years')::date
+          ) THEN false
+          WHEN NOT p.enforce THEN true
+          WHEN sub.id IS NULL THEN false
+          WHEN sub.id = ANY (p.allowlist) AND NOT sub.id = ANY (p.denylist) THEN true
+          -- Grace is opt-in: only a deadline still in the future admits an
+          -- unverified account. NULL means refuse.
+          ELSE public.is_verified_self()
+            OR (p.grace_deadline IS NOT NULL AND now() < p.grace_deadline)
+        END
+      FROM public.verified_admission_policy p,
+           LATERAL (SELECT auth.jwt() ->> 'sub' AS id) sub
+      WHERE p.id = 1
+    )
+  END;
+$$;
+REVOKE ALL ON FUNCTION public.verified_participation_allowed() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.verified_participation_allowed() TO anon, authenticated, service_role;
+
+-- The client's banner reads its inputs here. Same shape as before minus
+-- accountCreatedAt and policy.cohort_created_after; an app build that still
+-- looks for them reads undefined, which its own mirror treats as in scope.
+CREATE OR REPLACE FUNCTION public.verified_admission_context()
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp AS $$
+  SELECT jsonb_build_object(
+    'userId', sub.id,
+    'policy', jsonb_build_object(
+      'enforce', p.enforce,
+      'grace_deadline', p.grace_deadline
+    ),
+    'exempt', sub.id = ANY (p.allowlist),
+    'denied', sub.id = ANY (p.denylist),
+    'record', (
+      SELECT jsonb_build_object('user_id', v.user_id, 'status', v.status, 'date_of_birth', v.date_of_birth)
+      FROM public.identity_verifications v WHERE v.user_id = sub.id
+    )
+  )
+  FROM public.verified_admission_policy p,
+       LATERAL (SELECT NULLIF(current_setting('request.jwt.claims', true), '')::json ->> 'sub' AS id) sub
+  WHERE p.id = 1 AND sub.id IS NOT NULL;
+$$;
+REVOKE ALL ON FUNCTION public.verified_admission_context() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.verified_admission_context() TO authenticated, service_role;
+`;
+await sql(GATE_ADMISSION_FUNCTIONS);
 // Seeded before the migration, so reuse has real rows to find.
 await sql(`
   INSERT INTO public."user" (id, name, email, "emailVerified", username)
@@ -240,7 +305,7 @@ await sql(`
   VALUES (NULL, 'vera@example.com'), (NULL, 'ursula@example.com');
 `);
 await apply(MIGRATION);
-console.log(`0. OK: fixture, 3 dependency migrations and ${MIGRATION} applied`);
+console.log(`0. OK: fixture, 3 dependency migrations, the gate admission functions and ${MIGRATION} applied`);
 
 const ensure = async (email, username, name = "Night Owl", phone = "+12125550142") =>
   (await sql(`SELECT public.ensure_checkout_profile($1, $2, $3, $4) AS r`, [email, username, name, phone]))[0].r;
@@ -559,6 +624,77 @@ let owl;
     assert.ok(leaked.rows.every((r) => !r.t.includes("5550199")), `${role} can see the stored phone`);
   }
   console.log("11. OK: phone required once, stored server-side as an unrestricted member row, never overwritten");
+}
+
+// ── 12. Admission functions are the gate's, plus the restricted branch ─────
+{
+  const { existsSync } = await import("node:fs");
+  const fnText = (src, name) => {
+    const start = src.indexOf(`CREATE OR REPLACE FUNCTION public.${name}()`);
+    assert.ok(start >= 0, `${name} not found`);
+    return src.slice(start, src.indexOf("\n$$;", start) + 4);
+  };
+  const ours = readFileSync(join(MIGRATIONS, MIGRATION), "utf8");
+  // The only lines this migration adds to each body.
+  const ADDED = {
+    verified_participation_allowed: [
+      "          -- A checkout-created profile is locked until it passes adult",
+      "          -- verification, whatever the rollout switch says.",
+      "          WHEN sub.id IS NOT NULL AND public.is_checkout_restricted(sub.id) THEN false",
+    ],
+    verified_admission_context: ["    'restricted', public.is_checkout_restricted(sub.id),"],
+  };
+  for (const [name, added] of Object.entries(ADDED)) {
+    const mine = fnText(ours, name).split("\n");
+    for (const line of added) assert.ok(mine.includes(line), `${name} lost: ${line.trim()}`);
+    const stripped = mine.filter((line) => !added.includes(line)).join("\n");
+    assert.equal(stripped, fnText(GATE_ADMISSION_FUNCTIONS, name), `${name} differs from the gate body beyond the restricted branch`);
+  }
+  if (existsSync(join(MIGRATIONS, GATE_MIGRATION))) {
+    const gateFile = readFileSync(join(MIGRATIONS, GATE_MIGRATION), "utf8");
+    for (const name of Object.keys(ADDED)) {
+      assert.equal(fnText(GATE_ADMISSION_FUNCTIONS, name), fnText(gateFile, name), `the fixture copy of ${name} drifted from ${GATE_MIGRATION}`);
+    }
+  }
+
+  // What is live after both migrations.
+  for (const name of Object.keys(ADDED)) {
+    const [{ def }] = await sql(`SELECT pg_get_functiondef($1::regprocedure) AS def`, [`public.${name}()`]);
+    assert.ok(!/cohort/i.test(def), `${name} still reads cohort_created_after`);
+    assert.match(def, /is_checkout_restricted/, `${name} lost the restricted branch`);
+  }
+
+  const post = (sub) =>
+    as("authenticated", { role: "authenticated", sub }, (q) =>
+      failsWith(q(`INSERT INTO public.posts (author_auth_id, content) VALUES ($1, 'hi')`, [sub])),
+    );
+  const fresh = await ensure("gate.check@example.com", "gatecheck");
+  assert.equal(fresh.status, "created");
+
+  // Enforcement off: an ordinary member posts, a restricted profile does not.
+  await sql(`UPDATE public.verified_admission_policy SET enforce = false, grace_deadline = NULL, cohort_created_after = NULL, allowlist = '{}', denylist = '{}' WHERE id = 1`);
+  assert.equal(await post("auth_unverified"), null);
+  assert.equal(await post(fresh.authId), "42501", "restricted profile posted with enforcement off");
+
+  // Enforced with NULL grace: no grace, an unverified member is refused at once.
+  await sql(`UPDATE public.verified_admission_policy SET enforce = true WHERE id = 1`);
+  assert.equal(await post("auth_unverified"), "42501", "NULL grace_deadline still admitted an unverified member");
+  // A leftover cohort date exempts nobody.
+  await sql(`UPDATE public.verified_admission_policy SET cohort_created_after = now() + interval '1 day' WHERE id = 1`);
+  assert.equal(await post("auth_unverified"), "42501", "cohort_created_after exempted an account");
+  // A future deadline is grace for members, never for a restricted profile.
+  await sql(`UPDATE public.verified_admission_policy SET grace_deadline = now() + interval '1 day' WHERE id = 1`);
+  assert.equal(await post("auth_unverified"), null, "a future grace deadline did not admit");
+  assert.equal(await post(fresh.authId), "42501", "grace unlocked a restricted profile");
+
+  const ctx = await as("authenticated", { role: "authenticated", sub: fresh.authId }, (q) =>
+    q(`SELECT public.verified_admission_context() AS c`),
+  );
+  const c = ctx.rows[0].c;
+  assert.equal(c.restricted, true);
+  assert.ok(!("accountCreatedAt" in c) && !("cohort_created_after" in c.policy), JSON.stringify(c));
+  await sql(`UPDATE public.verified_admission_policy SET enforce = false, grace_deadline = NULL, cohort_created_after = NULL WHERE id = 1`);
+  console.log("12. OK: admission functions are the gate bodies plus the restricted branch: no cohort, NULL grace = none, restricted still blocked");
 }
 
 console.log("\nverify-checkout-profile: all sections pass");

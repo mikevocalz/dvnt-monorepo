@@ -442,9 +442,11 @@ END;
 $$;
 
 -- ── The RLS boundary learns about restricted profiles ──────────────────────
--- Same body as 20260916170000 plus one branch: a checkout-created profile is
--- refused before the rollout switch is read, so it stays locked while
--- verified_admission_policy.enforce is false.
+-- Both bodies are 20261003170000_verified_admission_whole_membership.sql's
+-- (no cohort exemption, NULL grace_deadline = no grace) plus one branch each:
+-- a checkout-created profile is refused before the rollout switch is read,
+-- so it stays locked while verified_admission_policy.enforce is false, and
+-- the context reports it as 'restricted' so the banner can say why.
 CREATE OR REPLACE FUNCTION public.verified_participation_allowed()
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp AS $$
@@ -453,22 +455,22 @@ SET search_path = public, pg_temp AS $$
     ELSE (
       SELECT
         CASE
+          -- An under-18 document closes participation whatever the config says.
           WHEN EXISTS (
             SELECT 1 FROM public.identity_verifications v
             WHERE v.user_id = sub.id AND v.date_of_birth IS NOT NULL
               AND v.date_of_birth > (CURRENT_DATE - INTERVAL '18 years')::date
           ) THEN false
+          -- A checkout-created profile is locked until it passes adult
+          -- verification, whatever the rollout switch says.
           WHEN sub.id IS NOT NULL AND public.is_checkout_restricted(sub.id) THEN false
           WHEN NOT p.enforce THEN true
           WHEN sub.id IS NULL THEN false
-          WHEN sub.id = ANY (p.denylist) THEN public.is_verified_self() OR p.grace_deadline IS NULL
-            OR now() < p.grace_deadline
-          WHEN sub.id = ANY (p.allowlist) THEN true
-          WHEN p.cohort_created_after IS NOT NULL AND EXISTS (
-            SELECT 1 FROM public."user" u
-            WHERE u.id = sub.id AND u."createdAt" < p.cohort_created_after
-          ) THEN true
-          ELSE public.is_verified_self() OR p.grace_deadline IS NULL OR now() < p.grace_deadline
+          WHEN sub.id = ANY (p.allowlist) AND NOT sub.id = ANY (p.denylist) THEN true
+          -- Grace is opt-in: only a deadline still in the future admits an
+          -- unverified account. NULL means refuse.
+          ELSE public.is_verified_self()
+            OR (p.grace_deadline IS NOT NULL AND now() < p.grace_deadline)
         END
       FROM public.verified_admission_policy p,
            LATERAL (SELECT auth.jwt() ->> 'sub' AS id) sub
@@ -484,10 +486,8 @@ RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp AS $$
   SELECT jsonb_build_object(
     'userId', sub.id,
-    'accountCreatedAt', (SELECT u."createdAt" FROM public."user" u WHERE u.id = sub.id),
     'policy', jsonb_build_object(
       'enforce', p.enforce,
-      'cohort_created_after', p.cohort_created_after,
       'grace_deadline', p.grace_deadline
     ),
     'exempt', sub.id = ANY (p.allowlist),
@@ -522,7 +522,7 @@ GRANT EXECUTE ON FUNCTION public.run_new_profile_onboarding(text, integer, integ
 GRANT EXECUTE ON FUNCTION public.run_verified_onboarding(text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.ensure_member_phone(text, text) TO service_role;
 
--- Unchanged from 20260916170000: both stay callable where they were.
+-- Same grants as 20261003170000: both stay callable where they were.
 REVOKE ALL ON FUNCTION public.verified_participation_allowed() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.verified_participation_allowed() TO anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.verified_admission_context() FROM PUBLIC;
