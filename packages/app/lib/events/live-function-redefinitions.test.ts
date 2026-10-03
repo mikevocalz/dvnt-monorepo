@@ -26,7 +26,17 @@ const HOME10 =
 
 const EXPECTED: Record<string, Record<string, [string, string][]>> = {
   "20261003120000_discovery_rpcs_return_event_tz.sql": {
-    [HOME11]: [TZ, [VIS, LISTABLE]],
+    // Live Home has no status filter (20260916190000 never reached production),
+    // so cancelled, draft and suspended events were listed. get_events_for_you
+    // already has this line.
+    [HOME11]: [
+      TZ,
+      [
+        VIS,
+        LISTABLE +
+          "      AND COALESCE(e.status, 'active') NOT IN ('cancelled', 'canceled', 'draft', 'suspended')\n",
+      ],
+    ],
     "public.get_events_for_you(integer,integer,integer)": [TZ, [VIS, LISTABLE]],
   },
   "20261003110000_event_hide_and_publish_at.sql": {

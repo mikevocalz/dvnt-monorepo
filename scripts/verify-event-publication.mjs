@@ -397,6 +397,24 @@ await sql(`UPDATE public.events SET publish_at = now() + interval '2 seconds' WH
 const homeRows = await home();
 expectListed(titles(homeRows), "get_events_home (11 args) lists only published events");
 expectListed(titles(await forYou()), "get_events_for_you lists only published events");
+{
+  // Live Home had no status filter, so cancelled, draft and suspended events
+  // were listed. Seed one of each, published and public, and check Home skips
+  // them while For You (which always filtered) still does too.
+  const statuses = ["cancelled", "draft", "suspended"];
+  for (const st of statuses) {
+    const row = await ev(`Status ${st}`);
+    await sql(`UPDATE public.events SET status = $2 WHERE id = $1`, [row.id, st]);
+  }
+  const listed = titles(await home());
+  for (const st of statuses) {
+    check(`get_events_home does not list a ${st} event`, () => assert.ok(!listed.includes(`Status ${st}`)));
+  }
+  const listedForYou = titles(await forYou());
+  for (const st of statuses) {
+    check(`get_events_for_you does not list a ${st} event`, () => assert.ok(!listedForYou.includes(`Status ${st}`)));
+  }
+}
 check("get_events_home returns event_tz", () =>
   assert.equal(homeRows.find((r) => r.title === "Published")?.event_tz, "America/Los_Angeles"));
 check("a scheduled event is not listed before publish_at", () =>

@@ -362,6 +362,7 @@ BEGIN
       AND COALESCE(e.visibility, 'public') = 'public'
       AND NOT e.is_hidden
       AND (e.publish_at IS NULL OR e.publish_at <= now())
+      AND COALESCE(e.status, 'active') NOT IN ('cancelled', 'canceled', 'draft', 'suspended')
       AND (p_nsfw IS NULL OR COALESCE(e.nsfw, false) = p_nsfw)
       AND (p_filter_online IS NULL OR
            (p_filter_online = true AND e.location_type = 'virtual') OR
