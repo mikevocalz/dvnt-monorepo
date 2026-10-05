@@ -184,7 +184,7 @@
     "tailwindcss-animate": "1.0.7",
     "zod": "^4.3.6",
     "zustand": "^5.0.12",
-    "expo-callkit-telecom": "github:mfairley/expo-callkit-telecom#feat/webrtc-stack-agnostic"
+    "expo-callkit-telecom": "github:mfairley/expo-callkit-telecom#348cdc0f7ca11aea7266493e39d3640d44a704af"
   },
   "devDependencies": {
     "@bacons/apple-targets": "^4.0.7",
