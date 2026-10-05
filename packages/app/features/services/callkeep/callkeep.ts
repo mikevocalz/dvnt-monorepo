@@ -12,6 +12,7 @@
  */
 
 import RNCallKeep, { CONSTANTS } from "react-native-callkeep";
+import * as ExpoCallKitTelecom from "expo-callkit-telecom";
 import { Platform, PermissionsAndroid } from "react-native";
 import { createMMKV } from "react-native-mmkv";
 
@@ -122,6 +123,11 @@ export function clearDisplayedCall(callUUID: string): void {
 
 // Store references so we can remove them if needed
 const _eventListeners: Array<{ remove: () => void }> = [];
+
+// expo-callkit-telecom owns the iOS CallKit lifecycle on this migration path.
+// Keep the existing wrapper API so the Fishjam call layer does not need to know
+// which native call provider is active.
+const _expoAnswerRequests = new Map<string, string>();
 
 // ---------------------------------------------------------------------------
 // Android runtime permissions
@@ -246,6 +252,14 @@ export async function setupCallKeep(): Promise<void> {
   _androidPermsGranted = await ensureAndroidCallPermissions();
 
   try {
+    // iOS uses expo-callkit-telecom. It owns the CallKit provider and
+    // RTCAudioSession coordination; Android remains on CallKeep for now.
+    if (Platform.OS === "ios") {
+      _setupComplete = true;
+      console.log("[CallKeep] iOS uses expo-callkit-telecom");
+      return;
+    }
+
     await RNCallKeep.setup({
       ios: {
         appName: "DVNT",
@@ -307,12 +321,15 @@ export function startOutgoingCall({
     `[CallKeep] startOutgoingCall uuid=${callUUID} handle=${handle} video=${hasVideo}`,
   );
   try {
-    RNCallKeep.startCall(callUUID, handle, displayName, "generic", hasVideo);
-
     if (Platform.OS === "ios") {
-      // Report connecting → connected lifecycle on iOS
-      RNCallKeep.reportConnectingOutgoingCallWithUUID(callUUID);
+      void ExpoCallKitTelecom.startOutgoingCall(
+        { id: callUUID, displayName },
+        { hasVideo },
+      );
+      return;
     }
+
+    RNCallKeep.startCall(callUUID, handle, displayName, "generic", hasVideo);
   } catch (err) {
     // Defense-in-depth: catch native exceptions (e.g. SecurityException on Android)
     // so the call can still proceed without native call UI
@@ -326,7 +343,16 @@ export function startOutgoingCall({
 export function reportOutgoingCallConnected(callUUID: string): void {
   try {
     if (Platform.OS === "ios") {
-      RNCallKeep.reportConnectedOutgoingCallWithUUID(callUUID);
+      const requestId = _expoAnswerRequests.get(callUUID);
+      if (requestId) {
+        // Incoming calls must acknowledge the CallKit answer only after
+        // Fishjam media has connected. This function is already called from
+        // the peer-connected path, so it is the correct fulfillment point.
+        void ExpoCallKitTelecom.fulfillIncomingCallConnected(requestId);
+        _expoAnswerRequests.delete(callUUID);
+      } else {
+        void ExpoCallKitTelecom.reportOutgoingCallConnected(callUUID);
+      }
     } else {
       RNCallKeep.setCurrentCallActive(callUUID);
     }
@@ -363,6 +389,16 @@ export function showIncomingCall({
     `[CallKeep] showIncomingCall uuid=${callUUID} handle=${handle} video=${hasVideo}`,
   );
   try {
+    if (Platform.OS === "ios") {
+      void ExpoCallKitTelecom.reportIncomingCall({
+        eventId: callUUID,
+        serverCallId: callUUID,
+        hasVideo,
+        caller: { id: handle, displayName },
+      });
+      return;
+    }
+
     RNCallKeep.displayIncomingCall(
       callUUID,
       handle,
@@ -381,6 +417,11 @@ export function showIncomingCall({
 export function endCall(callUUID: string): void {
   console.log(`[CallKeep] endCall uuid=${callUUID}`);
   try {
+    if (Platform.OS === "ios") {
+      _expoAnswerRequests.delete(callUUID);
+      void ExpoCallKitTelecom.endCall(callUUID);
+      return;
+    }
     RNCallKeep.endCall(callUUID);
   } catch (err) {
     // Swallow — call may already be ended
@@ -394,6 +435,13 @@ export function endCall(callUUID: string): void {
 export function endAllCalls(): void {
   console.log("[CallKeep] endAllCalls");
   try {
+    if (Platform.OS === "ios") {
+      void ExpoCallKitTelecom.getActiveCallSession().then((session) => {
+        if (session) void ExpoCallKitTelecom.endCall(session.id);
+      });
+      _expoAnswerRequests.clear();
+      return;
+    }
     RNCallKeep.endAllCalls();
   } catch (err) {
     console.error("[CallKeep] endAllCalls native error:", err);
@@ -409,6 +457,14 @@ export function reportEndCall(
 ): void {
   console.log(`[CallKeep] reportEndCall uuid=${callUUID} reason=${reason}`);
   try {
+    if (Platform.OS === "ios") {
+      _expoAnswerRequests.delete(callUUID);
+      const expoReason = reason === "REMOTE_ENDED" ? "remoteEnded" :
+        reason === "UNANSWERED" ? "unanswered" :
+        reason === "DECLINED" ? "unknown" : "unknown";
+      void ExpoCallKitTelecom.reportCallEnded(callUUID, expoReason);
+      return;
+    }
     RNCallKeep.reportEndCallWithUUID(
       callUUID,
       CONSTANTS.END_CALL_REASONS[reason],
@@ -437,6 +493,10 @@ export function setCallActive(callUUID: string): void {
  */
 export function setMuted(callUUID: string, muted: boolean): void {
   try {
+    if (Platform.OS === "ios") {
+      void ExpoCallKitTelecom.setMuted(callUUID, muted);
+      return;
+    }
     RNCallKeep.setMutedCall(callUUID, muted);
     console.log(`[CallKeep] setMuted uuid=${callUUID} muted=${muted}`);
   } catch (err) {
@@ -464,6 +524,7 @@ export function updateDisplay(
  */
 export function backToForeground(): void {
   try {
+    if (Platform.OS === "ios") return;
     RNCallKeep.backToForeground();
   } catch (err) {
     console.error("[CallKeep] backToForeground native error:", err);
@@ -488,6 +549,44 @@ export function registerCallKeepListeners(handlers: {
   onAudioSessionActivated?: CallKeepAudioSessionHandler;
 }): () => void {
   if (_listenersRegistered) {
+  if (Platform.OS === "ios") {
+    _listenersRegistered = true;
+    console.log("[CallKeep] Registering expo-callkit-telecom iOS listeners");
+
+    const answerListener = ExpoCallKitTelecom.addCallAnsweredListener((data) => {
+      _expoAnswerRequests.set(data.id, data.requestId);
+      handlers.onAnswer({ callUUID: data.id });
+    });
+    _eventListeners.push(answerListener);
+
+    const endListener = ExpoCallKitTelecom.addCallEndedListener((data) => {
+      _expoAnswerRequests.delete(data.id);
+      handlers.onEnd({ callUUID: data.id });
+    });
+    _eventListeners.push(endListener);
+
+    if (handlers.onToggleMute) {
+      const muteListener = ExpoCallKitTelecom.addSetMutedActionListener((data) => {
+        handlers.onToggleMute!({ callUUID: data.id, muted: data.isMuted });
+      });
+      _eventListeners.push(muteListener);
+    }
+
+    if (handlers.onAudioSessionActivated) {
+      const audioListener = ExpoCallKitTelecom.addAudioSessionActivatedListener(() => {
+        handlers.onAudioSessionActivated!();
+      });
+      _eventListeners.push(audioListener);
+    }
+
+    return () => {
+      for (const listener of _eventListeners) listener.remove();
+      _eventListeners.length = 0;
+      _listenersRegistered = false;
+      _expoAnswerRequests.clear();
+    };
+  }
+
     console.warn(
       "[CallKeep] Listeners already registered — skipping duplicate registration",
     );
