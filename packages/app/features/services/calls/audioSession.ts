@@ -33,6 +33,7 @@
  */
 
 import { NativeEventEmitter, NativeModules, Platform } from "react-native";
+import * as ExpoCallKitTelecom from "expo-callkit-telecom";
 import InCallManager from "react-native-incall-manager";
 import { RTCAudioSession } from "@fishjam-cloud/react-native-webrtc";
 import { CT } from "@dvnt/app/features/services/calls/callTrace";
@@ -236,6 +237,12 @@ export const audioSession = {
       // _isCallKitActivated is only reset in stop() at end of call.
       _pendingMicStartCallback = null;
       _pendingSpeakerOn = null;
+
+      // Let expo-callkit-telecom prewarm/coordinate WebRTC's RTCAudioSession on iOS.
+      // It owns CallKit activation; DVNT only owns media tracks and route preference.
+      if (Platform.OS === "ios") {
+        ExpoCallKitTelecom.prepareAudioSessionForCall(mediaType === "video");
+      }
 
       // ALWAYS call InCallManager.start — even if _isActive is true.
       // A previous call may not have cleaned up properly.
@@ -465,8 +472,8 @@ export const audioSession = {
     }
 
     try {
-      // Signal WebRTC that the audio session is now active
-      RTCAudioSession.audioSessionDidActivate();
+      // expo-callkit-telecom already activated WebRTC's RTCAudioSession before
+      // emitting this event. Do NOT call audioSessionDidActivate() a second time.
       _isCallKitActivated = true;
 
       // Apply deferred speaker routing now that session is active.
@@ -518,7 +525,8 @@ export const audioSession = {
       InCallManager.stop();
 
       if (Platform.OS === "ios") {
-        RTCAudioSession.audioSessionDidDeactivate();
+        // expo-callkit-telecom owns the native WebRTC audio-session teardown.
+        ExpoCallKitTelecom.restoreAudioSession();
       }
 
       _isActive = false;
