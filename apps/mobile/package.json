@@ -183,7 +183,8 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss-animate": "1.0.7",
     "zod": "^4.3.6",
-    "zustand": "^5.0.12"
+    "zustand": "^5.0.12",
+    "expo-callkit-telecom": "github:mfairley/expo-callkit-telecom#feat/webrtc-stack-agnostic"
   },
   "devDependencies": {
     "@bacons/apple-targets": "^4.0.7",
