@@ -678,6 +678,8 @@ export default {
             "DVNT uses your location to show nearby events and suggest relevant venues while you are using the app.",
         },
       ],
+      // Fishjam-compatible CallKit/Telecom native audio bridge (expo-callkit-telecom PR #44).
+      "expo-callkit-telecom",
       "@config-plugins/react-native-callkeep",
       "./plugins/with-voip-push",
       "./plugins/with-custom-ringtone",
