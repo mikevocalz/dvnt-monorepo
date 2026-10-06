@@ -18,6 +18,7 @@ import {
   incrementPromoUsage,
 } from "../_shared/apply-promo-code.ts";
 import {
+  resolveAccountPromoterCode,
   validateAndApplyPromoterCode,
 } from "../_shared/apply-promoter-code.ts";
 import {
@@ -214,7 +215,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
             .toUpperCase()
             .slice(0, 32)
         : "";
-    const promoterCode = /^[A-Z0-9_-]{2,32}$/.test(promoterCodeRaw)
+    let promoterCode = /^[A-Z0-9_-]{2,32}$/.test(promoterCodeRaw)
       ? promoterCodeRaw
       : "";
 
@@ -237,6 +238,15 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
     }
     if (!cart || cart.user_id !== authId) {
       return errorResponse("Cart not found", 404);
+    }
+
+    if (!promoterCode && cart.event_id) {
+      promoterCode =
+        (await resolveAccountPromoterCode(
+          supabase,
+          Number(cart.event_id),
+          authId,
+        )) ?? "";
     }
 
     if (!await canAccessEvent(supabase, Number(cart.event_id), authId)) {
