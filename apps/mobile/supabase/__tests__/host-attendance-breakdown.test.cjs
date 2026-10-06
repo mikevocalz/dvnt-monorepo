@@ -7,11 +7,11 @@ const edge = fs.readFileSync(
   "utf8",
 );
 const web = fs.readFileSync(
-  path.join(__dirname, "../../../packages/app/features/events/analytics.web.tsx"),
+  path.join(__dirname, "../../../../packages/app/features/events/analytics.web.tsx"),
   "utf8",
 );
 const native = fs.readFileSync(
-  path.join(__dirname, "../../../packages/app/features/routes/screens/(protected)/events/[id]/analytics.tsx"),
+  path.join(__dirname, "../../../../packages/app/features/routes/screens/(protected)/events/[id]/analytics.tsx"),
   "utf8",
 );
 
