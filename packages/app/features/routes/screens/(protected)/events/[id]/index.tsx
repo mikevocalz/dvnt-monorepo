@@ -349,9 +349,18 @@ function EventDetailScreenContent() {
       (eventId ? usePromoterRefStore.getState().getRef(eventId) : null);
     const numericEventId = Number(eventId);
     if (code && Number.isInteger(numericEventId) && numericEventId > 0) {
-      void promotersApi.claimRef(numericEventId, code).catch((error) => {
-        console.warn("[EventDetail] promoter ref claim failed:", error);
-      });
+      void promotersApi
+        .claimRef(numericEventId, code)
+        .then((claim) => {
+          setPromoterRef(
+            eventId,
+            claim.code,
+            claim.customerDiscountBps,
+          );
+        })
+        .catch((error) => {
+          console.warn("[EventDetail] promoter ref claim failed:", error);
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId, rawParams.ref, setPromoterRef]);
