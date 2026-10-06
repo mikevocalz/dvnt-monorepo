@@ -92,7 +92,8 @@ BEGIN
     PERFORM public.recompute_event_total_attendees(v_new_event_id);
   END IF;
 
-  RETURN COALESCE(NEW, OLD);
+  -- AFTER trigger return value is ignored; NULL avoids touching NEW on DELETE.
+  RETURN NULL;
 END;
 $$;
 
