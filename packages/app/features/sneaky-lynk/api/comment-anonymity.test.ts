@@ -12,6 +12,7 @@ import {
 import {
   MEMBER_STAT_COLUMNS,
   buildRoomParticipantStats,
+  resolveRoomAudience,
   toMemberStatRow,
 } from "./room-stats.ts";
 
@@ -81,4 +82,42 @@ test("stats keyed by row id count the same people", () => {
   ];
   const stats = buildRoomParticipantStats(rows.map(toMemberStatRow), now);
   assert.deepEqual(stats[7], { activeCount: 2, activeHostCount: 1, historicalCount: 3 });
+});
+
+
+test("pre-join visitors use the server-maintained participant count when RLS hides member rows", () => {
+  const now = Date.parse("2026-10-06T21:53:00Z");
+  const audience = resolveRoomAudience(
+    {
+      id: 588,
+      status: "open",
+      participant_count: 1,
+      created_at: "2026-10-06T20:00:00Z",
+    },
+    undefined,
+    now,
+  );
+
+  assert.equal(audience.isLive, true);
+  assert.equal(audience.listeners, 1);
+  assert.equal(audience.activeHostCount, 0);
+});
+
+test("visible membership stats remain authoritative over the persisted fallback", () => {
+  const audience = resolveRoomAudience(
+    { id: 588, status: "open", participant_count: 2 },
+    { activeCount: 1, activeHostCount: 0, historicalCount: 2 },
+  );
+
+  assert.equal(audience.isLive, false);
+  assert.equal(audience.listeners, 1);
+});
+
+test("an ended room is never live even if its persisted participant count is stale", () => {
+  const audience = resolveRoomAudience(
+    { id: 588, status: "ended", participant_count: 1 },
+    undefined,
+  );
+
+  assert.equal(audience.isLive, false);
 });
