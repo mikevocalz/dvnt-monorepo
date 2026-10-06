@@ -86,6 +86,7 @@ import {
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useTicketViewerId } from "@dvnt/app/lib/hooks/use-tickets";
+import { tierIsHiddenFromBuyers } from "@dvnt/app/lib/tickets/pricing";
 import { qk } from "@dvnt/app/lib/query/keys";
 import * as WebBrowser from "expo-web-browser";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
@@ -642,7 +643,16 @@ function EventDetailScreenContent() {
   const ticketTiers = useMemo(() => {
     if (!eventData) return [];
     const dbTiers = eventData.ticketTiers;
-    const hasDbTiers = Array.isArray(dbTiers) && dbTiers.length > 0;
+    const buyerDbTiers = Array.isArray(dbTiers)
+      ? dbTiers.filter(
+          (t: any) =>
+            !tierIsHiddenFromBuyers({
+              tier_visibility:
+                t.tier_visibility ?? t.tierVisibility ?? null,
+            }),
+        )
+      : [];
+    const hasDbTiers = buyerDbTiers.length > 0;
     // If the organizer turned ticketing ON but never configured tiers, don't
     // fabricate a synthetic GA card — it can't actually be sold (no real
     // ticket_type_id for Stripe) and tapping Get Tickets would just toast an
@@ -657,7 +667,7 @@ function EventDetailScreenContent() {
     if (!eventData.ticketingEnabled && eventPriceForSale > 0) return [];
     if (hasDbTiers) {
       const glowColors = ["#34A2DF", "#8A40CF", "#FF5BFC", "#f59e0b"];
-      return dbTiers.map((t: any, i: number) => {
+      return buyerDbTiers.map((t: any, i: number) => {
         // remaining may be pre-computed by RPC or we derive it from qty fields
         const remaining =
           t.remaining != null
@@ -817,6 +827,9 @@ function EventDetailScreenContent() {
   const { data: verificationStatus } = useAgeVerificationStatus();
   const promoCode = useEventDetailScreenStore((s) => s.promoCode);
   const setPromoCode = useEventDetailScreenStore((s) => s.setPromoCode);
+  const promoterRef = usePromoterRefStore(
+    (s) => s.refs[String(eventId)] ?? null,
+  );
 
   // FIX: Cleanup effect - reset all screen state on unmount
   useEffect(() => {
@@ -1804,17 +1817,30 @@ function EventDetailScreenContent() {
   const heroPrice = useMemo<
     { kind: "free" } | { kind: "from"; label: string } | { kind: "unknown" }
   >(() => {
-    const cents = liveTicketTypes.length
-      ? liveTicketTypes.map((t) => t.price_cents || 0)
+    const visibleLivePrices = liveTicketTypes
+      .filter(
+        (t: any) =>
+          !tierIsHiddenFromBuyers({
+            tier_visibility:
+              t.tier_visibility ?? t.tierVisibility ?? null,
+          }),
+      )
+      .map((t) => t.price_cents || 0);
+    const cents = visibleLivePrices.length
+      ? visibleLivePrices
       : ticketTiers.length
         ? ticketTiers.map((t) => Math.round((t.price || 0) * 100))
         : null;
 
     if (cents && cents.length) {
-      const lowest = Math.min(...cents);
-      return lowest === 0
-        ? { kind: "free" }
-        : { kind: "from", label: `From ${formatCents(lowest)}` };
+      const paid = cents.filter((value) => value > 0);
+      if (paid.length > 0) {
+        return {
+          kind: "from",
+          label: `From ${formatCents(Math.min(...paid))}`,
+        };
+      }
+      return { kind: "free" };
     }
     if (isLoading) return { kind: "unknown" };
     if (event?.price === 0) return { kind: "free" };
@@ -2224,6 +2250,44 @@ function EventDetailScreenContent() {
                       letterSpacing: 1,
                     }}
                   />
+                  {promoterRef?.code ? (
+                    <View
+                      accessibilityRole="text"
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginTop: 8,
+                        paddingHorizontal: 12,
+                        paddingVertical: 9,
+                        borderRadius: 10,
+                        backgroundColor: "rgba(138,64,207,0.12)",
+                        borderWidth: 1,
+                        borderColor: "rgba(138,64,207,0.35)",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: "#d8b4fe",
+                          fontSize: 12,
+                          fontFamily: "InterSemiBold",
+                        }}
+                      >
+                        Promoter code {promoterRef.code}
+                      </Text>
+                      <Text
+                        style={{
+                          color: "#d8b4fe",
+                          fontSize: 12,
+                          fontFamily: "InterBold",
+                        }}
+                      >
+                        {promoterRef.customerDiscountBps != null
+                          ? `${promoterRef.customerDiscountBps / 100}% off · applied`
+                          : "Applied at checkout"}
+                      </Text>
+                    </View>
+                  ) : null}
                   {promoCode.trim() ? (
                     <Pressable
                       onPress={() => setPromoCode("")}
