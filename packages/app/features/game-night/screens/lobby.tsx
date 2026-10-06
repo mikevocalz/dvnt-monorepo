@@ -17,6 +17,7 @@ export default function GameNightLobbyScreen() {
   return <View className="flex-1 bg-background px-6 pt-20">
     <Text className="text-3xl font-black text-foreground">Pull up a chair</Text>
     <Text className="mt-2 text-muted-foreground">Start a new table, or enter the six-character invite code.</Text>
+    <Text className="mt-2 text-sm text-muted-foreground">2 seated players = Duel · 3–4 = Classic · extra people watch.</Text>
     <Pressable disabled={busy} onPress={create} className="mt-8 items-center rounded-full bg-primary py-4"><Text className="font-bold text-white">{busy && params.create === "1" ? "Starting…" : "Start a table"}</Text></Pressable>
     <Text className="my-6 text-center text-muted-foreground">or</Text>
     <TextInput value={code} onChangeText={(v) => { setCode(v.replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 6)); setError(null); }} maxLength={6} autoCapitalize="characters" autoCorrect={false} placeholder="ABC123" placeholderTextColor="#6B7280" className="rounded-2xl border border-border bg-secondary px-4 py-5 text-center text-2xl font-black tracking-widest text-foreground" />
