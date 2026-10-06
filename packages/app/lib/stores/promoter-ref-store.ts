@@ -6,9 +6,10 @@
  * it survives navigation AND the app-switch to Stripe's hosted page /
  * PaymentSheet — hence MMKV-persisted (localStorage on web via the
  * shared mmkvStorage adapter). The checkout API layer reads the
- * pending ref at kickoff and forwards it as `promoter_code`; the
- * server validates and the stripe-webhook records attribution when the
- * order flips paid. Never affects pricing.
+ * pending ref at kickoff and forwards it as `promoter_code`; signed-in
+ * buyers also persist the claim server-side so it survives login/device
+ * changes. The server validates the current promoter policy, applies the
+ * customer discount, and records attribution when the order flips paid.
  *
  * Zustand + persist, never useState (house law).
  */
