@@ -50,7 +50,10 @@ export function RoomReactionDock({
         </Pressable>
       ))}
       {failed ? (
-        <Text accessibilityLiveRegion="polite" className="sr-only">
+        <Text
+          accessibilityLiveRegion="polite"
+          style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+        >
           Reaction could not be sent.
         </Text>
       ) : null}
