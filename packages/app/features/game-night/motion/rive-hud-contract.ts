@@ -33,6 +33,7 @@ export const GAME_NIGHT_RIVE_HUD = {
     burst: "burst",
     isSelf: "isSelf",
     lane: "lane",
+    seatIndex: "seatIndex",
     intensity: "intensity",
   },
 } as const;
