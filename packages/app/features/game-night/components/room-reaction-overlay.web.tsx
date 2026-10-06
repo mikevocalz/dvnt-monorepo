@@ -71,6 +71,7 @@ export function RoomReactionOverlay({ roomId }: { roomId: number }) {
             data-rive-reaction-kind={event.kindValue}
             data-rive-is-self={event.isMine}
             data-rive-lane={event.lane}
+            data-rive-seat-index={event.seatIndex}
             data-rive-intensity={event.intensity}
             className="dvnt-room-reaction absolute bottom-5 grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-[#0b0c13]/76 text-3xl shadow-[0_12px_32px_rgba(0,0,0,.28)] backdrop-blur-md"
             style={
