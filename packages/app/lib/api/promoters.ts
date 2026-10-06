@@ -73,7 +73,7 @@ export function promoterShareLink(
   eventId: string | number,
   code: string,
 ): string {
-  return `https://dvntapp.live/public/events/${eventId}?ref=${encodeURIComponent(code)}`;
+  return `https://dvntapp.live/e/${eventId}?ref=${encodeURIComponent(code)}`;
 }
 
 export const promotersApi = {
