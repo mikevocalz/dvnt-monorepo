@@ -88,6 +88,8 @@ interface VideoRoomStoreState {
   callEnded: boolean;
   callDuration: number;
   callStartedAt: number | null;
+  /** Seconds remaining on the server-owned personal/group call deadline. */
+  callSessionSecondsLeft: number | null;
   recipientInfo: RecipientInfo | null;
 
   // Permissions
@@ -144,6 +146,7 @@ interface VideoRoomStoreActions {
   setCallEnded: (duration: number) => void;
   setCallDuration: (duration: number) => void;
   setCallStartedAt: (ts: number | null) => void;
+  setCallSessionSecondsLeft: (seconds: number | null) => void;
 
   // Permissions
   setCameraPermission: (state: PermissionState) => void;
@@ -198,6 +201,7 @@ const initialState: VideoRoomStoreState = {
   callEnded: false,
   callDuration: 0,
   callStartedAt: null,
+  callSessionSecondsLeft: null,
   recipientInfo: null,
   cameraPermission: "pending",
   micPermission: "pending",
@@ -312,6 +316,8 @@ export const useVideoRoomStore = create<VideoRoomStore>((set, get) => ({
     }),
   setCallDuration: (callDuration) => set({ callDuration }),
   setCallStartedAt: (callStartedAt) => set({ callStartedAt }),
+  setCallSessionSecondsLeft: (callSessionSecondsLeft) =>
+    set({ callSessionSecondsLeft }),
 
   // Permissions
   setCameraPermission: (cameraPermission) => set({ cameraPermission }),
