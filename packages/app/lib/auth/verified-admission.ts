@@ -139,3 +139,21 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
   }
   return { state: "blocked", reason, deadline, message: blockedMessage(reason) };
 }
+
+/**
+ * Hard platform-entry decision.
+ *
+ * Participation rollout policy is intentionally ignored here: entering DVNT
+ * itself requires an approved adult ID. This is stricter than feature-level
+ * participation gates and cannot be bypassed by policy.enforce=false, grace,
+ * or the support allowlist.
+ */
+export function decideAdultPlatformEntry(
+  input: AdmissionContext,
+): AdmissionVerdict {
+  return decideVerifiedAdmission({
+    ...input,
+    policy: { enforce: true, grace_deadline: null },
+    exempt: false,
+  });
+}
