@@ -16,6 +16,19 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-users-lockdown.mjs"
+      - "scripts/verify-content-lockdown.mjs"
+      - "packages/app/features/sneaky-lynk/api/**"
+      - "packages/app/features/video/api.ts"
+      - "packages/app/lib/api/**"
+      - "apps/mobile/lib/api/**"
+      - "scripts/verify-admission-gate.mjs"
+      - "scripts/verify-checkout-profile.mjs"
+      - "scripts/verify-event-publication.mjs"
+      - "scripts/verify-brand-follows.mjs"
+      - "scripts/verify-comp-claims.mjs"
+      - "scripts/verify-event-lynk-lifecycle.mjs"
+      - "scripts/verify-event-consolidation.mjs"
       - "scripts/verify-call-capacity.mjs"
       - "scripts/verify-editorial-identity.mjs"
       - ".github/workflows/verify-edge-functions.yml"
@@ -27,6 +40,18 @@ on:
     paths:
       - "apps/mobile/supabase/**"
       - "scripts/verify-edge-functions.mjs"
+      - "scripts/verify-users-lockdown.mjs"
+      - "scripts/verify-content-lockdown.mjs"
+      - "packages/app/features/sneaky-lynk/api/**"
+      - "packages/app/features/video/api.ts"
+      - "packages/app/lib/api/**"
+      - "apps/mobile/lib/api/**"
+      - "scripts/verify-admission-gate.mjs"
+      - "scripts/verify-checkout-profile.mjs"
+      - "scripts/verify-event-publication.mjs"
+      - "scripts/verify-brand-follows.mjs"
+      - "scripts/verify-event-lynk-lifecycle.mjs"
+      - "scripts/verify-event-consolidation.mjs"
       - "scripts/verify-call-capacity.mjs"
       - "scripts/verify-editorial-identity.mjs"
 
@@ -76,6 +101,138 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-call-capacity.mjs
+      # Phone comp claims: single use, a second account refused, expiry, and
+      # racing claims, against the real migration SQL. Same no-skip rule.
+      - run: node scripts/verify-comp-claims.mjs
+
+  users-write-lockdown:
+    # Boots a throwaway cluster with production's public.users grants and
+    # policies, proves the hole is reproduced, applies the lockdown migration
+    # and asserts anon/authenticated get 42501 on every write. No --allow-skip,
+    # for the same reason as the job above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-users-lockdown.mjs
+
+  content-lockdown:
+    # posts writes, video_room_members.user_id reads and room_comments.author_id
+    # reads/writes. Same shape as the job above: proves the holes exist in a
+    # fixture copied from production, applies 20261003150100, 20261003150200
+    # and 20261003150300, and asserts they are closed (room chat handles are
+    # checked through the app's own resolver, comment-anonymity.ts). Also
+    # fails if client code writes posts/likes/comments/room_comments or names
+    # video_room_members.user_id or room_comments.author_id. No --allow-skip.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-content-lockdown.mjs
+
+  admission-gate-rls:
+    # Applies the verified-admission migration to a throwaway cluster that
+    # reproduces the live policies, then checks row visibility and writes as
+    # each persona (unverified, underage, old unverified, approved adult,
+    # anon, service_role). It also runs the same checks without the migration
+    # and requires the changed ones to fail there. No --allow-skip: a runner
+    # without Postgres must break the build, not report an empty green.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-admission-gate.mjs
+
+  checkout-profile-sql:
+    # Guest checkout creates or reuses a restricted profile. Duplicate
+    # accounts under concurrent checkouts, contact fields readable by client
+    # roles, and a restricted profile passing the RLS boundary are database
+    # behaviour, so this replays the migrations on a throwaway cluster. Same
+    # rule as above: no --allow-skip, a runner without Postgres fails.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-checkout-profile.mjs
+
+  event-publication:
+    # Boots a throwaway cluster from the runner's own Postgres and runs the
+    # hide / publish_at rule through can_view_event (behind the RESTRICTIVE
+    # events policy), the listing RPCs, the share-token lookup and guest RSVP.
+    # No --allow-skip: a runner without Postgres fails instead of passing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-event-publication.mjs
+
+  brand-follow-backfill:
+    # Replays the @DeviantEvents follow functions on a throwaway cluster and
+    # checks the backfill batches, skips ineligible accounts, never duplicates
+    # a follow or drifts the counts, and never has the brand follow old
+    # members. No --allow-skip, for the same reason as the job above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-brand-follows.mjs
+
+
+  event-lynk-lifecycle-backfill:
+    # Applies the event Lynk lifecycle migration to a throwaway cluster seeded
+    # with past, in-progress, future, cancelled and shared-room events, and
+    # checks that only the in-progress ones go live and that a second apply is
+    # harmless. No --allow-skip: a runner without Postgres must break the
+    # build, not report an empty green.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-event-lynk-lifecycle.mjs
+
+
+  event-consolidation:
+    # Replays the consolidation migration on a throwaway cluster: destination
+    # authorization, tier capacity against live holds and racing buyers,
+    # NULL-tier tickets, and total_attendees on event_id moves. No
+    # --allow-skip, for the same reason as the job above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-event-consolidation.mjs
 
   editorial-identity:
     # Replays the editorial migrations on a throwaway cluster with the live

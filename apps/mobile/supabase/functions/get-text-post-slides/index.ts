@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
+import { viewerMaySeeSpicy, withoutHiddenSpicy } from "../_shared/spicy-access.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -75,7 +76,7 @@ Deno.serve(async (req) => {
 
     const { data: posts, error: postsError } = await supabaseAdmin
       .from("posts")
-      .select("id, author_id, visibility, post_kind")
+      .select("id, author_id, visibility, post_kind, is_nsfw")
       .in("id", postIds)
       .eq("post_kind", "text");
 
@@ -88,7 +89,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    const allowedPostIds = (posts || [])
+    // SPICY slides go to a signed-in viewer with no under-18 ID on file
+    // (spicy-access.ts).
+    const maySeeSpicy = await viewerMaySeeSpicy(supabaseAdmin, viewerAuthId);
+    const allowedPostIds = withoutHiddenSpicy(posts || [], { userId: viewerUserId, maySeeSpicy })
       .filter((post: any) => {
         const visibility = String(post?.visibility || "public");
         return visibility === "public" || post?.author_id === viewerUserId;

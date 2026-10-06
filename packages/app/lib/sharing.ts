@@ -66,3 +66,35 @@ export const dvntShare = {
     return shareNative({ title, message, url });
   },
 };
+
+export type ShareMessageOutcome = "shared" | "dismissed" | "unsupported";
+
+/**
+ * Share a ready-made message (link already inside it). Unlike shareNative this
+ * reports what happened, so the caller can fall back to sms: or copy.
+ *
+ * Web goes straight to navigator.share: react-native-web's Share rejects when
+ * the browser has none, and desktop Chrome/Firefox often have none.
+ */
+export async function shareMessage(content: {
+  title: string;
+  message: string;
+}): Promise<ShareMessageOutcome> {
+  if (Platform.OS === "web") {
+    const nav = typeof navigator !== "undefined" ? navigator : undefined;
+    if (!nav || typeof nav.share !== "function") return "unsupported";
+    try {
+      await nav.share({ title: content.title, text: content.message });
+      return "shared";
+    } catch (err: any) {
+      return err?.name === "AbortError" ? "dismissed" : "unsupported";
+    }
+  }
+  try {
+    const result = await Share.share({ title: content.title, message: content.message });
+    return result.action === Share.dismissedAction ? "dismissed" : "shared";
+  } catch (err) {
+    console.error("[Share] Error:", err);
+    return "unsupported";
+  }
+}

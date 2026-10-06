@@ -61,6 +61,7 @@ import {
   useTicketViewerId,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { formatEventClock, formatEventDay } from "@dvnt/app/lib/events/event-time";
 import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
 import { addonsApi, type OrderAddonRecord } from "@dvnt/app/lib/api/addons";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
@@ -141,20 +142,12 @@ function dbToTicket(rec: TicketRecord): Ticket {
     tierName: rec.ticket_type_name || "General Admission",
     eventTitle: rec.event_title || "",
     eventDate: rec.event_date || "",
+    eventTz: rec.event_tz ?? null,
+    eventIsOnline: rec.event_is_online ?? false,
     eventLocation: rec.event_location || "",
     eventImage: rec.event_image || "",
     transferable: true,
   };
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
 }
 
 function formatTime(iso: string): string {
@@ -196,6 +189,11 @@ export function TicketDetailScreen() {
   const ticket: Ticket | undefined = dbTicket
     ? dbToTicket(dbTicket)
     : storeTicket;
+  // Door time in the venue's zone with its abbreviation ("8:00 PM PDT").
+  const ticketZone = {
+    eventTz: ticket?.eventTz ?? null,
+    isOnline: ticket?.eventIsOnline ?? false,
+  };
 
   /**
    * This route takes EITHER a ticket uuid or an event id — My Tickets links by
@@ -704,12 +702,16 @@ export function TicketDetailScreen() {
             <div className="mt-1 flex flex-col gap-0.5">
               {ticket.eventDate ? (
                 <p className="text-sm font-semibold text-white/70">
-                  {formatDate(ticket.eventDate)}
+                  {formatEventDay(ticket.eventDate, ticketZone, {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                  })}
                 </p>
               ) : null}
               {ticket.eventDate ? (
                 <p className="text-sm font-semibold text-white/70">
-                  {formatTime(ticket.eventDate)}
+                  {formatEventClock(ticket.eventDate, ticketZone)}
                 </p>
               ) : null}
               {ticket.eventLocation ? (

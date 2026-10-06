@@ -40,6 +40,7 @@ import {
   type HostDashboardEvent,
 } from "@dvnt/app/lib/api/privileged";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
+import type { EventDraftSummary } from "@dvnt/app/lib/api/event-drafts";
 import { useHostSectionsStore } from "./host-sections-store";
 
 function formatMoney(cents: number): string {
@@ -233,6 +234,61 @@ function CollapsibleSection({
   );
 }
 
+function SavedDrafts({
+  drafts,
+  onOpen,
+  onDelete,
+}: {
+  drafts: EventDraftSummary[];
+  onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  if (drafts.length === 0) return null;
+  return (
+    <section>
+      <p className="px-2 pt-6 pb-2 text-[11px] font-semibold uppercase tracking-wide text-white/45">
+        SAVED DRAFTS · {drafts.length}
+      </p>
+      <div className="space-y-1">
+        {drafts.map((draft) => (
+          <div
+            key={draft.id}
+            className="flex items-center gap-3 rounded-xl px-2 py-3 hover:bg-white/4"
+          >
+            <button
+              type="button"
+              onClick={() => onOpen(draft.id)}
+              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+            >
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[#3FDCFF]/18 bg-[#3FDCFF]/8">
+                <Calendar size={18} color="#3FDCFF" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-semibold text-white">
+                  {draft.title || "Untitled event"}
+                </span>
+                <span className="mt-0.5 block text-xs text-white/45">
+                  Updated {new Date(draft.updated_at).toLocaleString()}
+                  {draft.source_event_id ? " · duplicated event" : ""}
+                </span>
+              </span>
+              <ChevronRight size={18} className="text-white/25" />
+            </button>
+            <button
+              type="button"
+              aria-label={`Delete draft ${draft.title || "Untitled event"}`}
+              onClick={() => onDelete(draft.id)}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/35 hover:bg-red-500/10 hover:text-red-300"
+            >
+              <span aria-hidden className="text-lg leading-none">×</span>
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function HostScreen() {
   const router = useRouter();
   const q = useQuery({
@@ -240,6 +296,35 @@ export function HostScreen() {
     queryFn: getHostDashboard,
     staleTime: 30_000,
   });
+  const savedDrafts = useQuery({
+    queryKey: ["event-drafts"],
+    queryFn: async () => {
+      const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
+      return eventDraftsApi.list();
+    },
+    staleTime: 10_000,
+  });
+
+  const openSavedDraft = useCallback(
+    async (draftId: string) => {
+      const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
+      await eventDraftsApi.open(draftId);
+      router.push("/feed/events/create");
+    },
+    [router],
+  );
+
+  const deleteSavedDraft = useCallback(
+    async (draftId: string) => {
+      if (typeof window !== "undefined" && !window.confirm("Delete this saved event draft?")) {
+        return;
+      }
+      const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
+      await eventDraftsApi.delete(draftId);
+      await savedDrafts.refetch();
+    },
+    [savedDrafts],
+  );
 
   // Native routes per-event taps to the single-event admin surfaces; on web
   // every event tap lands on the per-event organizer surface.
@@ -301,7 +386,8 @@ export function HostScreen() {
     data.tonight.length === 0 &&
     data.upcoming.length === 0 &&
     data.drafts.length === 0 &&
-    data.past.length === 0;
+    data.past.length === 0 &&
+    (savedDrafts.data?.length ?? 0) === 0;
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -364,6 +450,12 @@ export function HostScreen() {
               accent={tierAccent("free")}
             />
           </div>
+
+          <SavedDrafts
+            drafts={savedDrafts.data ?? []}
+            onOpen={(id) => void openSavedDraft(id)}
+            onDelete={(id) => void deleteSavedDraft(id)}
+          />
 
           {empty ? (
             <div className="flex flex-col items-center gap-2 p-8 text-center">

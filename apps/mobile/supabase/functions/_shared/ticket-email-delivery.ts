@@ -177,6 +177,8 @@ export async function deliverTicketBundleEmail(
     force?: boolean;
     kind?: "fulfillment" | "manual_resend" | "retry";
     logPrefix?: string;
+    /** Set when this checkout just created a restricted profile for the buyer. */
+    profileUsername?: string | null;
   } = {},
 ): Promise<{ ok: boolean; reason?: string }> {
   const logPrefix = opts.logPrefix ?? "[ticket-email]";
@@ -240,6 +242,7 @@ export async function deliverTicketBundleEmail(
         dominantColor: event?.dominant_color ?? null,
         greeting,
         toEmail: to,
+        profileUsername: opts.profileUsername ?? null,
         summary: [
           { label: "Order", value: `#${order.id.slice(0, 8).toUpperCase()}` },
           {

@@ -30,6 +30,8 @@ export type SneakyLynkErrorReason =
   | "unauthorized"
   /** Web client refused a peer token for an app-only room. */
   | "app_only"
+  /** Event Lynk the host has not started yet. Not an error: a waiting room. */
+  | "waiting_for_host"
   | "unknown";
 
 /**
@@ -94,6 +96,18 @@ export function classifySneakyLynkError(
       reason: "app_only",
       title: "This Lynk is app-only",
       body: "The host made this room app-only, so it can't be opened in a browser. Open it in the DVNT app to join.",
+      ctaLabel: null,
+      rawMessage: raw,
+    };
+  }
+
+  // An event room before the host starts it. The room screen shows the
+  // waiting room for this instead of an error sheet.
+  if (detailReason === "waiting_for_host") {
+    return {
+      reason: "waiting_for_host",
+      title: "Waiting for the host to start",
+      body: "You're in the waiting room. You'll join automatically when the host starts.",
       ctaLabel: null,
       rawMessage: raw,
     };

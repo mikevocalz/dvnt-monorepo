@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-function harness() {
+function harness({ standing = { state: 'allowed', reason: 'not_enrolled', message: null } } = {}) {
   let handler, nextId = 1;
   const rows = [];
   const client = { from: () => {
@@ -28,6 +28,7 @@ function harness() {
     Deno: { env: { get: () => 'test' }, serve: fn => { handler = fn; } },
     require: name => name.includes('supabase-js') ? { createClient: () => client }
       : name.includes('verify-session') ? { verifySession: async (_db, req) => req.headers.get('x-test-actor'), corsHeaders: () => ({}), optionsResponse: () => new Response(null, { status: 204 }) }
+      : name.includes('creator-standing') ? { resolveCreatorStanding: async () => standing, creatorStandingRefusal: verdict => ({ code: 'creator_hosting_closed', reason: verdict.reason, message: verdict.message }) }
       : name.includes('verified-admission') ? { resolveVerifiedAdmission: async () => ({ state: 'allowed', reason: 'not_enforced', deadline: null, message: null }), admissionRefusal: verdict => ({ code: 'verification_required', reason: verdict.reason, message: verdict.message }) }
       : { checkRateLimit: () => ({ allowed: true }), WRITE_LIMIT: {} },
   });
@@ -58,4 +59,54 @@ test('online event does not require a fabricated physical venue and saves video 
   const h = harness(); const result = await h.publish({ ...draft, location: '', isOnline: true, videoFlyerUrl: 'https://cdn.test/event-video/flyer' });
   assert.equal(result.ok, true); assert.equal(result.data.event.location, 'Online');
   assert.equal(result.data.event.video_flyer_url, 'https://cdn.test/event-video/flyer'); assert.equal(result.data.event.image, null);
+});
+test('an end before the start is refused and nothing is inserted', async () => {
+  const h = harness();
+  const result = await h.publish({ ...draft, endDate: '2026-10-01T19:00:00Z' });
+  assert.equal(result.ok, false); assert.equal(result.error.code, 'validation_error');
+  assert.match(result.error.message, /ends before it starts/); assert.equal(h.rows.length, 0);
+});
+test('an unparseable end date is refused rather than handed to Postgres', async () => {
+  const h = harness(); const result = await h.publish({ ...draft, endDate: 'not a date' });
+  assert.equal(result.ok, false); assert.equal(result.error.code, 'validation_error'); assert.equal(h.rows.length, 0);
+});
+test('an end after the start and the picked zone are stored', async () => {
+  const h = harness();
+  const result = await h.publish({ ...draft, endDate: '2026-10-02T02:00:00Z', eventTz: 'America/Los_Angeles' });
+  assert.equal(result.ok, true); assert.equal(result.data.event.end_date, '2026-10-02T02:00:00Z');
+  assert.equal(result.data.event.event_tz, 'America/Los_Angeles');
+});
+test('a zone name Intl does not know is dropped, and the event still publishes', async () => {
+  const h = harness(); const result = await h.publish({ ...draft, eventTz: 'Not/AZone' });
+  assert.equal(result.ok, true); assert.equal(result.data.event.event_tz, undefined);
+});
+
+// E06: hide an event, or schedule when it goes public.
+test('a hidden event and a go-public time are stored', async () => {
+  const h = harness();
+  const result = await h.publish({ ...draft, isHidden: true, publishAt: '2026-09-25T16:00:00Z' });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.event.is_hidden, true);
+  assert.equal(result.data.event.publish_at, '2026-09-25T16:00:00.000Z');
+});
+test('without either field the event is public now', async () => {
+  const h = harness(); const result = await h.publish(draft);
+  assert.equal(result.data.event.is_hidden, false); assert.equal(result.data.event.publish_at, null);
+});
+test('an unparseable go-public time is refused and nothing is inserted', async () => {
+  const h = harness(); const result = await h.publish({ ...draft, publishAt: 'next friday' });
+  assert.equal(result.ok, false); assert.equal(result.error.code, 'validation_error'); assert.equal(h.rows.length, 0);
+});
+test('a go-public time after the event starts is refused', async () => {
+  const h = harness(); const result = await h.publish({ ...draft, publishAt: '2026-10-01T21:00:00Z' });
+  assert.equal(result.ok, false); assert.match(result.error.message, /before the event starts/); assert.equal(h.rows.length, 0);
+});
+test('isHidden must be a real boolean, not a truthy string', async () => {
+  const h = harness(); const result = await h.publish({ ...draft, isHidden: 'false' });
+  assert.equal(result.ok, false); assert.equal(result.error.code, 'validation_error'); assert.equal(h.rows.length, 0);
+});
+test('a creator whose hosting is closed publishes nothing', async () => {
+  const h = harness({ standing: { state: 'refused', reason: 'suspended', message: 'Hosting is paused on this account.' } });
+  const result = await h.publish(draft);
+  assert.equal(result.ok, false); assert.equal(result.error.code, 'creator_hosting_closed'); assert.equal(h.rows.length, 0);
 });

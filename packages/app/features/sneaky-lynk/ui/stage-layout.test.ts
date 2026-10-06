@@ -137,3 +137,63 @@ test("degenerate inputs do not produce negative boxes", () => {
   const tile = crowdTileBox(0, 0, 0, 0, GAP);
   assert.ok(tile.width >= 0 && tile.height >= 0);
 });
+
+// ── Host stage: 1 vs 2 hosts at phone, tablet and desktop widths ──────────
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { HOST_STAGE_MAX_WIDTH, HOST_TILE_GAP, hostStageLayout } from "./stage-layout.ts";
+
+const WIDTHS = [
+  { name: "phone", w: 390 - 24, h: 844, platform: "native" as const },
+  { name: "tablet portrait", w: 1024 - 24, h: 1366, platform: "native" as const },
+  { name: "tablet landscape", w: 1366 - 24, h: 1024, platform: "native" as const },
+  { name: "desktop web", w: 1440 - 48, h: 900, platform: "web" as const },
+  { name: "phone web", w: 390 - 32, h: 844, platform: "web" as const },
+];
+
+test("one host fills the stage; two split it with the same stage box", () => {
+  for (const s of WIDTHS) {
+    const maxH = Math.round(s.h * 0.44);
+    const one = hostStageLayout(1, s.w, maxH, s.platform);
+    const two = hostStageLayout(2, s.w, maxH, s.platform);
+    assert.deepEqual(one.stage, two.stage, `${s.name}: stage must not jump between 1 and 2 hosts`);
+    assert.deepEqual(one.tiles, [one.stage], s.name);
+    assert.equal(two.tiles.length, 2, s.name);
+    const used = two.tiles[0].width + two.tiles[1].width + two.gap;
+    assert.ok(used <= two.stage.width, `${s.name}: the pair overflows (${used} > ${two.stage.width})`);
+    assert.ok(two.stage.width - used <= 1, `${s.name}: the pair leaves a gap`);
+    assert.equal(two.gap, HOST_TILE_GAP);
+    // Halves keep the hero's height and stay between 3:4 and 16:9.
+    for (const t of two.tiles) {
+      assert.equal(t.height, two.stage.height, s.name);
+      assert.ok(ratio(t) >= 0.75 && ratio(t) <= HERO_ASPECT, `${s.name}: tile aspect ${ratio(t)}`);
+    }
+    assert.ok(one.stage.width <= s.w, `${s.name}: wider than the screen`);
+  }
+});
+
+test("web and tablets cap the stage at max-w-3xl; phones stay full width", () => {
+  const maxH = 10_000; // height never binds here, so only the width cap shows
+  // heroBox rounds through the 16:9 height, so full width is within 1pt.
+  assert.ok(366 - hostStageLayout(1, 366, maxH, "native").stage.width <= 1);
+  assert.ok(358 - hostStageLayout(1, 358, maxH, "web").stage.width <= 1);
+  assert.equal(hostStageLayout(1, 1000, maxH, "native").stage.width, HOST_STAGE_MAX_WIDTH);
+  assert.equal(hostStageLayout(2, 1342, maxH, "native").stage.width, HOST_STAGE_MAX_WIDTH);
+  assert.equal(hostStageLayout(1, 1392, maxH, "web").stage.width, HOST_STAGE_MAX_WIDTH);
+  assert.equal(hostStageLayout(2, 1392, maxH, "web").tiles[0].width, (HOST_STAGE_MAX_WIDTH - HOST_TILE_GAP) / 2);
+});
+
+test("a host leaving collapses two tiles back to one; nobody hosting draws none", () => {
+  assert.equal(hostStageLayout(2, 366, 400, "native").tiles.length, 2);
+  assert.equal(hostStageLayout(1, 366, 400, "native").tiles.length, 1);
+  assert.equal(hostStageLayout(0, 366, 400, "native").tiles.length, 0);
+  assert.equal(hostStageLayout(3, 366, 400, "native").tiles.length, 2, "the top holds two hosts at most");
+});
+
+test("the stage cap is the app's max-w-3xl content column", () => {
+  const sheet = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "lib", "ui", "sheet-metrics.ts"), "utf8");
+  const m = sheet.match(/MAX_SHEET_WIDTH = (\d+);/);
+  assert.ok(m, "MAX_SHEET_WIDTH moved");
+  assert.equal(Number(m[1]), HOST_STAGE_MAX_WIDTH);
+});

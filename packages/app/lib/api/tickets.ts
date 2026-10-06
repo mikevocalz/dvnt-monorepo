@@ -50,6 +50,9 @@ export interface TicketRecord {
    */
   event_dominant_color?: string | null;
   event_date?: string;
+  /** IANA venue zone; null on older events (render unlabelled). */
+  event_tz?: string | null;
+  event_is_online?: boolean;
   event_location?: string;
   username?: string;
   /** Holder display name, resolved server-side. Guests carry `guest_name`. */
@@ -397,6 +400,8 @@ export const ticketsApi = {
     userId?: string; // deprecated — server derives from session
     promoCode?: string;
     idempotencyKey?: string;
+    /** Normalized phone, sent once the server has asked for one. */
+    phone?: string;
   }): Promise<{
     url?: string;
     tickets?: any[];
@@ -421,6 +426,7 @@ export const ticketsApi = {
             ...(params.idempotencyKey
               ? { idempotency_key: params.idempotencyKey }
               : {}),
+            ...(params.phone ? { phone: params.phone } : {}),
           },
           headers: { Authorization: `Bearer ${token}` },
         },
@@ -445,6 +451,10 @@ export const ticketsApi = {
     quantity: number;
     guestEmail: string;
     guestName?: string;
+    /** Restricted-profile fields; send all three (see checkout-profile-fields). */
+    username?: string;
+    fullName?: string;
+    phoneE164?: string;
     promoCode?: string;
     idempotencyKey?: string;
   }): Promise<{
@@ -466,6 +476,9 @@ export const ticketsApi = {
             quantity: params.quantity,
             guest_email: params.guestEmail,
             ...(params.guestName ? { guest_name: params.guestName } : {}),
+            ...(params.username ? { username: params.username } : {}),
+            ...(params.fullName ? { full_name: params.fullName } : {}),
+            ...(params.phoneE164 ? { phone: params.phoneE164 } : {}),
             ...(params.promoCode ? { promo_code: params.promoCode } : {}),
             ...(promoterCode ? { promoter_code: promoterCode } : {}),
             ...(params.idempotencyKey

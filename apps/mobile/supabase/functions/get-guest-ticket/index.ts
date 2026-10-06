@@ -65,7 +65,7 @@ Deno.serve(async (req: Request) => {
         guest_name,
         cart_id,
         ticket_type:ticket_types(name),
-        event:events(title, start_date, end_date, location_name, location_address, cover_image_url)
+        event:events(title, start_date, end_date, event_tz, is_online, location_name, location_address, cover_image_url)
       `,
       )
       .eq("guest_lookup_token", token)
@@ -147,6 +147,9 @@ Deno.serve(async (req: Request) => {
           title: eventRow?.title ?? "",
           startDate: eventRow?.start_date ?? null,
           endDate: eventRow?.end_date ?? null,
+          // Venue zone, so the ticket shows the door time the host set.
+          eventTz: eventRow?.event_tz ?? null,
+          isOnline: eventRow?.is_online ?? false,
           location:
             eventRow?.location_name ??
             eventRow?.location_address ??

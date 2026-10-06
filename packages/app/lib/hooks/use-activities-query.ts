@@ -9,6 +9,7 @@
  * toggleFollow) and realtime subscriptions. This hook provides the READ path.
  */
 
+import { ticketActivityRoute } from "@dvnt/app/lib/activity/ticket-activity";
 import { useQuery } from "@tanstack/react-query";
 import {
   getPostDetailCommentsRoute,
@@ -49,6 +50,12 @@ export type ActivityType =
   | "ticket_transfer_cancelled"
   | "ticket_comped"
   | "ticket_refunded"
+  | "ticket_claim_required"
+  | "ticket_delivery_failed"
+  | "ticket_voided"
+  | "event_postponed"
+  | "event_time_changed"
+  | "event_venue_changed"
   | "room_invite"
   | "sneaky_lynk"
   // App-wide announcement. No actor and no entity — the copy travels in
@@ -90,6 +97,10 @@ export interface Activity {
     body?: string;
     summary?: string;
     changes?: string[];
+    /** Specific pass for ticket rows, when the emitter sends one. */
+    ticket_id?: string;
+    /** room_invite: the event the Lynk belongs to (event-lynk-invite). */
+    event_title?: string | null;
   } | null;
 }
 
@@ -279,6 +290,14 @@ export function getRouteForActivity(activity: Activity): string {
   if (type === "event_promoter_added" && entityId) {
     return `/(protected)/events/${entityId}/promoter`;
   }
+
+  // Ticket rows open the pass or the transfer/claim screen (T04), ahead of
+  // the generic entityType "event" branch that comp and refund rows hit.
+  const ticketRoute = ticketActivityRoute(
+    { type, entityType, entityId, eventId: event?.id, payload: activity.payload },
+    "native",
+  );
+  if (ticketRoute) return ticketRoute;
 
   // Use entityType/entityId if available (preferred routing)
   if (entityType && entityId) {

@@ -8,6 +8,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
+import { viewerMaySeeSpicy, withoutHiddenSpicy } from "../_shared/spicy-access.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -250,7 +251,7 @@ Deno.serve(async (req) => {
       postIds.length > 0
         ? supabaseAdmin
             .from("posts")
-            .select("id, author_id, content")
+            .select("id, author_id, content, is_nsfw")
             .in("id", postIds)
         : Promise.resolve({ data: [], error: null }),
       postIds.length > 0
@@ -369,8 +370,12 @@ Deno.serve(async (req) => {
       }
     }
 
+    // A like does not outlive the SPICY rule. A hidden post renders as
+    // "Post unavailable" with no preview image.
+    const maySeeSpicy = await viewerMaySeeSpicy(supabaseAdmin, sessionResult.userId);
     const postsById = new Map(
-      (posts || []).map((post: any) => [String(post.id), post]),
+      withoutHiddenSpicy(posts || [], { userId: userData.id, maySeeSpicy })
+        .map((post: any) => [String(post.id), post]),
     );
     const eventsById = new Map(
       (events || []).map((event: any) => [String(event.id), event]),
@@ -410,7 +415,7 @@ Deno.serve(async (req) => {
         entityId,
         createdAt,
         title: truncate(post?.content, 96, "Post unavailable"),
-        previewImage: postMediaMap.get(entityId) || "",
+        previewImage: post ? postMediaMap.get(entityId) || "" : "",
         actor,
       };
     });

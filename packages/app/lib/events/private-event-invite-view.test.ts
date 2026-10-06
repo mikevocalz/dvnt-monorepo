@@ -46,11 +46,12 @@ test("a sent-but-unaccepted staff invite opens a private event", async () => {
 });
 
 test("being invited is not being an organizer", async () => {
-  // Organizer privileges skip the not-started gate and survive cancellation.
-  // An invitee must get neither, or "let them in" becomes "promote them".
+  // Organizer privileges skip the waiting room (a host can enter before
+  // starting) and survive cancellation. An invitee must get neither, or "let
+  // them in" becomes "promote them".
   const relations = await eventRelationships(pendingStaff, privateEvent, "guest");
   const early = decideEventRoomAccess(privateEvent, relations, {}, start - 1);
-  assert.equal(early.ok === false && early.detail.reason, "event_not_started");
+  assert.equal(early.ok === false && early.detail.reason, "waiting_for_host");
   const cancelled = decideEventRoomAccess({ ...privateEvent, status: "cancelled" }, relations, {}, start);
   assert.equal(cancelled.ok === false && cancelled.detail.reason, "event_unavailable");
 });

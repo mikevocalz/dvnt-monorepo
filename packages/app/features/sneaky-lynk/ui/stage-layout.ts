@@ -113,3 +113,56 @@ export function crowdTileBox(
   const width = Math.min(slotWidth, Math.floor(slotHeight * MAX_TILE_ASPECT));
   return { width: Math.max(0, width), height: Math.max(0, slotHeight) };
 }
+
+/**
+ * Widest the host stage gets: max-w-3xl, the app's content column
+ * (MAX_SHEET_WIDTH in lib/ui/sheet-metrics.ts; stage-layout.test.ts pins
+ * the two together). One person spread across a desktop or a landscape iPad
+ * reads as a mistake, so web and tablets cap here and centre. Phones are
+ * narrower than the cap and stay full width.
+ */
+export const HOST_STAGE_MAX_WIDTH = 768;
+
+/** Gap between two host tiles. */
+export const HOST_TILE_GAP = 8;
+
+export type StagePlatform = "web" | "native";
+
+export interface HostStageLayout {
+  /** The capped, centred box both layouts share. */
+  stage: Box;
+  /** One box per host, left to right. Empty when nobody is hosting yet. */
+  tiles: Box[];
+  gap: number;
+}
+
+/**
+ * The top of the room: one host full width of the stage, or two side by side.
+ *
+ * The stage box is the same for one and two hosts, so a co-host arriving or
+ * leaving only splits or merges the tiles; the stage itself does not jump.
+ * Each half keeps the hero's height, which leaves it close to square at the
+ * usual widths instead of a 16:9 sliver.
+ */
+export function hostStageLayout(
+  hostCount: number,
+  availableWidth: number,
+  maxHeight: number,
+  platform: StagePlatform,
+): HostStageLayout {
+  const capped = platform === "web" || availableWidth >= TABLET_MIN_WIDTH;
+  const width = capped ? Math.min(availableWidth, HOST_STAGE_MAX_WIDTH) : availableWidth;
+  const stage = heroBox(Math.max(0, width), maxHeight);
+  const count = Math.max(0, Math.min(2, Math.floor(hostCount)));
+  if (count === 0) return { stage, tiles: [], gap: 0 };
+  if (count === 1) return { stage, tiles: [{ ...stage }], gap: 0 };
+  const half = Math.max(0, Math.floor((stage.width - HOST_TILE_GAP) / 2));
+  return {
+    stage,
+    tiles: [
+      { width: half, height: stage.height },
+      { width: half, height: stage.height },
+    ],
+    gap: HOST_TILE_GAP,
+  };
+}

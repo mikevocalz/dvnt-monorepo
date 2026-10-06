@@ -18,6 +18,7 @@ import { usersApi } from "@dvnt/app/lib/api/users";
 import { citiesApi } from "@dvnt/app/lib/api/cities";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { IDENTITY_OPTIONS, AUDIENCE_OPTIONS } from "@dvnt/app/lib/constants/identity";
+import { fetchOwnIdentity, onboardingState } from "@dvnt/app/lib/profile/own-identity";
 import { onboardingCheckpoint, onboardingFailure } from "@dvnt/observability/flows";
 import { create } from "zustand";
 
@@ -31,11 +32,14 @@ import { create } from "zustand";
 const P = "rgb(62, 164, 229)";
 
 interface WelcomeUiState {
+  /** Result of reading the member's saved identity. "error" is NOT "needed". */
+  check: "checking" | "needed" | "error";
   step: number;
   identity: string[];
   audience: string;
   saving: boolean;
   locating: boolean;
+  setCheck: (v: "checking" | "needed" | "error") => void;
   setStep: (n: number) => void;
   toggleIdentity: (v: string) => void;
   setAudience: (v: string) => void;
@@ -45,11 +49,13 @@ interface WelcomeUiState {
 }
 
 const useWelcomeUiStore = create<WelcomeUiState>((set) => ({
+  check: "checking",
   step: 0,
   identity: [],
   audience: "",
   saving: false,
   locating: false,
+  setCheck: (check) => set({ check }),
   setStep: (step) => set({ step }),
   toggleIdentity: (v) =>
     set((s) => ({
@@ -60,7 +66,8 @@ const useWelcomeUiStore = create<WelcomeUiState>((set) => ({
   setAudience: (audience) => set({ audience }),
   setSaving: (saving) => set({ saving }),
   setLocating: (locating) => set({ locating }),
-  reset: () => set({ step: 0, identity: [], audience: "", saving: false, locating: false }),
+  reset: () =>
+    set({ check: "checking", step: 0, identity: [], audience: "", saving: false, locating: false }),
 }));
 
 function Chip({
@@ -118,30 +125,41 @@ export default function WelcomeScreen() {
     router.replace("/(protected)/(tabs)" as any);
   };
 
-  // Prefill / self-skip from the profile row (may have been set on web).
+  // Self-skip when the profile row already has identity (may have been set on
+  // web). A failed read is "unknown", not "not onboarded": the member gets a
+  // retry instead of the questions, so stored answers are never re-asked or
+  // overwritten on a read that only failed.
+  const checkIdentity = async (userId: string) => {
+    s.setCheck("checking");
+    const result = await fetchOwnIdentity(supabase, userId);
+    const state = onboardingState(result);
+    if (state === "unknown") {
+      s.setCheck("error");
+      return;
+    }
+    if (state === "done" && result.ok) {
+      updateUser({
+        sexuality: result.identity.sexuality,
+        eventAudience: result.identity.eventAudience || undefined,
+      });
+      finish();
+      return;
+    }
+    s.setCheck("needed");
+  };
+
   useEffect(() => {
     if (!user?.id) return;
     setCurrentStep("welcome");
-    (async () => {
-      try {
-        const { data } = await supabase
-          .from("users")
-          .select("sexuality, event_audience")
-          .eq("id", Number(user.id))
-          .maybeSingle();
-        if (data?.sexuality?.length) {
-          updateUser({
-            sexuality: data.sexuality,
-            eventAudience: data.event_audience || undefined,
-          });
-          finish();
-        }
-      } catch {
-        // Best-effort — the flow works from a blank slate.
-      }
-    })();
+    void checkIdentity(user.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  // Leave without marking welcome done, so it is offered again next sign-in.
+  const leaveForNow = () => {
+    setCurrentStep(null);
+    router.replace("/(protected)/(tabs)" as any);
+  };
 
   const savePreferences = async () => {
     if (!s.identity.length && !s.audience) {
@@ -283,6 +301,46 @@ export default function WelcomeScreen() {
 
   const current = steps[s.step] ?? steps[0];
   const busy = s.saving || s.locating;
+
+  if (s.check !== "needed") {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#02030A" }}>
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 16 }}>
+          {s.check === "checking" ? (
+            <ActivityIndicator color={P} />
+          ) : (
+            <>
+              <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700", textAlign: "center" }}>
+                Couldn&apos;t load your profile
+              </Text>
+              <Text style={{ color: "rgba(255,255,255,0.65)", fontSize: 14, textAlign: "center" }}>
+                Check your connection and try again.
+              </Text>
+              <Pressable
+                onPress={() => user?.id && void checkIdentity(user.id)}
+                accessibilityRole="button"
+                style={{
+                  height: 48,
+                  paddingHorizontal: 28,
+                  borderRadius: 12,
+                  backgroundColor: P,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>Try again</Text>
+              </Pressable>
+              <Pressable onPress={leaveForNow} accessibilityRole="button">
+                <Text style={{ color: "rgba(255,255,255,0.55)", fontSize: 14, fontWeight: "700" }}>
+                  Not now
+                </Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#02030A" }}>

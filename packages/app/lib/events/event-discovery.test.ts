@@ -65,3 +65,34 @@ test("a ticket holder, host or staff still opens a cancelled event directly", ()
   assert.equal(canOpenEventDirectly(cancelled, {}), false);
   assert.equal(canOpenEventDirectly(active, {}), true);
 });
+
+// E06: a hidden event, or one whose publish_at has not passed, is not listed.
+test("a hidden event is not publicly listable", async () => {
+  const { isPubliclyListableEvent } = await import("./event-discovery.ts");
+  assert.equal(isPubliclyListableEvent({ id: 1, visibility: "public", is_hidden: true }), false);
+  assert.equal(isPubliclyListableEvent({ id: 1, visibility: "public", is_hidden: false }), true);
+});
+
+test("an event is listable only once its publish_at has passed", async () => {
+  const { isPubliclyListableEvent, filterPubliclyListableEvents } = await import("./event-discovery.ts");
+  const now = Date.parse("2026-10-03T12:00:00Z");
+  const at = (publish_at: string | null) => ({ id: 1, visibility: "public", publish_at });
+  assert.equal(isPubliclyListableEvent(at("2026-10-03T12:00:01Z"), now), false);
+  assert.equal(isPubliclyListableEvent(at("2026-10-03T12:00:00Z"), now), true);
+  assert.equal(isPubliclyListableEvent(at("2026-10-01T00:00:00Z"), now), true);
+  assert.equal(isPubliclyListableEvent(at(null), now), true);
+  // Rows from callers that never select the columns keep listing as before.
+  assert.equal(isPubliclyListableEvent({ id: 1, visibility: "public" }, now), true);
+  assert.deepEqual(
+    filterPubliclyListableEvents(
+      [at("2026-10-04T00:00:00Z"), { id: 2, visibility: "public", is_hidden: true }, { id: 3, visibility: "public" }],
+      now,
+    ).map((e) => e.id),
+    [3],
+  );
+});
+
+test("an unparseable publish_at fails closed", async () => {
+  const { isPubliclyListableEvent } = await import("./event-discovery.ts");
+  assert.equal(isPubliclyListableEvent({ id: 1, visibility: "public", publish_at: "soon" }), false);
+});

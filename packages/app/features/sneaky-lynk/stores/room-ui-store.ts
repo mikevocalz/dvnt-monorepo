@@ -21,6 +21,8 @@ export type RoomPhase =
   /** Web client refused a peer token because the room is app-only. Terminal
    *  on this rail — the only escape is opening the room in the DVNT app. */
   | "app-only"
+  /** Event Lynk the host has not started. Joins on its own once they do. */
+  | "waiting"
   | "error";
 
 interface RoomUIStore {

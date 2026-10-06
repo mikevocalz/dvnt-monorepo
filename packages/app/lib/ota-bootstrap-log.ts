@@ -105,13 +105,25 @@ function safeGet<T>(fn: () => T, fallback: T): T {
           // Required lazily: this runs inside a .then(), long after both
           // modules have evaluated, so it cannot re-enter the boot import
           // order that ota-bootstrap-log is deliberately first in.
-          const first = recoveryEntries[0] as { message?: string };
+          const first = recoveryEntries[0] as { message?: string; timestamp?: number };
           // eslint-disable-next-line @typescript-eslint/no-var-requires
           const { reportPriorCrash } = require("@dvnt/app/lib/native-exception-log");
-          reportPriorCrash("expo-updates-recovery", {
+          // reportPriorCrash resolves false while a sink still lacks the report
+          // and the attempt budget allows another boot to retry it.
+          // This is the only path carrying ErrorRecovery.crash()'s reason
+          // string, so a silent false here means the sole evidence for the
+          // iOS startup crash is gone with nothing in the log to say so.
+          void reportPriorCrash("expo-updates-recovery", {
             name: "ErrorRecovery",
+            timestamp: first.timestamp,
             message: first?.message ?? "(no message)",
             entries: recoveryEntries.slice(0, 5),
+          }).then((accepted: boolean) => {
+            if (!accepted) {
+              console.warn(
+                "[ota-bootstrap] ErrorRecovery crash report was not accepted; retained for the next boot",
+              );
+            }
           });
         }
       } catch {

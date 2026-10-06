@@ -46,7 +46,9 @@ import {
   Send,
   Ticket,
   Radio,
+  EyeOff,
 } from "lucide-react-native";
+import { publicationBadge } from "@dvnt/app/lib/events/event-publication";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Motion } from "@legendapp/motion";
@@ -95,6 +97,7 @@ import { useSaleNotifyStore } from "@dvnt/app/lib/stores/sale-notify-store";
 import { SafeCalendar as Calendar } from "@dvnt/app/lib/safe-native-modules";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
+import { CheckoutPhoneField } from "@dvnt/app/features/events/checkout-phone-field";
 import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 import { usePromotionStore } from "@dvnt/app/lib/stores/promotion-store";
 import { PromoteEventSheet } from "@dvnt/app/features/events";
@@ -112,6 +115,9 @@ import {
   OrganizerCard,
 } from "@dvnt/app/features/events/ui";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
+import { canHostEventLynk } from "@dvnt/app/lib/events/event-lynk";
+import { EventLynkHostPanel } from "@dvnt/app/features/events/ui/EventLynkHostPanel";
 import { canScanTickets } from "@dvnt/app/lib/events/event-role";
 import { eventEnded } from "@dvnt/app/lib/events/event-time";
 import type {
@@ -146,6 +152,15 @@ import {
 import { ensureOnlineOrToast } from "@dvnt/app/lib/connectivity/guard";
 import { ZoomTarget } from "@dvnt/app/components/ui/zoom-card";
 import { CONTENT_MAX_WIDTH } from "@dvnt/app/components/layout/screen-shell";
+import {
+  deviceTimeZone,
+  normalizeTimeZone,
+  zonedIsoToLocalIso,
+} from "@dvnt/app/lib/events/event-zone";
+import {
+  formatEventClock,
+  formatEventDay,
+} from "@dvnt/app/lib/events/event-time";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 /**
@@ -302,33 +317,6 @@ function buildPlaceholderAttendees(count: number): EventAttendee[] {
   }));
 }
 
-function formatEventDate(dateStr: string): string {
-  try {
-    const d = new Date(dateStr);
-    return d
-      .toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-      })
-      .toUpperCase();
-  } catch {
-    return dateStr;
-  }
-}
-
-function formatEventTime(dateStr: string): string {
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-  } catch {
-    return "";
-  }
-}
 
 function EventDetailScreenContent() {
   // DEV-only loop detection
@@ -1143,6 +1131,14 @@ function EventDetailScreenContent() {
     return false;
   }, [user?.id, eventData?.host?.id]);
 
+  // Event Lynk waiting room. Host = owner or accepted admin/editor
+  // co-organizer, the server's rule; the server re-checks on every call.
+  const mayHostLynk = canHostEventLynk(doorRole) || isHost;
+  const lynkHost = useEventLynkHost(
+    Number(eventId),
+    mayHostLynk && !!(eventData as any)?.lynkRoomId,
+  );
+
   // ── WS-9 safe destructive flows ──────────────────────────────────
   // Cancel (auto-refund) / Postpone (reversible, no refunds) / Delete
   // (blocked while paid tickets exist) each get their own confirmed
@@ -1347,8 +1343,15 @@ function EventDetailScreenContent() {
     // event must not default to a date that can't be booked.
     const srcDate = eventData.date ? new Date(eventData.date) : null;
     if (srcDate && srcDate.getTime() > Date.now()) {
-      store.setEventDate(srcDate.toISOString());
-      if (eventData.endDate) store.setEndDate(eventData.endDate);
+      // The create store holds the wall clock; reopen it in the source
+      // event's zone so a 9 PM Pacific event copies as 9 PM Pacific.
+      const srcTz =
+        normalizeTimeZone((eventData as any).event_tz) ?? deviceTimeZone();
+      store.setEventTz(srcTz);
+      store.setEventDate(zonedIsoToLocalIso(srcDate.toISOString(), srcTz));
+      if (eventData.endDate) {
+        store.setEndDate(zonedIsoToLocalIso(eventData.endDate, srcTz) || null);
+      }
     }
     if (eventData.maxAttendees) {
       store.setMaxAttendees(String(eventData.maxAttendees));
@@ -1856,10 +1859,36 @@ function EventDetailScreenContent() {
     }
     go(roomId);
   };
+  /** Host's Start: opens the room for everyone waiting, then enters it. */
+  const startEventLynk = async () => {
+    try {
+      const res = await lynkHost.start();
+      showToast(
+        "success",
+        "Lynk started",
+        res.admitted > 0
+          ? `${res.admitted} waiting ${res.admitted === 1 ? "guest is" : "guests are"} joining`
+          : "Guests can join now",
+      );
+      void openEventLynk();
+    } catch (err) {
+      showToast(
+        "error",
+        "Couldn't start the Lynk",
+        err instanceof Error && err.message ? err.message : "Try again in a moment.",
+      );
+    }
+  };
   // CRITICAL: event.date is the day number ("22"), event.fullDate is the ISO string
   const isoDate = event.fullDate || event.date;
-  const dateStr = formatEventDate(isoDate);
-  const timeStr = formatEventTime(isoDate);
+  // Day and time in the venue's zone with its abbreviation ("8:00 PM PDT"),
+  // the same rule web detail uses. No recorded zone: viewer's zone, no label.
+  const zoneFields = {
+    event_tz: (event as any).event_tz,
+    isOnline: (event as any).isOnline,
+  };
+  const dateStr = formatEventDay(isoDate, zoneFields).toUpperCase();
+  const timeStr = formatEventClock(isoDate, zoneFields);
 
   // ── Render ──────────────────────────────────────────────────────────
   return (
@@ -2015,6 +2044,33 @@ function EventDetailScreenContent() {
               {host?.verified && <BadgeCheck size={16} color="#34A2DF" />}
             </Pressable>
           </View>
+
+          {/* Host-only: the event is hidden, or not public until publish_at.
+              Nobody else can open it, so nobody else needs telling. */}
+          {isHost && publicationBadge(eventData as any) ? (
+            <View style={s.section}>
+              <View
+                accessibilityRole="text"
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  alignSelf: "flex-start",
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  backgroundColor: "rgba(192,132,252,0.12)",
+                  borderWidth: 1,
+                  borderColor: "rgba(192,132,252,0.4)",
+                }}
+              >
+                <EyeOff size={14} color="#C084FC" />
+                <Text style={{ color: "#C084FC", fontSize: 13, fontWeight: "600" }}>
+                  {publicationBadge(eventData as any)}
+                </Text>
+              </View>
+            </View>
+          ) : null}
 
           {/* ── CANCELLED — premium full-bleed banner that replaces
                  the entire ticketing surface. The cancel-event edge
@@ -2172,6 +2228,9 @@ function EventDetailScreenContent() {
                   ) : null}
                 </View>
               )}
+
+              {/* Signed-in buyer with no phone on file: shown after checkout asks. */}
+              {selectedTier && !hasTicket ? <CheckoutPhoneField /> : null}
 
               {/* Quantity selector — shown for all real DB tiers (free and paid).
                   Excluded for the synthetic "free" id which uses the legacy RSVP path. */}
@@ -2462,6 +2521,15 @@ function EventDetailScreenContent() {
                 </Text>
               </View>
             </Pressable>
+          ) : null}
+          {(event as any).lynkRoomId && mayHostLynk && lynkHost.view ? (
+            <EventLynkHostPanel
+              waiting={lynkHost.view.waiting}
+              count={lynkHost.view.count}
+              isLive={lynkHost.isLive}
+              isStarting={lynkHost.isStarting}
+              onStart={() => void startEventLynk()}
+            />
           ) : null}
 
           {/* ── 4. COLLAPSIBLE EVENT DETAILS ─────────────────────── */}

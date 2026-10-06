@@ -152,6 +152,9 @@ verify_jwt = false
 [functions.guest-checkout]
 verify_jwt = false
 
+[functions.checkout-username]
+verify_jwt = false
+
 # Guest ticket re-request (WS-7): email-only re-delivery, no session. Own
 # rate limits + uniform response inside the fn; never returns ticket data.
 [functions.guest-ticket-lookup]
@@ -267,6 +270,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.lynk-cohost-invite]
+verify_jwt = false
+
+[functions.lynk-room-comment]
 verify_jwt = false
 
 [functions.event-comment-mutate]
@@ -504,6 +510,40 @@ verify_jwt = false
 [functions.event-reminders]
 verify_jwt = false
 
+[functions.first-post-offer]
+verify_jwt = false
+
+[functions.event-drafts]
+verify_jwt = false
+
+# Phone comp claim. Better Auth session, checked in the handler, like every
+# other function here.
+[functions.claim-comp-ticket]
+verify_jwt = false
+
+[functions.event-followup-settings]
+verify_jwt = false
+
+[functions.process-event-followups]
+verify_jwt = false
+
+[functions.event-followup-unsubscribe]
+verify_jwt = false
+
+[functions.event-lynk-invite]
+verify_jwt = false
+
+[functions.process-event-lynk-lifecycle]
+verify_jwt = false
+
+[functions.event-lynk-room]
+verify_jwt = false
+
+[functions.event-consolidation]
+verify_jwt = false
+
+[functions.creator-program]
+verify_jwt = false
 
 [functions.editorial-admin]
 verify_jwt = false

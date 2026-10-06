@@ -762,6 +762,8 @@ export const postsApi = {
     }>;
     location?: string;
     isNSFW?: boolean;
+    /** The event behind a ticket first-post draft; create-post gates on it. */
+    firstPostEventId?: number;
   }): Promise<Post> {
     try {
       console.log("[Posts] createPost via Edge Function");
@@ -806,6 +808,7 @@ export const postsApi = {
             media: data.media,
             location: data.location,
             isNSFW: data.isNSFW,
+            firstPostEventId: data.firstPostEventId,
           },
           headers: { Authorization: `Bearer ${token}` },
           signal: AbortSignal.timeout(60_000),

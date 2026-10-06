@@ -9,6 +9,10 @@
  * it; the claim email is a separate outcome that can fail on its own. Every
  * count here keeps those apart — collapsing them is how a host tells someone
  * "you're on the list" for a mail that bounced.
+ *
+ * A phone number gets a claim link instead, and DVNT never sends it: the
+ * host's own phone texts it. Until the host has done that, a phone comp is
+ * issued and not delivered.
  */
 
 import type { CompResult } from "@dvnt/app/lib/api/privileged";
@@ -27,12 +31,16 @@ export function canCompTickets(role: string | null | undefined): boolean {
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Same shape test the server runs before trying to normalize a phone. */
+const PHONE_LIKE = /^\+?[\d\s().-]{7,}$/;
 
 export interface CompRecipientPreview {
   /** Trimmed entries, in typed order, as they will be posted. */
   entries: string[];
   /** Entries that look like an email address. */
   emails: number;
+  /** Entries that look like a phone number. The server decides if they are valid. */
+  phones: number;
   /** Everything else, treated as a DVNT username. */
   members: number;
   /** Past the server's batch cap — nothing should be sent. */
@@ -46,11 +54,16 @@ export function parseCompRecipients(raw: string): CompRecipientPreview {
     .map((s) => s.trim())
     .filter(Boolean);
   let emails = 0;
-  for (const entry of entries) if (EMAIL.test(entry)) emails += 1;
+  let phones = 0;
+  for (const entry of entries) {
+    if (EMAIL.test(entry)) emails += 1;
+    else if (!entry.startsWith("@") && PHONE_LIKE.test(entry)) phones += 1;
+  }
   return {
     entries,
     emails,
-    members: entries.length - emails,
+    phones,
+    members: entries.length - emails - phones,
     overLimit: entries.length > MAX_COMP_RECIPIENTS,
   };
 }
@@ -74,6 +87,10 @@ export interface CompSummary {
   issued: number;
   /** Guest tickets minted for emails with no account. */
   guestIssued: number;
+  /** Phone comps newly minted. Resends rotate an existing ticket and are not counted. */
+  phoneIssued: number;
+  /** Claim links the host still has to text, one per phone. */
+  claimLinks: number;
   /** Every ticket that now exists. */
   totalIssued: number;
   /** Claim emails the mailer confirmed. */
@@ -90,12 +107,15 @@ export interface CompSummary {
  */
 export function summarizeCompResult(result: CompResult): CompSummary {
   const guestIssued = result.guest_issued ?? 0;
+  const phoneIssued = result.phone_guest_issued ?? 0;
   const delivery = result.delivery ?? [];
   const delivered = delivery.filter((d) => d.status === "delivered").length;
   return {
     issued: result.issued,
     guestIssued,
-    totalIssued: result.issued + guestIssued,
+    phoneIssued,
+    claimLinks: result.claim_links?.length ?? 0,
+    totalIssued: result.issued + guestIssued + phoneIssued,
     delivered,
     undelivered: delivery.length - delivered,
     skipped: result.skipped.length,

@@ -1,0 +1,87 @@
+name: release regression gate
+
+# Runs the critical-scenario suites named in
+# docs/workstreams/release-regression-manifest.json, plus the static verifiers.
+# `pnpm verify:release` reads that manifest and fails when a scenario's
+# automation is missing, has no assertions, or is not executed by any workflow.
+#
+# paths: has to stay wider than it looks. The job runs `pnpm verify:routes`,
+# whose APP_DIR is apps/web/src/app/(frontend), so apps/web/** belongs here or
+# the /feed-prefix regression class never triggers the gate that checks it.
+# docs/workstreams/** is listed so editing the manifest triggers its validator.
+# package.json is listed because rewriting a test script body changes what this
+# job actually runs.
+
+on:
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - "packages/**"
+      - "apps/mobile/supabase/**"
+      - "scripts/**"
+      - "docs/workstreams/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/release-regression-gate.yml"
+  push:
+    # Both branch names: `master` is the repo default, `main` is what release
+    # PRs merge into. A release gate with no push trigger never runs on the
+    # release merge itself, which is the same hole bundle-budget.yml and
+    # verify-edge-functions.yml both carry a comment about.
+    branches: [master, main]
+    paths:
+      - "apps/web/**"
+      - "packages/**"
+      - "apps/mobile/supabase/**"
+      - "scripts/**"
+      - "docs/workstreams/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # The manifest check first: if a scenario lost its automation, the rest of
+      # this job can still pass and tell you nothing.
+      - run: pnpm verify:release
+
+      # Static verifiers. verify:issuance is the one that catches a partial-index
+      # onConflict, the September outage mode, and it ran in no workflow before.
+      - run: pnpm verify:functions
+      - run: pnpm verify:routes
+      - run: pnpm verify:issuance
+      - run: pnpm verify:identifiers
+      - run: pnpm verify:parity
+
+      # Typecheck had no CI coverage: CLAUDE.md relies on a local Stop hook,
+      # which is a developer-machine gate, not a release one. `pnpm lint` is left
+      # out on purpose. @dvnt/auth, @dvnt/utils, @dvnt/supabase and web-vite run
+      # eslint with no config file, so turbo lint has never passed; add it here
+      # once those packages have configs.
+      - run: pnpm typecheck
+
+      # Suites. test:node is the broad one (700+ cases) and ran nowhere before.
+      - run: pnpm test:node
+      - run: pnpm test:community
+      - run: pnpm test:tickets
+      - run: pnpm test:lynk-session

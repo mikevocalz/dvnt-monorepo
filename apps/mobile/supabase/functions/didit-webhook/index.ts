@@ -316,5 +316,22 @@ Deno.serve(async (req) => {
     return new Response("Server error", { status: 500 });
   }
 
+  // R07: approval is when posting opens, so it is when the first-post prompt
+  // goes out. run_verified_onboarding skips the call when the prompt function
+  // is not migrated yet. Best-effort: the verification is already recorded,
+  // and a 500 here would make Didit redeliver an event the dedup row now
+  // swallows.
+  if (finalStatus === "passed") {
+    const { data: onboarding, error: onboardingErr } = await supabase.rpc(
+      "run_verified_onboarding",
+      { p_auth_id: referenceId },
+    );
+    if (onboardingErr) {
+      console.error("[didit-webhook] verified onboarding failed", onboardingErr.message);
+    } else if (String(onboarding?.firstPostPrompt ?? "").startsWith("error")) {
+      console.error("[didit-webhook] first-post prompt:", onboarding.firstPostPrompt);
+    }
+  }
+
   return new Response("ok", { status: 200 });
 });

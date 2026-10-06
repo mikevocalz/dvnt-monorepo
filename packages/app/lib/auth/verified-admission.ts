@@ -12,30 +12,30 @@ import { calculateAge, validateDateOfBirth } from "../utils/age-verification.ts"
 
 export interface AdmissionPolicy {
   enforce?: boolean | null;
-  cohort_created_after?: string | null;
   grace_deadline?: string | null;
 }
 
 export interface AdmissionContext {
   userId: string | null | undefined;
-  accountCreatedAt?: string | null;
   policy?: AdmissionPolicy | null;
   record?: { user_id?: string | null; status?: string | null; date_of_birth?: unknown } | null;
   exempt?: boolean;
   denied?: boolean;
+  /** Guest-checkout profile, locked until verification passes. Mirrors the server. */
+  restricted?: boolean;
   now?: Date;
 }
 
 export type AdmissionReason =
   | "not_enforced"
-  | "out_of_cohort"
   | "exempt"
   | "verified"
   | "unauthenticated"
   | "verification_required"
   | "verification_incomplete"
   | "age_evidence_missing"
-  | "underage";
+  | "underage"
+  | "restricted_profile";
 
 export interface AdmissionVerdict {
   state: "allowed" | "grace" | "blocked";
@@ -44,7 +44,7 @@ export interface AdmissionVerdict {
   message: string | null;
 }
 
-const PARTICIPATION = "posting, buying tickets, joining rooms and messaging";
+const PARTICIPATION = "posting, commenting, messaging, hosting and joining rooms";
 
 function formatDeadline(deadline: string | null): string | null {
   if (!deadline) return null;
@@ -58,14 +58,6 @@ function formatDeadline(deadline: string | null): string | null {
   });
 }
 
-function inCohort(createdAt: string | null | undefined, after: string | null | undefined): boolean {
-  if (!after) return true;
-  const start = Date.parse(after);
-  if (!Number.isFinite(start)) return true;
-  const created = Date.parse(createdAt ?? "");
-  return Number.isFinite(created) ? created >= start : true;
-}
-
 function blockedMessage(reason: AdmissionReason): string {
   switch (reason) {
     case "unauthenticated":
@@ -76,6 +68,8 @@ function blockedMessage(reason: AdmissionReason): string {
       return `Your ID didn't show a readable date of birth. Submit it again to reopen ${PARTICIPATION}.`;
     case "underage":
       return `Your ID shows you're under 18. DVNT is 18+, so ${PARTICIPATION} stay closed.`;
+    case "restricted_profile":
+      return "Verify your ID to start posting, commenting, messaging and joining rooms. Your tickets are already in your account.";
     default:
       return `Verify your ID to continue ${PARTICIPATION}. Your account, your tickets and the verification flow stay open.`;
   }
@@ -108,11 +102,21 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
   const allowed = (reason: AdmissionReason): AdmissionVerdict =>
     ({ state: "allowed", reason, deadline: null, message: null });
 
+  // A profile made at guest checkout never gave a date of birth. It stays
+  // locked until an adult document passes, even with the rollout switched off
+  // and even for an allowlisted id: the allowlist exempts members, and this
+  // account has not been through signup's age check.
+  if (input.restricted && !(status === "passed" && adultDocument)) {
+    return {
+      state: "blocked",
+      reason: "restricted_profile",
+      deadline: null,
+      message: blockedMessage("restricted_profile"),
+    };
+  }
+
   if (!policy?.enforce) return allowed("not_enforced");
   if (input.exempt && !input.denied) return allowed("exempt");
-  if (!input.denied && !inCohort(input.accountCreatedAt, policy.cohort_created_after)) {
-    return allowed("out_of_cohort");
-  }
   if (status === "passed" && adultDocument) return allowed("verified");
 
   const reason: AdmissionReason = status === null || status === "none"
@@ -121,17 +125,16 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
       ? (adultDocument ? "verification_required" : "age_evidence_missing")
       : "verification_incomplete";
 
+  // Grace is opt-in. With no deadline set, an enforced policy refuses at once;
+  // only a future grace_deadline turns the refusal into a prompt.
   const deadlineAt = policy.grace_deadline ? Date.parse(policy.grace_deadline) : NaN;
   const deadline = Number.isFinite(deadlineAt) ? new Date(deadlineAt).toISOString() : null;
-  if (deadline === null || now.getTime() < deadlineAt) {
-    const by = formatDeadline(deadline);
+  if (deadline !== null && now.getTime() < deadlineAt) {
     return {
       state: "grace",
       reason,
       deadline,
-      message: by
-        ? `DVNT is verified-only from ${by}. Verify your ID before then to keep ${PARTICIPATION}.`
-        : `DVNT is moving to verified-only. Verify your ID to keep ${PARTICIPATION}.`,
+      message: `DVNT is verified-only from ${formatDeadline(deadline)}. Verify your ID before then to keep ${PARTICIPATION}.`,
     };
   }
   return { state: "blocked", reason, deadline, message: blockedMessage(reason) };

@@ -174,6 +174,12 @@ export interface TicketConfirmationOpts {
    * re-parents the guest orders. Pass null to suppress entirely.
    */
   claimUrl?: string | null;
+  /**
+   * Username of the restricted profile this checkout created. Swaps the
+   * "Add to my account" nudge for "Finish your profile", which goes through
+   * the same one-tap sign-in link.
+   */
+  profileUsername?: string | null;
   /** Machine-readable event time → renders Google Calendar + .ics links. */
   calendar?: { startIso: string; endIso?: string | null } | null;
   /** Overrides for non-confirmation sends (e.g. the 3-hour reminder) that
@@ -304,7 +310,24 @@ export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
         ? `${SITE_URL}/api/auth/guest-claim?email=${encodeURIComponent(opts.toEmail)}`
         : null;
 
-  const nudge = claimUrl
+  const profileNudge = claimUrl && opts.profileUsername
+    ? [
+        divider(),
+        paragraph(
+          `We made <strong style="color:${COLORS.text}">@${esc(opts.profileUsername)}</strong> for you on ${BRAND.name}, and your ${multi ? "tickets are" : "ticket is"} waiting there. Sign in with one tap to finish your profile.`,
+          { size: 13, color: COLORS.textMuted },
+        ),
+        button(claimUrl, "Finish your profile", { gradient: "brand" }),
+        paragraph(
+          "Posting, comments, messages and Lynk rooms open after you verify your ID. Your tickets work at the door either way.",
+          { size: 12, color: COLORS.textFaint, align: "center", margin: "4px 0 0" },
+        ),
+      ].join("")
+    : null;
+
+  const nudge = profileNudge
+    ? profileNudge
+    : claimUrl
     ? [
         divider(),
         paragraph(
@@ -464,8 +487,24 @@ export function payoutStatement(opts: {
 
 // ─── Better Auth: welcome / reset / verify (link-based) ──────────────────────
 
-export function welcome(name?: string | null): EmailContent {
+export interface WelcomeOpts {
+  /**
+   * The profile was made for the member at guest checkout and stays locked
+   * until they verify their ID. Adds the paragraph that says how to unlock it.
+   */
+  checkoutProfile?: boolean;
+}
+
+export function welcome(name?: string | null, opts: WelcomeOpts = {}): EmailContent {
   const who = name ? esc(name) : "there";
+  const unlock = opts.checkoutProfile
+    ? card(
+        paragraph(
+          "We made this profile when you got your ticket. Posting, comments, messages and Lynk rooms open after you verify your ID: sign in with this email address, then tap <strong>Verify your ID</strong> at the top of your feed. Your tickets work at the door either way.",
+          { size: 15, color: COLORS.textBody, margin: "0" },
+        ),
+      )
+    : "";
   return {
     subject: `Welcome to the cookout — ${BRAND.name}`,
     html: brandEmailWrapper(
@@ -478,6 +517,7 @@ export function welcome(name?: string | null): EmailContent {
         paragraph(
           "Start with your profile, and complete age and identity verification to unlock verified spaces. Your chosen name is how the community knows you; your verification details stay private.",
         ),
+        unlock,
         card(
           paragraph(
             [
@@ -515,6 +555,43 @@ export function welcome(name?: string | null): EmailContent {
         button(`${SITE_URL}/feed`, `Open ${BRAND.name}`, { gradient: "brand" }),
       ].join(""),
       { preheader: "Your people. Your culture. Your next connection." },
+    ),
+  };
+}
+
+/**
+ * promoterInvite — sent when a host adds a DVNT member as an event promoter
+ * (T07). Same destination as the push: the promoter dashboard, where payout
+ * setup is the first thing a new promoter does. The code sits in a plain card
+ * rather than codeBlock, whose 40px tracked type only fits short numeric codes.
+ */
+export function promoterInvite(opts: {
+  eventId: number;
+  eventTitle?: string | null;
+  hostHandle?: string | null;
+  code: string;
+}): EmailContent {
+  const event = opts.eventTitle?.trim() || "an event";
+  const host = opts.hostHandle?.trim() || "An event host";
+  const url = `${SITE_URL}/feed/events/${opts.eventId}/promoter`;
+  return {
+    subject: `You're a promoter for ${event}`,
+    html: brandEmailWrapper(
+      [
+        heading("You're a promoter"),
+        paragraph(`${esc(host)} added you as a promoter for <strong style="color:${COLORS.text}">${esc(event)}</strong>.`),
+        card(
+          paragraph(
+            `Your code: <strong style="font-family:${FONTS.mono};color:${COLORS.cyan}">${esc(opts.code)}</strong>`,
+            { size: 18, color: COLORS.text, margin: "0" },
+          ),
+        ),
+        paragraph("Share it with your people. Set up payouts on your promoter dashboard so your earnings can reach you.", {
+          size: 15,
+        }),
+        button(url, "Open promoter dashboard", { gradient: "brand" }),
+      ].join(""),
+      { preheader: `Your promoter code for ${event}` },
     ),
   };
 }

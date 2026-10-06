@@ -35,6 +35,7 @@ import {
 } from "@stripe/react-stripe-js";
 import {
   ArrowLeft,
+  CalendarDays,
   CreditCard,
   Minus,
   Plus,
@@ -54,35 +55,43 @@ import type {
 import { calculateCartSubtotalCents } from "@dvnt/app/lib/contracts/invariants";
 import { computeFees, formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { cartApi } from "@dvnt/app/lib/api/cart";
+import { useCheckoutPhoneStore } from "@dvnt/app/lib/stores/checkout-phone-store";
+import { isPhoneRequiredError } from "@dvnt/app/lib/checkout/member-phone";
+import { CheckoutPhoneField } from "./checkout-phone-field.web";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import {
   computePromoDiscountCents,
   promoLabel,
 } from "@dvnt/app/lib/payments/promo-discount";
+import {
+  isPromoCheckoutError,
+  promoForCart,
+  type ScopedPromo,
+} from "@dvnt/app/lib/payments/checkout-promo";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
+import { useEvent } from "@dvnt/app/lib/hooks/use-events";
+import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
 import {
   effectiveAddonUnitPriceCents,
   filterEligibleAddons,
 } from "@dvnt/app/lib/tickets/pricing";
 
 // ── Promo input: tiny local Zustand store (no useState, Law 2) ──────────
-type AppliedPromo = {
-  type: "percent" | "fixed_cents" | "bogo";
-  value: number;
-  code: string;
-};
+// Module-level, so it outlives the screen: the applied promo carries the event
+// it was validated for, and the screen resets the store per cart.
 interface PromoState {
   promoCode: string;
   setPromoCode: (value: string) => void;
-  appliedPromo: AppliedPromo | null;
-  setAppliedPromo: (p: AppliedPromo | null) => void;
+  appliedPromo: ScopedPromo | null;
+  setAppliedPromo: (p: ScopedPromo | null) => void;
   promoError: string | null;
   setPromoError: (e: string | null) => void;
   promoApplying: boolean;
   setPromoApplying: (v: boolean) => void;
+  reset: () => void;
 }
 const usePromoStore = create<PromoState>((set) => ({
   promoCode: "",
@@ -93,6 +102,13 @@ const usePromoStore = create<PromoState>((set) => ({
   setPromoError: (promoError) => set({ promoError }),
   promoApplying: false,
   setPromoApplying: (promoApplying) => set({ promoApplying }),
+  reset: () =>
+    set({
+      promoCode: "",
+      appliedPromo: null,
+      promoError: null,
+      promoApplying: false,
+    }),
 }));
 
 /**
@@ -231,6 +247,30 @@ function metadataText(
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return fallback;
+}
+
+/**
+ * When the event is, in the venue's zone ("Fri, Jul 10 at 8:00 PM PDT"), so a
+ * buyer in another zone sees the door time the host set, not a converted one.
+ * Reads the cached detail query the buyer came from; renders nothing until it
+ * has a start.
+ */
+function CheckoutEventWhen({ eventId }: { eventId: string }) {
+  const { data: event } = useEvent(String(eventId));
+  const start = (event as any)?.fullDate as string | undefined;
+  const when = formatEventWhen(start, event as any);
+  if (!when) return null;
+  return (
+    <section className="mb-5 flex items-center gap-2.5 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+      <CalendarDays size={18} className="shrink-0 text-[#3FDCFF]" />
+      <div className="min-w-0">
+        {event?.title ? (
+          <p className="truncate text-sm font-semibold text-white">{event.title}</p>
+        ) : null}
+        <p className="text-xs text-white/70">{when}</p>
+      </div>
+    </section>
+  );
 }
 
 /**
@@ -499,12 +539,16 @@ export function CheckoutReviewScreen() {
 
   const promoCode = usePromoStore((s) => s.promoCode);
   const setPromoCode = usePromoStore((s) => s.setPromoCode);
-  const appliedPromo = usePromoStore((s) => s.appliedPromo);
+  const storedPromo = usePromoStore((s) => s.appliedPromo);
   const setAppliedPromo = usePromoStore((s) => s.setAppliedPromo);
   const promoError = usePromoStore((s) => s.promoError);
   const setPromoError = usePromoStore((s) => s.setPromoError);
   const promoApplying = usePromoStore((s) => s.promoApplying);
   const setPromoApplying = usePromoStore((s) => s.setPromoApplying);
+  const resetPromo = usePromoStore((s) => s.reset);
+  // A code validated for another event's cart is not applied here; the
+  // server would reject it with "Invalid promo code".
+  const appliedPromo = promoForCart(storedPromo, cart?.eventId);
 
   const lineItems = cart?.lineItems ?? [];
 
@@ -558,13 +602,18 @@ export function CheckoutReviewScreen() {
     [quantity, effectiveSubtotal],
   );
 
-  // Seed the field from ?promo= — the code the buyer typed in the event's
-  // checkout sheet before being routed here. Runs once, and never clobbers
-  // something they have already typed on this screen.
+  // Fresh promo state per cart, and none left behind on unmount. Then seed
+  // the field from ?promo=, the code the buyer typed in the event's checkout
+  // sheet before being routed here. Seeding fills the text only; the code
+  // still has to be validated against this cart's event with Apply.
+  const cartId = cart?.cartId;
+  const cartEventId = cart?.eventId;
   useEffect(() => {
+    resetPromo();
     const seeded = new URLSearchParams(window.location.search).get("promo");
-    if (seeded && !usePromoStore.getState().promoCode) setPromoCode(seeded);
-  }, [setPromoCode]);
+    if (seeded) setPromoCode(seeded);
+    return resetPromo;
+  }, [cartId, cartEventId, resetPromo, setPromoCode]);
 
   // Drop a validated promo when the buyer edits the code away from it.
   useEffect(() => {
@@ -603,6 +652,7 @@ export function CheckoutReviewScreen() {
       type: data.discount_type,
       value: data.discount_value ?? 0,
       code: data.code || code,
+      eventId: String(cart.eventId),
     });
   }, [promoCode, cart, setAppliedPromo, setPromoError, setPromoApplying]);
 
@@ -645,6 +695,12 @@ export function CheckoutReviewScreen() {
       showToast("error", "Your cart is empty");
       return;
     }
+    // A buyer the server already asked for a phone must have typed one.
+    const phone = useCheckoutPhoneStore.getState().forRequest();
+    if (!phone.ok) {
+      showToast("error", phone.message);
+      return;
+    }
 
     setCheckoutLoading(true);
     AppTrace.trace("CART", "cart_review_continue_pressed", {
@@ -661,10 +717,21 @@ export function CheckoutReviewScreen() {
       }
       setHold(holdExpiresAt);
 
-      const payment = await cartApi.checkout(
-        cart.cartId,
-        appliedPromo ? appliedPromo.code : undefined,
-      );
+      let payment;
+      try {
+        payment = await cartApi.checkout(
+          cart.cartId,
+          appliedPromo ? appliedPromo.code : undefined,
+          undefined,
+          phone.phone,
+        );
+      } catch (err) {
+        // No phone on file: show the field; the next press sends it.
+        if (isPhoneRequiredError(err)) useCheckoutPhoneStore.getState().markNeeded();
+        throw err;
+      }
+      // Past the phone check: the number is on file now.
+      useCheckoutPhoneStore.getState().reset();
       setPaymentIntent(payment.paymentIntentId);
       AppTrace.trace("CART", "mixed_cart_payment_intent_ready", {
         cartId: cart.cartId,
@@ -702,6 +769,12 @@ export function CheckoutReviewScreen() {
         cartId: cart?.cartId,
         error: message,
       });
+      // A rejected promo shows under the field it came from and stops being
+      // sent, so the next tap can go through at full price.
+      if (isPromoCheckoutError(message)) {
+        setAppliedPromo(null);
+        setPromoError(message);
+      }
       showToast("error", "Checkout failed", message);
     } finally {
       setCheckoutLoading(false);
@@ -711,6 +784,8 @@ export function CheckoutReviewScreen() {
     lineItems.length,
     fees.customer_charge_amount,
     appliedPromo,
+    setAppliedPromo,
+    setPromoError,
     setCheckoutLoading,
     setHold,
     setPaymentIntent,
@@ -772,6 +847,8 @@ export function CheckoutReviewScreen() {
           </div>
         ) : (
           <>
+            {cart?.eventId ? <CheckoutEventWhen eventId={cart.eventId} /> : null}
+
             {/* Order summary — grouped line items */}
             {groups.map((group) => (
               <section key={group.category} className="mb-5">
@@ -898,6 +975,10 @@ export function CheckoutReviewScreen() {
                   />
                 </Elements>
               ) : (
+                <>
+                <div className="mt-4">
+                  <CheckoutPhoneField />
+                </div>
                 <button
                   type="button"
                   onClick={handlePlaceOrder}
@@ -909,6 +990,7 @@ export function CheckoutReviewScreen() {
                     {isLoading ? "Processing…" : "Continue to payment"}
                   </span>
                 </button>
+                </>
               )}
 
               {/* Terms */}

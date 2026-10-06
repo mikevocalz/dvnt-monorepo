@@ -132,7 +132,6 @@ export const auth = {
       const selectFields = `
           ${DB.users.id},
           ${DB.users.authId},
-          ${DB.users.email},
           ${DB.users.username},
           ${DB.users.firstName},
           ${DB.users.lastName},
@@ -141,7 +140,6 @@ export const auth = {
           ${DB.users.website},
           ${DB.users.links},
           ${DB.users.pronouns},
-          ${DB.users.gender},
           ${DB.users.verified},
           ${DB.users.followersCount},
           ${DB.users.followingCount},
@@ -174,26 +172,10 @@ export const auth = {
 
         if (authIdResult.data) {
           data = authIdResult.data;
-        } else if (email) {
-          // Fallback: query by email if auth_id not found
-          console.log("[Auth] auth_id not found, trying email:", email);
-          const emailResult = await supabase
-            .from(DB.users.table)
-            .select(selectFields)
-            .eq(DB.users.email, email)
-            .single();
-          data = emailResult.data;
-          error = emailResult.error;
-
-          // Update auth_id in database if found by email
-          if (data && !data[DB.users.authId]) {
-            console.log("[Auth] Updating auth_id for user:", data[DB.users.id]);
-            await supabase
-              .from(DB.users.table)
-              .update({ [DB.users.authId]: userId })
-              .eq(DB.users.id, data[DB.users.id]);
-          }
         } else {
+          // No email fallback: clients cannot filter on users.email
+          // (20261003150400). auth-sync links auth_id from the verified
+          // session; until it has, the caller falls back to session data.
           error = authIdResult.error;
         }
       }
@@ -203,10 +185,19 @@ export const auth = {
         return null;
       }
 
+      // gender is members-only (20261003150500): anon gets 42501. It is read
+      // on its own so a call that goes out before the JWT bridge has attached
+      // still returns the rest of the member's profile.
+      const { data: identity } = await supabase
+        .from(DB.users.table)
+        .select(DB.users.gender)
+        .eq(DB.users.id, data[DB.users.id])
+        .maybeSingle();
+
       return {
         id: String(data[DB.users.id]),
         authId: data[DB.users.authId] || userId,
-        email: data[DB.users.email],
+        email: email ?? "",
         username: data[DB.users.username],
         name: data[DB.users.firstName] || data[DB.users.username],
         avatar: data.avatar?.url,
@@ -218,7 +209,7 @@ export const auth = {
         postsCount: Number(data[DB.users.postsCount]) || 0,
         followersCount: Number(data[DB.users.followersCount]) || 0,
         followingCount: Number(data[DB.users.followingCount]) || 0,
-        gender: data[DB.users.gender] || "",
+        gender: (identity as any)?.[DB.users.gender] || "",
         pronouns: data[DB.users.pronouns] || "",
         hashtags: [],
       };
@@ -226,32 +217,6 @@ export const auth = {
       console.error("[Supabase Auth] Get profile error:", error);
       return null;
     }
-  },
-
-  /**
-   * Update user profile
-   */
-  async updateProfile(userId: string, updates: Partial<AppUser>) {
-    const dbUpdates: any = {};
-
-    if (updates.name) dbUpdates[DB.users.firstName] = updates.name;
-    if (updates.bio !== undefined) dbUpdates[DB.users.bio] = updates.bio;
-    if (updates.location !== undefined)
-      dbUpdates[DB.users.location] = updates.location;
-
-    const { data, error } = await supabase
-      .from(DB.users.table)
-      .update(dbUpdates)
-      .eq(DB.users.id, userId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error("[Supabase Auth] Update profile error:", error);
-      throw error;
-    }
-
-    return data;
   },
 
   /**

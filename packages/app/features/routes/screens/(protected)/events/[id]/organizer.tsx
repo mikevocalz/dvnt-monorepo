@@ -7,7 +7,7 @@
  * - See check-in status
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useFocusEffect } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import {
@@ -30,12 +30,14 @@ import {
   Settings,
   WifiOff,
   CloudUpload,
+  CopyPlus,
   Tag,
   BarChart3,
   Megaphone,
   Undo2,
 } from "lucide-react-native";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
+import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { tickets } from "@dvnt/app/lib/api/tickets";
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
@@ -60,6 +62,7 @@ function EventOrganizerScreenContent() {
   const router = useRouter();
   const { colors } = useColorScheme();
   const showToast = useUIStore((s) => s.showToast);
+  const duplicateLock = useRef(false);
   const [eventTickets, setEventTickets] = useState<Ticket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -67,6 +70,29 @@ function EventOrganizerScreenContent() {
   // so we don't ship two different scanner UIs for the same job.
 
   const eventId = id || "";
+
+  const handleDuplicateEvent = useCallback(async () => {
+    const numericId = Number(eventId);
+    if (!Number.isSafeInteger(numericId) || numericId <= 0 || duplicateLock.current) return;
+    duplicateLock.current = true;
+    try {
+      await eventDraftsApi.duplicateEvent(numericId);
+      showToast(
+        "success",
+        "Draft created",
+        "We copied the event setup. Pick a new date before publishing.",
+      );
+      router.push("/(protected)/events/create" as any);
+    } catch (error) {
+      showToast(
+        "error",
+        "Couldn't duplicate event",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    } finally {
+      duplicateLock.current = false;
+    }
+  }, [eventId, router, showToast]);
 
   // Offline check-in state
   const offlineStore = useOfflineCheckinStore();
@@ -502,36 +528,51 @@ function EventOrganizerScreenContent() {
           </Pressable>
         </View>
 
-        {/* Promoters (WS-4) — tracked links + rev-share ledger. Native
-            staff entry lives in the (fenced) event action sheet, so the
-            organizer surface hosts this entry point instead. */}
-        <Pressable
-          onPress={() =>
-            router.push(`/(protected)/events/${eventId}/promoters` as any)
-          }
-          style={{
-            backgroundColor: "rgba(255,255,255,0.06)",
-            borderWidth: 1,
-            borderColor: colors.border,
-            paddingVertical: 12,
-            borderRadius: 12,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 6,
-          }}
-        >
-          <Megaphone size={16} color="#C084FC" />
-          <Text
+        {/* Promoters + intentional duplicate-to-draft */}
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Pressable
+            onPress={() =>
+              router.push(`/(protected)/events/${eventId}/promoters` as any)
+            }
             style={{
-              color: colors.foreground,
-              fontSize: 13,
-              fontWeight: "600",
+              flex: 1,
+              backgroundColor: "rgba(255,255,255,0.06)",
+              borderWidth: 1,
+              borderColor: colors.border,
+              paddingVertical: 12,
+              borderRadius: 12,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
             }}
           >
-            Promoters
-          </Text>
-        </Pressable>
+            <Megaphone size={16} color="#C084FC" />
+            <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>
+              Promoters
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => void handleDuplicateEvent()}
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(255,255,255,0.06)",
+              borderWidth: 1,
+              borderColor: colors.border,
+              paddingVertical: 12,
+              borderRadius: 12,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+            }}
+          >
+            <CopyPlus size={16} color="#3FDCFF" />
+            <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>
+              Duplicate Event
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Tickets List */}

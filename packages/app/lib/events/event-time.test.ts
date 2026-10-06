@@ -16,6 +16,8 @@ import {
   eventSalesClosed,
   SALES_CUTOFF_MINUTES,
   ASSUMED_EVENT_LENGTH_MS,
+  formatEventClock,
+  formatEventWhen,
 } from "./event-time.ts";
 
 // LA event: absolute instant 04:00Z, venue zone America/Los_Angeles (summer → PDT).
@@ -131,4 +133,29 @@ test("eventEnded / eventSalesClosed: cutoff is end anchor − 30 min", () => {
   // No anchor → stays open (mirrors isSalesClosed).
   assert.equal(eventSalesClosed({}, end + 999_000), false);
   assert.equal(eventEnded({}, end + 999_000), false);
+});
+
+// Home and For You rows come from get_events_home / get_events_for_you, which
+// return event_tz and location_type (no is_online).
+test("a discovery row's zone fields label the card time in the venue zone", async () => {
+  const { listRowZoneFields } = await import("./event-time.ts");
+  const row = { start_date: "2026-07-11T03:00:00Z", event_tz: "America/Los_Angeles", location_type: "physical" };
+  const zone = listRowZoneFields(row);
+  assert.deepEqual(zone, { event_tz: "America/Los_Angeles", is_online: false });
+  assert.equal(formatEventClock(row.start_date, zone, "America/New_York"), "8:00 PM PDT");
+  assert.equal(formatEventWhen(row.start_date, zone, "America/New_York"), "Fri, Jul 10 at 8:00 PM PDT");
+});
+
+test("a discovery row with no zone, or a virtual one, falls back as before", async () => {
+  const { listRowZoneFields } = await import("./event-time.ts");
+  assert.deepEqual(listRowZoneFields({ event_tz: null }), { event_tz: null, is_online: false });
+  assert.deepEqual(listRowZoneFields({ event_tz: "Not/AZone" }), { event_tz: null, is_online: false });
+  assert.deepEqual(listRowZoneFields({ event_tz: "America/Los_Angeles", location_type: "virtual" }), {
+    event_tz: "America/Los_Angeles",
+    is_online: true,
+  });
+  assert.equal(
+    formatEventClock("2026-07-11T03:00:00Z", listRowZoneFields({ event_tz: null }), "America/New_York"),
+    formatEventClock("2026-07-11T03:00:00Z", null, "America/New_York"),
+  );
 });

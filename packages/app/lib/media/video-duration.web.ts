@@ -11,8 +11,10 @@
  * Native uses the picker's own `asset.duration`; this is the web equivalent.
  */
 
-/** Keep in sync with media-upload's MAX_VIDEO_DURATION_SEC. */
-export const MAX_VIDEO_SECONDS = 60;
+import { MAX_VIDEO_DURATION_SEC } from "./upload-policy.ts";
+
+/** media-upload's MAX_VIDEO_DURATION_SEC, read from the pinned policy table. */
+export const MAX_VIDEO_SECONDS = MAX_VIDEO_DURATION_SEC;
 
 export function readVideoDurationSec(file: File): Promise<number | null> {
   return new Promise((resolve) => {

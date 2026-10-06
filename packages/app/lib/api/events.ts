@@ -15,7 +15,16 @@ import {
   filterDiscoverableEvents,
   filterPubliclyListableEvents,
 } from "../events/event-discovery";
-import { eventSalesClosed } from "../events/event-time";
+import {
+  END_BEFORE_START_ERROR,
+  endsBeforeStart,
+  eventSalesClosed,
+  formatEventClock,
+  formatEventDay,
+  listRowZoneFields,
+  type EventZoneFields,
+} from "../events/event-time";
+import { publishAtError } from "../events/event-publication";
 import type { TicketTypeCategory } from "./ticket-types";
 import type { TierType, TierVisibility } from "../tickets/pricing";
 import type { DraftAddon } from "../../features/events/create/addon-form";
@@ -148,7 +157,15 @@ function normalizeVisibility(
 }
 
 /** Format a raw ISO date into the fields the EventCard UI expects */
-export function formatEventDate(isoDate: string | null | undefined) {
+/**
+ * Card date parts. With the event row passed in, day/month/time come from the
+ * event's zone and `time` carries its abbreviation ("8:00 PM PDT"). Rows with
+ * no recorded zone keep the viewer-local, unlabelled output.
+ */
+export function formatEventDate(
+  isoDate: string | null | undefined,
+  zoneOf?: EventZoneFields | null,
+) {
   if (!isoDate) {
     return {
       date: "--",
@@ -167,10 +184,10 @@ export function formatEventDate(isoDate: string | null | undefined) {
     };
   }
   return {
-    date: d.getDate().toString().padStart(2, "0"),
-    month: d.toLocaleString("en-US", { month: "short" }).toUpperCase(),
+    date: formatEventDay(d, zoneOf, { day: "2-digit" }),
+    month: formatEventDay(d, zoneOf, { month: "short" }).toUpperCase(),
     fullDate: d.toISOString(),
-    time: d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+    time: formatEventClock(d, zoneOf),
   };
 }
 
@@ -297,7 +314,8 @@ export const eventsApi = {
       // — this is the client-side half, so the list is correct on a build that
       // reaches a database where that migration has not run yet.
       const mapped = filterDiscoverableEvents((data as any[]) || []).map((event: any) => {
-        const dateParts = formatEventDate(event.start_date);
+        const zone = listRowZoneFields(event);
+        const dateParts = formatEventDate(event.start_date, zone);
         const avatars = Array.isArray(event.attendee_avatars)
           ? event.attendee_avatars
           : [];
@@ -332,6 +350,8 @@ export const eventsApi = {
           // badge. RPC now returns this; we just pass it through.
           status: event.status || undefined,
           cancelledAt: event.cancelled_at || undefined,
+          event_tz: zone.event_tz,
+          isOnline: zone.is_online,
           locationLat:
             event.location_lat != null ? Number(event.location_lat) : undefined,
           locationLng:
@@ -395,7 +415,8 @@ export const eventsApi = {
       // — this is the client-side half, so the list is correct on a build that
       // reaches a database where that migration has not run yet.
       const mapped = filterDiscoverableEvents((data as any[]) || []).map((event: any) => {
-        const dateParts = formatEventDate(event.start_date);
+        const zone = listRowZoneFields(event);
+        const dateParts = formatEventDate(event.start_date, zone);
         const avatars = Array.isArray(event.attendee_avatars)
           ? event.attendee_avatars
           : [];
@@ -425,6 +446,8 @@ export const eventsApi = {
           category: event.category || undefined,
           status: event.status || undefined,
           cancelledAt: event.cancelled_at || undefined,
+          event_tz: zone.event_tz,
+          isOnline: zone.is_online,
           friendsGoing: event.friends_going || 0,
           host: {
             username: event.host_username || "unknown",
@@ -499,7 +522,7 @@ export const eventsApi = {
       );
 
       const mapped = visible.map((event: any) => {
-        const dateParts = formatEventDate(event[DB.events.startDate]);
+        const dateParts = formatEventDate(event[DB.events.startDate], event);
         return {
           id: String(event[DB.events.id]),
           title: event[DB.events.title],
@@ -513,6 +536,12 @@ export const eventsApi = {
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           status: event.status || undefined,
           cancelledAt: event.cancelled_at || undefined,
+          // My Events is where a host sees "Hidden" / "Goes public ...".
+          isHidden: event.is_hidden === true,
+          publishAt: event.publish_at ?? null,
+          event_tz: event.event_tz ?? null,
+          // Only the host sees the Hidden / Goes public badge, not an invitee.
+          isHost: event[DB.events.hostId] === authId,
         };
       });
       return enrichEventsWithTierPrices(mapped);
@@ -548,7 +577,7 @@ export const eventsApi = {
       // getMyEvents — `.neq()` would drop the legacy NULL rows too.
       const mapped = filterPubliclyListableEvents(data || [])
         .map((event: any) => {
-        const dateParts = formatEventDate(event[DB.events.startDate]);
+        const dateParts = formatEventDate(event[DB.events.startDate], event);
         return {
           id: String(event[DB.events.id]),
           title: event[DB.events.title],
@@ -628,7 +657,7 @@ export const eventsApi = {
 
       const mapped = rows.map((event: any) => {
         const host = hostsMap.get(event[DB.events.hostId]);
-        const dateParts = formatEventDate(event[DB.events.startDate]);
+        const dateParts = formatEventDate(event[DB.events.startDate], event);
         return {
           id: String(event[DB.events.id]),
           title: event[DB.events.title],
@@ -699,7 +728,7 @@ export const eventsApi = {
 
       const ev = data.event;
       const host = data.host || {};
-      const dateParts = formatEventDate(ev.start_date);
+      const dateParts = formatEventDate(ev.start_date, ev);
 
       // dominant_color isn't in the detail RPC's column list — read it directly
       // (cheap, RLS-visible) so <EventFlyer>/cover can use the edge-fn color and
@@ -759,6 +788,9 @@ export const eventsApi = {
         // viewer-local formatting on the detail screen.
         event_tz: ev.event_tz ?? null,
         isOnline: ev.is_online ?? false,
+        // Hide / go-public schedule; the detail screen badges it for the host.
+        isHidden: ev.is_hidden === true,
+        publishAt: ev.publish_at ?? null,
         // V2 fields
         locationLat:
           ev.location_lat != null ? Number(ev.location_lat) : undefined,
@@ -975,7 +1007,7 @@ export const eventsApi = {
       }
 
       // Return formatted event data for optimistic updates
-      const dateParts = formatEventDate(data[DB.events.startDate]);
+      const dateParts = formatEventDate(data[DB.events.startDate], data);
       return {
         replayed: result.data.data.replayed === true,
         id: String(data[DB.events.id]),
@@ -1024,7 +1056,7 @@ export const eventsApi = {
       const { data: beforeEvent } = await supabase
         .from(DB.events.table)
         .select(
-          "id, start_date, end_date, location, location_name, age_restriction",
+          "id, start_date, end_date, location, location_name, age_restriction, publish_at",
         )
         .eq(DB.events.id, parseInt(eventId))
         .maybeSingle();
@@ -1058,6 +1090,11 @@ export const eventsApi = {
       // corrected — display fell back to UTC or the viewer's zone forever.
       if (updates.eventTz !== undefined)
         updateData.event_tz = updates.eventTz || null;
+      // Hide / schedule going public (E06). A strict boolean only: a string
+      // "false" would otherwise hide the event.
+      if (typeof updates.isHidden === "boolean") updateData.is_hidden = updates.isHidden;
+      if (updates.publishAt !== undefined)
+        updateData.publish_at = updates.publishAt || null;
       if (updates.category !== undefined)
         updateData.category = updates.category || null;
       if (updates.visibility !== undefined)
@@ -1103,6 +1140,24 @@ export const eventsApi = {
         updateData.images = Array.isArray(updates.images)
           ? updates.images.filter((m: any) => hosted(m?.url))
           : updates.images;
+
+      // End before start: check the row as it will be after this patch, so
+      // moving only the start (or only the end) is caught too. Edits go
+      // straight to PostgREST, so until they move into an edge function this
+      // client check is the only gate on the edit path.
+      const nextStart =
+        updateData[DB.events.startDate] ?? beforeEvent?.start_date ?? null;
+      const nextEnd =
+        "end_date" in updateData ? updateData.end_date : beforeEvent?.end_date ?? null;
+      if (endsBeforeStart(nextStart, nextEnd)) {
+        throw new Error(END_BEFORE_START_ERROR);
+      }
+      // Same rule create-event applies; this client check is the only gate on
+      // the edit path for the same reason as the end date above.
+      const nextPublishAt =
+        "publish_at" in updateData ? updateData.publish_at : beforeEvent?.publish_at ?? null;
+      const publishError = publishAtError(nextPublishAt, nextStart);
+      if (publishError) throw new Error(publishError);
 
       // Ensure the Supabase JWT bridge is attached so PostgREST sees
       // us as `authenticated` (not `anon`) — RLS on events_update_own

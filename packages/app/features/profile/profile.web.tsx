@@ -49,6 +49,7 @@ import { useProfilePosts } from "@dvnt/app/lib/hooks/use-posts";
 import { useBookmarkedPosts } from "@dvnt/app/lib/hooks/use-bookmarks";
 import { useTaggedPosts } from "@dvnt/app/lib/hooks/use-post-tags";
 import { useMyEvents, useLikedEvents } from "@dvnt/app/lib/hooks/use-events";
+import { publicationBadge } from "@dvnt/app/lib/events/event-publication";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { useProfileStore } from "@dvnt/app/lib/stores/profile-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -709,6 +710,11 @@ function EventRow({
           {event.title}
         </span>
         {date ? <span className="block text-xs text-white/55">{date}</span> : null}
+        {!liked && event.isHost && publicationBadge(event) ? (
+          <span className="mt-0.5 block truncate text-xs font-semibold text-[#C084FC]">
+            {publicationBadge(event)}
+          </span>
+        ) : null}
         {event.location ? (
           <span className="block truncate text-xs text-white/55">{event.location}</span>
         ) : null}

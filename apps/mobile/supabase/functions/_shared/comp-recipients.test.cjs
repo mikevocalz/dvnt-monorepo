@@ -13,7 +13,7 @@ function load() {
   new Function('exports', 'module', source)(mod.exports, mod);
   return mod.exports;
 }
-const { routeCompRecipient, summarizeCompDelivery } = load();
+const { normalizeCompRecipient, normalizePhoneE164, routeCompRecipient, summarizeCompDelivery } = load();
 
 const ACCOUNT = { authId: 'auth-deviant' };
 
@@ -35,20 +35,26 @@ test('a username with no account is skipped — a handle is not an address', () 
   assert.match(route.reason, /use their email/i);
 });
 
-test('a phone number is skipped and the reason names the missing SMS path', () => {
-  for (const input of ['+1 (415) 555-0134', '4155550134']) {
-    const route = routeCompRecipient(input, null);
-    assert.equal(route.route, 'skip');
-    assert.match(route.reason, /SMS consent record/);
-    assert.doesNotMatch(route.reason, /phone delivery is not available/);
-  }
+test('phone numbers normalize to E.164 and take the guest SMS path', () => {
+  assert.equal(normalizePhoneE164('(415) 555-0134'), '+14155550134');
+  assert.equal(normalizePhoneE164('+447911123456'), '+447911123456');
+  assert.deepEqual(normalizeCompRecipient('4155550134'), { kind: 'phone', value: '+14155550134' });
+  assert.deepEqual(routeCompRecipient('+1 (415) 555-0134', null), {
+    route: 'phone_guest',
+    phone: '+14155550134',
+  });
+});
+
+test('malformed phone-like input is rejected before issuance', () => {
+  const route = routeCompRecipient('123-45-67', null);
+  assert.equal(route.route, 'skip');
 });
 
 test('junk input is skipped without being mistaken for a phone number', () => {
   const route = routeCompRecipient('not an address', null);
   assert.deepEqual(route, {
     route: 'skip',
-    reason: 'Not a DVNT username or a valid email address',
+    reason: 'Not a DVNT username, valid email address, or valid phone number',
   });
 });
 

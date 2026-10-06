@@ -1,5 +1,7 @@
 import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
+import { canHostEventLynk, waitingSinceLabel } from "@dvnt/app/lib/events/event-lynk";
 import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { canScanTickets, canViewFullRoster } from "@dvnt/app/lib/events/event-role";
 /**
@@ -20,6 +22,11 @@ import {
   eventEnded,
   eventSalesClosed,
 } from "@dvnt/app/lib/events/event-time";
+import {
+  deviceTimeZone,
+  normalizeTimeZone,
+  zonedIsoToLocalIso,
+} from "@dvnt/app/lib/events/event-zone";
 import {
   ArrowLeft,
   ArrowUpCircle,
@@ -56,7 +63,9 @@ import {
   Ticket,
   Trash2,
   Users,
+  EyeOff,
 } from "lucide-react";
+import { publicationBadge } from "@dvnt/app/lib/events/event-publication";
 import { useQueryClient } from "@tanstack/react-query";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { eventsApi } from "@dvnt/app/lib/api/events";
@@ -81,6 +90,7 @@ import {
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
+import { CheckoutPhoneField } from "./checkout-phone-field.web";
 import {
   useTicketUpgradeOptions,
   useInitiateUpgrade,
@@ -209,10 +219,10 @@ function timeAgo(iso?: string): string {
 
 const VIDEO_RE = /post-video|flyer-video|\.(mp4|mov|webm)(\?|$)/i;
 
-// Timezone-correct: physical events with a known venue zone render event-local
-// (same door time for everyone); otherwise viewer-local. Always shows a zone
-// abbreviation so "9:00 PM PDT" is never ambiguous. Falls back gracefully when
-// event_tz isn't present yet (older events) → viewer-local.
+// Timezone-correct: physical events render event-local (same door time for
+// everyone, "9:00 PM PDT"); online events render in the viewer's zone. A
+// physical event with no recorded zone (older rows) renders in the viewer's
+// zone with no abbreviation, since nobody picked one.
 function fmt(
   iso?: string,
   eventTz?: string | null,
@@ -221,7 +231,7 @@ function fmt(
   if (!iso) return "Date TBA";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Date TBA";
-  const mode = !isOnline && eventTz ? "event-local" : "viewer-local";
+  const mode = isOnline ? "viewer-local" : "event-local";
   return formatEventTime(d, eventTz ?? null, mode);
 }
 
@@ -711,6 +721,11 @@ export function EventDetailScreen() {
   const mayScan = canScanTickets(doorRole);
   const mayManage = isHost || canViewFullRoster(doorRole);
 
+  // Event Lynk waiting room. Host = owner or accepted admin/editor
+  // co-organizer, the server's rule; the server re-checks on every call.
+  const mayHostLynk = isHost || canHostEventLynk(doorRole);
+  const lynkHost = useEventLynkHost(Number(eventId), mayHostLynk && !!e?.lynkRoomId);
+
   // Promoters get their own door back to the promoter dashboard — the
   // payout-setup screen must always be reachable, not just from the push
   // notification that says they were added.
@@ -775,6 +790,27 @@ export function EventDetailScreen() {
     }
     go(roomId);
   }, [e?.lynkRoomId, e?.title, e?.description, eventId, isHost, router]);
+
+  /** Host's Start: opens the room for everyone waiting, then enters it. */
+  const startEventLynk = useCallback(async () => {
+    try {
+      const res = await lynkHost.start();
+      showToast(
+        "success",
+        "Lynk started",
+        res.admitted > 0
+          ? `${res.admitted} waiting ${res.admitted === 1 ? "guest is" : "guests are"} joining`
+          : "Guests can join now",
+      );
+      void openEventLynk();
+    } catch (err) {
+      showToast(
+        "error",
+        "Couldn't start the Lynk",
+        err instanceof Error && err.message ? err.message : "Try again in a moment.",
+      );
+    }
+  }, [lynkHost, openEventLynk, showToast]);
 
   if (!e && resolving) return <Centered>Loading…</Centered>;
   if (!e) {
@@ -1007,8 +1043,13 @@ export function EventDetailScreen() {
       // to an unbookable date.
       const srcDate = e.fullDate || e.date ? new Date(e.fullDate || e.date) : null;
       if (srcDate && !Number.isNaN(srcDate.getTime()) && srcDate.getTime() > Date.now()) {
-        store.setEventDate(srcDate.toISOString());
-        if (e.endDate) store.setEndDate(e.endDate);
+        // The create store holds the wall clock; reopen it in the source
+        // event's zone so a 9 PM Pacific event copies as 9 PM Pacific.
+        const srcTz =
+          normalizeTimeZone((e as any).event_tz ?? (e as any).eventTz) ?? deviceTimeZone();
+        store.setEventTz(srcTz);
+        store.setEventDate(zonedIsoToLocalIso(srcDate.toISOString(), srcTz));
+        if (e.endDate) store.setEndDate(zonedIsoToLocalIso(e.endDate, srcTz) || null);
       }
       if (e.maxAttendees) store.setMaxAttendees(String(e.maxAttendees));
       if (e.visibility) store.setVisibility(e.visibility);
@@ -1283,6 +1324,14 @@ export function EventDetailScreen() {
             )}
           </div>
           <h1 className="text-2xl font-extrabold mt-1 leading-tight">{e.title}</h1>
+          {/* Host-only: hidden, or not public until publish_at. Nobody else
+              can open the event, so nobody else needs telling. */}
+          {isHost && publicationBadge(e as any) ? (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#C084FC]/40 bg-[#C084FC]/10 px-3 py-1 text-[13px] font-semibold text-[#C084FC]">
+              <EyeOff size={14} aria-hidden />
+              {publicationBadge(e as any)}
+            </div>
+          ) : null}
           {e.location ? (
             <div className="flex items-center gap-1.5 text-white/60 text-sm mt-2">
               <MapPin size={15} />
@@ -1664,6 +1713,52 @@ export function EventDetailScreen() {
                   </span>
                 </span>
               </button>
+              {mayHostLynk && lynkHost.view && !lynkHost.isLive ? (
+                <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" data-testid="event-lynk-host-panel">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-white" aria-live="polite">
+                      {lynkHost.view.count === 0
+                        ? "No one waiting yet"
+                        : lynkHost.view.count === 1
+                          ? "1 person waiting"
+                          : `${lynkHost.view.count} people waiting`}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void startEventLynk()}
+                      disabled={lynkHost.isStarting}
+                      aria-busy={lynkHost.isStarting}
+                      data-testid="event-lynk-start"
+                      className="rounded-full bg-[#8A40CF] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-60"
+                    >
+                      {lynkHost.isStarting ? "Starting" : "Start Lynk"}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-white/55">
+                    Guests wait here until you start. Everyone waiting joins when you do.
+                  </p>
+                  {lynkHost.view.count > 0 ? (
+                    <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+                      {lynkHost.view.waiting.map((w) => {
+                        const name = w.displayName || w.username || "Guest";
+                        return (
+                          <li key={w.userId} className="flex items-center gap-3 py-1">
+                            {w.avatar ? (
+                              <img src={w.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+                            ) : (
+                              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-white/60">
+                                {name.slice(0, 1).toUpperCase()}
+                              </span>
+                            )}
+                            <span className="min-w-0 flex-1 truncate text-sm text-white">{name}</span>
+                            <span className="text-xs text-white/55">{waitingSinceLabel(w.joinedAt)}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
             </Section>
           ) : null}
 
@@ -2794,6 +2889,9 @@ function CheckoutSheet({
             <span className="font-bold">{totalCents ? money(totalCents) : "Free"}</span>
           </div>
         </div>
+
+        {/* Signed-in buyer with no phone on file: shown after checkout asks. */}
+        <CheckoutPhoneField />
 
         <button
           onClick={onCheckout}

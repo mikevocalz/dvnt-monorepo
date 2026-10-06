@@ -5,11 +5,16 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import {
   CALL_HUMAN_CAPACITY,
   CALL_MAX_INVITEES,
 } from "../_shared/call-capacity.ts";
+import {
+  creatorStandingRefusal,
+  resolveCreatorStanding,
+} from "../_shared/creator-standing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -49,7 +54,7 @@ type ErrorCode =
 interface ApiResponse<T = unknown> {
   ok: boolean;
   data?: T;
-  error?: { code: ErrorCode; message: string };
+  error?: { code: ErrorCode; message: string; detail?: Record<string, unknown> };
 }
 
 function isMissingColumnError(error: unknown, column: string): boolean {
@@ -71,8 +76,15 @@ function jsonResponse<T>(data: ApiResponse<T>, status = 200): Response {
   });
 }
 
-function errorResponse(code: ErrorCode, message: string): Response {
-  return jsonResponse({ ok: false, error: { code, message } }, 200);
+function errorResponse(
+  code: ErrorCode,
+  message: string,
+  detail?: Record<string, unknown>,
+): Response {
+  return jsonResponse(
+    { ok: false, error: { code, message, ...(detail ? { detail } : {}) } },
+    200,
+  );
 }
 
 async function notifyRoomInvite(
@@ -193,6 +205,14 @@ Deno.serve(async (req) => {
 
     const userId = sessionResult.userId;
 
+    // Verified-only admission, the same gate video_join_room applies at line
+    // 141. A client that skips the banner is still refused.
+    const admission = await resolveVerifiedAdmission(supabase, userId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
+      return errorResponse("forbidden", refusal.message, { reason: refusal.reason });
+    }
+
     // Parse and validate input
     let body: unknown;
     try {
@@ -228,6 +248,27 @@ Deno.serve(async (req) => {
       isPublic,
       maxParticipants,
     });
+
+    // ── Creator standing ─────────────────────────────────────────────────────
+    // creator_hosts.status used to be read in exactly one place, the
+    // creator-program `schedule` action, so a suspended creator simply came
+    // here instead and kept minting Lynk rooms. The gate runs before the
+    // rate-limit record and before the room insert, so a refusal writes
+    // nothing and costs the caller nothing.
+    //
+    // Scoped to `lynk`: suspension closes audience hosting. A personal call
+    // (roomKind 'call') is a 1:1 conversation, not a hosted room, and cutting
+    // it off would be a messaging ban — a different control, not this one.
+    if (roomKind === "lynk") {
+      const standing = await resolveCreatorStanding(supabase, userId);
+      if (standing.state === "refused") {
+        const refusal = creatorStandingRefusal(standing);
+        console.log(
+          `[video_create_room] Refused Lynk creation for ${userId}: ${refusal.reason}`,
+        );
+        return errorResponse("forbidden", refusal.message);
+      }
+    }
 
     let endsAt: string | null = null;
     if (roomKind === "call") {

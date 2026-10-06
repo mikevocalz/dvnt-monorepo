@@ -10,6 +10,7 @@ import { usersApi } from '../../../lib/api/users';
 import { citiesApi } from '../../../lib/api/cities';
 import { supabase } from '../../../lib/supabase/client';
 import { IDENTITY_OPTIONS, AUDIENCE_OPTIONS } from '../../../lib/constants/identity';
+import { fetchOwnIdentity, onboardingState } from '../../../lib/profile/own-identity';
 import { onboardingCheckpoint, onboardingFailure } from '@dvnt/observability/flows';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
 
@@ -65,6 +66,8 @@ export function WelcomeScreen() {
   const [audience, setAudience] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
+  // Result of reading the member's saved identity. "error" is NOT "needed".
+  const [check, setCheck] = useState<'checking' | 'needed' | 'error'>('checking');
 
   const markDoneAndGo = () => {
     if (user?.id && typeof localStorage !== 'undefined') {
@@ -73,28 +76,32 @@ export function WelcomeScreen() {
     router.replace('/feed');
   };
 
-  // Prefill from the profile row; if identity is already saved, this user
-  // has been through onboarding (maybe on mobile) — skip straight to feed.
+  // If identity is already saved (maybe on mobile), skip straight to the feed.
+  // A failed read is "unknown", not "not onboarded": show a retry instead of
+  // the questions, so stored answers are never re-asked or overwritten on a
+  // read that only failed.
+  const checkIdentity = async (userId: string) => {
+    setCheck('checking');
+    const result = await fetchOwnIdentity(supabase, userId);
+    const state = onboardingState(result);
+    if (state === 'unknown') {
+      setCheck('error');
+      return;
+    }
+    if (state === 'done' && result.ok) {
+      updateUser({
+        sexuality: result.identity.sexuality,
+        eventAudience: result.identity.eventAudience || undefined,
+      });
+      markDoneAndGo();
+      return;
+    }
+    setCheck('needed');
+  };
+
   useEffect(() => {
     if (!user?.id) return;
-    (async () => {
-      try {
-        const { data } = await supabase
-          .from('users')
-          .select('sexuality, event_audience')
-          .eq('id', Number(user.id))
-          .maybeSingle();
-        if (data?.sexuality?.length) {
-          updateUser({ sexuality: data.sexuality, eventAudience: data.event_audience || undefined });
-          markDoneAndGo();
-          return;
-        }
-        if (user.sexuality?.length) setIdentity(user.sexuality);
-        if (user.eventAudience) setAudience(user.eventAudience);
-      } catch {
-        // Prefill is best-effort — the flow works from a blank slate.
-      }
-    })();
+    void checkIdentity(user.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -236,6 +243,30 @@ export function WelcomeScreen() {
   ];
 
   const current = steps[step];
+
+  if (check !== 'needed') {
+    return (
+      <View style={{ minHeight: 720, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16, backgroundColor: '#02030A' }}>
+        {check === 'checking' ? (
+          <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14 }}>Loading…</Text>
+        ) : (
+          <>
+            <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
+              Couldn&apos;t load your profile
+            </Text>
+            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, textAlign: 'center' }}>
+              Check your connection and try again.
+            </Text>
+            <Button onPress={() => user?.id && void checkIdentity(user.id)}>Try again</Button>
+            {/* Leave without the done flag, so welcome is offered again. */}
+            <Pressable onPress={() => router.replace('/feed')} accessibilityRole="button">
+              <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 14, fontWeight: '700' }}>Not now</Text>
+            </Pressable>
+          </>
+        )}
+      </View>
+    );
+  }
 
   return (
     <ScrollView

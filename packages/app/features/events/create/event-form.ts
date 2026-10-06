@@ -16,6 +16,15 @@
  */
 
 import type { EventType } from "@dvnt/app/lib/stores/create-event-store";
+import {
+  deviceTimeZone,
+  localIsoToZonedIso,
+  normalizeTimeZone,
+} from "../../../lib/events/event-zone.ts";
+import {
+  publishAtError,
+  publishAtLocalToInstant,
+} from "../../../lib/events/event-publication.ts";
 
 // ── Event Type taxonomy (canonical) ─────────────────────────────────────────
 export const EVENT_TYPE_LABELS: Record<EventType, string> = {
@@ -77,8 +86,15 @@ export interface TicketTierLike {
 export interface EventFormDraft {
   title: string;
   description: string;
+  /** Picker value: a device-local ISO whose wall clock the organizer typed. */
   eventDate: string;
   endDate: string | null;
+  /**
+   * IANA zone the typed wall clock belongs to. Missing on drafts saved before
+   * the zone picker existed; those fall back to the device zone, which is what
+   * they were typed in.
+   */
+  eventTz?: string | null;
   location: string;
   locationData: {
     name?: string;
@@ -90,6 +106,10 @@ export interface EventFormDraft {
   eventType: EventType | null;
   tags: string[];
   visibility: "public" | "private" | "link_only";
+  /** E06. Optional so drafts saved before it existed still type-check. */
+  isHidden?: boolean;
+  /** E06: typed wall clock as a device-local ISO; "" = public on publish. */
+  publishAt?: string;
   ageRestriction: "none" | "18+" | "21+";
   isNsfw: boolean;
   dressCode: string;
@@ -105,6 +125,8 @@ export interface EventFormDraft {
   maxAttendees: string;
   ticketTiers: TicketTierLike[];
   agreementAccepted: boolean;
+  /** Duplicated events must get an explicit new schedule before publish. */
+  scheduleNeedsReview?: boolean;
 }
 
 // ── Ticketing helpers ────────────────────────────────────────────────────────
@@ -129,6 +151,31 @@ export function belowFloor(d: EventFormDraft): boolean {
   return Number.isFinite(flat) && flat > 0 && flat < MIN_PAID_TIER_CENTS / 100;
 }
 
+// ── Schedule: wall clock + zone -> stored instants ───────────────────────────
+
+export const END_BEFORE_START_MESSAGE = "End time must be after the start.";
+
+/**
+ * Turn the picked wall-clock start/end plus the event's zone into the UTC
+ * instants that get stored, and check end against start on those instants.
+ * Comparing instants (not wall clocks) keeps the check honest across a DST
+ * change inside the event.
+ */
+export function resolveEventSchedule(d: {
+  eventDate: string;
+  endDate: string | null;
+  eventTz?: string | null;
+}): { eventTz: string; startIso: string; endIso: string | null; error?: string } {
+  const eventTz = normalizeTimeZone(d.eventTz) ?? deviceTimeZone();
+  const startIso = d.eventDate ? localIsoToZonedIso(d.eventDate, eventTz) : "";
+  const endIso = d.endDate ? localIsoToZonedIso(d.endDate, eventTz) || null : null;
+  if (!startIso) return { eventTz, startIso, endIso, error: "Choose when it starts." };
+  if (endIso && new Date(endIso).getTime() <= new Date(startIso).getTime()) {
+    return { eventTz, startIso, endIso, error: END_BEFORE_START_MESSAGE };
+  }
+  return { eventTz, startIso, endIso };
+}
+
 // ── Validation (unified required set, signed off 2026-06-20) ─────────────────
 // Required to publish: Title, Event Type, Date/Start, Location (or Virtual),
 // plus accepted terms when the event is paid. Everything else is optional.
@@ -140,6 +187,7 @@ export interface EventFormErrors {
   location?: string;
   price?: string;
   terms?: string;
+  publishAt?: string;
 }
 
 export function validateEventDraft(d: EventFormDraft): {
@@ -151,15 +199,19 @@ export function validateEventDraft(d: EventFormDraft): {
   if (!d.title.trim()) errors.title = "Give your event a title.";
   if (!d.eventType) errors.eventType = "Pick an event type.";
 
-  const start = d.eventDate ? new Date(d.eventDate) : null;
-  if (!start || Number.isNaN(start.getTime())) {
-    errors.date = "Choose when it starts.";
-  } else if (d.endDate) {
-    const end = new Date(d.endDate);
-    if (!Number.isNaN(end.getTime()) && end.getTime() <= start.getTime()) {
-      errors.date = "End time must be after the start.";
-    }
+  const schedule = resolveEventSchedule(d);
+  if (d.scheduleNeedsReview) {
+    // A duplicated event keeps the source's times only as a hint; the host
+    // has to pick a new start before it can publish.
+    errors.date = "Choose a new start date and time for this duplicated event.";
+  } else if (schedule.error) {
+    errors.date = schedule.error;
   }
+  const publishError = publishAtError(
+    publishAtLocalToInstant(d.publishAt, schedule.eventTz),
+    schedule.startIso,
+  );
+  if (publishError) errors.publishAt = publishError;
 
   if (!d.isOnline && !d.location.trim()) {
     errors.location = "Add a venue, or mark the event online.";
@@ -201,16 +253,20 @@ export interface BuiltEventMedia {
 export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {}) {
   const maxAttendees = d.maxAttendees ? parseInt(d.maxAttendees, 10) : undefined;
   const price = d.ticketingEnabled ? parseFloat(d.ticketPrice) || 0 : 0;
+  const schedule = resolveEventSchedule(d);
 
   return {
     title: d.title.trim(),
     description: d.description.trim(),
-    date: d.eventDate,
-    endDate: d.endDate || undefined,
+    date: schedule.startIso,
+    endDate: schedule.endIso || undefined,
+    eventTz: schedule.eventTz,
     location: d.isOnline ? "Online" : d.location.trim(),
     price,
     maxAttendees: Number.isFinite(maxAttendees as number) ? maxAttendees : undefined,
     visibility: d.visibility,
+    isHidden: d.isHidden === true,
+    publishAt: publishAtLocalToInstant(d.publishAt, schedule.eventTz) ?? undefined,
     isOnline: d.isOnline,
     image: media.image,
     images: media.images,
@@ -238,4 +294,29 @@ export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {})
     disclaimers: d.disclaimers.trim() || undefined,
     nsfw: d.isNsfw || undefined,
   };
+}
+
+// ── Promo codes carried by a duplicated draft (review step) ─────────────────
+export interface PromoCodeTemplateLike {
+  code: string;
+  discountType: string;
+  discountValue: number;
+  ticketTierName: string | null;
+  active: boolean;
+}
+
+/** "10% off", "$5.00 off", "Buy one, get one", plus the tier when scoped. */
+export function describePromoTemplate(p: PromoCodeTemplateLike): string {
+  const discount =
+    p.discountType === "fixed_cents"
+      ? `$${(p.discountValue / 100).toFixed(2)} off`
+      : p.discountType === "bogo"
+        ? "Buy one, get one"
+        : `${p.discountValue}% off`;
+  return p.ticketTierName ? `${discount}, ${p.ticketTierName} only` : discount;
+}
+
+/** Enabled codes first, then the ones that copy switched off. */
+export function sortPromoTemplates<T extends PromoCodeTemplateLike>(list: T[]): T[] {
+  return [...list].sort((a, b) => Number(b.active) - Number(a.active) || a.code.localeCompare(b.code));
 }

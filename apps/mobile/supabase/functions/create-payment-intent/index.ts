@@ -22,6 +22,7 @@ import {
   TIER_VISIBILITY_MESSAGES,
 } from "../_shared/tier-visibility.ts";
 import { verifySession } from "../_shared/verify-session.ts";
+import { requireMemberPhone } from "../_shared/member-phone.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import {
   validateAndApplyPromo,
@@ -186,6 +187,7 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
       promoter_code,
       unlock_code,
       idempotency_key,
+      phone,
     } = await req.json();
 
     // Idempotency: one key per checkout attempt — double-tap/retry returns
@@ -222,6 +224,13 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
 
     if (!event_id || !ticket_type_id) {
       return json({ error: "Missing required fields" }, 400);
+    }
+
+    // A signed-in buyer with no phone on file gives one before paying. It is
+    // stored server-side; a number already on file is never replaced.
+    const memberPhone = await requireMemberPhone(supabase, user_id, phone, "[create-payment-intent]");
+    if (!memberPhone.ok) {
+      return json({ error: memberPhone.message, code: memberPhone.code }, memberPhone.status);
     }
 
     if (!await canAccessEvent(supabase, Number(event_id), user_id)) {

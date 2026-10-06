@@ -3,7 +3,7 @@
  *
  * POST /manage-promoters
  *   { action: "list",        event_id }
- *   { action: "add",         event_id, display_name?, username?, rev_share_bps, code? }
+ *   { action: "add",         event_id, display_name?, username?, rev_share_bps, code?, invite_email? }
  *   { action: "update",      promoter_id, rev_share_bps?, status?, display_name? }
  *   { action: "remove",      promoter_id }
  *   { action: "leaderboard", event_id }
@@ -30,12 +30,27 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { sendResendEmail, promoterInvite } from "../_shared/send-resend-email.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-const CODE_RE = /^[A-Z0-9_-]{2,32}$/;
+// Case is kept as typed (T06: "Tre151Share" stays "Tre151Share"). Matching is
+// case-insensitive everywhere it matters: the unique index is
+// (event_id, upper(code)), checkout uses ilike, attribution compares UPPER().
+const CODE_RE = /^[A-Za-z0-9_-]{2,32}$/;
 const VALID_UPDATE_STATUSES = new Set(["active", "paused"]);
+
+// Host-typed invite address for a name-only promoter. Deliberately plain:
+// one @, a dot in the domain, no whitespace, within the RFC 5321 length cap.
+const INVITE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const INVITE_EMAIL_MAX = 254;
+// Per organizer, through the DB-backed check_rate_limit / record_rate_limit
+// RPCs (record_rate_limit prunes rows older than an hour, so the window can't
+// be longer than that).
+const INVITE_EMAIL_ACTION = "promoter-invite-email";
+const INVITE_EMAIL_LIMIT = 20;
+const INVITE_EMAIL_WINDOW_SECONDS = 3600;
 
 function json(data: unknown, status = 200, req?: Request) {
   const headers = req
@@ -164,6 +179,81 @@ async function notifyPromoterAdded(
   }
 }
 
+export type InviteEmailStatus =
+  | "sent"
+  | "no_account"
+  | "no_email"
+  | "not_configured"
+  | "failed";
+
+/**
+ * Send the promoterInvite template to `to`. Never throws: the promoter row is
+ * already written, so a mail failure is reported in the response and the
+ * logs, not as a failed add.
+ */
+async function deliverPromoterInvite(
+  supabase: any,
+  to: string,
+  params: { actorAuthId: string; eventId: number; eventTitle: string | null; code: string },
+): Promise<InviteEmailStatus> {
+  try {
+    const { data: actor } = await supabase
+      .from("users")
+      .select("username")
+      .eq("auth_id", params.actorAuthId)
+      .maybeSingle();
+
+    const messageId = await sendResendEmail({
+      to,
+      ...promoterInvite({
+        eventId: params.eventId,
+        eventTitle: params.eventTitle,
+        hostHandle: actor?.username ? `@${actor.username}` : null,
+        code: params.code,
+      }),
+    });
+    // sendResendEmail returns null without sending when RESEND_API_KEY is unset.
+    return messageId ? "sent" : "not_configured";
+  } catch (err) {
+    console.error("[manage-promoters] invite email failed (non-fatal):", err);
+    return "failed";
+  }
+}
+
+/**
+ * Email the linked promoter their invitation (T07). The address comes from
+ * the Better Auth `user` row for the promoter's auth id, never from the
+ * request.
+ */
+async function sendPromoterInviteEmail(
+  supabase: any,
+  params: {
+    recipientAuthId: string;
+    actorAuthId: string;
+    eventId: number;
+    eventTitle: string | null;
+    code: string;
+  },
+): Promise<InviteEmailStatus> {
+  try {
+    const { data: account, error: accountError } = await supabase
+      .from("user")
+      .select("id, email")
+      .eq("id", params.recipientAuthId)
+      .maybeSingle();
+    if (accountError) {
+      console.error("[manage-promoters] invite email lookup failed:", accountError);
+      return "failed";
+    }
+    const to = typeof account?.email === "string" ? account.email.trim() : "";
+    if (!to || !to.includes("@")) return "no_email";
+    return await deliverPromoterInvite(supabase, to, params);
+  } catch (err) {
+    console.error("[manage-promoters] invite email failed (non-fatal):", err);
+    return "failed";
+  }
+}
+
 Deno.serve(withSentry("manage-promoters", async (req: Request) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST")
@@ -185,6 +275,156 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
       return json({ error: "Invalid JSON body" }, 400, req);
     }
     const action = String(body.action || "");
+
+    // ── reusable promoter library (organizer-scoped) ─────────────
+    if (action === "library-list") {
+      const { data: entries, error: libraryError } = await supabase
+        .from("promoter_library_entries")
+        .select("id, promoter_auth_id, display_name, preferred_code, customer_discount_bps, promoter_commission_bps, created_at, updated_at")
+        .eq("organizer_auth_id", authId)
+        .order("updated_at", { ascending: false });
+      if (libraryError) {
+        console.error("[manage-promoters] library list failed:", libraryError);
+        return json({ error: "Could not load promoter library" }, 500, req);
+      }
+
+      const authIds = (entries || []).map((entry: any) => entry.promoter_auth_id);
+      const usersByAuth = new Map<string, any>();
+      if (authIds.length > 0) {
+        const { data: users } = await supabase
+          .from("users")
+          .select("auth_id, username, first_name, last_name, avatar_id(url)")
+          .in("auth_id", authIds);
+        for (const user of users || []) usersByAuth.set(user.auth_id, user);
+      }
+
+      return json({
+        ok: true,
+        entries: (entries || []).map((entry: any) => {
+          const user = usersByAuth.get(entry.promoter_auth_id);
+          const avatarRaw = user?.avatar_id;
+          return {
+            id: entry.id,
+            promoterAuthId: entry.promoter_auth_id,
+            username: user?.username ?? null,
+            displayName:
+              entry.display_name ||
+              [user?.first_name, user?.last_name].filter(Boolean).join(" ") ||
+              user?.username ||
+              "Promoter",
+            avatarUrl:
+              (Array.isArray(avatarRaw) ? avatarRaw[0]?.url : avatarRaw?.url) ??
+              null,
+            preferredCode: entry.preferred_code,
+            customerDiscountBps: entry.customer_discount_bps,
+            promoterCommissionBps: entry.promoter_commission_bps,
+            createdAt: entry.created_at,
+            updatedAt: entry.updated_at,
+          };
+        }),
+      }, 200, req);
+    }
+
+    if (action === "library-save") {
+      const username =
+        typeof body.username === "string"
+          ? body.username.trim().toLowerCase().replace(/^@/, "")
+          : "";
+      let promoterAuthId =
+        typeof body.promoter_auth_id === "string"
+          ? body.promoter_auth_id.trim()
+          : "";
+      let displayName =
+        typeof body.display_name === "string" ? body.display_name.trim() : "";
+
+      // Resolve by username or by auth id, but always through a users row.
+      // A raw promoter_auth_id from the client is never written unchecked.
+      if (username || promoterAuthId) {
+        const { data: target } = await supabase
+          .from("users")
+          .select("auth_id, username, first_name, last_name")
+          .eq(username ? "username" : "auth_id", username || promoterAuthId)
+          .maybeSingle();
+        if (!target?.auth_id) {
+          return json(
+            { error: username ? `No user @${username}` : "No such user" },
+            404,
+            req,
+          );
+        }
+        promoterAuthId = target.auth_id;
+        if (!displayName) {
+          displayName =
+            [target.first_name, target.last_name].filter(Boolean).join(" ").trim() ||
+            target.username ||
+            "Promoter";
+        }
+      }
+
+      if (!promoterAuthId) {
+        return json({ error: "username or promoter_auth_id required" }, 400, req);
+      }
+
+      const preferredCode =
+        typeof body.preferred_code === "string" &&
+        body.preferred_code.trim().length > 0
+          ? body.preferred_code.trim()
+          : null;
+      if (preferredCode && !CODE_RE.test(preferredCode)) {
+        return json(
+          { error: "preferred_code must be 2–32 letters, numbers, - or _" },
+          400,
+          req,
+        );
+      }
+
+      const customerDiscountBps = Number(body.customer_discount_bps ?? 0);
+      const promoterCommissionBps = Number(body.promoter_commission_bps ?? 0);
+      for (const [name, value] of [
+        ["customer_discount_bps", customerDiscountBps],
+        ["promoter_commission_bps", promoterCommissionBps],
+      ] as const) {
+        if (!Number.isInteger(value) || value < 0 || value > 10000) {
+          return json({ error: `${name} must be an integer 0–10000` }, 400, req);
+        }
+      }
+
+      const { data: saved, error: saveError } = await supabase
+        .from("promoter_library_entries")
+        .upsert(
+          {
+            organizer_auth_id: authId,
+            promoter_auth_id: promoterAuthId,
+            display_name: (displayName || "Promoter").slice(0, 80),
+            preferred_code: preferredCode,
+            customer_discount_bps: customerDiscountBps,
+            promoter_commission_bps: promoterCommissionBps,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "organizer_auth_id,promoter_auth_id" },
+        )
+        .select("id")
+        .single();
+      if (saveError || !saved) {
+        console.error("[manage-promoters] library save failed:", saveError);
+        return json({ error: "Could not save promoter" }, 500, req);
+      }
+      return json({ ok: true, id: saved.id }, 200, req);
+    }
+
+    if (action === "library-remove") {
+      const libraryId = String(body.library_id || "");
+      if (!libraryId) return json({ error: "library_id required" }, 400, req);
+      const { error: removeLibraryError } = await supabase
+        .from("promoter_library_entries")
+        .delete()
+        .eq("id", libraryId)
+        .eq("organizer_auth_id", authId);
+      if (removeLibraryError) {
+        return json({ error: "Could not remove saved promoter" }, 500, req);
+      }
+      return json({ ok: true }, 200, req);
+    }
 
     // ── Resolve the event + permission gate ─────────────────────
     // list/add/leaderboard carry event_id; update/remove carry
@@ -402,11 +642,44 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
       }
       if (displayName.length > 80) displayName = displayName.slice(0, 80);
 
+      // Name-only promoter: the host may give an address for the invite. It
+      // is used for this one send and not stored (event_promoters has no
+      // private column for it). Ignored for a linked promoter, whose address
+      // always comes from their account. The address is never looked up, so
+      // the response can't reveal whether it belongs to a DVNT account.
+      let inviteEmailTo = "";
+      if (!userId && body.invite_email !== undefined && body.invite_email !== null) {
+        const raw = typeof body.invite_email === "string" ? body.invite_email.trim() : null;
+        if (raw === null || (raw && (raw.length > INVITE_EMAIL_MAX || !INVITE_EMAIL_RE.test(raw)))) {
+          return json({ error: "Enter a valid email address" }, 400, req);
+        }
+        inviteEmailTo = raw;
+      }
+      if (inviteEmailTo) {
+        // Checked before the insert so a refused send leaves nothing behind.
+        // A failed check reads as "not allowed": fail closed.
+        const { data: allowed, error: limitError } = await supabase.rpc("check_rate_limit", {
+          p_user_id: authId,
+          p_action: INVITE_EMAIL_ACTION,
+          p_room_id: null,
+          p_max_attempts: INVITE_EMAIL_LIMIT,
+          p_window_seconds: INVITE_EMAIL_WINDOW_SECONDS,
+        });
+        if (limitError) console.error("[manage-promoters] invite rate check failed:", limitError);
+        if (allowed !== true) {
+          return json(
+            { error: "Too many invite emails. Add them without an email or try again in an hour." },
+            429,
+            req,
+          );
+        }
+      }
+
       // Code: caller-supplied (validated) or generated. Retry on the
       // per-event uniq index for generated codes.
       const suppliedCode =
         typeof body.code === "string"
-          ? body.code.trim().toUpperCase()
+          ? body.code.trim()
           : "";
       if (suppliedCode && !CODE_RE.test(suppliedCode)) {
         return json(
@@ -456,8 +729,59 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
         return json({ error: "Could not add promoter" }, 500, req);
       }
 
+      // Insert-only: ON CONFLICT (organizer_auth_id, promoter_auth_id) DO
+      // NOTHING. An existing library entry holds the host's saved code and
+      // rates; adding the promoter to one event must not overwrite them.
+      // Edits to a saved entry go through library-save.
+      if (userId && body.save_to_library !== false) {
+        const { error: librarySaveError } = await supabase
+          .from("promoter_library_entries")
+          .upsert(
+            {
+              organizer_auth_id: authId,
+              promoter_auth_id: userId,
+              display_name: displayName,
+              preferred_code: suppliedCode || null,
+              customer_discount_bps: customerDiscountBps,
+              promoter_commission_bps: promoterCommissionBps,
+              updated_at: new Date().toISOString(),
+            },
+            {
+              onConflict: "organizer_auth_id,promoter_auth_id",
+              ignoreDuplicates: true,
+            },
+          );
+        if (librarySaveError) {
+          console.warn("[manage-promoters] library autosave failed (non-fatal):", librarySaveError);
+        }
+      }
+
       // Linked promoter → they've been added to the event; tell them.
       // The event_promoters row is the truth; this is the courtesy copy.
+      // A name-only promoter has no account and so no address to mail.
+      let inviteEmail: InviteEmailStatus = "no_account";
+      if (!userId && inviteEmailTo) {
+        const { error: recordError } = await supabase.rpc("record_rate_limit", {
+          p_user_id: authId,
+          p_action: INVITE_EMAIL_ACTION,
+          p_room_id: null,
+        });
+        if (recordError) console.error("[manage-promoters] invite rate record failed:", recordError);
+        const { data: ev } = await supabase
+          .from("events")
+          .select("title")
+          .eq("id", eventId)
+          .maybeSingle();
+        inviteEmail = await deliverPromoterInvite(supabase, inviteEmailTo, {
+          actorAuthId: authId,
+          eventId: eventId!,
+          eventTitle: ev?.title ?? null,
+          code: inserted.code,
+        });
+        if (inviteEmail !== "sent") {
+          console.warn(`[manage-promoters] invite email not sent for promoter ${inserted.id}: ${inviteEmail}`);
+        }
+      }
       if (userId) {
         const { data: ev } = await supabase
           .from("events")
@@ -472,6 +796,16 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
           promoterId: inserted.id,
           code: inserted.code,
         });
+        inviteEmail = await sendPromoterInviteEmail(supabase, {
+          recipientAuthId: userId,
+          actorAuthId: authId,
+          eventId: eventId!,
+          eventTitle: ev?.title ?? null,
+          code: inserted.code,
+        });
+        if (inviteEmail !== "sent") {
+          console.warn(`[manage-promoters] invite email not sent for promoter ${inserted.id}: ${inviteEmail}`);
+        }
       }
 
       return json(
@@ -494,6 +828,7 @@ Deno.serve(withSentry("manage-promoters", async (req: Request) => {
             earnedCents: 0,
             createdAt: inserted.created_at,
           },
+          inviteEmail,
         },
         200,
         req,

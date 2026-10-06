@@ -6,6 +6,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { resolveRoomMemberTarget } from "../_shared/room-member-handle.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
@@ -102,7 +103,11 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { roomId, targetUserId, reason, durationMinutes } = parsed.data;
+    const { roomId, reason, durationMinutes } = parsed.data;
+    // A `member:<id>` handle names an anonymous member; it is resolved to the
+    // auth id below, after the room is known. Responses echo the handle.
+    const targetHandle = parsed.data.targetUserId;
+    let targetUserId = targetHandle;
 
     // Cannot ban yourself
     if (actorId === targetUserId) {
@@ -121,6 +126,19 @@ Deno.serve(async (req) => {
     }
 
     const internalRoomId = room.id;
+
+    const resolvedTarget = await resolveRoomMemberTarget(
+      supabase,
+      internalRoomId,
+      targetHandle,
+    );
+    if (!resolvedTarget) {
+      return errorResponse("not_found", "User is not a member of this room");
+    }
+    targetUserId = resolvedTarget;
+    if (actorId === targetUserId) {
+      return errorResponse("validation_error", "Cannot ban yourself");
+    }
 
     if (room.status !== "open") {
       return errorResponse("conflict", "Room is no longer open");

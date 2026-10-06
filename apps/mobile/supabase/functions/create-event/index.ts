@@ -11,6 +11,10 @@ import {
 } from "../_shared/verify-session.ts";
 import { checkRateLimit, WRITE_LIMIT } from "../_shared/rate-limit.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
+import {
+  creatorStandingRefusal,
+  resolveCreatorStanding,
+} from "../_shared/creator-standing.ts";
 
 interface ApiResponse<T = unknown> {
   ok: boolean;
@@ -51,6 +55,15 @@ function text(value: unknown): string | null {
 function hostedUrl(value: unknown): string | null {
   const t = text(value);
   return t && /^https?:\/\//i.test(t) ? t : null;
+}
+
+function isIanaZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function textList(value: unknown): string | null {
@@ -130,6 +143,17 @@ Deno.serve(async (req) => {
     const admission = await resolveVerifiedAdmission(supabaseAdmin, authUserId);
     if (admission.state === "blocked") {
       const refusal = admissionRefusal(admission);
+      return errorResponse(req, refusal.code, refusal.message, 403);
+    }
+
+    // A suspended, paused or rejected creator cannot host an event either.
+    // Before this, creator_hosts was consulted only by creator-program's
+    // `schedule` action, so the normal publish rail ignored the suspension
+    // entirely. Runs before the insert and before the idempotent replay
+    // lookup, so a refusal publishes nothing.
+    const standing = await resolveCreatorStanding(supabaseAdmin, authUserId);
+    if (standing.state === "refused") {
+      const refusal = creatorStandingRefusal(standing);
       return errorResponse(req, refusal.code, refusal.message, 403);
     }
 
@@ -241,12 +265,61 @@ Deno.serve(async (req) => {
     if (ageRestriction === "18+" || ageRestriction === "21+" || ageRestriction === "none") {
       insertPayload.age_restriction = ageRestriction;
     }
-    if (text(body.endDate)) insertPayload.end_date = text(body.endDate);
+    // An end before the start is the "ended before it began" event. The
+    // create forms check this too, but a client is not a gate. There is no DB
+    // CHECK on purpose: a constraint on the events insert once broke every
+    // publish, so this rule lives in app code.
+    const endDate = text(body.endDate);
+    if (endDate) {
+      const endMs = new Date(endDate).getTime();
+      if (Number.isNaN(endMs)) {
+        return errorResponse(req, "validation_error", "End date is not a valid date");
+      }
+      if (endMs < new Date(startDate).getTime()) {
+        return errorResponse(
+          req,
+          "validation_error",
+          "The event ends before it starts. Set an end time after the start.",
+        );
+      }
+      insertPayload.end_date = endDate;
+    }
+    // Hide the event, or schedule when it goes public (E06). Validated here,
+    // not by a DB CHECK, for the same reason as the end date above.
+    if (body.isHidden !== undefined && body.isHidden !== null && typeof body.isHidden !== "boolean") {
+      return errorResponse(req, "validation_error", "isHidden must be true or false");
+    }
+    insertPayload.is_hidden = body.isHidden === true;
+    const publishAt = text(body.publishAt);
+    if (publishAt) {
+      const publishMs = new Date(publishAt).getTime();
+      if (Number.isNaN(publishMs)) {
+        return errorResponse(req, "validation_error", "Go-public time is not a valid date");
+      }
+      if (publishMs > new Date(startDate).getTime()) {
+        return errorResponse(
+          req,
+          "validation_error",
+          "Set the go-public time before the event starts.",
+        );
+      }
+      insertPayload.publish_at = new Date(publishMs).toISOString();
+    } else {
+      insertPayload.publish_at = null;
+    }
     // Venue timezone (IANA name). The client always sends it; physical events
     // render start/end in this zone (event-time.ts) — dropping it made every
     // event display in the viewer's local zone instead of the venue's.
     const eventTz = text(body.eventTz);
-    if (eventTz && /^[A-Za-z_+-]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(eventTz) && eventTz.length <= 64) {
+    // Shape check, then ask Intl: "legacy_unknown" passes the regex but is not
+    // a zone, and every client would fall back to an unlabelled time for it.
+    // A bad zone is dropped (NULL), never a reason to refuse the event.
+    if (
+      eventTz &&
+      /^[A-Za-z_+-]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(eventTz) &&
+      eventTz.length <= 64 &&
+      isIanaZone(eventTz)
+    ) {
       insertPayload.event_tz = eventTz;
     }
     if (typeof body.ticketingEnabled === "boolean") {

@@ -127,11 +127,12 @@ test('growth email stays shut until an unsubscribe URL exists', () => {
 });
 
 test('brand copy is labelled automated and an unknown campaign version sends nothing', () => {
-  const welcome = outbox.campaignMessage('welcome_dm_v1');
+  const welcome = outbox.campaignMessage('welcome_dm_v2');
   assert.match(welcome.body, /^Deviant announcement — automated\n\n/);
-  assert.ok(welcome.body.includes('Welcome to the cookout! The Black Queer cookout.'));
+  assert.ok(welcome.body.includes('Welcome to the cookout! (The Black, Brown & Queer cookout aka B.B.Q.)'));
   assert.ok(!welcome.body.includes('Stop these messages'));
   const withLink = outbox.campaignMessage('first_post_v1', 'https://dvntapp.live/u/x');
+  assert.equal(withLink.subject, 'Make your first DVNT post');
   assert.ok(withLink.body.includes('Stop these messages: https://dvntapp.live/u/x'));
   assert.equal(outbox.campaignMessage('welcome_dm_v9'), null);
 });
@@ -184,4 +185,138 @@ test("a missing account fails closed rather than defaulting to anyone", async ()
 test("an unreadable users table sends nothing", async () => {
   const got = await verifyBrandSender(fakeDb({ error: new Error("boom") }), BRAND);
   assert.equal(got.ok, false);
+});
+
+// auth-sync calls enqueue_brand_onboarding with p_auth_id on every sign-in,
+// including members who joined years ago. The lookback must bound that path
+// too, or every returning member is "welcomed" again.
+test("enqueue_brand_onboarding applies the lookback to the single-member path", () => {
+  const sql = fs.readFileSync(
+    `${__dirname}/../../migrations/20261001194000_deviantevents_onboarding_retention.sql`,
+    'utf8',
+  );
+  const fn = sql.slice(
+    sql.indexOf('FUNCTION public.enqueue_brand_onboarding'),
+    sql.indexOf('FUNCTION public.claim_brand_messages'),
+  );
+  const recipients = fn.slice(fn.indexOf('recipients AS ('), fn.indexOf('rows_to_insert AS ('));
+  const where = recipients.slice(recipients.indexOf('WHERE')).replace(/\s+/g, ' ');
+  assert.match(where, /^WHERE u\.created_at >= now\(\) - p_lookback AND \(/);
+  assert.ok(!/\)\s*OR\s*\(/.test(where), 'no OR branch may bypass the lookback');
+
+  const authSync = fs.readFileSync(`${__dirname}/../auth-sync/index.ts`, 'utf8');
+  assert.match(authSync, /enqueue_brand_onboarding[\s\S]{0,120}p_lookback: "7 days"/);
+});
+
+// The welcome email goes out directly from the auth function's
+// user.create.after hook, as it did on master. The outbox only sends once the
+// brand sender, unsubscribe URL and DVNT_BRAND_OUTBOX_ENABLED are configured,
+// so routing the email through it meant new members got none. The outbox must
+// not queue or render a second welcome email either.
+const MIGRATION = `${__dirname}/../../migrations/20261001194000_deviantevents_onboarding_retention.sql`;
+
+function createAfterHook() {
+  const src = fs.readFileSync(`${__dirname}/../auth/index.ts`, 'utf8');
+  const start = src.indexOf('after: async (user: any) => {');
+  assert.ok(start > 0, 'user.create.after hook not found');
+  return { src, hook: src.slice(start, src.indexOf('session: {', start)) };
+}
+
+test('signup sends the welcome email directly from user.create.after', () => {
+  const { src, hook } = createAfterHook();
+  assert.match(src, /welcome as welcomeEmail/);
+  assert.match(hook, /welcomeEmail\(name\)/);
+  assert.match(hook, /await sendEmail\(user\.email, subject, html\)/);
+});
+
+test('the outbox carries no second welcome email', () => {
+  const sql = fs.readFileSync(MIGRATION, 'utf8');
+  const fn = sql.slice(
+    sql.indexOf('FUNCTION public.enqueue_brand_onboarding'),
+    sql.indexOf('FUNCTION public.brand_member_adult_verified'),
+  );
+  assert.ok(fn.includes('RETURN v_count;'), 'slice must cover the whole function');
+  assert.ok(!/welcome_email/.test(fn), 'enqueue_brand_onboarding must not queue a welcome email');
+  assert.ok(!/'email'/.test(fn), 'enqueue_brand_onboarding must not queue any email row');
+  assert.match(fn, /'welcome_dm_v2'/);
+  assert.match(fn, /'first_post_v1'/);
+  assert.equal(outbox.campaignMessage('welcome_email_v2', 'https://dvntapp.live/u/x'), null);
+});
+
+// R05: every eligible member follows @DeviantEvents, including members who
+// joined before this shipped. The SQL behaviour (eligibility, idempotency,
+// counts, the brand never following old members) is proven against a real
+// Postgres by scripts/verify-brand-follows.mjs. These checks pin the wiring.
+test('the brand-outbox cron runs the follow backfill in batches', () => {
+  const sql = fs.readFileSync(MIGRATION, 'utf8');
+  const worker = fs.readFileSync(`${__dirname}/../brand-outbox-worker/index.ts`, 'utf8');
+  const sweep = sql.slice(sql.indexOf('FUNCTION public.cron_brand_outbox_sweep'));
+  assert.match(sweep, /body := '\{"follow_backfill_limit":250\}'::jsonb/);
+  assert.match(worker, /supabase\.rpc\("backfill_brand_follows", \{[\s\S]{0,160}p_limit: limit/);
+  assert.match(worker, /Number\(body\.follow_backfill_limit\) \|\| 250/);
+  // A failed backfill is reported in the response, not dropped.
+  assert.match(worker, /return \{ status: "error", error:/);
+  const responses = worker.match(/enqueued: enqueued \?\? 0,\s*brandFollows,/g) || [];
+  assert.equal(responses.length, 3, 'every worker response must report brandFollows');
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.backfill_brand_follows\(integer, integer, interval\) TO service_role/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.backfill_brand_follows\(integer, integer, interval\) FROM PUBLIC, anon, authenticated/);
+});
+
+test('member -> brand has no signup window; brand -> member keeps one', () => {
+  const sql = fs.readFileSync(MIGRATION, 'utf8');
+  const fn = sql.slice(
+    sql.indexOf('FUNCTION public.ensure_brand_follow_relationships'),
+    sql.indexOf('FUNCTION public.backfill_brand_follows'),
+  ).replace(/\s+/g, ' ');
+  // The old early return skipped BOTH directions for anyone outside the window.
+  assert.ok(!/v_member_created < now\(\) - p_lookback THEN RETURN/.test(fn));
+  assert.match(fn, /IF p_bidirectional AND v_member_created IS NOT NULL AND v_member_created >= now\(\) - p_lookback THEN/);
+});
+
+// Profiles created outside auth-sync (resolveOrProvisionUser runs in 30+ edge
+// functions) must get both directions too, without waiting for the cron.
+test('every profile-creation path calls ensureBrandFollows', () => {
+  const helper = fs.readFileSync(`${__dirname}/brand-follow.ts`, 'utf8');
+  assert.match(helper, /ensure_brand_follow_relationships[\s\S]{0,200}p_lookback: NEW_PROFILE_WINDOW/);
+  assert.match(helper, /NEW_PROFILE_WINDOW = "7 days"/);
+  const authSync = fs.readFileSync(`${__dirname}/../auth-sync/index.ts`, 'utf8');
+  assert.match(authSync, /await ensureBrandFollows\(supabaseAdmin, memberId, /);
+  const resolveUser = fs.readFileSync(`${__dirname}/resolve-user.ts`, 'utf8');
+  const provisioned = resolveUser.slice(resolveUser.indexOf('if (newRow) {'));
+  assert.match(provisioned.slice(0, 600), /await ensureBrandFollows\(supabase, Number\(newRow\.id\), /);
+});
+
+// R03/R07: the prompt queued after adult verification has its own copy. The
+// queue/skip rules run against Postgres in scripts/verify-brand-follows.mjs.
+test('first_post_v2 tells a newly verified member that posting is open', () => {
+  const msg = outbox.campaignMessage('first_post_v2');
+  assert.equal(msg.subject, 'Make your first DVNT post');
+  assert.match(msg.body, /^Deviant announcement — automated\n\n/);
+  assert.ok(msg.body.includes("You're verified."));
+  assert.equal(outbox.campaignMessage('first_post_v3'), null);
+});
+
+// Profiles made at guest checkout skip user.create.after, so the worker sends
+// them the same welcome template, plus how to unlock posting.
+test('the checkout welcome is the signup template plus the unlock paragraph', async () => {
+  globalThis.Deno ??= { env: { get: () => undefined } };
+  const t = await import(`${__dirname}/email/templates.ts`);
+  const plain = t.welcome('sam');
+  const checkout = t.welcome('sam', { checkoutProfile: true });
+  assert.equal(checkout.subject, plain.subject);
+  assert.ok(!plain.html.includes('Verify your ID'), 'signup welcome must not change');
+  assert.ok(checkout.html.includes('<strong>Verify your ID</strong>'));
+  assert.ok(checkout.html.includes('Posting, comments, messages and Lynk rooms open after you verify your ID'));
+});
+
+test('the worker claims the checkout welcome before sending and releases it on failure', () => {
+  const worker = fs.readFileSync(`${__dirname}/../brand-outbox-worker/index.ts`, 'utf8');
+  const fn = worker.slice(worker.indexOf('async function sendCheckoutWelcomeEmails'), worker.indexOf('Deno.serve('));
+  const claimAt = fn.indexOf('rpc("claim_checkout_welcome_emails"');
+  const sendAt = fn.indexOf('sendResendEmail(');
+  assert.ok(claimAt > 0 && sendAt > claimAt, 'the marker must be claimed before the send');
+  assert.match(fn, /welcomeEmail\(row\.username, \{ checkoutProfile: true \}\)/);
+  assert.match(fn, /rpc\("complete_checkout_welcome_email", \{[\s\S]{0,80}p_sent: ok/);
+  // It runs before the DVNT_BRAND_OUTBOX_ENABLED gate.
+  assert.ok(worker.indexOf('await sendCheckoutWelcomeEmails(supabase)') < worker.indexOf('const configured = brandSendGate()'));
 });

@@ -45,7 +45,14 @@ import {
   Search,
 } from "lucide-react";
 import { VenueSearchInput } from "@dvnt/ui";
+import { EventZonePickerWeb } from "@dvnt/app/features/events/ui/event-zone-picker.web";
+import { EventPublicationFieldWeb } from "@dvnt/app/features/events/ui/event-publication-picker.web";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
+import {
+  saleWindowLabel,
+  saleWindowLocalToInstant,
+} from "@dvnt/app/lib/events/sale-window";
+import { zoneDisplayName } from "@dvnt/app/lib/events/event-zone";
 import { useCreateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { usePlacesAutocomplete } from "@dvnt/app/lib/hooks/use-places-autocomplete";
 import type { PlacesLocationData } from "@dvnt/app/lib/places/types";
@@ -66,6 +73,7 @@ import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
+import { useEventMediaPreupload } from "@dvnt/app/lib/hooks/use-event-media-preupload";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
   EVENT_VISIBILITY_OPTIONS,
@@ -80,7 +88,10 @@ import {
   SUGGESTED_TAGS,
   validateEventDraft,
   buildEventInsert,
+  resolveEventSchedule,
   hasPaidTier,
+  describePromoTemplate,
+  sortPromoTemplates,
   type EventFormErrors,
 } from "@dvnt/app/features/events/create/event-form";
 
@@ -164,12 +175,103 @@ export function CreateEventScreen() {
     return () => { screenMounted.current = false; };
   }, []);
   const s = useCreateEventStore();
+  useEventMediaPreupload();
   const createEvent = useCreateEvent();
   const showToast = useUIStore((st) => st.showToast);
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   const publishLock = useRef(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  useEffect(() => {
+    // Local MMKV persistence is instant; this adds a debounced server copy so
+    // the same draft can be resumed after a browser reset or on another device.
+    // Server metadata itself is deliberately excluded from the fingerprint so
+    // saving a revision cannot recursively schedule another save.
+    const fingerprint = (state: ReturnType<typeof useCreateEventStore.getState>) =>
+      JSON.stringify({
+        title: state.title,
+        description: state.description,
+        location: state.location,
+        locationData: state.locationData,
+        eventImages: state.eventImages,
+        tags: state.tags,
+        eventDate: state.eventDate,
+        endDate: state.endDate,
+        ticketPrice: state.ticketPrice,
+        maxAttendees: state.maxAttendees,
+        youtubeUrl: state.youtubeUrl,
+        attachLynkRoom: state.attachLynkRoom,
+        ticketingEnabled: state.ticketingEnabled,
+        visibility: state.visibility,
+        ageRestriction: state.ageRestriction,
+        isOnline: state.isOnline,
+        dressCode: state.dressCode,
+        doorPolicy: state.doorPolicy,
+        lineup: state.lineup,
+        perks: state.perks,
+        ticketTiers: state.ticketTiers,
+        addons: state.addons,
+        coOrganizers: state.coOrganizers,
+        guests: state.guests,
+        promoterTemplates: state.promoterTemplates,
+        flyerImage: state.flyerImage,
+        flyerMediaType: state.flyerMediaType,
+        flyerFallbackImage: state.flyerFallbackImage,
+        eventType: state.eventType,
+        disclaimers: state.disclaimers,
+        isNsfw: state.isNsfw,
+        currentStep: state.currentStep,
+        scheduleNeedsReview: state.scheduleNeedsReview,
+      });
+
+    let last = fingerprint(useCreateEventStore.getState());
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = useCreateEventStore.subscribe((state) => {
+      const next = fingerprint(state);
+      if (next === last) return;
+      last = next;
+      if (timer) clearTimeout(timer);
+      if (!state.hasDraft() || state.isSubmitting) return;
+
+      timer = setTimeout(() => {
+        const current = useCreateEventStore.getState();
+        if (!current.hasDraft() || current.isSubmitting || current.isSavingDraft) return;
+        current.setIsSavingDraft(true);
+        void import("@dvnt/app/lib/api/event-drafts")
+          .then(({ eventDraftsApi }) => eventDraftsApi.saveCurrent())
+          .catch((error) => console.warn("[event-drafts] autosave failed", error))
+          .finally(() => useCreateEventStore.getState().setIsSavingDraft(false));
+      }, 1500);
+    });
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
+  }, []);
+
+  const saveDraft = async () => {
+    if (s.isSavingDraft) return;
+    s.setIsSavingDraft(true);
+    try {
+      const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
+      const saved = await eventDraftsApi.saveCurrent();
+      showToast(
+        "success",
+        "Draft saved",
+        saved.revision > 1 ? "Your draft was updated." : "You can resume this draft from Host Dashboard.",
+      );
+    } catch (error) {
+      showToast(
+        "error",
+        "Couldn't save draft",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    } finally {
+      s.setIsSavingDraft(false);
+    }
+  };
 
   const places = usePlacesAutocomplete({
     value: s.location,
@@ -189,6 +291,16 @@ export function CreateEventScreen() {
   const errors: EventFormErrors = attempted ? validation.errors : {};
 
   const publish = async () => {
+    if (s.scheduleNeedsReview) {
+      setAttempted(true);
+      showToast(
+        "error",
+        "Choose a new event date",
+        "This is a duplicated event. Review the schedule before publishing so the copy cannot reuse the original event time.",
+      );
+      return;
+    }
+
     // DIAGNOSTIC: label every awaited step so an infinite "Publishing…" becomes
     // a 20s error naming the exact stalling call (upload / create-event / ticket).
     // Also a hard backstop against any single hung network call.
@@ -210,7 +322,8 @@ export function CreateEventScreen() {
     const { ok, errors: errs } = validateEventDraft(s);
     if (!ok) {
       const first =
-        errs.title || errs.eventType || errs.date || errs.location || errs.price || errs.terms;
+        errs.title || errs.eventType || errs.date || errs.location || errs.price || errs.terms ||
+        errs.publishAt;
       showToast("error", "Almost there", first || "Check the highlighted fields.");
       return;
     }
@@ -366,7 +479,15 @@ export function CreateEventScreen() {
       if (created?.replayed && id) {
         // A previous attempt already created this row. Setup may have partly
         // completed before the app closed; never duplicate ticket inventory.
+        const replayedDraftId = s.serverDraftId;
         s.resetDraft();
+        if (replayedDraftId) {
+          void import("@dvnt/app/lib/api/event-drafts")
+            .then(({ eventDraftsApi }) => eventDraftsApi.delete(replayedDraftId))
+            .catch((error) =>
+            console.warn("[create-event] replayed draft cleanup failed", error),
+          );
+        }
         showToast("warning", "Event already published", "Review tickets and add-ons in Edit before sharing it.");
         if (screenMounted.current) router.push(`/feed/events/${id}/edit`);
         return;
@@ -395,6 +516,10 @@ export function CreateEventScreen() {
                   quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
                   maxPerUser:
                     tier.maxPerUser > 0 ? tier.maxPerUser : s.simpleMaxPerUser,
+                  // The form holds the typed wall clock; store it as that
+                  // time in the event's zone. These were never sent before.
+                  saleStart: saleWindowLocalToInstant(tier.saleStart, s.eventTz) ?? undefined,
+                  saleEnd: saleWindowLocalToInstant(tier.saleEnd, s.eventTz) ?? undefined,
                   // v2 tier model — visibility, type, early-bird pricing.
                   tierType: tier.tierType,
                   tierVisibility: tier.visibility,
@@ -478,6 +603,51 @@ export function CreateEventScreen() {
         }
       }
 
+      // Promoters copied by Duplicate Event are fresh invitations/configuration.
+      // Historical earnings, attributed orders and acceptance state are never
+      // part of the draft.
+      if (id && s.promoterTemplates.length > 0) {
+        const failed: string[] = [];
+        for (const promoter of s.promoterTemplates) {
+          try {
+            const { promotersApi } = await import("@dvnt/app/lib/api/promoters");
+            await promotersApi.add({
+              eventId: Number(id),
+              username: promoter.username || undefined,
+              displayName: promoter.displayName || undefined,
+              code: promoter.code || undefined,
+              customerDiscountBps: promoter.customerDiscountBps,
+              promoterCommissionBps: promoter.promoterCommissionBps,
+            });
+          } catch (error) {
+            console.warn("[create-event] promoter template failed", promoter, error);
+            failed.push(promoter.displayName || promoter.username || "Promoter");
+          }
+        }
+        if (failed.length) {
+          showToast("warning", "Some promoters weren't recreated", failed.join(", "));
+        }
+      }
+
+      // Standalone promo codes from the duplicated event. Copied on the
+      // server, idempotent, inactive codes stay inactive.
+      if (id && s.draftSourceEventId) {
+        try {
+          const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
+          const res = await eventDraftsApi.copyPromoCodes(Number(id), s.draftSourceEventId);
+          if (res.skipped.length > 0) {
+            showToast(
+              "warning",
+              "Some promo codes weren't copied",
+              `Add them from Promo codes: ${res.skipped.map((p) => p.code).join(", ")}.`,
+            );
+          }
+        } catch (error) {
+          console.warn("[create-event] promo code copy failed", error);
+          showToast("warning", "Promo codes not copied", "Your event is live. Add codes from Promo codes.");
+        }
+      }
+
       // Guest list. Same shape as the co-organizer write-back and for the same
       // reason: there was no event id to attach an invite to until now. One
       // batched call, and a guest who can't be added never rolls back a
@@ -506,7 +676,15 @@ export function CreateEventScreen() {
         }
       }
 
+      const publishedDraftId = s.serverDraftId;
       s.resetDraft();
+      if (publishedDraftId) {
+        void import("@dvnt/app/lib/api/event-drafts")
+          .then(({ eventDraftsApi }) => eventDraftsApi.delete(publishedDraftId))
+          .catch((error) =>
+          console.warn("[create-event] published draft cleanup failed", error),
+        );
+      }
       if (ticketSetupFailed) {
         showToast(
           "warning",
@@ -598,14 +776,58 @@ export function CreateEventScreen() {
       <div className="mx-auto max-w-5xl px-4 pt-4 pb-28">
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-2xl font-extrabold">Create event</h1>
-          <button
-            onClick={publish}
-            disabled={publishing}
-            className="h-10 px-5 rounded-full bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-40"
-          >
-            {publishing ? "Publishing…" : "Publish"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void saveDraft()}
+              disabled={s.isSavingDraft || publishing || !s.hasDraft()}
+              className="h-10 px-4 rounded-full border border-white/15 bg-white/5 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              {s.isSavingDraft ? "Saving…" : s.serverDraftId ? "Update draft" : "Save draft"}
+            </button>
+            <button
+              onClick={publish}
+              disabled={publishing}
+              className="h-10 px-5 rounded-full bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-40"
+            >
+              {publishing ? "Publishing…" : "Publish"}
+            </button>
+          </div>
         </div>
+        {s.scheduleNeedsReview ? (
+          <div role="alert" className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-sm text-amber-100">
+            Duplicated event: choose and confirm a new date/time before publishing.
+          </div>
+        ) : null}
+        {s.draftSourceEventId && (s.promoCodeTemplates.length > 0 || s.eventTz) ? (
+          <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+            {s.eventTz ? (
+              <p className="text-white/70">Times publish in {s.eventTz}, the original event's zone.</p>
+            ) : null}
+            {s.promoCodeTemplates.length > 0 ? (
+              <>
+                <p className={`${s.eventTz ? "mt-2 " : ""}font-semibold text-white`}>
+                  Promo codes from the original event
+                </p>
+                <ul className="mt-1.5 flex flex-col gap-1">
+                  {sortPromoTemplates(s.promoCodeTemplates).map((p) => (
+                    <li key={p.code} className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-white/80">
+                        <span className="font-mono font-semibold text-white">{p.code}</span>{" "}
+                        {describePromoTemplate(p)}
+                      </span>
+                      <span className={`shrink-0 text-xs font-semibold ${p.active ? "text-emerald-300" : "text-white/45"}`}>
+                        {p.active ? "Enabled" : "Off"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1.5 text-xs text-white/45">
+                  Off codes were expired or used up on the original, and stay off on this event.
+                </p>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         {publishing && (
           <div role="status" className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
             {s.uploadProgress > 0 && s.uploadProgress < 100 ? "Uploading event media…" : "Publishing event…"}
@@ -683,6 +905,11 @@ export function CreateEventScreen() {
                   }
                 />
               </Field>
+              <EventZonePickerWeb
+                value={s.eventTz}
+                onChange={s.setEventTz}
+                at={resolveEventSchedule(s).startIso}
+              />
               <label className="flex items-center gap-2 mt-1 text-sm text-white/75">
                 <input
                   type="checkbox"
@@ -1067,6 +1294,14 @@ export function CreateEventScreen() {
                   {eventVisibilityCopy(s.visibility).helper}
                 </p>
               </Field>
+              <EventPublicationFieldWeb
+                isHidden={s.isHidden}
+                onHiddenChange={s.setIsHidden}
+                publishAt={s.publishAt}
+                onPublishAtChange={s.setPublishAt}
+                eventTz={s.eventTz}
+                error={errors.publishAt}
+              />
               {/* Private only. A link-only event lets anyone holding the URL in,
                   so a guest list there would grant a permission everyone
                   already has while implying a restriction. */}
@@ -1390,6 +1625,7 @@ function slugifyTitle(t: string): string {
 function TicketTiersEditor() {
   const ticketTiers = useCreateEventStore((st) => st.ticketTiers);
   const setTicketTiers = useCreateEventStore((st) => st.setTicketTiers);
+  const eventTz = useCreateEventStore((st) => st.eventTz);
   const update = (idx: number, patch: Partial<typeof ticketTiers[number]>) =>
     setTicketTiers((cur) => cur.map((t, i) => (i === idx ? { ...t, ...patch } : t)));
   const remove = (idx: number) =>
@@ -1479,6 +1715,9 @@ function TicketTiersEditor() {
             onChange={(e) => update(idx, { description: e.target.value })}
           />
           <div className="grid grid-cols-2 gap-2">
+            <p className="col-span-2 text-[11px] text-white/40">
+              Sale times are in the event&apos;s zone: {zoneDisplayName(eventTz)}
+            </p>
             <label className="text-[11px] text-white/55">
               Sales start
               <input
@@ -1489,6 +1728,9 @@ function TicketTiersEditor() {
                   update(idx, { saleStart: e.target.value ? fromLocalInput(e.target.value) : "" })
                 }
               />
+              {tier.saleStart ? (
+                <span className="mt-0.5 block text-white/40">{saleWindowLabel(tier.saleStart, eventTz)}</span>
+              ) : null}
             </label>
             <label className="text-[11px] text-white/55">
               Sales end
@@ -1500,6 +1742,9 @@ function TicketTiersEditor() {
                   update(idx, { saleEnd: e.target.value ? fromLocalInput(e.target.value) : "" })
                 }
               />
+              {tier.saleEnd ? (
+                <span className="mt-0.5 block text-white/40">{saleWindowLabel(tier.saleEnd, eventTz)}</span>
+              ) : null}
             </label>
           </div>
 

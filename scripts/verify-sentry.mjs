@@ -81,23 +81,31 @@ for (const opt of ["attachViewHierarchy", "enableUserInteractionTracing"]) {
 }
 console.log("2. OK — attachViewHierarchy and enableUserInteractionTracing are off");
 
-// --- 3. TurboModule aggregate stats disabled, slow-call breadcrumbs off -------
-// The billed level:'info' event every 30s. Largest single quota item.
-const turbo = boot.match(/turboModuleContextIntegration\(\{[\s\S]*?\}\)/);
-assert.ok(turbo, `${BOOT} must pass turboModuleContextIntegration explicit options`);
-assert.match(turbo[0], /enableAggregateStats:\s*false/, "enableAggregateStats must be false");
-assert.match(turbo[0], /slowCallThresholdMs:\s*0/, "slowCallThresholdMs must be 0");
-// And the override has to actually win the name collision against the default.
-const filterDuplicates = readFileSync(
-  join(dirname(require.resolve("@sentry/core/package.json")), "build/cjs/integration.js"),
-  "utf8",
+// --- 3. Mobile has no SDK: the boot fork stays a no-op -----------------------
+// The mobile SDK was removed 2026-09-04 (d00827be). This section used to
+// assert turboModuleContextIntegration options inside sentry-boot.native.ts,
+// which cannot pass against a file that no longer initialises anything.
+// Mobile errors now leave through lib/analytics/sentry-envelope.ts (fetch)
+// and analytics_events. What has to hold instead: nothing on mobile
+// half-restores the SDK, because a required-but-never-init()ed SDK is a
+// silent no-op (that is how error-boundary and outbox reported nothing for
+// five days).
+const bootCode = stripComments(boot);
+assert.match(bootCode, /export const Sentry = undefined;/, `${BOOT} must stay the no-op fork`);
+assert.ok(
+  !/@sentry\/react-native|Sentry\.init\(/.test(bootCode),
+  `${BOOT} imports or initialises the mobile SDK; restoring it needs the plugin and a prebuild, see the file header`,
 );
-assert.match(
-  filterDuplicates,
-  /existingInstance && !existingInstance\.isDefaultInstance && currentInstance\.isDefaultInstance/,
-  "@sentry/core filterDuplicates no longer keeps the last non-default instance — the turboModuleContextIntegration override may not win",
+const sdkCallers = grepRepo(/@sentry\/react-native/).filter(
+  (f) => !f.startsWith("packages/observability/") &&
+    /(require\(|from\s+|import\()\s*["']@sentry\/react-native["']/.test(stripComments(read(f))),
 );
-console.log("3. OK — TurboModule aggregate off, and last-instance-wins still holds");
+assert.deepStrictEqual(
+  sdkCallers,
+  [],
+  `these files load @sentry/react-native, which resolves but is never init()ed on mobile: ${sdkCallers.join(", ")}`,
+);
+console.log("3. OK — mobile boot is a no-op and no app code loads the uninitialised SDK");
 
 // --- 4. No mobile replay anywhere ---------------------------------------------
 // Replay is removed globally (50/mo pool, no sampling contract). The SDK adds
@@ -131,23 +139,37 @@ assert.strictEqual(
 );
 console.log("5. OK — no app-level enablePromiseRejectionTracker competing with the SDK");
 
-// --- 6. Mobile uses the shared sampler ----------------------------------------
+// --- 6. The fetch sink reads the DSN in the one form Expo inlines -------------
+// Mobile Sentry is now lib/analytics/sentry-envelope.ts, fed by report-issue.ts.
+// Expo's babel preset inlines EXPO_PUBLIC_* only for the static member
+// expression `process.env.EXPO_PUBLIC_X`; destructuring or a computed key
+// ships `undefined` and the sink goes quiet with only a console.warn.
+const REPORT_ISSUE = "packages/app/lib/analytics/report-issue.ts";
+const ENVELOPE = "packages/app/lib/analytics/sentry-envelope.ts";
 assert.match(
-  boot,
-  /dvntTracesSampler/,
-  `${BOOT} must import dvntTracesSampler from @dvnt/observability rather than defining its own inline sampler (the chatty->0 bucket and the Lynk boost live there)`,
+  stripComments(read(REPORT_ISSUE)),
+  /process\.env\.EXPO_PUBLIC_SENTRY_DSN\b/,
+  `${REPORT_ISSUE} must read process.env.EXPO_PUBLIC_SENTRY_DSN literally so Expo inlines it`,
 );
-console.log("6. OK — mobile is on the shared dvntTracesSampler");
+const envelope = stripComments(read(ENVELOPE));
+assert.match(envelope, /export function parseDsn\(/, `${ENVELOPE} must export parseDsn`);
+assert.match(envelope, /export async function sendToSentry\(/, `${ENVELOPE} must export sendToSentry`);
+assert.match(envelope, /\/api\/\$\{projectId\}\/envelope\//, `${ENVELOPE} must post to the envelope endpoint`);
+console.log("6. OK — fetch sink reads EXPO_PUBLIC_SENTRY_DSN statically and posts envelopes");
 
-// --- 7. The version cited in the boot header is the installed version ---------
-const cited = boot.match(/@sentry\/react-native\s+(\d+\.\d+\.\d+)/);
-assert.ok(cited, `${BOOT} header must cite the version its symbols were verified against`);
-assert.strictEqual(
-  cited[1],
-  installedVersion,
-  `${BOOT} header cites ${cited[1]} but ${installedVersion} is installed — re-verify the symbols, then update the header`,
-);
-console.log(`7. OK — boot header cites ${installedVersion}, which is installed`);
+// --- 7. No eas.json profile pins the DSN to a literal -------------------------
+// The DSN comes from EAS environment variables (production + preview). A
+// profile `env` entry outranks those, so a literal or empty value here would
+// silently replace the real DSN in every build of that profile.
+const eas = JSON.parse(read("apps/mobile/eas.json"));
+for (const [profile, cfg] of Object.entries(eas.build ?? {})) {
+  const value = cfg?.env?.EXPO_PUBLIC_SENTRY_DSN;
+  assert.ok(
+    value === undefined || /^\$\{[A-Z0-9_]+\}$/.test(value),
+    `eas.json build.${profile}.env.EXPO_PUBLIC_SENTRY_DSN overrides the EAS environment variable with a literal`,
+  );
+}
+console.log("7. OK — no eas.json profile overrides the EAS-provided DSN");
 
 // --- 8. Exactly one io.sentry:sentry-android version in the build ------------
 // sentry-java's InitUtil.shouldInit enforces version consistency at init; two
@@ -250,29 +272,16 @@ assert.match(
 );
 console.log("10. OK — profiling defaults off, hang threshold explicit");
 
-// --- 11. The plugin entry carries the native-init decision -------------------
-// Phase-0 item 2. Without useNativeInit the SDK is dark until the JS bundle
-// evaluates (bootSentry runs at features/routes/screens/_layout.tsx:185), so a
-// crash before that point is invisible — which is the state finding 2.7
-// described. Asserted so it cannot be dropped in a config tidy-up.
-const appConfig = read("apps/mobile/app.config.js");
-assert.match(
-  appConfig,
-  /useNativeInit:\s*true/,
-  "app.config.js must set useNativeInit — otherwise Sentry misses every pre-bundle crash",
+// --- 11. The Sentry Expo plugin stays out of app.config.js -------------------
+// Removed 2026-09-04 with the SDK. Its `useNativeInit: true` ran
+// RNSentrySDK.init ahead of the JS bundle; re-adding the plugin without the
+// SDK boot (section 3) would put native init back with no JS side at all.
+const appConfig = stripComments(read("apps/mobile/app.config.js"));
+assert.ok(
+  !/@sentry\/react-native\/expo|useNativeInit\s*:/.test(appConfig),
+  "app.config.js re-adds the Sentry Expo plugin; restore the SDK as a whole (see sentry-boot.native.ts) or not at all",
 );
-// The native side must not start with the settings WS-0 removed on the JS side.
-for (const [opt, why] of [
-  ["attachViewHierarchy: false", "a main-thread view-tree walk at error time"],
-  ["attachScreenshot: false", "screenshots are not masked by the RN SDK"],
-  ["profilesSampleRate: 0", "profiling is billed and its allowance is unverified"],
-]) {
-  assert.ok(
-    appConfig.includes(opt),
-    `native init options must pin ${opt} — ${why}`,
-  );
-}
-console.log("11. OK — native init on, and its options mirror the JS defaults");
+console.log("11. OK — no Sentry Expo plugin or native init in app.config.js");
 
 console.log("\nverify-sentry: all sections pass");
 

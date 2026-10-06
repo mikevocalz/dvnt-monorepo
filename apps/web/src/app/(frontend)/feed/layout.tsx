@@ -21,7 +21,6 @@ const IncomingCallOverlay = dynamic(
 );
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
-  // Web push: silently (re)subscribe when permission was already granted.
   useEffect(() => {
     void registerWebPushIfGranted();
   }, []);

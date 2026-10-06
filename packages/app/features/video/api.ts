@@ -289,23 +289,16 @@ export const videoApi = {
     // write path, where a failed insert costs someone their seat in a live
     // room. Two reads and a Map cost one extra round trip and can't fail
     // that way.
-    const { data, error } = await supabase
-      .from("video_room_members")
-      .select(
-        `
-        room_id,
-        user_id,
-        role,
-        status,
-        hand_raised,
-        joined_at,
-        left_at,
-        is_anonymous,
-        anon_label
-      `,
-      )
-      .eq("room_id", internalRoomId)
-      .eq("status", "active");
+    //
+    // The roster comes from the lynk_room_roster RPC, not the table: clients
+    // have no SELECT on video_room_members.user_id (migration
+    // 20261003150200), because for an anonymous member it is their auth id.
+    // The RPC returns `member:<row id>` in its place for anonymous members
+    // other than the caller; the moderation edge functions resolve it.
+    const { data: rows, error } = await supabase.rpc("lynk_room_roster", {
+      p_room_id: internalRoomId,
+    });
+    const data = (rows as any[] | null)?.filter((m) => m.status === "active");
 
     if (error || !data) {
       // Loud on purpose. The silent version of this line hid the bug above for
@@ -314,7 +307,16 @@ export const videoApi = {
       return [];
     }
 
-    const authIds = [...new Set(data.map((m: any) => m.user_id).filter(Boolean))];
+    // Anonymous rows never get a profile lookup, own row included: the tile
+    // shows the label, and a handle would match nothing anyway.
+    const authIds = [
+      ...new Set(
+        data
+          .filter((m: any) => !m.is_anonymous)
+          .map((m: any) => m.user_id)
+          .filter(Boolean),
+      ),
+    ];
     const profileByAuthId = new Map<string, { username?: string; avatar?: any }>();
     if (authIds.length > 0) {
       const { data: users, error: usersError } = await supabase
@@ -385,21 +387,27 @@ export const videoApi = {
    * Get user's rooms (as member)
    */
   async getMyRooms(): Promise<VideoRoom[]> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return [];
-
-    const { data, error } = await supabase
+    // No user_id filter: clients cannot read that column (migration
+    // 20261003150200), and this used supabase.auth.getUser(), which has no
+    // GoTrue user under Better Auth. The SELECT policy already limits the
+    // visible rows to rooms the caller is a member or host of, so every room
+    // reachable from a visible row is one of theirs.
+    const { data: rows, error } = await supabase
       .from("video_room_members")
       .select(
         `
+        room_id,
         video_rooms!inner(*)
       `,
       )
-      .eq("user_id", user.id)
-      .eq("status", "active")
       .eq("video_rooms.status", "open");
+
+    const seen = new Set<number>();
+    const data = (rows as any[] | null)?.filter((m) => {
+      if (seen.has(m.room_id)) return false;
+      seen.add(m.room_id);
+      return true;
+    });
 
     if (error || !data) return [];
 
@@ -499,7 +507,25 @@ export const videoApi = {
             filter: `room_id=eq.${realtimeRoomId}`,
           },
           async (payload) => {
-            const member = (payload.new || payload.old) as any;
+            const raw = (
+              payload.new && Object.keys(payload.new).length
+                ? payload.new
+                : payload.old
+            ) as any;
+            // Change events no longer carry user_id (no column privilege, see
+            // migration 20261003150200). Read the row back through the
+            // roster RPC, which masks anonymous members the same way the
+            // initial fetch does. A DELETE has only the primary key left.
+            let member = raw;
+            if (payload.eventType !== "DELETE" && raw?.id != null) {
+              const { data: rows } = await supabase.rpc("lynk_room_roster", {
+                p_room_id: realtimeRoomId,
+                p_member_id: raw.id,
+              });
+              const row = (rows as any[] | null)?.[0];
+              if (row) member = { ...raw, ...row, id: row.member_id };
+            }
+            if (!member.user_id) member = { ...member, user_id: `member:${raw?.id}` };
             const isAnonymous = member.is_anonymous ?? false;
             const anonLabel = member.anon_label ?? null;
 

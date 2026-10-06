@@ -42,6 +42,7 @@ import {
   Ticket as TicketIcon,
 } from "lucide-react";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
+import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
 import { usePublicGateStore } from "@dvnt/app/lib/stores/public-gate-store";
 import { useGuestTicketUIStore } from "@dvnt/app/lib/stores/guest-ticket-ui-store";
 
@@ -62,6 +63,9 @@ interface GuestTicketData {
       title: string;
       startDate: string | null;
       endDate: string | null;
+      /** Absent until get-guest-ticket ships the zone; then the label appears. */
+      eventTz?: string | null;
+      isOnline?: boolean;
       location: string | null;
       coverImageUrl: string | null;
     };
@@ -83,20 +87,6 @@ interface GuestTicketData {
   };
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      weekday: "long",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
-}
 
 export function GuestTicketScreen() {
   const params = useParams<{ token: string | string[] }>();
@@ -245,7 +235,8 @@ export function GuestTicketScreen() {
   const { event } = ticket;
   const checkedIn = !!ticket.checkedInAt || ticket.status === "scanned";
   const revoked = ticket.status === "refunded" || ticket.status === "void";
-  const dateLabel = formatDate(event.startDate);
+  // Venue zone with its abbreviation ("Friday, Jul 10 at 8:00 PM PDT").
+  const dateLabel = formatEventWhen(event.startDate, event);
   const buyer = ticket.guestName || ticket.guestEmail;
 
   return (

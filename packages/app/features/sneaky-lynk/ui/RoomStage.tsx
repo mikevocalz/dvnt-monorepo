@@ -4,7 +4,8 @@
  * Zoom-parity stage for Sneaky Lynk rooms. Two zones:
  *
  *   ┌──────────────────────────┐
- *   │  HOST HERO   (16:9)      │  ← aspect-sized, capped by maxHeight
+ *   │  HOST HERO   (16:9)      │  ← aspect-sized, capped by maxHeight;
+ *   │  [ HOST ][ CO-HOST ]     │    a co-host splits it in two (same box)
  *   ├──────────────────────────┤
  *   │  CROWD · N               │  ← divider + label (fixed height)
  *   │  ┌───┬───┐   ┌───┬───┐   │
@@ -51,6 +52,9 @@ import React, { memo, useCallback, useMemo } from "react";
 import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import Animated, {
   Easing,
+  FadeIn,
+  FadeOut,
+  LinearTransition,
   interpolate,
   useAnimatedScrollHandler,
   useAnimatedStyle,
@@ -62,7 +66,7 @@ import type { SharedValue } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
 import { Users } from "lucide-react-native";
 import { VideoTile, type VideoParticipant } from "./VideoGrid";
-import { crowdColumns, crowdTileBox, heroBox } from "./stage-layout";
+import { crowdColumns, crowdTileBox, hostStageLayout } from "./stage-layout";
 
 interface RoomStageProps {
   /** Full flat list including local/host + remotes. */
@@ -123,7 +127,7 @@ export const RoomStage = memo(function RoomStage({
   // never see themselves in the hero slot. Earlier versions used
   // `participants.find(p => p.isLocal)` as a fallback, which is what
   // caused listeners to see themselves up top.
-  const { host, attendees } = useMemo(() => {
+  const { host, coHost, attendees } = useMemo(() => {
     const hostParticipant =
       // 1. Authoritative host ID from room snapshot
       (hostUserId
@@ -141,10 +145,17 @@ export const RoomStage = memo(function RoomStage({
       // 5. Absolute last resort
       participants[0] ||
       null;
-    const rest = hostParticipant
-      ? participants.filter((p) => p.id !== hostParticipant.id)
-      : participants;
-    return { host: hostParticipant, attendees: rest };
+    // A second host (co-host) shares the top. The first co-host only; the
+    // stage holds two people, anyone else stays in the crowd.
+    const coHostParticipant = hostParticipant
+      ? participants.find(
+          (p) => p.id !== hostParticipant.id && p.role === "co-host",
+        ) || null
+      : null;
+    const rest = participants.filter(
+      (p) => p.id !== hostParticipant?.id && p.id !== coHostParticipant?.id,
+    );
+    return { host: hostParticipant, coHost: coHostParticipant, attendees: rest };
   }, [participants, hostUserId, isHost]);
 
   const totalCount = participants.length;
@@ -159,10 +170,17 @@ export const RoomStage = memo(function RoomStage({
   // Lower cap gives the crowd zone more height — matches Zoom's ~40/60 split.
   const heroCap = totalCount >= 10 ? 0.38 : 0.44;
   const heroMaxHeight = Math.round(screenHeight * heroCap);
-  // Width comes down with the cap so the hero stays 16:9 — see stage-layout.
-  const hero = heroBox(pageWidth, heroMaxHeight);
-  const heroHeight = hero.height;
-  const heroWidth = hero.width;
+  // Width comes down with the cap so the hero stays 16:9, tablets cap at the
+  // content column, and a co-host splits the same box in two (stage-layout).
+  const hostTiles = useMemo(
+    () => [host, coHost].filter((p): p is VideoParticipant => !!p),
+    [host, coHost],
+  );
+  const stageLayout = useMemo(
+    () => hostStageLayout(hostTiles.length, pageWidth, heroMaxHeight, "native"),
+    [hostTiles.length, pageWidth, heroMaxHeight],
+  );
+  const heroHeight = stageLayout.stage.height;
 
   // ── Crowd-zone height — derived from the measured stage height ───
   // The parent (RoomLayout) measures the stage container via onLayout
@@ -228,7 +246,7 @@ export const RoomStage = memo(function RoomStage({
   const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
 
   const renderHero = useCallback(() => {
-    if (!host) return null;
+    if (hostTiles.length === 0) return null;
     return (
       <View
         style={{
@@ -240,36 +258,57 @@ export const RoomStage = memo(function RoomStage({
       >
         <View
           style={{
-            width: heroWidth,
+            width: stageLayout.stage.width,
             height: heroHeight,
-            borderRadius: 20,
-            overflow: "hidden",
+            flexDirection: "row",
+            gap: stageLayout.gap,
           }}
         >
-          <VideoTile
-            participant={host}
-            isSpeaking={activeSpeakers.has(host.user.id)}
-            tileWidth={heroWidth}
-            tileHeight={heroHeight}
-            isHost={isHost}
-            onPress={
-              isHost && !host.isLocal
-                ? () => onParticipantPress?.(host)
-                : undefined
-            }
-          />
-          {hostOverlay ? (
-            <View pointerEvents="none" style={styles.hostOverlay}>
-              {hostOverlay}
-            </View>
-          ) : null}
+          {hostTiles.map((p, i) => {
+            const box = stageLayout.tiles[i];
+            if (!box) return null;
+            return (
+              // Layout transition: a co-host arriving slides the host tile to
+              // half width and fades the new tile in; leaving reverses it.
+              <Animated.View
+                key={p.id}
+                layout={LinearTransition.duration(240)}
+                entering={FadeIn.duration(200)}
+                exiting={FadeOut.duration(160)}
+                style={{
+                  width: box.width,
+                  height: box.height,
+                  borderRadius: 20,
+                  overflow: "hidden",
+                }}
+              >
+                <VideoTile
+                  participant={p}
+                  isSpeaking={activeSpeakers.has(p.user.id)}
+                  tileWidth={box.width}
+                  tileHeight={box.height}
+                  isHost={isHost}
+                  onPress={
+                    isHost && !p.isLocal
+                      ? () => onParticipantPress?.(p)
+                      : undefined
+                  }
+                />
+                {i === 0 && hostOverlay ? (
+                  <View pointerEvents="none" style={styles.hostOverlay}>
+                    {hostOverlay}
+                  </View>
+                ) : null}
+              </Animated.View>
+            );
+          })}
         </View>
       </View>
     );
   }, [
-    host,
+    hostTiles,
+    stageLayout,
     isHost,
-    heroWidth,
     heroHeight,
     activeSpeakers,
     onParticipantPress,
