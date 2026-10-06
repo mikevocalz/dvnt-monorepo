@@ -67,7 +67,11 @@ AS $function$
 DECLARE
   v_event_id integer;
 BEGIN
-  v_event_id := COALESCE(NEW.event_id, OLD.event_id);
+  IF TG_OP = 'DELETE' THEN
+    v_event_id := OLD.event_id;
+  ELSE
+    v_event_id := NEW.event_id;
+  END IF;
   IF v_event_id IS NOT NULL THEN
     PERFORM public.recompute_event_financials(v_event_id);
   END IF;
