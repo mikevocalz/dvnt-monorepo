@@ -189,7 +189,7 @@ export function ClassicRound({
         </p>
       ) : (
         <p className="mt-5 rounded-xl border border-white/15 bg-white/5 p-4 text-sm text-white/60">
-          Players are writing their answers.
+          Players are choosing their cards.
         </p>
       )}
     </section>
