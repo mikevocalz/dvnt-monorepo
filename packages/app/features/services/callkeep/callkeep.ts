@@ -459,9 +459,9 @@ export function reportEndCall(
   try {
     if (Platform.OS === "ios") {
       _expoAnswerRequests.delete(callUUID);
-      const expoReason = reason === "REMOTE_ENDED" ? "remoteEnded" :
-        reason === "UNANSWERED" ? "unanswered" :
-        reason === "DECLINED" ? "unknown" : "unknown";
+      const expoReason =
+        reason === "REMOTE_ENDED" ? "remoteEnded" :
+        reason === "UNANSWERED" ? "unanswered" : "unknown";
       void ExpoCallKitTelecom.reportCallEnded(callUUID, expoReason);
       return;
     }

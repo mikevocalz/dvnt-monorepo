@@ -355,6 +355,11 @@ const nextConfig: NextConfig = {
         __dirname,
         'src/platform/stripe-react-native.web.tsx',
       ),
+      // Git-pinned CallKit module ships no build/ output; web runs the stub.
+      'expo-callkit-telecom$': path.resolve(
+        __dirname,
+        'src/platform/expo-callkit-telecom.web.ts',
+      ),
       'react-native-reanimated/scripts/validate-worklets-version': path.resolve(
         __dirname,
         'src/platform/validate-worklets-version.ts',

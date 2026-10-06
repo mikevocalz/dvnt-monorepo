@@ -37,6 +37,11 @@
       "@dvnt/app/*": [
         "../../packages/app/*"
       ],
+      // The git-pinned module ships no build/ output; web resolves the shared
+      // stub so tsc and the bundle both succeed.
+      "expo-callkit-telecom": [
+        "./src/platform/expo-callkit-telecom.web.ts"
+      ],
       "react-native-screen-transitions": [
         "../../node_modules/react-native-screen-transitions/lib/typescript/shared/index.d.ts"
       ],

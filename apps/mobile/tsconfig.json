@@ -16,6 +16,11 @@
       "@dvnt/app/*": [
         "../../packages/app/*"
       ],
+      // The git-pinned module ships no build/ output, so its types entry does
+      // not exist; this shim mirrors the upstream API at the pinned commit.
+      "expo-callkit-telecom": [
+        "../../packages/app/types/expo-callkit-telecom.ts"
+      ],
       "react-native-screen-transitions": [
         "../../node_modules/react-native-screen-transitions/lib/typescript/shared/index.d.ts"
       ]
