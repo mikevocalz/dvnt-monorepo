@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -23,6 +23,8 @@ import { useMixedCartCheckout } from "@dvnt/app/lib/hooks/use-mixed-cart-checkou
 import { CheckoutPhoneField } from "@dvnt/app/features/events/checkout-phone-field";
 import { computeFees, formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
+import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
@@ -336,6 +338,30 @@ export default function CartReviewScreen() {
   const removeLineItem = useCartStore((state) => state.removeLineItem);
   const clearCart = useCartStore((state) => state.clearCart);
   const { checkout, isLoading } = useMixedCartCheckout();
+  const promoterRef = usePromoterRefStore(
+    (s) => (cart?.eventId ? s.refs[String(cart.eventId)] ?? null : null),
+  );
+  const setPromoterRef = usePromoterRefStore((s) => s.setRef);
+
+  useEffect(() => {
+    const numericEventId = Number(cart?.eventId);
+    if (!Number.isInteger(numericEventId) || numericEventId <= 0) return;
+    if (usePromoterRefStore.getState().getRef(cart!.eventId)) return;
+
+    void promotersApi
+      .getClaim(numericEventId)
+      .then((claim) => {
+        if (!claim || !cart?.eventId) return;
+        setPromoterRef(
+          cart.eventId,
+          claim.code,
+          claim.customerDiscountBps,
+        );
+      })
+      .catch((error) => {
+        console.warn("[CartReview] promoter claim hydrate failed:", error);
+      });
+  }, [cart?.eventId, setPromoterRef]);
 
   const lineItems = cart?.lineItems ?? [];
   const reviewItems = useMemo(() => buildReviewItems(lineItems), [lineItems]);
@@ -347,15 +373,40 @@ export default function CartReviewScreen() {
     () => lineItems.reduce((sum, lineItem) => sum + lineItem.quantity, 0),
     [lineItems],
   );
+  const admissionSubtotalCents = useMemo(
+    () =>
+      lineItems
+        .filter((lineItem) => lineItem.category === "admission")
+        .reduce(
+          (sum, lineItem) =>
+            sum + lineItem.unitPriceCents * lineItem.quantity,
+          0,
+        ),
+    [lineItems],
+  );
+  const promoterDiscountBps =
+    promoterRef?.customerDiscountBps != null
+      ? Math.max(0, Math.min(10000, promoterRef.customerDiscountBps))
+      : 0;
+  const promoterDiscountCents = Math.min(
+    admissionSubtotalCents,
+    promoterDiscountBps > 0
+      ? Math.round(admissionSubtotalCents * (promoterDiscountBps / 10000))
+      : 0,
+  );
+  const effectiveSubtotalCents = Math.max(
+    0,
+    subtotalCents - promoterDiscountCents,
+  );
   const fees = useMemo(
     () =>
       quantity > 0
-        ? computeFees(subtotalCents, quantity)
+        ? computeFees(effectiveSubtotalCents, quantity)
         : {
             buyer_fee: 0,
             customer_charge_amount: 0,
           },
-    [quantity, subtotalCents],
+    [quantity, effectiveSubtotalCents],
   );
 
   const handleIncrement = useCallback(
@@ -494,6 +545,16 @@ export default function CartReviewScreen() {
           <Text style={styles.summaryLabel}>Subtotal</Text>
           <Text style={styles.summaryValue}>{formatCents(subtotalCents)}</Text>
         </View>
+        {promoterDiscountCents > 0 ? (
+          <View style={styles.summaryRow}>
+            <Text style={styles.promoterSummaryLabel}>
+              Promoter · {promoterDiscountBps / 100}% off
+            </Text>
+            <Text style={styles.promoterSummaryValue}>
+              −{formatCents(promoterDiscountCents)}
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>DVNT Service Fee</Text>
           <Text style={styles.summaryValue}>{formatCents(fees.buyer_fee)}</Text>
@@ -832,6 +893,16 @@ const styles = StyleSheet.create({
   summaryLabel: {
     color: "#94A3B8",
     fontSize: 13,
+  },
+  promoterSummaryLabel: {
+    color: "#D8B4FE",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  promoterSummaryValue: {
+    color: "#D8B4FE",
+    fontSize: 14,
+    fontWeight: "700",
   },
   summaryValue: {
     color: "#E2E8F0",
