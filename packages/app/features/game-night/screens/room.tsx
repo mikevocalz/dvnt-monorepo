@@ -8,6 +8,7 @@ import { useRoomPresence } from "../use-room-presence";
 import { duelPick, endRoom, fetchRoomMessages, judgePick, leaveRoom, sendRoomMessage, setReady, startMatch, submitCards, takeSeat, type GameNightMessage } from "../rooms-api";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { classicWinText, duelFormatText, GAME_NIGHT_DECK_FACTS } from "../game-rules";
 
 const Button = ({label, onPress, disabled = false}:{label:string;onPress:()=>void;disabled?:boolean}) => <Pressable disabled={disabled} onPress={onPress} className={`items-center rounded-full px-5 py-3 ${disabled ? "bg-secondary" : "bg-primary"}`}><Text className="font-bold text-white">{label}</Text></Pressable>;
 
@@ -20,6 +21,7 @@ export default function GameNightRoomScreen() {
   const [commandError, setCommandError] = useState<string | null>(null);
   const [messages, setMessages] = useState<GameNightMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [rulesOpen, setRulesOpen] = useState(false);
   const snapPoints = useMemo(() => [120, "60%"], []);
   useRoomPresence(code, state ? { id: state.me.user_id, name: state.members.find(m => m.user_id === state.me.user_id)?.name ?? null, avatar: state.members.find(m => m.user_id === state.me.user_id)?.avatar ?? null, joinedAt: Date.now() } : null);
   const busy = useRef(false);
@@ -64,9 +66,19 @@ export default function GameNightRoomScreen() {
   const seats = [0,1,2,3].map(n => members.find(m => m.seat_no === n));
   const scoreName = (id:string) => members.find(m => m.user_id === id)?.name ?? "Player";
   return <View className="flex-1 bg-background pt-12">
-    <View className="flex-row items-center justify-between px-5 pb-3"><View><Text className="text-2xl font-black text-foreground">Game Night</Text><Text className="text-muted-foreground">Room {code} · {me.role === "watcher" ? "Watching" : `Seat ${(me.seat_no ?? 0) + 1}`}</Text></View><Pressable onPress={leave}><Text className="font-bold text-red-500">Leave</Text></Pressable></View>
+    <View className="flex-row items-center justify-between px-5 pb-3"><View><Text className="text-2xl font-black text-foreground">Game Night</Text><Text className="text-muted-foreground">Room {code} · {me.role === "watcher" ? "Watching" : `Seat ${(me.seat_no ?? 0) + 1}`}</Text></View><View className="flex-row items-center gap-4"><Pressable onPress={() => setRulesOpen((open) => !open)}><Text className="font-bold text-primary">{rulesOpen ? "Hide rules" : "How to play"}</Text></Pressable><Pressable onPress={leave}><Text className="font-bold text-red-500">Leave</Text></Pressable></View></View>
     <ScrollView className="flex-1 px-5" contentContainerStyle={{paddingBottom:150}}>
       {commandError ? <Text className="mb-3 text-red-500">{commandError}</Text> : null}
+      {rulesOpen ? <View className="mb-5 rounded-2xl border border-border bg-secondary p-4">
+        <Text className="text-base font-black text-foreground">How this table works</Text>
+        <Text className="mt-2 text-sm leading-5 text-muted-foreground">2 seated players = Duel. 3–4 seated players = Classic. The host starts once everyone else is ready. More than 4 people join as watchers.</Text>
+        <Text className="mt-4 text-xs font-black uppercase tracking-widest text-primary">Classic · 3–4 players</Text>
+        <Text className="mt-2 text-sm leading-5 text-muted-foreground">You hold 7 answer cards. A rotating judge sits out each round. Everyone else plays the 1 or 2 cards the prompt asks for within 45 seconds. The judge gets 60 seconds to pick a favorite; that player scores 1 point. {classicWinText(match?.target_score ?? 5)}</Text>
+        <Text className="mt-4 text-xs font-black uppercase tracking-widest text-primary">Duel · exactly 2 players</Text>
+        <Text className="mt-2 text-sm leading-5 text-muted-foreground">One player is the subject and secretly chooses a favorite from 6 shared options. The other predicts that choice. A correct prediction scores 1 point; a miss scores 0. {duelFormatText(match?.duel_paired_rounds ?? 5)}</Text>
+        <Text className="mt-4 text-xs font-black uppercase tracking-widest text-primary">Cards</Text>
+        <Text className="mt-2 text-sm leading-5 text-muted-foreground">Visual theme: {GAME_NIGHT_DECK_FACTS.visualTheme}. Playable text: DVNT's {GAME_NIGHT_DECK_FACTS.promptCount}-prompt / {GAME_NIGHT_DECK_FACTS.answerCount}-answer nightlife deck.</Text>
+      </View> : null}
       <View className="flex-row flex-wrap justify-between">{seats.map((member, i) => <View key={i} className="mb-3 w-[48%] rounded-2xl border border-border bg-secondary p-4"><Text className="font-bold text-foreground">{member?.name ?? `Open seat ${i+1}`}</Text><Text className={member?.ready ? "text-green-500" : "text-muted-foreground"}>{member ? (member.ready ? "Ready" : "Not ready") : "Available"}</Text>{me.is_host && member && member.user_id !== me.user_id && !match ? <Pressable onPress={() => void act(() => import("../rooms-api").then(x => x.kickMember(code, member.user_id)))}><Text className="mt-2 text-xs text-red-500">Remove</Text></Pressable> : null}</View>)}</View>
       {!match && me.role === "watcher" ? <View className="mb-4"><Button label="Take an open seat" onPress={() => void act(() => takeSeat(code))} /></View> : null}
       {!match && me.role === "player" ? <View className="mb-4"><Button label={me.ready ? "I'm not ready" : "I'm ready"} onPress={() => void act(() => setReady(code, !me.ready))} /></View> : null}
