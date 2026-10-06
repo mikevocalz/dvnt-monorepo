@@ -327,7 +327,7 @@ function EventAnalyticsContent() {
             iconColor="#f59e0b"
             label="Fees paid"
             value={formatMoney(revenue.dvntFeeCents + revenue.stripeFeeCents)}
-            sublabel={`${formatMoney(revenue.dvntFeeCents)} DVNT · ${formatMoney(revenue.stripeFeeCents)} Stripe`}
+            sublabel={`${formatMoney(revenue.dvntFeeCents)} DVNT platform · ${formatMoney(revenue.stripeFeeCents)} Stripe processing`}
           />
         </View>
 
