@@ -59,6 +59,11 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { useCallUIStore } from "./call-ui-store";
 import {
+  formatCallSessionCountdown,
+  callSessionSecondsRemaining,
+  shouldShowCallSessionWarning,
+} from "./call-session-limit";
+import {
   findSpeakingPage,
   getGroupCallLayout,
   getGroupCallPage,
@@ -233,6 +238,10 @@ function CallRoom({
   const isMicOn = useVideoRoomStore((s) => s.isMicOn);
   const isCameraOn = useVideoRoomStore((s) => s.isCameraOn);
   const participants = useVideoRoomStore((s) => s.participants);
+  const serverEndsAt = useVideoRoomStore((s) => s.serverEndsAt);
+  const callSessionSecondsLeft = useVideoRoomStore(
+    (s) => s.callSessionSecondsLeft,
+  );
   const errorMsg = useVideoRoomStore((s) => s.error);
   const getStore = useVideoRoomStore.getState;
 
@@ -342,7 +351,8 @@ function CallRoom({
         return;
       }
 
-      const { token, user: joinedUser } = joinResult.data;
+      const { token, user: joinedUser, room: joinedRoom } = joinResult.data;
+      s.setServerEndsAt(joinedRoom.endsAt ?? null);
       if (!token) {
         s.setError("No peer token received", "no_peer_token");
         return;
@@ -634,9 +644,17 @@ function CallRoom({
           filter: `uuid=eq.${liveRoomId}`,
         },
         (payload) => {
-          const status = (payload.new as { status?: string })?.status;
-          if (status === "open") return;
+          const nextRoom = payload.new as {
+            status?: string;
+            ends_at?: string | null;
+          };
           const s = getStore();
+
+          if ("ends_at" in nextRoom) {
+            s.setServerEndsAt(nextRoom.ends_at ?? null);
+          }
+
+          if (nextRoom.status === "open") return;
           if (s.callPhase === "call_ended" || s.callPhase === "error") return;
           leave();
         },
@@ -646,6 +664,32 @@ function CallRoom({
       supabase.removeChannel(channel);
     };
   }, [liveRoomId, getStore, leave]);
+
+  // ── Server-owned five-minute session deadline ─────────────────────────────
+  // The first invited participant starts video_rooms.ends_at. Every client
+  // counts down to that same timestamp, so reconnects and late group joins do
+  // not mint another five-minute window.
+  useEffect(() => {
+    if (callPhase !== "connected" || !serverEndsAt) {
+      getStore().setCallSessionSecondsLeft(null);
+      return;
+    }
+
+    let ended = false;
+    const tick = () => {
+      const secondsLeft = callSessionSecondsRemaining(serverEndsAt);
+      getStore().setCallSessionSecondsLeft(secondsLeft);
+
+      if (secondsLeft === 0 && !ended) {
+        ended = true;
+        leave();
+      }
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [callPhase, serverEndsAt, getStore, leave]);
 
   // ── Last one on the call ──────────────────────────────────────────────────
   // The last remote leaving used to strand the screen on "Waiting for
@@ -1260,6 +1304,24 @@ function CallRoom({
             {statusLabel}
           </span>
         </div>
+
+        {shouldShowCallSessionWarning(callSessionSecondsLeft) &&
+          callSessionSecondsLeft !== null && (
+            <div
+              role="timer"
+              aria-live={callSessionSecondsLeft <= 10 ? "assertive" : "polite"}
+              aria-label={`Call ends in ${formatCallSessionCountdown(
+                callSessionSecondsLeft,
+              )}`}
+              className="rounded-full px-3 py-1.5 text-sm font-extrabold text-white"
+              style={{
+                backgroundColor: "rgba(252,37,58,0.94)",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              Call ends in {formatCallSessionCountdown(callSessionSecondsLeft)}
+            </div>
+          )}
       </header>
 
       {/* Controls bar: circular icon buttons */}
