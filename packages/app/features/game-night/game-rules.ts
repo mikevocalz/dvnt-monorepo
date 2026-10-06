@@ -9,7 +9,7 @@ export function gameNightModeForPlayerCount(
 }
 
 export function classicWinText(targetScore = 5): string {
-  return `First player to ${Math.max(1, targetScore)} points wins the match.`;
+  return `First player to ${Math.max(1, targetScore)} points wins; if the deck runs out first, the highest score wins.`;
 }
 
 export function duelFormatText(pairedRounds = 5): string {
