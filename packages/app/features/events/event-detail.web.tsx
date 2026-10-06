@@ -496,6 +496,20 @@ export function EventDetailScreen() {
             .catch((error) => {
               console.warn("[event-detail] promoter ref claim failed:", error);
             });
+        } else {
+          void promotersApi
+            .getClaim(Number(eventId))
+            .then((claim) => {
+              if (!claim) return;
+              setPromoterRef(
+                eventId,
+                claim.code,
+                claim.customerDiscountBps,
+              );
+            })
+            .catch((error) => {
+              console.warn("[event-detail] promoter claim hydrate failed:", error);
+            });
         }
       }
     } catch {
