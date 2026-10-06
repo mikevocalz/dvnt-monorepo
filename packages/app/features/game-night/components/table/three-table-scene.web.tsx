@@ -908,10 +908,12 @@ class CookoutTable3D {
       pointerId: e.pointerId,
     };
     this.renderer.domElement.style.cursor = "grabbing";
-    this.hoverTo(rig, true);
+    this.killRigTweens(rig);
+    rig.hoverLift = true;
+    rig.group.scale.setScalar(rig.targetScale * 1.06);
   };
 
-  private finishDrag = (e: PointerEvent, commit: boolean) => {
+  private finishDrag = (commit: boolean) => {
     const drag = this.drag;
     if (!drag) return;
     this.drag = null;
@@ -947,11 +949,11 @@ class CookoutTable3D {
     const commit =
       drag.moved &&
       isCommitDrag(drag.startX, drag.startY, e.clientX, e.clientY);
-    this.finishDrag(e, commit);
+    this.finishDrag(commit);
   };
 
   private onPointerCancel = (e: PointerEvent) => {
-    this.finishDrag(e, false);
+    this.finishDrag(false);
   };
 
   private onPointerLeave = () => {
