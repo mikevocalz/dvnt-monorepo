@@ -29,6 +29,14 @@ export function promoterEventLink(eventUrl: string, code: string): string {
   return `${eventUrl}${joiner}ref=${encodeURIComponent(code)}`;
 }
 
+/** Canonical public tracked link copied from the promoter dashboard. */
+export function canonicalPromoterEventLink(
+  eventId: string | number,
+  code: string,
+): string {
+  return promoterEventLink(`https://dvntapp.live/e/${eventId}`, code);
+}
+
 export interface PromoterShareInput {
   code: string;
   eventUrl: string;
