@@ -340,7 +340,8 @@ export function EventAnalyticsScreen() {
     );
   }
 
-  const { revenue, ticketStats, attendanceBreakdown, tiers, promoCodes } = data;
+  const { revenue, ticketStats, tiers, promoCodes } = data;
+  const attendanceBreakdown = resolveAttendanceBreakdown(data);
   const checkInPercent =
     ticketStats.total > 0
       ? (ticketStats.checkedIn / ticketStats.total) * 100
