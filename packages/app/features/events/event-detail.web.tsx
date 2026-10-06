@@ -469,22 +469,30 @@ export function EventDetailScreen() {
 
 
 
-  // Promoter attribution (WS-4): capture ?ref=CODE from tracked share
-  // links (?promo= is taken by promo codes) into the MMKV/localStorage-
-  // persisted store so the Stripe redirect can't lose it. The checkout
-  // API layer forwards it as promoter_code; pricing is never affected.
-  // Covers /feed/events/[id] AND /public/events/[id] (both render this
-  // screen).
+  // Promoter attribution: a tracked ?ref=CODE is persisted locally for
+  // guest checkout and, when the viewer is signed in, bound to their account.
+  // Checkout revalidates the active promoter policy server-side and applies the
+  // customer discount automatically.
   const setPromoterRef = usePromoterRefStore((s) => s.setRef);
   useEffect(() => {
     if (!eventId || typeof window === "undefined") return;
     try {
-      const ref = new URLSearchParams(window.location.search).get("ref");
-      if (ref) setPromoterRef(eventId, ref);
+      const rawRef = new URLSearchParams(window.location.search).get("ref");
+      if (rawRef) setPromoterRef(eventId, rawRef);
+
+      if (isAuthenticated) {
+        const code =
+          rawRef ?? usePromoterRefStore.getState().getRef(eventId);
+        if (code) {
+          void promotersApi.claimRef(Number(eventId), code).catch((error) => {
+            console.warn("[event-detail] promoter ref claim failed:", error);
+          });
+        }
+      }
     } catch {
       /* malformed URL — ignore */
     }
-  }, [eventId, setPromoterRef]);
+  }, [eventId, isAuthenticated, setPromoterRef]);
 
   // Phase 2 — live propagation: subscribe to this event's row + tier/ticket
   // changes so a host edit (time/venue/price/cancel) reflects here without a
