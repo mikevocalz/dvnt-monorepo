@@ -41,6 +41,7 @@ import {
   issueTicketsForCheckoutSession,
 } from "../_shared/session-issuance.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
+import { syncOrderStripeProcessingFee } from "../_shared/stripe-processing-fee.ts";
 import {
   parseDoorSaleMetadata,
   doorGuestTicketBase,
@@ -282,6 +283,16 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             eventCreatedAt,
             logPrefix: "[stripe-webhook]",
           });
+          await syncOrderStripeProcessingFee(
+            supabase,
+            Deno.env.get("STRIPE_SECRET_KEY") || "",
+            {
+              paymentIntentId: typeof session.payment_intent === "string"
+                ? session.payment_intent
+                : session.payment_intent?.id ?? null,
+              checkoutSessionId: session.id,
+            },
+          );
         } else if (metadata.type === "sneaky_access") {
           // ── Grant sneaky link access ─────────────────────
           const { error: accessError } = await supabase
@@ -395,6 +406,14 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         // Native PaymentSheet flow — PaymentIntent succeeded
         const pi = event.data.object;
         const piMetadata = pi.metadata || {};
+
+        if (piMetadata.type === "cart_checkout" || piMetadata.type === "event_ticket") {
+          await syncOrderStripeProcessingFee(
+            supabase,
+            Deno.env.get("STRIPE_SECRET_KEY") || "",
+            { paymentIntentId: pi.id },
+          );
+        }
 
         if (piMetadata.type === "cart_checkout") {
           // Match the reconciler's protection: an expired hold on a delayed
