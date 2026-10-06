@@ -1,5 +1,9 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { escapeLikePattern, validateAndApplyPromoterCode } from "./apply-promoter-code.ts";
+import {
+  escapeLikePattern,
+  resolveAccountPromoterCode,
+  validateAndApplyPromoterCode,
+} from "./apply-promoter-code.ts";
 
 // Postgres ILIKE with the default escape character, enough to show which
 // stored codes a pattern would match.
@@ -56,4 +60,60 @@ Deno.test("a code with _ matches only itself, case-insensitively", async () => {
   assertEquals(result !== null, true);
   assertEquals(ilikeMatches("TREX1", pattern), false);
   assertEquals(ilikeMatches("Tre_1", pattern), true);
+});
+
+
+Deno.test("an account-bound promoter claim resolves only while the promoter is active for that event", async () => {
+  const supabase = {
+    from: (table: string) => {
+      if (table === "promoter_ref_claims") {
+        const q = {
+          select: () => q,
+          eq: () => q,
+          maybeSingle: () =>
+            Promise.resolve({
+              data: { promoter_id: "promoter-1" },
+              error: null,
+            }),
+        };
+        return q;
+      }
+      if (table === "event_promoters") {
+        const q = {
+          select: () => q,
+          eq: () => q,
+          maybeSingle: () =>
+            Promise.resolve({
+              data: { code: "Ron" },
+              error: null,
+            }),
+        };
+        return q;
+      }
+      throw new Error(`unexpected table ${table}`);
+    },
+  };
+
+  assertEquals(
+    await resolveAccountPromoterCode(supabase, 90, "buyer-auth-id"),
+    "RON",
+  );
+});
+
+Deno.test("no account claim means checkout has no implicit promoter code", async () => {
+  const supabase = {
+    from: () => {
+      const q = {
+        select: () => q,
+        eq: () => q,
+        maybeSingle: () => Promise.resolve({ data: null, error: null }),
+      };
+      return q;
+    },
+  };
+
+  assertEquals(
+    await resolveAccountPromoterCode(supabase, 90, "buyer-auth-id"),
+    null,
+  );
 });
