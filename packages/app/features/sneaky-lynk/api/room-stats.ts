@@ -120,18 +120,32 @@ export function resolveRoomAudience(
   const justCreated =
     Number.isFinite(createdAtMs) && nowMs - createdAtMs <= JUST_CREATED_GRACE_MS;
 
+  // A visitor who has not joined yet cannot see the host's membership row:
+  // video_room_members RLS only reveals rows to the member themself, an
+  // existing room participant, or the host. That means a public pre-join read
+  // legitimately produces no stats even while the host is live. The server
+  // maintains video_rooms.participant_count on join/leave, so use it only as
+  // the fallback when membership stats are completely unavailable. Once stats
+  // are visible, trust them — they can distinguish a room with participants
+  // from one that still has an active host.
+  const membershipStatsUnavailable = stats === undefined;
+  const persistedPresence =
+    membershipStatsUnavailable && persistedCount > 0;
+
   const listeners =
     room.status === "open"
       ? activeCount > 0
         ? activeCount
-        : justCreated
+        : persistedPresence || justCreated
           ? historicalCount
           : 0
       : historicalCount;
 
   return {
     listeners,
-    isLive: room.status === "open" && activeHostCount > 0,
+    isLive:
+      room.status === "open" &&
+      (activeHostCount > 0 || persistedPresence),
     activeCount,
     activeHostCount,
     historicalCount,
