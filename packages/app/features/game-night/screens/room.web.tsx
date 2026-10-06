@@ -456,6 +456,7 @@ export function GameNightRoomScreen() {
         open={rulesOpen}
         onClose={() => setRulesOpen(false)}
         targetScore={match?.target_score}
+        duelPairedRounds={match?.duel_paired_rounds ?? 5}
       />
     </main>
   );
