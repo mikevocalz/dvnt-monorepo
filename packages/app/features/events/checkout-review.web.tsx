@@ -71,6 +71,8 @@ import {
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
@@ -549,6 +551,10 @@ export function CheckoutReviewScreen() {
   // A code validated for another event's cart is not applied here; the
   // server would reject it with "Invalid promo code".
   const appliedPromo = promoForCart(storedPromo, cart?.eventId);
+  const promoterRef = usePromoterRefStore(
+    (s) => (cart?.eventId ? s.refs[String(cart.eventId)] ?? null : null),
+  );
+  const setPromoterRef = usePromoterRefStore((s) => s.setRef);
 
   const lineItems = cart?.lineItems ?? [];
 
@@ -579,21 +585,50 @@ export function CheckoutReviewScreen() {
     () => lineItems.reduce((sum, lineItem) => sum + lineItem.quantity, 0),
     [lineItems],
   );
-  // Promo discount preview (server re-validates + is authoritative at charge).
-  // BOGO depends on qty, so recompute from the validated promo each change.
+  const admissionSubtotalCents = useMemo(
+    () =>
+      lineItems
+        .filter((lineItem) => lineItem.category === "admission")
+        .reduce(
+          (sum, lineItem) =>
+            sum + lineItem.unitPriceCents * lineItem.quantity,
+          0,
+        ),
+    [lineItems],
+  );
+  const promoterDiscountBps =
+    promoterRef?.customerDiscountBps != null
+      ? Math.max(0, Math.min(10000, promoterRef.customerDiscountBps))
+      : 0;
+  const promoterDiscountCents = Math.min(
+    admissionSubtotalCents,
+    promoterDiscountBps > 0
+      ? Math.round(admissionSubtotalCents * (promoterDiscountBps / 10000))
+      : 0,
+  );
+  const subtotalAfterPromoter = Math.max(
+    0,
+    subtotalCents - promoterDiscountCents,
+  );
+
+  // Server applies promoter discount first, then any promo code to the
+  // remaining cart subtotal. Mirror that order exactly in the review.
   const discountCents = useMemo(
     () =>
       appliedPromo
         ? computePromoDiscountCents(
             appliedPromo.type,
             appliedPromo.value,
-            subtotalCents,
+            subtotalAfterPromoter,
             quantity,
           )
         : 0,
-    [appliedPromo, subtotalCents, quantity],
+    [appliedPromo, subtotalAfterPromoter, quantity],
   );
-  const effectiveSubtotal = Math.max(0, subtotalCents - discountCents);
+  const effectiveSubtotal = Math.max(
+    0,
+    subtotalAfterPromoter - discountCents,
+  );
   const fees = useMemo(
     () =>
       quantity > 0
@@ -608,6 +643,30 @@ export function CheckoutReviewScreen() {
   // still has to be validated against this cart's event with Apply.
   const cartId = cart?.cartId;
   const cartEventId = cart?.eventId;
+
+  // A server-bound promoter claim follows the account across devices. Hydrate
+  // it here as well so Review Order never displays full price while checkout
+  // is about to apply a saved discount.
+  useEffect(() => {
+    const numericEventId = Number(cartEventId);
+    if (!Number.isInteger(numericEventId) || numericEventId <= 0) return;
+    if (usePromoterRefStore.getState().getRef(cartEventId!)) return;
+
+    void promotersApi
+      .getClaim(numericEventId)
+      .then((claim) => {
+        if (!claim) return;
+        setPromoterRef(
+          cartEventId!,
+          claim.code,
+          claim.customerDiscountBps,
+        );
+      })
+      .catch((error) => {
+        console.warn("[checkout-review] promoter claim hydrate failed:", error);
+      });
+  }, [cartEventId, setPromoterRef]);
+
   useEffect(() => {
     resetPromo();
     const seeded = new URLSearchParams(window.location.search).get("promo");
