@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { WatchableRoom } from "./rooms-api";
-import { partitionRooms, roomMatchesHandle } from "./rooms-discovery";
+import type { WatchableRoom } from "./rooms-api.ts";
+import { partitionRooms, roomMatchesHandle } from "./rooms-discovery.ts";
 
 function room(overrides: Partial<WatchableRoom> = {}): WatchableRoom {
   return {

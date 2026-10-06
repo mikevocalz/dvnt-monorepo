@@ -1,5 +1,5 @@
-import type { WatchableRoom } from "./rooms-api";
-import { entryMode } from "./seats";
+import type { WatchableRoom } from "./rooms-api.ts";
+import { entryMode } from "./seats.ts";
 
 export function roomMatchesHandle(room: WatchableRoom, query: string): boolean {
   const needle = query.trim().toLocaleLowerCase();
