@@ -30,8 +30,8 @@ export interface CallJoinResponse {
     id: string;
     title: string;
     fishjamRoomId: string;
-    /** Server-owned deadline. Null while a call is still ringing. */
-    endsAt: string | null;
+    /** Server-owned deadline. Absent on older edge deployments; null while ringing. */
+    endsAt?: string | null;
   };
   token: string;
   user: { id: string; username?: string; avatar?: string };
