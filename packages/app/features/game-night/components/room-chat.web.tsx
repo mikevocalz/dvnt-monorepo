@@ -25,9 +25,14 @@ import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { fetchRoomMessages, sendRoomMessage } from "../rooms-api";
 import { KlipyGifPicker, type GifPayload } from "./game-night-klipy.web";
 import type { GameNightMessage, GameNightState } from "./game-types";
+import {
+  createRoomReactionEvent,
+  emitRoomReaction,
+  isRoomReactionEmoji,
+  ROOM_REACTIONS,
+} from "../motion/room-reactions";
 
 const PAGE = 50;
-const REACTIONS = ["👍", "😂", "🔥", "💀"] as const;
 
 interface GifData {
   id?: string;
@@ -149,6 +154,23 @@ export function RoomChat({ state }: { state: GameNightState }) {
         },
         (payload) => {
           const row = toChatRow(payload.new as MessageRow);
+          if (
+            row.kind === "reaction" &&
+            row.reaction &&
+            row.userId !== myId &&
+            isRoomReactionEmoji(row.reaction)
+          ) {
+            emitRoomReaction(
+              createRoomReactionEvent({
+                id: `remote-${row.id}`,
+                roomId,
+                userId: row.userId,
+                emoji: row.reaction,
+                isMine: false,
+                createdAt: Date.parse(row.createdAt) || Date.now(),
+              }),
+            );
+          }
           setRows((prev) => {
             // The sender's optimistic row already occupies this spot.
             if (prev.some((r) => r.id === row.id)) return prev;
@@ -399,7 +421,7 @@ export function RoomChat({ state }: { state: GameNightState }) {
 
           <div className="border-t border-white/10 p-3">
             <div className="mb-2 flex gap-1">
-              {REACTIONS.map((emoji) => (
+              {ROOM_REACTIONS.map((emoji) => (
                 <button
                   key={emoji}
                   type="button"
