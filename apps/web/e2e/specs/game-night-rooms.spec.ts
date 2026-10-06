@@ -1,9 +1,11 @@
 /**
- * Game Night rooms list — the render pass the list had never had.
+ * Game Night rooms list — the render pass the discovery surface had never had.
  *
- * The list shipped unseen: seats, the GSAP stagger and the virtualizer were
+ * The list shipped unseen: seats, the GSAP stagger and the card partition were
  * argued for in review and never once opened in a browser. This spec is that
- * missing check.
+ * missing check. It asserts the merged Spill-style discovery layout:
+ * "Find a Game" handle search, a "Games to Watch" rail for playing rooms,
+ * and a "Games to Join" grid for open tables.
  *
  * It runs in the AUTHED lane: `/game-night` sits behind `WebAppShell`'s default
  * auth gate, because the rooms RPC reads through the bridged JWT and a
@@ -27,10 +29,19 @@ const player = (n: number) => ({
   avatar: null,
 });
 
-/** Rooms across the whole seat range: empty, partial, and full. */
-const room = (i: number, seated: number, watchers = 0) => ({
+/**
+ * Rows across both partitions: `open` rooms with seats left land in
+ * "Games to Join", `playing` rooms land in "Games to Watch" — including a
+ * full table, which stays watchable rather than disabled.
+ */
+const room = (
+  i: number,
+  seated: number,
+  status: "open" | "playing" = "open",
+  watchers = 0,
+) => ({
   room_code: `TBL${String(i).padStart(3, "0")}`,
-  status: seated >= 4 ? "playing" : "open",
+  status,
   host_name: player(i).name,
   host_avatar: null,
   player_count: seated,
@@ -56,12 +67,12 @@ async function stubRooms(page: Page, rows: unknown[]) {
  * arrives before the code that fills it does. In dev that chunk is compiled on
  * demand and routinely takes longer than the config's 5s assertion budget —
  * failures there read as "the list is broken" when the list has not loaded
- * yet. This waits on the one element every state shares, so the assertions
+ * yet. This waits on the heading every state shares, so the assertions
  * that follow are about the screen rather than about webpack.
  */
 async function gotoLobby(page: Page) {
   await page.goto("/game-night");
-  await expect(page.getByRole("heading", { name: "Tables in play" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Find a Game" })).toBeVisible({
     timeout: 60_000,
   });
 }
@@ -85,7 +96,7 @@ test.describe("game night rooms list", () => {
       route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
     );
     await page.goto("/game-night");
-    await expect(page.getByRole("heading", { name: "Tables in play" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Find a Game" })).toBeVisible({
       timeout: 120_000,
     });
     await context.close();
@@ -97,7 +108,7 @@ test.describe("game night rooms list", () => {
     await stubRooms(page, []);
     await gotoLobby(page);
 
-    await expect(page.getByRole("heading", { name: "No tables running" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No games are live" })).toBeVisible();
     // The stagger animates opacity from 0. If GSAP never ran, or ran and never
     // completed, the seats stay invisible — which is exactly the failure a
     // screenshot-only check would sail past.
@@ -108,18 +119,23 @@ test.describe("game night rooms list", () => {
       await expect(seats.nth(i)).toHaveCSS("opacity", "1");
     }
 
-    // One primary action on the screen, not two.
-    await expect(page.getByRole("button", { name: "Start a table" })).toHaveCount(1);
-    await expect(page.getByText("Nothing running right now.")).toBeVisible();
+    // One primary action on the screen, in the header.
+    await expect(page.getByRole("button", { name: "Start a game" })).toHaveCount(1);
+    await expect(page.getByText("Start the first table.")).toBeVisible();
 
     await page.screenshot({ path: "e2e/results/game-night-empty.png", fullPage: true });
   });
 
-  test("a partial table offers seats, a full one offers watching", async ({ page }) => {
-    await stubRooms(page, [room(1, 2, 0), room(2, 4, 7), room(3, 3, 0)]);
+  test("open tables offer seats, live games offer watching", async ({ page }) => {
+    await stubRooms(page, [
+      room(1, 2, "open", 0),
+      room(2, 4, "playing", 7),
+      room(3, 3, "open", 0),
+    ]);
     await gotoLobby(page);
 
-    await expect(page.getByText("3 tables going.", { exact: false })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Games to Watch" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Games to Join" })).toBeVisible();
 
     // Two seated, two open — and the empty seats are DRAWN, not omitted.
     const partial = page.locator('a[href="/game-night/room/TBL001"]');
@@ -128,44 +144,44 @@ test.describe("game night rooms list", () => {
       "2 of 4 seats taken",
     );
     await expect(partial.getByRole("listitem")).toHaveCount(4);
-    await expect(partial.getByText("2 seats open")).toBeVisible();
+    await expect(partial.getByText("2 open")).toBeVisible();
+    await expect(partial).toHaveAttribute("aria-label", /Join Bex game/);
 
-    // A full table is never disabled; it is a different offer.
+    // A live table is never disabled; it is a different offer.
     const full = page.locator('a[href="/game-night/room/TBL002"]');
-    await expect(full.getByText("Watch", { exact: true })).toBeVisible();
-    await expect(full.getByText("7 watching")).toBeVisible();
+    await expect(full).toHaveAttribute("aria-label", /Watch Cyd game/);
+    await expect(full.getByText("7")).toBeVisible();
     await expect(full).toBeEnabled();
 
-    // Singular vs plural is a real branch in seatsLeft's consumer.
+    // Singular seat math is a real branch in seatsLeft's consumer.
     await expect(
-      page.locator('a[href="/game-night/room/TBL003"]').getByText("1 seat open"),
+      page.locator('a[href="/game-night/room/TBL003"]').getByText("1 open"),
     ).toBeVisible();
 
     await page.screenshot({ path: "e2e/results/game-night-rooms.png", fullPage: true });
   });
 
-  test("the virtualizer windows a long lobby and scrolls to the end", async ({
-    page,
-  }) => {
-    const many = Array.from({ length: 60 }, (_, i) => room(i, i % 5));
-    await stubRooms(page, many);
+  test("handle search filters both sections", async ({ page }) => {
+    await stubRooms(page, [
+      room(1, 2, "open", 0), // Ash
+      room(2, 4, "playing", 7), // Bex
+      room(3, 3, "open", 0), // Cyd
+    ]);
     await gotoLobby(page);
 
-    await expect(page.getByText("60 tables going.", { exact: false })).toBeVisible();
+    await expect(page.locator('a[href="/game-night/room/TBL001"]')).toBeVisible();
 
-    // Windowing is the whole point: 60 rooms must not mean 60 rows in the DOM.
-    const rows = page.locator('a[href^="/game-night/room/"]');
-    const rendered = await rows.count();
-    expect(rendered).toBeGreaterThan(0);
-    expect(rendered).toBeLessThan(many.length);
+    // "bex" matches only TBL001's host; the seat lists rotate player(i+s), so
+    // every other name on the table also appears in another room's seats.
+    // A host-only needle is the one search that isolates a single room.
+    await page.getByPlaceholder("Search by handle").fill("bex");
+    await expect(page.locator('a[href="/game-night/room/TBL001"]')).toBeVisible();
+    await expect(page.locator('a[href="/game-night/room/TBL002"]')).toHaveCount(0);
+    await expect(page.locator('a[href="/game-night/room/TBL003"]')).toHaveCount(0);
 
-    // measureElement has to settle, or the last row sits past the scroll
-    // height and can never be reached.
-    const scroller = page.locator("div.overflow-y-auto");
-    await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight));
-    await expect(page.locator('a[href="/game-night/room/TBL059"]')).toBeVisible();
-
-    await page.screenshot({ path: "e2e/results/game-night-virtualized.png" });
+    // A needle that matches nothing says so, instead of rendering empty rails.
+    await page.getByPlaceholder("Search by handle").fill("zzzzz");
+    await expect(page.getByText("No handles match")).toBeVisible();
   });
 
   test("a failed read says connection, not empty lobby", async ({ page }) => {
@@ -174,7 +190,7 @@ test.describe("game night rooms list", () => {
     );
     await gotoLobby(page);
 
-    await expect(page.getByText("Could not load the rooms")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "No tables running" })).toHaveCount(0);
+    await expect(page.getByText("Could not load the games")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No games are live" })).toHaveCount(0);
   });
 });
