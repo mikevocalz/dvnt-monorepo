@@ -67,10 +67,11 @@ the next round automatically.
 
 ## Card/deck behavior
 
-- Classic hands refill toward 7 cards between rounds.
-- Played answer cards go to discard and can be reshuffled if the answer deck
-  runs out.
-- Prompt exhaustion ends the current match rather than silently inventing new
-  prompts.
+- Classic hands refill toward 7 cards between rounds while unused answer cards
+  remain.
+- Cards and prompts do **not repeat within a match**. Discards are not recycled.
+- If the prompt deck is spent, or there are not enough fresh answer cards to
+  supply the next round, the match completes using the current scores.
+- A rematch starts with a freshly shuffled full deck.
 - Game state and scoring are server-authoritative. UI animation never decides
   a winner or adds points.
