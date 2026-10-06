@@ -240,6 +240,38 @@ export const promotersApi = {
     }
   },
 
+  /** Read the active promoter discount already bound to this account/event. */
+  async getClaim(eventId: number): Promise<{
+    code: string;
+    customerDiscountBps: number;
+    promoterCommissionBps: number;
+  } | null> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      claim?: {
+        eventId: number;
+        promoterId: string;
+        code: string;
+        customerDiscountBps: number;
+        promoterCommissionBps: number;
+      } | null;
+      error?: string;
+    }>("promoter-ref", {
+      action: "get",
+      event_id: eventId,
+    });
+    if (error) throw new Error(error.message);
+    if (!data?.ok) {
+      throw new Error(data?.error || "Could not load promoter discount");
+    }
+    if (!data.claim) return null;
+    return {
+      code: data.claim.code,
+      customerDiscountBps: data.claim.customerDiscountBps,
+      promoterCommissionBps: data.claim.promoterCommissionBps,
+    };
+  },
+
   /** Persist a tracked promoter link to the signed-in buyer account. */
   async claimRef(eventId: number, code: string): Promise<{
     code: string;
