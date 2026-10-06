@@ -8,6 +8,7 @@
 
 import { useMemo, useState } from "react";
 import { submitCards } from "../rooms-api";
+import { GameNightButton } from "./game-night-button.web";
 import { CommandError, useCommand } from "./use-command";
 import type { GameNightState } from "./game-types";
 
@@ -105,16 +106,16 @@ export function Hand({
         })}
       </ul>
       <div className="mt-4">
-        <button
-          type="button"
+        <GameNightButton
+          kind="primary"
           disabled={selected.length !== pick || cmd.pending}
           onClick={play}
-          className="w-full rounded-xl bg-[#8A40CF] px-5 py-3 font-semibold text-white transition-colors hover:bg-[#7A35BC] disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+          className="w-full sm:w-auto"
         >
           {cmd.pending
             ? "Playing…"
             : `Play card${pick > 1 ? "s" : ""} (${selected.length}/${pick})`}
-        </button>
+        </GameNightButton>
         <CommandError message={cmd.error} />
       </div>
     </section>
