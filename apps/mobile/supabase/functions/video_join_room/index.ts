@@ -238,16 +238,16 @@ Deno.serve(async (req) => {
       return errorResponse(eventAccess.code, eventAccess.message, eventAccess.detail);
     }
     room.ends_at = eventAccess.endsAt;
-    // Calls are exempt: a call room is created with the same +5min ends_at a
-    // free-tier Lynk gets, but a personal call has no session tier — it ends
-    // when the caller leaves, not on a timer. The gate used to sit in front of
-    // the isCall branch, so a member bumped out mid-call could never rejoin
-    // after minute five: session_expired ahead of admit_call_participant's
-    // reconnect path. The Lynk deadline is enforced again below for non-call
-    // rooms; this copy keeps eventAccess semantics identical without the
-    // call regression.
-    if (!isCall && room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
-      return errorResponse("conflict", "This Lynk's session has ended", { reason: "session_expired" });
+    // A server deadline is authoritative for both Lynks and personal/group
+    // calls. Calls receive their deadline only after the first invited
+    // participant successfully connects, so ringing time never consumes the
+    // five-minute session.
+    if (room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
+      return errorResponse(
+        "conflict",
+        isCall ? "This call has ended" : "This Lynk's session has ended",
+        { reason: "session_expired" },
+      );
     }
 
     const internalRoomId = room.id;
@@ -299,7 +299,7 @@ Deno.serve(async (req) => {
             internalId: room.id,
             title: room.title,
             appOnly: false,
-            endsAt: null,
+            endsAt: result.endsAt ?? room.ends_at ?? null,
             fishjamRoomId: result.fishjamRoomId,
           },
           token: result.token,
