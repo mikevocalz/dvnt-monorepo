@@ -426,7 +426,18 @@ export function RoomChat({ state }: { state: GameNightState }) {
                   key={emoji}
                   type="button"
                   aria-label={`React ${emoji}`}
-                  onClick={() => void send("reaction", { reaction: emoji })}
+                  onClick={() => {
+                    emitRoomReaction(
+                      createRoomReactionEvent({
+                        id: `local-chat-${crypto.randomUUID()}`,
+                        roomId,
+                        userId: myId,
+                        emoji,
+                        isMine: true,
+                      }),
+                    );
+                    void send("reaction", { reaction: emoji });
+                  }}
                   className="rounded-lg px-2 py-1 text-lg transition-colors hover:bg-white/10"
                 >
                   {emoji}
