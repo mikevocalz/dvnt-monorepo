@@ -26,7 +26,13 @@ export interface CallCreateResponse {
 }
 
 export interface CallJoinResponse {
-  room: { id: string; title: string; fishjamRoomId: string };
+  room: {
+    id: string;
+    title: string;
+    fishjamRoomId: string;
+    /** Server-owned deadline. Null while a call is still ringing. */
+    endsAt: string | null;
+  };
   token: string;
   user: { id: string; username?: string; avatar?: string };
 }
