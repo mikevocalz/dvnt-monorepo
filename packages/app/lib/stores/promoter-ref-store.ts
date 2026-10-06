@@ -25,13 +25,19 @@ const CODE_RE = /^[A-Z0-9_-]{2,32}$/;
 interface PendingRef {
   code: string;
   capturedAt: number;
+  /** Validated buyer discount from the server, in basis points. */
+  customerDiscountBps?: number | null;
 }
 
 interface PromoterRefState {
   /** eventId (string) → pending promoter code. Last click wins. */
   refs: Record<string, PendingRef>;
   /** Normalize + store a ref for an event. Invalid shapes are dropped. */
-  setRef: (eventId: string | number, rawCode: string) => void;
+  setRef: (
+    eventId: string | number,
+    rawCode: string,
+    customerDiscountBps?: number | null,
+  ) => void;
   /** Valid (unexpired) code for an event, or null. */
   getRef: (eventId: string | number) => string | null;
   clearRef: (eventId: string | number) => void;
@@ -42,7 +48,7 @@ export const usePromoterRefStore = create<PromoterRefState>()(
     (set, get) => ({
       refs: {},
 
-      setRef: (eventId, rawCode) => {
+      setRef: (eventId, rawCode, customerDiscountBps) => {
         const key = String(eventId);
         const code = String(rawCode || "")
           .trim()
@@ -56,7 +62,20 @@ export const usePromoterRefStore = create<PromoterRefState>()(
           for (const [k, v] of Object.entries(s.refs)) {
             if (now - v.capturedAt < REF_TTL_MS) refs[k] = v;
           }
-          refs[key] = { code, capturedAt: now };
+          const previous = s.refs[key];
+          const validatedBps =
+            Number.isInteger(customerDiscountBps) &&
+              Number(customerDiscountBps) >= 0 &&
+              Number(customerDiscountBps) <= 10000
+              ? Number(customerDiscountBps)
+              : previous?.code === code
+                ? previous.customerDiscountBps ?? null
+                : null;
+          refs[key] = {
+            code,
+            capturedAt: now,
+            customerDiscountBps: validatedBps,
+          };
           return { refs };
         });
       },
