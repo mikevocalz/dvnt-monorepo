@@ -48,3 +48,16 @@ export function toggleSelection(
   if (selected.length >= Math.max(0, pick)) return selected;
   return [...selected, cardId];
 }
+/** A physical card drag only commits when it is intentional and moves toward the table. */
+export function isCommitDrag(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  minDistance = 28,
+  minUpward = 18,
+): boolean {
+  const dx = endX - startX;
+  const dy = endY - startY;
+  return Math.hypot(dx, dy) >= minDistance && dy <= -minUpward;
+}

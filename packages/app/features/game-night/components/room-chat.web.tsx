@@ -25,9 +25,14 @@ import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { fetchRoomMessages, sendRoomMessage } from "../rooms-api";
 import { KlipyGifPicker, type GifPayload } from "./game-night-klipy.web";
 import type { GameNightMessage, GameNightState } from "./game-types";
+import {
+  createRoomReactionEvent,
+  emitRoomReaction,
+  isRoomReactionEmoji,
+  ROOM_REACTIONS,
+} from "../motion/room-reactions";
 
 const PAGE = 50;
-const REACTIONS = ["👍", "😂", "🔥", "💀"] as const;
 
 interface GifData {
   id?: string;
@@ -105,6 +110,11 @@ export function RoomChat({ state }: { state: GameNightState }) {
       state.members.find((m) => m.user_id === userId)?.name ?? "Someone",
     [state.members],
   );
+  const seatOf = useCallback(
+    (userId: string) =>
+      state.members.find((m) => m.user_id === userId)?.seat_no ?? -1,
+    [state.members],
+  );
 
   const scrollToBottom = useCallback(() => {
     const el = listRef.current;
@@ -149,6 +159,24 @@ export function RoomChat({ state }: { state: GameNightState }) {
         },
         (payload) => {
           const row = toChatRow(payload.new as MessageRow);
+          if (
+            row.kind === "reaction" &&
+            row.reaction &&
+            row.userId !== myId &&
+            isRoomReactionEmoji(row.reaction)
+          ) {
+            emitRoomReaction(
+              createRoomReactionEvent({
+                id: `remote-${row.id}`,
+                roomId,
+                userId: row.userId,
+                emoji: row.reaction,
+                isMine: false,
+                seatIndex: seatOf(row.userId),
+                createdAt: Date.parse(row.createdAt) || Date.now(),
+              }),
+            );
+          }
           setRows((prev) => {
             // The sender's optimistic row already occupies this spot.
             if (prev.some((r) => r.id === row.id)) return prev;
@@ -177,7 +205,7 @@ export function RoomChat({ state }: { state: GameNightState }) {
     return () => {
       void channel.unsubscribe();
     };
-  }, [roomId, scrollToBottom]);
+  }, [roomId, myId, scrollToBottom, seatOf]);
 
   const loadEarlier = useCallback(async () => {
     const oldest = rows.find((r) => !r.localId)?.id;
@@ -399,12 +427,24 @@ export function RoomChat({ state }: { state: GameNightState }) {
 
           <div className="border-t border-white/10 p-3">
             <div className="mb-2 flex gap-1">
-              {REACTIONS.map((emoji) => (
+              {ROOM_REACTIONS.map((emoji) => (
                 <button
                   key={emoji}
                   type="button"
                   aria-label={`React ${emoji}`}
-                  onClick={() => void send("reaction", { reaction: emoji })}
+                  onClick={() => {
+                    emitRoomReaction(
+                      createRoomReactionEvent({
+                        id: `local-chat-${crypto.randomUUID()}`,
+                        roomId,
+                        userId: myId,
+                        emoji,
+                        isMine: true,
+                        seatIndex: state.me.seat_no ?? -1,
+                      }),
+                    );
+                    void send("reaction", { reaction: emoji });
+                  }}
                   className="rounded-lg px-2 py-1 text-lg transition-colors hover:bg-white/10"
                 >
                   {emoji}

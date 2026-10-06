@@ -471,7 +471,7 @@ test.describe("game night — two-client match", () => {
       ).toBeVisible({ timeout: 30_000 });
 
       // Host rematches from the result screen: fresh duel round starts.
-      const rematch = page.getByRole("button", { name: /rematch/i });
+      const rematch = page.getByRole("button", { name: /rematch|play again/i });
       await expect(rematch).toBeVisible({ timeout: 30_000 });
       await rematch.click();
       await expect(

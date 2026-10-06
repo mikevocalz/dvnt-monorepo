@@ -97,8 +97,8 @@ export function DuelRound({
       {isPlayer && !locked ? (
         <p className="mt-1 text-xs text-white/60">
           {isSubject
-            ? "Tap one card — on the table or below. It locks in immediately."
-            : "Tap one card — on the table or below. Your prediction locks in immediately."}
+            ? "Tap a card, or drag it up toward the table. It locks in immediately."
+            : "Tap a card, or drag it up toward the table. Your prediction locks in immediately."}
         </p>
       ) : null}
       {locked ? (

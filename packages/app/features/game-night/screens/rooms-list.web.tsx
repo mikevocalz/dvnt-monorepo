@@ -1,30 +1,27 @@
 "use client";
 
 /**
- * Game Night — live rooms (WEB).
+ * Game Night discovery — styled as a DVNT social surface, not an admin room list.
  *
- * A browsable list of tables in progress. Four seats per table; everyone past
- * the fourth watches. The card DRAWS its four seats rather than printing
- * "2/4", because the only question a reader has is "can I sit down, or am I
- * watching" — and a row of filled and empty seats answers that before they have
- * read a word.
+ * The hierarchy deliberately mirrors the mobile reference:
+ *  1. find a game / search by handle
+ *  2. large horizontal live-game cards for watching
+ *  3. open-seat cards for joining
  *
- * Capacity is never rendered as an error. A full table still opens; it just
- * opens into watching. There is no disabled row in this list.
- *
- * Idioms are the repo's, not new ones:
- *  - `useGsapScope` (landing/hooks/useGsap) registers ScrollTrigger once,
- *    scopes tweens to the returned ref, reverts on unmount, and short-circuits
- *    under prefers-reduced-motion.
- *  - TanStack Virtual with dynamic `measureElement`, matching
- *    settings/host-disputes.web.tsx.
- *  - Card surface `rounded-2xl border border-white/10 bg-white/4`.
+ * Rooms remain a single accessible link target. The visual table preview is
+ * decorative; capacity, watcher count and CTA text are still real DOM text.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "solito/navigation";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { Gamepad2, Eye, Plus, AlertTriangle } from "lucide-react";
+import {
+  AlertTriangle,
+  Eye,
+  Gamepad2,
+  Plus,
+  Search,
+  Users,
+} from "lucide-react";
 import {
   useGsapScope,
   prefersReducedMotion,
@@ -34,20 +31,17 @@ import {
   listWatchableRooms,
   type WatchableRoom,
 } from "../rooms-api";
-import { seatsFor, entryMode, seatsLeft, MAX_PLAYERS } from "../seats";
+import { entryMode, seatsFor, seatsLeft, MAX_PLAYERS } from "../seats";
+import { partitionRooms, roomMatchesHandle } from "../rooms-discovery";
 import { useRoomsListStore } from "../rooms-list-store";
-
-/** Initial guess only — measureElement corrects it once rendered. */
-const ROW_ESTIMATE = 132;
 
 export function GameNightRoomsScreen() {
   const router = useRouter();
-  const parentRef = useRef<HTMLDivElement | null>(null);
-
   const rooms = useRoomsListStore((s) => s.rooms);
   const status = useRoomsListStore((s) => s.status);
   const setRooms = useRoomsListStore((s) => s.setRooms);
   const setStatus = useRoomsListStore((s) => s.setStatus);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -61,15 +55,11 @@ export function GameNightRoomsScreen() {
           setStatus("ready");
         }
       } catch {
-        // A failed read is not an empty lobby. Different sentence, different UI.
         if (!cancelled && mine === seq) setStatus("error");
       }
     };
     setStatus((prev) => (prev === "ready" ? "ready" : "loading"));
     void load();
-    // Rooms open and fill while someone is reading the list. Polling rather
-    // than a realtime subscription: this is a projection across ALL rooms, and
-    // presence would mean joining every room's channel to watch it change.
     const id = window.setInterval(load, 10_000);
     return () => {
       cancelled = true;
@@ -77,12 +67,14 @@ export function GameNightRoomsScreen() {
     };
   }, [setRooms, setStatus]);
 
-  const virtualizer = useVirtualizer({
-    count: rooms.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_ESTIMATE,
-    overscan: 8,
-  });
+  const visibleRooms = useMemo(
+    () => rooms.filter((room) => roomMatchesHandle(room, query)),
+    [rooms, query],
+  );
+  const { watch: watchRooms, join: joinRooms } = useMemo(
+    () => partitionRooms(visibleRooms),
+    [visibleRooms],
+  );
 
   const [startPending, setStartPending] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -106,58 +98,70 @@ export function GameNightRoomsScreen() {
   }, [router]);
 
   return (
-    <main className="min-h-dvh bg-[#06070d] text-white">
-      <div className="mx-auto w-full max-w-3xl px-6 py-10">
+    <main className="min-h-dvh overflow-x-hidden bg-[#08090f] text-white">
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-x-0 top-0 h-72 opacity-80"
+        style={{
+          background:
+            "radial-gradient(circle at 24% 0%, rgba(138,64,207,.46), transparent 52%), radial-gradient(circle at 72% 8%, rgba(236,104,156,.25), transparent 42%)",
+        }}
+      />
+      <div className="relative mx-auto w-full max-w-6xl px-5 pb-14 pt-8 sm:px-8 sm:pt-12">
         <Header
           onStart={startRoom}
-          count={rooms.length}
           pending={startPending}
           error={startError}
         />
 
+        <section aria-labelledby="find-game" className="mt-10">
+          <h1 id="find-game" className="text-4xl font-black tracking-[-0.035em] sm:text-5xl">
+            Find a Game
+          </h1>
+          <label className="mt-5 flex min-h-16 items-center gap-3 rounded-2xl border-2 border-white/20 bg-[#0d0e15]/90 px-5 shadow-[0_24px_80px_rgba(0,0,0,.25)] transition-colors focus-within:border-[#C9A2F0]/70">
+            <Search aria-hidden className="h-6 w-6 shrink-0 text-white/80" />
+            <span className="sr-only">Search games by handle</span>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+              placeholder="Search by handle"
+              className="min-w-0 flex-1 bg-transparent py-4 text-lg font-semibold text-white outline-none placeholder:text-white/35"
+            />
+          </label>
+        </section>
+
         {status === "error" ? (
           <Notice
             icon={<AlertTriangle aria-hidden className="h-4 w-4" />}
-            title="Could not load the rooms"
+            title="Could not load the games"
             body="This is a connection problem, not an empty lobby. It will retry on its own."
           />
         ) : status === "loading" ? (
-          <RoomSkeletons />
+          <ShowcaseSkeletons />
         ) : rooms.length === 0 ? (
           <EmptyLobby />
+        ) : visibleRooms.length === 0 ? (
+          <section className="mt-10 rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+            <h2 className="text-xl font-bold">No handles match “{query}”</h2>
+            <p className="mt-2 text-sm text-white/55">
+              Try another player name or clear the search to see every live table.
+            </p>
+          </section>
         ) : (
-          <div
-            ref={parentRef}
-            className="mt-6 overflow-y-auto"
-            style={{ maxHeight: "calc(100dvh - 220px)" }}
-          >
-            <div
-              className="relative w-full"
-              style={{ height: virtualizer.getTotalSize() }}
-            >
-              {virtualizer.getVirtualItems().map((item) => {
-                const room = rooms[item.index];
-                if (!room) return null;
-                return (
-                  <div
-                    key={room.roomCode}
-                    data-index={item.index}
-                    ref={virtualizer.measureElement}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${item.start}px)`,
-                      paddingBottom: 12,
-                    }}
-                  >
-                    <RoomCard room={room} />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <>
+            <GameSection
+              title="Games to Watch"
+              rooms={watchRooms}
+              empty="No live games to watch right now."
+              variant="watch"
+            />
+            <GameSection
+              title="Games to Join"
+              rooms={joinRooms}
+              empty="No open seats right now — you can still watch a live table."
+              variant="join"
+            />
+          </>
         )}
       </div>
     </main>
@@ -166,109 +170,205 @@ export function GameNightRoomsScreen() {
 
 function Header({
   onStart,
-  count,
   pending,
   error,
 }: {
   onStart: () => void;
-  count: number;
-  pending?: boolean;
-  error?: string | null;
+  pending: boolean;
+  error: string | null;
 }) {
   return (
-    <header className="flex items-end justify-between gap-4">
-      <div>
-        <span className="inline-flex items-center gap-2 rounded-full border border-[#8A40CF]/40 bg-[#8A40CF]/10 px-3 py-1 text-xs font-medium tracking-wide text-[#C9A2F0]">
-          <Gamepad2 aria-hidden className="h-3.5 w-3.5" />
-          Game Night
-        </span>
-        <h1 className="mt-4 text-3xl font-semibold tracking-tight">
-          Tables in play
-        </h1>
-        <p aria-live="polite" className="mt-1 text-sm text-white/55">
-          {count === 0
-            ? "Nothing running right now."
-            : `${count} ${count === 1 ? "table" : "tables"} going. Four seats each — after that you watch.`}
-        </p>
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-2">
-        <button
-          type="button"
-          disabled={pending}
-          onClick={onStart}
-          className="flex items-center gap-2 rounded-xl bg-[#8A40CF] px-4 py-2.5 font-semibold text-white transition-colors hover:bg-[#7A35BC] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <Plus aria-hidden className="h-4 w-4" />
-          Start a table
-        </button>
-        {error ? <p className="max-w-40 text-right text-xs text-red-400">{error}</p> : null}
-        {/* A private table never appears in this list, so the code route has to
-            stay reachable from it — otherwise someone holding a code has
-            nowhere to type it. */}
-        <a
-          href="/game-night/join"
-          className="text-xs text-white/50 underline-offset-4 hover:text-white/80 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0]"
-        >
-          Have a code?
-        </a>
-      </div>
+    <header className="flex flex-wrap items-center gap-3">
+      <a
+        href="/feed"
+        className="inline-flex h-11 items-center rounded-full border border-white/15 bg-white/8 px-4 text-sm font-bold text-white/80 backdrop-blur-xl transition hover:bg-white/12"
+      >
+        ← Back
+      </a>
+      <span className="inline-flex items-center gap-2 rounded-full border border-[#8A40CF]/40 bg-[#8A40CF]/15 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-[#D8BBF4]">
+        <Gamepad2 aria-hidden className="h-4 w-4" />
+        Game Night
+      </span>
+      <span className="flex-1" />
+      <a
+        href="/game-night/join"
+        className="rounded-xl border border-white/15 px-3 py-2 text-sm font-semibold text-white/70 transition hover:bg-white/8 hover:text-white"
+      >
+        Have a code?
+      </a>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={onStart}
+        className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-black text-black transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Plus aria-hidden className="h-4 w-4" />
+        {pending ? "Starting…" : "Start a game"}
+      </button>
+      {error ? (
+        <p className="basis-full text-right text-xs text-[#F0A2A2]">{error}</p>
+      ) : null}
     </header>
   );
 }
 
-function RoomCard({ room }: { room: WatchableRoom }) {
-  const mode = entryMode(room.playerCount);
-  const left = seatsLeft(room.playerCount);
-  const seats = seatsFor(room.seatAvatars, room.seatAvatars[0]?.id ?? "");
+function GameSection({
+  title,
+  rooms,
+  empty,
+  variant,
+}: {
+  title: string;
+  rooms: WatchableRoom[];
+  empty: string;
+  variant: "watch" | "join";
+}) {
+  return (
+    <section className="mt-10" aria-labelledby={`${variant}-heading`}>
+      <div className="mb-4 flex items-end justify-between gap-4">
+        <h2
+          id={`${variant}-heading`}
+          className="text-3xl font-black tracking-[-0.03em]"
+        >
+          {title}
+        </h2>
+        {rooms.length > 0 ? (
+          <span className="text-xs font-semibold text-white/40">
+            {rooms.length} live
+          </span>
+        ) : null}
+      </div>
 
-  // The whole card is the link. One target, one action — no nested buttons to
-  // trap a keyboard user inside a row.
+      {rooms.length === 0 ? (
+        <p className="rounded-2xl border border-white/10 bg-white/4 p-5 text-sm font-semibold text-white/55">
+          {empty}
+        </p>
+      ) : variant === "watch" ? (
+        <div className="-mx-5 overflow-x-auto px-5 pb-3 sm:-mx-8 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <ul className="flex w-max snap-x snap-mandatory gap-4">
+            {rooms.map((room) => (
+              <li key={room.roomCode} className="w-[82vw] max-w-[380px] snap-start sm:w-[360px]">
+                <RoomShowcaseCard room={room} mode="watch" />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {rooms.map((room) => (
+            <li key={room.roomCode}>
+              <RoomShowcaseCard room={room} mode="join" />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function RoomShowcaseCard({
+  room,
+  mode,
+}: {
+  room: WatchableRoom;
+  mode: "watch" | "join";
+}) {
+  const seats = seatsFor(room.seatAvatars, room.seatAvatars[0]?.id ?? "");
+  const left = seatsLeft(room.playerCount);
+  const canPlay = entryMode(room.playerCount) === "play";
+  const action = mode === "join" && canPlay ? "Join" : "Watch";
+  const players = room.seatAvatars
+    .map((seat) => seat.name)
+    .filter((name): name is string => Boolean(name));
+
   return (
     <a
       href={`/game-night/room/${room.roomCode}`}
-      className="group block rounded-2xl border border-white/10 bg-white/4 p-4 transition-colors hover:border-[#8A40CF]/50 hover:bg-white/6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0]"
+      aria-label={`${action} ${room.hostName ?? "this"} game`}
+      className="group block overflow-hidden rounded-[28px] border border-white/10 bg-[#10111a] shadow-[0_26px_80px_rgba(0,0,0,.35)] transition duration-300 hover:-translate-y-1 hover:border-[#C9A2F0]/45 hover:shadow-[0_32px_90px_rgba(80,31,123,.28)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#C9A2F0]"
     >
-      {/* Reserved for the table art. Sized now so dropping the graphic in
-          later cannot reflow the row or invalidate measured heights. */}
       <div
-        aria-hidden
-        className="mb-3 h-1 rounded-full bg-gradient-to-r from-[#8A40CF]/70 via-[#8A40CF]/20 to-transparent"
-      />
-
-      <div className="flex items-center gap-4">
-        <Seats seats={seats} />
-
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-semibold text-white">
-            {room.hostName ?? "Someone"}&rsquo;s table
-          </p>
-          <p className="mt-0.5 flex items-center gap-2 text-xs text-white/55">
-            <span className="font-mono tracking-[0.18em]">{room.roomCode}</span>
-            {room.watcherCount > 0 ? (
-              <>
-                <span aria-hidden>·</span>
-                <span className="inline-flex items-center gap-1">
-                  <Eye aria-hidden className="h-3 w-3" />
-                  {room.watcherCount} watching
-                </span>
-              </>
-            ) : null}
-          </p>
-        </div>
-
-        <span
-          className={
-            mode === "play"
-              ? "shrink-0 rounded-full bg-[#8A40CF]/20 px-3 py-1 text-[11px] font-bold text-[#C9A2F0]"
-              : "shrink-0 rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold text-white/70"
-          }
-        >
-          {mode === "play"
-            ? `${left} ${left === 1 ? "seat" : "seats"} open`
-            : "Watch"}
+        className="relative h-48 overflow-hidden"
+        style={{
+          background:
+            "radial-gradient(circle at 50% 45%, #344b39 0%, #213729 42%, #111c16 72%, #0a0f0c 100%)",
+        }}
+      >
+        <div
+          aria-hidden
+          className="absolute inset-[18%_8%] rounded-[38%] border-[7px] border-[#d3a94a]/35 bg-[#112719] shadow-[inset_0_0_45px_rgba(0,0,0,.55),0_18px_38px_rgba(0,0,0,.25)]"
+        />
+        <DecorativeCards />
+        <span className="absolute right-3 top-3 rounded-lg bg-white px-3 py-1.5 text-xs font-black text-black shadow-lg">
+          Live Now
+        </span>
+        <span className="absolute bottom-3 left-3 rounded-lg border border-white/10 bg-black/45 px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.18em] text-white/70 backdrop-blur-md">
+          {room.roomCode}
         </span>
       </div>
+
+      <div className="bg-[linear-gradient(135deg,#641d80_0%,#32154f_55%,#151020_100%)] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-xl font-black tracking-tight">
+              {room.hostName ?? "DVNT Player"}
+            </p>
+            <p className="mt-1 line-clamp-2 min-h-9 text-sm font-semibold leading-snug text-white/72">
+              {players.length > 0 ? players.join(" · ") : "Waiting for players"}
+            </p>
+          </div>
+          {room.watcherCount > 0 ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-black/30 px-2.5 py-1 text-[11px] font-bold text-white/70">
+              <Eye aria-hidden className="h-3 w-3" />
+              {room.watcherCount}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="mt-4 flex items-center gap-3">
+          <Seats seats={seats} />
+          <span className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-white/55">
+            <Users aria-hidden className="h-3.5 w-3.5" />
+            {canPlay ? `${left} open` : "table full"}
+          </span>
+        </div>
+
+        <div className="mt-4 grid h-12 place-items-center rounded-xl bg-white text-base font-black text-black transition group-hover:bg-[#F3E8FF]">
+          {action}
+        </div>
+      </div>
     </a>
+  );
+}
+
+function DecorativeCards() {
+  const cards = [
+    { left: "21%", top: "34%", rotate: -17, tone: "#f5f2e9" },
+    { left: "40%", top: "24%", rotate: 7, tone: "#0f0d12" },
+    { left: "57%", top: "35%", rotate: 19, tone: "#f5f2e9" },
+  ];
+  return (
+    <>
+      {cards.map((card, index) => (
+        <span
+          key={index}
+          aria-hidden
+          className="absolute h-24 w-16 rounded-lg border border-black/25 shadow-[0_12px_24px_rgba(0,0,0,.35)] transition-transform duration-500 group-hover:-translate-y-1"
+          style={{
+            left: card.left,
+            top: card.top,
+            background: card.tone,
+            transform: `rotate(${card.rotate}deg)`,
+          }}
+        >
+          <span
+            className={`absolute left-2 top-2 text-[9px] font-black ${index === 1 ? "text-[#D4A642]" : "text-black"}`}
+          >
+            {index === 1 ? "DVNT" : index === 0 ? "Q♠" : "A♥"}
+          </span>
+        </span>
+      ))}
+    </>
   );
 }
 
@@ -276,26 +376,22 @@ function Seats({ seats }: { seats: ReturnType<typeof seatsFor> }) {
   return (
     <ul
       className="flex shrink-0 -space-x-2"
-      aria-label={`${seats.filter((s) => s.player).length} of ${MAX_PLAYERS} seats taken`}
+      aria-label={`${seats.filter((seat) => seat.player).length} of ${MAX_PLAYERS} seats taken`}
     >
       {seats.map((seat) => (
         <li key={seat.index}>
-          {seat.player ? (
-            seat.player.avatar ? (
-              // Rounded SQUARES, never circles — the repo's avatar rule.
-              <img
-                src={seat.player.avatar}
-                alt=""
-                className="h-9 w-9 rounded-lg object-cover ring-2 ring-[#06070d]"
-              />
-            ) : (
-              <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#8A40CF]/25 text-xs font-bold text-[#C9A2F0] ring-2 ring-[#06070d]">
-                {(seat.player.name ?? "?").charAt(0).toUpperCase()}
-              </span>
-            )
+          {seat.player?.avatar ? (
+            <img
+              src={seat.player.avatar}
+              alt=""
+              className="h-9 w-9 rounded-full object-cover ring-2 ring-[#32154f]"
+            />
+          ) : seat.player ? (
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-[#D8BBF4] text-xs font-black text-[#32154f] ring-2 ring-[#32154f]">
+              {(seat.player.name ?? "?").charAt(0).toUpperCase()}
+            </span>
           ) : (
-            // An empty seat is drawn, not omitted. The gap is the information.
-            <span className="block h-9 w-9 rounded-lg border border-dashed border-white/20 ring-2 ring-[#06070d]" />
+            <span className="block h-9 w-9 rounded-full border border-dashed border-white/25 bg-black/10 ring-2 ring-[#32154f]" />
           )}
         </li>
       ))}
@@ -303,32 +399,23 @@ function Seats({ seats }: { seats: ReturnType<typeof seatsFor> }) {
   );
 }
 
-function RoomSkeletons() {
+function ShowcaseSkeletons() {
   return (
-    <ul className="mt-6 space-y-3" aria-busy="true" aria-label="Loading tables">
-      {[0, 1, 2].map((i) => (
-        <li
-          key={i}
-          className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/4 p-4"
-        >
-          <span className="flex -space-x-2">
-            {[0, 1, 2, 3].map((s) => (
-              <span
-                key={s}
-                className="h-9 w-9 animate-pulse rounded-lg bg-white/10 ring-2 ring-[#06070d]"
-              />
-            ))}
-          </span>
-          <span className="h-3 w-40 animate-pulse rounded bg-white/10" />
-        </li>
-      ))}
-    </ul>
+    <section className="mt-10" aria-busy="true" aria-label="Loading games">
+      <div className="mb-4 h-8 w-48 animate-pulse rounded bg-white/10" />
+      <div className="flex gap-4 overflow-hidden">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="h-[390px] w-[82vw] max-w-[360px] shrink-0 animate-pulse rounded-[28px] border border-white/10 bg-white/5"
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
 function EmptyLobby() {
-  // An empty screen is an invitation, and it carries the action rather than
-  // describing one that lives elsewhere.
   const scope = useGsapScope((self, gsap) => {
     if (prefersReducedMotion()) return;
     gsap.from(self.querySelectorAll("[data-seat]"), {
@@ -343,24 +430,20 @@ function EmptyLobby() {
   return (
     <section
       ref={scope as React.RefObject<HTMLElement>}
-      className="mt-10 rounded-2xl border border-dashed border-white/15 p-10 text-center"
+      className="mt-10 rounded-3xl border border-dashed border-white/15 bg-white/3 p-10 text-center"
     >
-      {/* Spaced, not stacked. The overlap is an avatar convention and it needs
-          a filled seat to read against; four dashed outlines overlapping merge
-          into one box, which is the opposite of the point. */}
       <ul className="mb-5 flex justify-center gap-2" aria-hidden>
         {[0, 1, 2, 3].map((i) => (
           <li
             key={i}
             data-seat
-            className="h-10 w-10 rounded-lg border border-dashed border-white/25 ring-2 ring-[#06070d]"
+            className="h-11 w-11 rounded-full border border-dashed border-white/25"
           />
         ))}
       </ul>
-      <h2 className="text-lg font-semibold text-white">No tables running</h2>
-      <p className="mx-auto mt-1 max-w-sm text-sm text-white/55">
-        Four people sit down, everyone else watches. Start one with the button
-        above and read the code out.
+      <h2 className="text-xl font-black">No games are live</h2>
+      <p className="mx-auto mt-2 max-w-sm text-sm font-medium text-white/55">
+        Start the first table. Four people can sit; everyone after that drops in as a spectator.
       </p>
     </section>
   );
@@ -376,8 +459,8 @@ function Notice({
   body: string;
 }) {
   return (
-    <div role="status" className="mt-6 rounded-2xl border border-white/15 bg-white/5 p-5">
-      <p className="flex items-center gap-2 font-medium text-white">
+    <div role="status" className="mt-8 rounded-2xl border border-white/15 bg-white/5 p-5">
+      <p className="flex items-center gap-2 font-bold text-white">
         {icon}
         {title}
       </p>
