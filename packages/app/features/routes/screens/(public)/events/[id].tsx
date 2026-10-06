@@ -31,7 +31,10 @@ import { usePublicGateStore } from "@dvnt/app/lib/stores/public-gate-store";
 import { GuestCheckoutSheet } from "@dvnt/app/features/events";
 import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
 import { OrganizerCard } from "@dvnt/app/features/events/ui";
-import { filterBuyerVisibleTiers } from "@dvnt/app/lib/tickets/pricing";
+import {
+  filterBuyerVisibleTiers,
+  pickDefaultBuyerTier,
+} from "@dvnt/app/lib/tickets/pricing";
 import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { promotersApi } from "@dvnt/app/lib/api/promoters";
@@ -171,10 +174,11 @@ function PublicEventDetailContent() {
     const available = tiers.filter(
       (t) => !t.isSoldOut && !t.saleNotStarted && !t.saleEnded,
     );
-    const eventIsPaid = Number(event?.price || 0) > 0;
-    const firstAvailable = eventIsPaid
-      ? available.find((t) => t.priceCents > 0) ?? available[0]
-      : available[0];
+    const firstAvailable = pickDefaultBuyerTier(
+      available,
+      Number(event?.price || 0) > 0,
+      (tier) => tier.priceCents,
+    );
     if (firstAvailable) setSelectedTierId(firstAvailable.id);
   }, [tiers, selectedTierId, event?.price]);
 
