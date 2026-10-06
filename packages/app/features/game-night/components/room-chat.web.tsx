@@ -143,7 +143,7 @@ export function RoomChat({ state }: { state: GameNightState }) {
     return () => {
       cancelled = true;
     };
-  }, [roomId, myId, scrollToBottom, seatOf]);
+  }, [roomId, scrollToBottom]);
 
   // Live inserts — own channel via freshChannel, never raw supabase.channel.
   useEffect(() => {
@@ -205,7 +205,7 @@ export function RoomChat({ state }: { state: GameNightState }) {
     return () => {
       void channel.unsubscribe();
     };
-  }, [roomId, scrollToBottom]);
+  }, [roomId, myId, scrollToBottom, seatOf]);
 
   const loadEarlier = useCallback(async () => {
     const oldest = rows.find((r) => !r.localId)?.id;
