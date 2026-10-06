@@ -17,10 +17,12 @@ test("supported room reactions are explicit and Rive-addressable", () => {
     userId: "u1",
     emoji: "🔥",
     isMine: true,
+    seatIndex: 2,
   });
 
   assert.equal(event.kind, "fire");
   assert.equal(event.kindValue, 2);
+  assert.equal(event.seatIndex, 2);
   assert.ok(event.lane >= 0 && event.lane <= 2);
   assert.equal(event.intensity, 1);
 });
@@ -33,8 +35,20 @@ test("reaction intensity is clamped for the animation state machine", () => {
       userId: "u",
       emoji: "💯",
       isMine: false,
+      seatIndex: 99,
       intensity: 99,
     }).intensity,
+    3,
+  );
+  assert.equal(
+    createRoomReactionEvent({
+      id: "b",
+      roomId: 1,
+      userId: "u",
+      emoji: "❤️",
+      isMine: false,
+      seatIndex: 99,
+    }).seatIndex,
     3,
   );
 });
