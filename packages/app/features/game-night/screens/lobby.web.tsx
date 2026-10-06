@@ -81,7 +81,11 @@ export function GameNightLobbyScreen() {
           Game Night
         </h1>
         <p className="mt-2 text-white/60">
-          Start a room and read the code to whoever you are playing with.
+          Start a room and read the code to your table. With 2 seated players
+          the game runs Duel; with 3–4 it runs Classic automatically.
+        </p>
+        <p className="mt-2 text-xs font-medium text-white/40">
+          Four seats max. Anyone else joins as a watcher and can chat/react.
         </p>
 
         <button

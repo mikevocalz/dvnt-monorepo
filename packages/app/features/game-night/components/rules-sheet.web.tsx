@@ -1,17 +1,11 @@
 "use client";
 
-/**
- * Game Night rules sheet (web). A BottomSheet popover any player can open
- * mid-match — Escape, scrim tap, drag-to-dismiss, or the ✕ closes it, so it
- * never blocks play.
- *
- * Copy is grounded in two sources only: the printed Cookout instructions card
- * ("Blue 100 - The Cookout Rs - Instructions.pdf") for the deck and its house
- * rules, and the implemented match mechanics for the app flow (classic judge
- * rounds, duel prediction rounds, first to target_score).
- */
-
 import { BottomSheet } from "../../../components/bottom-sheet.web";
+import {
+  classicWinText,
+  duelFormatText,
+  GAME_NIGHT_DECK_FACTS,
+} from "../game-rules";
 
 function Section({
   title,
@@ -35,58 +29,91 @@ function Section({
 export function RulesSheet({
   open,
   onClose,
-  targetScore,
+  targetScore = 5,
+  duelPairedRounds = 5,
 }: {
   open: boolean;
   onClose: () => void;
-  /** From match.target_score — shown verbatim so the sheet never lies. */
   targetScore?: number;
+  duelPairedRounds?: number;
 }) {
   return (
-    <BottomSheet open={open} onClose={onClose} title="How to play" maxWidthClass="max-w-xl">
-      <Section title="The deck — Keep It 100: The Cookout">
+    <BottomSheet
+      open={open}
+      onClose={onClose}
+      title="How to play"
+      maxWidthClass="max-w-xl"
+    >
+      <Section title="Pick a mode by player count">
         <p>
-          Pop culture and real talk across Dating, Sex &amp; Intimacy, Family,
-          Politics &amp; Power, and Queer Inclusion. Every card is a
-          multiple-choice prompt that ends with a personal follow-up.
+          Game Night chooses the mode automatically when the host starts:
+          <strong className="text-white"> 2 seated players = Duel</strong>;
+          <strong className="text-white"> 3–4 seated players = Classic</strong>.
+        </p>
+        <p>
+          The table has four seats. Anyone beyond four joins as a watcher and
+          can watch, chat and react without playing cards or scoring.
         </p>
       </Section>
 
-      <Section title="A round">
+      <Section title="Classic · 3–4 players">
         <p>
-          A prompt lands face-up on the table. Pick your best answer card
-          before the timer runs out — some prompts ask for more than one. Picks
-          stay face-down until everyone locks in.
+          Everyone has a 7-card hand. One player is the judge, and the judge
+          rotates each round.
         </p>
         <p>
-          The judge reveals every answer and crowns the round winner. The
-          winner keeps the card and takes the point.
+          A prompt tells non-judges to play either 1 or 2 answer cards. You have
+          45 seconds. Answers stay hidden until everyone has submitted or time
+          expires.
         </p>
-      </Section>
-
-      <Section title="Duel rounds">
         <p>
-          One player is the subject and picks their favorite of six options.
-          Everyone else predicts what the subject chose — a correct prediction
-          scores.
+          The judge then has 60 seconds to choose their favorite revealed
+          answer. That player gets 1 point. {classicWinText(targetScore)}
         </p>
-      </Section>
-
-      <Section title="Winning">
         <p>
-          {targetScore
-            ? `First to ${targetScore} points takes the match.`
-            : "Most points when the match ends takes it."}{" "}
-          The winner reads their kept cards aloud and answers the follow-ups —
-          the floor opens for discussion with every Q&amp;A.
+          If nobody submits, or the judge times out, the round is skipped and
+          nobody scores.
         </p>
       </Section>
 
-      <Section title="House rules (printed card)">
+      <Section title="Duel · exactly 2 players">
         <p>
-          Choose how long a round runs. Right answers keep the card; wrong
-          answers take a shot — or your table&apos;s penalty. At the end, the
-          winner picks someone to take a shot, then reads their cards aloud.
+          One player is the subject and the other is the predictor. The subject
+          alternates every round.
+        </p>
+        <p>
+          Both players see the same 6 answer options. The subject secretly picks
+          a favorite; the predictor secretly guesses which option the subject
+          chose. Both get 30 seconds to lock in.
+        </p>
+        <p>
+          A correct prediction gives the predictor 1 point. A wrong prediction
+          gives no point. {duelFormatText(duelPairedRounds)}
+        </p>
+      </Section>
+
+      <Section title="About the cards">
+        <p>
+          The current card look is{" "}
+          <strong className="text-white">{GAME_NIGHT_DECK_FACTS.visualTheme}</strong>
+          {" "}({GAME_NIGHT_DECK_FACTS.internalThemeName}).
+        </p>
+        <p>
+          The playable text is DVNT&apos;s own nightlife deck:{" "}
+          <strong className="text-white">
+            {GAME_NIGHT_DECK_FACTS.promptCount} prompts +{" "}
+            {GAME_NIGHT_DECK_FACTS.answerCount} answer cards
+          </strong>.
+          The printed Cookout multiple-choice/follow-up house rules are not the
+          rules this digital match engine uses.
+        </p>
+      </Section>
+
+      <Section title="Good to know">
+        <p>
+          Results stay up briefly, then the next round opens automatically.
+          Classic hands refill between rounds. Watchers never receive private
+          hands or secret Duel picks.
         </p>
       </Section>
     </BottomSheet>
