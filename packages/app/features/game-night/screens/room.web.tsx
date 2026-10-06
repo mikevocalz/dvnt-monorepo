@@ -40,6 +40,8 @@ import { DuelRound } from "../components/duel-round.web";
 import { MatchEnd } from "../components/match-end.web";
 import { Scoreboard } from "../components/scoreboard.web";
 import { RoomChat } from "../components/room-chat.web";
+import { RoomReactionDock } from "../components/room-reaction-dock.web";
+import { RoomReactionOverlay } from "../components/room-reaction-overlay.web";
 import { Countdown, PromptCard } from "../components/prompt-card.web";
 import { CommandError, useCommand } from "../components/use-command";
 import { RulesSheet } from "../components/rules-sheet.web";
@@ -342,7 +344,15 @@ export function GameNightRoomScreen() {
               <>
                 {/* 3-D table scene: visible only during an active match. */}
                 {playing && round && !matchOver && round.prompt ? (
-                  <section aria-label="Table scene">
+                  <section aria-label="Table scene" className="relative overflow-hidden rounded-[28px]">
+                    <RoomReactionOverlay roomId={state.room.id} />
+                    <div className="absolute left-3 top-3 z-40">
+                      <RoomReactionDock
+                        code={code}
+                        roomId={state.room.id}
+                        userId={state.me.user_id}
+                      />
+                    </div>
                     <TableRenderer
                       state={deriveTableState(round.phase, match?.mode)}
                       prompt={{
