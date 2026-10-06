@@ -351,6 +351,7 @@ export function GameNightRoomScreen() {
                         code={code}
                         roomId={state.room.id}
                         userId={state.me.user_id}
+                        seatIndex={state.me.seat_no}
                       />
                     </div>
                     <TableRenderer
