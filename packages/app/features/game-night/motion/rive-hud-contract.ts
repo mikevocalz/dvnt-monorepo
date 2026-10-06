@@ -13,8 +13,10 @@ export const GAME_NIGHT_RIVE_HUD = {
     leaderboard: "Leaderboard",
     button: "Game Button",
     result: "Match Result",
+    roomReactions: "Room Reactions",
   },
   stateMachine: "DVNT HUD",
+  roomReactionStateMachine: "Room Reactions",
   inputs: {
     score: "score",
     targetScore: "targetScore",
@@ -27,6 +29,11 @@ export const GAME_NIGHT_RIVE_HUD = {
     pressed: "pressed",
     celebrate: "celebrate",
     ctaKind: "ctaKind",
+    reactionKind: "reactionKind",
+    burst: "burst",
+    isSelf: "isSelf",
+    lane: "lane",
+    intensity: "intensity",
   },
 } as const;
 
