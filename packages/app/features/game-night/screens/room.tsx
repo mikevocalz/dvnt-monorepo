@@ -67,6 +67,9 @@ export default function GameNightRoomScreen() {
               userId: row.user_id,
               emoji: row.reaction,
               isMine: false,
+              seatIndex:
+                state?.members.find((member) => member.user_id === row.user_id)
+                  ?.seat_no ?? -1,
               createdAt: row.created_at
                 ? Date.parse(row.created_at) || Date.now()
                 : Date.now(),
@@ -77,7 +80,7 @@ export default function GameNightRoomScreen() {
       })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [roomId, myUserId, loadMessages]);
+  }, [roomId, myUserId, state?.members, loadMessages]);
 
   // Selection is per-round; stale card ids must not carry into the next deal.
   const roundId = state?.round?.id ?? null;
@@ -104,7 +107,12 @@ export default function GameNightRoomScreen() {
     <RoomReactionOverlay roomId={state.room.id} />
     <View className="flex-row items-center justify-between px-5 pb-3"><View><Text className="text-2xl font-black text-foreground">Game Night</Text><Text className="text-muted-foreground">Room {code} · {me.role === "watcher" ? "Watching" : `Seat ${(me.seat_no ?? 0) + 1}`}</Text></View><Pressable onPress={leave}><Text className="font-bold text-red-500">Leave</Text></Pressable></View>
     <View className="items-end px-5 pb-3">
-      <RoomReactionDock code={code} roomId={state.room.id} userId={me.user_id} />
+      <RoomReactionDock
+        code={code}
+        roomId={state.room.id}
+        userId={me.user_id}
+        seatIndex={me.seat_no}
+      />
     </View>
     <ScrollView className="flex-1 px-5" contentContainerStyle={{paddingBottom:150}}>
       {commandError ? <Text className="mb-3 text-red-500">{commandError}</Text> : null}
