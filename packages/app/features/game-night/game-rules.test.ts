@@ -15,7 +15,7 @@ test("player count chooses the same mode as the server engine", () => {
 });
 
 test("rule summaries expose the actual win conditions", () => {
-  assert.equal(classicWinText(5), "First player to 5 points wins the match.");
+  assert.equal(classicWinText(5), "First player to 5 points wins; if the deck runs out first, the highest score wins.");
   assert.equal(
     duelFormatText(5),
     "Each player is the subject 5 times (10 rounds total). If the score is tied after that, rounds continue until the tie is broken.",
