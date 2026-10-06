@@ -484,9 +484,18 @@ export function EventDetailScreen() {
         const code =
           rawRef ?? usePromoterRefStore.getState().getRef(eventId);
         if (code) {
-          void promotersApi.claimRef(Number(eventId), code).catch((error) => {
-            console.warn("[event-detail] promoter ref claim failed:", error);
-          });
+          void promotersApi
+            .claimRef(Number(eventId), code)
+            .then((claim) => {
+              setPromoterRef(
+                eventId,
+                claim.code,
+                claim.customerDiscountBps,
+              );
+            })
+            .catch((error) => {
+              console.warn("[event-detail] promoter ref claim failed:", error);
+            });
         }
       }
     } catch {
