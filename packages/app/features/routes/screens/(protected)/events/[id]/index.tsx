@@ -2219,37 +2219,60 @@ function EventDetailScreenContent() {
 
               {/* Promo code input */}
               {selectedTier && selectedTier.price > 0 && !hasTicket && (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    marginTop: 12,
-                    gap: 8,
-                  }}
-                >
-                  <TextInput
-                    value={promoCode}
-                    onChangeText={setPromoCode}
-                    placeholder="Promo code"
-                    placeholderTextColor="#71717a"
-                    autoCapitalize="characters"
-                    autoCorrect={false}
+                <View style={{ marginTop: 12, gap: 8 }}>
+                  <View
                     style={{
-                      flex: 1,
-                      height: 40,
-                      borderRadius: 10,
-                      backgroundColor: "rgba(255,255,255,0.06)",
-                      borderWidth: 1,
-                      borderColor: promoCode.trim()
-                        ? "#8A40CF60"
-                        : "rgba(255,255,255,0.08)",
-                      paddingHorizontal: 12,
-                      color: "#fff",
-                      fontSize: 14,
-                      fontFamily: "InterSemiBold",
-                      letterSpacing: 1,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
                     }}
-                  />
+                  >
+                    <TextInput
+                      value={promoCode}
+                      onChangeText={setPromoCode}
+                      placeholder="Promo code"
+                      placeholderTextColor="#71717a"
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      style={{
+                        flex: 1,
+                        height: 40,
+                        borderRadius: 10,
+                        backgroundColor: "rgba(255,255,255,0.06)",
+                        borderWidth: 1,
+                        borderColor: promoCode.trim()
+                          ? "#8A40CF60"
+                          : "rgba(255,255,255,0.08)",
+                        paddingHorizontal: 12,
+                        color: "#fff",
+                        fontSize: 14,
+                        fontFamily: "InterSemiBold",
+                        letterSpacing: 1,
+                      }}
+                    />
+                    {promoCode.trim() ? (
+                      <Pressable
+                        onPress={() => setPromoCode("")}
+                        style={{
+                          paddingHorizontal: 12,
+                          paddingVertical: 8,
+                          borderRadius: 8,
+                          backgroundColor: "rgba(255,255,255,0.06)",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: "#a1a1aa",
+                            fontSize: 13,
+                            fontFamily: "InterSemiBold",
+                          }}
+                        >
+                          Clear
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+
                   {promoterRef?.code ? (
                     <View
                       accessibilityRole="text"
@@ -2257,7 +2280,6 @@ function EventDetailScreenContent() {
                         flexDirection: "row",
                         alignItems: "center",
                         justifyContent: "space-between",
-                        marginTop: 8,
                         paddingHorizontal: 12,
                         paddingVertical: 9,
                         borderRadius: 10,
@@ -2287,27 +2309,6 @@ function EventDetailScreenContent() {
                           : "Applied at checkout"}
                       </Text>
                     </View>
-                  ) : null}
-                  {promoCode.trim() ? (
-                    <Pressable
-                      onPress={() => setPromoCode("")}
-                      style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        borderRadius: 8,
-                        backgroundColor: "rgba(255,255,255,0.06)",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: "#a1a1aa",
-                          fontSize: 13,
-                          fontFamily: "InterSemiBold",
-                        }}
-                      >
-                        Clear
-                      </Text>
-                    </Pressable>
                   ) : null}
                 </View>
               )}
