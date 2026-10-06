@@ -1589,9 +1589,11 @@ export function EventDetailScreen() {
                       return;
                     }
                     const tier =
-                      sellableTiers.find((t) => t.price_cents === 0) ??
-                      sellableTiers.find((t) => t.price_cents > 0) ??
-                      sellableTiers[0];
+                      Number(e.price || 0) > 0
+                        ? sellableTiers.find((t) => t.price_cents > 0) ??
+                          sellableTiers[0]
+                        : sellableTiers.find((t) => t.price_cents === 0) ??
+                          sellableTiers[0];
                     if (tier) {
                       openGuestCheckout({
                         eventId,
@@ -2733,6 +2735,14 @@ function CheckoutSheet({
   const addonPreviewCents = addonSelectionsTotalCents(addons, selectionList);
   const hasAddonSelections = selectionList.length > 0;
 
+  const promoterRef = usePromoterRefStore(
+    (s) => s.refs[String(eventId)] ?? null,
+  );
+  const promoterDiscountBps =
+    promoterRef?.customerDiscountBps != null
+      ? Math.max(0, Math.min(10000, promoterRef.customerDiscountBps))
+      : 0;
+
   const appliedPromo = useEventDetailUiStore((s) => s.appliedPromo);
   const setAppliedPromo = useEventDetailUiStore((s) => s.setAppliedPromo);
   const promoError = useEventDetailUiStore((s) => s.promoError);
@@ -2754,9 +2764,24 @@ function CheckoutSheet({
   // Discount is recomputed from the validated promo + current qty (BOGO depends
   // on qty). Server re-validates at charge — this is the buyer-facing preview.
   const discountCents = appliedPromo
-    ? computePromoDiscountCents(appliedPromo.type, appliedPromo.value, subtotalCents, qty)
+    ? computePromoDiscountCents(
+        appliedPromo.type,
+        appliedPromo.value,
+        subtotalCents,
+        qty,
+      )
     : 0;
-  const goodsCents = Math.max(0, subtotalCents - discountCents) + addonPreviewCents;
+  const promoterDiscountCents =
+    promoterDiscountBps > 0
+      ? Math.round(subtotalCents * (promoterDiscountBps / 10000))
+      : 0;
+  const totalAdmissionDiscountCents = Math.min(
+    subtotalCents,
+    discountCents + promoterDiscountCents,
+  );
+  const goodsCents =
+    Math.max(0, subtotalCents - totalAdmissionDiscountCents) +
+    addonPreviewCents;
   // The buyer fee is part of what Stripe charges, so it has to be part of what
   // this sheet says. It showed "Pay $25.00" and the card was debited $26.63 —
   // computeFees(2500, 1) is 2.5% + $1.00 per ticket — and three people were
@@ -2832,6 +2857,22 @@ function CheckoutSheet({
           </div>
         </div>
 
+        {promoterRef?.code ? (
+          <div
+            role="status"
+            className="flex items-center justify-between rounded-xl border border-[#8A40CF]/35 bg-[#8A40CF]/10 px-3 py-2.5"
+          >
+            <span className="text-sm font-semibold text-[#D8B4FE]">
+              Promoter code {promoterRef.code}
+            </span>
+            <span className="text-sm font-bold text-[#D8B4FE]">
+              {promoterDiscountBps > 0
+                ? `${promoterDiscountBps / 100}% off · applied`
+                : "Applied at checkout"}
+            </span>
+          </div>
+        ) : null}
+
         {/* Promo code + apply */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
@@ -2881,19 +2922,31 @@ function CheckoutSheet({
               </span>
             </div>
           ) : null}
-          {discountCents > 0 ? (
-            <>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-white/55">Subtotal</span>
-                <span className="text-sm text-white/80">{money(subtotalCents)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-[#379ED8]">
-                  {promoLabel(appliedPromo!.type, appliedPromo!.value)}
-                </span>
-                <span className="text-sm text-[#379ED8]">−{money(discountCents)}</span>
-              </div>
-            </>
+          {totalAdmissionDiscountCents > 0 ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-white/55">Subtotal</span>
+              <span className="text-sm text-white/80">{money(subtotalCents)}</span>
+            </div>
+          ) : null}
+          {promoterDiscountCents > 0 ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-[#D8B4FE]">
+                Promoter · {promoterDiscountBps / 100}% off
+              </span>
+              <span className="text-sm text-[#D8B4FE]">
+                −{money(promoterDiscountCents)}
+              </span>
+            </div>
+          ) : null}
+          {discountCents > 0 && appliedPromo ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-[#379ED8]">
+                {promoLabel(appliedPromo.type, appliedPromo.value)}
+              </span>
+              <span className="text-sm text-[#379ED8]">
+                −{money(discountCents)}
+              </span>
+            </div>
           ) : null}
           {feeCents > 0 ? (
             <div className="flex items-center justify-between">
