@@ -946,6 +946,27 @@ export function CheckoutReviewScreen() {
               />
             ) : null}
 
+            {promoterRef?.code ? (
+              <section
+                role="status"
+                className="mb-3 flex items-center justify-between rounded-2xl border border-[#8A40CF]/35 bg-[#8A40CF]/10 p-4"
+              >
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-[#D8B4FE]/70">
+                    Promoter discount
+                  </p>
+                  <p className="mt-0.5 font-mono text-sm font-semibold text-[#D8B4FE]">
+                    {promoterRef.code}
+                  </p>
+                </div>
+                <span className="text-sm font-extrabold text-[#D8B4FE]">
+                  {promoterDiscountBps > 0
+                    ? `${promoterDiscountBps / 100}% off · applied`
+                    : "Applied at checkout"}
+                </span>
+              </section>
+            ) : null}
+
             {/* Promo code */}
             <section className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <FormField label="Promo code">
@@ -987,6 +1008,16 @@ export function CheckoutReviewScreen() {
                   {formatCents(subtotalCents)}
                 </span>
               </div>
+              {promoterDiscountCents > 0 ? (
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-sm text-[#D8B4FE]">
+                    Promoter · {promoterDiscountBps / 100}% off
+                  </span>
+                  <span className="text-sm font-semibold text-[#D8B4FE]">
+                    −{formatCents(promoterDiscountCents)}
+                  </span>
+                </div>
+              ) : null}
               {discountCents > 0 && appliedPromo ? (
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm text-[#3FDCFF]">
