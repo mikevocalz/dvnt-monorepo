@@ -18,11 +18,17 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const ClaimSchema = z.object({
-  action: z.literal("claim"),
-  event_id: z.number().int().positive(),
-  code: z.string().trim().min(2).max(32),
-});
+const RequestSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("claim"),
+    event_id: z.number().int().positive(),
+    code: z.string().trim().min(2).max(32),
+  }),
+  z.object({
+    action: z.literal("get"),
+    event_id: z.number().int().positive(),
+  }),
+]);
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -54,9 +60,58 @@ Deno.serve(async (req) => {
       return json({ error: "Authentication required" }, 401);
     }
 
-    const parsed = ClaimSchema.safeParse(await req.json().catch(() => null));
+    const parsed = RequestSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {
-      return json({ error: "Invalid promoter link" }, 400);
+      return json({ error: "Invalid promoter link request" }, 400);
+    }
+
+    if (parsed.data.action === "get") {
+      const { data: claim, error: claimError } = await supabase
+        .from("promoter_ref_claims")
+        .select("promoter_id")
+        .eq("buyer_auth_id", session.userId)
+        .eq("event_id", parsed.data.event_id)
+        .maybeSingle();
+
+      if (claimError) {
+        console.error("[promoter-ref] claim lookup failed:", claimError);
+        return json({ error: "Could not load promoter discount" }, 500);
+      }
+      if (!claim?.promoter_id) {
+        return json({ ok: true, claim: null });
+      }
+
+      const { data: savedPromoter, error: savedPromoterError } = await supabase
+        .from("event_promoters")
+        .select(
+          "id, event_id, code, customer_discount_bps, promoter_commission_bps, status",
+        )
+        .eq("id", claim.promoter_id)
+        .eq("event_id", parsed.data.event_id)
+        .eq("status", "active")
+        .maybeSingle();
+
+      if (savedPromoterError) {
+        console.error(
+          "[promoter-ref] saved promoter lookup failed:",
+          savedPromoterError,
+        );
+        return json({ error: "Could not load promoter discount" }, 500);
+      }
+      if (!savedPromoter) {
+        return json({ ok: true, claim: null });
+      }
+
+      return json({
+        ok: true,
+        claim: {
+          eventId: savedPromoter.event_id,
+          promoterId: savedPromoter.id,
+          code: savedPromoter.code,
+          customerDiscountBps: savedPromoter.customer_discount_bps,
+          promoterCommissionBps: savedPromoter.promoter_commission_bps,
+        },
+      });
     }
 
     const code = parsed.data.code.toUpperCase();
