@@ -56,19 +56,24 @@ function ReactionBubble({ event }: { event: RoomReactionEvent }) {
  */
 export function RoomReactionOverlay({ roomId }: { roomId: number }) {
   const [events, setEvents] = useState<RoomReactionEvent[]>([]);
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
-  useEffect(
-    () =>
-      subscribeRoomReactions((event) => {
-        if (event.roomId !== roomId) return;
-        setEvents((current) => [...current, event].slice(-MAX_VISIBLE));
-        const timer = setTimeout(() => {
-          setEvents((current) => current.filter((item) => item.id !== event.id));
-        }, TTL_MS);
-        return () => clearTimeout(timer);
-      }),
-    [roomId],
-  );
+  useEffect(() => {
+    const unsubscribe = subscribeRoomReactions((event) => {
+      if (event.roomId !== roomId) return;
+      setEvents((current) => [...current, event].slice(-MAX_VISIBLE));
+      const timer = setTimeout(() => {
+        setEvents((current) => current.filter((item) => item.id !== event.id));
+        timers.current.delete(event.id);
+      }, TTL_MS);
+      timers.current.set(event.id, timer);
+    });
+    return () => {
+      unsubscribe();
+      for (const timer of timers.current.values()) clearTimeout(timer);
+      timers.current.clear();
+    };
+  }, [roomId]);
 
   return (
     <View pointerEvents="none" style={styles.layer}>
