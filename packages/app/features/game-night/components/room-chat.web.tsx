@@ -110,6 +110,11 @@ export function RoomChat({ state }: { state: GameNightState }) {
       state.members.find((m) => m.user_id === userId)?.name ?? "Someone",
     [state.members],
   );
+  const seatOf = useCallback(
+    (userId: string) =>
+      state.members.find((m) => m.user_id === userId)?.seat_no ?? -1,
+    [state.members],
+  );
 
   const scrollToBottom = useCallback(() => {
     const el = listRef.current;
@@ -138,7 +143,7 @@ export function RoomChat({ state }: { state: GameNightState }) {
     return () => {
       cancelled = true;
     };
-  }, [roomId, scrollToBottom]);
+  }, [roomId, myId, scrollToBottom, seatOf]);
 
   // Live inserts — own channel via freshChannel, never raw supabase.channel.
   useEffect(() => {
@@ -167,6 +172,7 @@ export function RoomChat({ state }: { state: GameNightState }) {
                 userId: row.userId,
                 emoji: row.reaction,
                 isMine: false,
+                seatIndex: seatOf(row.userId),
                 createdAt: Date.parse(row.createdAt) || Date.now(),
               }),
             );
@@ -434,6 +440,7 @@ export function RoomChat({ state }: { state: GameNightState }) {
                         userId: myId,
                         emoji,
                         isMine: true,
+                        seatIndex: state.me.seat_no ?? -1,
                       }),
                     );
                     void send("reaction", { reaction: emoji });
