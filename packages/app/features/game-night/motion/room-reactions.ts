@@ -35,6 +35,7 @@ export interface RoomReactionEvent {
   kind: RoomReactionKind;
   kindValue: number;
   isMine: boolean;
+  seatIndex: number;
   lane: number;
   intensity: number;
   createdAt: number;
@@ -61,6 +62,7 @@ export function createRoomReactionEvent({
   userId,
   emoji,
   isMine,
+  seatIndex = -1,
   createdAt = Date.now(),
   intensity = 1,
 }: {
@@ -69,6 +71,7 @@ export function createRoomReactionEvent({
   userId: string;
   emoji: RoomReactionEmoji;
   isMine: boolean;
+  seatIndex?: number;
   createdAt?: number;
   intensity?: number;
 }): RoomReactionEvent {
@@ -81,6 +84,7 @@ export function createRoomReactionEvent({
     kind,
     kindValue: KIND_VALUE[kind],
     isMine,
+    seatIndex: Number.isFinite(seatIndex) ? Math.max(-1, Math.min(3, seatIndex)) : -1,
     lane: stableLane(id),
     intensity: Math.min(3, Math.max(1, intensity)),
     createdAt,
