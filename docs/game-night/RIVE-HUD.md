@@ -97,3 +97,30 @@ Winner celebration is one-shot and should respect reduced motion.
   accessible DOM/RN equivalent.
 - Never make the Rive state machine the source of truth for points, rank, game
   phase or button availability.
+
+## Mobbin benchmark set
+
+Use these as shipped-product references during visual review. They are not
+templates to clone; they are a sanity check on hierarchy, ranking density,
+live/social discovery and result-state clarity.
+
+Discovery / live-social:
+- Azar: https://mobbin.com/screens/4e12dc6b-0451-4cd8-b6bb-86ab0709d4ce
+- Yubo: https://mobbin.com/screens/4f06f8d7-5575-4fc6-93fe-8b3041120436
+- Twitch: https://mobbin.com/screens/b499a80c-089d-4355-a203-97f96a21b13e
+- Twitch Search flow: https://mobbin.com/flows/da6876d8-4ef3-44a1-af56-36e7f6a817b4
+- Twitch Stream detail flow: https://mobbin.com/flows/4bb5108b-1a03-4a48-919f-36304102a1c7
+
+Leaderboard / rank:
+- Duolingo: https://mobbin.com/screens/3ca570fe-9e97-4e65-85eb-3e544a7eacab
+- Mimo: https://mobbin.com/screens/80bf7a7f-9251-454f-8a73-045dab21b334
+- Uxcel Go: https://mobbin.com/screens/8baf7fae-7014-4821-bc86-766c38f3635d
+
+Result / completion:
+- Quizlet: https://mobbin.com/screens/22670919-b826-45b1-94f7-0f29d33a45ef
+- Duolingo: https://mobbin.com/screens/53b4c9d8-be76-4f1b-90de-8dc2fcb525f7
+- Yubo: https://mobbin.com/screens/71059bf5-887f-4332-b42d-4c06da54c2cf
+
+The actual DVNT implementation should keep its own black/violet/gold system,
+square/rounded avatar conventions where already established, and the existing
+server-authoritative game model.
