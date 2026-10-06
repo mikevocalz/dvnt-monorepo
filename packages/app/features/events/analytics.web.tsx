@@ -340,7 +340,7 @@ export function EventAnalyticsScreen() {
     );
   }
 
-  const { revenue, ticketStats, tiers, promoCodes } = data;
+  const { revenue, ticketStats, attendanceBreakdown, tiers, promoCodes } = data;
   const checkInPercent =
     ticketStats.total > 0
       ? (ticketStats.checkedIn / ticketStats.total) * 100
@@ -389,6 +389,30 @@ export function EventAnalyticsScreen() {
             sublabel={`${formatCents(revenue.dvntFeeCents)} DVNT · ${formatCents(revenue.stripeFeeCents)} Stripe`}
           />
         </div>
+
+        {/* ── Attendance source breakdown (host-only) ── */}
+        <section className="mt-4 rounded-2xl border border-white/10 bg-white/4 p-4">
+          <p className="mb-3 text-sm font-bold tracking-wide text-white">
+            Attendance
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <p className="text-xs text-white/45">RSVP</p>
+              <p className="mt-1 text-xl font-bold text-white">{attendanceBreakdown.rsvp}</p>
+            </div>
+            <div>
+              <p className="text-xs text-white/45">Paid</p>
+              <p className="mt-1 text-xl font-bold text-white">{attendanceBreakdown.paid}</p>
+            </div>
+            <div>
+              <p className="text-xs text-white/45">Total</p>
+              <p className="mt-1 text-xl font-bold text-white">{attendanceBreakdown.total}</p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-white/40">
+            Total includes paid, free/comp tickets, and RSVP-only guests without double-counting.
+          </p>
+        </section>
 
         {/* ── Revenue split (SVG donut chart) ── */}
         <section className="mt-4 rounded-2xl border border-white/10 bg-white/4 p-4">

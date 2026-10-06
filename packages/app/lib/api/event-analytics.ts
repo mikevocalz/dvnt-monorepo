@@ -25,6 +25,15 @@ export interface EventTicketStats {
   transferPending: number;
 }
 
+export interface EventAttendanceBreakdown {
+  /** Explicit event_rsvps rows with status=going. */
+  rsvp: number;
+  /** Valid ticket seats with a monetary purchase amount. */
+  paid: number;
+  /** Public "going" total: valid ticket seats + RSVP-only people. */
+  total: number;
+}
+
 export interface EventTierAnalytics {
   id: string;
   name: string;
@@ -51,6 +60,7 @@ export interface EventAnalyticsSummary {
   title: string;
   revenue: EventRevenueSummary;
   ticketStats: EventTicketStats;
+  attendanceBreakdown: EventAttendanceBreakdown;
   tiers: EventTierAnalytics[];
   promoCodes: EventPromoCodeAnalytics[];
 }

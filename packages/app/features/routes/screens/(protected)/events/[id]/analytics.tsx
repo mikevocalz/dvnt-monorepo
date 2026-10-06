@@ -244,7 +244,7 @@ function EventAnalyticsContent() {
     );
   }
 
-  const { revenue, ticketStats, tiers, promoCodes } = data;
+  const { revenue, ticketStats, attendanceBreakdown, tiers, promoCodes } = data;
   const checkInPercent =
     ticketStats.total > 0
       ? (ticketStats.checkedIn / ticketStats.total) * 100
@@ -329,6 +329,37 @@ function EventAnalyticsContent() {
             value={formatMoney(revenue.dvntFeeCents + revenue.stripeFeeCents)}
             sublabel={`${formatMoney(revenue.dvntFeeCents)} DVNT · ${formatMoney(revenue.stripeFeeCents)} Stripe`}
           />
+        </View>
+
+        {/* ── Attendance source breakdown (host-only) ── */}
+        <View
+          style={[
+            styles.section,
+            { borderColor: colors.border, backgroundColor: colors.card },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+            Attendance
+          </Text>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            {[
+              ["RSVP", attendanceBreakdown.rsvp],
+              ["Paid", attendanceBreakdown.paid],
+              ["Total", attendanceBreakdown.total],
+            ].map(([label, value]) => (
+              <View key={String(label)} style={{ flex: 1 }}>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+                  {label}
+                </Text>
+                <Text style={{ color: colors.foreground, fontSize: 22, fontWeight: "700", marginTop: 4 }}>
+                  {String(value)}
+                </Text>
+              </View>
+            ))}
+          </View>
+          <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 10 }}>
+            Total includes paid, free/comp tickets, and RSVP-only guests without double-counting.
+          </Text>
         </View>
 
         {/* ── Per-tier breakdown ── */}
