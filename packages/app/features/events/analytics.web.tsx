@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import {
   eventAnalyticsApi,
+  resolveAttendanceBreakdown,
   attendeesToCsv,
   type EventAnalyticsSummary,
 } from "@dvnt/app/lib/api/event-analytics";
