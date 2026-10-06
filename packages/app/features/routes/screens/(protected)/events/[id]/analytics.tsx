@@ -35,6 +35,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 import {
   eventAnalyticsApi,
+  resolveAttendanceBreakdown,
   attendeesToCsv,
   type EventAnalyticsSummary,
 } from "@dvnt/app/lib/api/event-analytics";
@@ -244,7 +245,8 @@ function EventAnalyticsContent() {
     );
   }
 
-  const { revenue, ticketStats, attendanceBreakdown, tiers, promoCodes } = data;
+  const { revenue, ticketStats, tiers, promoCodes } = data;
+  const attendanceBreakdown = resolveAttendanceBreakdown(data);
   const checkInPercent =
     ticketStats.total > 0
       ? (ticketStats.checkedIn / ticketStats.total) * 100
