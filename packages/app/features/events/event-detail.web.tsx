@@ -132,6 +132,7 @@ import {
 } from "@dvnt/app/lib/api/ticket-types";
 import {
   filterBuyerVisibleTiers,
+  pickDefaultBuyerTier,
   tierIsHiddenFromBuyers,
   tierIsLockedForBuyer,
   effectiveAddonUnitPriceCents,
@@ -1581,10 +1582,12 @@ export function EventDetailScreen() {
             // 1. TICKETS — open the checkout sheet (or RSVP for free events).
             const openCheckout = () => {
               if (sellableTiers.length > 0 && !selectedTierId) {
-                const firstPaid =
-                  sellableTiers.find((t) => t.price_cents > 0) ??
-                  sellableTiers[0];
-                setSelectedTierId(String(firstPaid.id));
+                const firstTier = pickDefaultBuyerTier(
+                  sellableTiers,
+                  Number(e.price || 0) > 0,
+                  (candidate) => candidate.price_cents ?? 0,
+                );
+                if (firstTier) setSelectedTierId(String(firstTier.id));
               }
               setCheckoutOpen(true);
             };
@@ -1602,12 +1605,11 @@ export function EventDetailScreen() {
                       openGuestRsvp(eventId, e.title ?? "Event");
                       return;
                     }
-                    const tier =
-                      Number(e.price || 0) > 0
-                        ? sellableTiers.find((t) => t.price_cents > 0) ??
-                          sellableTiers[0]
-                        : sellableTiers.find((t) => t.price_cents === 0) ??
-                          sellableTiers[0];
+                    const tier = pickDefaultBuyerTier(
+                      sellableTiers,
+                      Number(e.price || 0) > 0,
+                      (candidate) => candidate.price_cents ?? 0,
+                    );
                     if (tier) {
                       openGuestCheckout({
                         eventId,
