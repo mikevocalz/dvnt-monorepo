@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   subscribeRoomReactions,
   type RoomReactionEvent,
@@ -73,13 +73,15 @@ export function RoomReactionOverlay({ roomId }: { roomId: number }) {
             data-rive-lane={event.lane}
             data-rive-intensity={event.intensity}
             className="dvnt-room-reaction absolute bottom-5 grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-[#0b0c13]/76 text-3xl shadow-[0_12px_32px_rgba(0,0,0,.28)] backdrop-blur-md"
-            style={{
-              right: laneX,
-              animation: `dvnt-room-reaction-rise ${TTL_MS}ms cubic-bezier(.16,.8,.24,1) both`,
-              animationDelay: `${index * 35}ms`,
-              ["--drift" as string]: drift,
-              ["--spin" as string]: spin,
-            }}
+            style={
+              {
+                right: laneX,
+                animation: `dvnt-room-reaction-rise ${TTL_MS}ms cubic-bezier(.16,.8,.24,1) both`,
+                animationDelay: `${index * 35}ms`,
+                "--drift": drift,
+                "--spin": spin,
+              } as CSSProperties
+            }
           >
             {event.emoji}
           </span>
