@@ -12,10 +12,12 @@ export function RoomReactionDock({
   code,
   roomId,
   userId,
+  seatIndex,
 }: {
   code: string;
   roomId: number;
   userId: string;
+  seatIndex?: number | null;
 }) {
   const [failed, setFailed] = useState(false);
 
@@ -39,6 +41,7 @@ export function RoomReactionDock({
                 userId,
                 emoji,
                 isMine: true,
+                seatIndex: seatIndex ?? -1,
               }),
             );
             void sendRoomMessage(code, "reaction", { reaction: emoji }).catch(
