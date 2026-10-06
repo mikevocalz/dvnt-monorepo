@@ -41,6 +41,7 @@ import {
   incrementPromoUsage,
 } from "../_shared/apply-promo-code.ts";
 import {
+  resolveAccountPromoterCode,
   validateAndApplyPromoterCode,
 } from "../_shared/apply-promoter-code.ts";
 import { maybeFireCapacityAlerts } from "../_shared/capacity-alerts.ts";
@@ -147,12 +148,20 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       typeof promoter_code === "string"
         ? promoter_code.trim().toUpperCase().slice(0, 32)
         : "";
-    const validPromoterCode = /^[A-Z0-9_-]{2,32}$/.test(trimmedPromoterCode)
+    let validPromoterCode = /^[A-Z0-9_-]{2,32}$/.test(trimmedPromoterCode)
       ? trimmedPromoterCode
       : "";
 
     // ── Session auth — required UNLESS guest_email is provided ──
     const user_id = await verifySession(supabase, req);
+    if (!validPromoterCode && user_id) {
+      validPromoterCode =
+        (await resolveAccountPromoterCode(
+          supabase,
+          Number(event_id),
+          user_id,
+        )) ?? "";
+    }
     const trimmedGuestEmail =
       typeof guest_email === "string" ? guest_email.trim().toLowerCase() : "";
     const trimmedGuestName =
