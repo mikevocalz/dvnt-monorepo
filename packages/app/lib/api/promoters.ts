@@ -239,6 +239,38 @@ export const promotersApi = {
     }
   },
 
+  /** Persist a tracked promoter link to the signed-in buyer account. */
+  async claimRef(eventId: number, code: string): Promise<{
+    code: string;
+    customerDiscountBps: number;
+    promoterCommissionBps: number;
+  }> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      claim?: {
+        eventId: number;
+        promoterId: string;
+        code: string;
+        customerDiscountBps: number;
+        promoterCommissionBps: number;
+      };
+      error?: string;
+    }>("promoter-ref", {
+      action: "claim",
+      event_id: eventId,
+      code,
+    });
+    if (error) throw new Error(error.message);
+    if (!data?.ok || !data.claim) {
+      throw new Error(data?.error || "Could not apply promoter discount");
+    }
+    return {
+      code: data.claim.code,
+      customerDiscountBps: data.claim.customerDiscountBps,
+      promoterCommissionBps: data.claim.promoterCommissionBps,
+    };
+  },
+
   /** Ranked by net ledger earnings — single ledger query server-side. */
   async leaderboard(eventId: number): Promise<PromoterLeaderboardRow[]> {
     const { data, error } = await invokeEdge<{
