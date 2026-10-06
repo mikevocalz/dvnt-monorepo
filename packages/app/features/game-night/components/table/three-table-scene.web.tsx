@@ -16,6 +16,7 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { GameTable } from "./game-table.web";
 import type { GameTableProps, TableCard } from "./types";
+import { isCommitDrag } from "./table-logic";
 import {
   cookoutFontsReady,
   renderCookoutFace,
@@ -112,6 +113,18 @@ class CookoutTable3D {
   private dealOrder = 0;
   /** Horizontal spread squeeze on narrow/portrait viewports (1 = full). */
   private layoutScale = 1;
+  private tableResources: Array<{ dispose(): void }> = [];
+  private reducedMotion = false;
+  private pointer = { x: 0, y: 0 };
+  private cameraBase = { x: 0, y: 0, z: 0 };
+  private drag: {
+    rig: CardRig;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    pointerId: number;
+  } | null = null;
+  private suppressClickUntil = 0;
 
   async init(container: HTMLDivElement) {
     const THREE = (this.THREE = await import("three"));
@@ -119,6 +132,7 @@ class CookoutTable3D {
       "three/examples/jsm/geometries/RoundedBoxGeometry.js"
     );
     this.gsap = (await import("gsap")).gsap;
+    this.reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     if (this.disposed) return;
     await cookoutFontsReady();
     if (this.disposed) return;
@@ -181,7 +195,11 @@ class CookoutTable3D {
     this.clock = new THREE.Clock();
 
     const canvas = this.renderer.domElement;
+    canvas.style.touchAction = "none";
     canvas.addEventListener("pointermove", this.onPointerMove);
+    canvas.addEventListener("pointerdown", this.onPointerDown);
+    canvas.addEventListener("pointerup", this.onPointerUp);
+    canvas.addEventListener("pointercancel", this.onPointerCancel);
     canvas.addEventListener("pointerleave", this.onPointerLeave);
     canvas.addEventListener("click", this.onClick);
 
@@ -228,11 +246,49 @@ class CookoutTable3D {
     );
     const dir = new THREE.Vector3(0, 8.9, 10.1).normalize();
     this.camera.position.set(dir.x * dist, dir.y * dist + 0.1, dir.z * dist);
+    this.cameraBase = {
+      x: this.camera.position.x,
+      y: this.camera.position.y,
+      z: this.camera.position.z,
+    };
     this.camera.lookAt(0, 0, 0.1);
   }
 
   private buildTable() {
     const THREE = this.THREE;
+
+    // A dimensional DVNT rail lives below the felt. Keeping the felt at y=0
+    // means all existing card target heights remain physically correct.
+    const baseGeo = new THREE.BoxGeometry(TABLE_W + 0.9, 0.42, TABLE_H + 0.9, 4, 1, 4);
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x160d21,
+      metalness: 0.52,
+      roughness: 0.34,
+    });
+    const base = new THREE.Mesh(baseGeo, baseMat);
+    base.position.y = -0.23;
+    base.receiveShadow = true;
+    base.castShadow = true;
+    this.scene.add(base);
+    this.tableResources.push(baseGeo, baseMat);
+
+    const floorGeo = new THREE.PlaneGeometry(42, 30);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x050509,
+      roughness: 1,
+      metalness: 0,
+    });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.47;
+    floor.receiveShadow = true;
+    this.scene.add(floor);
+    this.tableResources.push(floorGeo, floorMat);
+
+    const underglow = new THREE.PointLight(0x8a40cf, 2.2, 15, 2);
+    underglow.position.set(0, -0.1, 0.4);
+    this.scene.add(underglow);
+
     // Felt: rounded-rect plane with a canvas-drawn radial gradient + rail.
     const c = document.createElement("canvas");
     c.width = 1024;
@@ -261,6 +317,7 @@ class CookoutTable3D {
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
+    this.tableResources.push(tex);
     const shape = new THREE.Shape();
     const w = TABLE_W / 2;
     const h = TABLE_H / 2;
@@ -280,13 +337,17 @@ class CookoutTable3D {
     for (let i = 0; i < uv.count; i++) {
       uv.setXY(i, (uv.getX(i) + w) / TABLE_W, (uv.getY(i) + h) / TABLE_H);
     }
-    const table = new THREE.Mesh(
-      geo,
-      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }),
-    );
+    const feltMat = new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: 0.9,
+      metalness: 0.02,
+    });
+    const table = new THREE.Mesh(geo, feltMat);
     table.rotation.x = -Math.PI / 2;
+    table.position.y = 0.002;
     table.receiveShadow = true;
     this.scene.add(table);
+    this.tableResources.push(geo, feltMat);
   }
 
   private async loadBackTexture() {
@@ -458,6 +519,13 @@ class CookoutTable3D {
     rig.targetScale = scale;
     const delay = rig.fresh ? (this.dealOrder++ * 0.06) : 0;
     rig.fresh = false;
+    if (this.reducedMotion) {
+      rig.group.position.copy(rig.targetPos);
+      rig.group.rotation.x = rig.targetRot.x;
+      rig.group.rotation.y = rig.targetRot.y;
+      rig.group.scale.setScalar(rig.targetScale);
+      return;
+    }
     this.dealTo(rig, delay);
   }
 
@@ -517,6 +585,12 @@ class CookoutTable3D {
   /** Hover affordance — lift + grow without re-flying the card. */
   private hoverTo(rig: CardRig, on: boolean) {
     rig.hoverLift = on;
+    if (this.reducedMotion) {
+      rig.group.position.y = rig.targetPos.y + (on ? 0.16 : 0);
+      const scale = rig.targetScale * (on ? 1.03 : 1);
+      rig.group.scale.setScalar(scale);
+      return;
+    }
     const gsap = this.gsap;
     gsap.to(rig.group.position, {
       y: rig.targetPos.y + (on ? 0.3 : 0),
@@ -783,6 +857,26 @@ class CookoutTable3D {
   private lastRaycast = 0;
 
   private onPointerMove = (e: PointerEvent) => {
+    const canvas = this.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    this.pointer.x = ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+    this.pointer.y = -(((e.clientY - rect.top) / Math.max(1, rect.height)) * 2 - 1);
+
+    if (this.drag) {
+      const dx = e.clientX - this.drag.startX;
+      const dy = e.clientY - this.drag.startY;
+      this.drag.moved ||= Math.hypot(dx, dy) > 6;
+      const rig = this.drag.rig;
+      const xOffset = (dx / Math.max(1, rect.width)) * 8 * this.layoutScale;
+      const zOffset = (dy / Math.max(1, rect.height)) * 5;
+      rig.group.position.x = rig.targetPos.x + xOffset;
+      rig.group.position.z = rig.targetPos.z + zOffset;
+      rig.group.position.y =
+        rig.targetPos.y + 0.28 + Math.max(0, (-dy / Math.max(1, rect.height)) * 1.8);
+      rig.group.scale.setScalar(rig.targetScale * 1.06);
+      return;
+    }
+
     // ~30fps cap on hover raycasts — every event is a full scene intersection.
     const now = performance.now();
     if (now - this.lastRaycast < 33) return;
@@ -794,11 +888,78 @@ class CookoutTable3D {
       this.hovered = id;
       if (prev) this.hoverTo(prev, false);
       if (rig) this.hoverTo(rig, true);
-      this.renderer.domElement.style.cursor = id ? "pointer" : "default";
+      this.renderer.domElement.style.cursor = id ? "grab" : "default";
     }
   };
 
+  private onPointerDown = (e: PointerEvent) => {
+    const rig = this.pickZone(e.clientX, e.clientY);
+    if (!rig) return;
+    const draggable =
+      rig.key.startsWith("hand-") ||
+      (rig.key.startsWith("rev-") && this.props?.state === "judging");
+    if (!draggable) return;
+    this.renderer.domElement.setPointerCapture?.(e.pointerId);
+    this.drag = {
+      rig,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+      pointerId: e.pointerId,
+    };
+    this.renderer.domElement.style.cursor = "grabbing";
+    this.killRigTweens(rig);
+    rig.hoverLift = true;
+    rig.group.scale.setScalar(rig.targetScale * 1.06);
+  };
+
+  private finishDrag = (commit: boolean) => {
+    const drag = this.drag;
+    if (!drag) return;
+    this.drag = null;
+    this.renderer.domElement.releasePointerCapture?.(drag.pointerId);
+    this.renderer.domElement.style.cursor = "default";
+
+    if (commit && this.props) {
+      this.suppressClickUntil = performance.now() + 250;
+      if (drag.rig.key.startsWith("hand-")) {
+        const cardId = drag.rig.group.userData.cardId as string;
+        if (this.props.state === "duel") this.props.onDuelPick?.(cardId);
+        else this.props.onSelectCard(cardId);
+      } else if (
+        drag.rig.key.startsWith("rev-") &&
+        this.props.state === "judging"
+      ) {
+        this.props.onPickWinner(Number(drag.rig.key.slice(4)));
+      }
+    }
+
+    drag.rig.hoverLift = false;
+    if (this.reducedMotion) {
+      drag.rig.group.position.copy(drag.rig.targetPos);
+      drag.rig.group.scale.setScalar(drag.rig.targetScale);
+    } else {
+      this.dealTo(drag.rig, 0);
+    }
+  };
+
+  private onPointerUp = (e: PointerEvent) => {
+    const drag = this.drag;
+    if (!drag) return;
+    const commit =
+      drag.moved &&
+      isCommitDrag(drag.startX, drag.startY, e.clientX, e.clientY);
+    this.finishDrag(commit);
+  };
+
+  private onPointerCancel = (e: PointerEvent) => {
+    this.finishDrag(false);
+  };
+
   private onPointerLeave = () => {
+    this.pointer.x = 0;
+    this.pointer.y = 0;
+    if (this.drag) return;
     const prev = this.hovered ? this.cards.get(this.hovered) : null;
     this.hovered = null;
     if (prev) this.hoverTo(prev, false);
@@ -806,6 +967,7 @@ class CookoutTable3D {
   };
 
   private onClick = (e: MouseEvent) => {
+    if (performance.now() < this.suppressClickUntil) return;
     const rig = this.pickZone(e.clientX, e.clientY);
     if (!rig || !this.props) return;
     if (rig.key.startsWith("hand-")) {
@@ -826,7 +988,15 @@ class CookoutTable3D {
     if (this.winnerGlow.visible) {
       const t = this.clock.elapsedTime;
       (this.winnerGlow.material as import("three").MeshBasicMaterial).opacity =
-        0.55 + Math.sin(t * 5) * 0.3;
+        this.reducedMotion ? 0.72 : 0.55 + Math.sin(t * 5) * 0.3;
+    }
+    if (!this.reducedMotion) {
+      const targetX = this.cameraBase.x + this.pointer.x * 0.28;
+      const targetY = this.cameraBase.y + this.pointer.y * 0.12;
+      this.camera.position.x += (targetX - this.camera.position.x) * 0.055;
+      this.camera.position.y += (targetY - this.camera.position.y) * 0.055;
+      this.camera.position.z += (this.cameraBase.z - this.camera.position.z) * 0.055;
+      this.camera.lookAt(this.pointer.x * 0.12, 0, 0.1 - this.pointer.y * 0.05);
     }
     this.renderer.render(this.scene, this.camera);
   };
@@ -838,6 +1008,9 @@ class CookoutTable3D {
     if (!this.renderer) return;
     const canvas = this.renderer.domElement;
     canvas.removeEventListener("pointermove", this.onPointerMove);
+    canvas.removeEventListener("pointerdown", this.onPointerDown);
+    canvas.removeEventListener("pointerup", this.onPointerUp);
+    canvas.removeEventListener("pointercancel", this.onPointerCancel);
     canvas.removeEventListener("pointerleave", this.onPointerLeave);
     canvas.removeEventListener("click", this.onClick);
     for (const [, rig] of this.cards) {
@@ -854,6 +1027,12 @@ class CookoutTable3D {
     this.planeGeo?.dispose();
     this.edgeMat?.dispose();
     this.backTex?.dispose();
+    this.tableResources.forEach((resource) => resource.dispose());
+    this.tableResources = [];
+    const winnerMat = this.winnerGlow?.material as import("three").MeshBasicMaterial | undefined;
+    winnerMat?.map?.dispose();
+    winnerMat?.dispose();
+    this.winnerGlow?.geometry.dispose();
     canvas.parentElement?.removeChild(canvas);
     this.renderer.dispose();
     this.renderer.forceContextLoss();

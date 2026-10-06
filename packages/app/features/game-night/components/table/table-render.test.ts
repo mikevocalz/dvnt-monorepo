@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { layoutSeats, orderReveal, toggleSelection } from "./table-logic.ts";
+import { isCommitDrag, layoutSeats, orderReveal, toggleSelection } from "./table-logic.ts";
 
 const members = [
   { user_id: "b", name: "B", avatar: "", seat_no: 2 },
@@ -31,4 +31,11 @@ test("selection toggles and obeys prompt pick bound", () => {
   assert.deepEqual(toggleSelection(["a"], "b", 1), ["a"]);
   assert.deepEqual(toggleSelection(["a"], "a", 1), []);
   assert.deepEqual(toggleSelection([], "a", 0), []);
+});
+
+
+test("drag-to-table requires deliberate upward movement", () => {
+  assert.equal(isCommitDrag(100, 300, 103, 280), false);
+  assert.equal(isCommitDrag(100, 300, 130, 250), true);
+  assert.equal(isCommitDrag(100, 300, 145, 310), false);
 });
