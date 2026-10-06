@@ -80,6 +80,7 @@
     },
     "onlyBuiltDependencies": [
       "@fishjam-cloud/react-native-webrtc",
+      "expo-callkit-telecom",
       "@shopify/react-native-skia",
       "@swc/core",
       "esbuild",

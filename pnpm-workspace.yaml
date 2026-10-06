@@ -3,5 +3,6 @@ packages:
   - packages/*
 
 onlyBuiltDependencies:
+  - expo-callkit-telecom
   - sharp
   - unrs-resolver
