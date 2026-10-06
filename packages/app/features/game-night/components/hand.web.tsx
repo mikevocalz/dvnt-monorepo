@@ -70,7 +70,7 @@ export function Hand({
       </h3>
       <p aria-live="polite" className="mt-1 text-xs text-white/60">
         {selected.length === 0
-          ? "Tap a card — on the table below or in this list — to select it."
+          ? "Tap a card, or drag it up toward the table, to select it."
           : `${selected.length} of ${pick} selected`}
       </p>
       <ul className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
