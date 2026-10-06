@@ -35,6 +35,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 import {
   eventAnalyticsApi,
+  resolveAttendanceBreakdown,
   attendeesToCsv,
   type EventAnalyticsSummary,
 } from "@dvnt/app/lib/api/event-analytics";
