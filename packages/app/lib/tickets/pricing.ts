@@ -275,6 +275,21 @@ export function filterBuyerVisibleTiers<
   return { visible, hasLockedTiers };
 }
 
+/**
+ * Choose the tier a buyer should land on before they make an explicit choice.
+ * A paid event must not silently default to a $0 comp/special tier when a paid
+ * admission tier is available. Free events keep the first available tier.
+ */
+export function pickDefaultBuyerTier<T>(
+  tiers: T[],
+  eventIsPaid: boolean,
+  priceCents: (tier: T) => number,
+): T | undefined {
+  if (tiers.length === 0) return undefined;
+  if (!eventIsPaid) return tiers[0];
+  return tiers.find((tier) => priceCents(tier) > 0) ?? tiers[0];
+}
+
 // ── Add-on availability / eligibility (client PREVIEW of the checks
 //    cart_create_hold enforces under FOR UPDATE — server stays authoritative) ──
 
