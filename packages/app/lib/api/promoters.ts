@@ -12,6 +12,7 @@
  */
 
 import { invokeEdge } from "./invoke-edge";
+import { canonicalPromoterEventLink } from "../events/promoter-share";
 
 export type PromoterStatus = "invited" | "active" | "paused" | "removed";
 
@@ -73,7 +74,7 @@ export function promoterShareLink(
   eventId: string | number,
   code: string,
 ): string {
-  return `https://dvntapp.live/e/${eventId}?ref=${encodeURIComponent(code)}`;
+  return canonicalPromoterEventLink(eventId, code);
 }
 
 export const promotersApi = {
