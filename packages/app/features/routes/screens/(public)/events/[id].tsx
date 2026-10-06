@@ -93,19 +93,38 @@ function PublicEventDetailContent() {
         (rawRef ? String(rawRef) : null) ??
         usePromoterRefStore.getState().getRef(eventId);
       const numericEventId = Number(eventId);
-      if (code && Number.isInteger(numericEventId) && numericEventId > 0) {
-        void promotersApi
-          .claimRef(numericEventId, code)
-          .then((claim) => {
-            setPromoterRef(
-              eventId,
-              claim.code,
-              claim.customerDiscountBps,
-            );
-          })
-          .catch((error) => {
-            console.warn("[PublicEventDetail] promoter ref claim failed:", error);
-          });
+      if (Number.isInteger(numericEventId) && numericEventId > 0) {
+        if (code) {
+          void promotersApi
+            .claimRef(numericEventId, code)
+            .then((claim) => {
+              setPromoterRef(
+                eventId,
+                claim.code,
+                claim.customerDiscountBps,
+              );
+            })
+            .catch((error) => {
+              console.warn("[PublicEventDetail] promoter ref claim failed:", error);
+            });
+        } else {
+          void promotersApi
+            .getClaim(numericEventId)
+            .then((claim) => {
+              if (!claim) return;
+              setPromoterRef(
+                eventId,
+                claim.code,
+                claim.customerDiscountBps,
+              );
+            })
+            .catch((error) => {
+              console.warn(
+                "[PublicEventDetail] promoter claim hydrate failed:",
+                error,
+              );
+            });
+        }
       }
     }
   }, [eventId, isAuthenticated, params.ref, setPromoterRef]);
