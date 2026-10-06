@@ -8,6 +8,13 @@ import { useRoomPresence } from "../use-room-presence";
 import { duelPick, endRoom, fetchRoomMessages, judgePick, leaveRoom, sendRoomMessage, setReady, startMatch, submitCards, takeSeat, type GameNightMessage } from "../rooms-api";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { RoomReactionDock } from "../components/room-reaction-dock.native";
+import { RoomReactionOverlay } from "../components/room-reaction-overlay.native";
+import {
+  createRoomReactionEvent,
+  emitRoomReaction,
+  isRoomReactionEmoji,
+} from "../motion/room-reactions";
 
 const Button = ({label, onPress, disabled = false}:{label:string;onPress:()=>void;disabled?:boolean}) => <Pressable disabled={disabled} onPress={onPress} className={`items-center rounded-full px-5 py-3 ${disabled ? "bg-secondary" : "bg-primary"}`}><Text className="font-bold text-white">{label}</Text></Pressable>;
 
@@ -29,6 +36,7 @@ export default function GameNightRoomScreen() {
   // Live chat on native too — without a subscription the sheet only refreshes
   // when the local user sends.
   const roomId = state?.room.id ?? null;
+  const myUserId = state?.me.user_id ?? null;
   useEffect(() => {
     if (!roomId) return;
     const channel = freshChannel(`game-night-chat-native:${roomId}`)
@@ -37,10 +45,39 @@ export default function GameNightRoomScreen() {
         schema: "public",
         table: "game_night_messages",
         filter: `room_id=eq.${roomId}`,
-      }, () => void loadMessages())
+      }, (payload) => {
+        const row = payload.new as {
+          id?: number;
+          user_id?: string;
+          kind?: string;
+          reaction?: string | null;
+          created_at?: string;
+        };
+        if (
+          row.kind === "reaction" &&
+          row.reaction &&
+          row.user_id &&
+          row.user_id !== myUserId &&
+          isRoomReactionEmoji(row.reaction)
+        ) {
+          emitRoomReaction(
+            createRoomReactionEvent({
+              id: `remote-native-${row.id ?? Date.now()}`,
+              roomId,
+              userId: row.user_id,
+              emoji: row.reaction,
+              isMine: false,
+              createdAt: row.created_at
+                ? Date.parse(row.created_at) || Date.now()
+                : Date.now(),
+            }),
+          );
+        }
+        void loadMessages();
+      })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [roomId, loadMessages]);
+  }, [roomId, myUserId, loadMessages]);
 
   // Selection is per-round; stale card ids must not carry into the next deal.
   const roundId = state?.round?.id ?? null;
@@ -64,7 +101,11 @@ export default function GameNightRoomScreen() {
   const seats = [0,1,2,3].map(n => members.find(m => m.seat_no === n));
   const scoreName = (id:string) => members.find(m => m.user_id === id)?.name ?? "Player";
   return <View className="flex-1 bg-background pt-12">
+    <RoomReactionOverlay roomId={state.room.id} />
     <View className="flex-row items-center justify-between px-5 pb-3"><View><Text className="text-2xl font-black text-foreground">Game Night</Text><Text className="text-muted-foreground">Room {code} · {me.role === "watcher" ? "Watching" : `Seat ${(me.seat_no ?? 0) + 1}`}</Text></View><Pressable onPress={leave}><Text className="font-bold text-red-500">Leave</Text></Pressable></View>
+    <View className="items-end px-5 pb-3">
+      <RoomReactionDock code={code} roomId={state.room.id} userId={me.user_id} />
+    </View>
     <ScrollView className="flex-1 px-5" contentContainerStyle={{paddingBottom:150}}>
       {commandError ? <Text className="mb-3 text-red-500">{commandError}</Text> : null}
       <View className="flex-row flex-wrap justify-between">{seats.map((member, i) => <View key={i} className="mb-3 w-[48%] rounded-2xl border border-border bg-secondary p-4"><Text className="font-bold text-foreground">{member?.name ?? `Open seat ${i+1}`}</Text><Text className={member?.ready ? "text-green-500" : "text-muted-foreground"}>{member ? (member.ready ? "Ready" : "Not ready") : "Available"}</Text>{me.is_host && member && member.user_id !== me.user_id && !match ? <Pressable onPress={() => void act(() => import("../rooms-api").then(x => x.kickMember(code, member.user_id)))}><Text className="mt-2 text-xs text-red-500">Remove</Text></Pressable> : null}</View>)}</View>
