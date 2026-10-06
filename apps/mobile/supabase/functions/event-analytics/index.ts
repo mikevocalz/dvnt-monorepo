@@ -185,6 +185,7 @@ Deno.serve(async (req: Request) => {
     const [
       financialsRes,
       ticketsRes,
+      rsvpRes,
       tierRes,
       promoRes,
     ] = await Promise.all([
@@ -197,8 +198,13 @@ Deno.serve(async (req: Request) => {
         .maybeSingle(),
       supabase
         .from("tickets")
-        .select("id, ticket_type_id, status, checked_in_at, purchase_amount_cents")
+        .select("id, user_id, ticket_type_id, status, checked_in_at, purchase_amount_cents")
         .eq("event_id", eventIdNum),
+      supabase
+        .from("event_rsvps")
+        .select("user_id,status")
+        .eq("event_id", eventIdNum)
+        .eq("status", "going"),
       supabase
         .from("ticket_types")
         .select(
@@ -216,6 +222,7 @@ Deno.serve(async (req: Request) => {
 
     const financials = financialsRes.data;
     const { data: ticketRows, error: ticketsErr } = ticketsRes;
+    const { data: rsvpRows, error: rsvpErr } = rsvpRes;
     const { data: tierRows } = tierRes;
     const { data: promoRows } = promoRes;
 
@@ -228,12 +235,13 @@ Deno.serve(async (req: Request) => {
       calculatedAt: financials?.calculated_at ?? null,
     };
 
-    if (ticketsErr) {
-      console.error("[event-analytics] tickets error:", ticketsErr);
-      return errorResponse("Ticket stats failed", 500);
+    if (ticketsErr || rsvpErr) {
+      console.error("[event-analytics] attendance stats error:", ticketsErr || rsvpErr);
+      return errorResponse("Attendance stats failed", 500);
     }
 
     const tickets = ticketRows || [];
+    const goingRsvps = rsvpRows || [];
     // A ticket counts as checked-in if EITHER checked_in_at is set OR the
     // status is "scanned" — some code paths set only one.
     let checkedIn = 0;
@@ -256,6 +264,28 @@ Deno.serve(async (req: Request) => {
       refunded,
       void: voidCount,
       transferPending,
+    };
+
+    // Host-only attendance breakdown. Public surfaces continue to show one
+    // "going" total; organizers get the source split here.
+    const validStatuses = new Set(["active", "scanned", "transfer_pending"]);
+    const validTickets = tickets.filter((t: any) => validStatuses.has(t.status));
+    const validTicketUserIds = new Set(
+      validTickets
+        .map((t: any) => typeof t.user_id === "string" ? t.user_id : null)
+        .filter(Boolean),
+    );
+    const paidTicketCount = validTickets.filter(
+      (t: any) => Number(t.purchase_amount_cents || 0) > 0,
+    ).length;
+    const rsvpCount = goingRsvps.length;
+    const rsvpOnlyCount = goingRsvps.filter(
+      (r: any) => !validTicketUserIds.has(r.user_id),
+    ).length;
+    const attendanceBreakdown = {
+      rsvp: rsvpCount,
+      paid: paidTicketCount,
+      total: validTickets.length + rsvpOnlyCount,
     };
 
     // ── 3. Per-tier breakdown ──
@@ -306,6 +336,7 @@ Deno.serve(async (req: Request) => {
       title: event.title || "",
       revenue,
       ticketStats,
+      attendanceBreakdown,
       tiers,
       promoCodes,
     });
