@@ -61,6 +61,7 @@ import Animated, {
 import { useEventViewStore } from "@dvnt/app/lib/stores/event-store";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
@@ -333,16 +334,25 @@ function EventDetailScreenContent() {
   );
   const eventId = normalizedParams.id || "";
 
-  // Promoter attribution (WS-4): capture ?ref=CODE from a tracked share
-  // deep link into the MMKV-persisted store so the app-switch to Stripe
-  // can't lose it. Checkout kickoffs forward it as promoter_code;
-  // pricing is never affected.
+  // A tracked promoter ref follows the buyer into checkout and is also bound
+  // to the signed-in account, so login/navigation/device changes do not drop
+  // the discount. Server checkout revalidates the active promoter policy.
   const setPromoterRef = usePromoterRefStore((s) => s.setRef);
   useEffect(() => {
     const rawRef = Array.isArray(rawParams.ref)
       ? rawParams.ref[0]
       : rawParams.ref;
     if (eventId && rawRef) setPromoterRef(eventId, String(rawRef));
+
+    const code =
+      (rawRef ? String(rawRef) : null) ??
+      (eventId ? usePromoterRefStore.getState().getRef(eventId) : null);
+    const numericEventId = Number(eventId);
+    if (code && Number.isInteger(numericEventId) && numericEventId > 0) {
+      void promotersApi.claimRef(numericEventId, code).catch((error) => {
+        console.warn("[EventDetail] promoter ref claim failed:", error);
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId, rawParams.ref, setPromoterRef]);
 
