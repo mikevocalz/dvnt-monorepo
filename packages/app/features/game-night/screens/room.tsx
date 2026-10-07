@@ -161,6 +161,7 @@ export default function GameNightRoomScreen() {
       index={-1}
       snapPoints={snapPoints}
       enablePanDownToClose
+      enableDynamicSizing={false}
       keyboardBehavior="interactive"
       keyboardBlurBehavior="restore"
       android_keyboardInputMode="adjustResize"
@@ -187,7 +188,14 @@ export default function GameNightRoomScreen() {
             onChangeText={setDraft}
             placeholder="Message the table"
             placeholderTextColor="#737373"
-            className="flex-1 rounded-full bg-black px-4 py-3 text-white"
+            style={{
+              flex: 1,
+              borderRadius: 999,
+              backgroundColor: "#000",
+              color: "#fff",
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+            }}
           />
           <Pressable
             onPress={send}
