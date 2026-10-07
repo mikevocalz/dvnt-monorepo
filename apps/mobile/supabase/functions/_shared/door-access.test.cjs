@@ -6,7 +6,7 @@ const { harness } = require('./payment-safety.test.cjs');
 
 function fixture({ user = 'member', role, accepted = true, membershipEvent = 1,
   membershipUser = user, expired = false, revoked = false, sessionError = false,
-  order, eventDates } = {}) {
+  order, eventDates, terminalLocation } = {}) {
   const reads = [];
   const writes = [];
   const rows = {
@@ -26,7 +26,9 @@ function fixture({ user = 'member', role, accepted = true, membershipEvent = 1,
     orders: order ? [order] : [],
     order_timeline: [],
     // terminal-token reads the platform Location mapping.
-    event_terminal_locations: [],
+    event_terminal_locations: terminalLocation
+      ? [{ event_id: 1, stripe_location_id: terminalLocation }]
+      : [],
   };
   return { reads, writes, database: { from(table) {
     reads.push(table);
@@ -158,6 +160,8 @@ for (const scenario of [
     eventDates: closedEvent, status: 400 },
   { name: 'sell inside cutoff refused', action: 'sell',
     eventDates: closedEvent, status: 400 },
+  { name: 'Tap to Pay quote inside CNP cutoff allowed', action: 'quote_terminal',
+    eventDates: closedEvent, status: 200 },
   { name: 'quote past end refused', action: 'quote',
     eventDates: { end_date: new Date(Date.now() - 60_000).toISOString() }, status: 400 },
   // No end_date → assumed start+6h run, so doors in 10 min still sells
@@ -200,6 +204,8 @@ for (const scenario of [
 // configured Terminal Location get 409, not a token.
 for (const scenario of [
   { name: 'terminal-token owner without location', user: 'owner', status: 409 },
+  { name: 'terminal-token location lookup does not mint a token', user: 'owner',
+    terminalLocation: 'tml_fixture', action: 'location', status: 200 },
   { name: 'terminal-token outsider', role: 'outsider', status: 403 },
   { name: 'terminal-token missing token', token: '', status: 401 },
 ]) {
@@ -208,8 +214,9 @@ for (const scenario of [
     f.database = { from: f.database.from, rpc: f.database.rpc };
     const h = harness({ database: f.database,
       dependencyOverrides: { 'verify-session.ts': undefined } });
-    const response = await h.invoke('terminal-token', { event_id: 1 },
-      { 'x-auth-token': scenario.token ?? 'fixture-token' });
+    const response = await h.invoke('terminal-token', {
+      event_id: 1, ...(scenario.action ? { action: scenario.action } : {}),
+    }, { 'x-auth-token': scenario.token ?? 'fixture-token' });
     assert.equal(response.status, scenario.status, await response.text());
     assert.equal(h.requests.length, 0, 'No Stripe request before authz/location');
     assert.equal(h.writes.length, 0);
