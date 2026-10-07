@@ -6,12 +6,12 @@
  *     promoter_code?, promo_code? }
  *     → server quote only: { quote }. Creates nothing.
  *
- *   { action: "sell", event_id, ticket_type_id, quantity,
+ *   { action: "sell" | "sell_terminal", event_id, ticket_type_id, quantity,
  *     guest_email, guest_name?, promoter_code?, promo_code? }
  *     → creates atomic ticket hold + PaymentIntent + payment_pending
  *       order; returns { clientSecret, publishableKey, quote, order_id }.
- *       Zero-total orders take the secure free path: guest tickets are
- *       issued immediately with no Stripe object ("No charge").
+ *       "sell" is card-not-present web checkout; "sell_terminal" is
+ *       card-present Tap to Pay. Zero-total orders take the secure free path.
  *
  * Money-path rules honored:
  *  - Staff only: host or accepted event_co_organizers (scanner+). The
@@ -122,9 +122,15 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       order_id,
     } = body;
 
-    if (!["quote", "sell", "status", "resend"].includes(action)) {
+    if (
+      !["quote", "quote_terminal", "sell", "sell_terminal", "status", "resend"]
+        .includes(action)
+    ) {
       return json(
-        { error: "action must be 'quote', 'sell', 'status' or 'resend'" },
+        {
+          error:
+            "action must be 'quote', 'quote_terminal', 'sell', 'sell_terminal', 'status' or 'resend'",
+        },
         400,
       );
     }
@@ -147,7 +153,10 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
     const trimmedGuestName =
       typeof guest_name === "string" ? guest_name.trim().slice(0, 120) : "";
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedGuestEmail);
-    if (action === "sell" && (!isValidEmail || trimmedGuestEmail.length > 254)) {
+    if (
+      (action === "sell" || action === "sell_terminal") &&
+      (!isValidEmail || trimmedGuestEmail.length > 254)
+    ) {
       return json(
         { error: "Enter an email to send the tickets to." },
         400,
@@ -423,11 +432,12 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       remaining,
     };
 
-    if (action === "quote") {
+    if (action === "quote" || action === "quote_terminal") {
       return json({ ok: true, quote, role: staffRole });
     }
 
-    // ── action === "sell" ──────────────────────────────────────────────
+    // ── action === "sell" | "sell_terminal" ───────────────────────────
+    const terminalSale = action === "sell_terminal";
 
     // Zero-total: secure free path — no Stripe object, real guest tickets.
     if (effectiveSubtotal === 0) {
@@ -556,21 +566,27 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       );
     }
 
-    // ── PaymentIntent — web rail: automatic_payment_methods only ──────
-    // Minted BEFORE the hold so the hold binds the real PI id in one
-    // write — a placeholder-then-rebind pattern can collide with another
-    // seller's concurrent hold on the same tier.
+    // ── PaymentIntent rail ─────────────────────────────────────────────
+    // Web uses automatic payment methods. Native Tap to Pay MUST create
+    // card_present and lets Terminal process+capture it on-device. Minted
+    // BEFORE the hold so the hold binds the real PI id atomically.
     let pi: any;
     try {
       pi = await stripeRequest("/payment_intents", {
         amount: fees.customer_charge_amount.toString(),
         currency: ticketType.currency || "usd",
-        "automatic_payment_methods[enabled]": "true",
+        ...(terminalSale
+          ? {
+              "payment_method_types[]": "card_present",
+              capture_method: "automatic",
+            }
+          : { "automatic_payment_methods[enabled]": "true" }),
         "transfer_data[destination]": organizer.stripe_account_id,
         application_fee_amount: fees.application_fee_amount.toString(),
         receipt_email: trimmedGuestEmail,
         "metadata[type]": "event_ticket",
         "metadata[is_door_sale]": "true",
+        "metadata[payment_rail]": terminalSale ? "terminal" : "web",
         "metadata[event_id]": event_id.toString(),
         "metadata[ticket_type_id]": ticket_type_id,
         "metadata[quantity]": quantity.toString(),
