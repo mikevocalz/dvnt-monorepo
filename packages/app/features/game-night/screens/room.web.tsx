@@ -42,7 +42,7 @@ import { Scoreboard } from "../components/scoreboard.web";
 import { RoomChat } from "../components/room-chat.web";
 import { RoomReactionDock } from "../components/room-reaction-dock.web";
 import { RoomReactionOverlay } from "../components/room-reaction-overlay.web";
-import { Countdown, PromptCard } from "../components/prompt-card.web";
+import { Countdown } from "../components/prompt-card.web";
 import { CommandError, useCommand } from "../components/use-command";
 import { RulesSheet } from "../components/rules-sheet.web";
 import { TableRenderer } from "../components/table";
@@ -234,14 +234,14 @@ export function GameNightRoomScreen() {
   const watcherMode = state?.me.role === "watcher";
 
   return (
-    <main className="min-h-dvh bg-[#06070d] px-6 py-8 text-white">
-      <div className="mx-auto w-full max-w-6xl">
-        <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
+    <main className="min-h-dvh overflow-x-clip bg-[#06070d] px-3 pb-4 pt-4 text-white sm:px-6 sm:py-8">
+      <div className="mx-auto w-full max-w-7xl">
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-white/10 bg-white/[0.035] p-3 shadow-[0_18px_50px_rgba(0,0,0,.24)] backdrop-blur-xl sm:gap-x-4 sm:gap-y-3 sm:p-4">
           <span className="inline-flex items-center gap-2 rounded-full border border-[#8A40CF]/40 bg-[#8A40CF]/10 px-3 py-1 text-xs font-medium tracking-wide text-[#C9A2F0]">
             <Gamepad2 aria-hidden className="h-3.5 w-3.5" />
             Game Night
           </span>
-          <p className="font-mono text-2xl font-semibold tracking-[0.18em]">
+          <p className="font-mono text-lg font-semibold tracking-[0.14em] sm:text-2xl sm:tracking-[0.18em]">
             {code}
           </p>
           <button
@@ -260,7 +260,7 @@ export function GameNightRoomScreen() {
           <p aria-live="polite" className="sr-only">
             {copied ? "Join link copied to clipboard" : ""}
           </p>
-          <span className="text-sm text-white/50">
+          <span className="text-xs text-white/50 sm:text-sm">
             {memberCount} {memberCount === 1 ? "person" : "people"} here
           </span>
           <button
@@ -272,7 +272,7 @@ export function GameNightRoomScreen() {
             <ScrollText aria-hidden className="h-3.5 w-3.5" />
             Rules
           </button>
-          <span className="flex-1" />
+          <span className="hidden flex-1 sm:block" />
           {round?.deadline_at && match?.status === "active" ? (
             <Countdown deadlineAt={round.deadline_at} />
           ) : null}
@@ -331,8 +331,8 @@ export function GameNightRoomScreen() {
           </div>
         ) : null}
 
-        <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_auto]">
-          <div className="space-y-8">
+        <div className="mt-4 grid min-w-0 gap-5 sm:mt-6 lg:mt-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-8">
+          <div className="min-w-0 space-y-5 sm:space-y-8">
             {status === "loading" || status === "idle" ? (
               <div aria-busy="true" className="space-y-3">
                 <div className="h-40 animate-pulse rounded-2xl bg-white/5" />
@@ -342,11 +342,26 @@ export function GameNightRoomScreen() {
               <EndedRoom />
             ) : (
               <>
+                {round?.prompt ? (
+                  <LivePrompt
+                    text={round.prompt.text}
+                    pick={round.prompt.pick}
+                    label={
+                      match?.mode === "duel"
+                        ? `Duel · round ${round.round_no}`
+                        : `Round ${round.round_no}`
+                    }
+                  />
+                ) : null}
+
                 {/* 3-D table scene: visible only during an active match. */}
                 {playing && round && !matchOver && round.prompt ? (
-                  <section aria-label="Table scene" className="relative overflow-hidden rounded-[28px]">
+                  <section
+                    aria-label="Table scene"
+                    className="relative min-w-0 overflow-hidden rounded-[24px] border border-white/10 bg-[#0c0914] shadow-[0_18px_55px_rgba(0,0,0,.32)] sm:rounded-[28px]"
+                  >
                     <RoomReactionOverlay roomId={state.room.id} />
-                    <div className="absolute left-3 top-3 z-40">
+                    <div className="relative z-40 flex justify-center border-b border-white/10 bg-[#080910]/88 p-2 backdrop-blur-md sm:absolute sm:left-3 sm:top-3 sm:block sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
                       <RoomReactionDock
                         code={code}
                         roomId={state.room.id}
@@ -387,23 +402,6 @@ export function GameNightRoomScreen() {
                       // pointer hits, so there's no double-fire.
                       interactive
                     />
-                  </section>
-                ) : null}
-
-                {/* Prompt anchors the table whenever a round is live. */}
-                {round?.prompt ? (
-                  <section aria-label="Prompt">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <PromptCard
-                        text={round.prompt.text}
-                        pick={round.prompt.pick}
-                        label={
-                          match?.mode === "duel"
-                            ? `Duel · round ${round.round_no}`
-                            : `Round ${round.round_no}`
-                        }
-                      />
-                    </div>
                   </section>
                 ) : null}
 
@@ -511,6 +509,39 @@ function buildTableMembers(
 }
 
 // ---------------------------------------------------------------------------
+
+function LivePrompt({
+  text,
+  pick,
+  label,
+}: {
+  text: string;
+  pick: number;
+  label: string;
+}) {
+  return (
+    <section
+      aria-label="Prompt"
+      className="rounded-2xl border border-[#8A40CF]/25 bg-[linear-gradient(135deg,rgba(138,64,207,.14),rgba(255,255,255,.035))] px-4 py-3 shadow-[0_12px_34px_rgba(0,0,0,.18)]"
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#C9A2F0]">
+            {label} · Prompt
+          </p>
+          <p className="mt-1 text-sm font-semibold leading-snug text-white sm:text-base">
+            {text}
+          </p>
+        </div>
+        {pick > 1 ? (
+          <span className="shrink-0 rounded-full border border-[#d9a419]/35 bg-[#d9a419]/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#f4d978]">
+            Pick {pick}
+          </span>
+        ) : null}
+      </div>
+    </section>
+  );
+}
 
 function EndedRoom() {
   return (
