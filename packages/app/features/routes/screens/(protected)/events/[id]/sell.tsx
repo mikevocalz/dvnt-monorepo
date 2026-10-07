@@ -241,7 +241,12 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      setPhase((p) => (p === "ready" ? "quoting" : p));
+      setPhase((p) =>
+        p === "creating" || p === "waiting_for_tap" || p === "fulfilling"
+          ? p
+          : "quoting",
+      );
+      setMessage("Getting total…");
       void doorApi
         .quote({
           eventId,
@@ -254,7 +259,7 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
           if (cancelled) return;
           setQuote(nextQuote);
           setPhase((p) => (p === "quoting" ? "ready" : p));
-          setMessage((m) => (m === "Getting total…" ? "Tap to Pay ready" : m));
+          setMessage("Tap to Pay ready");
         })
         .catch((error: Error) => {
           if (cancelled) return;
@@ -308,7 +313,7 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
   );
 
   const processTap = useCallback(
-    async (intent: PaymentIntent.Type) => {
+    async (intent: PaymentIntent.Type, fulfillmentOrderId: string | null = orderId) => {
       setPhase("waiting_for_tap");
       setMessage("Tap card, Apple Pay, or Google Pay on this phone");
       const processed = await processPaymentIntent({
@@ -332,7 +337,7 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
       }
 
       setPendingIntent(null);
-      await waitForFulfillment(orderId);
+      await waitForFulfillment(fulfillmentOrderId);
     },
     [orderId, processPaymentIntent, waitForFulfillment],
   );
@@ -374,7 +379,7 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
         throw retrieved.error || new Error("Payment could not be loaded.");
       }
       setPendingIntent(retrieved.paymentIntent);
-      await processTap(retrieved.paymentIntent);
+      await processTap(retrieved.paymentIntent, sale.order_id ?? null);
     } catch (error: any) {
       setPhase("error");
       setMessage(error?.message || "Sale could not be completed.");
