@@ -35,6 +35,7 @@ import {
   BarChart3,
   Megaphone,
   Undo2,
+  Contactless,
 } from "lucide-react-native";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
@@ -373,6 +374,29 @@ function EventOrganizerScreenContent() {
           <QrCode size={20} color="#fff" />
           <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
             Scan QR Code
+          </Text>
+        </Pressable>
+
+        {/* Native card-present checkout — phone becomes the contactless reader. */}
+        <Pressable
+          onPress={() =>
+            router.push(`/(protected)/events/${eventId}/sell` as any)
+          }
+          style={{
+            backgroundColor: "rgba(55,158,216,0.14)",
+            borderWidth: 1,
+            borderColor: "rgba(55,158,216,0.45)",
+            paddingVertical: 16,
+            borderRadius: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          }}
+        >
+          <Contactless size={21} color="#7fd4ff" />
+          <Text style={{ color: "#7fd4ff", fontSize: 16, fontWeight: "700" }}>
+            Sell Tickets · Tap to Pay
           </Text>
         </Pressable>
 
