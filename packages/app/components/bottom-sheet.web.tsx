@@ -36,6 +36,8 @@ export interface BottomSheetProps {
   footer?: React.ReactNode;
   /** Tailwind max-width for the centered panel. Default "max-w-3xl". */
   maxWidthClass?: string;
+  /** Height/max-height classes for the panel. Default keeps the generic 92vh cap. */
+  heightClass?: string;
 }
 
 export function BottomSheet({
@@ -45,6 +47,7 @@ export function BottomSheet({
   children,
   footer,
   maxWidthClass = "max-w-3xl",
+  heightClass = "max-h-[92vh]",
 }: BottomSheetProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef({ startY: 0, dy: 0, dragging: false });
@@ -123,7 +126,7 @@ export function BottomSheet({
       <div
         ref={panelRef}
         onClick={(e) => e.stopPropagation()}
-        className={`absolute bottom-0 left-0 right-0 mx-auto flex max-h-[92vh] w-full ${maxWidthClass} flex-col rounded-t-3xl border border-white/10 bg-[#101321] text-white shadow-2xl`}
+        className={`absolute bottom-0 left-0 right-0 mx-auto flex w-full ${maxWidthClass} ${heightClass} flex-col rounded-t-3xl border border-white/10 bg-[#101321] text-white shadow-2xl`}
         style={{ willChange: "transform" }}
       >
         {/* Grab handle — the drag target. touch-action:none so vertical drags
