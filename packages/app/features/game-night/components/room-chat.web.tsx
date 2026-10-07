@@ -21,6 +21,7 @@ import {
   useState,
 } from "react";
 import { ImagePlay, Loader2, MessageSquare, SendHorizonal } from "lucide-react";
+import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { fetchRoomMessages, sendRoomMessage } from "../rooms-api";
 import { KlipyGifPicker, type GifPayload } from "./game-night-klipy.web";
@@ -79,21 +80,9 @@ export function RoomChat({ state }: { state: GameNightState }) {
   const roomId = state.room.id;
   const myId = state.me.user_id;
 
-  // Collapse preference persists; below lg the panel starts closed so the
-  // table owns the screen.
-  const [open, setOpen] = useState(() => {
-    if (typeof window === "undefined") return true;
-    const saved = window.localStorage.getItem("gn-chat-open");
-    if (saved != null) return saved === "1";
-    return window.innerWidth >= 1024;
-  });
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("gn-chat-open", open ? "1" : "0");
-    } catch {
-      /* private mode — pref just won't persist */
-    }
-  }, [open]);
+  // Chat is intentionally closed until summoned. It is a bottom-sheet surface,
+  // never a persistent sidebar competing with the game table.
+  const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<ChatRow[]>([]); // oldest -> newest
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -290,32 +279,100 @@ export function RoomChat({ state }: { state: GameNightState }) {
   const visibleRows = rows.filter((r) => r.kind !== "reaction");
 
   return (
-    <section
-      aria-label="Room chat"
-      className={`flex flex-col rounded-2xl border border-white/10 bg-white/4 ${
-        open ? "w-full lg:w-90" : "w-full lg:w-48"
-      }`}
-    >
+    <>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(true)}
+        aria-label="Open table chat"
+        aria-haspopup="dialog"
         aria-expanded={open}
-        className="flex items-center justify-between px-4 py-3 text-sm font-semibold text-white"
+        className="fixed bottom-[calc(env(safe-area-inset-bottom)+104px)] right-4 z-[1200] inline-flex h-12 items-center gap-2 rounded-full border border-[#8A40CF]/45 bg-[#151020]/95 px-4 text-sm font-semibold text-white shadow-[0_14px_38px_rgba(0,0,0,.42)] backdrop-blur-xl transition hover:bg-[#1d162b] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0] lg:bottom-6 lg:right-6"
       >
-        <span className="inline-flex items-center gap-2">
-          <MessageSquare aria-hidden className="h-4 w-4 text-[#C9A2F0]" />
-          Chat
-        </span>
-        <span className="text-xs text-white/40">{open ? "Hide" : "Show"}</span>
+        <MessageSquare aria-hidden className="h-4 w-4 text-[#C9A2F0]" />
+        Chat
       </button>
 
-      {open ? (
-        <>
-          {/* Recent reactions ride as chips over the divider. */}
+      <BottomSheet
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Table chat"
+        maxWidthClass="max-w-2xl"
+        heightClass="h-[75dvh] max-h-[75dvh]"
+        footer={
+          <div className="w-full">
+            <div className="mb-2 flex max-w-full gap-1 overflow-x-auto overscroll-x-contain pb-0.5">
+              {ROOM_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  aria-label={`React ${emoji}`}
+                  onClick={() => {
+                    emitRoomReaction(
+                      createRoomReactionEvent({
+                        id: `local-chat-${crypto.randomUUID()}`,
+                        roomId,
+                        userId: myId,
+                        emoji,
+                        isMine: true,
+                        seatIndex: state.me.seat_no ?? -1,
+                      }),
+                    );
+                    void send("reaction", { reaction: emoji });
+                  }}
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-lg transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#C9A2F0]"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const body = input.trim();
+                if (!body || sendPending) return;
+                setInput("");
+                void send("text", { body });
+              }}
+            >
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Say something…"
+                aria-label="Chat message"
+                maxLength={2000}
+                className="min-w-0 flex-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/40 focus:border-[#8A40CF] focus:outline-none"
+              />
+              <button
+                type="button"
+                aria-label="Send a GIF"
+                aria-pressed={showGifs}
+                onClick={() => setShowGifs((v) => !v)}
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/15 text-white/70 transition-colors hover:bg-white/10"
+              >
+                <ImagePlay aria-hidden className="h-4 w-4" />
+              </button>
+              <button
+                type="submit"
+                aria-label="Send message"
+                disabled={!input.trim() || sendPending}
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#8A40CF] text-white transition-colors hover:bg-[#7A35BC] disabled:opacity-40"
+              >
+                <SendHorizonal aria-hidden className="h-4 w-4" />
+              </button>
+            </form>
+          </div>
+        }
+      >
+        <section
+          aria-label="Room chat"
+          className="flex h-full min-h-0 flex-col"
+        >
           {recentReactions.length > 0 ? (
             <div
               aria-label="Recent reactions"
-              className="flex flex-wrap gap-1.5 border-t border-white/10 px-4 py-2"
+              className="flex shrink-0 flex-wrap gap-1.5 pb-3"
             >
               {recentReactions.map((r) => (
                 <span
@@ -329,11 +386,11 @@ export function RoomChat({ state }: { state: GameNightState }) {
             </div>
           ) : null}
 
-          <div className="relative">
+          <div className="relative min-h-0 flex-1">
             <div
               ref={listRef}
               onScroll={onScroll}
-              className="h-64 overflow-y-auto border-t border-white/10 px-4 py-3"
+              className="h-full overflow-y-auto overscroll-contain pr-1"
             >
               {hasMore ? (
                 <button
@@ -415,7 +472,7 @@ export function RoomChat({ state }: { state: GameNightState }) {
           </div>
 
           {showGifs ? (
-            <div className="h-72 border-t border-white/10">
+            <div className="mt-3 h-64 shrink-0 overflow-hidden rounded-2xl border border-white/10">
               <KlipyGifPicker
                 onPick={(gif: GifPayload) => {
                   setShowGifs(false);
@@ -424,73 +481,8 @@ export function RoomChat({ state }: { state: GameNightState }) {
               />
             </div>
           ) : null}
-
-          <div className="border-t border-white/10 p-3">
-            <div className="mb-2 flex gap-1">
-              {ROOM_REACTIONS.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  aria-label={`React ${emoji}`}
-                  onClick={() => {
-                    emitRoomReaction(
-                      createRoomReactionEvent({
-                        id: `local-chat-${crypto.randomUUID()}`,
-                        roomId,
-                        userId: myId,
-                        emoji,
-                        isMine: true,
-                        seatIndex: state.me.seat_no ?? -1,
-                      }),
-                    );
-                    void send("reaction", { reaction: emoji });
-                  }}
-                  className="rounded-lg px-2 py-1 text-lg transition-colors hover:bg-white/10"
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const body = input.trim();
-                if (!body || sendPending) return;
-                setInput("");
-                void send("text", { body });
-              }}
-            >
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Say something…"
-                aria-label="Chat message"
-                maxLength={2000}
-                className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/40 focus:border-[#8A40CF] focus:outline-none"
-              />
-              <button
-                type="button"
-                aria-label="Send a GIF"
-                aria-pressed={showGifs}
-                onClick={() => setShowGifs((v) => !v)}
-                className="rounded-lg border border-white/15 px-3 text-white/70 transition-colors hover:bg-white/10"
-              >
-                <ImagePlay aria-hidden className="h-4 w-4" />
-              </button>
-              <button
-                type="submit"
-                aria-label="Send message"
-                disabled={!input.trim() || sendPending}
-                className="rounded-lg bg-[#8A40CF] px-3 text-white transition-colors hover:bg-[#7A35BC] disabled:opacity-40"
-              >
-                <SendHorizonal aria-hidden className="h-4 w-4" />
-              </button>
-            </form>
-          </div>
-        </>
-      ) : null}
-    </section>
+        </section>
+      </BottomSheet>
+    </>
   );
 }
