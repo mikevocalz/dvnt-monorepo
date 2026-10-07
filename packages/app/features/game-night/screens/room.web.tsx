@@ -42,7 +42,7 @@ import { Scoreboard } from "../components/scoreboard.web";
 import { RoomChat } from "../components/room-chat.web";
 import { RoomReactionDock } from "../components/room-reaction-dock.web";
 import { RoomReactionOverlay } from "../components/room-reaction-overlay.web";
-import { Countdown, PromptCard } from "../components/prompt-card.web";
+import { Countdown } from "../components/prompt-card.web";
 import { CommandError, useCommand } from "../components/use-command";
 import { RulesSheet } from "../components/rules-sheet.web";
 import { TableRenderer } from "../components/table";
