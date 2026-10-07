@@ -66,9 +66,10 @@ export const doorApi = {
     quantity: number;
     promoterCode?: string;
     promoCode?: string;
+    rail?: "web" | "terminal";
   }): Promise<DoorQuote> {
     const { data, error } = await invokeEdge<DoorSellResponse>("door-sell", {
-      action: "quote",
+      action: params.rail === "terminal" ? "quote_terminal" : "quote",
       event_id: params.eventId,
       ticket_type_id: params.ticketTypeId,
       quantity: params.quantity,
@@ -92,9 +93,10 @@ export const doorApi = {
     guestName?: string;
     promoterCode?: string;
     promoCode?: string;
+    rail?: "web" | "terminal";
   }): Promise<DoorSellResult> {
     const { data, error } = await invokeEdge<DoorSellResponse>("door-sell", {
-      action: "sell",
+      action: params.rail === "terminal" ? "sell_terminal" : "sell",
       event_id: params.eventId,
       ticket_type_id: params.ticketTypeId,
       quantity: params.quantity,
@@ -183,5 +185,24 @@ export const terminalApi = {
       throw err;
     }
     return res.secret;
+  },
+
+  /**
+   * Stripe's Tap to Pay connectReader call also needs the Location id.
+   * Read it without minting (and wasting) a connection token.
+   */
+  async locationId(eventId: number): Promise<string> {
+    const { data, error } = await invokeEdge<{
+      locationId?: string;
+      error?: string;
+      code?: string;
+    }>("terminal-token", { event_id: eventId, action: "location" });
+    const res = unwrap(data, error);
+    if (!res.locationId) {
+      const err = new Error(res.error || "Tap to Pay is not configured");
+      (err as Error & { code?: string }).code = res.code;
+      throw err;
+    }
+    return res.locationId;
   },
 };
