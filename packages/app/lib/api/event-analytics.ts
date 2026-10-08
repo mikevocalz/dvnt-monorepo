@@ -7,6 +7,8 @@
 
 import { invokeEdge } from "./invoke-edge";
 
+export { resolveAttendanceBreakdown } from "./event-attendance";
+
 export interface EventRevenueSummary {
   grossCents: number;
   refundsCents: number;
@@ -64,36 +66,6 @@ export interface EventAnalyticsSummary {
   attendanceBreakdown?: EventAttendanceBreakdown;
   tiers: EventTierAnalytics[];
   promoCodes: EventPromoCodeAnalytics[];
-}
-
-export function resolveAttendanceBreakdown(
-  summary: Pick<EventAnalyticsSummary, "attendanceBreakdown" | "ticketStats">,
-): EventAttendanceBreakdown {
-  const raw = summary.attendanceBreakdown;
-  if (
-    raw &&
-    Number.isFinite(raw.rsvp) &&
-    Number.isFinite(raw.paid) &&
-    Number.isFinite(raw.total)
-  ) {
-    return {
-      rsvp: Math.max(0, Math.trunc(raw.rsvp)),
-      paid: Math.max(0, Math.trunc(raw.paid)),
-      total: Math.max(0, Math.trunc(raw.total)),
-    };
-  }
-
-  const { ticketStats } = summary;
-  return {
-    rsvp: 0,
-    paid: 0,
-    total: Math.max(
-      0,
-      Number(ticketStats.active || 0) +
-        Number(ticketStats.checkedIn || 0) +
-        Number(ticketStats.transferPending || 0),
-    ),
-  };
 }
 
 export interface EventAttendeeRow {
