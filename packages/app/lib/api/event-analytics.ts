@@ -7,6 +7,8 @@
 
 import { invokeEdge } from "./invoke-edge";
 
+export { resolveAttendanceBreakdown } from "./event-attendance";
+
 export interface EventRevenueSummary {
   grossCents: number;
   refundsCents: number;
@@ -23,6 +25,15 @@ export interface EventTicketStats {
   refunded: number;
   void: number;
   transferPending: number;
+}
+
+export interface EventAttendanceBreakdown {
+  /** Explicit event_rsvps rows with status=going. */
+  rsvp: number;
+  /** Valid ticket seats with a monetary purchase amount. */
+  paid: number;
+  /** Public "going" total: valid ticket seats + RSVP-only people. */
+  total: number;
 }
 
 export interface EventTierAnalytics {
@@ -51,6 +62,8 @@ export interface EventAnalyticsSummary {
   title: string;
   revenue: EventRevenueSummary;
   ticketStats: EventTicketStats;
+  /** Optional during rolling deploys so old Edge payloads cannot blank UI. */
+  attendanceBreakdown?: EventAttendanceBreakdown;
   tiers: EventTierAnalytics[];
   promoCodes: EventPromoCodeAnalytics[];
 }
