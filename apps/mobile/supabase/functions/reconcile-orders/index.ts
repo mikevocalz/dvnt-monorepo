@@ -17,7 +17,7 @@ import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import { handleCartPaymentIntentSucceeded } from "../_shared/cart-issuance.ts";
 import { issueTicketsForCheckoutSession } from "../_shared/session-issuance.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
-import { syncOrderStripeProcessingFee } from "../_shared/stripe-processing-fee.ts";
+import { syncOrderStripeProcessingFeeSafely } from "../_shared/stripe-processing-fee.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -691,8 +691,11 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
       .eq("type", "event_ticket")
       .eq("status", "paid")
       .not("stripe_payment_intent_id", "is", null)
-      .or("processing_fee_cents.is.null,processing_fee_cents.eq.0")
-      .order("paid_at", { ascending: false })
+      .is("stripe_fee_cents", null)
+      // Never-tried orders first, then the least recently tried, so an order
+      // that fails every run rotates to the back instead of starving the rest.
+      .order("stripe_fee_attempted_at", { ascending: true, nullsFirst: true })
+      .order("paid_at", { ascending: true })
       .limit(25);
 
     if (feeBackfillError) {
@@ -700,18 +703,22 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
     }
 
     for (const order of feeBackfillOrders || []) {
-      try {
-        const fee = await syncOrderStripeProcessingFee(
-          supabase,
-          STRIPE_SECRET_KEY,
-          {
-            orderId: order.id,
-            paymentIntentId: order.stripe_payment_intent_id,
-          },
-        );
-        if (fee !== null) stats.stripe_fees_synced++;
-      } catch (err) {
-        console.error(`[reconcile] Stripe fee sync failed for order ${order.id}:`, err);
+      const fee = await syncOrderStripeProcessingFeeSafely(
+        supabase,
+        STRIPE_SECRET_KEY,
+        {
+          orderId: order.id,
+          paymentIntentId: order.stripe_payment_intent_id,
+        },
+      );
+      if (fee !== null) {
+        stats.stripe_fees_synced++;
+      } else {
+        await supabase
+          .from("orders")
+          .update({ stripe_fee_attempted_at: new Date().toISOString() })
+          .eq("id", order.id)
+          .is("stripe_fee_cents", null);
       }
     }
 
