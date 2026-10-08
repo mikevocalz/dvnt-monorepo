@@ -108,10 +108,11 @@ export function SidePanel({
         className="absolute inset-0 z-40 bg-black/50 sm:bg-black/30"
       />
       <aside
-        className="absolute inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-white/10 bg-[#0b0d14] shadow-2xl"
+        className="absolute inset-x-0 bottom-0 z-50 flex h-[75dvh] max-h-[75dvh] w-full flex-col overflow-hidden rounded-t-3xl border-t border-white/10 bg-[#0b0d14] shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:max-h-none sm:max-w-md sm:rounded-none sm:border-l sm:border-t-0"
         role="dialog"
         aria-label={title}
       >
+        <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/25 sm:hidden" aria-hidden="true" />
         <header className="flex items-center justify-between border-b border-white/8 px-4 py-3">
           <span className="flex items-center gap-2 text-base font-semibold text-white">
             {icon}

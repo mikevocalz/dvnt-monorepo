@@ -27,3 +27,18 @@ test("several guests stay on the stage rather than spilling to one column", () =
   assert.equal(stageColumns(9, LAPTOP), 3);
   assert.equal(stageColumns(16, LAPTOP), 4);
 });
+
+test("solo, one-to-one, and group calls have explicit modes", async () => {
+  const { stageMode } = await import("./stage-grid.ts");
+  assert.equal(stageMode(0), "solo");
+  assert.equal(stageMode(1), "solo");
+  assert.equal(stageMode(2), "duo");
+  for (const count of [3, 4, 6, 12]) assert.equal(stageMode(count), "group");
+});
+
+test("two-person rooms split on desktop but stack on phones", () => {
+  assert.equal(stageGridClass(1), "grid-cols-1");
+  assert.equal(stageGridClass(2), "grid-cols-1 sm:grid-cols-2");
+  assert.equal(stageColumns(2, PHONE), 1);
+  assert.equal(stageColumns(2, LAPTOP), 2);
+});

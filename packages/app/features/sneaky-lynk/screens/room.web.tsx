@@ -142,8 +142,7 @@ import type { SneakyUser } from "@dvnt/app/features/sneaky-lynk/types";
 import { useRoomStore } from "../stores/room-store";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { isPublisherRole } from "../publish-roles";
-import { stageGridClass } from "../ui/stage-grid";
-import { HERO_ASPECT, HOST_STAGE_MAX_WIDTH, HOST_TILE_GAP } from "../ui/stage-layout";
+import { stageGridClass, stageMode } from "../ui/stage-grid";
 import { useLynkHistoryStore } from "../stores/lynk-history-store";
 import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
 import { SecureCaptureBoundary } from "@dvnt/app/lib/secure-capture";
@@ -511,7 +510,7 @@ function WebViewerDisclosureChip() {
   return (
     <span
       role="status"
-      className="flex items-center gap-2 rounded-lg border border-[#F5C518]/35 bg-[#F5C518]/12 px-2.5 py-1.5 text-[11px] font-semibold leading-tight text-[#F5C518]"
+      className="inline-flex max-w-full items-center gap-2 rounded-xl border border-[#F5C518]/35 bg-[#F5C518]/10 px-3 py-1.5 text-[11px] font-medium leading-tight text-[#F5C518]"
     >
       <ShieldAlert size={13} className="shrink-0" />
       Web viewers in room — capture protection limited on web
@@ -1335,17 +1334,18 @@ function RoomInner({
   const remotePublisherTiles = remoteTiles.filter((t) => t.isPublisher);
   const listenerTiles = remoteTiles.filter((t) => !t.isPublisher);
 
-  const stageTiles = [localTile, ...remotePublisherTiles];
-  // The host and one co-host share the top of the stage (hostStageLayout):
-  // one host is a single capped, centred tile; a co-host splits it in two.
-  // Other publishers keep the uniform grid underneath.
-  const hostStageTiles = [
-    stageTiles.find((t) => t.isHost),
-    stageTiles.find((t) => t.isCoHost),
-  ].filter((t): t is Tile => !!t);
-  const otherStageTiles = stageTiles.filter((t) => !hostStageTiles.includes(t));
+  // Equal stage tiles for every publisher; roles remain visible as chips.
+  // Stable ordering keeps the same host-first grid for every participant.
+  const stageTiles = [localTile, ...remotePublisherTiles].sort(
+    (a, b) => Number(b.isHost) - Number(a.isHost) ||
+      Number(b.isCoHost) - Number(a.isCoHost) ||
+      a.key.localeCompare(b.key),
+  );
   const roomTitle = roomSnapshot?.title || paramTitle || getLynkDisplayName();
-  const participantCount = stageTiles.length;
+  const participantCount = Math.max(
+    stageTiles.length,
+    members.filter((m) => m.status === "active").length,
+  );
 
   // Listener grid (TanStack Virtual). For an audio room the remote peers list
   // can grow large; virtualize it. Rendered as a horizontal row of avatars.
@@ -1653,66 +1653,34 @@ function RoomInner({
         </div>
       ) : (
         <>
-          {/* Speaker / video stage — host (+ co-hosts) own the top, large. */}
-          {/* The stage grew one breakpoint wider at each size instead of
-              staying capped at max-w-2xl (672px). On a tablet that cap left the
-              room as a phone column floating in dead space, which is what made
-              the aspect ratio read as wrong — the tiles were not mis-shaped, the
-              stage was refusing the width. */}
-          {/* `justify-center` + a height-aware cap: the grid sizes tiles from
-              WIDTH (aspect-video), so on a tall viewport they used a third of
-              the stage and floated at the top over a large void. Now the stage
-              centres and the tiles are also bounded by the space available. */}
-          {/* ONE uniform grid. The host was drawn large on top with guests in a
-              5-up strip beneath, which at five people read as one person and
-              four thumbnails. Zoom, Teams and Riverside all draw equal tiles at
-              this headcount and mark the talker with a ring instead — which is
-              what `data-speaking` on each tile already does. `auto-rows-fr`
-              plus a filling tile means N people share the stage evenly rather
-              than the grid growing past the fold. */}
-          <section className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-2 md:px-6 lg:px-8">
-            {hostStageTiles.length > 0 ? (
-              // Capped at max-w-3xl (HOST_STAGE_MAX_WIDTH) and by the height
-              // left for it, kept at 16:9 and centred, so one host never
-              // fills a desktop. Two hosts split the same box; the host tile
-              // animates its width as a co-host arrives or leaves.
-              <div
-                data-host-count={hostStageTiles.length}
-                className="mx-auto flex w-full shrink-0 overflow-hidden"
-                style={{
-                  maxWidth: `min(${HOST_STAGE_MAX_WIDTH}px, calc((100dvh - 20rem) * ${HERO_ASPECT}))`,
-                  aspectRatio: HERO_ASPECT,
-                  gap: HOST_TILE_GAP,
-                }}
-              >
-                {hostStageTiles.map((tile) => (
-                  <div
-                    key={tile.key}
-                    className="h-full min-w-0 transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none"
-                    style={{
-                      width:
-                        hostStageTiles.length === 2
-                          ? `calc(50% - ${HOST_TILE_GAP / 2}px)`
-                          : "100%",
-                    }}
-                  >
-                    <StageTile tile={tile} />
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {otherStageTiles.length > 0 ? (
-              <div
-                className={`mx-auto grid min-h-0 w-full max-w-6xl flex-1 auto-rows-fr gap-3 md:gap-4 ${
-                  hostStageTiles.length > 0 ? "max-h-[40dvh]" : "h-full max-h-[calc(100dvh-20rem)]"
-                } ${stageGridClass(otherStageTiles.length)}`}
-              >
-                {otherStageTiles.map((tile) => (
-                  <StageTile key={tile.key} tile={tile} />
-                ))}
-              </div>
-            ) : null}
-          </section>
+           {/* Solo invites, one-to-one equal split, or responsive group grid.
+               Keep the speaker ring and roles; remove the oversized host hero. */}
+           <section
+             data-stage-participants={stageTiles.length}
+             className="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-hidden px-3 py-3 sm:px-5 lg:px-8"
+           >
+             {stageTiles.length === 1 ? (
+               <div role="status" className="flex shrink-0 flex-wrap items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#111522]/85 px-3 py-2 text-xs text-white/70">
+                 <span>Just you here — invite someone to join.</span>
+                 <button
+                   type="button"
+                   onClick={shareRoom}
+                   className="rounded-lg bg-[#3FDCFF]/15 px-3 py-1.5 font-semibold text-[#3FDCFF] hover:bg-[#3FDCFF]/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
+                 >
+                   Copy invite / Share
+                 </button>
+               </div>
+             ) : null}
+             <div
+               data-stage-mode={stageMode(stageTiles.length)}
+               data-stage-count={stageTiles.length}
+               className={`mx-auto grid min-h-0 w-full flex-1 auto-rows-fr gap-2 overflow-y-auto sm:gap-3 lg:gap-4 ${stageTiles.length === 1 ? "max-w-4xl" : "max-w-6xl"} ${stageGridClass(stageTiles.length)}`}
+             >
+               {stageTiles.map((tile) => (
+                 <StageTile key={tile.key} tile={tile} />
+               ))}
+             </div>
+           </section>
 
           {/* Listener row — TanStack Virtual (horizontal) */}
           {listenerTiles.length > 0 ? (
@@ -1757,9 +1725,9 @@ function RoomInner({
       <FloatingReactions reactions={reactions} />
 
       {/* Controls bar */}
-      <footer className="relative z-10 flex flex-col items-center gap-3 pb-8 pt-2">
+      <footer className="relative z-10 flex shrink-0 flex-col items-center gap-2 border-t border-white/8 bg-[#090b15]/95 px-2 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-2 sm:gap-3 sm:pb-5">
         <ReactionBar onSend={sendReaction} />
-        <div className="flex items-center justify-center gap-4">
+        <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
           <ControlButton
             onClick={toggleMic}
             active={isMicOn}
