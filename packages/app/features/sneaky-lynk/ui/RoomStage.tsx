@@ -65,7 +65,7 @@ import Animated, {
 import type { SharedValue } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
 import { Users } from "lucide-react-native";
-import { VideoTile, type VideoParticipant } from "./VideoGrid";
+import { VideoGrid, VideoTile, type VideoParticipant } from "./VideoGrid";
 import { crowdColumns, crowdTileBox, hostStageLayout } from "./stage-layout";
 
 interface RoomStageProps {
@@ -391,6 +391,30 @@ export const RoomStage = memo(function RoomStage({
       onParticipantPress,
     ],
   );
+
+  // Once another person arrives, use the SAME flat grid as the native group
+  // call rather than pinning a giant host above a tiny guest/crowd carousel.
+  // One-person rooms keep the host preview + invitation empty state below.
+  if (totalCount >= 2) {
+    const ordered = [host, coHost, ...attendees].filter(
+      (person): person is VideoParticipant => !!person,
+    );
+    return (
+      <View style={{ flex: 1 }}>
+        <VideoGrid
+          participants={ordered}
+          activeSpeakers={activeSpeakers}
+          isHost={isHost}
+          onParticipantPress={onParticipantPress}
+        />
+        {hostOverlay ? (
+          <View pointerEvents="none" style={styles.hostOverlay}>
+            {hostOverlay}
+          </View>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1 }}>
