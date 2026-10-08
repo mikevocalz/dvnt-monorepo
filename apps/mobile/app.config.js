@@ -33,6 +33,7 @@ export default {
   expo: {
     name: "DVNT",
     slug: "dvnt",
+    scheme: "dvnt",
     version: "1.0.0",
     // Fingerprint, NOT a hardcoded string. A fixed runtimeVersion makes every
     // binary ever shipped claim the same native contract, so `eas update`

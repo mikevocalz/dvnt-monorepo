@@ -41,6 +41,7 @@ import {
   Plus,
   WifiOff,
   XCircle,
+  Nfc,
 } from "lucide-react";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
@@ -617,6 +618,24 @@ export function DoorSellScreen() {
       ) : (
         <main className="mx-auto w-full max-w-3xl px-4 pb-40 pt-5 md:pb-10">
           <h1 className="text-lg font-bold">Sell tickets</h1>
+
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-[#379ED8]/30 bg-[#379ED8]/10 p-3">
+            <div className="min-w-0">
+              <p className="flex items-center gap-2 text-sm font-bold text-white">
+                <Nfc size={17} className="text-[#7fd4ff]" />
+                Taking payment at the door?
+              </p>
+              <p className="mt-1 text-xs text-white/55">
+                Browser checkout stays here. For card-present Tap to Pay, open this event in the DVNT app.
+              </p>
+            </div>
+            <a
+              href={`dvnt://events/${eventId}/sell?tap=1`}
+              className="shrink-0 rounded-xl bg-[#379ED8] px-3 py-2 text-xs font-bold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7fd4ff]"
+            >
+              Open app
+            </a>
+          </div>
 
           {!online ? (
             <div className="mt-4 flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-200">

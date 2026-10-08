@@ -50,9 +50,10 @@ Deno.serve(withSentry("terminal-token", async (req: Request) => {
     const staffUserId = await verifySession(supabase, req);
     if (!staffUserId) return json({ error: "Unauthorized" }, 401);
 
-    const { event_id } = await req.json().catch(() => ({}));
+    const { event_id, action } = await req.json().catch(() => ({}));
     if (!event_id) return json({ error: "Missing event_id" }, 400);
     const eventId = parseInt(event_id);
+    const readLocationOnly = action === "location";
 
     const rl = checkRateLimit(`terminal:${staffUserId}`, "terminal-token", {
       maxRequests: 20,
@@ -104,6 +105,12 @@ Deno.serve(withSentry("terminal-token", async (req: Request) => {
       }, 409);
     }
 
+    // connectReader needs the event-scoped Terminal Location id in addition
+    // to the connection token. Return it without minting a disposable token.
+    if (readLocationOnly) {
+      return json({ locationId: loc.stripe_location_id });
+    }
+
     if (!STRIPE_SECRET_KEY) {
       return json({ error: "Payments are not configured" }, 500);
     }
@@ -123,7 +130,7 @@ Deno.serve(withSentry("terminal-token", async (req: Request) => {
       console.error("[terminal-token] Stripe error:", token);
       return json({ error: "Could not start Tap to Pay. Try again." }, 502);
     }
-    return json({ secret: token.secret });
+    return json({ secret: token.secret, locationId: loc.stripe_location_id });
   } catch (err: any) {
     console.error("[terminal-token] Error:", err);
     return json({ error: err.message || "Internal error" }, 500);
