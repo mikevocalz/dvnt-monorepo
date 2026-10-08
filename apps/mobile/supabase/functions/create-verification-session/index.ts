@@ -1,19 +1,11 @@
 /**
- * create-verification-session — B3 deferred ID verification.
+ * Authenticated Didit session creation for DVNT's adult verification.
+ * Production: DIDIT_API_KEY and DIDIT_WORKFLOW_ID must be Supabase Edge secrets
+ * on the SAME project the web/native client calls. This code never bypasses the
+ * adult gate when configuration or provider health is unavailable.
  *
- * Creates a Didit verification session for the AUTHENTICATED user. vendor_data
- * is the server-derived Better Auth user id (same I1 binding the didit-webhook
- * trusts) — never client-supplied, so a session can't be minted for someone else.
- *
- * Contract verified against docs.didit.me (Create Session, v2):
- *   POST https://verification.didit.me/v2/session/
- *   headers: x-api-key, Content-Type: application/json
- *   body:    { workflow_id, vendor_data, callback? }
- *   returns: { session_id, url, status, ... }
- *
- * Responses: { ok, data: { status: 'passed' } }                   — already verified
- *            { ok, data: { status: 'pending', url, sessionId } }  — open this URL
- * Deno env: DIDIT_API_KEY, DIDIT_WORKFLOW_ID (+ standard Supabase vars).
+ * Didit v3: POST https://verification.didit.me/v3/session/
+ * with x-api-key, workflow_id, vendor_data and optional callback.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
@@ -21,100 +13,131 @@ import { withSentry } from "../_shared/sentry.ts";
 import { checkAdultBirthDate } from "../_shared/age-policy.ts";
 import { normalizeVerificationState } from "../_shared/verification-state.ts";
 
+const DIDIT_SESSION_URL = "https://verification.didit.me/v3/session/";
+const PROVIDER_TIMEOUT_MS = 10_000;
+
 function json(req: Request, data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+    headers: {
+      ...corsHeaders(req),
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      ...(status === 503 ? { "Retry-After": "60" } : {}),
+    },
   });
 }
-function err(req: Request, code: string, message: string): Response {
-  console.error(`[create-verification-session] ${code}: ${message}`);
-  return json(req, { ok: false, error: { code, message } });
+
+function fail(req: Request, code: string, message: string, status: number): Response {
+  // Stable code and HTTP status for monitoring; do not log user IDs, ID data or secrets.
+  console.error(`[create-verification-session] ${code}`);
+  return json(req, { ok: false, error: { code, message } }, status);
 }
 
-Deno.serve(
-  withSentry("create-verification-session", async (req) => {
-    if (req.method === "OPTIONS") return optionsResponse(req);
-    if (req.method !== "POST") return err(req, "method_not_allowed", "POST only");
+/** Only allow a return to a DVNT-controlled origin (or the native app scheme). */
+function allowedCallback(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 2048) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol === "dvnt:") return url.toString();
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && url.hostname === "localhost")) return undefined;
+    if (!["dvntapp.live", "www.dvntapp.live", "dvnt.app", "www.dvnt.app", "localhost"].includes(url.hostname)) return undefined;
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-      { auth: { persistSession: false, autoRefreshToken: false } },
-    );
+Deno.serve(withSentry("create-verification-session", async (req) => {
+  if (req.method === "OPTIONS") return optionsResponse(req);
+  if (req.method !== "POST") return fail(req, "method_not_allowed", "POST only", 405);
 
-    const authUserId = await verifySession(supabase, req);
-    if (!authUserId) return err(req, "unauthorized", "Sign in to verify");
+  const dbUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!dbUrl || !serviceKey) {
+    return fail(req, "service_unavailable", "Verification is temporarily unavailable. Your account is saved; please retry later.", 503);
+  }
+  const supabase = createClient(dbUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const authUserId = await verifySession(supabase, req);
+  if (!authUserId) return fail(req, "unauthorized", "Please sign in again to verify your account.", 401);
 
-    const apiKey = Deno.env.get("DIDIT_API_KEY");
-    const workflowId = Deno.env.get("DIDIT_WORKFLOW_ID");
-    if (!apiKey || !workflowId) {
-      return err(req, "not_configured", "Verification isn't available right now");
-    }
+  // Approvals and non-retryable decisions do not depend on provider availability.
+  const { data: existing, error: readError } = await supabase
+    .from("identity_verifications")
+    .select("status,provider_ref,date_of_birth,failure_code,failure_message")
+    .eq("user_id", authUserId)
+    .maybeSingle();
+  if (readError) return fail(req, "status_unavailable", "Verification status could not be loaded. Please try again.", 503);
+  if (existing?.status === "passed" && checkAdultBirthDate(existing.date_of_birth).allowed) {
+    return json(req, { ok: true, data: { status: "passed" } });
+  }
+  const state = normalizeVerificationState(existing);
+  if (state.state === "rejected" && !state.retryable) {
+    return fail(req, state.reason || "verification_rejected",
+      state.message || "This account cannot retry identity verification.", 403);
+  }
 
-    // Already approved → the user never sees the flow again (B3).
-    const { data: existing } = await supabase
-      .from("identity_verifications")
-      .select("status, provider_ref, date_of_birth, failure_code, failure_message")
-      .eq("user_id", authUserId)
-      .maybeSingle();
-    // Table vocabulary (CHECK constraint): pending|submitted|passed|failed|expired|review.
-    if (existing?.status === "passed" && checkAdultBirthDate(existing.date_of_birth).allowed) {
-      return json(req, { ok: true, data: { status: "passed" } });
-    }
-    const normalized = normalizeVerificationState(existing);
-    if (normalized.state === "rejected" && !normalized.retryable) {
-      return json(req, {
-        ok: false,
-        error: {
-          code: normalized.reason || "verification_rejected",
-          message: normalized.message || "This account cannot retry identity verification.",
-        },
-      }, 403);
-    }
+  const apiKey = Deno.env.get("DIDIT_API_KEY");
+  const workflowId = Deno.env.get("DIDIT_WORKFLOW_ID");
+  if (!apiKey || !workflowId) {
+    return fail(req, "not_configured",
+      "ID verification is temporarily unavailable. Your DVNT account is saved. Please sign in and retry later.", 503);
+  }
 
-    // Optional post-verification return URL (validated https or app scheme).
-    let callback: string | undefined;
-    try {
-      const body = await req.json().catch(() => ({}));
-      const cb = typeof body?.returnUrl === "string" ? body.returnUrl : "";
-      if (/^(https:\/\/|dvnt:\/\/)/i.test(cb)) callback = cb;
-    } catch { /* no body */ }
-
-    const res = await fetch("https://verification.didit.me/v2/session/", {
+  const body = await req.json().catch(() => ({}));
+  const callback = allowedCallback(body?.returnUrl);
+  let response: Response;
+  try {
+    response = await fetch(DIDIT_SESSION_URL, {
       method: "POST",
       headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({
         workflow_id: workflowId,
-        vendor_data: authUserId,
+        vendor_data: authUserId, // never accept a userId supplied by the caller
         ...(callback ? { callback } : {}),
       }),
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      console.error("[create-verification-session] didit error", res.status, detail.slice(0, 300));
-      return err(req, "vendor_error", "Couldn't start verification. Try again in a minute.");
-    }
-    const session = await res.json();
-    const sessionId = String(session.session_id ?? "");
-    const url = String(session.url ?? "");
-    if (!sessionId || !url) {
-      return err(req, "vendor_error", "Verification session came back incomplete");
-    }
+  } catch {
+    return fail(req, "provider_unreachable", "ID verification is taking too long. Please retry.", 503);
+  }
+  if (!response.ok) {
+    console.error(`[create-verification-session] provider_http_${response.status}`);
+    return fail(req, "provider_unavailable", "ID verification could not start. Please retry shortly.", 503);
+  }
 
-    // Track the pending session so the webhook's update has a row to land on.
-    await supabase.from("identity_verifications").upsert(
-      {
-        user_id: authUserId,
-        provider: "didit",
-        status: "pending",
-        provider_ref: sessionId,
-        last_event_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
+  const session = await response.json().catch(() => null);
+  const sessionId = typeof session?.session_id === "string" ? session.session_id : "";
+  const url = typeof session?.url === "string" ? session.url : "";
+  // Never return an arbitrary provider response as a redirect.
+  let safeUrl: URL;
+  try {
+    safeUrl = new URL(url);
+    if (safeUrl.protocol !== "https:" || !(safeUrl.hostname === "didit.me" || safeUrl.hostname.endsWith(".didit.me"))) {
+      throw new Error("untrusted provider URL");
+    }
+  } catch {
+    return fail(req, "provider_bad_response", "ID verification could not start. Please retry shortly.", 502);
+  }
+  if (!sessionId) return fail(req, "provider_bad_response", "ID verification could not start. Please retry shortly.", 502);
 
-    return json(req, { ok: true, data: { status: "pending", url, sessionId } });
-  }),
-);
+  // Do not advertise the session URL until the webhook correlation row is saved.
+  const { error: saveError } = await supabase.from("identity_verifications").upsert({
+    user_id: authUserId,
+    provider: "didit",
+    provider_ref: sessionId,
+    status: "pending",
+    last_event_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "user_id" });
+  if (saveError) {
+    console.error("[create-verification-session] persistence_failed", saveError.code);
+    return fail(req, "persistence_unavailable", "Could not save verification progress. Please retry.", 503);
+  }
+  return json(req, { ok: true, data: { status: "pending", url: safeUrl.toString(), sessionId } });
+}));
