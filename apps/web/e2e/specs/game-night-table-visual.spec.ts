@@ -160,12 +160,29 @@ test.describe("game night — cookout table visuals", () => {
       await startBtn.click();
 
       const table = page.getByRole("region", { name: "Table scene" });
-      await expect(table.locator("canvas")).toBeVisible({ timeout: 30_000 });
+      const canvas = table.locator("canvas");
+      await expect(canvas).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("region", { name: "Prompt" })).toBeVisible();
       await page.waitForTimeout(2500);
 
       // The scene must not push the page wider than the viewport.
       const docW = await page.evaluate(() => document.documentElement.scrollWidth);
       expect(docW).toBeLessThanOrEqual(376);
+
+      // Mobile reactions live in their own strip instead of floating over the
+      // prompt/table. The canvas also has a hard phone-height ceiling so the
+      // game controls remain reachable without a giant scroll.
+      const canvasBox = await canvas.boundingBox();
+      const reactionBox = await table
+        .locator('[aria-label="React to the room"]')
+        .boundingBox();
+      expect(canvasBox).toBeTruthy();
+      expect(reactionBox).toBeTruthy();
+      expect(canvasBox!.width).toBeLessThanOrEqual(376);
+      expect(canvasBox!.height).toBeLessThanOrEqual(421);
+      expect(reactionBox!.y + reactionBox!.height).toBeLessThanOrEqual(
+        canvasBox!.y + 1,
+      );
 
       // On a phone the chat starts collapsed — it must never cover the table.
       await expect(page.getByPlaceholder(/say something/i)).toBeHidden();
