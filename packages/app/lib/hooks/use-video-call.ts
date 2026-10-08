@@ -73,6 +73,11 @@ import {
 import type { Participant } from "@dvnt/app/features/video/types";
 import { CT } from "@dvnt/app/features/services/calls/callTrace";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
+import {
+  callSessionSecondsRemaining,
+  fetchCallDeadline,
+  serverClockOffsetMs,
+} from "@dvnt/app/features/call/call-session-limit";
 
 // Re-export for consumers
 export type { CallType, CallPhase, CallRole, CallDirection, RecipientInfo };
@@ -141,6 +146,9 @@ export function useVideoCall() {
   const chatId_store = useVideoRoomStore((s) => s.chatId);
   const callEnded = useVideoRoomStore((s) => s.callEnded);
   const callDuration = useVideoRoomStore((s) => s.callDuration);
+  const callSessionSecondsLeft = useVideoRoomStore(
+    (s) => s.callSessionSecondsLeft,
+  );
   const error_store = useVideoRoomStore((s) => s.error);
   const errorCode_store = useVideoRoomStore((s) => s.errorCode);
   const connectionStatus = useVideoRoomStore((s) => s.connectionState.status);
@@ -453,14 +461,39 @@ export function useVideoCall() {
 
   // ── Duration timer ──────────────────────────────────────────────────
   const startDurationTimer = useCallback(() => {
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+    }
+
     const now = Date.now();
     getStore().setCallStartedAt(now);
-    durationIntervalRef.current = setInterval(() => {
-      const startedAt = getStore().callStartedAt;
+
+    const tick = () => {
+      const state = getStore();
+      const startedAt = state.callStartedAt;
       if (startedAt) {
-        getStore().setCallDuration(Math.floor((Date.now() - startedAt) / 1000));
+        state.setCallDuration(Math.floor((Date.now() - startedAt) / 1000));
       }
-    }, 1000);
+
+      const secondsLeft = callSessionSecondsRemaining(
+        state.serverEndsAt,
+        Date.now(),
+        state.serverClockOffsetMs,
+      );
+      state.setCallSessionSecondsLeft(secondsLeft);
+
+      if (secondsLeft === 0 && state.callPhase === "connected") {
+        if (durationIntervalRef.current) {
+          clearInterval(durationIntervalRef.current);
+          durationIntervalRef.current = null;
+        }
+        log("[SESSION] Five-minute call deadline reached — leaving");
+        leaveCallRef.current();
+      }
+    };
+
+    tick();
+    durationIntervalRef.current = setInterval(tick, 1000);
   }, [getStore]);
 
   const stopDurationTimer = useCallback(() => {
@@ -468,7 +501,8 @@ export function useVideoCall() {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
     }
-  }, []);
+    getStore().setCallSessionSecondsLeft(null);
+  }, [getStore]);
 
   // ── Find front camera device ID ────────────────────────────────────
   const getFrontCameraId = useCallback((): string | undefined => {
@@ -692,6 +726,7 @@ export function useVideoCall() {
       s.setCallPhase("joining_room");
       log("Joining room...");
 
+      const joinStartedMs = Date.now();
       const joinResult = await callRoomsApi.joinCall(newRoomId);
       log("Join result:", joinResult.ok ? "authorized" : "rejected");
       if (!joinResult.ok || !joinResult.data) {
@@ -703,6 +738,10 @@ export function useVideoCall() {
       }
 
       const { token, user: joinedUser, room: joinedRoom } = joinResult.data;
+      s.setServerEndsAt(joinedRoom.endsAt ?? null);
+      s.setServerClockOffsetMs(
+        serverClockOffsetMs(joinedRoom.serverNow, joinStartedMs, Date.now()),
+      );
       watchOwnedRoom.current = joinedRoom.id;
       watchOwnedGeneration.current = watchCallGeneration;
       log("Got Fishjam token for user:", joinedUser.id);
@@ -950,6 +989,7 @@ export function useVideoCall() {
       s.setCallPhase("joining_room");
       log("Joining existing room:", roomId);
 
+      const joinStartedMs = Date.now();
       const joinResult = await callRoomsApi.joinCall(roomId);
       if (!joinResult.ok || !joinResult.data) {
         const msg = joinResult.error?.message || "Failed to join room";
@@ -960,6 +1000,10 @@ export function useVideoCall() {
       }
 
       const { token, user: joinedUser, room: joinedRoom } = joinResult.data;
+      s.setServerEndsAt(joinedRoom.endsAt ?? null);
+      s.setServerClockOffsetMs(
+        serverClockOffsetMs(joinedRoom.serverNow, joinStartedMs, Date.now()),
+      );
       watchOwnedRoom.current = joinedRoom.id;
       watchOwnedGeneration.current = watchCallGeneration;
       log("Got Fishjam token for user:", joinedUser.id);
@@ -1617,9 +1661,17 @@ export function useVideoCall() {
         // (room sweep, last-member-out, video_end_room) leaves status='ended'
         // on the row with no signal, stranding this screen on a dead call.
         (payload) => {
-          const status = (payload.new as { status?: string })?.status;
-          if (!status || status === "open") return;
+          const nextRoom = payload.new as {
+            status?: string;
+            ends_at?: string | null;
+          };
           const current = getStore();
+
+          if ("ends_at" in nextRoom) {
+            current.setServerEndsAt(nextRoom.ends_at ?? null);
+          }
+
+          if (!nextRoom.status || nextRoom.status === "open") return;
           if (
             current.callPhase === "connected" ||
             current.callPhase === "outgoing_ringing"
@@ -1631,6 +1683,20 @@ export function useVideoCall() {
       )
       .subscribe((status) => {
         log(`[SIGNAL_SUB] Subscription status: ${status}`);
+        // SUBSCRIBED fires on the first join and again after every
+        // reconnect. Any ends_at UPDATE sent while the channel was down (or
+        // before it joined, e.g. the host's first invitee connecting) is
+        // lost, so re-read the deadline here.
+        if (status !== "SUBSCRIBED") return;
+        void fetchCallDeadline(() =>
+          supabase
+            .from("video_rooms")
+            .select("ends_at")
+            .eq("uuid", currentRoomId)
+            .maybeSingle(),
+        ).then((endsAt) => {
+          if (endsAt) getStore().setServerEndsAt(endsAt);
+        });
       });
 
     signalChannelRef.current = channel;
@@ -1670,6 +1736,7 @@ export function useVideoCall() {
     chatId: chatId_store,
     callEnded,
     callDuration,
+    callSessionSecondsLeft,
     error: error_store,
     errorCode: errorCode_store,
     connectionStatus,

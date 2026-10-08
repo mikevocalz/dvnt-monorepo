@@ -60,7 +60,7 @@ import { isPhoneRequiredError } from "@dvnt/app/lib/checkout/member-phone";
 import { CheckoutPhoneField } from "./checkout-phone-field.web";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import {
-  computePromoDiscountCents,
+  computeStackedAdmissionDiscount,
   promoLabel,
 } from "@dvnt/app/lib/payments/promo-discount";
 import {
@@ -71,6 +71,8 @@ import {
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
@@ -549,6 +551,10 @@ export function CheckoutReviewScreen() {
   // A code validated for another event's cart is not applied here; the
   // server would reject it with "Invalid promo code".
   const appliedPromo = promoForCart(storedPromo, cart?.eventId);
+  const promoterRef = usePromoterRefStore(
+    (s) => (cart?.eventId ? s.refs[String(cart.eventId)] ?? null : null),
+  );
+  const setPromoterRef = usePromoterRefStore((s) => s.setRef);
 
   const lineItems = cart?.lineItems ?? [];
 
@@ -579,21 +585,39 @@ export function CheckoutReviewScreen() {
     () => lineItems.reduce((sum, lineItem) => sum + lineItem.quantity, 0),
     [lineItems],
   );
-  // Promo discount preview (server re-validates + is authoritative at charge).
-  // BOGO depends on qty, so recompute from the validated promo each change.
-  const discountCents = useMemo(
+  const admissionSubtotalCents = useMemo(
     () =>
-      appliedPromo
-        ? computePromoDiscountCents(
-            appliedPromo.type,
-            appliedPromo.value,
-            subtotalCents,
-            quantity,
-          )
-        : 0,
-    [appliedPromo, subtotalCents, quantity],
+      lineItems
+        .filter((lineItem) => lineItem.category === "admission")
+        .reduce(
+          (sum, lineItem) =>
+            sum + lineItem.unitPriceCents * lineItem.quantity,
+          0,
+        ),
+    [lineItems],
   );
-  const effectiveSubtotal = Math.max(0, subtotalCents - discountCents);
+  const promoterDiscountBps =
+    promoterRef?.customerDiscountBps != null
+      ? Math.max(0, Math.min(10000, promoterRef.customerDiscountBps))
+      : 0;
+  // Server applies promoter discount first (admission only), then any promo
+  // code to the remaining cart subtotal. Shared helper keeps this review, the
+  // event-detail sheet, and the server in the same order.
+  const {
+    promoterDiscountCents,
+    promoDiscountCents: discountCents,
+    discountedSubtotalCents: effectiveSubtotal,
+  } = useMemo(
+    () =>
+      computeStackedAdmissionDiscount({
+        subtotalCents,
+        admissionSubtotalCents,
+        promoterDiscountBps,
+        promo: appliedPromo,
+        quantity,
+      }),
+    [subtotalCents, admissionSubtotalCents, promoterDiscountBps, appliedPromo, quantity],
+  );
   const fees = useMemo(
     () =>
       quantity > 0
@@ -608,6 +632,30 @@ export function CheckoutReviewScreen() {
   // still has to be validated against this cart's event with Apply.
   const cartId = cart?.cartId;
   const cartEventId = cart?.eventId;
+
+  // A server-bound promoter claim follows the account across devices. Hydrate
+  // it here as well so Review Order never displays full price while checkout
+  // is about to apply a saved discount.
+  useEffect(() => {
+    const numericEventId = Number(cartEventId);
+    if (!Number.isInteger(numericEventId) || numericEventId <= 0) return;
+    if (usePromoterRefStore.getState().getRef(cartEventId!)) return;
+
+    void promotersApi
+      .getClaim(numericEventId)
+      .then((claim) => {
+        if (!claim) return;
+        setPromoterRef(
+          cartEventId!,
+          claim.code,
+          claim.customerDiscountBps,
+        );
+      })
+      .catch((error) => {
+        console.warn("[checkout-review] promoter claim hydrate failed:", error);
+      });
+  }, [cartEventId, setPromoterRef]);
+
   useEffect(() => {
     resetPromo();
     const seeded = new URLSearchParams(window.location.search).get("promo");
@@ -887,6 +935,27 @@ export function CheckoutReviewScreen() {
               />
             ) : null}
 
+            {promoterRef?.code ? (
+              <section
+                role="status"
+                className="mb-3 flex items-center justify-between rounded-2xl border border-[#8A40CF]/35 bg-[#8A40CF]/10 p-4"
+              >
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-[#D8B4FE]/70">
+                    Promoter discount
+                  </p>
+                  <p className="mt-0.5 font-mono text-sm font-semibold text-[#D8B4FE]">
+                    {promoterRef.code}
+                  </p>
+                </div>
+                <span className="text-sm font-extrabold text-[#D8B4FE]">
+                  {promoterDiscountBps > 0
+                    ? `${promoterDiscountBps / 100}% off · applied`
+                    : "Applied at checkout"}
+                </span>
+              </section>
+            ) : null}
+
             {/* Promo code */}
             <section className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <FormField label="Promo code">
@@ -928,6 +997,16 @@ export function CheckoutReviewScreen() {
                   {formatCents(subtotalCents)}
                 </span>
               </div>
+              {promoterDiscountCents > 0 ? (
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-sm text-[#D8B4FE]">
+                    Promoter · {promoterDiscountBps / 100}% off
+                  </span>
+                  <span className="text-sm font-semibold text-[#D8B4FE]">
+                    −{formatCents(promoterDiscountCents)}
+                  </span>
+                </div>
+              ) : null}
               {discountCents > 0 && appliedPromo ? (
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm text-[#3FDCFF]">

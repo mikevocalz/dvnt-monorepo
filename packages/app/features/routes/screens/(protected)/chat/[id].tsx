@@ -90,6 +90,7 @@ import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 // expo-video-thumbnails removed — hangs on iOS 26.3
 import { LinearGradient } from "expo-linear-gradient";
 import { useTypingIndicator } from "@dvnt/app/lib/hooks/use-typing-indicator";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { TypingIndicator } from "@dvnt/app/components/chat/typing-indicator";
 import {
   useUserPresence,
@@ -505,6 +506,7 @@ function ChatScreenContent() {
   const currentMessage = useChatStore((s) => s.currentMessage);
   const setCurrentMessage = useChatStore((s) => s.setCurrentMessage);
   const sendMessageToBackend = useChatStore((s) => s.sendMessageToBackend);
+  const guardVerified = useVerifiedGate();
   const loadMessages = useChatStore((s) => s.loadMessages);
   const mentionQuery = useChatStore((s) => s.mentionQuery);
   const showMentions = useChatStore((s) => s.showMentions);
@@ -1191,7 +1193,7 @@ function ChatScreenContent() {
     return [];
   }, [mentionQuery, recipient]);
 
-  const handleSend = useCallback(() => {
+  const sendNow = useCallback(() => {
     // Read fresh state from store — avoids stale closure bugs
     const store = useChatStore.getState();
     if (!store.currentMessage.trim() && store.pendingMedia.length === 0) return;
@@ -1271,6 +1273,14 @@ function ChatScreenContent() {
     queryClient,
     activeConvId,
   ]);
+
+  // Verified-only: DMs need a verified account. The draft stays in the
+  // composer while the popup is up.
+  const handleSend = useCallback(() => {
+    const store = useChatStore.getState();
+    if (!store.currentMessage.trim() && store.pendingMedia.length === 0) return;
+    guardVerified("message", sendNow);
+  }, [guardVerified, sendNow]);
 
   const handleMentionSelect = useCallback(
     (username: string) => {

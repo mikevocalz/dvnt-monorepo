@@ -86,15 +86,20 @@ test.describe("game night — cookout table visuals", () => {
         page.getByRole("region", { name: "Duel round" }).getByText(/locked in/i),
       ).toBeVisible({ timeout: 10_000 });
 
-      // Chat toggles out of the table's way and reopens on demand — initial
-      // state depends on viewport (open on lg+, collapsed below it).
+      // Chat is never a sidebar. It opens as a bottom sheet capped at 75vh.
       const chatInput = page.getByPlaceholder(/say something/i);
-      const wasOpen = await chatInput.isVisible().catch(() => false);
-      await page
-        .getByRole("button", { name: /chat\s*(hide|show)/i })
-        .click();
-      if (wasOpen) await expect(chatInput).toBeHidden();
-      else await expect(chatInput).toBeVisible();
+      await expect(chatInput).toBeHidden();
+      await page.getByRole("button", { name: /open table chat/i }).click();
+      const chatDialog = page.getByRole("dialog");
+      await expect(chatDialog).toBeVisible();
+      await expect(chatInput).toBeVisible();
+      const dialogBox = await chatDialog.locator(":scope > div").boundingBox();
+      expect(dialogBox).toBeTruthy();
+      expect(dialogBox!.height).toBeLessThanOrEqual(
+        Math.ceil((await page.evaluate(() => window.innerHeight)) * 0.75) + 2,
+      );
+      await page.keyboard.press("Escape");
+      await expect(chatInput).toBeHidden();
 
       // Peer locks a pick so the submissions row + flip can be captured.
       const option = peer
@@ -184,10 +189,17 @@ test.describe("game night — cookout table visuals", () => {
         canvasBox!.y + 1,
       );
 
-      // On a phone the chat starts collapsed — it must never cover the table.
+      // Phone chat starts closed and opens as the same 75% bottom sheet.
       await expect(page.getByPlaceholder(/say something/i)).toBeHidden();
-      await page.getByRole("button", { name: /chat\s*(hide|show)/i }).click();
+      await page.getByRole("button", { name: /open table chat/i }).click();
+      const chatDialog = page.getByRole("dialog");
+      await expect(chatDialog).toBeVisible();
       await expect(page.getByPlaceholder(/say something/i)).toBeVisible();
+      const mobileSheet = await chatDialog.locator(":scope > div").boundingBox();
+      expect(mobileSheet).toBeTruthy();
+      expect(mobileSheet!.height).toBeLessThanOrEqual(611); // 75% of 812 + rounding
+      await page.keyboard.press("Escape");
+      await expect(page.getByPlaceholder(/say something/i)).toBeHidden();
 
       await table.screenshot({ path: "e2e/results/cookout-table-mobile.png" });
     } finally {

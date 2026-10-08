@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 export interface DialogProps {
@@ -16,7 +16,12 @@ export interface DialogProps {
   maxWidth?: number;
   /** Hide the default close (X) button. */
   hideClose?: boolean;
+  /** id of the element that names the dialog, when there is no `title`. */
+  labelledBy?: string;
 }
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Centered modal dialog (web) — the Law-3 translation of a native bottom sheet
@@ -31,11 +36,44 @@ export function Dialog({
   footer,
   maxWidth = 520,
   hideClose,
+  labelledBy,
 }: DialogProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Held in a ref so a parent passing a fresh onClose each render does not
+  // re-run the effect and bounce focus.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (!open) return;
+    // Focus moves into the dialog ([data-autofocus] first, else the first
+    // control), Tab stays inside it, and focus returns to the opener on close.
+    const opener = document.activeElement as HTMLElement | null;
+    const focusables = () =>
+      Array.from(panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
+    const initial =
+      panelRef.current?.querySelector<HTMLElement>("[data-autofocus]") ?? focusables()[0];
+    initial?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !panelRef.current?.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !panelRef.current?.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
@@ -43,8 +81,9 @@ export function Dialog({
     return () => {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
+      opener?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return (
@@ -53,8 +92,11 @@ export function Dialog({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={labelledBy}
+      aria-label={labelledBy ? undefined : title}
     >
       <div
+        ref={panelRef}
         className="w-full max-h-[88vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#101321] shadow-2xl"
         style={{ maxWidth }}
         onClick={(e) => e.stopPropagation()}

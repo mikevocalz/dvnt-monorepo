@@ -129,6 +129,7 @@ import {
 import { EjectModal } from "../ui/EjectModal";
 import type { EjectKind } from "../ui/EjectModal.types";
 import { classifySneakyLynkError } from "../errors";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { videoApi } from "@dvnt/app/features/video/api";
 import { useSneakyLynkCaptureBroadcast } from "../hooks/useSneakyLynkCaptureBroadcast";
 import {
@@ -2185,12 +2186,17 @@ export function SneakyLynkRoomScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, shouldGateJoin]);
 
+  // Verified-only: joining a Lynk needs a verified account. The pre-join
+  // screen stays up behind the popup.
+  const guardVerified = useVerifiedGate();
   const handleJoin = useCallback(
     (anonymous: boolean) => {
-      setJoinAnonymous(anonymous);
-      setPhase("joining");
+      guardVerified("sneaky_lynk", () => {
+        setJoinAnonymous(anonymous);
+        setPhase("joining");
+      });
     },
-    [setJoinAnonymous, setPhase],
+    [setJoinAnonymous, setPhase, guardVerified],
   );
 
   const roomTitle = roomSnapshot?.title || paramTitle || getLynkDisplayName();

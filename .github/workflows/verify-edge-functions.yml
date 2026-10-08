@@ -63,6 +63,19 @@ jobs:
           node-version: 22
       - run: node scripts/verify-edge-functions.mjs
 
+  verification-onboarding-contract:
+    # Prevent a recurrence of the 2026-10-08 error: missing Didit secrets
+    # must not look like a successful HTTP 200 or expose a bad redirect.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node --test apps/mobile/supabase/functions/_shared/verification-session-onboarding.test.cjs
+
   deno-shared-suites:
     # 138 Deno.test cases under apps/mobile/supabase/functions/_shared that no
     # npm script reached before. They own the capacity constants.

@@ -17,6 +17,7 @@ import { SheetHeader } from "@dvnt/app/components/ui/sheet-header";
 import { CommentRow, type CommentData } from "@dvnt/app/features/comments";
 import { CommentComposerFooter } from "@dvnt/app/features/comments";
 import { useCommentThread, useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
@@ -88,6 +89,7 @@ function RepliesScreenContent() {
 
   const { data: thread, isLoading } = useCommentThread(postId || "", commentId || "", 100);
   const createComment = useCreateComment();
+  const guardVerified = useVerifiedGate();
 
   const parentComment = thread?.parentComment || null;
   const replies = thread?.replies || [];
@@ -248,7 +250,7 @@ function RepliesScreenContent() {
     [focusCommentId, handleProfilePress, handleReply, postId],
   );
 
-  const handleSend = useCallback(() => {
+  const sendReply = useCallback(() => {
     if (!replyText.trim() || !postId || !parentComment) return;
     if (!user?.username) {
       showToast("error", "Error", "You must be logged in to reply");
@@ -283,6 +285,12 @@ function RepliesScreenContent() {
       },
     );
   }, [createComment, parentComment, postId, replyTarget, replyText, showToast, user]);
+
+  // Verified-only: replying needs a verified account. The draft stays put.
+  const handleSend = useCallback(() => {
+    if (!replyText.trim() || !postId || !parentComment) return;
+    guardVerified("comment", sendReply);
+  }, [replyText, postId, parentComment, guardVerified, sendReply]);
 
   useSafeHeader(
     {

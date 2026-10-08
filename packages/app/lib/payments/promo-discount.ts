@@ -34,3 +34,54 @@ export function promoLabel(type: PromoDiscountType, value: number): string {
   if (type === "percent") return `${value}% off`;
   return `$${(value / 100).toFixed(2)} off`;
 }
+
+export interface StackedAdmissionDiscountInput {
+  /** Pre-discount subtotal the promo code applies to (admission, or cart). */
+  subtotalCents: number;
+  /** Admission-only subtotal the promoter discount applies to. Defaults to subtotalCents. */
+  admissionSubtotalCents?: number;
+  /** Promoter customer discount, basis points 0-10000. */
+  promoterDiscountBps: number;
+  /** Validated promo code, if any. */
+  promo?: { type: PromoDiscountType; value: number } | null;
+  quantity: number;
+}
+
+export interface StackedAdmissionDiscount {
+  promoterDiscountCents: number;
+  promoDiscountCents: number;
+  /** subtotalCents minus both discounts, never below 0. */
+  discountedSubtotalCents: number;
+}
+
+/**
+ * Promoter discount first, then the promo code on what is left: the order
+ * ticket-checkout and cart-checkout charge in. The promoter part floors to
+ * whole cents like computePromoterCommission on the server.
+ * 20% promoter + 10% promo on $100 is $100 - $20 = $80, then - $8 = $72.
+ */
+export function computeStackedAdmissionDiscount(
+  input: StackedAdmissionDiscountInput,
+): StackedAdmissionDiscount {
+  const subtotal = Math.max(0, input.subtotalCents);
+  const admission = Math.max(0, input.admissionSubtotalCents ?? subtotal);
+  const bps = Math.max(0, Math.min(10000, input.promoterDiscountBps || 0));
+  const promoterDiscountCents = Math.min(
+    admission,
+    Math.floor((admission * bps) / 10000),
+  );
+  const afterPromoter = Math.max(0, subtotal - promoterDiscountCents);
+  const promoDiscountCents = input.promo
+    ? computePromoDiscountCents(
+        input.promo.type,
+        input.promo.value,
+        afterPromoter,
+        input.quantity,
+      )
+    : 0;
+  return {
+    promoterDiscountCents,
+    promoDiscountCents,
+    discountedSubtotalCents: Math.max(0, afterPromoter - promoDiscountCents),
+  };
+}

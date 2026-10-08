@@ -33,6 +33,7 @@ import {
   ArrowDown,
 } from "lucide-react";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { usePublishPost } from "@dvnt/app/lib/hooks/use-publish-post";
 import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
 import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
@@ -116,6 +117,7 @@ export function CreatePostScreen() {
   const ui = useCreatePostUIStore();
   const showToast = useUIStore((s) => s.showToast);
   const publishPost = usePublishPost();
+  const guardVerified = useVerifiedGate();
   const submittingRef = useRef(false);
 
   // Same hand-off as native `(tabs)/create.tsx`: the /feed/camera screen writes
@@ -250,7 +252,9 @@ export function CreatePostScreen() {
 
   // ---- Publish (same upload + mutation path as native) ----
 
-  const handlePost = async () => {
+  const handlePost = () => guardVerified("post", () => void submitPost());
+
+  const submitPost = async () => {
     if (submittingRef.current) return;
     submittingRef.current = true;
     ui.setIsSubmitLocked(true);

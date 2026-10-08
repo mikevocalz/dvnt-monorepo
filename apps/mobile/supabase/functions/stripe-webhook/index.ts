@@ -42,6 +42,10 @@ import {
 } from "../_shared/session-issuance.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
 import {
+  syncOrderStripeProcessingFeeSafely,
+  type StripeFeeSyncRefs,
+} from "../_shared/stripe-processing-fee.ts";
+import {
   parseDoorSaleMetadata,
   doorGuestTicketBase,
 } from "../_shared/door-sale.ts";
@@ -216,6 +220,10 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
   // guard (upsert_order_money_state) and the membership guard.
   const eventCreatedAt = new Date(event.created * 1000).toISOString();
 
+  // Set by a case that paid for event tickets. Synced after the event is
+  // marked processed so a Stripe read can never delay or fail issuance.
+  let stripeFeeSyncRefs: StripeFeeSyncRefs | null = null;
+
   try {
     switch (event.type) {
       // async_payment_succeeded is the settlement completion for delayed
@@ -282,6 +290,13 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             eventCreatedAt,
             logPrefix: "[stripe-webhook]",
           });
+          // Fee sync runs after the switch, once issuance has succeeded.
+          stripeFeeSyncRefs = {
+            paymentIntentId: typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : session.payment_intent?.id ?? null,
+            checkoutSessionId: session.id,
+          };
         } else if (metadata.type === "sneaky_access") {
           // ── Grant sneaky link access ─────────────────────
           const { error: accessError } = await supabase
@@ -395,6 +410,11 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         // Native PaymentSheet flow — PaymentIntent succeeded
         const pi = event.data.object;
         const piMetadata = pi.metadata || {};
+
+        if (piMetadata.type === "cart_checkout" || piMetadata.type === "event_ticket") {
+          // Deferred until after issuance; see the post-switch block.
+          stripeFeeSyncRefs = { paymentIntentId: pi.id };
+        }
 
         if (piMetadata.type === "cart_checkout") {
           // Match the reconciler's protection: an expired hold on a delayed
@@ -1984,6 +2004,14 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
       .from("stripe_events")
       .update({ processed_at: new Date().toISOString() })
       .eq("event_id", event.id);
+
+    if (stripeFeeSyncRefs) {
+      await syncOrderStripeProcessingFeeSafely(
+        supabase,
+        Deno.env.get("STRIPE_SECRET_KEY") || "",
+        stripeFeeSyncRefs,
+      );
+    }
   } catch (err) {
     console.error("[stripe-webhook] Processing error:", err);
     // This catch swallows fulfillment failures — without a capture here the

@@ -17,6 +17,7 @@ import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import { handleCartPaymentIntentSucceeded } from "../_shared/cart-issuance.ts";
 import { issueTicketsForCheckoutSession } from "../_shared/session-issuance.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
+import { syncOrderStripeProcessingFeeSafely } from "../_shared/stripe-processing-fee.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -101,6 +102,7 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
       needs_attention: 0,
       abandoned: 0,
       emails_retried: 0,
+      stripe_fees_synced: 0,
       by_status: {} as Record<string, number>,
     };
 
@@ -678,7 +680,49 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
       }
     }
 
-    // ── 3. Retry guest ticket emails that never landed ────────
+    // ── 3. Backfill real Stripe processing fees ────────────────
+    // Historical paid orders predate processor-fee capture. Reconciliation
+    // progressively repairs them from Stripe's actual Charge balance
+    // transaction. DVNT's platform fee is a separate order column and is never
+    // used as a proxy for this value.
+    const { data: feeBackfillOrders, error: feeBackfillError } = await supabase
+      .from("orders")
+      .select("id,stripe_payment_intent_id")
+      .eq("type", "event_ticket")
+      .eq("status", "paid")
+      .not("stripe_payment_intent_id", "is", null)
+      .is("stripe_fee_cents", null)
+      // Never-tried orders first, then the least recently tried, so an order
+      // that fails every run rotates to the back instead of starving the rest.
+      .order("stripe_fee_attempted_at", { ascending: true, nullsFirst: true })
+      .order("paid_at", { ascending: true })
+      .limit(25);
+
+    if (feeBackfillError) {
+      console.error("[reconcile] Stripe fee backfill fetch error:", feeBackfillError);
+    }
+
+    for (const order of feeBackfillOrders || []) {
+      const fee = await syncOrderStripeProcessingFeeSafely(
+        supabase,
+        STRIPE_SECRET_KEY,
+        {
+          orderId: order.id,
+          paymentIntentId: order.stripe_payment_intent_id,
+        },
+      );
+      if (fee !== null) {
+        stats.stripe_fees_synced++;
+      } else {
+        await supabase
+          .from("orders")
+          .update({ stripe_fee_attempted_at: new Date().toISOString() })
+          .eq("id", order.id)
+          .is("stripe_fee_cents", null);
+      }
+    }
+
+    // ── 4. Retry guest ticket emails that never landed ────────
     // Delivery is independent of fulfillment: a paid order whose Resend
     // call failed (or whose send attempt crashed) stays 'failed' /
     // 'pending' / null until something retries it. This sweep is that

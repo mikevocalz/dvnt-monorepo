@@ -18,6 +18,7 @@ import { SheetHeader } from "@dvnt/app/components/ui/sheet-header";
 import { ThreadedComment, type CommentData } from "@dvnt/app/features/comments";
 import { CommentComposerFooter } from "@dvnt/app/features/comments";
 import { useComments, useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
@@ -94,6 +95,7 @@ function CommentsScreenContent() {
 
   const { data: comments = [], isLoading } = useComments(postId || "", 50);
   const createComment = useCreateComment();
+  const guardVerified = useVerifiedGate();
 
   const commenters = useMemo(
     () => collectCommenters(comments, user?.username),
@@ -223,7 +225,7 @@ function CommentsScreenContent() {
     ],
   );
 
-  const handleSend = useCallback(() => {
+  const sendComment = useCallback(() => {
     if (!commentText.trim() || !postId) return;
     if (!user?.username) {
       showToast("error", "Error", "You must be logged in to comment");
@@ -265,6 +267,13 @@ function CommentsScreenContent() {
       },
     );
   }, [commentText, createComment, postId, replyTarget, showToast, user]);
+
+  // Verified-only: commenting needs a verified account. The draft stays in
+  // the composer while the popup is up.
+  const handleSend = useCallback(() => {
+    if (!commentText.trim() || !postId) return;
+    guardVerified("comment", sendComment);
+  }, [commentText, postId, guardVerified, sendComment]);
 
   useEffect(() => {
     if (!commentId || redirectedReplyRef.current || comments.length === 0) {
