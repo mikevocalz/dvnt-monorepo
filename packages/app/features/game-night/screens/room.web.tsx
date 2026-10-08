@@ -331,7 +331,7 @@ export function GameNightRoomScreen() {
           </div>
         ) : null}
 
-        <div className="mt-4 grid min-w-0 gap-5 sm:mt-6 lg:mt-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-8">
+        <div className="mt-4 min-w-0 sm:mt-6 lg:mt-8">
           <div className="min-w-0 space-y-5 sm:space-y-8">
             {status === "loading" || status === "idle" ? (
               <div aria-busy="true" className="space-y-3">
@@ -457,10 +457,9 @@ export function GameNightRoomScreen() {
               </>
             )}
           </div>
-
-          {state ? <RoomChat state={state} /> : null}
         </div>
       </div>
+      {state ? <RoomChat state={state} /> : null}
       <RulesSheet
         open={rulesOpen}
         onClose={() => setRulesOpen(false)}

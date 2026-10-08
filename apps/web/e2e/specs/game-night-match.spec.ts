@@ -282,10 +282,17 @@ test.describe("game night — two-client match", () => {
         watcher.getByRole("button", { name: /take a seat/i }),
       ).toHaveCount(0);
 
-      // Chat: player and watcher both post; everyone sees both.
+      // Chat: summon the 75% bottom sheet on each client, then post.
+      await page.getByRole("button", { name: /open table chat/i }).click();
+      await peer.getByRole("button", { name: /open table chat/i }).click();
+      await watcher.getByRole("button", { name: /open table chat/i }).click();
+
       const peerChat = peer.getByRole("region", { name: "Room chat" });
       const watcherChat = watcher.getByRole("region", { name: "Room chat" });
       const hostChat = page.getByRole("region", { name: "Room chat" });
+      await expect(hostChat).toBeVisible();
+      await expect(peerChat).toBeVisible();
+      await expect(watcherChat).toBeVisible();
 
       await peerChat.getByLabel("Chat message").fill("chat from a player");
       await peerChat.getByLabel("Chat message").press("Enter");
