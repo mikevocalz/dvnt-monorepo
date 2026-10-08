@@ -60,7 +60,7 @@ import { isPhoneRequiredError } from "@dvnt/app/lib/checkout/member-phone";
 import { CheckoutPhoneField } from "./checkout-phone-field.web";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import {
-  computePromoDiscountCents,
+  computeStackedAdmissionDiscount,
   promoLabel,
 } from "@dvnt/app/lib/payments/promo-discount";
 import {
@@ -600,34 +600,23 @@ export function CheckoutReviewScreen() {
     promoterRef?.customerDiscountBps != null
       ? Math.max(0, Math.min(10000, promoterRef.customerDiscountBps))
       : 0;
-  const promoterDiscountCents = Math.min(
-    admissionSubtotalCents,
-    promoterDiscountBps > 0
-      ? Math.round(admissionSubtotalCents * (promoterDiscountBps / 10000))
-      : 0,
-  );
-  const subtotalAfterPromoter = Math.max(
-    0,
-    subtotalCents - promoterDiscountCents,
-  );
-
-  // Server applies promoter discount first, then any promo code to the
-  // remaining cart subtotal. Mirror that order exactly in the review.
-  const discountCents = useMemo(
+  // Server applies promoter discount first (admission only), then any promo
+  // code to the remaining cart subtotal. Shared helper keeps this review, the
+  // event-detail sheet, and the server in the same order.
+  const {
+    promoterDiscountCents,
+    promoDiscountCents: discountCents,
+    discountedSubtotalCents: effectiveSubtotal,
+  } = useMemo(
     () =>
-      appliedPromo
-        ? computePromoDiscountCents(
-            appliedPromo.type,
-            appliedPromo.value,
-            subtotalAfterPromoter,
-            quantity,
-          )
-        : 0,
-    [appliedPromo, subtotalAfterPromoter, quantity],
-  );
-  const effectiveSubtotal = Math.max(
-    0,
-    subtotalAfterPromoter - discountCents,
+      computeStackedAdmissionDiscount({
+        subtotalCents,
+        admissionSubtotalCents,
+        promoterDiscountBps,
+        promo: appliedPromo,
+        quantity,
+      }),
+    [subtotalCents, admissionSubtotalCents, promoterDiscountBps, appliedPromo, quantity],
   );
   const fees = useMemo(
     () =>

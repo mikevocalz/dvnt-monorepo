@@ -29,6 +29,7 @@ import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
+import { computeStackedAdmissionDiscount } from "@dvnt/app/lib/payments/promo-discount";
 import {
   effectiveAddonUnitPriceCents,
   filterEligibleAddons,
@@ -388,16 +389,15 @@ export default function CartReviewScreen() {
     promoterRef?.customerDiscountBps != null
       ? Math.max(0, Math.min(10000, promoterRef.customerDiscountBps))
       : 0;
-  const promoterDiscountCents = Math.min(
+  const {
+    promoterDiscountCents,
+    discountedSubtotalCents: effectiveSubtotalCents,
+  } = computeStackedAdmissionDiscount({
+    subtotalCents,
     admissionSubtotalCents,
-    promoterDiscountBps > 0
-      ? Math.round(admissionSubtotalCents * (promoterDiscountBps / 10000))
-      : 0,
-  );
-  const effectiveSubtotalCents = Math.max(
-    0,
-    subtotalCents - promoterDiscountCents,
-  );
+    promoterDiscountBps,
+    quantity,
+  });
   const fees = useMemo(
     () =>
       quantity > 0

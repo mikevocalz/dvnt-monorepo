@@ -244,7 +244,6 @@ export const promotersApi = {
   async getClaim(eventId: number): Promise<{
     code: string;
     customerDiscountBps: number;
-    promoterCommissionBps: number;
   } | null> {
     const { data, error } = await invokeEdge<{
       ok: boolean;
@@ -253,8 +252,7 @@ export const promotersApi = {
         promoterId: string;
         code: string;
         customerDiscountBps: number;
-        promoterCommissionBps: number;
-      } | null;
+          } | null;
       error?: string;
     }>("promoter-ref", {
       action: "get",
@@ -268,7 +266,6 @@ export const promotersApi = {
     return {
       code: data.claim.code,
       customerDiscountBps: data.claim.customerDiscountBps,
-      promoterCommissionBps: data.claim.promoterCommissionBps,
     };
   },
 
@@ -276,7 +273,6 @@ export const promotersApi = {
   async claimRef(eventId: number, code: string): Promise<{
     code: string;
     customerDiscountBps: number;
-    promoterCommissionBps: number;
   }> {
     const { data, error } = await invokeEdge<{
       ok: boolean;
@@ -285,8 +281,7 @@ export const promotersApi = {
         promoterId: string;
         code: string;
         customerDiscountBps: number;
-        promoterCommissionBps: number;
-      };
+          };
       error?: string;
     }>("promoter-ref", {
       action: "claim",
@@ -300,7 +295,6 @@ export const promotersApi = {
     return {
       code: data.claim.code,
       customerDiscountBps: data.claim.customerDiscountBps,
-      promoterCommissionBps: data.claim.promoterCommissionBps,
     };
   },
 

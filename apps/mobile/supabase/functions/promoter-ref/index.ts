@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       const { data: savedPromoter, error: savedPromoterError } = await supabase
         .from("event_promoters")
         .select(
-          "id, event_id, code, customer_discount_bps, promoter_commission_bps, status",
+          "id, event_id, code, customer_discount_bps, status",
         )
         .eq("id", claim.promoter_id)
         .eq("event_id", parsed.data.event_id)
@@ -109,7 +109,6 @@ Deno.serve(async (req) => {
           promoterId: savedPromoter.id,
           code: savedPromoter.code,
           customerDiscountBps: savedPromoter.customer_discount_bps,
-          promoterCommissionBps: savedPromoter.promoter_commission_bps,
         },
       });
     }
@@ -122,7 +121,7 @@ Deno.serve(async (req) => {
     const { data: promoter, error: promoterError } = await supabase
       .from("event_promoters")
       .select(
-        "id, event_id, code, customer_discount_bps, promoter_commission_bps, status",
+        "id, event_id, code, customer_discount_bps, status",
       )
       .eq("event_id", parsed.data.event_id)
       .ilike("code", escapeLikePattern(code))
@@ -162,7 +161,6 @@ Deno.serve(async (req) => {
         promoterId: promoter.id,
         code: promoter.code,
         customerDiscountBps: promoter.customer_discount_bps,
-        promoterCommissionBps: promoter.promoter_commission_bps,
       },
     });
   } catch (error) {

@@ -16,7 +16,6 @@ import { useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter, usePathname } from "solito/navigation";
 import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
-import { computeFees } from "@dvnt/app/lib/stripe/fee-calculator";
 import {
   formatEventTime,
   eventEnded,
@@ -76,7 +75,8 @@ import { useEvents, useEvent, useToggleEventLike, useRsvpEvent } from "@dvnt/app
 import { useEventRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useEventDominantColor } from "@dvnt/app/lib/color/useEventDominantColor";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
-import { computePromoDiscountCents, promoLabel } from "@dvnt/app/lib/payments/promo-discount";
+import { promoLabel } from "@dvnt/app/lib/payments/promo-discount";
+import { computeCheckoutSheetTotals } from "@dvnt/app/lib/payments/checkout-sheet-totals";
 import { WhoAllOverThere } from "@dvnt/app/components/event/WhoAllOverThere.web";
 import { GoingAccordion } from "@dvnt/app/components/event/GoingAccordion.web";
 import { WeatherStrip } from "./ui/weather-strip.web";
@@ -2778,34 +2778,23 @@ function CheckoutSheet({
   }, [promoCode, appliedPromo, setAppliedPromo, setPromoError]);
 
   // Discount is recomputed from the validated promo + current qty (BOGO depends
-  // on qty). Server re-validates at charge — this is the buyer-facing preview.
-  const discountCents = appliedPromo
-    ? computePromoDiscountCents(
-        appliedPromo.type,
-        appliedPromo.value,
-        subtotalCents,
-        qty,
-      )
-    : 0;
-  const promoterDiscountCents =
-    promoterDiscountBps > 0
-      ? Math.round(subtotalCents * (promoterDiscountBps / 10000))
-      : 0;
-  const totalAdmissionDiscountCents = Math.min(
-    subtotalCents,
-    discountCents + promoterDiscountCents,
-  );
-  const goodsCents =
-    Math.max(0, subtotalCents - totalAdmissionDiscountCents) +
-    addonPreviewCents;
-  // The buyer fee is part of what Stripe charges, so it has to be part of what
-  // this sheet says. It showed "Pay $25.00" and the card was debited $26.63 —
-  // computeFees(2500, 1) is 2.5% + $1.00 per ticket — and three people were
-  // charged that way today. checkout-review has always added it; the sheet
-  // that precedes it did not, so the two screens quoted different prices for
-  // the same order.
-  const feeCents = goodsCents > 0 ? computeFees(goodsCents, qty).buyer_fee : 0;
-  const totalCents = goodsCents + feeCents;
+  // on qty). Server re-validates at charge; this is the buyer-facing preview.
+  // Promoter discount comes off first and the promo applies to what is left,
+  // the same order ticket-checkout charges in. The buyer fee is part of what
+  // Stripe charges, so it is part of what this sheet says (it once showed
+  // "Pay $25.00" while the card was debited $26.63).
+  const {
+    promoDiscountCents: discountCents,
+    promoterDiscountCents,
+    feeCents,
+    totalCents,
+  } = computeCheckoutSheetTotals({
+    admissionSubtotalCents: subtotalCents,
+    quantity: qty,
+    promoterDiscountBps,
+    promo: appliedPromo,
+    addonCents: addonPreviewCents,
+  });
   const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 
   const applyPromo = async () => {
@@ -2938,7 +2927,7 @@ function CheckoutSheet({
               </span>
             </div>
           ) : null}
-          {totalAdmissionDiscountCents > 0 ? (
+          {promoterDiscountCents + discountCents > 0 ? (
             <div className="flex items-center justify-between">
               <span className="text-sm text-white/55">Subtotal</span>
               <span className="text-sm text-white/80">{money(subtotalCents)}</span>
