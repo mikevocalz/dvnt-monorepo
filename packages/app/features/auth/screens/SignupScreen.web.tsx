@@ -44,12 +44,13 @@ const signupBirthDateError = (value: string) =>
 
 export function SignupScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // Survive the full-page redirect back from Didit, including Instagram's in-app browser.
-  const [activeStep, setActiveStep] = useState(() => {
+  // Hydration-safe restoration after Didit's full-page redirect.
+  const [activeStep, setActiveStep] = useState(0);
+  useEffect(() => {
     try {
-      return typeof window !== 'undefined' && window.sessionStorage.getItem('dvnt:signup:verification') === 'pending' ? 2 : 0;
-    } catch { return 0; }
-  });
+      if (window.sessionStorage.getItem('dvnt:signup:verification') === 'pending') setActiveStep(2);
+    } catch { /* storage may be disabled */ }
+  }, []);
   const [verificationStartError, setVerificationStartError] = useState<string | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [legalDoc, setLegalDoc] = useState<null | 'terms' | 'privacy'>(null);
