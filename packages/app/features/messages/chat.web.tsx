@@ -65,6 +65,7 @@ import { useConversationResolution } from "@dvnt/app/lib/hooks/use-conversation-
 import { useRefreshMessageCounts } from "@dvnt/app/lib/hooks/use-messages";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { useTypingIndicator } from "@dvnt/app/lib/hooks/use-typing-indicator";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import {
   useUserPresence,
   formatLastSeen,
@@ -610,6 +611,7 @@ export function ChatScreen() {
   const currentMessage = useChatStore((s) => s.currentMessage);
   const setCurrentMessage = useChatStore((s) => s.setCurrentMessage);
   const sendMessageToBackend = useChatStore((s) => s.sendMessageToBackend);
+  const guardVerified = useVerifiedGate();
   const loadMessages = useChatStore((s) => s.loadMessages);
   const mentionQuery = useChatStore((s) => s.mentionQuery);
   const showMentions = useChatStore((s) => s.showMentions);
@@ -1054,8 +1056,9 @@ export function ChatScreen() {
     if (!store.currentMessage.trim() && store.pendingMedia.length === 0) return;
     if (store.isSending) return;
     if (!activeConvId) return;
-    sendMessageToBackend(activeConvId);
-  }, [activeConvId, sendMessageToBackend]);
+    // Verified-only: DMs need a verified account. The draft stays put.
+    guardVerified("message", () => sendMessageToBackend(activeConvId));
+  }, [activeConvId, sendMessageToBackend, guardVerified]);
 
   const handleTextChange = useCallback(
     (text: string) => {

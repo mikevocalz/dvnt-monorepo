@@ -1,4 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
+import { withFunctionObserver } from "./function-observer";
+
+export { setFunctionResponseObserver } from "./function-observer";
 
 const FALLBACK_SUPABASE_URL = "https://npfjanxturvmjyevoyfo.supabase.co";
 
@@ -227,7 +230,7 @@ async function bridgeTokenOrAnon(): Promise<string> {
 
 export const supabase = createClient(supabaseUrl, clientKey, {
   accessToken: bridgeTokenOrAnon,
-  global: { fetch: proxiedFetch },
+  global: { fetch: withFunctionObserver(proxiedFetch) },
 });
 
 console.log("[Supabase] Web client initialized (accessToken bridge)");

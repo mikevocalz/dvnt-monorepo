@@ -24,6 +24,7 @@ import {
 import { UserAvatar } from "@dvnt/app/components/ui/avatar";
 import { usePost, useDeletePost } from "@dvnt/app/lib/hooks/use-posts";
 import { useComments, useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import {
   useToggleBookmark,
@@ -705,12 +706,18 @@ function CommentComposer({ postId }: { postId: string }) {
   const reset = useCommentDraftStore((s) => s.reset);
   const user = useAuthStore((s) => s.user);
   const createComment = useCreateComment();
+  const guardVerified = useVerifiedGate();
 
   // Hidden until the user taps the comment button (or Reply) — mirrors the
   // mobile comment sheet, adapted to web as a reveal-on-demand bar.
   if (!open) return null;
 
+  // Verified-only: commenting needs a verified account. The draft stays put.
   const submit = () => {
+    if (text.trim()) guardVerified("comment", submitNow);
+  };
+
+  const submitNow = () => {
     const body = text.trim();
     if (!body) return;
     createComment.mutate({

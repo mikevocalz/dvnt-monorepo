@@ -1,6 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
+import { withFunctionObserver } from "./function-observer";
+
+export { setFunctionResponseObserver } from "./function-observer";
 
 const FALLBACK_SUPABASE_URL = "https://npfjanxturvmjyevoyfo.supabase.co";
 
@@ -57,6 +60,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: false,
     detectSessionInUrl: false,
   },
+  // Late-bound so any fetch instrumentation installed after this module still applies.
+  global: { fetch: withFunctionObserver((input, init) => fetch(input, init)) },
 });
 
 // Native attaches the bridged JWT via supabase.auth.setSession (see the

@@ -54,6 +54,7 @@ import {
 } from "@dvnt/app/lib/events/sale-window";
 import { zoneDisplayName } from "@dvnt/app/lib/events/event-zone";
 import { useCreateEvent } from "@dvnt/app/lib/hooks/use-events";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { usePlacesAutocomplete } from "@dvnt/app/lib/hooks/use-places-autocomplete";
 import type { PlacesLocationData } from "@dvnt/app/lib/places/types";
 import {
@@ -177,6 +178,8 @@ export function CreateEventScreen() {
   const s = useCreateEventStore();
   useEventMediaPreupload();
   const createEvent = useCreateEvent();
+  // Verified-only: hosting needs a verified account.
+  const guardVerified = useVerifiedGate();
   const showToast = useUIStore((st) => st.showToast);
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -785,7 +788,7 @@ export function CreateEventScreen() {
               {s.isSavingDraft ? "Saving…" : s.serverDraftId ? "Update draft" : "Save draft"}
             </button>
             <button
-              onClick={publish}
+              onClick={() => guardVerified("host_event", () => void publish())}
               disabled={publishing}
               className="h-10 px-5 rounded-full bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-40"
             >
