@@ -16,8 +16,8 @@
  * rounded SQUARES.
  */
 
-import { useCallback } from "react";
-import { Crown, Hand, Mic, MicOff, Zap } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Crown, Hand, Mic, MicOff, RotateCw, Zap } from "lucide-react";
 
 import { SquareAvatar } from "./room-panels";
 
@@ -260,6 +260,41 @@ export function TimeUpDialog({
  */
 export function StageTile({ tile }: { tile: Tile }) {
   const { canvasPath, attachCanvas } = tile;
+  const tileRef = useRef<HTMLDivElement | null>(null);
+  // MoQ exposes no camera orientation metadata to the web watcher. A blanket
+  // transform would break upright cameras, so correction is per remote tile.
+  const [rotation, setRotation] = useState(0);
+  const [tileSize, setTileSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => setRotation(0), [canvasPath]);
+
+  useEffect(() => {
+    const el = tileRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const { width, height } = el.getBoundingClientRect();
+      setTileSize((previous) =>
+        previous.width === width && previous.height === height
+          ? previous
+          : { width, height },
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Rotated portrait frame must exchange its box dimensions to avoid cropping.
+  const sideways = rotation % 180 !== 0;
+  const canvasStyle = {
+    left: "50%",
+    top: "50%",
+    width: sideways ? (tileSize.height || "100%") : "100%",
+    height: sideways ? (tileSize.width || "100%") : "100%",
+    transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+    objectFit: "contain" as const,
+  };
   // Stable across re-renders, so the MoQ backend is created once per publisher
   // and closed only when the tile really goes away.
   const canvasRef = useCallback(
@@ -276,6 +311,8 @@ export function StageTile({ tile }: { tile: Tile }) {
       // a11y pass will hang a live region off.
       data-speaking={tile.isSpeaking ? "true" : "false"}
       data-tile={tile.isLocal ? "local" : tile.key}
+      data-video-rotation={rotation}
+      ref={tileRef}
       // Speaking is a RING, not a background or a glow: it reads at thumbnail
       // size, survives on top of video, and costs no contrast against the tile.
       // Cyan rather than signal — someone talking is not an alert.
@@ -296,15 +333,27 @@ export function StageTile({ tile }: { tile: Tile }) {
           ref={canvasRef}
           draggable={false}
           onContextMenu={(event) => event.preventDefault()}
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute object-contain"
+          style={canvasStyle}
         />
       ) : tile.isCameraOn && tile.videoStream ? (
         <VideoTile
           stream={tile.videoStream}
           muted={tile.isLocal}
           mirror={tile.isLocal}
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-contain"
         />
+      ) : null}
+      {canvasPath && !tile.isLocal ? (
+        <button
+          type="button"
+          aria-label={`Rotate ${tile.name}'s video clockwise`}
+          title="Video sideways? Rotate 90°"
+          onClick={() => setRotation((angle) => (angle + 90) % 360)}
+          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg border border-white/20 bg-black/65 text-white/90 backdrop-blur-sm transition-colors hover:bg-black/85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
+        >
+          <RotateCw size={16} aria-hidden="true" />
+        </button>
       ) : null}
       {/* Muted reads as a badge in the corner, the way Discord and Skype show
           it, so it is legible at thumbnail size and against moving video. A
