@@ -284,6 +284,9 @@ verify_jwt = false
 [functions.manage-promoters]
 verify_jwt = false
 
+[functions.promoter-ref]
+verify_jwt = false
+
 [functions.mark-read]
 verify_jwt = false
 

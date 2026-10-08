@@ -12,6 +12,7 @@
  */
 
 import { invokeEdge } from "./invoke-edge";
+import { canonicalPromoterEventLink } from "../events/promoter-share";
 
 export type PromoterStatus = "invited" | "active" | "paused" | "removed";
 
@@ -73,7 +74,7 @@ export function promoterShareLink(
   eventId: string | number,
   code: string,
 ): string {
-  return `https://dvntapp.live/public/events/${eventId}?ref=${encodeURIComponent(code)}`;
+  return canonicalPromoterEventLink(eventId, code);
 }
 
 export const promotersApi = {
@@ -237,6 +238,64 @@ export const promotersApi = {
     if (!data?.ok) {
       throw new Error(data?.error || "Could not remove saved promoter");
     }
+  },
+
+  /** Read the active promoter discount already bound to this account/event. */
+  async getClaim(eventId: number): Promise<{
+    code: string;
+    customerDiscountBps: number;
+  } | null> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      claim?: {
+        eventId: number;
+        promoterId: string;
+        code: string;
+        customerDiscountBps: number;
+          } | null;
+      error?: string;
+    }>("promoter-ref", {
+      action: "get",
+      event_id: eventId,
+    });
+    if (error) throw new Error(error.message);
+    if (!data?.ok) {
+      throw new Error(data?.error || "Could not load promoter discount");
+    }
+    if (!data.claim) return null;
+    return {
+      code: data.claim.code,
+      customerDiscountBps: data.claim.customerDiscountBps,
+    };
+  },
+
+  /** Persist a tracked promoter link to the signed-in buyer account. */
+  async claimRef(eventId: number, code: string): Promise<{
+    code: string;
+    customerDiscountBps: number;
+  }> {
+    const { data, error } = await invokeEdge<{
+      ok: boolean;
+      claim?: {
+        eventId: number;
+        promoterId: string;
+        code: string;
+        customerDiscountBps: number;
+          };
+      error?: string;
+    }>("promoter-ref", {
+      action: "claim",
+      event_id: eventId,
+      code,
+    });
+    if (error) throw new Error(error.message);
+    if (!data?.ok || !data.claim) {
+      throw new Error(data?.error || "Could not apply promoter discount");
+    }
+    return {
+      code: data.claim.code,
+      customerDiscountBps: data.claim.customerDiscountBps,
+    };
   },
 
   /** Ranked by net ledger earnings — single ledger query server-side. */

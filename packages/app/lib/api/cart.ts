@@ -37,9 +37,9 @@ export const cartApi = {
     cartId: string,
     promoCode?: string,
     /**
-     * Promoter attribution code (WS-4) — pending ?ref= from a tracked
-     * share link. Passed by the checkout hook (which knows the cart's
-     * eventId); never affects pricing.
+     * Promoter code captured from a tracked ?ref= event link. The checkout
+     * server revalidates the active promoter and applies its buyer discount
+     * to admission tickets while preserving promoter attribution.
      */
     promoterCode?: string | null,
     /** Normalized phone, sent once the server has asked for one. */

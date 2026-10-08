@@ -88,3 +88,52 @@ export async function validateAndApplyPromoterCode(
     error: null,
   };
 }
+
+
+/**
+ * Resolve an account-bound tracked promoter code for checkout.
+ *
+ * A saved claim is never trusted on its own: the linked promoter must still
+ * belong to this event and be active. If the promoter was paused/removed, the
+ * stale claim is ignored and checkout continues without a promoter discount.
+ */
+export async function resolveAccountPromoterCode(
+  supabase: any,
+  eventId: number,
+  buyerAuthId: string | null | undefined,
+): Promise<string | null> {
+  if (!buyerAuthId || !Number.isInteger(eventId) || eventId <= 0) return null;
+
+  const { data: claim, error: claimError } = await supabase
+    .from("promoter_ref_claims")
+    .select("promoter_id")
+    .eq("buyer_auth_id", buyerAuthId)
+    .eq("event_id", eventId)
+    .maybeSingle();
+
+  if (claimError) {
+    // Forward-compatible deploy ordering: older databases without the claims
+    // table still check out normally; tracked refs continue riding the request.
+    if (claimError.code !== "42P01") {
+      console.error("[apply-promoter-code] account claim lookup error:", claimError);
+    }
+    return null;
+  }
+  if (!claim?.promoter_id) return null;
+
+  const { data: promoter, error: promoterError } = await supabase
+    .from("event_promoters")
+    .select("code")
+    .eq("id", claim.promoter_id)
+    .eq("event_id", eventId)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (promoterError) {
+    console.error("[apply-promoter-code] claimed promoter lookup error:", promoterError);
+    return null;
+  }
+
+  const code = String(promoter?.code || "").trim().toUpperCase().slice(0, 32);
+  return /^[A-Z0-9_-]{2,32}$/.test(code) ? code : null;
+}

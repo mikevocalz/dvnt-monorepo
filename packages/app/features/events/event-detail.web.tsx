@@ -16,7 +16,6 @@ import { useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter, usePathname } from "solito/navigation";
 import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
-import { computeFees } from "@dvnt/app/lib/stripe/fee-calculator";
 import {
   formatEventTime,
   eventEnded,
@@ -76,7 +75,8 @@ import { useEvents, useEvent, useToggleEventLike, useRsvpEvent } from "@dvnt/app
 import { useEventRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useEventDominantColor } from "@dvnt/app/lib/color/useEventDominantColor";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
-import { computePromoDiscountCents, promoLabel } from "@dvnt/app/lib/payments/promo-discount";
+import { promoLabel } from "@dvnt/app/lib/payments/promo-discount";
+import { computeCheckoutSheetTotals } from "@dvnt/app/lib/payments/checkout-sheet-totals";
 import { WhoAllOverThere } from "@dvnt/app/components/event/WhoAllOverThere.web";
 import { GoingAccordion } from "@dvnt/app/components/event/GoingAccordion.web";
 import { WeatherStrip } from "./ui/weather-strip.web";
@@ -132,6 +132,7 @@ import {
 } from "@dvnt/app/lib/api/ticket-types";
 import {
   filterBuyerVisibleTiers,
+  pickDefaultBuyerTier,
   tierIsHiddenFromBuyers,
   tierIsLockedForBuyer,
   effectiveAddonUnitPriceCents,
@@ -469,22 +470,53 @@ export function EventDetailScreen() {
 
 
 
-  // Promoter attribution (WS-4): capture ?ref=CODE from tracked share
-  // links (?promo= is taken by promo codes) into the MMKV/localStorage-
-  // persisted store so the Stripe redirect can't lose it. The checkout
-  // API layer forwards it as promoter_code; pricing is never affected.
-  // Covers /feed/events/[id] AND /public/events/[id] (both render this
-  // screen).
+  // Promoter attribution: a tracked ?ref=CODE is persisted locally for
+  // guest checkout and, when the viewer is signed in, bound to their account.
+  // Checkout revalidates the active promoter policy server-side and applies the
+  // customer discount automatically.
   const setPromoterRef = usePromoterRefStore((s) => s.setRef);
   useEffect(() => {
     if (!eventId || typeof window === "undefined") return;
     try {
-      const ref = new URLSearchParams(window.location.search).get("ref");
-      if (ref) setPromoterRef(eventId, ref);
+      const rawRef = new URLSearchParams(window.location.search).get("ref");
+      if (rawRef) setPromoterRef(eventId, rawRef);
+
+      if (isAuthenticated) {
+        const code =
+          rawRef ?? usePromoterRefStore.getState().getRef(eventId);
+        if (code) {
+          void promotersApi
+            .claimRef(Number(eventId), code)
+            .then((claim) => {
+              setPromoterRef(
+                eventId,
+                claim.code,
+                claim.customerDiscountBps,
+              );
+            })
+            .catch((error) => {
+              console.warn("[event-detail] promoter ref claim failed:", error);
+            });
+        } else {
+          void promotersApi
+            .getClaim(Number(eventId))
+            .then((claim) => {
+              if (!claim) return;
+              setPromoterRef(
+                eventId,
+                claim.code,
+                claim.customerDiscountBps,
+              );
+            })
+            .catch((error) => {
+              console.warn("[event-detail] promoter claim hydrate failed:", error);
+            });
+        }
+      }
     } catch {
       /* malformed URL — ignore */
     }
-  }, [eventId, setPromoterRef]);
+  }, [eventId, isAuthenticated, setPromoterRef]);
 
   // Phase 2 — live propagation: subscribe to this event's row + tier/ticket
   // changes so a host edit (time/venue/price/cancel) reflects here without a
@@ -1550,10 +1582,12 @@ export function EventDetailScreen() {
             // 1. TICKETS — open the checkout sheet (or RSVP for free events).
             const openCheckout = () => {
               if (sellableTiers.length > 0 && !selectedTierId) {
-                const firstPaid =
-                  sellableTiers.find((t) => t.price_cents > 0) ??
-                  sellableTiers[0];
-                setSelectedTierId(String(firstPaid.id));
+                const firstTier = pickDefaultBuyerTier(
+                  sellableTiers,
+                  Number(e.price || 0) > 0,
+                  (candidate) => candidate.price_cents ?? 0,
+                );
+                if (firstTier) setSelectedTierId(String(firstTier.id));
               }
               setCheckoutOpen(true);
             };
@@ -1571,10 +1605,11 @@ export function EventDetailScreen() {
                       openGuestRsvp(eventId, e.title ?? "Event");
                       return;
                     }
-                    const tier =
-                      sellableTiers.find((t) => t.price_cents === 0) ??
-                      sellableTiers.find((t) => t.price_cents > 0) ??
-                      sellableTiers[0];
+                    const tier = pickDefaultBuyerTier(
+                      sellableTiers,
+                      Number(e.price || 0) > 0,
+                      (candidate) => candidate.price_cents ?? 0,
+                    );
                     if (tier) {
                       openGuestCheckout({
                         eventId,
@@ -2716,6 +2751,14 @@ function CheckoutSheet({
   const addonPreviewCents = addonSelectionsTotalCents(addons, selectionList);
   const hasAddonSelections = selectionList.length > 0;
 
+  const promoterRef = usePromoterRefStore(
+    (s) => s.refs[String(eventId)] ?? null,
+  );
+  const promoterDiscountBps =
+    promoterRef?.customerDiscountBps != null
+      ? Math.max(0, Math.min(10000, promoterRef.customerDiscountBps))
+      : 0;
+
   const appliedPromo = useEventDetailUiStore((s) => s.appliedPromo);
   const setAppliedPromo = useEventDetailUiStore((s) => s.setAppliedPromo);
   const promoError = useEventDetailUiStore((s) => s.promoError);
@@ -2735,19 +2778,23 @@ function CheckoutSheet({
   }, [promoCode, appliedPromo, setAppliedPromo, setPromoError]);
 
   // Discount is recomputed from the validated promo + current qty (BOGO depends
-  // on qty). Server re-validates at charge — this is the buyer-facing preview.
-  const discountCents = appliedPromo
-    ? computePromoDiscountCents(appliedPromo.type, appliedPromo.value, subtotalCents, qty)
-    : 0;
-  const goodsCents = Math.max(0, subtotalCents - discountCents) + addonPreviewCents;
-  // The buyer fee is part of what Stripe charges, so it has to be part of what
-  // this sheet says. It showed "Pay $25.00" and the card was debited $26.63 —
-  // computeFees(2500, 1) is 2.5% + $1.00 per ticket — and three people were
-  // charged that way today. checkout-review has always added it; the sheet
-  // that precedes it did not, so the two screens quoted different prices for
-  // the same order.
-  const feeCents = goodsCents > 0 ? computeFees(goodsCents, qty).buyer_fee : 0;
-  const totalCents = goodsCents + feeCents;
+  // on qty). Server re-validates at charge; this is the buyer-facing preview.
+  // Promoter discount comes off first and the promo applies to what is left,
+  // the same order ticket-checkout charges in. The buyer fee is part of what
+  // Stripe charges, so it is part of what this sheet says (it once showed
+  // "Pay $25.00" while the card was debited $26.63).
+  const {
+    promoDiscountCents: discountCents,
+    promoterDiscountCents,
+    feeCents,
+    totalCents,
+  } = computeCheckoutSheetTotals({
+    admissionSubtotalCents: subtotalCents,
+    quantity: qty,
+    promoterDiscountBps,
+    promo: appliedPromo,
+    addonCents: addonPreviewCents,
+  });
   const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 
   const applyPromo = async () => {
@@ -2815,6 +2862,22 @@ function CheckoutSheet({
           </div>
         </div>
 
+        {promoterRef?.code ? (
+          <div
+            role="status"
+            className="flex items-center justify-between rounded-xl border border-[#8A40CF]/35 bg-[#8A40CF]/10 px-3 py-2.5"
+          >
+            <span className="text-sm font-semibold text-[#D8B4FE]">
+              Promoter code {promoterRef.code}
+            </span>
+            <span className="text-sm font-bold text-[#D8B4FE]">
+              {promoterDiscountBps > 0
+                ? `${promoterDiscountBps / 100}% off · applied`
+                : "Applied at checkout"}
+            </span>
+          </div>
+        ) : null}
+
         {/* Promo code + apply */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
@@ -2864,19 +2927,31 @@ function CheckoutSheet({
               </span>
             </div>
           ) : null}
-          {discountCents > 0 ? (
-            <>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-white/55">Subtotal</span>
-                <span className="text-sm text-white/80">{money(subtotalCents)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-[#379ED8]">
-                  {promoLabel(appliedPromo!.type, appliedPromo!.value)}
-                </span>
-                <span className="text-sm text-[#379ED8]">−{money(discountCents)}</span>
-              </div>
-            </>
+          {promoterDiscountCents + discountCents > 0 ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-white/55">Subtotal</span>
+              <span className="text-sm text-white/80">{money(subtotalCents)}</span>
+            </div>
+          ) : null}
+          {promoterDiscountCents > 0 ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-[#D8B4FE]">
+                Promoter · {promoterDiscountBps / 100}% off
+              </span>
+              <span className="text-sm text-[#D8B4FE]">
+                −{money(promoterDiscountCents)}
+              </span>
+            </div>
+          ) : null}
+          {discountCents > 0 && appliedPromo ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-[#379ED8]">
+                {promoLabel(appliedPromo.type, appliedPromo.value)}
+              </span>
+              <span className="text-sm text-[#379ED8]">
+                −{money(discountCents)}
+              </span>
+            </div>
           ) : null}
           {feeCents > 0 ? (
             <div className="flex items-center justify-between">
