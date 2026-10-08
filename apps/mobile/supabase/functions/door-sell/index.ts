@@ -68,12 +68,14 @@ function json(data: unknown, status = 200): Response {
 async function stripeRequest(
   endpoint: string,
   body: Record<string, string>,
+  idempotencyKey?: string,
 ): Promise<any> {
   const res = await fetch(`https://api.stripe.com/v1${endpoint}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       "Content-Type": "application/x-www-form-urlencoded",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: new URLSearchParams(body).toString(),
   });
@@ -120,6 +122,7 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       promoter_code,
       unlock_code,
       order_id,
+      sale_key,
     } = body;
 
     if (
@@ -570,6 +573,14 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
     // Web uses automatic payment methods. Native Tap to Pay MUST create
     // card_present and lets Terminal process+capture it on-device. Minted
     // BEFORE the hold so the hold binds the real PI id atomically.
+    // `sale_key` is one per sale attempt from the seller's device. Stripe
+    // returns the same PaymentIntent for a repeated key, so a retry after a
+    // lost response cannot mint a second charge; the order lookup below then
+    // returns the existing sale instead of taking a second hold.
+    const saleKey =
+      typeof sale_key === "string" && /^[A-Za-z0-9-]{16,64}$/.test(sale_key)
+        ? sale_key
+        : undefined;
     let pi: any;
     try {
       pi = await stripeRequest("/payment_intents", {
@@ -610,9 +621,27 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
         ...(validPromoterCode
           ? { "metadata[dvnt_promoter_code]": validPromoterCode }
           : {}),
-      });
+      }, saleKey ? `door-sell:${staffUserId}:${saleKey}` : undefined);
     } catch (stripeErr) {
       throw stripeErr;
+    }
+
+    if (saleKey) {
+      const { data: existingOrder } = await supabase
+        .from("orders")
+        .select("id")
+        .eq("stripe_payment_intent_id", pi.id)
+        .maybeSingle();
+      if (existingOrder) {
+        return json({
+          ok: true,
+          clientSecret: pi.client_secret,
+          publishableKey: STRIPE_PUBLISHABLE_KEY,
+          paymentIntentId: pi.id,
+          order_id: existingOrder.id,
+          quote,
+        });
+      }
     }
 
     // ── Atomic inventory hold — same RPC as online checkout ────────────

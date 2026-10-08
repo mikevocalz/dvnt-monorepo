@@ -94,6 +94,12 @@ export const doorApi = {
     promoterCode?: string;
     promoCode?: string;
     rail?: "web" | "terminal";
+    /**
+     * One id per sale attempt, reused when retrying that same sale. The
+     * server passes it to Stripe as the idempotency key, so a retry after a
+     * lost response returns the original sale instead of charging twice.
+     */
+    saleKey?: string;
   }): Promise<DoorSellResult> {
     const { data, error } = await invokeEdge<DoorSellResponse>("door-sell", {
       action: params.rail === "terminal" ? "sell_terminal" : "sell",
@@ -104,6 +110,7 @@ export const doorApi = {
       ...(params.guestName ? { guest_name: params.guestName } : {}),
       ...(params.promoterCode ? { promoter_code: params.promoterCode } : {}),
       ...(params.promoCode ? { promo_code: params.promoCode } : {}),
+      ...(params.saleKey ? { sale_key: params.saleKey } : {}),
     });
     const res = unwrap(data, error);
     return {

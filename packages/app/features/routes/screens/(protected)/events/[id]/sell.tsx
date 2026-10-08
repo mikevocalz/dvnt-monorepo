@@ -21,7 +21,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Contactless,
+  Nfc,
   Minus,
   Plus,
   RotateCcw,
@@ -85,6 +85,13 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
   const [orderId, setOrderId] = useState<string | null>(null);
   const connectingReader = useRef(false);
   const booted = useRef(false);
+  // One key per sale attempt. A retry of the same sale reuses it so the
+  // server returns the original PaymentIntent and order; changing what is
+  // being sold starts a new attempt with a new key.
+  const saleKey = useRef<string | null>(null);
+  useEffect(() => {
+    saleKey.current = null;
+  }, [selectedTierId, quantity, email, code]);
 
   const {
     initialize,
@@ -325,9 +332,10 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
 
       if (processed.error) {
         // Stripe requires retries to reuse the SAME PaymentIntent after a
-        // decline/temporary failure. Keep the returned intent instead of
-        // creating another hold/charge.
-        if (processed.paymentIntent) setPendingIntent(processed.paymentIntent);
+        // decline/temporary failure. Keep that intent instead of creating
+        // another hold/charge. The result union types `paymentIntent` as
+        // undefined on the error branch, so keep the one we already hold.
+        setPendingIntent(intent);
         setPhase("error");
         setMessage(
           processed.error.message ||
@@ -337,6 +345,7 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
       }
 
       setPendingIntent(null);
+      saleKey.current = null;
       await waitForFulfillment(fulfillmentOrderId);
     },
     [orderId, processPaymentIntent, waitForFulfillment],
@@ -357,6 +366,7 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
 
       setPhase("creating");
       setMessage("Reserving tickets…");
+      if (!saleKey.current) saleKey.current = crypto.randomUUID();
       const sale = await doorApi.sell({
         eventId,
         ticketTypeId: selectedTier.id,
@@ -364,6 +374,7 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
         guestEmail: email.trim(),
         promoterCode: code.trim() || undefined,
         rail: "terminal",
+        saleKey: saleKey.current,
       });
       setOrderId(sale.order_id ?? null);
 
@@ -374,12 +385,14 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
       }
       if (!sale.clientSecret) throw new Error("Payment could not be started.");
 
-      const retrieved = await retrievePaymentIntent(sale.clientSecret);
-      if (retrieved.error || !retrieved.paymentIntent) {
-        throw retrieved.error || new Error("Payment could not be loaded.");
+      // Destructure before narrowing: checking `retrieved.error` first narrows
+      // the whole union to `never` on the success branch.
+      const { paymentIntent, error: retrieveError } = await retrievePaymentIntent(sale.clientSecret);
+      if (!paymentIntent) {
+        throw retrieveError || new Error("Payment could not be loaded.");
       }
-      setPendingIntent(retrieved.paymentIntent);
-      await processTap(retrieved.paymentIntent, sale.order_id ?? null);
+      setPendingIntent(paymentIntent);
+      await processTap(paymentIntent, sale.order_id ?? null);
     } catch (error: any) {
       setPhase("error");
       setMessage(error?.message || "Sale could not be completed.");
@@ -400,6 +413,7 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
   ]);
 
   const resetSale = useCallback(() => {
+    saleKey.current = null;
     setPendingIntent(null);
     setOrderId(null);
     setQuantity(1);
@@ -604,7 +618,7 @@ function TapToPaySeller({ eventId }: { eventId: number }) {
               paddingHorizontal: 16,
             }}
           >
-            {busy ? <ActivityIndicator color="#fff" /> : <Contactless size={24} color="#fff" />}
+            {busy ? <ActivityIndicator color="#fff" /> : <Nfc size={24} color="#fff" />}
             <Text style={{ color: "#fff", fontSize: 17, fontWeight: "800" }}>
               {pendingIntent
                 ? "Retry Tap to Pay"

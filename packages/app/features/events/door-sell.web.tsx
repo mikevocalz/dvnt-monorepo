@@ -41,7 +41,7 @@ import {
   Plus,
   WifiOff,
   XCircle,
-  Contactless,
+  Nfc,
 } from "lucide-react";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
@@ -622,7 +622,7 @@ export function DoorSellScreen() {
           <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-[#379ED8]/30 bg-[#379ED8]/10 p-3">
             <div className="min-w-0">
               <p className="flex items-center gap-2 text-sm font-bold text-white">
-                <Contactless size={17} className="text-[#7fd4ff]" />
+                <Nfc size={17} className="text-[#7fd4ff]" />
                 Taking payment at the door?
               </p>
               <p className="mt-1 text-xs text-white/55">

@@ -35,7 +35,7 @@ import {
   BarChart3,
   Megaphone,
   Undo2,
-  Contactless,
+  Nfc,
 } from "lucide-react-native";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
@@ -394,7 +394,7 @@ function EventOrganizerScreenContent() {
             gap: 8,
           }}
         >
-          <Contactless size={21} color="#7fd4ff" />
+          <Nfc size={21} color="#7fd4ff" />
           <Text style={{ color: "#7fd4ff", fontSize: 16, fontWeight: "700" }}>
             Sell Tickets · Tap to Pay
           </Text>
