@@ -128,9 +128,18 @@ export function resolveRoomAudience(
   // the fallback when membership stats are completely unavailable. Once stats
   // are visible, trust them — they can distinguish a room with participants
   // from one that still has an active host.
+  //
+  // participant_count alone never decays: a host whose app crashed never
+  // sends the leave that zeroes it, and a paid room with ends_at NULL is
+  // never swept, so the count would read "live" forever. video_rooms has no
+  // column that moves while a room is active (updated_at has no trigger and
+  // the participant_count writes do not touch it; the video_heartbeat
+  // freshness stamp is video_room_members.last_seen_at, which a pre-join
+  // visitor cannot read). So the fallback only counts inside the same
+  // just-created window used for listeners.
   const membershipStatsUnavailable = stats === undefined;
   const persistedPresence =
-    membershipStatsUnavailable && persistedCount > 0;
+    membershipStatsUnavailable && persistedCount > 0 && justCreated;
 
   const listeners =
     room.status === "open"

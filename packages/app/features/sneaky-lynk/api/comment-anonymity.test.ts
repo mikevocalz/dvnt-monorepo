@@ -85,7 +85,28 @@ test("stats keyed by row id count the same people", () => {
 });
 
 
-test("pre-join visitors use the server-maintained participant count when RLS hides member rows", () => {
+test("pre-join visitors use the server-maintained participant count for a just-created room", () => {
+  const now = Date.parse("2026-10-06T21:53:00Z");
+  const audience = resolveRoomAudience(
+    {
+      id: 588,
+      status: "open",
+      participant_count: 1,
+      created_at: "2026-10-06T21:52:00Z",
+    },
+    undefined,
+    now,
+  );
+
+  assert.equal(audience.isLive, true);
+  assert.equal(audience.listeners, 1);
+  assert.equal(audience.activeHostCount, 0);
+});
+
+test("a stale open room whose count never dropped is not live to a pre-join visitor", () => {
+  // Host crashed without leaving: participant_count stays 1, and a paid room
+  // with ends_at NULL is never swept. Nothing on video_rooms moves to say the
+  // room is still active, so the count alone must not light it up.
   const now = Date.parse("2026-10-06T21:53:00Z");
   const audience = resolveRoomAudience(
     {
@@ -98,9 +119,8 @@ test("pre-join visitors use the server-maintained participant count when RLS hid
     now,
   );
 
-  assert.equal(audience.isLive, true);
-  assert.equal(audience.listeners, 1);
-  assert.equal(audience.activeHostCount, 0);
+  assert.equal(audience.isLive, false);
+  assert.equal(audience.listeners, 0);
 });
 
 test("visible membership stats remain authoritative over the persisted fallback", () => {
