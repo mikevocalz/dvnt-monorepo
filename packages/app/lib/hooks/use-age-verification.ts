@@ -3,11 +3,7 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { onboardingCheckpoint, onboardingFailure } from "@dvnt/observability/flows";
-import { validateDateOfBirth } from "@dvnt/app/lib/utils/age-verification";
-import {
-  normalizeVerificationState,
-  type NormalizedVerification,
-} from "@dvnt/app/lib/auth/verification-state";
+import type { NormalizedVerification } from "@dvnt/app/lib/auth/verification-state";
 
 /**
  * B3 deferred ID verification (Didit). Status vocabulary mirrors the
@@ -29,7 +25,36 @@ export const ageVerificationKeys = {
   state: ["age-verification", "state"] as const,
 };
 
-/** Own-row read via RLS (identity_verifications_own SELECT policy). */
+/**
+ * Better Auth sessions are not Supabase Auth JWTs. Reading
+ * identity_verifications through PostgREST can 401 even when the caller is
+ * signed into DVNT. Both web and native use a self-only authenticated function.
+ */
+async function fetchVerificationStatus(): Promise<{
+  status: AgeVerificationStatus;
+  state: NormalizedVerification;
+}> {
+  const token = await requireBetterAuthToken();
+  const { data, error } = await supabase.functions.invoke<{
+    ok: boolean;
+    data?: { status: AgeVerificationStatus; state: NormalizedVerification };
+    error?: { code: string; message: string };
+  }>("verification-status", {
+    body: {},
+    headers: { Authorization: `Bearer ${token}`, "x-auth-token": token },
+  });
+  if (error) throw await describeFunctionError(error);
+  if (!data?.ok || !data.data) throw new Error(data?.error?.message || "Couldn't check verification status");
+  return data.data;
+}
+
+async function describeFunctionError(error: any): Promise<Error> {
+  // supabase-js puts the structured body of 401/503 responses in error.context.
+  const body = await error?.context?.clone?.().json?.().catch(() => null);
+  return new Error(body?.error?.message || error?.message || "Verification is temporarily unavailable");
+}
+
+/** Self-only status from the authenticated Edge Function. */
 export function useAgeVerificationStatus() {
   const authId = useAuthStore((s) => s.user?.authId);
   return useQuery({
@@ -37,15 +62,9 @@ export function useAgeVerificationStatus() {
     enabled: !!authId,
     staleTime: 30_000,
     queryFn: async (): Promise<AgeVerificationStatus> => {
-      const { data } = await supabase
-        .from("identity_verifications")
-        .select("status, date_of_birth")
-        .eq("user_id", authId!)
-        .maybeSingle();
-      if (data?.status === "passed" && !validateDateOfBirth(data.date_of_birth).isValid) {
-        return "review";
-      }
-      return (data?.status as AgeVerificationStatus) ?? "none";
+      const result = await fetchVerificationStatus();
+      if (result.status === "passed" && result.state.state !== "approved") return "review";
+      return result.status;
     },
   });
 }
@@ -87,18 +106,8 @@ export function useVerificationState() {
     queryKey: [...ageVerificationKeys.state, authId],
     enabled: !!authId,
     staleTime: 15_000,
-    queryFn: async (): Promise<NormalizedVerification> => {
-      const { data, error } = await supabase
-        .from("identity_verifications")
-        .select("user_id,status,date_of_birth,failure_code,failure_message,provider_ref")
-        .eq("user_id", authId!)
-        .maybeSingle();
-      if (error) throw error;
-      if (data && data.user_id !== authId) {
-        return normalizeVerificationState(null);
-      }
-      return normalizeVerificationState(data);
-    },
+    queryFn: async (): Promise<NormalizedVerification> =>
+      (await fetchVerificationStatus()).state,
   });
 }
 
@@ -118,7 +127,7 @@ export function useStartVerification() {
         body: { returnUrl: opts?.returnUrl },
         headers: { Authorization: `Bearer ${token}`, "x-auth-token": token },
       });
-      if (error) throw new Error(error.message || "Couldn't start verification");
+      if (error) throw await describeFunctionError(error);
       if (!data?.ok || !data.data) {
         throw new Error(data?.error?.message || "Couldn't start verification");
       }
