@@ -17,11 +17,11 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { ImagePlay, Loader2, MessageSquare, SendHorizonal } from "lucide-react";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
+import { useChatSheetScroll } from "./use-chat-sheet-scroll";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { fetchRoomMessages, sendRoomMessage } from "../rooms-api";
 import { KlipyGifPicker, type GifPayload } from "./game-night-klipy.web";
@@ -89,10 +89,15 @@ export function RoomChat({ state }: { state: GameNightState }) {
   const [input, setInput] = useState("");
   const [showGifs, setShowGifs] = useState(false);
   const [sendPending, setSendPending] = useState(false);
-  const [showNewPill, setShowNewPill] = useState(false);
-
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const atBottom = useRef(true);
+  const {
+    listRef,
+    onScroll,
+    scrollToBottom,
+    showNewPill,
+    unread,
+    noteIncoming,
+    jumpToNewest,
+  } = useChatSheetScroll(open);
 
   const nameOf = useCallback(
     (userId: string) =>
@@ -104,19 +109,6 @@ export function RoomChat({ state }: { state: GameNightState }) {
       state.members.find((m) => m.user_id === userId)?.seat_no ?? -1,
     [state.members],
   );
-
-  const scrollToBottom = useCallback(() => {
-    const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, []);
-
-  const onScroll = useCallback(() => {
-    const el = listRef.current;
-    if (!el) return;
-    atBottom.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    if (atBottom.current) setShowNewPill(false);
-  }, []);
 
   // Initial page.
   useEffect(() => {
@@ -186,15 +178,17 @@ export function RoomChat({ state }: { state: GameNightState }) {
             }
             return [...prev, row];
           });
-          if (atBottom.current) requestAnimationFrame(scrollToBottom);
-          else setShowNewPill(true);
+          noteIncoming({
+            fromMe: row.userId === myId,
+            listed: row.kind !== "reaction",
+          });
         },
       )
       .subscribe();
     return () => {
       void channel.unsubscribe();
     };
-  }, [roomId, myId, scrollToBottom, seatOf]);
+  }, [roomId, myId, noteIncoming, seatOf]);
 
   const loadEarlier = useCallback(async () => {
     const oldest = rows.find((r) => !r.localId)?.id;
@@ -283,13 +277,26 @@ export function RoomChat({ state }: { state: GameNightState }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Open table chat"
+        aria-label={
+          unread > 0
+            ? `Open table chat, ${unread} unread message${unread === 1 ? "" : "s"}`
+            : "Open table chat"
+        }
         aria-haspopup="dialog"
         aria-expanded={open}
         className="fixed bottom-[calc(env(safe-area-inset-bottom)+104px)] right-4 z-[1200] inline-flex h-12 items-center gap-2 rounded-full border border-[#8A40CF]/45 bg-[#151020]/95 px-4 text-sm font-semibold text-white shadow-[0_14px_38px_rgba(0,0,0,.42)] backdrop-blur-xl transition hover:bg-[#1d162b] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C9A2F0] lg:bottom-6 lg:right-6"
       >
         <MessageSquare aria-hidden className="h-4 w-4 text-[#C9A2F0]" />
         Chat
+        {unread > 0 ? (
+          <span
+            aria-hidden
+            data-testid="chat-unread-badge"
+            className="-mr-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#FC253A] px-1.5 font-mono text-[11px] font-bold leading-none text-white"
+          >
+            {unread > 9 ? "9+" : unread}
+          </span>
+        ) : null}
       </button>
 
       <BottomSheet
@@ -460,10 +467,7 @@ export function RoomChat({ state }: { state: GameNightState }) {
             {showNewPill ? (
               <button
                 type="button"
-                onClick={() => {
-                  scrollToBottom();
-                  setShowNewPill(false);
-                }}
+                onClick={jumpToNewest}
                 className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-[#8A40CF] px-3 py-1 text-xs font-semibold text-white shadow-lg"
               >
                 ↓ New messages
