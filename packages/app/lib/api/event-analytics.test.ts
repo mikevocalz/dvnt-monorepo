@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { resolveAttendanceBreakdown } from "./event-analytics";
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { resolveAttendanceBreakdown } from "./event-attendance.ts";
 
 describe("resolveAttendanceBreakdown", () => {
   it("uses the host breakdown when present", () => {
-    expect(
+    assert.deepEqual(
       resolveAttendanceBreakdown({
         attendanceBreakdown: { rsvp: 2, paid: 7, total: 12 },
         ticketStats: {
@@ -15,11 +16,12 @@ describe("resolveAttendanceBreakdown", () => {
           transferPending: 0,
         },
       }),
-    ).toEqual({ rsvp: 2, paid: 7, total: 12 });
+      { rsvp: 2, paid: 7, total: 12 },
+    );
   });
 
   it("falls back safely when an older Edge Function omits the field", () => {
-    expect(
+    assert.deepEqual(
       resolveAttendanceBreakdown({
         ticketStats: {
           total: 12,
@@ -30,6 +32,7 @@ describe("resolveAttendanceBreakdown", () => {
           transferPending: 1,
         },
       }),
-    ).toEqual({ rsvp: 0, paid: 0, total: 11 });
+      { rsvp: 0, paid: 0, total: 11 },
+    );
   });
 });

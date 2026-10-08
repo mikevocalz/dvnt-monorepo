@@ -889,11 +889,23 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
           onPress={() => setShowHistory((v) => !v)}
           className="flex-row items-center justify-between"
         >
-          <View className="flex-row items-center gap-2">
-            <CheckCircle2 size={16} color="#22C55E" />
-            <Text className="text-white font-sans-semibold text-sm">
-              {scanCount} scanned
-            </Text>
+          <View className="flex-row items-center gap-3">
+            <View className="flex-row items-center gap-2">
+              <CheckCircle2 size={16} color="#22C55E" />
+              <Text className="text-white font-sans-semibold text-sm">
+                {scanCount} scanned
+              </Text>
+            </View>
+            <Pressable
+              onPress={() =>
+                router.push(`/(protected)/events/${eventId}/sell` as any)
+              }
+              className="rounded-xl bg-[#379ED8]/20 px-3 py-2"
+            >
+              <Text className="text-[#7fd4ff] text-xs font-sans-bold">
+                Sell · Tap to Pay
+              </Text>
+            </Pressable>
           </View>
           {scanHistory.length > 0 && (
             <Text className="text-white/50 text-xs">

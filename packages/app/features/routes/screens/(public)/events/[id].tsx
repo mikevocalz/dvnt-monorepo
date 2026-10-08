@@ -31,6 +31,13 @@ import { usePublicGateStore } from "@dvnt/app/lib/stores/public-gate-store";
 import { GuestCheckoutSheet } from "@dvnt/app/features/events";
 import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
 import { OrganizerCard } from "@dvnt/app/features/events/ui";
+import {
+  filterBuyerVisibleTiers,
+  pickDefaultBuyerTier,
+} from "@dvnt/app/lib/tickets/pricing";
+import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 
 interface TierLite {
   id: string;
@@ -72,19 +79,68 @@ function formatSaleWindow(
 }
 
 function PublicEventDetailContent() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id: string; ref?: string }>();
+  const { id } = params;
   const router = useRouter();
   const eventId = Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
   const openGate = usePublicGateStore((s) => s.openGate);
+  const setPromoterRef = usePromoterRefStore((s) => s.setRef);
+  const isAuthenticated = useAuthStore((s) => !!s.user);
+
+  React.useEffect(() => {
+    const rawRef = Array.isArray(params.ref) ? params.ref[0] : params.ref;
+    if (eventId && rawRef) setPromoterRef(eventId, String(rawRef));
+
+    if (isAuthenticated && eventId) {
+      const code =
+        (rawRef ? String(rawRef) : null) ??
+        usePromoterRefStore.getState().getRef(eventId);
+      const numericEventId = Number(eventId);
+      if (Number.isInteger(numericEventId) && numericEventId > 0) {
+        if (code) {
+          void promotersApi
+            .claimRef(numericEventId, code)
+            .then((claim) => {
+              setPromoterRef(
+                eventId,
+                claim.code,
+                claim.customerDiscountBps,
+              );
+            })
+            .catch((error) => {
+              console.warn("[PublicEventDetail] promoter ref claim failed:", error);
+            });
+        } else {
+          void promotersApi
+            .getClaim(numericEventId)
+            .then((claim) => {
+              if (!claim) return;
+              setPromoterRef(
+                eventId,
+                claim.code,
+                claim.customerDiscountBps,
+              );
+            })
+            .catch((error) => {
+              console.warn(
+                "[PublicEventDetail] promoter claim hydrate failed:",
+                error,
+              );
+            });
+        }
+      }
+    }
+  }, [eventId, isAuthenticated, params.ref, setPromoterRef]);
 
   const { data: event, isLoading, isError } = useEvent(eventId);
   const { data: tierRows = [] } = useTicketTypes(eventId);
 
   const tiers: TierLite[] = useMemo(() => {
     const now = Date.now();
-    return (tierRows as any[])
-      .filter((t) => t.is_active !== false)
-      .map((t) => {
+    const { visible } = filterBuyerVisibleTiers(
+      (tierRows as any[]).filter((t) => t.is_active !== false),
+    );
+    return visible.map((t) => {
         const total = Number(t.quantity_total || 0);
         const sold = Number(t.quantity_sold || 0);
         const remaining = Math.max(0, total - sold);
@@ -115,11 +171,16 @@ function PublicEventDetailContent() {
   // Auto-select the first available tier once tiers load
   React.useEffect(() => {
     if (selectedTierId) return;
-    const firstAvailable = tiers.find(
+    const available = tiers.filter(
       (t) => !t.isSoldOut && !t.saleNotStarted && !t.saleEnded,
     );
+    const firstAvailable = pickDefaultBuyerTier(
+      available,
+      Number(event?.price || 0) > 0,
+      (tier) => tier.priceCents,
+    );
     if (firstAvailable) setSelectedTierId(firstAvailable.id);
-  }, [tiers, selectedTierId]);
+  }, [tiers, selectedTierId, event?.price]);
 
   const selectedTier = useMemo(
     () => tiers.find((t) => t.id === selectedTierId) ?? null,

@@ -55,6 +55,7 @@ import {
 import { useMotionTier } from "@dvnt/app/lib/navigation/use-motion-tier";
 import { AppDrawerHost } from "@dvnt/app/features/navigation/app-drawer-host";
 import { DrawerTrigger } from "@dvnt/app/components/drawer-trigger";
+import { VerifiedOnlyPopup } from "@dvnt/app/components/verified-only-popup";
 import { useMyTickets } from "@dvnt/app/lib/hooks/use-tickets";
 import {
   buildTicketLibrary,
@@ -516,6 +517,10 @@ export default function ProtectedLayout() {
         />
       </Stack>
       </AppDrawerHost>
+      {/* PERSISTENT: verified-only popup. Opened by useVerifiedGate before a
+          verified-only action, or by a participation rail's refusal. Renders
+          nothing while closed, and never opens while enforcement is off. */}
+      <VerifiedOnlyPopup />
       {/* PERSISTENT: Weather overlay — renders ON TOP of screens.
           pointerEvents="none" — touches pass through to content below. */}
       <WeatherReanimatedOverlay />

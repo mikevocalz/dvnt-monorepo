@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildPromoterShareMessage,
+  canonicalPromoterEventLink,
   promoterEventLink,
   promoterSmsHref,
   truncateDescription,
@@ -45,4 +46,12 @@ test("the ref is encoded and appended to an existing query", () => {
 
 test("the sms fallback encodes the whole message as the body", () => {
   assert.equal(promoterSmsHref("Hi & bye\nnow"), "sms:?&body=Hi%20%26%20bye%0Anow");
+});
+
+
+test("copied promoter links use the canonical event short link", () => {
+  assert.equal(
+    canonicalPromoterEventLink(90, "Ron"),
+    "https://dvntapp.live/e/90?ref=Ron",
+  );
 });

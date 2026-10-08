@@ -8,6 +8,7 @@ import { useIsLargeScreen } from "@dvnt/app/lib/hooks/use-is-large-screen";
 
 import { StoriesBar } from "@dvnt/app/features/stories";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import * as Haptics from "expo-haptics";
 import { useCallback, memo, useEffect } from "react";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
@@ -28,12 +29,16 @@ const MemoStoriesBar = memo(function MemoStoriesBar() {
 export const FeedModeToggle = memo(function FeedModeToggle() {
   const nsfwEnabled = useAppStore((s) => s.nsfwEnabled);
   const setNsfwEnabled = useAppStore((s) => s.setNsfwEnabled);
+  const guardVerified = useVerifiedGate();
 
   const toggleSpicy = useCallback(() => {
     // void: async, and it rejects where the native module is absent.
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setNsfwEnabled(!nsfwEnabled, "feed_toggle");
-  }, [nsfwEnabled, setNsfwEnabled]);
+    // Verified-only: turning Spicy ON needs a verified account. Turning it
+    // off never does.
+    if (nsfwEnabled) setNsfwEnabled(false, "feed_toggle");
+    else guardVerified("spicy", () => setNsfwEnabled(true, "feed_toggle"));
+  }, [nsfwEnabled, setNsfwEnabled, guardVerified]);
 
   return (
     // Motion.Pressable, not a bare Pressable: `whileTap` reads a context ONLY

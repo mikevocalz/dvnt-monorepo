@@ -8,6 +8,7 @@ import Animated, {
 } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { usePathname } from "expo-router";
 
 const TRACK_WIDTH = 84;
@@ -117,6 +118,14 @@ export function SpicyToggleFAB({ accessoryPlacement }: SpicyToggleFABProps) {
     store.setNsfwEnabled(false, source);
   }, [accessoryPlacement, isAccessory, pathname]);
 
+  // Verified-only: turning Spicy ON shows the popup to an unverified member
+  // before the adult-verification flow below. Turning it off never does.
+  const guardVerified = useVerifiedGate();
+  const onPress = useCallback(() => {
+    if (useAppStore.getState().nsfwEnabled) void doToggle();
+    else guardVerified("spicy", () => void doToggle());
+  }, [doToggle, guardVerified]);
+
   const pressable = (
     <Pressable
       onPressIn={() => {
@@ -126,7 +135,7 @@ export function SpicyToggleFAB({ accessoryPlacement }: SpicyToggleFABProps) {
           currentEnabled: useAppStore.getState().nsfwEnabled,
         });
       }}
-      onPress={doToggle}
+      onPress={onPress}
       hitSlop={12}
       accessibilityRole="switch"
       accessibilityLabel="Spicy toggle"

@@ -21,6 +21,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
+import { readAdmissionRefusal } from "@dvnt/app/lib/auth/verified-only-prompt";
 import { ErrorBoundary as GlobalErrorBoundary } from "@dvnt/app/components/error-boundary";
 import {
   ArrowLeft,
@@ -644,14 +646,19 @@ function SneakyLynkRoomScreenContent({
     };
   }, [id, shouldGateJoin]);
 
+  // Verified-only: joining a Lynk needs a verified account. The pre-join
+  // screen stays up behind the popup.
+  const guardVerified = useVerifiedGate();
   const handleJoin = useCallback(
     (anonymous: boolean, cameraOn: boolean, micOn: boolean) => {
-      setJoinAnonymous(anonymous);
-      setJoinCameraOn(cameraOn);
-      setJoinMicOn(micOn);
-      setHasJoined(true);
+      guardVerified("sneaky_lynk", () => {
+        setJoinAnonymous(anonymous);
+        setJoinCameraOn(cameraOn);
+        setJoinMicOn(micOn);
+        setHasJoined(true);
+      });
     },
-    [],
+    [guardVerified],
   );
 
   if (shouldGateJoin && roomLookup.loading) {
@@ -1205,6 +1212,11 @@ function ServerRoom({
       markRoomClosed(roomSnapshot);
     },
     onError: (error, envelope) => {
+      // A verified-admission refusal already opened the verified-only popup
+      // (the supabase fetch observer saw it), so no second message here.
+      if (readAdmissionRefusal({ ok: false, error: { code: envelope?.code, detail: envelope?.detail } })) {
+        return;
+      }
       // Classify BEFORE any toast — premium errors (room full, ended,
       // rate-limited, etc.) get a dedicated sheet with proper copy.
       // Pass the structured error envelope (code + detail) through to

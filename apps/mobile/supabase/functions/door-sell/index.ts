@@ -6,12 +6,12 @@
  *     promoter_code?, promo_code? }
  *     → server quote only: { quote }. Creates nothing.
  *
- *   { action: "sell", event_id, ticket_type_id, quantity,
+ *   { action: "sell" | "sell_terminal", event_id, ticket_type_id, quantity,
  *     guest_email, guest_name?, promoter_code?, promo_code? }
  *     → creates atomic ticket hold + PaymentIntent + payment_pending
  *       order; returns { clientSecret, publishableKey, quote, order_id }.
- *       Zero-total orders take the secure free path: guest tickets are
- *       issued immediately with no Stripe object ("No charge").
+ *       "sell" is card-not-present web checkout; "sell_terminal" is
+ *       card-present Tap to Pay. Zero-total orders take the secure free path.
  *
  * Money-path rules honored:
  *  - Staff only: host or accepted event_co_organizers (scanner+). The
@@ -68,12 +68,14 @@ function json(data: unknown, status = 200): Response {
 async function stripeRequest(
   endpoint: string,
   body: Record<string, string>,
+  idempotencyKey?: string,
 ): Promise<any> {
   const res = await fetch(`https://api.stripe.com/v1${endpoint}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       "Content-Type": "application/x-www-form-urlencoded",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: new URLSearchParams(body).toString(),
   });
@@ -120,11 +122,18 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       promoter_code,
       unlock_code,
       order_id,
+      sale_key,
     } = body;
 
-    if (!["quote", "sell", "status", "resend"].includes(action)) {
+    if (
+      !["quote", "quote_terminal", "sell", "sell_terminal", "status", "resend"]
+        .includes(action)
+    ) {
       return json(
-        { error: "action must be 'quote', 'sell', 'status' or 'resend'" },
+        {
+          error:
+            "action must be 'quote', 'quote_terminal', 'sell', 'sell_terminal', 'status' or 'resend'",
+        },
         400,
       );
     }
@@ -147,7 +156,10 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
     const trimmedGuestName =
       typeof guest_name === "string" ? guest_name.trim().slice(0, 120) : "";
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedGuestEmail);
-    if (action === "sell" && (!isValidEmail || trimmedGuestEmail.length > 254)) {
+    if (
+      (action === "sell" || action === "sell_terminal") &&
+      (!isValidEmail || trimmedGuestEmail.length > 254)
+    ) {
       return json(
         { error: "Enter an email to send the tickets to." },
         400,
@@ -423,11 +435,12 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       remaining,
     };
 
-    if (action === "quote") {
+    if (action === "quote" || action === "quote_terminal") {
       return json({ ok: true, quote, role: staffRole });
     }
 
-    // ── action === "sell" ──────────────────────────────────────────────
+    // ── action === "sell" | "sell_terminal" ───────────────────────────
+    const terminalSale = action === "sell_terminal";
 
     // Zero-total: secure free path — no Stripe object, real guest tickets.
     if (effectiveSubtotal === 0) {
@@ -556,21 +569,35 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
       );
     }
 
-    // ── PaymentIntent — web rail: automatic_payment_methods only ──────
-    // Minted BEFORE the hold so the hold binds the real PI id in one
-    // write — a placeholder-then-rebind pattern can collide with another
-    // seller's concurrent hold on the same tier.
+    // ── PaymentIntent rail ─────────────────────────────────────────────
+    // Web uses automatic payment methods. Native Tap to Pay MUST create
+    // card_present and lets Terminal process+capture it on-device. Minted
+    // BEFORE the hold so the hold binds the real PI id atomically.
+    // `sale_key` is one per sale attempt from the seller's device. Stripe
+    // returns the same PaymentIntent for a repeated key, so a retry after a
+    // lost response cannot mint a second charge; the order lookup below then
+    // returns the existing sale instead of taking a second hold.
+    const saleKey =
+      typeof sale_key === "string" && /^[A-Za-z0-9-]{16,64}$/.test(sale_key)
+        ? sale_key
+        : undefined;
     let pi: any;
     try {
       pi = await stripeRequest("/payment_intents", {
         amount: fees.customer_charge_amount.toString(),
         currency: ticketType.currency || "usd",
-        "automatic_payment_methods[enabled]": "true",
+        ...(terminalSale
+          ? {
+              "payment_method_types[]": "card_present",
+              capture_method: "automatic",
+            }
+          : { "automatic_payment_methods[enabled]": "true" }),
         "transfer_data[destination]": organizer.stripe_account_id,
         application_fee_amount: fees.application_fee_amount.toString(),
         receipt_email: trimmedGuestEmail,
         "metadata[type]": "event_ticket",
         "metadata[is_door_sale]": "true",
+        "metadata[payment_rail]": terminalSale ? "terminal" : "web",
         "metadata[event_id]": event_id.toString(),
         "metadata[ticket_type_id]": ticket_type_id,
         "metadata[quantity]": quantity.toString(),
@@ -594,9 +621,27 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
         ...(validPromoterCode
           ? { "metadata[dvnt_promoter_code]": validPromoterCode }
           : {}),
-      });
+      }, saleKey ? `door-sell:${staffUserId}:${saleKey}` : undefined);
     } catch (stripeErr) {
       throw stripeErr;
+    }
+
+    if (saleKey) {
+      const { data: existingOrder } = await supabase
+        .from("orders")
+        .select("id")
+        .eq("stripe_payment_intent_id", pi.id)
+        .maybeSingle();
+      if (existingOrder) {
+        return json({
+          ok: true,
+          clientSecret: pi.client_secret,
+          publishableKey: STRIPE_PUBLISHABLE_KEY,
+          paymentIntentId: pi.id,
+          order_id: existingOrder.id,
+          quote,
+        });
+      }
     }
 
     // ── Atomic inventory hold — same RPC as online checkout ────────────

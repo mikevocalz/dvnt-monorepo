@@ -25,6 +25,7 @@ import {
   useCommentThread,
   useCreateComment,
 } from "@dvnt/app/lib/hooks/use-comments";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
 import {
@@ -148,8 +149,14 @@ function ReplyComposer({
   const reset = useCommentDraftStore((s) => s.reset);
   const user = useAuthStore((s) => s.user);
   const createComment = useCreateComment();
+  const guardVerified = useVerifiedGate();
 
+  // Verified-only: replying needs a verified account. The draft stays put.
   const submit = () => {
+    if (text.trim()) guardVerified("comment", submitNow);
+  };
+
+  const submitNow = () => {
     const body = text.trim();
     if (!body || !postId || !parentCommentId) return;
     createComment.mutate({

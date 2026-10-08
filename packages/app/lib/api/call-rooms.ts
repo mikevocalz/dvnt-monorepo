@@ -26,7 +26,15 @@ export interface CallCreateResponse {
 }
 
 export interface CallJoinResponse {
-  room: { id: string; title: string; fishjamRoomId: string };
+  room: {
+    id: string;
+    title: string;
+    fishjamRoomId: string;
+    /** Server-owned deadline. Absent on older edge deployments; null while ringing. */
+    endsAt?: string | null;
+    /** Server clock when the response was built (ISO). Absent on older deployments. */
+    serverNow?: string;
+  };
   token: string;
   user: { id: string; username?: string; avatar?: string };
 }

@@ -35,11 +35,13 @@ with tempfile.TemporaryDirectory(prefix="dvnt-call-db-", dir="/tmp") as tmp:
             sql((ROOT / "migrations" / name).read_text())
         # Later production columns needed by admission; no external data fixture.
         sql("ALTER TABLE video_rooms ADD COLUMN room_kind text DEFAULT 'lynk', ADD COLUMN participant_count integer DEFAULT 0;")
+        sql((ROOT / "migrations/20260824120000_video_rooms_ends_at.sql").read_text())
         migration = (ROOT / "migrations/20260905121000_call_admission.sql").read_text()
         sql(migration)
         sql(migration)  # repeatable migration definition / grants
         # Seat admission now reads the room's own cap rather than a literal.
         sql((ROOT / "migrations/20261001120000_call_capacity_ten.sql").read_text())
+        sql((ROOT / "migrations/20261006220500_call_session_limit_five_minutes.sql").read_text())
 
         def create(kind="call"):
             return sql(f"INSERT INTO video_rooms(created_by,title,room_kind,max_participants) VALUES ('host','test','{kind}',4) RETURNING uuid;").splitlines()[0]
@@ -107,6 +109,22 @@ with tempfile.TemporaryDirectory(prefix="dvnt-call-db-", dir="/tmp") as tmp:
         assert reconnect["reconnected"] is True
         assert sql(f"SELECT finish_call_media('{media_room}','{lease2}','provider-room','peer-host-new');") == "t"
         assert sql(f"SELECT count(*) FROM call_media_peers WHERE room_id=(SELECT id FROM video_rooms WHERE uuid='{media_room}');") == "1"
+
+        # Ringing does not consume the five-minute allowance. The host can
+        # establish media with no deadline; the first invited peer that
+        # successfully commits media starts one shared server deadline.
+        timed_room = create()
+        invite(timed_room, ["timer-peer"])
+        assert json.loads(sql(f"SELECT begin_call_media('{timed_room}', 'host', '{lease1}');"))["ok"]
+        assert sql(f"SELECT finish_call_media('{timed_room}','{lease1}','provider-timed','peer-host');") == "t"
+        assert sql(f"SELECT ends_at IS NULL FROM video_rooms WHERE uuid='{timed_room}';") == "t"
+        assert json.loads(sql(f"SELECT begin_call_media('{timed_room}', 'timer-peer', '{lease2}');"))["ok"]
+        assert sql(f"SELECT finish_call_media('{timed_room}','{lease2}','provider-timed','peer-guest');") == "t"
+        deadline_seconds = float(sql(
+            f"SELECT EXTRACT(EPOCH FROM (ends_at - clock_timestamp())) FROM video_rooms WHERE uuid='{timed_room}';"
+        ))
+        assert 290 <= deadline_seconds <= 300, deadline_seconds
+
         assert begin("a", lease1)["ok"]
         # Provider failure releases a newly admitted seat, preserving the host.
         assert sql(f"SELECT finish_call_media('{media_room}','{lease1}');") == "t"
@@ -136,6 +154,6 @@ with tempfile.TemporaryDirectory(prefix="dvnt-call-db-", dir="/tmp") as tmp:
         # Rollback removes only the new RPC; the existing Lynk rows survive.
         sql("DROP FUNCTION public.begin_call_media(uuid,text,uuid); DROP FUNCTION public.finish_call_media(uuid,uuid,text,text); DROP TABLE public.call_media_peers, public.call_media_leases; DROP FUNCTION public.admit_call_participant(uuid,text);")
         assert sql(f"SELECT count(*) FROM video_room_members WHERE room_id=(SELECT id FROM video_rooms WHERE uuid='{lynk}');") == "8"
-        print("PASS: capacity 2/3/4, concurrent fifth admission, concurrent reconnect, left/rejoin, invite/ban/kick/ended gates, Lynk isolation, media lease/replacement/failure/expiry/leave/kick/ban fencing, grants, rollback")
+        print("PASS: capacity, reconnect, invite/ban/kick/ended gates, five-minute connected-session deadline, Lynk isolation, media lease/replacement/failure/expiry fencing, grants, rollback")
     finally:
         run("pg_ctl", "-D", data, "-m", "immediate", "-w", "stop")

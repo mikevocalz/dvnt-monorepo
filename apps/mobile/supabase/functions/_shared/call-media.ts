@@ -181,9 +181,27 @@ export async function provisionCallMedia(params: {
     }
     committed = true;
     held = false;
+
+    // finish_call_media is the transaction boundary that starts the shared
+    // five-minute call deadline when the first non-host participant actually
+    // connects. Read that server fact back after commit so the joining client
+    // renders the same clock as everyone else.
+    const { data: deadlineRoom, error: deadlineError } = await supabase
+      .from("video_rooms")
+      .select("ends_at")
+      .eq("uuid", roomId)
+      .maybeSingle();
+    if (deadlineError) {
+      console.error(
+        "[call-media] Could not read committed call deadline:",
+        deadlineError.message,
+      );
+    }
+
     return {
       ok: true as const,
       fishjamRoomId: providerRoomId,
+      endsAt: deadlineRoom?.ends_at ?? null,
       token,
       peer: { id: newPeerId, role: admission.role },
       user: {

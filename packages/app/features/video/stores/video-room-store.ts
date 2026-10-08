@@ -88,6 +88,8 @@ interface VideoRoomStoreState {
   callEnded: boolean;
   callDuration: number;
   callStartedAt: number | null;
+  /** Seconds remaining on the server-owned personal/group call deadline. */
+  callSessionSecondsLeft: number | null;
   recipientInfo: RecipientInfo | null;
 
   // Permissions
@@ -104,6 +106,8 @@ interface VideoRoomStoreState {
    *  predates the gate, `null` = unlimited. Display only — video_join_room
    *  enforces it. */
   serverEndsAt: string | null | undefined;
+  /** serverNow - local now, measured once at call join. 0 when unknown. */
+  serverClockOffsetMs: number;
   isFrontCamera: boolean;
   isSpeakerOn: boolean;
   localStream: MediaStream | null;
@@ -144,6 +148,7 @@ interface VideoRoomStoreActions {
   setCallEnded: (duration: number) => void;
   setCallDuration: (duration: number) => void;
   setCallStartedAt: (ts: number | null) => void;
+  setCallSessionSecondsLeft: (seconds: number | null) => void;
 
   // Permissions
   setCameraPermission: (state: PermissionState) => void;
@@ -154,6 +159,7 @@ interface VideoRoomStoreActions {
   setMicOn: (on: boolean) => void;
   setHostMuteLocked: (locked: boolean) => void;
   setServerEndsAt: (v: string | null) => void;
+  setServerClockOffsetMs: (v: number) => void;
   toggleCamera: () => void;
   toggleMic: () => void;
   setFrontCamera: (front: boolean) => void;
@@ -198,6 +204,7 @@ const initialState: VideoRoomStoreState = {
   callEnded: false,
   callDuration: 0,
   callStartedAt: null,
+  callSessionSecondsLeft: null,
   recipientInfo: null,
   cameraPermission: "pending",
   micPermission: "pending",
@@ -205,6 +212,7 @@ const initialState: VideoRoomStoreState = {
   isMicOn: false,
   hostMuteLocked: false,
   serverEndsAt: undefined as string | null | undefined,
+  serverClockOffsetMs: 0,
   isFrontCamera: true,
   isSpeakerOn: true,
   localStream: null,
@@ -312,6 +320,8 @@ export const useVideoRoomStore = create<VideoRoomStore>((set, get) => ({
     }),
   setCallDuration: (callDuration) => set({ callDuration }),
   setCallStartedAt: (callStartedAt) => set({ callStartedAt }),
+  setCallSessionSecondsLeft: (callSessionSecondsLeft) =>
+    set({ callSessionSecondsLeft }),
 
   // Permissions
   setCameraPermission: (cameraPermission) => set({ cameraPermission }),
@@ -332,6 +342,7 @@ export const useVideoRoomStore = create<VideoRoomStore>((set, get) => ({
   setMicOn: (isMicOn) => set({ isMicOn }),
   setHostMuteLocked: (hostMuteLocked) => set({ hostMuteLocked }),
   setServerEndsAt: (serverEndsAt) => set({ serverEndsAt }),
+  setServerClockOffsetMs: (serverClockOffsetMs) => set({ serverClockOffsetMs }),
   toggleCamera: () => {
     const { callType, isCameraOn } = get();
     if (!isCameraOn && callType === "audio") {

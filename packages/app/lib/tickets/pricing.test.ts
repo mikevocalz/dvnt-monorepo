@@ -23,6 +23,7 @@ import {
   tierIsHiddenFromBuyers,
   tierIsLockedForBuyer,
   filterBuyerVisibleTiers,
+  pickDefaultBuyerTier,
   addonIsPurchasable,
   addonSatisfiesTierGate,
   filterEligibleAddons,
@@ -302,5 +303,34 @@ test("tierDisplayPriceCents prefers the live row and its scheduled price", () =>
   assert.equal(
     tierDisplayPriceCents(scheduled, null, Date.parse("2026-06-01T00:00:00Z")),
     1500,
+  );
+});
+
+
+test("paid events default to a paid buyer tier even when a public $0 tier exists", () => {
+  const tiers = [
+    { id: "early", price_cents: 0 },
+    { id: "ga", price_cents: 3000 },
+  ];
+  assert.equal(
+    pickDefaultBuyerTier(tiers, true, (tier) => tier.price_cents)?.id,
+    "ga",
+  );
+  assert.equal(
+    pickDefaultBuyerTier(tiers, false, (tier) => tier.price_cents)?.id,
+    "early",
+  );
+});
+
+test("hidden tiers are removed before default-tier selection", () => {
+  const tiers = [
+    { id: "influencer", tier_visibility: "hidden", price_cents: 0 },
+    { id: "ga", tier_visibility: "public", price_cents: 3000 },
+  ];
+  const { visible } = filterBuyerVisibleTiers(tiers);
+  assert.deepEqual(visible.map((tier) => tier.id), ["ga"]);
+  assert.equal(
+    pickDefaultBuyerTier(visible, true, (tier) => tier.price_cents)?.id,
+    "ga",
   );
 });

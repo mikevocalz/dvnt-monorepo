@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import BottomSheet, {
+  BottomSheetFlatList,
+  BottomSheetTextInput,
+  BottomSheetView,
+} from "@gorhom/bottom-sheet";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { randomUUID } from "expo-crypto";
 import { useGameNightState } from "../use-game-state";
@@ -29,7 +33,8 @@ export default function GameNightRoomScreen() {
   const [messages, setMessages] = useState<GameNightMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [rulesOpen, setRulesOpen] = useState(false);
-  const snapPoints = useMemo(() => [120, "60%"], []);
+  const chatSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ["75%"], []);
   useRoomPresence(code, state ? { id: state.me.user_id, name: state.members.find(m => m.user_id === state.me.user_id)?.name ?? null, avatar: state.members.find(m => m.user_id === state.me.user_id)?.avatar ?? null, joinedAt: Date.now() } : null);
   const busy = useRef(false);
   const loadMessages = useCallback(async () => { if (state) setMessages(await fetchRoomMessages(state.room.id)); }, [state?.room.id]);
@@ -141,6 +146,65 @@ export default function GameNightRoomScreen() {
       {match?.status === "completed" ? <View className="items-center gap-3 py-6"><Text className="text-2xl font-black text-foreground">{match.winner_user_id ? `${scoreName(match.winner_user_id)} wins!` : "Match complete"}</Text>{me.is_host ? <><Button label="Rematch" onPress={() => void act(() => startMatch(code, randomUUID()))} /><Button label="End room" onPress={() => void act(() => endRoom(code))} /></> : null}</View> : null}
       {me.role === "watcher" ? <Text className="py-3 text-center text-muted-foreground">Watcher mode is read-only.</Text> : null}
     </ScrollView>
-    <BottomSheet index={0} snapPoints={snapPoints} backgroundStyle={{backgroundColor:"#171717"}} handleIndicatorStyle={{backgroundColor:"#737373"}}><BottomSheetView style={{flex:1,paddingHorizontal:16}}><Text className="mb-2 text-base font-black text-white">Table chat</Text><FlatList style={{flex:1}} data={[...messages].reverse()} keyExtractor={m => String(m.id)} renderItem={({item}) => <Text className="mb-2 text-white">{scoreName(item.userId)}: {item.body ?? item.reaction ?? "Shared something"}</Text>} /><View className="flex-row gap-2 pb-5"><TextInput value={draft} onChangeText={setDraft} placeholder="Message the table" placeholderTextColor="#737373" className="flex-1 rounded-full bg-black px-4 py-3 text-white" /><Pressable onPress={send} className="justify-center rounded-full bg-primary px-5"><Text className="font-bold text-white">Send</Text></Pressable></View></BottomSheetView></BottomSheet>
+
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Open table chat"
+      onPress={() => chatSheetRef.current?.snapToIndex(0)}
+      className="absolute bottom-28 right-5 z-20 flex-row items-center rounded-full border border-primary/40 bg-neutral-950 px-5 py-3 shadow-lg"
+    >
+      <Text className="font-black text-white">Chat</Text>
+    </Pressable>
+
+    <BottomSheet
+      ref={chatSheetRef}
+      index={-1}
+      snapPoints={snapPoints}
+      enablePanDownToClose
+      enableDynamicSizing={false}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
+      backgroundStyle={{ backgroundColor: "#171717" }}
+      handleIndicatorStyle={{ backgroundColor: "#737373" }}
+    >
+      <BottomSheetView style={{ flex: 1, paddingHorizontal: 16 }}>
+        <Text className="mb-3 text-base font-black text-white">Table chat</Text>
+        <BottomSheetFlatList
+          style={{ flex: 1 }}
+          data={[...messages].reverse()}
+          keyExtractor={(m) => String(m.id)}
+          contentContainerStyle={{ paddingBottom: 12 }}
+          renderItem={({ item }) => (
+            <Text className="mb-2 text-white">
+              {scoreName(item.userId)}:{" "}
+              {item.body ?? item.reaction ?? "Shared something"}
+            </Text>
+          )}
+        />
+        <View className="flex-row gap-2 pb-5 pt-2">
+          <BottomSheetTextInput
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="Message the table"
+            placeholderTextColor="#737373"
+            style={{
+              flex: 1,
+              borderRadius: 999,
+              backgroundColor: "#000",
+              color: "#fff",
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+            }}
+          />
+          <Pressable
+            onPress={send}
+            className="justify-center rounded-full bg-primary px-5"
+          >
+            <Text className="font-bold text-white">Send</Text>
+          </Pressable>
+        </View>
+      </BottomSheetView>
+    </BottomSheet>
   </View>;
 }

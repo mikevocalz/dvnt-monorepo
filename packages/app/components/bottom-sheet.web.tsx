@@ -17,9 +17,10 @@
  * Drag is imperative (refs + direct transform) so it never re-renders per
  * pointer move; open/close is driven by the parent's Zustand flag, no useState.
  */
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { useDialogFocus } from "./use-dialog-focus";
 
 // Position the panel off-screen BEFORE the browser paints (a plain useEffect
 // runs after the first paint, so the panel flashes at its resting spot for one
@@ -36,6 +37,8 @@ export interface BottomSheetProps {
   footer?: React.ReactNode;
   /** Tailwind max-width for the centered panel. Default "max-w-3xl". */
   maxWidthClass?: string;
+  /** Height/max-height classes for the panel. Default keeps the generic 92vh cap. */
+  heightClass?: string;
 }
 
 export function BottomSheet({
@@ -45,6 +48,7 @@ export function BottomSheet({
   children,
   footer,
   maxWidthClass = "max-w-3xl",
+  heightClass = "max-h-[92vh]",
 }: BottomSheetProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef({ startY: 0, dy: 0, dragging: false });
@@ -83,6 +87,11 @@ export function BottomSheet({
     };
   }, [open]);
 
+  // Focus moves into the panel on open, Tab stays inside, and focus returns
+  // to the opener on close.
+  useDialogFocus(open, panelRef);
+  const titleId = useId();
+
   if (!open || typeof document === "undefined") return null;
 
   const close = () => onCloseRef.current();
@@ -119,11 +128,13 @@ export function BottomSheet({
       onClick={close}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={title ? titleId : undefined}
     >
       <div
         ref={panelRef}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className={`absolute bottom-0 left-0 right-0 mx-auto flex max-h-[92vh] w-full ${maxWidthClass} flex-col rounded-t-3xl border border-white/10 bg-[#101321] text-white shadow-2xl`}
+        className={`absolute bottom-0 left-0 right-0 mx-auto flex w-full ${maxWidthClass} ${heightClass} flex-col rounded-t-3xl outline-none border border-white/10 bg-[#101321] text-white shadow-2xl`}
         style={{ willChange: "transform" }}
       >
         {/* Grab handle — the drag target. touch-action:none so vertical drags
@@ -140,7 +151,7 @@ export function BottomSheet({
         </div>
         {title ? (
           <div className="flex shrink-0 items-center justify-between border-b border-white/8 px-5 pb-3">
-            <h2 className="text-base font-bold text-white">{title}</h2>
+            <h2 id={titleId} className="text-base font-bold text-white">{title}</h2>
             <button
               type="button"
               onClick={close}

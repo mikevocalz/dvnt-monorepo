@@ -44,6 +44,10 @@ import {
 } from "./stages/TerminalStages";
 import { DevHud } from "./DevHud";
 import { ConnectionBanner } from "@dvnt/ui";
+import {
+  formatCallSessionCountdown,
+  shouldShowCallSessionWarning,
+} from "@dvnt/app/features/call/call-session-limit";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -95,6 +99,7 @@ export function CallScreen({
     isPiPActive,
     callEnded,
     callDuration,
+    callSessionSecondsLeft,
     error,
     errorCode,
     connectionStatus,
@@ -123,6 +128,9 @@ export function CallScreen({
   });
   const statusLabel = getStatusLabel(mode);
   const effectiveIsGroupCall = isGroupCall || participants.length > 1;
+  const showSessionWarning = shouldShowCallSessionWarning(
+    callSessionSecondsLeft,
+  );
 
   // ── Stage model ─────────────────────────────────────────────────────
   const remotePeer = participants[0] ?? null;
@@ -428,6 +436,24 @@ export function CallScreen({
     <>
       {renderStage()}
 
+      {showSessionWarning && callSessionSecondsLeft !== null && (
+        <View style={styles.bannerWrap} pointerEvents="none">
+          <View
+            style={styles.sessionWarning}
+            accessibilityLiveRegion={
+              callSessionSecondsLeft <= 10 ? "assertive" : "polite"
+            }
+            accessibilityLabel={`Call ends in ${formatCallSessionCountdown(
+              callSessionSecondsLeft,
+            )}`}
+          >
+            <Text style={styles.sessionWarningText}>
+              Call ends in {formatCallSessionCountdown(callSessionSecondsLeft)}
+            </Text>
+          </View>
+        </View>
+      )}
+
       <CallControls
         mode={mode}
         isMuted={isMuted}
@@ -448,7 +474,9 @@ export function CallScreen({
       {/* 1:1 alone countdown — GroupCallStage renders its own banner for
           group calls; the P2P stages have none, so the timer would tick
           invisibly and hang up with no warning. */}
-      {aloneSecondsLeft !== null && !effectiveIsGroupCall && (
+      {aloneSecondsLeft !== null &&
+        !effectiveIsGroupCall &&
+        !showSessionWarning && (
         <View style={styles.bannerWrap}>
           <View style={styles.aloneBanner}>
             <Text style={styles.aloneBannerText}>
@@ -466,7 +494,12 @@ export function CallScreen({
       )}
 
       {connectionStatus !== "connected" && mode !== "RECONNECTING" && (
-          <View style={styles.bannerWrap}>
+          <View
+            style={[
+              styles.bannerWrap,
+              showSessionWarning && styles.secondaryBannerWrap,
+            ]}
+          >
             <ConnectionBanner
               // "error" is the only value outside the shared vocabulary; a
               // call in that state is down, and `detail` carries the why.
@@ -556,6 +589,22 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     zIndex: 30,
+  },
+  secondaryBannerWrap: {
+    top: 108,
+  },
+  sessionWarning: {
+    alignSelf: "center",
+    backgroundColor: "rgba(252,37,58,0.94)",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  sessionWarningText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
   },
   aloneBanner: {
     flexDirection: "row",

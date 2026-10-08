@@ -72,6 +72,7 @@ import {
   type LocationData,
 } from "@dvnt/app/components/ui/location-autocomplete-v3";
 import { useCreateEvent } from "@dvnt/app/lib/hooks/use-events";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
 import { promotersApi } from "@dvnt/app/lib/api/promoters";
@@ -180,6 +181,8 @@ function CreateEventScreenContent() {
   const { colors } = useColorScheme();
   const { pickFromLibrary, requestPermissions } = useMediaPicker();
   const createEvent = useCreateEvent();
+  // Verified-only: hosting needs a verified account.
+  const guardVerified = useVerifiedGate();
   useEventMediaPreupload();
   const showToast = useUIStore((s) => s.showToast);
   // Transient UI state: which tier currently has its "Sale starts" picker
@@ -3552,7 +3555,7 @@ function CreateEventScreenContent() {
         ) : (
           <Pressable
             onPress={() => {
-              if (!isSubmitting) handleSubmit();
+              if (!isSubmitting) guardVerified("host_event", () => void handleSubmit());
             }}
             disabled={isSubmitting}
             className="flex-row items-center gap-1.5 px-6 py-3 rounded-full"

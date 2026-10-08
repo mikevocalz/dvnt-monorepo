@@ -61,6 +61,7 @@ import Animated, {
 import { useEventViewStore } from "@dvnt/app/lib/stores/event-store";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { usePromoterRefStore } from "@dvnt/app/lib/stores/promoter-ref-store";
+import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { useTicketStore } from "@dvnt/app/lib/stores/ticket-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
@@ -85,6 +86,7 @@ import {
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useTicketViewerId } from "@dvnt/app/lib/hooks/use-tickets";
+import { tierIsHiddenFromBuyers } from "@dvnt/app/lib/tickets/pricing";
 import { qk } from "@dvnt/app/lib/query/keys";
 import * as WebBrowser from "expo-web-browser";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
@@ -333,16 +335,50 @@ function EventDetailScreenContent() {
   );
   const eventId = normalizedParams.id || "";
 
-  // Promoter attribution (WS-4): capture ?ref=CODE from a tracked share
-  // deep link into the MMKV-persisted store so the app-switch to Stripe
-  // can't lose it. Checkout kickoffs forward it as promoter_code;
-  // pricing is never affected.
+  // A tracked promoter ref follows the buyer into checkout and is also bound
+  // to the signed-in account, so login/navigation/device changes do not drop
+  // the discount. Server checkout revalidates the active promoter policy.
   const setPromoterRef = usePromoterRefStore((s) => s.setRef);
   useEffect(() => {
     const rawRef = Array.isArray(rawParams.ref)
       ? rawParams.ref[0]
       : rawParams.ref;
     if (eventId && rawRef) setPromoterRef(eventId, String(rawRef));
+
+    const code =
+      (rawRef ? String(rawRef) : null) ??
+      (eventId ? usePromoterRefStore.getState().getRef(eventId) : null);
+    const numericEventId = Number(eventId);
+    if (Number.isInteger(numericEventId) && numericEventId > 0) {
+      if (code) {
+        void promotersApi
+          .claimRef(numericEventId, code)
+          .then((claim) => {
+            setPromoterRef(
+              eventId,
+              claim.code,
+              claim.customerDiscountBps,
+            );
+          })
+          .catch((error) => {
+            console.warn("[EventDetail] promoter ref claim failed:", error);
+          });
+      } else {
+        void promotersApi
+          .getClaim(numericEventId)
+          .then((claim) => {
+            if (!claim) return;
+            setPromoterRef(
+              eventId,
+              claim.code,
+              claim.customerDiscountBps,
+            );
+          })
+          .catch((error) => {
+            console.warn("[EventDetail] promoter claim hydrate failed:", error);
+          });
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId, rawParams.ref, setPromoterRef]);
 
@@ -623,7 +659,16 @@ function EventDetailScreenContent() {
   const ticketTiers = useMemo(() => {
     if (!eventData) return [];
     const dbTiers = eventData.ticketTiers;
-    const hasDbTiers = Array.isArray(dbTiers) && dbTiers.length > 0;
+    const buyerDbTiers = Array.isArray(dbTiers)
+      ? dbTiers.filter(
+          (t: any) =>
+            !tierIsHiddenFromBuyers({
+              tier_visibility:
+                t.tier_visibility ?? t.tierVisibility ?? null,
+            }),
+        )
+      : [];
+    const hasDbTiers = buyerDbTiers.length > 0;
     // If the organizer turned ticketing ON but never configured tiers, don't
     // fabricate a synthetic GA card — it can't actually be sold (no real
     // ticket_type_id for Stripe) and tapping Get Tickets would just toast an
@@ -638,7 +683,7 @@ function EventDetailScreenContent() {
     if (!eventData.ticketingEnabled && eventPriceForSale > 0) return [];
     if (hasDbTiers) {
       const glowColors = ["#34A2DF", "#8A40CF", "#FF5BFC", "#f59e0b"];
-      return dbTiers.map((t: any, i: number) => {
+      return buyerDbTiers.map((t: any, i: number) => {
         // remaining may be pre-computed by RPC or we derive it from qty fields
         const remaining =
           t.remaining != null
@@ -798,6 +843,9 @@ function EventDetailScreenContent() {
   const { data: verificationStatus } = useAgeVerificationStatus();
   const promoCode = useEventDetailScreenStore((s) => s.promoCode);
   const setPromoCode = useEventDetailScreenStore((s) => s.setPromoCode);
+  const promoterRef = usePromoterRefStore(
+    (s) => s.refs[String(eventId)] ?? null,
+  );
 
   // FIX: Cleanup effect - reset all screen state on unmount
   useEffect(() => {
@@ -1785,17 +1833,30 @@ function EventDetailScreenContent() {
   const heroPrice = useMemo<
     { kind: "free" } | { kind: "from"; label: string } | { kind: "unknown" }
   >(() => {
-    const cents = liveTicketTypes.length
-      ? liveTicketTypes.map((t) => t.price_cents || 0)
+    const visibleLivePrices = liveTicketTypes
+      .filter(
+        (t: any) =>
+          !tierIsHiddenFromBuyers({
+            tier_visibility:
+              t.tier_visibility ?? t.tierVisibility ?? null,
+          }),
+      )
+      .map((t) => t.price_cents || 0);
+    const cents = visibleLivePrices.length
+      ? visibleLivePrices
       : ticketTiers.length
         ? ticketTiers.map((t) => Math.round((t.price || 0) * 100))
         : null;
 
     if (cents && cents.length) {
-      const lowest = Math.min(...cents);
-      return lowest === 0
-        ? { kind: "free" }
-        : { kind: "from", label: `From ${formatCents(lowest)}` };
+      const paid = cents.filter((value) => value > 0);
+      if (paid.length > 0) {
+        return {
+          kind: "from",
+          label: `From ${formatCents(Math.min(...paid))}`,
+        };
+      }
+      return { kind: "free" };
     }
     if (isLoading) return { kind: "unknown" };
     if (event?.price === 0) return { kind: "free" };
@@ -2174,57 +2235,96 @@ function EventDetailScreenContent() {
 
               {/* Promo code input */}
               {selectedTier && selectedTier.price > 0 && !hasTicket && (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    marginTop: 12,
-                    gap: 8,
-                  }}
-                >
-                  <TextInput
-                    value={promoCode}
-                    onChangeText={setPromoCode}
-                    placeholder="Promo code"
-                    placeholderTextColor="#71717a"
-                    autoCapitalize="characters"
-                    autoCorrect={false}
+                <View style={{ marginTop: 12, gap: 8 }}>
+                  <View
                     style={{
-                      flex: 1,
-                      height: 40,
-                      borderRadius: 10,
-                      backgroundColor: "rgba(255,255,255,0.06)",
-                      borderWidth: 1,
-                      borderColor: promoCode.trim()
-                        ? "#8A40CF60"
-                        : "rgba(255,255,255,0.08)",
-                      paddingHorizontal: 12,
-                      color: "#fff",
-                      fontSize: 14,
-                      fontFamily: "InterSemiBold",
-                      letterSpacing: 1,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
                     }}
-                  />
-                  {promoCode.trim() ? (
-                    <Pressable
-                      onPress={() => setPromoCode("")}
+                  >
+                    <TextInput
+                      value={promoCode}
+                      onChangeText={setPromoCode}
+                      placeholder="Promo code"
+                      placeholderTextColor="#71717a"
+                      autoCapitalize="characters"
+                      autoCorrect={false}
                       style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        borderRadius: 8,
+                        flex: 1,
+                        height: 40,
+                        borderRadius: 10,
                         backgroundColor: "rgba(255,255,255,0.06)",
+                        borderWidth: 1,
+                        borderColor: promoCode.trim()
+                          ? "#8A40CF60"
+                          : "rgba(255,255,255,0.08)",
+                        paddingHorizontal: 12,
+                        color: "#fff",
+                        fontSize: 14,
+                        fontFamily: "InterSemiBold",
+                        letterSpacing: 1,
+                      }}
+                    />
+                    {promoCode.trim() ? (
+                      <Pressable
+                        onPress={() => setPromoCode("")}
+                        style={{
+                          paddingHorizontal: 12,
+                          paddingVertical: 8,
+                          borderRadius: 8,
+                          backgroundColor: "rgba(255,255,255,0.06)",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: "#a1a1aa",
+                            fontSize: 13,
+                            fontFamily: "InterSemiBold",
+                          }}
+                        >
+                          Clear
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+
+                  {promoterRef?.code ? (
+                    <View
+                      accessibilityRole="text"
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingHorizontal: 12,
+                        paddingVertical: 9,
+                        borderRadius: 10,
+                        backgroundColor: "rgba(138,64,207,0.12)",
+                        borderWidth: 1,
+                        borderColor: "rgba(138,64,207,0.35)",
                       }}
                     >
                       <Text
                         style={{
-                          color: "#a1a1aa",
-                          fontSize: 13,
+                          color: "#d8b4fe",
+                          fontSize: 12,
                           fontFamily: "InterSemiBold",
                         }}
                       >
-                        Clear
+                        Promoter code {promoterRef.code}
                       </Text>
-                    </Pressable>
+                      <Text
+                        style={{
+                          color: "#d8b4fe",
+                          fontSize: 12,
+                          fontFamily: "InterBold",
+                        }}
+                      >
+                        {promoterRef.customerDiscountBps != null
+                          ? `${promoterRef.customerDiscountBps / 100}% off · applied`
+                          : "Applied at checkout"}
+                      </Text>
+                    </View>
                   ) : null}
                 </View>
               )}

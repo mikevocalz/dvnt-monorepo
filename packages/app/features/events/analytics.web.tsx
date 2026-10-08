@@ -388,7 +388,7 @@ export function EventAnalyticsScreen() {
             iconColor="#f59e0b"
             label="Fees paid"
             value={formatCents(feesTotal)}
-            sublabel={`${formatCents(revenue.dvntFeeCents)} DVNT · ${formatCents(revenue.stripeFeeCents)} Stripe`}
+            sublabel={`${formatCents(revenue.dvntFeeCents)} DVNT platform · ${formatCents(revenue.stripeFeeCents)} Stripe processing`}
           />
         </div>
 
@@ -424,11 +424,13 @@ export function EventAnalyticsScreen() {
           <RevenueDonut
             segments={[
               { label: "Net", value: revenue.netCents, color: "#22C55E" },
-              { label: "DVNT fee", value: revenue.dvntFeeCents, color: "#f59e0b" },
-              { label: "Stripe fee", value: revenue.stripeFeeCents, color: "#3FDCFF" },
+              { label: "DVNT platform fee", value: revenue.dvntFeeCents, color: "#f59e0b" },
               { label: "Refunds", value: revenue.refundsCents, color: "#ef4444" },
             ]}
           />
+          <p className="mt-3 text-xs leading-5 text-white/50">
+            Stripe processing is tracked separately from DVNT's platform fee and does not reduce the organizer payout shown as Net.
+          </p>
         </section>
 
         {/* ── View tab toggle (zustand) — no pill shapes ── */}
