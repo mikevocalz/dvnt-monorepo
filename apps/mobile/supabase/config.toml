@@ -371,6 +371,11 @@ verify_jwt = false
 [functions.create-verification-session]
 verify_jwt = false
 
+# Self-only Better Auth verification status. The gateway cannot parse the
+# Better Auth token as a Supabase JWT; this function authenticates it itself.
+[functions.verification-status]
+verify_jwt = false
+
 [functions.delete-account]
 verify_jwt = false
 
