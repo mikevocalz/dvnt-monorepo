@@ -18,7 +18,14 @@ export function routeOwnsHeader(pathname: string): boolean {
 // Full-screen surfaces that own the entire viewport and carry their own
 // controls on the bottom edge — no WebTopBar/WebTabBar from SiteChrome and no
 // shell clearance padding from WebAppShell.
-const IMMERSIVE_PREFIXES = ["/feed/call", "/feed/camera", "/feed/story"];
+const IMMERSIVE_PREFIXES = [
+  "/feed/call",
+  "/feed/camera",
+  "/feed/story",
+  // Call rooms own the whole viewport, including the desktop navigation rail.
+  "/feed/lynk",
+  "/feed/sneaky-lynk/room",
+];
 
 export function routeIsImmersive(pathname: string): boolean {
   return IMMERSIVE_PREFIXES.some(
