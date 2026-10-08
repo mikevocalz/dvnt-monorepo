@@ -320,3 +320,72 @@ test('the worker claims the checkout welcome before sending and releases it on f
   // It runs before the DVNT_BRAND_OUTBOX_ENABLED gate.
   assert.ok(worker.indexOf('await sendCheckoutWelcomeEmails(supabase)') < worker.indexOf('const configured = brandSendGate()'));
 });
+
+// The welcome copy is the DVNT team's text, word for word. Every line has to
+// reach the rendered email, escaped, in this order, so an edit that drops or
+// rewords one fails here.
+const WELCOME_LINES = [
+  "Welcome to DVNT,",
+  "The “Cookout” for Black, Brown & Queer community.",
+  "Pull up a chair. You belong here.",
+  "DVNT is a digital community built with Black and Brown Queer people at its center. It’s also open to invited-allies who respect, support, and celebrate us fully.",
+  "REAL PEOPLE. REAL COMMUNITY.",
+  "DVNT is for real ones. To fully participate in the platform, members must VERIFY their identity and confirm they meet the applicable age requirement for adult access (18+ in the United States).",
+  "We do this to help create a safer, more accountable community where people can connect with confidence.",
+  "ONLINE AND IRL",
+  "DVNT is intentionally sexy, sophisticated, and accessible from your phone or computer—designed to keep our community connected both online and in real life.",
+  "Express yourself. Share what’s on your mind. Discover what’s happening around you. Or create something of your own.",
+  "Hosting a kickback? Party? Professional Mixer? Picnic? Game night? Group Fitness? First Date? Movie Night?",
+  "Put it on DVNT.",
+  "DVNT is also an economic empowerment platform for our community’s curators, hosts, content creators, and entrepreneurs. We want more of our community’s attention, opportunities, and dollars circulating among the people creating our culture.",
+  "OUR CULTURE. OUR EXPRESSION. OUR SPACE.",
+  "Our bodies, expression, culture, conversations, and events deserve space to exist without being unnecessarily censored or shamed.",
+  "DVNT was built to protect that freedom of expression —not police it.",
+  "And freedom here comes with responsibility for how we treat one another. Social responsibility.",
+  "NO HATE. NO HARASSMENT. NO EXCEPTIONS.",
+  "There is no place on DVNT for transphobia, homophobia, biphobia, racism, anti-Blackness, xenophobia, sexism, ableism, harassment, or discrimination of any kind.",
+  "Members who violate our Community Standards may lose access to DVNT, including permanent removal from the platform and restrictions against creating replacement accounts.",
+  "THE RULES ARE SIMPLE.",
+  "Be bold. Be sexy. Be yourself.",
+  "Mind the business that pays you.",
+  "Be kind. Be considerate. Respect boundaries and get consent.",
+  "Don’t body-shame. Don’t slut-shame. Don’t harass people because they aren’t interested in you or interesting to you.",
+  "Leave the prejudice, judgment, and unnecessary hangups at home. Here is where we come to connect and do so safely, with real people, among real community.",
+  "Welcome to DVNT.",
+];
+
+function unescapeHtml(s) {
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "\x27")
+    .replace(/&amp;/g, "&");
+}
+
+test("the welcome email renders the team's copy verbatim and in order", async () => {
+  globalThis.Deno ??= { env: { get: () => undefined } };
+  const t = await import(`${__dirname}/email/templates.ts`);
+  assert.deepEqual(t.WELCOME_COPY.map((b) => b.text), WELCOME_LINES);
+  for (const { html } of [t.welcome("sam"), t.welcome("sam", { checkoutProfile: true })]) {
+    // Text nodes of the body, before the footer, in document order.
+    const texts = [...html.matchAll(/<(h1|h2|p)\b[^>]*>([\s\S]*?)<\/\1>/g)].map((m) => unescapeHtml(m[2]));
+    let from = 0;
+    for (const line of WELCOME_LINES) {
+      const at = texts.indexOf(line, from);
+      assert.ok(at >= from, `missing or out of order: ${line}`);
+      from = at + 1;
+    }
+    // Raw ampersand in the copy is escaped, and the name is not injected.
+    assert.ok(html.includes("Black, Brown &amp; Queer community."));
+    assert.ok(!/Black, Brown & Queer/.test(html));
+    assert.ok(!html.includes("sam"));
+    // Section titles are h2 under a single h1 greeting.
+    assert.equal((html.match(/<h1\b/g) || []).length, 1);
+    assert.equal((html.match(/<h2\b/g) || []).length, 5);
+    // The CTA stays an https universal link to /feed.
+    assert.match(html, /href="https:\/\/dvntapp\.live\/feed"/);
+    assert.ok(!html.includes("dvnt://"));
+  }
+  assert.equal(t.welcome("sam").subject, "Welcome to the cookout — DVNT");
+});

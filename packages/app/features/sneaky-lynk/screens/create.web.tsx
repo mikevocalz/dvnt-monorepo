@@ -44,6 +44,7 @@ import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { useLynkHistoryStore } from "../stores/lynk-history-store";
 import { sneakyLynkApi } from "../api/supabase";
 import { useCreateLynkStore } from "../stores/create-store";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 
 const ACCENT = "#FC253A";
 const ROOM_UUID_REGEX =
@@ -239,6 +240,9 @@ export function SneakyLynkCreateScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inviteSearch, invitees, isPublic]);
+
+  // Verified-only: opening a Lynk needs a verified account.
+  const guardVerified = useVerifiedGate();
 
   const handleCreate = useCallback(async () => {
     if (!title.trim()) {
@@ -519,7 +523,7 @@ export function SneakyLynkCreateScreen() {
         {/* Create button */}
         <button
           type="button"
-          onClick={handleCreate}
+          onClick={() => guardVerified("sneaky_lynk", () => void handleCreate())}
           disabled={!canCreate}
           className="py-4 rounded-full text-center font-bold text-base text-white disabled:opacity-50"
           style={{ backgroundColor: ACCENT }}

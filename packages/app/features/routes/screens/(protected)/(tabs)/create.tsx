@@ -37,6 +37,7 @@ import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { useCreateHeaderStore } from "@dvnt/app/lib/stores/create-header-store";
 import { useTabBarTopInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { usePublishPost } from "@dvnt/app/lib/hooks/use-publish-post";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
 import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
 import {
@@ -107,6 +108,7 @@ function CreateScreenContent() {
   const [selectedTagUsers, setSelectedTagUsers] = useState<TagCandidate[]>([]);
   const { pickFromLibrary } = useMediaPicker();
   const publishPost = usePublishPost();
+  const guardVerified = useVerifiedGate();
   const isSubmittingRef = useRef(false);
   const [isSubmitLocked, setIsSubmitLocked] = useState(false);
   const showToast = useUIStore((s) => s.showToast);
@@ -292,7 +294,7 @@ function CreateScreenContent() {
     ],
   );
 
-  const handlePost = useCallback(async () => {
+  const submitPost = useCallback(async () => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     setIsSubmitLocked(true);
@@ -313,6 +315,12 @@ function CreateScreenContent() {
       setIsSubmitLocked(false);
     }
   }, [publishPost, reset, router, showToast]);
+
+  // Verified-only: an unverified member sees the popup instead of a post the
+  // server would refuse.
+  const handlePost = useCallback(() => {
+    guardVerified("post", () => void submitPost());
+  }, [guardVerified, submitPost]);
 
   const handleClose = () => {
     if (selectedMedia.length > 0 || caption.length > 0 || hasTextDraft) {

@@ -11,19 +11,23 @@ export interface DialogProps {
   footer?: ReactNode;
   maxWidth?: number;
   hideClose?: boolean;
+  /** Web only: id of the element that names the dialog. Ignored on native. */
+  labelledBy?: string;
 }
 
 /** Native centered dialog (RN Modal). Mirror of `Dialog.web.tsx`. */
-export function Dialog({ open, onClose, title, children, footer, hideClose }: DialogProps) {
+export function Dialog({ open, onClose, title, children, footer, hideClose, maxWidth = 520 }: DialogProps) {
   return (
-    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <Pressable
         onPress={onClose}
         style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.7)", alignItems: "center", justifyContent: "center", padding: 16 }}
       >
         <Pressable
           onPress={(e) => e.stopPropagation()}
-          style={{ width: "100%", maxWidth: 520, borderRadius: 24, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", backgroundColor: "#101321", overflow: "hidden" }}
+          // VoiceOver stays inside the panel while it is up.
+          accessibilityViewIsModal
+          style={{ width: "100%", maxWidth, borderRadius: 24, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", backgroundColor: "#101321", overflow: "hidden" }}
         >
           {title || !hideClose ? (
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.08)" }}>

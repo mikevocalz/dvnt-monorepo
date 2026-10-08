@@ -1,15 +1,10 @@
-import { useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
-import * as WebBrowser from "expo-web-browser";
 import { ShieldCheck } from "lucide-react-native";
 import {
   useVerifiedAdmission,
   useAdmissionPromptStore,
 } from "@dvnt/app/lib/hooks/use-verified-admission";
-import {
-  useStartVerification,
-  useRefreshVerificationStatus,
-} from "@dvnt/app/lib/hooks/use-age-verification";
+import { useBeginVerification } from "@dvnt/app/lib/hooks/use-begin-verification";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { onboardingCheckpoint } from "@dvnt/observability/flows";
 
@@ -29,29 +24,13 @@ export function VerifiedAdmissionBanner() {
   const { data: verdict } = useVerifiedAdmission();
   const dismissed = useAdmissionPromptStore((s) => s.dismissed);
   const dismiss = useAdmissionPromptStore((s) => s.dismiss);
-  const start = useStartVerification();
-  const refresh = useRefreshVerificationStatus();
-  const [opened, setOpened] = useState(false);
+  const { begin: beginCapture, start, opened } = useBeginVerification();
 
   if (!authId || !verdict || verdict.state === "allowed") return null;
   const blocked = verdict.state === "blocked";
   if (!blocked && dismissed.includes(authId)) return null;
   // An under-18 document has no retry: there is nothing to submit again.
   const canVerify = verdict.reason !== "underage";
-
-  const beginCapture = async () => {
-    try {
-      const result = await start.mutateAsync({ returnUrl: "dvnt://" });
-      if (result.url) {
-        onboardingCheckpoint("verification.capture_start", { hosted: true });
-        setOpened(true);
-        await WebBrowser.openBrowserAsync(result.url);
-      }
-      void refresh();
-    } catch {
-      // start.isError renders below — no dead end.
-    }
-  };
 
   return (
     <View

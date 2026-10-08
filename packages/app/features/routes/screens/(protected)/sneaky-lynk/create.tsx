@@ -22,6 +22,7 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import * as Haptics from "expo-haptics";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
@@ -132,6 +133,9 @@ function CreateLynkScreenContent() {
       current.filter((invitee) => invitee.authId !== authId),
     );
   }, []);
+
+  // Verified-only: opening a Lynk needs a verified account.
+  const guardVerified = useVerifiedGate();
 
   const handleCreate = useCallback(async () => {
     if (!title.trim()) {
@@ -489,7 +493,7 @@ function CreateLynkScreenContent() {
 
         {/* Create Button */}
         <Pressable
-          onPress={handleCreate}
+          onPress={() => guardVerified("sneaky_lynk", () => void handleCreate())}
           disabled={isCreating || !title.trim()}
           className={`py-4 rounded-full items-center ${
             isCreating || !title.trim() ? "bg-primary/50" : "bg-primary"

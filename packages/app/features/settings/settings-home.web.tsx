@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 
 /**
  * Settings HOME / hub — web (Phase 1 port of native
@@ -93,6 +94,7 @@ export function SettingsHomeScreen() {
   const logout = useAuthStore((s) => s.logout);
   const nsfwEnabled = useAppStore((s) => s.nsfwEnabled);
   const setNsfwEnabled = useAppStore((s) => s.setNsfwEnabled);
+  const guardVerified = useVerifiedGate();
   const feedMode = useAppStore((s) => s.feedMode);
   const setFeedMode = useAppStore((s) => s.setFeedMode);
 
@@ -264,7 +266,12 @@ export function SettingsHomeScreen() {
               role="switch"
               aria-checked={nsfwEnabled}
               aria-label="Show Spicy Content"
-              onClick={() => setNsfwEnabled(!nsfwEnabled, "settings-home-web")}
+              // Verified-only: turning Spicy ON needs a verified account.
+              onClick={() =>
+                nsfwEnabled
+                  ? setNsfwEnabled(false, "settings-home-web")
+                  : guardVerified("spicy", () => setNsfwEnabled(true, "settings-home-web"))
+              }
               className={`relative inline-flex w-12 h-7 shrink-0 items-center rounded-full transition-colors outline-none ${
                 nsfwEnabled ? "bg-cyan-500" : "bg-white/15"
               }`}

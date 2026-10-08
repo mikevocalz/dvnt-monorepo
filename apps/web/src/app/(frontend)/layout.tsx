@@ -7,6 +7,7 @@ import { SiteChrome } from "@/components/site-chrome";
 import { WebVitalsReporter } from "@/components/web-vitals-reporter";
 import { WebToaster } from "@/components/web-toaster";
 import { CohostInviteWatcher } from "@/components/cohost-invite-watcher";
+import { VerifiedOnlyPopupHost } from "@/components/verified-only-popup-host";
 import { ScreenViewTracker } from "@/components/screen-view-tracker";
 import { RNWStyleRegistry } from "./registry";
 import { RegisterSW } from "@/components/pwa/register-sw";
@@ -120,6 +121,9 @@ export default function FrontendLayout({
                   an invite is time-bounded, so it cannot wait for you to open
                   Notifications. */}
               <CohostInviteWatcher />
+              {/* Verified-only popup: one instance for every screen, opened by
+                  useVerifiedGate or a participation rail's refusal. */}
+              <VerifiedOnlyPopupHost />
             </ApiProvider>
           </ImageProvider>
         </RNWStyleRegistry>

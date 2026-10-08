@@ -495,8 +495,60 @@ export interface WelcomeOpts {
   checkoutProfile?: boolean;
 }
 
-export function welcome(name?: string | null, opts: WelcomeOpts = {}): EmailContent {
-  const who = name ? esc(name) : "there";
+/**
+ * The welcome copy, verbatim from the DVNT team. Do not reword, trim or
+ * re-punctuate it here: a test in ../brand-outbox.test.cjs pins every line,
+ * in order. "greeting" is the opening line, "heading" lines are the all-caps
+ * section titles, everything else is a body paragraph.
+ */
+export const WELCOME_COPY: ReadonlyArray<{
+  kind: "greeting" | "heading" | "p";
+  text: string;
+}> = [
+  { kind: "greeting", text: "Welcome to DVNT," },
+  { kind: "p", text: "The “Cookout” for Black, Brown & Queer community." },
+  { kind: "p", text: "Pull up a chair. You belong here." },
+  { kind: "p", text: "DVNT is a digital community built with Black and Brown Queer people at its center. It’s also open to invited-allies who respect, support, and celebrate us fully." },
+  { kind: "heading", text: "REAL PEOPLE. REAL COMMUNITY." },
+  { kind: "p", text: "DVNT is for real ones. To fully participate in the platform, members must VERIFY their identity and confirm they meet the applicable age requirement for adult access (18+ in the United States)." },
+  { kind: "p", text: "We do this to help create a safer, more accountable community where people can connect with confidence." },
+  { kind: "heading", text: "ONLINE AND IRL" },
+  { kind: "p", text: "DVNT is intentionally sexy, sophisticated, and accessible from your phone or computer—designed to keep our community connected both online and in real life." },
+  { kind: "p", text: "Express yourself. Share what’s on your mind. Discover what’s happening around you. Or create something of your own." },
+  { kind: "p", text: "Hosting a kickback? Party? Professional Mixer? Picnic? Game night? Group Fitness? First Date? Movie Night?" },
+  { kind: "p", text: "Put it on DVNT." },
+  { kind: "p", text: "DVNT is also an economic empowerment platform for our community’s curators, hosts, content creators, and entrepreneurs. We want more of our community’s attention, opportunities, and dollars circulating among the people creating our culture." },
+  { kind: "heading", text: "OUR CULTURE. OUR EXPRESSION. OUR SPACE." },
+  { kind: "p", text: "Our bodies, expression, culture, conversations, and events deserve space to exist without being unnecessarily censored or shamed." },
+  { kind: "p", text: "DVNT was built to protect that freedom of expression —not police it." },
+  { kind: "p", text: "And freedom here comes with responsibility for how we treat one another. Social responsibility." },
+  { kind: "heading", text: "NO HATE. NO HARASSMENT. NO EXCEPTIONS." },
+  { kind: "p", text: "There is no place on DVNT for transphobia, homophobia, biphobia, racism, anti-Blackness, xenophobia, sexism, ableism, harassment, or discrimination of any kind." },
+  { kind: "p", text: "Members who violate our Community Standards may lose access to DVNT, including permanent removal from the platform and restrictions against creating replacement accounts." },
+  { kind: "heading", text: "THE RULES ARE SIMPLE." },
+  { kind: "p", text: "Be bold. Be sexy. Be yourself." },
+  { kind: "p", text: "Mind the business that pays you." },
+  { kind: "p", text: "Be kind. Be considerate. Respect boundaries and get consent." },
+  { kind: "p", text: "Don’t body-shame. Don’t slut-shame. Don’t harass people because they aren’t interested in you or interesting to you." },
+  { kind: "p", text: "Leave the prejudice, judgment, and unnecessary hangups at home. Here is where we come to connect and do so safely, with real people, among real community." },
+  { kind: "p", text: "Welcome to DVNT." },
+];
+
+/**
+ * Section title inside the welcome email. Same face, colour and weight as
+ * heading(), sized down and emitted as h2 so the email keeps a single h1.
+ */
+function sectionHeading(text: string): string {
+  return `<h2 style="margin:32px 0 12px;font-family:${FONTS.display};font-size:17px;line-height:1.3;font-weight:700;letter-spacing:0.04em;color:${COLORS.text};text-align:left">${esc(text)}</h2>`;
+}
+
+/**
+ * `name` stays in the signature for the three callers (auth user.create hook,
+ * brand-outbox-worker, send-email) but is not rendered: the copy opens with
+ * "Welcome to DVNT," and adding a name line would add words the team did not
+ * write.
+ */
+export function welcome(_name?: string | null, opts: WelcomeOpts = {}): EmailContent {
   const unlock = opts.checkoutProfile
     ? card(
         paragraph(
@@ -505,33 +557,20 @@ export function welcome(name?: string | null, opts: WelcomeOpts = {}): EmailCont
         ),
       )
     : "";
+  const body = WELCOME_COPY.map(({ kind, text }) =>
+    kind === "greeting"
+      ? heading(esc(text))
+      : kind === "heading"
+        ? sectionHeading(text)
+        : paragraph(esc(text)),
+  );
   return {
     subject: `Welcome to the cookout — ${BRAND.name}`,
     html: brandEmailWrapper(
       [
-        heading("Welcome to the cookout!"),
-        paragraph(`Hey ${who},`),
-        paragraph(
-          "The Black Queer cookout. DVNT is an 18+ community connecting Black, Brown and Queer people through culture, expression and events — online and in person.",
-        ),
-        paragraph(
-          "Start with your profile, and complete age and identity verification to unlock verified spaces. Your chosen name is how the community knows you; your verification details stay private.",
-        ),
-        unlock,
-        card(
-          paragraph(
-            [
-              "• Add a photo and a little about yourself<br/>",
-              "• Discover your next event and connect with your crew<br/>",
-              "• Make your first post when you're ready",
-            ].join(""),
-            { size: 15, color: COLORS.textBody, margin: "0" },
-          ),
-        ),
-        paragraph(
-          "Be kind. Be considerate. No hate, harassment, body-shaming or slut-shaming. Our community standards protect our people, expression and culture.",
-          { size: 14, color: COLORS.textMuted },
-        ),
+        ...body,
+        unlock ? `<div style="height:8px"></div>${unlock}` : "",
+        `<div style="height:8px"></div>`,
         // MUST be an https universal link, never the bare `dvnt://` scheme.
         //
         // `dvnt://` only resolves on a device with the app installed. For
@@ -554,7 +593,7 @@ export function welcome(name?: string | null, opts: WelcomeOpts = {}): EmailCont
         // without the app installed.
         button(`${SITE_URL}/feed`, `Open ${BRAND.name}`, { gradient: "brand" }),
       ].join(""),
-      { preheader: "Your people. Your culture. Your next connection." },
+      { preheader: WELCOME_COPY[1].text },
     ),
   };
 }

@@ -54,6 +54,7 @@ import { useToggleBookmark } from "@dvnt/app/lib/hooks/use-bookmarks";
 import { useBookmarkStore } from "@dvnt/app/lib/stores/bookmark-store";
 import { useStories } from "@dvnt/app/lib/hooks/use-stories";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
+import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { feedColumnCount } from "@dvnt/app/lib/stores/feed-layout-preference";
 import {
   useStoryViewerStore,
@@ -769,9 +770,15 @@ function StoriesRow() {
 function SpicyToggle() {
   const nsfwEnabled = useAppStore((s) => s.nsfwEnabled);
   const setNsfwEnabled = useAppStore((s) => s.setNsfwEnabled);
+  const guardVerified = useVerifiedGate();
   return (
     <button
-      onClick={() => setNsfwEnabled(!nsfwEnabled, "feed_toggle")}
+      // Verified-only: turning Spicy ON needs a verified account.
+      onClick={() =>
+        nsfwEnabled
+          ? setNsfwEnabled(false, "feed_toggle")
+          : guardVerified("spicy", () => setNsfwEnabled(true, "feed_toggle"))
+      }
       aria-label={nsfwEnabled ? "Switch to sweet feed" : "Switch to spicy feed"}
       className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center border text-lg"
       style={{
