@@ -29,7 +29,8 @@ export async function startSpicyVerification(): Promise<StartAdultVerificationRe
   });
 
   if (error) {
-    throw new Error(error.message || "Couldn't start verification");
+    const body = await (error as any).context?.clone?.().json?.().catch(() => null);
+    throw new Error(body?.error?.message || error.message || "Couldn't start verification");
   }
   if (!data?.ok || !data.data) {
     throw new Error(data?.error?.message || "Couldn't start verification");

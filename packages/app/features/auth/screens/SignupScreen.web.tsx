@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useForm } from '@tanstack/react-form';
 import { useRouter } from 'solito/navigation';
@@ -44,12 +44,26 @@ const signupBirthDateError = (value: string) =>
 
 export function SignupScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Hydration-safe restoration after Didit's full-page redirect.
   const [activeStep, setActiveStep] = useState(0);
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem('dvnt:signup:verification') === 'pending') setActiveStep(2);
+    } catch { /* storage may be disabled */ }
+  }, []);
+  const [verificationStartError, setVerificationStartError] = useState<string | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [legalDoc, setLegalDoc] = useState<null | 'terms' | 'privacy'>(null);
   const { setUser } = useAuthStore();
   const verification = useVerificationState();
   const startVerification = useStartVerification();
+  useEffect(() => {
+    if (activeStep === 2 && verification.data?.state === 'approved') {
+      try { window.sessionStorage.removeItem('dvnt:signup:verification'); } catch { /* storage may be disabled */ }
+      setVerificationStartError(null);
+      setActiveStep(3);
+    }
+  }, [activeStep, verification.data?.state]);
   // Next app uses Solito/Next routing (no TanStack RouterProvider).
   const router = useRouter();
   const navigate = ({ to }: { to: string }) => router.push(to);
@@ -174,6 +188,13 @@ export function SignupScreen() {
             <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, textAlign: 'center', lineHeight: 21 }}>
               DVNT is 18+. Complete the secure ID check before your account can participate in the community.
             </Text>
+            {verificationStartError && (
+              <View accessibilityRole="alert" style={{ width: '100%', borderRadius: 12, padding: 14, backgroundColor: 'rgba(251,113,133,0.10)', borderWidth: 1, borderColor: 'rgba(251,113,133,0.35)', gap: 6 }}>
+                <Text style={{ color: '#fda4af', fontSize: 14, fontWeight: '800' }}>We couldn't start your ID check</Text>
+                <Text style={{ color: '#fff', fontSize: 13, lineHeight: 20 }}>{verificationStartError}</Text>
+                <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12, lineHeight: 18 }}>Your DVNT account has already been created. You do not need to sign up again. Return and sign in to retry verification later.</Text>
+              </View>
+            )}
             {verification.data?.state === 'pending' && (
               <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 13, textAlign: 'center' }}>
                 Your verification is processing. You can check again after returning from the verification window.
@@ -210,15 +231,21 @@ export function SignupScreen() {
               loading={startVerification.isPending}
               disabled={startVerification.isPending}
               onPress={async () => {
+                setVerificationStartError(null);
                 try {
-                  const result = await startVerification.mutateAsync({ returnUrl: window.location.href });
+                  const result = await startVerification.mutateAsync({ returnUrl: window.location.origin + '/auth/signup' });
                   if (result.status === 'passed') {
                     await verification.refetch();
+                    setActiveStep(3);
                     return;
                   }
-                  if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
+                  if (!result.url) throw new Error('No verification link was returned. Please retry.');
+                  // Async window.open is blocked by Instagram and many browsers.
+                  // Navigate the existing tab; the sessionStorage marker restores step 3.
+                  try { window.sessionStorage.setItem('dvnt:signup:verification', 'pending'); } catch { /* optional */ }
+                  window.location.assign(result.url);
                 } catch (error: any) {
-                  toast.error('Verification unavailable', { description: error?.message || 'Try again in a moment.' });
+                  setVerificationStartError(error?.message || 'Please try again in a moment.');
                 }
               }}
             >
