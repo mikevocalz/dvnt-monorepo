@@ -18,6 +18,13 @@
  * They agree on the shape of the answer — more width, more columns, capped at
  * four — not on every count.
  */
+/** Whether the participant stage is a solo, one-to-one, or group call. */
+export function stageMode(count: number): "solo" | "duo" | "group" {
+  if (count <= 1) return "solo";
+  if (count === 2) return "duo";
+  return "group";
+}
+
 export function stageGridClass(count: number): string {
   if (count <= 1) return "grid-cols-1";
   if (count === 2) return "grid-cols-1 sm:grid-cols-2";
