@@ -27,6 +27,7 @@
  */
 
 import { memo, useEffect, useRef, useCallback, useMemo, useState } from "react";
+import { switchWebCallCamera } from "@dvnt/app/features/call/switch-web-camera";
 import { useParams, useRouter, useSearchParams } from "solito/navigation";
 import {
   FishjamProvider,
@@ -561,16 +562,22 @@ function CallRoom({
     })();
   }, [getStore]);
 
-  // Web "switch camera" = cycle to the next available camera device.
+  // Refresh the browser camera list after permission, then switch the live
+  // Fishjam capture track. Never silently swallow one-camera or SDK errors.
+  const switchCameraInFlight = useRef(false);
   const switchCamera = useCallback(() => {
-    void (async () => {
-      const devices = cameraRef.current.cameraDevices || [];
-      if (devices.length < 2) return;
-      const current = cameraRef.current.currentCamera?.deviceId;
-      const idx = devices.findIndex((d) => d.deviceId === current);
-      const nextDevice = devices[(idx + 1) % devices.length];
-      if (nextDevice) await cameraRef.current.selectCamera(nextDevice.deviceId);
-    })();
+    if (switchCameraInFlight.current) return;
+    switchCameraInFlight.current = true;
+    void switchWebCallCamera(cameraRef.current)
+      .then((switched) => {
+        if (!switched) console.warn("[DVNT call] No second camera available on this device");
+      })
+      .catch((error) => {
+        console.error("[DVNT call] Camera switch failed", error);
+      })
+      .finally(() => {
+        switchCameraInFlight.current = false;
+      });
   }, []);
 
   // Set before any teardown so the rejoin effect knows a disconnect after
