@@ -509,7 +509,7 @@ function WebViewerDisclosureChip() {
   return (
     <span
       role="status"
-      className="flex items-center gap-2 rounded-lg border border-[#F5C518]/35 bg-[#F5C518]/12 px-2.5 py-1.5 text-[11px] font-semibold leading-tight text-[#F5C518]"
+      className="inline-flex max-w-full items-center gap-2 rounded-xl border border-[#F5C518]/35 bg-[#F5C518]/10 px-3 py-1.5 text-[11px] font-medium leading-tight text-[#F5C518]"
     >
       <ShieldAlert size={13} className="shrink-0" />
       Web viewers in room — capture protection limited on web
