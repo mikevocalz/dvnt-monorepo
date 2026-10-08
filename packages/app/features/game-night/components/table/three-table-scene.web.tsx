@@ -113,6 +113,8 @@ class CookoutTable3D {
   private dealOrder = 0;
   /** Horizontal spread squeeze on narrow/portrait viewports (1 = full). */
   private layoutScale = 1;
+  /** Phone layout keeps the shared table in 3D and moves private choices to DOM controls. */
+  private compactLayout = false;
   private tableResources: Array<{ dispose(): void }> = [];
   private reducedMotion = false;
   private pointer = { x: 0, y: 0 };
@@ -228,15 +230,27 @@ class CookoutTable3D {
   private fitCamera(w: number, h: number) {
     const THREE = this.THREE;
     const aspect = w / h;
-    this.camera.fov = aspect < 0.9 ? 48 : aspect < 1.35 ? 42 : 36;
+    this.compactLayout = w < 640;
+    this.camera.fov = this.compactLayout
+      ? 50
+      : aspect < 0.9
+        ? 48
+        : aspect < 1.35
+          ? 42
+          : 36;
     this.camera.aspect = aspect;
     this.camera.updateProjectionMatrix();
-    this.layoutScale = Math.min(1, Math.max(0.55, aspect / 1.5));
+    this.layoutScale = this.compactLayout
+      ? Math.min(0.88, Math.max(0.68, aspect / 1.35))
+      : Math.min(1, Math.max(0.55, aspect / 1.5));
 
     const vHalf = THREE.MathUtils.degToRad(this.camera.fov / 2);
     const hHalf = Math.atan(Math.tan(vHalf) * aspect);
-    const needX = 8.8 * this.layoutScale;
-    const needY = 5.4; // include the reclined hand's dipped far edge
+    // Fit the physical table, not the compressed card spread. The old solve
+    // multiplied the table bounds by layoutScale, which made phone framing
+    // crop the rail and magnify the overlapping hand.
+    const needX = 8.8;
+    const needY = 5.4;
     // The hand fan sits ~4 units nearer the camera than the table center, so
     // the width solve needs that depth added back or the edge cards crop.
     const dist = Math.max(
@@ -617,7 +631,7 @@ class CookoutTable3D {
     const sx = this.layoutScale; // horizontal squeeze on narrow viewports
 
     // Prompt card — face-up at the head of the table.
-    if (props.prompt?.text) {
+    if (props.prompt?.text && !this.compactLayout) {
       const rig = this.cardAt("prompt", {
         kind: "prompt",
         section: inDuel ? "Duel" : "Game Night",
@@ -704,10 +718,14 @@ class CookoutTable3D {
       this.winnerGlow.visible = false;
     }
 
-    // The player's hand — a reclined fan along the near edge.
-    const n = hand.length;
+    // The player's hand — a reclined fan along the near edge on larger
+    // canvases. On phones the same cards remain available in the semantic DOM
+    // hand below the table; duplicating 7–10 readable faces inside a narrow
+    // WebGL viewport turns into the pile-up shown in production.
+    const sceneHand = this.compactLayout ? [] : hand;
+    const n = sceneHand.length;
     const selectedSet = new Set(props.selected);
-    hand.forEach((card, i) => {
+    sceneHand.forEach((card, i) => {
       const key = `hand-${card.card_id}`;
       const t = n > 1 ? (i / (n - 1)) * 2 - 1 : 0; // -1..1 across the fan
       const selected = selectedSet.has(card.card_id);
@@ -1086,8 +1104,9 @@ export function ThreeTableScene(props: GameTableProps) {
       aria-label="Game table"
       style={{
         width: "100%",
-        height: "100%",
-        minHeight: "clamp(300px, 52vw, 480px)",
+        height: "clamp(300px, 42dvh, 420px)",
+        minHeight: 300,
+        maxHeight: 420,
       }}
     />
   );
