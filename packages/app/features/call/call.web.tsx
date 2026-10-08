@@ -61,6 +61,8 @@ import { useCallUIStore } from "./call-ui-store";
 import {
   formatCallSessionCountdown,
   callSessionSecondsRemaining,
+  fetchCallDeadline,
+  serverClockOffsetMs,
   shouldShowCallSessionWarning,
 } from "./call-session-limit";
 import {
@@ -342,6 +344,7 @@ function CallRoom({
         }
       }
 
+      const joinStartedMs = Date.now();
       const joinResult = await callRoomsApi.joinCall(joinTargetId);
       if (cancelled) return;
 
@@ -353,6 +356,9 @@ function CallRoom({
 
       const { token, user: joinedUser, room: joinedRoom } = joinResult.data;
       s.setServerEndsAt(joinedRoom.endsAt ?? null);
+      s.setServerClockOffsetMs(
+        serverClockOffsetMs(joinedRoom.serverNow, joinStartedMs, Date.now()),
+      );
       if (!token) {
         s.setError("No peer token received", "no_peer_token");
         return;
@@ -659,7 +665,21 @@ function CallRoom({
           leave();
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        // SUBSCRIBED fires on the first join and after every reconnect. An
+        // ends_at UPDATE sent while the channel was down is lost, and the
+        // host joins before ends_at exists, so re-read it here.
+        if (status !== "SUBSCRIBED") return;
+        void fetchCallDeadline(() =>
+          supabase
+            .from("video_rooms")
+            .select("ends_at")
+            .eq("uuid", liveRoomId)
+            .maybeSingle(),
+        ).then((endsAt) => {
+          if (endsAt) getStore().setServerEndsAt(endsAt);
+        });
+      });
     return () => {
       supabase.removeChannel(channel);
     };
@@ -677,7 +697,11 @@ function CallRoom({
 
     let ended = false;
     const tick = () => {
-      const secondsLeft = callSessionSecondsRemaining(serverEndsAt);
+      const secondsLeft = callSessionSecondsRemaining(
+        serverEndsAt,
+        Date.now(),
+        getStore().serverClockOffsetMs,
+      );
       getStore().setCallSessionSecondsLeft(secondsLeft);
 
       if (secondsLeft === 0 && !ended) {

@@ -73,7 +73,11 @@ import {
 import type { Participant } from "@dvnt/app/features/video/types";
 import { CT } from "@dvnt/app/features/services/calls/callTrace";
 import { resolveFishjamAppId } from "@dvnt/app/lib/video/fishjam-config";
-import { callSessionSecondsRemaining } from "@dvnt/app/features/call/call-session-limit";
+import {
+  callSessionSecondsRemaining,
+  fetchCallDeadline,
+  serverClockOffsetMs,
+} from "@dvnt/app/features/call/call-session-limit";
 
 // Re-export for consumers
 export type { CallType, CallPhase, CallRole, CallDirection, RecipientInfo };
@@ -471,7 +475,11 @@ export function useVideoCall() {
         state.setCallDuration(Math.floor((Date.now() - startedAt) / 1000));
       }
 
-      const secondsLeft = callSessionSecondsRemaining(state.serverEndsAt);
+      const secondsLeft = callSessionSecondsRemaining(
+        state.serverEndsAt,
+        Date.now(),
+        state.serverClockOffsetMs,
+      );
       state.setCallSessionSecondsLeft(secondsLeft);
 
       if (secondsLeft === 0 && state.callPhase === "connected") {
@@ -718,6 +726,7 @@ export function useVideoCall() {
       s.setCallPhase("joining_room");
       log("Joining room...");
 
+      const joinStartedMs = Date.now();
       const joinResult = await callRoomsApi.joinCall(newRoomId);
       log("Join result:", joinResult.ok ? "authorized" : "rejected");
       if (!joinResult.ok || !joinResult.data) {
@@ -730,6 +739,9 @@ export function useVideoCall() {
 
       const { token, user: joinedUser, room: joinedRoom } = joinResult.data;
       s.setServerEndsAt(joinedRoom.endsAt ?? null);
+      s.setServerClockOffsetMs(
+        serverClockOffsetMs(joinedRoom.serverNow, joinStartedMs, Date.now()),
+      );
       watchOwnedRoom.current = joinedRoom.id;
       watchOwnedGeneration.current = watchCallGeneration;
       log("Got Fishjam token for user:", joinedUser.id);
@@ -977,6 +989,7 @@ export function useVideoCall() {
       s.setCallPhase("joining_room");
       log("Joining existing room:", roomId);
 
+      const joinStartedMs = Date.now();
       const joinResult = await callRoomsApi.joinCall(roomId);
       if (!joinResult.ok || !joinResult.data) {
         const msg = joinResult.error?.message || "Failed to join room";
@@ -988,6 +1001,9 @@ export function useVideoCall() {
 
       const { token, user: joinedUser, room: joinedRoom } = joinResult.data;
       s.setServerEndsAt(joinedRoom.endsAt ?? null);
+      s.setServerClockOffsetMs(
+        serverClockOffsetMs(joinedRoom.serverNow, joinStartedMs, Date.now()),
+      );
       watchOwnedRoom.current = joinedRoom.id;
       watchOwnedGeneration.current = watchCallGeneration;
       log("Got Fishjam token for user:", joinedUser.id);
@@ -1667,6 +1683,20 @@ export function useVideoCall() {
       )
       .subscribe((status) => {
         log(`[SIGNAL_SUB] Subscription status: ${status}`);
+        // SUBSCRIBED fires on the first join and again after every
+        // reconnect. Any ends_at UPDATE sent while the channel was down (or
+        // before it joined, e.g. the host's first invitee connecting) is
+        // lost, so re-read the deadline here.
+        if (status !== "SUBSCRIBED") return;
+        void fetchCallDeadline(() =>
+          supabase
+            .from("video_rooms")
+            .select("ends_at")
+            .eq("uuid", currentRoomId)
+            .maybeSingle(),
+        ).then((endsAt) => {
+          if (endsAt) getStore().setServerEndsAt(endsAt);
+        });
       });
 
     signalChannelRef.current = channel;

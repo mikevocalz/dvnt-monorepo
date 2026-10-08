@@ -300,6 +300,10 @@ Deno.serve(async (req) => {
             title: room.title,
             appOnly: false,
             endsAt: result.endsAt ?? room.ends_at ?? null,
+            // Server clock at response time. Clients derive a clock offset
+            // from it so a phone whose clock runs fast does not hang up
+            // early against endsAt.
+            serverNow: new Date().toISOString(),
             fishjamRoomId: result.fishjamRoomId,
           },
           token: result.token,
