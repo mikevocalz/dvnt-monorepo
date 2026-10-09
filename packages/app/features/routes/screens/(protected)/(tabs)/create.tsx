@@ -37,6 +37,8 @@ import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { useCreateHeaderStore } from "@dvnt/app/lib/stores/create-header-store";
 import { useTabBarTopInset } from "@dvnt/app/lib/hooks/use-tab-bar-inset";
 import { usePublishPost } from "@dvnt/app/lib/hooks/use-publish-post";
+import { postPublishQueue } from "@dvnt/app/lib/posts/publish-queue";
+import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
 import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
 import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
@@ -302,7 +304,16 @@ function CreateScreenContent() {
       // An event-linked draft can sit here for days. Its visibility is checked
       // again against the server now, not trusted from when it was written.
       await assertFirstPostPublishable();
-      publishPost(useCreatePostStore.getState());
+      const onboarding = await fetchNewMemberProgress();
+      const firstPostRequired = onboarding.step === "first_post";
+      const publishId = publishPost(useCreatePostStore.getState());
+      if (firstPostRequired) {
+        await postPublishQueue.whenFinished(publishId);
+        const confirmed = await fetchNewMemberProgress();
+        if (!confirmed.hasPost || confirmed.step !== "complete") {
+          throw new Error("Your post is still processing. Please try again shortly.");
+        }
+      }
       useFirstPostOfferStore.getState().clearPending();
       reset();
       setSelectedTagUsers([]);
