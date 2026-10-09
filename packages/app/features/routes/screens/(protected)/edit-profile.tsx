@@ -29,6 +29,7 @@ import { useEffect, useState, useRef } from "react";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { appendCacheBuster } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { useUpdateProfile } from "@dvnt/app/lib/hooks/use-profile";
+import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import {
   fetchOwnIdentity,
@@ -323,18 +324,25 @@ function EditProfileScreenContent() {
           : {}),
       };
 
-      updateProfile.mutate(updateData, {
-        onSuccess: () => {
-          showToast("success", "Saved", "Profile updated successfully");
-        },
-        onError: (error: any) => {
-          console.error("[EditProfile] Save error:", error);
-          const errorMessage =
-            error?.message || "Failed to save profile. Please try again.";
-          showToast("error", "Error", errorMessage);
-        },
-      });
-
+      // Never leave this screen until the avatar mutation actually finishes.
+      // New members resume from the server-confirmed step across reinstall,
+      // refresh and mobile/web transitions.
+      await updateProfile.mutateAsync(updateData);
+      showToast("success", "Saved", "Profile updated successfully");
+      try {
+        const progress = await fetchNewMemberProgress();
+        if (progress.step === "photo") {
+          showToast("warning", "Photo required", "Add and save a real profile photo to continue.");
+          return;
+        }
+        if (progress.step === "first_post") {
+          router.replace("/(protected)/(tabs)/create" as any);
+          return;
+        }
+      } catch {
+        showToast("warning", "Checking progress", "Your changes are saved. Try again to continue.");
+        return;
+      }
       navigation.goBack();
       return;
     } catch (error: any) {
