@@ -59,9 +59,17 @@ type CartLineItemRow = {
   id: string;
   cart_id: string;
   category: "admission" | "coat_check";
-  tier_id: string;
+  tier_id: string | null;
+  addon_id: string | null;
+  variant_id: string | null;
   quantity: number;
   unit_price_cents: number;
+  ticket_addons?: {
+    price_cents: number;
+    currency?: string | null;
+    event_id: number;
+  } | null;
+  ticket_addon_variants?: { price_cents: number | null } | null;
   ticket_types?: {
     price_cents: number;
     currency?: string | null;
@@ -259,7 +267,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
     const { data: lineItems, error: lineItemsError } = await supabase
       .from("cart_line_items")
       .select(
-        "*, ticket_types(price_cents, currency, event_id, name, category)",
+        "*, ticket_types(price_cents, currency, event_id, name, category), ticket_addons(price_cents, currency, event_id), ticket_addon_variants(price_cents)",
       )
       .eq("cart_id", cartId)
       .order("created_at", { ascending: true });
@@ -307,22 +315,30 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
     let admissionQuantity = 0;
 
     for (const item of lineItems as CartLineItemRow[]) {
+      // A line is a ticket tier or an add-on (coat check etc.), never both
+      // (cart_line_items CHECK). Add-ons price as variant ?? add-on, the same
+      // rule cart_create_hold uses, and cart issuance already handles them.
       const tier = item.ticket_types;
-      if (!tier || tier.event_id !== cart.event_id) {
+      const addon = item.ticket_addons;
+      const source = item.tier_id ? tier : addon;
+      if (!source || source.event_id !== cart.event_id) {
         return errorResponse("Cart line item is invalid", 400);
       }
-      const tierCurrency = String(tier.currency || currency).toLowerCase();
-      if (tierCurrency !== currency) {
+      const unitPriceCents = item.tier_id
+        ? source.price_cents
+        : (item.ticket_addon_variants?.price_cents ?? source.price_cents);
+      const lineCurrency = String(source.currency || currency).toLowerCase();
+      if (lineCurrency !== currency) {
         return errorResponse("Cart contains mixed currencies", 400);
       }
       if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
         return errorResponse("Cart line item quantity is invalid", 400);
       }
-      if (!Number.isInteger(tier.price_cents) || tier.price_cents < 0) {
+      if (!Number.isInteger(unitPriceCents) || unitPriceCents < 0) {
         return errorResponse("Cart line item price is invalid", 400);
       }
 
-      const lineTotal = tier.price_cents * item.quantity;
+      const lineTotal = unitPriceCents * item.quantity;
       subtotalCents += lineTotal;
       quantity += item.quantity;
 
