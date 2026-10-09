@@ -2794,6 +2794,7 @@ function CheckoutSheet({
     promoterDiscountBps,
     promo: appliedPromo,
     addonCents: addonPreviewCents,
+    addonQuantity: selectionList.reduce((n, sel) => n + sel.quantity, 0),
   });
   const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 

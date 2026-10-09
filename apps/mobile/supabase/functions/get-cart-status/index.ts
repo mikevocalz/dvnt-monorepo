@@ -81,7 +81,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: activeHolds, error: holdsError } = await supabase
       .from("cart_holds")
-      .select("id, line_item_id, tier_id, qty, expires_at")
+      .select("id, line_item_id, tier_id, addon_id, variant_id, qty, expires_at")
       .eq("cart_id", cartId)
       .eq("released", false)
       .gt("expires_at", new Date().toISOString())

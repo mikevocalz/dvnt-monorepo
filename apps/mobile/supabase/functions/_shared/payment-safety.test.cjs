@@ -11,6 +11,9 @@ function harness(config = {}) {
   const writes = [], calls = [], requests = [];
   const tier = { id: 'tier', event_id: 1, name: 'General Admission', price_cents: 5000,
     currency: 'usd', quantity_total: 100, quantity_sold: 0, max_per_user: 20, ...config.tier };
+  // config.cart may be `true` (one two-ticket line) or the cart's line rows.
+  const cartLines = Array.isArray(config.cart) ? config.cart
+    : [{ id: 'line', tier_id: 'tier', addon_id: null, category: 'admission', quantity: 2, ticket_types: tier }];
   const client = { from(table) {
     let payload, operation;
     const result = () => {
@@ -21,8 +24,8 @@ function harness(config = {}) {
         : table === 'event_promoters' ? { id: 'promoter', code: 'CODE', status: 'active',
             customer_discount_bps: config.discountBps || 0, promoter_commission_bps: 1000 }
         : table === 'carts' ? { id: 'cart', user_id: 'staff', event_id: 1, status: 'holding', currency: 'usd', idempotency_key: 'test' }
-        : table === 'cart_line_items' && config.cart ? [{ id: 'line', tier_id: 'tier', category: 'admission', quantity: 2, ticket_types: tier }]
-        : table === 'cart_holds' ? [{ line_item_id: 'line', expires_at: new Date(Date.now() + 600000).toISOString() }]
+        : table === 'cart_line_items' && config.cart ? cartLines
+        : table === 'cart_holds' ? cartLines.map(line => ({ line_item_id: line.id, expires_at: new Date(Date.now() + 600000).toISOString() }))
         : table === 'orders' ? { id: 'order' }
         : table === 'tickets' && operation === 'insert' ? payload
         : [];

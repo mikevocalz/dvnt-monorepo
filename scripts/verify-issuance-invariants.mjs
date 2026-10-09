@@ -309,11 +309,69 @@ function checkUpserts({ byCols, dropped }) {
   return checked;
 }
 
+
+// ── C. cart line reads that join ticket_types must also price add-on lines ──
+//
+// cart_line_items_target_check makes a line a ticket tier XOR an add-on, and
+// add-on lines (coat check) have tier_id NULL, so their ticket_types embed is
+// null. On 2026-10-08 cart-checkout embedded only ticket_types and rejected
+// every cart holding an add-on with 400 "Cart line item is invalid". A read
+// that embeds ticket_types must either embed ticket_addons too or filter to
+// tier lines with .not("tier_id", "is", null).
+function resolveSelect(arg, source) {
+  const literal = arg.match(/^\s*(["'`])([\s\S]*?)\1/);
+  if (literal) return literal[2];
+  const ident = arg.match(/^\s*([A-Za-z_$][\w$]*)/)?.[1];
+  if (!ident) return null;
+  const def = new RegExp(`const\\s+${ident}\\s*=\\s*(["'\`])([\\s\\S]*?)\\1`);
+  for (const file of [source.path, ...walk(path.join(FUNCTIONS, "_shared"))]) {
+    if (!/\.ts$/.test(file)) continue;
+    const m = fs.readFileSync(file, "utf8").match(def);
+    if (m) return m[2];
+  }
+  return null;
+}
+
+function checkCartLineReads() {
+  let checked = 0;
+  for (const file of walk(FUNCTIONS)) {
+    if (!/\.ts$/.test(file) || /\.test\.ts$/.test(file)) continue;
+    const text = fs.readFileSync(file, "utf8");
+    const rel = path.relative(ROOT, file);
+    const re = /\.from\(\s*["']cart_line_items["']\s*\)/g;
+    for (let m; (m = re.exec(text)); ) {
+      const end = text.indexOf(";", m.index);
+      const chain = text.slice(m.index, end === -1 ? undefined : end);
+      const sel = chain.match(/\.select\(([\s\S]*?)\)\s*(?:\.|$)/);
+      if (!sel) continue;
+      checked += 1;
+      const line = text.slice(0, m.index).split("\n").length;
+      const columns = resolveSelect(sel[1], { path: file });
+      if (columns === null) {
+        fail("cart-line-addon", `${rel}:${line}`,
+          "cart_line_items select argument could not be resolved to a string; " +
+            "use a literal or a const defined in this file or _shared.");
+        continue;
+      }
+      if (!/\bticket_types\s*\(/.test(columns)) continue;
+      const tierOnly = /\.not\(\s*["']tier_id["']\s*,\s*["']is["']\s*,\s*null\s*\)/.test(chain);
+      if (!tierOnly && !/\bticket_addons\s*\(/.test(columns)) {
+        fail("cart-line-addon", `${rel}:${line}`,
+          "reads cart_line_items with a ticket_types embed but no ticket_addons " +
+            "embed and no .not(\"tier_id\", \"is\", null) filter. Add-on lines " +
+            "(tier_id NULL) come back with ticket_types = null.");
+      }
+    }
+  }
+  return checked;
+}
+
 // ── run ────────────────────────────────────────────────────────────────────
 const files = migrationFiles();
 const grants = checkGrants(files);
 const indexes = collectIndexes(files);
 const upsertsChecked = checkUpserts(indexes);
+const cartLineReads = checkCartLineReads();
 
 const summary = {
   migrations: files.length,
@@ -321,6 +379,7 @@ const summary = {
   tablesGranted: grants.grantedCount,
   uniqueIndexes: indexes.byCols.size,
   upsertsChecked,
+  cartLineReads,
   failures: failures.length,
   warnings: warnings.length,
 };
@@ -333,11 +392,12 @@ if (JSON_OUT) {
   console.log(
     `issuance invariants — ${summary.migrations} migrations, ` +
       `${summary.tablesCreated} tables created, ${summary.uniqueIndexes} unique indexes, ` +
-      `${summary.upsertsChecked} upserts checked`,
+      `${summary.upsertsChecked} upserts checked, ${summary.cartLineReads} cart line reads checked`,
   );
   if (failures.length === 0) {
     console.log("✓ every created table is granted to service_role");
     console.log("✓ every onConflict target is an inferable unique index");
+    console.log("✓ every cart line read that joins ticket_types also handles add-on lines");
   } else {
     for (const f of failures) {
       console.error(`\n✖ [${f.check}] ${f.where}\n  ${f.detail}`);
