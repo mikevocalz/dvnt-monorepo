@@ -389,3 +389,12 @@ test("the welcome email renders the team's copy verbatim and in order", async ()
   }
   assert.equal(t.welcome("sam").subject, "Welcome to the cookout — DVNT");
 });
+
+test('profile photo campaign is a labelled, deterministic single-version message', () => {
+  const copy = outbox.campaignMessage('profile_photo_v1');
+  assert.ok(copy);
+  assert.match(copy.body, /Deviant announcement — automated/);
+  assert.match(copy.body, /profile image/);
+  assert.match(copy.body, /first post/);
+  assert.equal(outbox.providerIdempotencyKey('profile_photo_v1',613,'dm'), 'profile_photo_v1:613:dm');
+});

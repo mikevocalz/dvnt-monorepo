@@ -29,6 +29,7 @@ import { useEffect, useState, useRef } from "react";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { appendCacheBuster } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { useUpdateProfile } from "@dvnt/app/lib/hooks/use-profile";
+import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import {
   fetchOwnIdentity,
@@ -99,6 +100,14 @@ function EditProfileScreenContent() {
   const updateProfile = useUpdateProfile();
   const [isSaving, setIsSaving] = useState(false);
   const [newAvatarUri, setNewAvatarUri] = useState<string | null>(null);
+  const [requiredPhoto, setRequiredPhoto] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void fetchNewMemberProgress().then((p) => {
+      if (active) setRequiredPhoto(p.step === "photo");
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [user?.id]);
   const { uploadSingle, isUploading, progress } = useMediaUpload({
     folder: "avatars",
     userId: user?.id,
@@ -323,18 +332,25 @@ function EditProfileScreenContent() {
           : {}),
       };
 
-      updateProfile.mutate(updateData, {
-        onSuccess: () => {
-          showToast("success", "Saved", "Profile updated successfully");
-        },
-        onError: (error: any) => {
-          console.error("[EditProfile] Save error:", error);
-          const errorMessage =
-            error?.message || "Failed to save profile. Please try again.";
-          showToast("error", "Error", errorMessage);
-        },
-      });
-
+      // Never leave this screen until the avatar mutation actually finishes.
+      // New members resume from the server-confirmed step across reinstall,
+      // refresh and mobile/web transitions.
+      await updateProfile.mutateAsync(updateData);
+      showToast("success", "Saved", "Profile updated successfully");
+      try {
+        const progress = await fetchNewMemberProgress();
+        if (progress.step === "photo") {
+          showToast("warning", "Photo required", "Add and save a real profile photo to continue.");
+          return;
+        }
+        if (progress.step === "first_post") {
+          router.replace("/(protected)/(tabs)/create" as any);
+          return;
+        }
+      } catch {
+        showToast("warning", "Checking progress", "Your changes are saved. Try again to continue.");
+        return;
+      }
       navigation.goBack();
       return;
     } catch (error: any) {
@@ -342,6 +358,7 @@ function EditProfileScreenContent() {
       const errorMessage =
         error?.message || "Failed to save profile. Please try again.";
       showToast("error", "Error", errorMessage);
+    } finally {
       setIsSaving(false);
     }
   };
@@ -437,6 +454,23 @@ function EditProfileScreenContent() {
         </Pressable>
       </View>
 
+      {requiredPhoto && (
+        <View style={{
+          paddingHorizontal: 18, paddingVertical: 14, marginHorizontal: 16,
+          marginTop: 10, borderRadius: 16, borderWidth: 1,
+          borderColor: "rgba(255,91,252,0.45)", backgroundColor: "rgba(255,91,252,0.12)",
+        }}>
+          <Text style={{ color: "#FF5BFC", fontSize: 11, letterSpacing: 2, fontWeight: "900" }}>
+            DVNT · STEP 1 OF 2
+          </Text>
+          <Text style={{ color: "#fff", fontSize: 17, fontWeight: "800", marginTop: 6 }}>
+            First, upload your profile picture.
+          </Text>
+          <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 13, marginTop: 4 }}>
+            Once the photo saves successfully, we'll take you straight to creating your first post.
+          </Text>
+        </View>
+      )}
       <KeyboardAwareScrollView
         ref={scrollRef}
         style={{ flex: 1 }}

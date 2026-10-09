@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
     const authUserId = sessionResult.userId;
 
     // Verified-only admission. A client that skips the banner is still refused.
-    const admission = await resolveVerifiedAdmission(supabaseAdmin, authUserId);
+    const admission = await resolveVerifiedAdmission(supabaseAdmin, authUserId, new Date(), { purpose: "first_post" });
     if (admission.state === "blocked") {
       const refusal = admissionRefusal(admission);
       return errorResponse(refusal.code, refusal.message, 403);

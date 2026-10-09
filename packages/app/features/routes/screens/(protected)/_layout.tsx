@@ -56,6 +56,7 @@ import { useMotionTier } from "@dvnt/app/lib/navigation/use-motion-tier";
 import { AppDrawerHost } from "@dvnt/app/features/navigation/app-drawer-host";
 import { DrawerTrigger } from "@dvnt/app/components/drawer-trigger";
 import { VerifiedOnlyPopup } from "@dvnt/app/components/verified-only-popup";
+import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
 import { useMyTickets } from "@dvnt/app/lib/hooks/use-tickets";
 import {
   buildTicketLibrary,
@@ -334,6 +335,34 @@ export default function ProtectedLayout() {
   useWatchCalls();
 
   const user = useAuthStore((s) => s.user);
+  const memberPath = usePathname();
+  const memberRouter = useRouter();
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    void fetchNewMemberProgress().then((progress) => {
+      if (cancelled || progress.step === "not_required" ||
+          progress.step === "complete" || progress.step === "pending_verification") return;
+      const path = memberPath.toLowerCase();
+      // Ticket buying, identity flow and saved tickets must never be blocked.
+      if (/\/(checkout|payment|tickets?|orders?)(\/|$)/.test(path)) return;
+      if (progress.step === "photo") {
+        if (path !== "/edit-profile" && path !== "/profile/edit") {
+          memberRouter.replace("/(protected)/edit-profile" as any);
+        }
+      } else if (progress.step === "first_post") {
+        if (path !== "/create" && !path.includes("/crop-preview") &&
+            !path.includes("/camera")) {
+          memberRouter.replace("/(protected)/(tabs)/create" as any);
+        }
+      }
+    }).catch(() => {
+      // Connectivity is unknown, not completed. Server-side admission still
+      // refuses new-member participation until verified progress is saved.
+    });
+    return () => { cancelled = true; };
+  }, [user?.id, memberPath, memberRouter]);
+
 
   // ── Boot-level weather fetch: prime the store as soon as location is available ──
   const deviceLat = useEventsLocationStore(

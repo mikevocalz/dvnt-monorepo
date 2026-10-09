@@ -24,6 +24,7 @@ function fakeDb(results: Record<string, Result>) {
         select: () => chain,
         eq: () => chain,
         maybeSingle: () => Promise.resolve(results[table] ?? { data: null, error: null }),
+        limit: () => Promise.resolve(results[table] ?? { data: [], error: null }),
       };
       return chain;
     },
@@ -226,4 +227,76 @@ Deno.test("an unreadable restricted flag refuses, a missing function does not", 
     "user_abc",
   );
   assertEquals(notMigrated.state, "allowed");
+});
+
+Deno.test("the new-member gate admits everyone while its flag is off", async () => {
+  Deno.env.delete("DVNT_NEW_MEMBER_ONBOARDING_ENABLED");
+  const verdict = await resolveVerifiedAdmission(
+    fakeDb({
+      verified_admission_policy: { data: { enforce: false }, error: null },
+      identity_verifications: { data: null, error: null },
+      user: { data: { id: "new-member", createdAt: "2026-10-09T01:00:00Z", emailVerified: false, image: null }, error: null },
+      users: { data: { id: 555, avatar_id: null }, error: null },
+      posts: { data: [], error: null },
+    }),
+    "new-member",
+  );
+  assertEquals(verdict.state, "allowed");
+});
+
+Deno.test("new-account participation is blocked until saved photo then first post", async () => {
+  Deno.env.set("DVNT_NEW_MEMBER_ONBOARDING_ENABLED", "true");
+  try {
+  const account = {
+    id: "new-member",
+    createdAt: "2026-10-09T01:00:00Z",
+    emailVerified: true,
+    image: null,
+  };
+  const base = {
+    verified_admission_policy: { data: { enforce: false }, error: null },
+    identity_verifications: {
+      data: { user_id: "new-member", status: "passed", date_of_birth: "1995-01-01" },
+      error: null,
+    },
+    user: { data: account, error: null },
+    users: { data: { id: 555, avatar_id: null }, error: null },
+    posts: { data: [], error: null },
+  };
+  const photoMissing = await resolveVerifiedAdmission(fakeDb(base), "new-member");
+  assertEquals(photoMissing.state, "blocked");
+  assertEquals(photoMissing.reason, "profile_photo_required");
+
+  const hasPhoto = {
+    ...base,
+    users: { data: { id: 555, avatar_id: 80 }, error: null },
+    media: { data: { url: "https://cdn.dvntapp.live/photo.jpg" }, error: null },
+  };
+  const noFirstPost = await resolveVerifiedAdmission(fakeDb(hasPhoto), "new-member");
+  assertEquals(noFirstPost.state, "blocked");
+  assertEquals(noFirstPost.reason, "first_post_required");
+
+  const firstPostAllowed = await resolveVerifiedAdmission(
+    fakeDb(hasPhoto), "new-member", new Date("2026-10-09T02:00:00Z"),
+    { purpose: "first_post" },
+  );
+  assertEquals(firstPostAllowed.state, "allowed");
+
+  const complete = await resolveVerifiedAdmission(
+    fakeDb({ ...hasPhoto, posts: { data: [{ id: 1 }], error: null } }), "new-member",
+  );
+  assertEquals(complete.state, "allowed");
+  } finally {
+    Deno.env.delete("DVNT_NEW_MEMBER_ONBOARDING_ENABLED");
+  }
+});
+
+Deno.test("new onboarding must never close ticket purchase", async () => {
+  const db = fakeDb({
+    verified_admission_policy: { data: { enforce: false }, error: null },
+    identity_verifications: { data: null, error: null },
+    user: { data: { id: "new-member", createdAt: "2026-10-09T01:00:00Z" }, error: null },
+  });
+  const decision = await resolveVerifiedAdmission(db, "new-member", new Date(), { purpose: "ticket_purchase" });
+  assertEquals(decision.state, "allowed");
 });

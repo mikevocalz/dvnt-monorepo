@@ -11,6 +11,11 @@
  * with `enforce = false`, so merging this changes nothing for live members.
  */
 import { checkAdultBirthDate } from "./age-policy.ts";
+import {
+  determineNewMemberStep,
+  isNewMemberOnboardingEnabled,
+  NEW_MEMBER_ONBOARDING_CUTOFF,
+} from "./new-member-onboarding.ts";
 
 /**
  * Every account is in scope once `enforce` is on (checklist A03). There is no
@@ -55,7 +60,9 @@ export type AdmissionReason =
   | "verification_incomplete"
   | "age_evidence_missing"
   | "underage"
-  | "restricted_profile";
+  | "restricted_profile"
+  | "profile_photo_required"
+  | "first_post_required";
 
 export interface AdmissionVerdict {
   state: "allowed" | "grace" | "blocked";
@@ -93,6 +100,10 @@ function blockedMessage(reason: AdmissionReason): string {
       return `Your ID didn't show a readable date of birth. Submit it again to reopen ${PARTICIPATION}.`;
     case "underage":
       return `Your ID shows you're under 18. DVNT is 18+, so ${PARTICIPATION} stay closed.`;
+    case "profile_photo_required":
+      return "Before joining the DVNT community, upload a profile photo and save it successfully.";
+    case "first_post_required":
+      return "Your photo is saved. Publish your first post to unlock the full DVNT community.";
     case "restricted_profile":
       return "Verify your ID to start posting, commenting, messaging and joining rooms. Your tickets are already in your account.";
     default:
@@ -169,7 +180,8 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
 /** The refusal body every participation rail returns, so one client handler covers all of them. */
 export function admissionRefusal(verdict: AdmissionVerdict) {
   return {
-    code: "verification_required",
+    code: verdict.reason === "profile_photo_required" || verdict.reason === "first_post_required"
+      ? "profile_completion_required" : "verification_required",
     reason: verdict.reason,
     message: verdict.message ?? blockedMessage("verification_required"),
   };
@@ -183,7 +195,7 @@ export async function resolveVerifiedAdmission(
   db: any,
   userId: string | null | undefined,
   now = new Date(),
-  opts: { purpose?: "participation" | "ticket_purchase" } = {},
+  opts: { purpose?: "participation" | "ticket_purchase" | "first_post" } = {},
 ): Promise<AdmissionVerdict> {
   if (!userId) return decideVerifiedAdmission({ userId, now });
   // Buying a ticket is the one thing a checkout-created profile can always do
@@ -229,16 +241,65 @@ export async function resolveVerifiedAdmission(
     policyResult?.data ?? null;
   const has = (list: unknown) => Array.isArray(list) && list.map(String).includes(userId);
 
-  return decideVerifiedAdmission({
+  const verdict = decideVerifiedAdmission({
     userId,
     policy,
-    // A failed read is no record, so an enforced account is refused rather than admitted.
     record: recordResult?.error ? null : recordResult?.data ?? null,
     exempt: has(policy?.allowlist),
     denied: has(policy?.denylist),
     restricted,
     now,
   });
+  if (opts.purpose === "ticket_purchase" || verdict.state === "blocked") return verdict;
+  if (!isNewMemberOnboardingEnabled()) return verdict;
+
+  // The mandatory onboarding gate is independent of the legacy verified-only
+  // rollout. It only applies to NEW Better Auth signups, never old accounts,
+  // and cannot be lifted by localStorage or a fabricated posts_count.
+  const { data: account, error: accountError } = await db.from("user")
+    .select("id,createdAt,emailVerified,image").eq("id", userId).maybeSingle();
+  if (accountError || !account) return verdict;
+  const createdAt = Date.parse(String(account.createdAt || ""));
+  if (!Number.isFinite(createdAt) || createdAt < Date.parse(NEW_MEMBER_ONBOARDING_CUTOFF))
+    return verdict;
+
+  const { data: member, error: memberError } = await db.from("users")
+    .select("id,avatar_id").eq("auth_id", userId).maybeSingle();
+  if (memberError || !member) {
+    return { state: "blocked", reason: "profile_photo_required", message: "We couldn't confirm your profile. Retry.", deadline: null };
+  }
+  const [{ data: avatar, error: avatarError }, { data: posts, error: postError }] =
+    await Promise.all([
+      member.avatar_id == null
+        ? Promise.resolve({ data: null, error: null })
+        : db.from("media").select("url").eq("id",member.avatar_id).maybeSingle(),
+      db.from("posts").select("id").eq("author_id",member.id).limit(1),
+    ]);
+  if (avatarError || postError) {
+    return { state: "blocked", reason: "profile_photo_required", message: "We couldn't confirm your setup. Retry.", deadline: null };
+  }
+  const step = determineNewMemberStep({
+    accountCreatedAt: account.createdAt,
+    emailVerified: account.emailVerified === true,
+    adultVerified: recordResult?.data?.status === "passed" &&
+      checkAdultBirthDate(recordResult.data.date_of_birth, now).allowed,
+    hasProfilePhoto: Boolean(String(avatar?.url ?? account.image ?? "").trim()),
+    hasPost: Array.isArray(posts) && posts.length > 0,
+  });
+  if (step === "pending_verification") return {
+    state: "blocked", reason: "verification_required",
+    message: "Finish ID and email verification before entering the community.",
+    deadline: null,
+  };
+  if (step === "photo") return {
+    state: "blocked", reason: "profile_photo_required",
+    message: blockedMessage("profile_photo_required"), deadline: null,
+  };
+  if (step === "first_post" && opts.purpose !== "first_post") return {
+    state: "blocked", reason: "first_post_required",
+    message: blockedMessage("first_post_required"), deadline: null,
+  };
+  return verdict;
 }
 
 /**
