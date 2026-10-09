@@ -162,6 +162,13 @@ CREATE TABLE public.ticket_addons (
   quantity_held INTEGER NOT NULL DEFAULT 0,
   CONSTRAINT ticket_addons_qty_nonneg CHECK (quantity_sold >= 0 AND quantity_held >= 0)
 );
+CREATE TABLE public.ticket_addon_variants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  addon_id UUID NOT NULL REFERENCES public.ticket_addons(id) ON DELETE CASCADE,
+  quantity_total INTEGER,
+  quantity_sold INTEGER NOT NULL DEFAULT 0,
+  quantity_held INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE public.order_addons (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID REFERENCES public.orders(id) ON DELETE SET NULL,
@@ -224,6 +231,13 @@ assert.ok(going, "20260918000000 no longer defines recompute_event_total_attende
 await sql(going[0]);
 await sql(read("20260915172318_atomic_legacy_ticket_hold.sql"));
 await sql(read("20261002200000_event_consolidation_tooling.sql"));
+// --baseline-followups replays the schema as it stood before the 2026-10-09
+// add-on follow-ups, so section 10 can be shown failing against the old SQL.
+if (!process.argv.includes("--baseline-followups")) {
+  await sql(read("20261009100000_addon_capacity_counts_variants_and_holds.sql").replace(
+    /CREATE OR REPLACE FUNCTION public\.cart_create_hold[\s\S]*$/, ""));
+  await sql(read("20261009100100_event_consolidation_addon_capacity.sql"));
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const event = async (host) =>
@@ -709,12 +723,8 @@ const attendees = async (eventId) =>
   ALTER TABLE public.orders
     ADD COLUMN cart_id UUID, ADD COLUMN refunded_at TIMESTAMPTZ,
     ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now();
-  CREATE TABLE public.ticket_addon_variants (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    addon_id UUID NOT NULL REFERENCES public.ticket_addons(id),
-    quantity_sold INTEGER NOT NULL DEFAULT 0,
-    CONSTRAINT addon_variant_qty_nonneg CHECK (quantity_sold >= 0)
-  );
+  ALTER TABLE public.ticket_addon_variants
+    ADD CONSTRAINT addon_variant_qty_nonneg CHECK (quantity_sold >= 0);
   ALTER TABLE public.order_addons
     ADD COLUMN cart_id UUID, ADD COLUMN cart_line_item_id UUID,
     ADD COLUMN unit_price_cents INTEGER NOT NULL DEFAULT 0,
@@ -844,6 +854,54 @@ const attendees = async (eventId) =>
     assert.deepEqual(grants, { anon: false, auth: false, svc: true }, fn);
   }
   console.log("-. OK: both refund functions are executable by service_role only");
+}
+
+// ── 10. destination add-on room counts variants; refunded rows move free ─────
+{
+  // 10a. Destination coat check capped at 4: one variant sold, one variant
+  // unit in a live cart hold, nothing sold on the parent itself. Room is 2.
+  // The old check read only the parent's quantity_sold and non-variant holds
+  // and saw 4.
+  const src = await event("host");
+  const dst = await event("host");
+  const srcTier = await tier(src);
+  const dstTier = await tier(dst);
+  const srcItem = await catalogAddon(src, null, 3);
+  const dstItem = await catalogAddon(dst, 4, 0);
+  const [{ id: variant }] = await sql(
+    `INSERT INTO ticket_addon_variants (addon_id, quantity_sold) VALUES ($1, 1) RETURNING id`, [dstItem]);
+  await sql(
+    `INSERT INTO cart_holds (addon_id, variant_id, qty, expires_at) VALUES ($1, $2, 1, now() + interval '10 min')`,
+    [dstItem, variant]);
+  const t = await ticket(src, srcTier, "v");
+  await buyAddon(src, srcItem, t, "v", 3);
+  const over = await consolidate(src, dst, "host", { [srcTier]: dstTier }, pool, { [srcItem]: dstItem });
+  assert.equal(over.ok, false, `variant sales and holds ignored: ${JSON.stringify(over)}`);
+  assert.equal(over.error, "Destination add-on capacity would be exceeded");
+  console.log("-. OK: destination add-on room subtracts variant sales and variant cart holds");
+
+  // 10b. A refunded purchase already gave its stock back. It still moves with
+  // its ticket, but it must not be counted as incoming or shifted off the
+  // source again (that under-counts the source or aborts on the CHECK).
+  const src2 = await event("host");
+  const dst2 = await event("host");
+  const srcTier2 = await tier(src2);
+  const dstTier2 = await tier(dst2);
+  const srcItem2 = await catalogAddon(src2, null, 1);
+  const dstItem2 = await catalogAddon(dst2, 1, 0);
+  const t2 = await ticket(src2, srcTier2, "r");
+  const live = await buyAddon(src2, srcItem2, t2, "r", 1);
+  const refunded = await buyAddon(src2, srcItem2, t2, "r", 2);
+  await sql(`UPDATE order_addons SET status = 'refunded' WHERE id = $1`, [refunded]);
+  const moved = await consolidate(src2, dst2, "host", { [srcTier2]: dstTier2 }, pool, { [srcItem2]: dstItem2 });
+  assert.equal(moved.ok, true, JSON.stringify(moved));
+  assert.equal(moved.moved_addon_count, 2, "both rows follow the ticket");
+  assert.equal(Number(moved.moved_addon_quantity), 1, "only live stock moves");
+  assert.equal((await addonRow(srcItem2)).quantity_sold, 0);
+  assert.equal((await addonRow(dstItem2)).quantity_sold, 1);
+  const [{ e }] = await sql(`SELECT event_id AS e FROM order_addons WHERE id = $1`, [live]);
+  assert.equal(e, dst2);
+  console.log("-. OK: refunded add-on rows move with their ticket without moving stock");
 }
 
 await pool.end();
