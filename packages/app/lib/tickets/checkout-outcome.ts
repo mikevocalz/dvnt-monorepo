@@ -26,7 +26,13 @@ export type CheckoutOutcome =
   /** Server confirmed payment; issuance has not finished. */
   | { kind: "issuing" }
   /** Paid and issued. The only state allowed to celebrate. */
-  | { kind: "issued"; admissionCount: number; coatCheckCount: number }
+  | {
+      kind: "issued";
+      admissionCount: number;
+      coatCheckCount: number;
+      /** Units across issued order_addons rows (quantity summed). */
+      addonCount: number;
+    }
   /** Paid, server says complete, but no credential came back. */
   | { kind: "issued-empty" }
   /** The cart ended without completing. */
@@ -42,6 +48,26 @@ export interface CheckoutTicketLike {
 }
 
 /**
+ * An issued `order_addons` row as `get-cart-status` returns it. An add-on-only
+ * cart (bought from the ticket-upgrade screen by someone who already holds a
+ * ticket) issues zero tickets and one or more of these.
+ */
+export interface CheckoutAddonLike {
+  quantity: number;
+  status?: string | null;
+}
+
+/** Add-on units that count as issued. A refunded row delivered nothing. */
+export function issuedAddonCount(
+  addons: readonly CheckoutAddonLike[] | undefined,
+): number {
+  return (addons ?? []).reduce(
+    (sum, addon) => (addon.status === "refunded" ? sum : sum + addon.quantity),
+    0,
+  );
+}
+
+/**
  * How long to keep polling before an unanswered cart becomes `unresolved`.
  * Indefinite polling is not a state; it is a screen that never resolves and a
  * member who never learns anything.
@@ -51,6 +77,8 @@ export const ISSUANCE_GRACE_MS = 90_000;
 export function resolveCheckoutOutcome(input: {
   status: CartStatus | null | undefined;
   tickets: readonly CheckoutTicketLike[] | undefined;
+  /** Issued add-ons. Optional because older function versions omit them. */
+  addons?: readonly CheckoutAddonLike[] | undefined;
   /** True before the first successful status read. */
   isLoading: boolean;
   /** True when the status read itself failed. */
@@ -59,14 +87,17 @@ export function resolveCheckoutOutcome(input: {
   elapsedMs: number;
 }): CheckoutOutcome {
   const tickets = input.tickets ?? [];
+  const addonCount = issuedAddonCount(input.addons);
 
   // Credentials in hand outrank everything. If the server issued them, the
-  // purchase completed whatever else is in flight.
-  if (tickets.length > 0) {
+  // purchase completed whatever else is in flight. An issued add-on is a
+  // credential too: an add-on-only cart never produces a ticket row.
+  if (tickets.length > 0 || addonCount > 0) {
     return {
       kind: "issued",
       admissionCount: tickets.filter((t) => t.category !== "coat_check").length,
       coatCheckCount: tickets.filter((t) => t.category === "coat_check").length,
+      addonCount,
     };
   }
 
@@ -125,8 +156,18 @@ export function checkoutCopy(outcome: CheckoutOutcome): CheckoutCopy {
           `${outcome.coatCheckCount} coat check${outcome.coatCheckCount === 1 ? "" : "s"}`,
         );
       }
+      if (outcome.addonCount > 0) {
+        parts.push(
+          `${outcome.addonCount} add-on${outcome.addonCount === 1 ? "" : "s"}`,
+        );
+      }
+      const hasTickets = outcome.admissionCount + outcome.coatCheckCount > 0;
       return {
-        title: "Tickets ready",
+        title: hasTickets
+          ? "Tickets ready"
+          : outcome.addonCount === 1
+            ? "Add-on ready"
+            : "Add-ons ready",
         body: parts.join(" · "),
         tone: "success",
       };
@@ -134,7 +175,7 @@ export function checkoutCopy(outcome: CheckoutOutcome): CheckoutCopy {
     case "issuing":
       return {
         title: "Payment confirmed",
-        body: "We're issuing your tickets. This page updates on its own — you don't need to pay again.",
+        body: "We're finishing your order. This page updates on its own, so you don't need to pay again.",
         tone: "working",
       };
     case "checking":
@@ -146,7 +187,7 @@ export function checkoutCopy(outcome: CheckoutOutcome): CheckoutCopy {
     case "issued-empty":
       return {
         title: "Payment confirmed",
-        body: "Your tickets haven't appeared yet. They'll show in My Tickets as soon as they're issued. Contact support if they don't.",
+        body: "Your order hasn't appeared yet. It will show in My Tickets as soon as it's issued. Contact support if it doesn't.",
         tone: "attention",
       };
     case "not-completed":

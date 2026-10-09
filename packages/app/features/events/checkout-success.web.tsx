@@ -7,7 +7,8 @@
  *
  * Law 1 (data wiring is sacred): the issued tickets come from the EXACT native
  * hook chain — `cartApi.getStatus(cartId)` keyed by `qk.cart.status(viewerId,
- * cartId)` with the same `refetchInterval` poll until `completed`, the same
+ * cartId)`, polled until the shared `resolveCheckoutOutcome` is terminal (the
+ * same rule native uses, add-ons included), the same
  * `markCompleted()` side-effect on the cart store, and ticket tap primes the
  * detail cache via `queryClient.setQueryData(qk.tickets.forEvent(...))` exactly
  * like native before navigating. cartId arrives via the `?cartId=` query param
@@ -21,16 +22,22 @@
  * expo-calendar (native-only) and has no web equivalent, so it is omitted here.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useMemo } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "solito/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, QrCode, Shirt, Ticket } from "lucide-react";
+import { CheckCircle, Clock, Info, QrCode, Shirt, Ticket } from "lucide-react";
 import { cartApi } from "@dvnt/app/lib/api/cart";
 import type { MixedTicket } from "@dvnt/app/lib/contracts/dto";
 import { qk } from "@dvnt/app/lib/query/keys";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
+import {
+  checkoutCopy,
+  resolveCheckoutOutcome,
+  shouldPollCheckout,
+  type CartStatus,
+} from "@dvnt/app/lib/tickets/checkout-outcome";
 
 const ACCENT = "#3FDCFF";
 const FirstPostOfferCard = lazy(() => import("./first-post-offer-card.web"));
@@ -101,13 +108,44 @@ export function CheckoutSuccessScreen() {
   const cartId = searchParams?.get("cartId") || undefined;
   const effectiveCartId = cartId || storeCart?.cartId || "";
 
+  // When this screen started waiting. Elapsed time is measured to the last
+  // fetch, so each poll re-renders and the grace window can expire without a
+  // separate timer.
+  const startedAt = useRef(Date.now());
+
   const statusQuery = useQuery({
     queryKey: qk.cart.status(viewerId, effectiveCartId),
     queryFn: () => cartApi.getStatus(effectiveCartId),
     enabled: !!effectiveCartId,
     staleTime: 0,
-    refetchInterval: (query) => (query.state.data?.completed ? false : 3000),
+    // Same terminal rule as native. Polling until `completed` alone kept an
+    // abandoned cart polling forever and stopped before issuance finished.
+    refetchInterval: (query) => {
+      const next = resolveCheckoutOutcome({
+        status: query.state.data?.cart?.status as CartStatus | undefined,
+        tickets: query.state.data?.tickets,
+        addons: query.state.data?.addons,
+        isLoading: !query.state.data,
+        isError: query.state.status === "error",
+        elapsedMs: Date.now() - startedAt.current,
+      });
+      return shouldPollCheckout(next) ? 3000 : false;
+    },
   });
+
+  const lastAnswerAt = Math.max(
+    statusQuery.dataUpdatedAt,
+    statusQuery.errorUpdatedAt,
+  );
+  const outcome = resolveCheckoutOutcome({
+    status: statusQuery.data?.cart?.status as CartStatus | undefined,
+    tickets: statusQuery.data?.tickets,
+    addons: statusQuery.data?.addons,
+    isLoading: statusQuery.isLoading,
+    isError: statusQuery.isError,
+    elapsedMs: lastAnswerAt > 0 ? lastAnswerAt - startedAt.current : 0,
+  });
+  const copy = checkoutCopy(outcome);
 
   useEffect(() => {
     if (statusQuery.data?.completed) {
@@ -119,18 +157,12 @@ export function CheckoutSuccessScreen() {
     () => statusQuery.data?.tickets ?? [],
     [statusQuery.data?.tickets],
   );
-  const admissionCount = tickets.filter(
-    (ticket) => ticket.category !== "coat_check",
-  ).length;
-  const coatCheckCount = tickets.filter(
-    (ticket) => ticket.category === "coat_check",
-  ).length;
-  // Issued add-ons (order_addons via get-cart-status) — WS-3.
+  // Issued add-ons (order_addons via get-cart-status). Counts for the hero
+  // come from the shared outcome, not from here.
   const issuedAddons = useMemo(
     () => statusQuery.data?.addons ?? [],
     [statusQuery.data?.addons],
   );
-  const addonCount = issuedAddons.reduce((sum, a) => sum + a.quantity, 0);
 
   const handleTicketPress = useCallback(
     (ticket: MixedTicket) => {
@@ -149,22 +181,39 @@ export function CheckoutSuccessScreen() {
           className="flex flex-col items-center px-6 pb-6 text-center"
           style={{ paddingTop: "calc(env(safe-area-inset-top) + 40px)" }}
         >
-          <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-2xl border border-cyan-500/20 bg-cyan-500/10">
-            <CheckCircle size={48} color={ACCENT} />
+          {/* The check belongs to the issued outcome only. It used to render
+              over "issuance is still processing". */}
+          <div
+            className={`mb-4 flex h-20 w-20 items-center justify-center rounded-2xl border ${
+              copy.tone === "success"
+                ? "border-cyan-500/20 bg-cyan-500/10"
+                : copy.tone === "working"
+                  ? "border-blue-300/20 bg-blue-300/10"
+                  : "border-amber-300/20 bg-amber-300/10"
+            }`}
+          >
+            {copy.tone === "success" ? (
+              <CheckCircle size={48} color={ACCENT} />
+            ) : copy.tone === "working" ? (
+              <Clock size={40} color="#93C5FD" />
+            ) : (
+              <Info size={40} color="#FCD34D" />
+            )}
           </div>
-          <h1 className="text-2xl font-extrabold text-white">Tickets Ready</h1>
-          <p className="mt-1.5 text-sm text-white/60">
-            {admissionCount} admission · {coatCheckCount} coat check
-            {addonCount > 0 ? ` · ${addonCount} add-on${addonCount === 1 ? "" : "s"}` : ""}
-          </p>
+          <h1 className="text-2xl font-extrabold text-white">{copy.title}</h1>
+          {copy.body ? (
+            <p className="mt-1.5 text-sm text-white/60">{copy.body}</p>
+          ) : null}
           {effectiveCartId ? (
             <p className="mt-2 font-mono text-[11px] tracking-wide text-white/40">
               Order #{effectiveCartId.slice(0, 8).toUpperCase()}
             </p>
           ) : null}
-          <p className="mt-3 text-xs text-white/50">
-            A confirmation has been sent to your email.
-          </p>
+          {outcome.kind === "issued" ? (
+            <p className="mt-3 text-xs text-white/50">
+              A confirmation has been sent to your email.
+            </p>
+          ) : null}
         </div>
 
         {/* Order summary / issued tickets */}
@@ -177,17 +226,19 @@ export function CheckoutSuccessScreen() {
               />
             ))}
           </div>
+        ) : tickets.length === 0 && issuedAddons.length > 0 ? (
+          // Add-on-only order: the add-on list below is the whole order.
+          null
         ) : tickets.length === 0 ? (
+          // The hero already says what state the order is in. This only offers
+          // a manual re-check.
           <div className="flex flex-col items-center justify-center gap-4 px-8 py-12 text-center">
-            <p className="text-sm text-white/60">
-              Ticket issuance is still processing.
-            </p>
             <button
               type="button"
               onClick={() => statusQuery.refetch()}
               className="rounded-xl bg-white/8 px-6 py-2.5 text-sm font-semibold text-white active:bg-white/12"
             >
-              Refresh
+              Check again
             </button>
           </div>
         ) : (
@@ -222,9 +273,11 @@ export function CheckoutSuccessScreen() {
                     ) : null}
                   </p>
                   <p className="text-xs text-white/45">
-                    {addon.is_redeemable
-                      ? "Scannable at the door — find its code on your ticket"
-                      : "Pick up / fulfillment at the event"}
+                    {addon.status === "refunded"
+                      ? "Refunded"
+                      : addon.is_redeemable
+                        ? "Show its code at the door. Find it on your ticket."
+                        : "Pick up / fulfillment at the event"}
                   </p>
                 </div>
                 <span className="shrink-0 font-mono text-sm text-white/70">

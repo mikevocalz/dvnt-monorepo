@@ -8,6 +8,10 @@ import { cartApi } from "@dvnt/app/lib/api/cart";
 import { qk } from "@dvnt/app/lib/query/keys";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
+import {
+  checkoutCopy,
+  resolveCheckoutOutcome,
+} from "@dvnt/app/lib/tickets/checkout-outcome";
 
 export function useCartPaymentRecovery() {
   const router = useRouter();
@@ -39,7 +43,20 @@ export function useCartPaymentRecovery() {
 
         if (status.completed) {
           markCompleted();
-          toast.success("Your tickets are ready");
+          // Same words as the success screen it routes to. An add-on-only
+          // order has no tickets, and a completed cart whose credentials have
+          // not landed yet is not "ready".
+          const outcome = resolveCheckoutOutcome({
+            status: status.cart.status,
+            tickets: status.tickets,
+            addons: status.addons,
+            isLoading: false,
+            isError: false,
+            elapsedMs: 0,
+          });
+          const copy = checkoutCopy(outcome);
+          if (copy.tone === "success") toast.success(copy.title);
+          else toast.info(copy.title);
           router.replace({
             pathname: "/(protected)/checkout/success",
             params: { cartId: currentCart.cartId },

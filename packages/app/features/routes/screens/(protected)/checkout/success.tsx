@@ -12,13 +12,17 @@ import {
   Info,
   QrCode,
   Shirt,
+  Sparkles,
   Ticket,
 } from "lucide-react-native";
 import { LegendList, type LegendListRenderItemProps } from "@dvnt/app/components/list";
 import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
 import { cartApi } from "@dvnt/app/lib/api/cart";
 import { addCartTicketToCalendar } from "@dvnt/app/lib/calendar/cart-ticket-calendar";
-import type { MixedTicket } from "@dvnt/app/lib/contracts/dto";
+import type {
+  CartStatusResponse,
+  MixedTicket,
+} from "@dvnt/app/lib/contracts/dto";
 import { normalizeRouteParams } from "@dvnt/app/lib/navigation/route-params";
 import { qk } from "@dvnt/app/lib/query/keys";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
@@ -43,6 +47,38 @@ function ticketIcon(ticket: MixedTicket) {
     return <Shirt size={20} color="#A78BFA" />;
   }
   return <Ticket size={20} color="#A78BFA" />;
+}
+
+type IssuedAddon = NonNullable<CartStatusResponse["addons"]>[number];
+
+/**
+ * An add-on bought in this cart. Same card as the holder's "Your add-ons" list
+ * on the ticket screen, minus the QR: that code lives on the ticket screen.
+ */
+function IssuedAddonRow({ addon }: { addon: IssuedAddon }) {
+  return (
+    <View style={styles.addonRow}>
+      <View style={styles.addonIcon}>
+        <Sparkles size={15} color="rgb(255, 109, 193)" />
+      </View>
+      <View style={styles.ticketBody}>
+        <Text style={styles.ticketTitle} numberOfLines={1}>
+          {addon.addon_name}
+          {addon.variant_name ? (
+            <Text style={styles.addonVariant}> · {addon.variant_name}</Text>
+          ) : null}
+        </Text>
+        <Text style={styles.ticketSubtitle} numberOfLines={1}>
+          {addon.status === "refunded"
+            ? "Refunded"
+            : addon.is_redeemable
+              ? "Show its code at the door. Find it on your ticket."
+              : "Pick up / fulfillment at the event"}
+        </Text>
+      </View>
+      <Text style={styles.addonQty}>×{addon.quantity}</Text>
+    </View>
+  );
 }
 
 function IssuedTicketRow({
@@ -111,6 +147,7 @@ export default function CheckoutSuccessScreen() {
       const next = resolveCheckoutOutcome({
         status: query.state.data?.cart?.status as CartStatus | undefined,
         tickets: query.state.data?.tickets,
+        addons: query.state.data?.addons,
         isLoading: !query.state.data,
         isError: query.state.status === "error",
         elapsedMs: Date.now() - startedAt.current,
@@ -122,6 +159,7 @@ export default function CheckoutSuccessScreen() {
   const outcome = resolveCheckoutOutcome({
     status: statusQuery.data?.cart?.status as CartStatus | undefined,
     tickets: statusQuery.data?.tickets,
+    addons: statusQuery.data?.addons,
     isLoading: statusQuery.isLoading,
     isError: statusQuery.isError,
     elapsedMs,
@@ -154,6 +192,7 @@ export default function CheckoutSuccessScreen() {
   }, [markCompleted, queryClient, statusQuery.data?.completed]);
 
   const tickets = statusQuery.data?.tickets ?? [];
+  const addons = statusQuery.data?.addons ?? [];
 
   const handleTicketPress = useCallback(
     (ticket: MixedTicket) => {
@@ -254,6 +293,16 @@ export default function CheckoutSuccessScreen() {
     </View>
   ) : null;
 
+  const addonSection =
+    addons.length > 0 ? (
+      <View style={styles.addonSection}>
+        <Text style={styles.addonHeading}>Add-ons</Text>
+        {addons.map((addon) => (
+          <IssuedAddonRow key={addon.id} addon={addon} />
+        ))}
+      </View>
+    ) : null;
+
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       {/* The green check belongs to exactly one outcome. It used to render
@@ -280,7 +329,10 @@ export default function CheckoutSuccessScreen() {
         {copy.body ? <Text style={styles.subtitle}>{copy.body}</Text> : null}
       </View>
 
-      {tickets.length === 0 ? (
+      {tickets.length === 0 && addons.length > 0 ? (
+        // Add-on-only order: nothing to list as a ticket, and nothing pending.
+        <View style={styles.listContent}>{addonSection}</View>
+      ) : tickets.length === 0 ? (
         <View style={styles.centerState}>
           {outcome.kind === "unresolved" || outcome.kind === "issued-empty" ? (
             <Text style={styles.orderRef}>
@@ -303,21 +355,31 @@ export default function CheckoutSuccessScreen() {
           keyExtractor={(ticket) => ticket.id}
           estimatedItemSize={82}
           contentContainerStyle={styles.listContent}
-          ListFooterComponent={firstPostCard}
+          ListFooterComponent={
+            <>
+              {addonSection}
+              {firstPostCard}
+            </>
+          }
         />
       )}
 
       <View
         style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}
       >
-        <Pressable
-          onPress={handleAddToCalendar}
-          accessibilityRole="button"
-          style={styles.secondaryButton}
-        >
-          <CalendarPlus size={18} color="#F8FAFC" />
-          <Text style={styles.secondaryButtonText}>Add to Calendar</Text>
-        </Pressable>
+        {/* The calendar entry reads the event date off a ticket. An add-on-only
+            order has none, and a button that silently does nothing is worse
+            than no button. */}
+        {tickets.length > 0 ? (
+          <Pressable
+            onPress={handleAddToCalendar}
+            accessibilityRole="button"
+            style={styles.secondaryButton}
+          >
+            <CalendarPlus size={18} color="#F8FAFC" />
+            <Text style={styles.secondaryButtonText}>Add to Calendar</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           onPress={() =>
             router.replace("/(protected)/events/my-tickets" as any)
@@ -401,6 +463,44 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(167,139,250,0.14)",
+  },
+  addonSection: {
+    marginTop: 6,
+    gap: 10,
+  },
+  addonHeading: {
+    marginLeft: 4,
+    color: "#94A3B8",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  addonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "#111113",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  addonIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  addonVariant: {
+    color: "#94A3B8",
+    fontWeight: "600",
+  },
+  addonQty: {
+    color: "#E2E8F0",
+    fontSize: 14,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
   },
   ticketBody: {
     flex: 1,
