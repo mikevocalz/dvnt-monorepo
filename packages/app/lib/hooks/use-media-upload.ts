@@ -17,6 +17,8 @@
 
 import { useState, useCallback } from "react";
 import { sizeLimitForKind } from "@dvnt/app/lib/media/upload-policy";
+import { uploadSingleImage } from "@dvnt/app/lib/media/single-image-upload";
+import { imageFitDeps } from "@dvnt/app/lib/media/image-fit-deps";
 import { Platform } from "react-native";
 import {
   uploadToServer as serverUpload,
@@ -166,9 +168,20 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
       setProgress(0);
       setError(null);
 
-      const result = await serverUpload(uri, folder, (p) => {
-        setProgress(p.percentage);
-      });
+      // Bring the picked image under its kind's cap first. Sending the raw
+      // file meant every phone photo over 2 MB failed the avatar preflight in
+      // uploadToServer before a request was made.
+      const result = await uploadSingleImage(uri, folder, imageFitDeps, (prepared) =>
+        serverUpload(prepared, folder, (p) => {
+          setProgress(p.percentage);
+        }),
+      ).catch((e: unknown): UploadResult => ({
+        success: false,
+        url: "",
+        path: "",
+        filename: "",
+        error: e instanceof Error ? e.message : "Upload failed",
+      }));
 
       setIsUploading(false);
 

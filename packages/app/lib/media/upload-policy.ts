@@ -64,3 +64,38 @@ export async function withUploadTimeout<T>(
     clearTimeout(timer!);
   }
 }
+
+/**
+ * Map folder name + mime type to media-upload edge function "kind" parameter.
+ */
+export function folderToKind(folder: string, mime?: string): string {
+  const isVideo = mime?.startsWith("video/");
+
+  // Check for thumbnail subfolders
+  if (folder.includes("thumbnails")) return "post-image";
+
+  const imageMap: Record<string, string> = {
+    avatars: "avatar",
+    posts: "post-image",
+    stories: "story-image",
+    events: "event-image",
+    "events/covers": "event-cover",
+    chat: "message-image",
+    uploads: "post-image",
+    "event-moments": "event-moment-photo",
+  };
+
+  const videoMap: Record<string, string> = {
+    posts: "post-video",
+    stories: "story-video",
+    chat: "message-video",
+    uploads: "post-video",
+    events: "event-video",
+    "event-moments": "event-moment-video",
+  };
+
+  if (isVideo) {
+    return videoMap[folder] || "post-video";
+  }
+  return imageMap[folder] || "post-image";
+}

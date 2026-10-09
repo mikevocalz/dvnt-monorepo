@@ -248,7 +248,7 @@ export function ProfileScreen() {
       const uploadResult = await uploadSingle(localUri);
       if (!uploadResult.success || !uploadResult.url) {
         if (user) setUser({ ...user, avatar: previousAvatar });
-        showToast("error", "Upload Failed", "Failed to upload image. Please try again.");
+        showToast("error", "Upload Failed", uploadResult.error || "Failed to upload image. Please try again.");
         return;
       }
       try {

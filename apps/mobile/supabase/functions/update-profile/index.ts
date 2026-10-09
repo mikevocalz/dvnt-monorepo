@@ -50,6 +50,16 @@ const UpdateProfileSchema = z
     message: "At least one field must be provided",
   });
 
+/** Labels of enum_users_pronouns in production. */
+const PRONOUN_VALUES = new Set([
+  "He/Him",
+  "She/Her",
+  "They/Them",
+  "He/They",
+  "She/They",
+  "Other",
+]);
+
 type ErrorCode =
   | "unauthorized"
   | "forbidden"
@@ -202,7 +212,17 @@ Deno.serve(async (req) => {
       updateData.links = normalizeLinks(updates.links);
     }
     if (updates.pronouns !== undefined) {
-      updateData.pronouns = updates.pronouns;
+      // users.pronouns is enum_users_pronouns. Web sends "" for "not set",
+      // which Postgres rejects, and that failed the whole save, avatar
+      // included. Empty means clear; anything else must be an enum label.
+      const pronouns = updates.pronouns.trim();
+      if (pronouns && !PRONOUN_VALUES.has(pronouns)) {
+        return errorResponse(
+          "validation_error",
+          `Pronouns must be one of: ${[...PRONOUN_VALUES].join(", ")}`,
+        );
+      }
+      updateData.pronouns = pronouns || null;
     }
     Object.assign(updateData, identityColumns(updates));
 

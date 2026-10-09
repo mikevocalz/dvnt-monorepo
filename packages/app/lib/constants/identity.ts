@@ -24,3 +24,18 @@ export const AUDIENCE_OPTIONS = [
   "Non-binary",
   "Everyone (every gender)",
 ] as const;
+
+/**
+ * users.pronouns is enum_users_pronouns, and these are its labels in order.
+ * No column holds free text, so the editors offer exactly these; anything
+ * else is rejected by update-profile. identity.test.ts pins this list to the
+ * function's PRONOUN_VALUES.
+ */
+export const PRONOUN_OPTIONS = [
+  "He/Him",
+  "She/Her",
+  "They/Them",
+  "He/They",
+  "She/They",
+  "Other",
+] as const;

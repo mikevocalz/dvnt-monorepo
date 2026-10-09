@@ -11,11 +11,10 @@ import { useUpdateProfile } from "@dvnt/app/lib/hooks/use-profile";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { appendCacheBuster } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { useEditProfileUIStore } from "@dvnt/app/lib/stores/edit-profile-ui-store";
-import { IDENTITY_OPTIONS, AUDIENCE_OPTIONS } from "@dvnt/app/lib/constants/identity";
+import { IDENTITY_OPTIONS, AUDIENCE_OPTIONS, PRONOUN_OPTIONS } from "@dvnt/app/lib/constants/identity";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { fetchOwnIdentity, identityPatch } from "@dvnt/app/lib/profile/own-identity";
 
-const PRONOUNS_OPTIONS = ["He/Him", "She/Her", "They/Them", "He/They", "She/They", "Ze/Zir", "Custom"];
 const GENDER_OPTIONS = ["Male", "Female", "Trans Male", "Trans Female", "Non-binary", "Prefer not to say", "Custom"];
 
 function sanitizeLinks(value: unknown[]): string[] {
@@ -170,26 +169,23 @@ export function EditProfileScreen() {
     }
     s.setIsSaving(true);
     try {
-      let avatarUrl = user.avatar;
-      if (s.newAvatarUri) {
-        try {
-          const uploadResult = await uploadSingle(s.newAvatarUri);
-          if (uploadResult.success && uploadResult.url) {
-            avatarUrl = appendCacheBuster(uploadResult.url) || uploadResult.url;
-          } else {
-            showToast("warning", "Upload Issue", "Avatar upload failed. Other changes will be saved.");
-          }
-        } catch {
-          showToast("warning", "Upload Issue", "Avatar upload failed. Other changes will be saved.");
-        }
-      }
-
       const trimmedUsername = s.username.trim().toLowerCase();
       const usernameErr = validateUsername(trimmedUsername);
       if (usernameErr) {
         s.setUsernameError(usernameErr);
-        s.setIsSaving(false);
         return;
+      }
+
+      let avatarUrl = user.avatar;
+      if (s.newAvatarUri) {
+        // A failed photo stops the save and keeps the screen open with the
+        // picked photo, so the member sees why and can pick another.
+        const uploadResult = await uploadSingle(s.newAvatarUri);
+        if (!uploadResult.success || !uploadResult.url) {
+          showToast("error", "Photo not saved", uploadResult.error || "The photo upload failed. Please try again.");
+          return;
+        }
+        avatarUrl = appendCacheBuster(uploadResult.url) || uploadResult.url;
       }
 
       const allLinks = Array.from(
@@ -214,14 +210,15 @@ export function EditProfileScreen() {
         ...(trimmedUsername !== (user.username || "").toLowerCase() ? { username: trimmedUsername } : {}),
       };
 
-      updateProfile.mutate(updateData as any, {
-        onSuccess: () => showToast("success", "Saved", "Profile updated successfully"),
-        onError: (error: any) =>
-          showToast("error", "Error", error?.message || "Failed to save profile. Please try again."),
-      });
+      // Stay on the screen until the server answers, like native does. Leaving
+      // first hid every failure behind a toast on the previous page.
+      await updateProfile.mutateAsync(updateData as any);
+      s.setNewAvatarUri(null);
+      showToast("success", "Saved", "Profile updated successfully");
       router.back();
     } catch (error: any) {
       showToast("error", "Error", error?.message || "Failed to save profile. Please try again.");
+    } finally {
       s.setIsSaving(false);
     }
   };
@@ -313,12 +310,12 @@ export function EditProfileScreen() {
             </button>
             {s.showPronouns ? (
               <div className="flex flex-wrap gap-2 pt-2">
-                {PRONOUNS_OPTIONS.map((opt) => (
+                {PRONOUN_OPTIONS.map((opt) => (
                   <button
                     key={opt}
                     onClick={() => {
                       s.setPronouns(opt === s.pronouns ? "" : opt);
-                      if (opt !== "Custom") s.setShowPronouns(false);
+                      s.setShowPronouns(false);
                     }}
                     className={`px-3.5 h-9 rounded-xl text-[13px] font-medium ${
                       s.pronouns === opt ? "bg-cyan-500 text-white" : "bg-white/8 text-white/85"
@@ -328,14 +325,6 @@ export function EditProfileScreen() {
                   </button>
                 ))}
               </div>
-            ) : null}
-            {s.showPronouns && s.pronouns === "Custom" ? (
-              <input
-                value=""
-                onChange={(e) => s.setPronouns(e.target.value)}
-                placeholder="Enter your pronouns"
-                className={`${inputCls} mt-2`}
-              />
             ) : null}
           </FormField>
 

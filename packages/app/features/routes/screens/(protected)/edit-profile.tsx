@@ -39,17 +39,8 @@ import {
 import {
   IDENTITY_OPTIONS,
   AUDIENCE_OPTIONS,
+  PRONOUN_OPTIONS,
 } from "@dvnt/app/lib/constants/identity";
-
-const PRONOUNS_OPTIONS = [
-  "He/Him",
-  "She/Her",
-  "They/Them",
-  "He/They",
-  "She/They",
-  "Ze/Zir",
-  "Custom",
-];
 
 const GENDER_OPTIONS = [
   "Male",
@@ -262,25 +253,20 @@ function EditProfileScreenContent() {
       let avatarUrl = user.avatar;
 
       if (newAvatarUri) {
-        try {
-          const uploadResult = await uploadSingle(newAvatarUri);
-          if (uploadResult.success && uploadResult.url) {
-            avatarUrl = appendCacheBuster(uploadResult.url) || uploadResult.url;
-          } else {
-            showToast(
-              "warning",
-              "Upload Issue",
-              "Avatar upload failed. Other changes will be saved.",
-            );
-          }
-        } catch (uploadError) {
-          console.error("[EditProfile] Avatar upload exception:", uploadError);
+        // A failed photo stops the save and keeps the screen open with the
+        // picked photo, so the member sees the real reason and can retry.
+        const uploadResult = await uploadSingle(newAvatarUri);
+        if (!uploadResult.success || !uploadResult.url) {
+          console.error("[EditProfile] Avatar upload failed:", uploadResult.error);
           showToast(
-            "warning",
-            "Upload Issue",
-            "Avatar upload failed. Other changes will be saved.",
+            "error",
+            "Photo not saved",
+            uploadResult.error || "The photo upload failed. Please try again.",
           );
+          setIsSaving(false);
+          return;
         }
+        avatarUrl = appendCacheBuster(uploadResult.url) || uploadResult.url;
       }
 
       const trimmedUsername = username.trim().toLowerCase();
@@ -649,12 +635,12 @@ function EditProfileScreenContent() {
                     gap: 8,
                   }}
                 >
-                  {PRONOUNS_OPTIONS.map((option) => (
+                  {PRONOUN_OPTIONS.map((option) => (
                     <Pressable
                       key={option}
                       onPress={() => {
                         setPronouns(option === pronouns ? "" : option);
-                        if (option !== "Custom") setShowPronouns(false);
+                        setShowPronouns(false);
                       }}
                       style={{
                         paddingHorizontal: 14,
@@ -677,22 +663,6 @@ function EditProfileScreenContent() {
                     </Pressable>
                   ))}
                 </View>
-                {pronouns === "Custom" && (
-                  <TextInput
-                    value={pronouns === "Custom" ? "" : pronouns}
-                    onChangeText={setPronouns}
-                    placeholder="Enter your pronouns"
-                    placeholderTextColor={colors.mutedForeground}
-                    style={{
-                      fontSize: 14,
-                      color: colors.foreground,
-                      marginTop: 8,
-                      paddingVertical: 8,
-                      borderBottomWidth: 1,
-                      borderBottomColor: colors.border,
-                    }}
-                  />
-                )}
               </View>
             )}
 
