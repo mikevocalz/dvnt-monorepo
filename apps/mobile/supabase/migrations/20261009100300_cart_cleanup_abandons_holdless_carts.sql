@@ -33,6 +33,7 @@ declare
   v_released_count integer;
   v_abandoned_count integer;
   v_holdless_count integer;
+  v_cart_id uuid;
 begin
   update public.cart_holds
   set released = true,
@@ -42,17 +43,35 @@ begin
 
   get diagnostics v_released_count = row_count;
 
-  update public.carts c
-  set status = 'abandoned'
-  where c.status = 'holding'
-    and not exists (
-      select 1 from public.cart_holds h
-      where h.cart_id = c.id
-        and h.released = false
-        and h.expires_at > now()
-    );
-
-  get diagnostics v_holdless_count = row_count;
+  -- Lock each candidate and skip any cart another transaction holds (a
+  -- re-hold in progress), then re-check for a live hold in a new statement,
+  -- whose snapshot sees holds committed after the candidate scan.
+  v_holdless_count := 0;
+  for v_cart_id in
+    select c.id from public.carts c
+    where c.status = 'holding'
+      and not exists (
+        select 1 from public.cart_holds h
+        where h.cart_id = c.id
+          and h.released = false
+          and h.expires_at > now()
+      )
+    for update skip locked
+  loop
+    update public.carts c
+    set status = 'abandoned'
+    where c.id = v_cart_id
+      and c.status = 'holding'
+      and not exists (
+        select 1 from public.cart_holds h
+        where h.cart_id = c.id
+          and h.released = false
+          and h.expires_at > now()
+      );
+    if found then
+      v_holdless_count := v_holdless_count + 1;
+    end if;
+  end loop;
 
   update public.carts
   set status = 'abandoned'

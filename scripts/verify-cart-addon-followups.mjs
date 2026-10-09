@@ -444,6 +444,29 @@ await section('5. cleanup abandons holding carts with no live hold', async () =>
   assert.equal(await status(paying), "paying");
   assert.equal(await status(draft), "draft");
   console.log("-. OK: cleanup abandons holding carts with no live hold, keeps live, paying and draft carts");
+
+  // A cart being re-held is locked by cart_create_hold. The sweep must skip
+  // it, not wait and then abandon it on a stale view of its holds.
+  const rehold = await cart("r", "holding");
+  await sql(`INSERT INTO cart_holds (cart_id, addon_id, qty, expires_at, released) VALUES ($1, $2, 1, now() - interval '1 min', true)`,
+    [rehold, await addon()]);
+  const holder = await pool.connect();
+  try {
+    await holder.query("BEGIN");
+    await holder.query(`SELECT 1 FROM carts WHERE id = $1 FOR UPDATE`, [rehold]);
+    await holder.query(`INSERT INTO cart_holds (cart_id, addon_id, qty, expires_at) VALUES ($1, $2, 1, now() + interval '10 min')`,
+      [rehold, await addon()]);
+    const sweep = await Promise.race([
+      one(`SELECT cart_release_expired_holds() AS r`).then(() => "done"),
+      new Promise((r) => setTimeout(() => r("blocked"), 2000)),
+    ]);
+    assert.equal(sweep, "done", "the sweep waited on a cart lock instead of skipping it");
+    await holder.query("COMMIT");
+  } finally {
+    holder.release();
+  }
+  assert.equal(await status(rehold), "holding", "a cart re-held during the sweep was abandoned");
+  console.log("-. OK: the sweep skips a cart locked by a re-hold");
 });
 
 await pool.end();
