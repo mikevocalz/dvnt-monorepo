@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Camera, ArrowUpRight, ImagePlus, PenLine, Sparkles } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
-import { auth } from "@dvnt/app/lib/api/auth";
+import { syncAuthUser } from "@dvnt/app/lib/api/privileged";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useVerifiedOnlyPromptStore } from "@dvnt/app/lib/auth/verified-only-prompt";
 import {
@@ -57,8 +57,8 @@ export function ProfileCompletionPopupHost() {
     let cancelled = false;
     void (async () => {
       try {
-        // Do not trust persisted postsCount/avatar: it can lag behind a save.
-        const latest = await auth.getProfile(memberId, user.email);
+        // Do not trust persisted postsCount/avatar: it can lag behind a save.\n        // The Better Auth-protected sync endpoint avoids the web JWT-bridge\n        // timing race that can make a direct PostgREST profile read 401.
+        const latest = await syncAuthUser();
         if (cancelled || !latest) return; // unavailable != incomplete
         const missing = missingProfileSteps(latest);
         if (!missing.photo && !missing.firstPost) return;
@@ -72,7 +72,7 @@ export function ProfileCompletionPopupHost() {
       }
     })();
     return () => { cancelled = true; };
-  }, [ready, allowed, memberId, user?.email, verificationPopupOpen]);
+  }, [ready, allowed, memberId, verificationPopupOpen]);
 
   useEffect(() => {
     if (!ready || !allowed) setOpen(false);
