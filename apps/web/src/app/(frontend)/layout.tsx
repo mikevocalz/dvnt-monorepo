@@ -8,6 +8,7 @@ import { WebVitalsReporter } from "@/components/web-vitals-reporter";
 import { WebToaster } from "@/components/web-toaster";
 import { CohostInviteWatcher } from "@/components/cohost-invite-watcher";
 import { VerifiedOnlyPopupHost } from "@/components/verified-only-popup-host";
+import { ProfileCompletionPopupHost } from "@/components/profile-completion-popup-host";
 import { ScreenViewTracker } from "@/components/screen-view-tracker";
 import { RNWStyleRegistry } from "./registry";
 import { RegisterSW } from "@/components/pwa/register-sw";
@@ -124,6 +125,8 @@ export default function FrontendLayout({
               {/* Verified-only popup: one instance for every screen, opened by
                   useVerifiedGate or a participation rail's refusal. */}
               <VerifiedOnlyPopupHost />
+              {/* One per authenticated tab entry, never over auth, payments or video calls. */}
+              <ProfileCompletionPopupHost />
             </ApiProvider>
           </ImageProvider>
         </RNWStyleRegistry>
