@@ -209,8 +209,14 @@ Deno.serve(async (req: Request) => {
     const { data: repairedFollows, error: repairError } = await supabase.rpc(
       "repair_canonical_brand_follows", { p_limit: followBackfillLimit },
     );
+    // Only fall back on a deployment-order/missing-RPC error. If the new
+    // function explicitly rejects a stale, renamed or banned canonical
+    // brand, NEVER bypass that rejection with the legacy path.
+    const missingRepairRpc = repairError && ["PGRST202", "42883"].includes(String(repairError.code));
     const brandFollows = repairError
-      ? await runBrandFollowBackfill(supabase, followBackfillLimit)
+      ? (missingRepairRpc
+          ? await runBrandFollowBackfill(supabase, followBackfillLimit)
+          : { status: "error" as const, error: "Canonical brand follow repair refused" })
       : { status: "ran" as const,
           memberToBrandInserted: Number(repairedFollows?.memberToBrandInserted ?? 0),
           brandToNewMemberInserted: Number(repairedFollows?.brandToNewMemberInserted ?? 0),
