@@ -103,6 +103,17 @@ export const WELCOME_DM = [
   "Start with a photo and a little about yourself. Bought your first DVNT ticket? You can turn that moment into your first post.",
 ].join("\n");
 
+export const PROFILE_PHOTO_REMINDER = [
+  "Your DVNT profile needs a picture 📸",
+  "",
+  "Blank profiles aren't allowed in our community. Please add a real profile image so people can recognize who they're connecting with.",
+  "",
+  "While you're at it, introduce yourself with your first post! A hello, a fit check, or your next event — make DVNT yours.",
+  "",
+  "Add your photo: https://dvntapp.live/feed/profile/edit",
+  "Create your first post: https://dvntapp.live/feed",
+].join("\\n");
+
 export const WELCOME_BROADCAST =
   "Welcome to the cookout 🖤 Your first DVNT post can be a hello, a look, or your next event. Add a photo, tell us a little about yourself, and let your people find you. Ready? Create your first post.";
 
@@ -132,6 +143,8 @@ export function campaignMessage(
     ? WELCOME_DM
     : campaignVersion === "first_post_v1"
       ? WELCOME_BROADCAST
+      : campaignVersion === "profile_photo_v1"
+        ? PROFILE_PHOTO_REMINDER
       : campaignVersion === "first_post_v2"
         ? FIRST_POST_AFTER_VERIFICATION
         : null;
@@ -140,7 +153,7 @@ export function campaignMessage(
     ? `\n\nStop these messages: ${unsubscribeUrl}`
     : "";
   return {
-    subject: isWelcome ? "Welcome to the cookout — DVNT" : "Make your first DVNT post",
+    subject: isWelcome ? "Welcome to the cookout — DVNT" : campaignVersion === "profile_photo_v1" ? "Add your DVNT profile photo" : "Make your first DVNT post",
     body: `${BRAND_ANNOUNCEMENT_LABEL}\n\n${copy}${footer}`,
   };
 }
