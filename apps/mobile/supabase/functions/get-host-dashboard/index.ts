@@ -22,6 +22,7 @@ import {
   corsHeaders,
   optionsResponse,
 } from "../_shared/verify-session.ts";
+import { ADDON_REVENUE_SELECT, addonKeptCents } from "../_shared/addon-revenue.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -97,6 +98,29 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Add-on purchases (coat check, drinks) are revenue on the same orders.
+    // They add to gross_cents and monthRevenueCents only; sold and scanned
+    // counts stay tickets-only.
+    let addonRows: any[] = [];
+    if (eventIds.length > 0) {
+      const { data: addons, error: addonsError } = await supabase
+        .from("order_addons")
+        .select(ADDON_REVENUE_SELECT)
+        .in("event_id", eventIds);
+      if (addonsError) throw addonsError;
+      addonRows = addons || [];
+      for (const a of addonRows) {
+        const agg =
+          ticketAggregates[a.event_id] ||
+          (ticketAggregates[a.event_id] = {
+            sold: 0,
+            scanned: 0,
+            gross_cents: 0,
+          });
+        agg.gross_cents += addonKeptCents(a);
+      }
+    }
+
     const now = new Date();
     const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
     const twelveHoursAhead = new Date(now.getTime() + 12 * 60 * 60 * 1000);
@@ -169,6 +193,11 @@ Deno.serve(async (req: Request) => {
         monthSold += 1;
         if (t.status !== "refunded" && t.status !== "void") {
           monthRevenueCents += Number(t.purchase_amount_cents || 0);
+        }
+      }
+      for (const a of addonRows) {
+        if (a.created_at && new Date(a.created_at) >= monthStart) {
+          monthRevenueCents += addonKeptCents(a);
         }
       }
       // All-time scan rate across past events

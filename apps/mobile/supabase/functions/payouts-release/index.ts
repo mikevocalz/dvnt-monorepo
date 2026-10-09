@@ -343,52 +343,42 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
           continue;
         }
 
-        // Compute financials
+        // Compute financials in SQL. recompute_event_financials is the one
+        // definition of gross/fee/net (tickets plus add-on purchases, 2.5%
+        // + $1 per kept unit) and also keeps the Stripe processor-fee
+        // ledger, which an upsert from here would overwrite. A failed
+        // recompute throws: no transfer without a fresh summary.
+        const { error: recomputeError } = await supabase.rpc(
+          "recompute_event_financials",
+          { p_event_id: event.id },
+        );
+        if (recomputeError) throw recomputeError;
+        const { data: financials, error: financialsError } = await supabase
+          .from("event_financials")
+          .select("gross_cents, refunds_cents, dvnt_fee_cents, net_cents")
+          .eq("event_id", event.id)
+          .single();
+        if (financialsError || !financials) {
+          throw financialsError || new Error("event_financials row missing");
+        }
+        const grossCents = Number(financials.gross_cents || 0);
+        const refundsCents = Number(financials.refunds_cents || 0);
+        const organizerFeeCents = Number(financials.dvnt_fee_cents || 0);
+        const netCents = Number(financials.net_cents || 0);
+
+        // Ticket counts for the statement email only. Add-on units are not
+        // tickets and must not inflate "tickets sold".
         const { data: tickets } = await supabase
           .from("tickets")
-          .select("purchase_amount_cents, status")
+          .select("status")
           .eq("event_id", event.id);
-
         const allTickets = tickets || [];
-        const activeTickets = allTickets.filter(
+        const ticketCount = allTickets.filter(
           (t: any) => t.status !== "refunded" && t.status !== "void",
-        );
-        const refundedTickets = allTickets.filter(
+        ).length;
+        const refundedTicketCount = allTickets.filter(
           (t: any) => t.status === "refunded",
-        );
-
-        const grossCents = activeTickets.reduce(
-          (sum: number, t: any) => sum + (t.purchase_amount_cents || 0),
-          0,
-        );
-        const refundsCents = refundedTickets.reduce(
-          (sum: number, t: any) => sum + (t.purchase_amount_cents || 0),
-          0,
-        );
-
-        // ── Fee structure ──────────────────────────────────────────
-        // Customer: 2.5% + $1/ticket  |  Organizer: 2.5% + $1/ticket
-        // DVNT total: 5% + $2/ticket (covers Stripe processing + platform fee)
-        const ticketCount = activeTickets.length;
-        const organizerFeeCents =
-          Math.round(grossCents * 0.025) + 100 * ticketCount; // 2.5% + $1/ticket
-        const dvntFeeCents = organizerFeeCents; // organizer's share of DVNT fee
-        const stripeFeeCents = 0; // absorbed by the $2/ticket total
-        // grossCents already excludes refunded tickets (they were filtered
-        // into refundedTickets above) — subtracting refundsCents again would
-        // take the same money out twice and underpay the organizer.
-        const netCents = Math.max(0, grossCents - organizerFeeCents);
-
-        // Upsert financials
-        await supabase.from("event_financials").upsert({
-          event_id: event.id,
-          gross_cents: grossCents,
-          refunds_cents: refundsCents,
-          dvnt_fee_cents: dvntFeeCents,
-          stripe_fee_cents: stripeFeeCents,
-          net_cents: netCents,
-          calculated_at: now,
-        });
+        ).length;
 
         // ── Split ledger: net promoter cuts out of the organizer's take ──
         // Runs before the organizer transfer so their share is disbursed to
@@ -505,7 +495,7 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
                 ...payoutStatement({
                   eventTitle: event.title,
                   ticketsSold: ticketCount,
-                  ticketsRefunded: refundedTickets.length,
+                  ticketsRefunded: refundedTicketCount,
                   grossCents,
                   refundsCents,
                   feeCents: organizerFeeCents + settlement.totalCutCents,
