@@ -5,7 +5,8 @@
  * Body: { cartId, lineItemId }
  *
  * Issues one Stripe refund for a single mixed-cart line item and atomically
- * marks only that line's tickets refunded. Deploy with --no-verify-jwt.
+ * marks only that line's tickets, or that add-on line's order_addons rows,
+ * refunded. Deploy with --no-verify-jwt.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -47,8 +48,9 @@ type CartRow = {
 type CartLineItemRow = {
   id: string;
   cart_id: string;
-  category: "admission" | "coat_check";
-  tier_id: string;
+  category: "admission" | "coat_check" | "product" | "service" | "addon";
+  tier_id: string | null;
+  addon_id: string | null;
   quantity: number;
   unit_price_cents: number;
   refunded_amount_cents: number;
@@ -207,7 +209,7 @@ Deno.serve(async (req: Request) => {
     const { data: lineItem, error: lineItemError } = await supabase
       .from("cart_line_items")
       .select(
-        "id, cart_id, category, tier_id, quantity, unit_price_cents, refunded_amount_cents",
+        "id, cart_id, category, tier_id, addon_id, quantity, unit_price_cents, refunded_amount_cents",
       )
       .eq("id", body.lineItemId)
       .eq("cart_id", body.cartId)
@@ -229,23 +231,55 @@ Deno.serve(async (req: Request) => {
       return errorResponse("Cart line item is already refunded", 409);
     }
 
-    const { data: activeTickets, error: activeTicketsError } = await supabase
-      .from("tickets")
-      .select("id")
-      .eq("cart_id", body.cartId)
-      .eq("cart_line_item_id", body.lineItemId)
-      .eq("user_id", authId)
-      .eq("status", "active");
+    if (item.addon_id) {
+      // Add-on lines never get tickets: issuance writes one order_addons row
+      // per cart line. A redeemed add-on (coat check handed in, drink package
+      // scanned) was consumed, so it is refused here before any money moves.
+      const { data: addonRows, error: addonRowsError } = await supabase
+        .from("order_addons")
+        .select("id, status")
+        .eq("cart_id", body.cartId)
+        .eq("cart_line_item_id", body.lineItemId);
 
-    if (activeTicketsError) {
-      console.error(
-        "[cart-line-refund] active ticket lookup failed",
-        activeTicketsError,
-      );
-      return errorResponse("Could not verify refundable tickets", 500);
-    }
-    if (!activeTickets?.length) {
-      return errorResponse("No active tickets remain on this line item", 409);
+      if (addonRowsError) {
+        console.error(
+          "[cart-line-refund] add-on purchase lookup failed",
+          addonRowsError,
+        );
+        return errorResponse("Could not verify refundable add-ons", 500);
+      }
+      const rows = (addonRows ?? []) as { id: string; status: string }[];
+      if (rows.some((row) => row.status === "redeemed")) {
+        return errorResponse(
+          "This add-on has already been used and can't be refunded",
+          409,
+        );
+      }
+      if (!rows.some((row) => row.status !== "refunded")) {
+        return errorResponse(
+          "No refundable add-on remains on this line item",
+          409,
+        );
+      }
+    } else {
+      const { data: activeTickets, error: activeTicketsError } = await supabase
+        .from("tickets")
+        .select("id")
+        .eq("cart_id", body.cartId)
+        .eq("cart_line_item_id", body.lineItemId)
+        .eq("user_id", authId)
+        .eq("status", "active");
+
+      if (activeTicketsError) {
+        console.error(
+          "[cart-line-refund] active ticket lookup failed",
+          activeTicketsError,
+        );
+        return errorResponse("Could not verify refundable tickets", 500);
+      }
+      if (!activeTickets?.length) {
+        return errorResponse("No active tickets remain on this line item", 409);
+      }
     }
 
     const idempotencyKey = `cart_line_refund_${body.lineItemId}_${refundAmountCents}`;
