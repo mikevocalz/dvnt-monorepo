@@ -25,12 +25,16 @@ keep `ticket_id` NULL and stay owned by `user_id` / `guest_email`.
 What follows from the binding:
 
 - `transfer-ticket` accept moves the unredeemed, unrefunded add-ons bound to
-  the ticket to the recipient and re-mints their door codes.
+  the ticket to the recipient and re-mints their door codes. The ticket has
+  already moved by then, so a failed add-on write is logged
+  (`ADD-ON NOT MOVED ticket=… order_addon=…`) for a manual move instead of
+  failing the accepted transfer.
 - `execute_event_consolidation` already moves add-ons by `ticket_id`.
-- `get-guest-ticket` and the Apple pass show rows bound to the ticket plus
-  unbound rows on its cart (`_shared/ticket-addons.ts`). A row bound to
-  another ticket is not shown, so one attendee in a group order cannot see or
-  redeem another attendee's code.
+- `get-guest-ticket` and the Apple pass show rows bound to the ticket, plus
+  unbound rows on its cart owned by the ticket's current holder
+  (`_shared/ticket-addons.ts`). A row bound to another ticket, or an unbound
+  row of a previous holder, is not shown, so nobody sees or redeems someone
+  else's code.
 
 Rows issued before `20261009100200` keep `ticket_id` NULL. No backfill was
 written: production had no `order_addons` rows on 2026-10-09.
@@ -49,7 +53,10 @@ ticket-scan responses, so issuance changed instead:
   before the migration), it writes the old single row so issuance never fails.
 - A non-redeemable line has nothing to scan and stays one row.
 
-Refunds already loop over every row of a line. `cart-line-refund` still
+Refunds already loop over every row of a line. `cart_apply_line_refund`
+(`20261009100400`) now spreads the refunded amount across the line's rows,
+each capped at its own cost, so a line split into units never records more
+refunded money than Stripe returned. `cart-line-refund` still
 refuses a line once any of its units is redeemed; a full charge refund
 (organizer-refund, event-cancel) returns the rest.
 

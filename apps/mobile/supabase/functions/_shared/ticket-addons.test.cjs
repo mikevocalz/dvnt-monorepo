@@ -38,9 +38,14 @@ const mod = () => harness().load(path.resolve(__dirname, 'ticket-addons.ts'));
 
 test('loads add-ons bound to the ticket plus unbound rows on its cart, never another ticket\'s', async () => {
   const d = db(ROWS);
-  const addons = await mod().loadTicketAddons(d, { id: 'tk', cart_id: 'cart' });
+  const addons = await mod().loadTicketAddons(d, { id: 'tk', cart_id: 'cart', user_id: 'holder' });
   assert.equal(d.calls[0].table, 'order_addons');
-  assert.equal(d.calls[0].or, 'ticket_id.eq.tk,and(cart_id.eq.cart,ticket_id.is.null)');
+  assert.equal(d.calls[0].or, 'ticket_id.eq.tk,and(cart_id.eq.cart,ticket_id.is.null,user_id.eq."holder")',
+    'unbound cart rows must belong to the current holder, or a transfer recipient sees the sender\'s codes');
+
+  const guest = db([]);
+  await mod().loadTicketAddons(guest, { id: 'tk', cart_id: 'cart', guest_email: 'a+b@x.io' });
+  assert.equal(guest.calls[0].or, 'ticket_id.eq.tk,and(cart_id.eq.cart,ticket_id.is.null,guest_email.eq."a+b@x.io")');
   assert.equal(addons.length, 4);
   assert.equal(addons[0].qrPayload, 'pa', 'the signed payload is what ticket-scan verifies');
   assert.equal(addons[3].variantName, 'M');
@@ -52,6 +57,6 @@ test('loads add-ons bound to the ticket plus unbound rows on its cart, never ano
 
 test('pass lines sum usable units and drop redeemed rows', async () => {
   const m = mod();
-  const addons = await m.loadTicketAddons(db(ROWS), { id: 'tk', cart_id: 'cart' });
+  const addons = await m.loadTicketAddons(db(ROWS), { id: 'tk', cart_id: 'cart', user_id: 'holder' });
   assert.deepEqual([...m.addonPassLines(addons)], ['2 × Drink', '1 × Shirt (M)']);
 });

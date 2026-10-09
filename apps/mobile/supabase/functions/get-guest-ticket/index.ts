@@ -62,6 +62,7 @@ Deno.serve(async (req: Request) => {
         qr_payload,
         checked_in_at,
         purchase_amount_cents,
+        user_id,
         guest_email,
         guest_name,
         cart_id,
@@ -94,6 +95,8 @@ Deno.serve(async (req: Request) => {
       addons = await loadTicketAddons(supabase, {
         id: String(ticket.id),
         cart_id: (ticket as any).cart_id ?? null,
+        user_id: (ticket as any).user_id ?? null,
+        guest_email: (ticket as any).guest_email ?? null,
       });
     } catch (addonError) {
       console.error("[get-guest-ticket] order_addons lookup:", addonError);

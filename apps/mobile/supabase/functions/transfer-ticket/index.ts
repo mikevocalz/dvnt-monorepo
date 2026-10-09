@@ -145,6 +145,11 @@ async function notifyTransfer(
  * above: the sender may still hold a screenshot of the old code. The update
  * is guarded on the status read here, so a row redeemed at the door between
  * the read and the write is left alone.
+ *
+ * Runs after the ticket has moved and the transfer is claimed, so it never
+ * throws: a 500 here would tell the recipient the transfer failed while a
+ * retry answers "already processed". Each failed row is logged with the
+ * ticket and row ids for a manual move, and the other rows still move.
  */
 async function moveTicketAddons(
   supabase: any,
@@ -157,7 +162,13 @@ async function moveTicketAddons(
     .select("id, status, qr_token")
     .eq("ticket_id", ticketId)
     .in("status", ["unfulfilled", "fulfilled"]);
-  if (error) throw error;
+  if (error) {
+    console.error(
+      `[transfer-ticket] ADD-ONS NOT MOVED ticket=${ticketId} to=${newOwner}:`,
+      error,
+    );
+    return;
+  }
 
   for (const row of rows ?? []) {
     const patch: Record<string, unknown> = {
@@ -165,20 +176,31 @@ async function moveTicketAddons(
       guest_email: null,
       guest_phone: null,
     };
-    if (row.qr_token) {
-      const { qrToken, qrPayload } = await createSignedQrPayload(
-        crypto.randomUUID(),
-        eventId,
-      );
-      patch.qr_token = qrToken;
-      patch.qr_payload = qrPayload;
+    let moveErr: unknown = null;
+    try {
+      if (row.qr_token) {
+        const { qrToken, qrPayload } = await createSignedQrPayload(
+          crypto.randomUUID(),
+          eventId,
+        );
+        patch.qr_token = qrToken;
+        patch.qr_payload = qrPayload;
+      }
+      const { error: writeErr } = await supabase
+        .from("order_addons")
+        .update(patch)
+        .eq("id", row.id)
+        .eq("status", row.status);
+      moveErr = writeErr;
+    } catch (err) {
+      moveErr = err;
     }
-    const { error: moveErr } = await supabase
-      .from("order_addons")
-      .update(patch)
-      .eq("id", row.id)
-      .eq("status", row.status);
-    if (moveErr) throw moveErr;
+    if (moveErr) {
+      console.error(
+        `[transfer-ticket] ADD-ON NOT MOVED ticket=${ticketId} order_addon=${row.id} to=${newOwner}:`,
+        moveErr,
+      );
+    }
   }
 }
 

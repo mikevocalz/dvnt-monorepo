@@ -594,6 +594,7 @@ Deno.serve(async (req) => {
         await loadTicketAddons(supabaseAdmin, {
           id: String(ticketId),
           cart_id: (ticketData as any).cart_id ?? null,
+          user_id: (ticketData as any).user_id ?? null,
         }),
       );
     } catch (addonError) {

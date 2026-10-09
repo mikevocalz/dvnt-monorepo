@@ -12,7 +12,7 @@ const ts = require('typescript');
 const TICKET = { id: 'tk1', user_id: 'sender', event_id: 7, status: 'transfer_pending',
   ticket_type_id: 'tier', guest_lookup_token: null };
 
-function fakeDb(orderAddons) {
+function fakeDb(orderAddons, { failAddonId } = {}) {
   const ops = [];
   return {
     ops,
@@ -45,7 +45,9 @@ function fakeDb(orderAddons) {
         then: (resolve, reject) => {
           ops.push(op);
           const data = op.operation === 'select' ? q.rows() : null;
-          return Promise.resolve({ data, error: null }).then(resolve, reject);
+          const error = table === 'order_addons' && op.operation === 'update' && op.eq.id === failAddonId
+            ? { message: 'write failed' } : null;
+          return Promise.resolve({ data, error }).then(resolve, reject);
         },
       };
       return q;
@@ -106,4 +108,15 @@ test('accepting a transfer moves the ticket\'s live add-ons to the recipient', a
   assert.equal(oa1.payload.qr_token.startsWith('tok-'), true, 'the add-on QR was not re-minted');
   const oa2 = moves.find((o) => o.eq.id === 'oa2');
   assert.equal(oa2.payload.qr_token, undefined, 'a row without a QR must not gain one');
+});
+
+test('one add-on write failing does not fail the accepted transfer or skip the other add-ons', async () => {
+  const addons = [
+    { id: 'oa1', ticket_id: 'tk1', status: 'unfulfilled', qr_token: 'old1', event_id: 7 },
+    { id: 'oa2', ticket_id: 'tk1', status: 'unfulfilled', qr_token: 'old2', event_id: 7 },
+  ];
+  const db = fakeDb(addons, { failAddonId: 'oa1' });
+  const r = await load(db).accept();
+  assert.equal(r.status, 200, 'the ticket already moved; a 500 here strands the add-ons with no retry');
+  assert.ok(db.ops.some((o) => o.table === 'order_addons' && o.operation === 'update' && o.eq.id === 'oa2'));
 });

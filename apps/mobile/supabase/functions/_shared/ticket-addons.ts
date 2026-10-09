@@ -4,7 +4,8 @@
  * Scope: rows bound to this ticket (order_addons.ticket_id, set at issuance
  * since migration 20261009100200 and carried by transfer-ticket), plus rows
  * on the same cart that are bound to no ticket (issued before ticket_id was
- * set). A row bound to a DIFFERENT ticket is left out, so one attendee in a
+ * set) and owned by the ticket's current holder. A row bound to a DIFFERENT
+ * ticket is left out, so one attendee in a
  * group order never sees, or can redeem, another attendee's add-on QR.
  */
 
@@ -28,10 +29,23 @@ const first = (value: any) => (Array.isArray(value) ? value[0] : value);
 export async function loadTicketAddons(
   // deno-lint-ignore no-explicit-any
   supabase: any,
-  ticket: { id: string; cart_id?: string | null },
+  ticket: {
+    id: string;
+    cart_id?: string | null;
+    user_id?: string | null;
+    guest_email?: string | null;
+  },
 ): Promise<HolderAddon[]> {
-  const filter = ticket.cart_id
-    ? `ticket_id.eq.${ticket.id},and(cart_id.eq.${ticket.cart_id},ticket_id.is.null)`
+  // Unbound rows on the cart count only while they belong to the ticket's
+  // current holder: after a transfer the sender's unbound rows stay theirs.
+  // Values are double-quoted so an email's `+` or `,` cannot break the filter.
+  const owner = ticket.user_id
+    ? `user_id.eq."${String(ticket.user_id).replace(/"/g, "")}"`
+    : ticket.guest_email
+      ? `guest_email.eq."${String(ticket.guest_email).replace(/"/g, "")}"`
+      : null;
+  const filter = ticket.cart_id && owner
+    ? `ticket_id.eq.${ticket.id},and(cart_id.eq.${ticket.cart_id},ticket_id.is.null,${owner})`
     : `ticket_id.eq.${ticket.id}`;
   const { data, error } = await supabase
     .from("order_addons")
