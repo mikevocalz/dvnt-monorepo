@@ -110,8 +110,9 @@ async function prepareCartTicketRows(
  * (migration 20260613000300). Add-on cart lines carry tier_id NULL and
  * addon_id set; they are NOT ticket rows.
  *
- * order_addons is one row per add-on LINE (quantity aggregated), so we
- * mint exactly ONE QR per REDEEMABLE add-on line — reusing the same
+ * A REDEEMABLE add-on line gets one QR per unit, and cart_complete_issuance
+ * (20261009100200) writes one order_addons row per unit, because the door
+ * spends a whole row on one scan. QRs are minted with the same
  * `createSignedQrPayload(id, eventId)` HMAC mint tickets use (hmac-qr.ts).
  * The signed id is a fresh UUID standing in for the redeemable token; the
  * add-on's event_id is the eid. The migration's add-on loop writes
@@ -160,16 +161,25 @@ async function prepareCartAddonRows(
       throw new Error(`Invalid event for cart add-on line ${line.id}`);
     }
 
-    // One QR per add-on LINE — order_addons is one aggregated row per line.
-    const { qrToken, qrPayload } = await createSignedQrPayload(
-      crypto.randomUUID(),
-      eventId,
-    );
-    rows.push({
-      line_item_id: line.id,
-      qr_token: qrToken,
-      qr_payload: qrPayload,
-    });
+    const quantity = Number(line.quantity);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new Error(`Invalid quantity for cart add-on line ${line.id}`);
+    }
+
+    // One QR per UNIT. redeem_addon spends a whole order_addons row on one
+    // scan, so cart_complete_issuance (20261009100200) writes one row per
+    // unit when it receives exactly `quantity` QRs for the line.
+    for (let i = 0; i < quantity; i++) {
+      const { qrToken, qrPayload } = await createSignedQrPayload(
+        crypto.randomUUID(),
+        eventId,
+      );
+      rows.push({
+        line_item_id: line.id,
+        qr_token: qrToken,
+        qr_payload: qrPayload,
+      });
+    }
   }
 
   return rows;

@@ -911,6 +911,11 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         const stripeRefundIds = refundObjects
           .map((refund: any) => refund?.id)
           .filter(Boolean);
+        // Every cent of the charge is back. Ticket-level scoping from refund
+        // metadata only applies while part of the charge is still kept.
+        const chargeFullyRefunded =
+          Number(charge.amount_refunded ?? 0) >= Number(charge.amount ?? 0) &&
+          Number(charge.amount ?? 0) > 0;
 
         if (paymentIntent) {
           let toRefund: any[] = [];
@@ -956,13 +961,20 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             // refunding 1 of a buyer's 3 passes used to flip all 3 to
             // 'refunded' (and decrement quantity_sold by 3) while returning
             // money for only one of them.
-            const refundedTicketIds = Array.from(
-              new Set(
-                refundObjects
-                  .map((refund: any) => refund?.metadata?.ticket_id)
-                  .filter(Boolean),
-              ),
-            );
+            //
+            // A FULL refund ignores that scoping. organizer-refund refunds the
+            // whole PaymentIntent and names one ticket for the audit trail;
+            // scoping there left the buyer's other tickets active after all of
+            // their money was returned.
+            const refundedTicketIds = chargeFullyRefunded
+              ? []
+              : Array.from(
+                  new Set(
+                    refundObjects
+                      .map((refund: any) => refund?.metadata?.ticket_id)
+                      .filter(Boolean),
+                  ),
+                );
 
             let legacyQuery = supabase
               .from("tickets")
@@ -1034,13 +1046,15 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           // Void wallet passes for refunded tickets. Same scoping rule as the
           // status flip above — a partial refund must not kill the passes for
           // the tickets that were NOT refunded.
-          const walletTicketIds = Array.from(
-            new Set(
-              refundObjects
-                .map((refund: any) => refund?.metadata?.ticket_id)
-                .filter(Boolean),
-            ),
-          );
+          const walletTicketIds = chargeFullyRefunded
+            ? []
+            : Array.from(
+                new Set(
+                  refundObjects
+                    .map((refund: any) => refund?.metadata?.ticket_id)
+                    .filter(Boolean),
+                ),
+              );
           let refundedTicketsQuery = supabase
             .from("tickets")
             .select("id")

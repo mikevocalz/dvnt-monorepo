@@ -70,10 +70,9 @@ interface GuestTicketData {
       coverImageUrl: string | null;
     };
     /**
-     * SEAM (WS-3): guest-owned add-ons (order_addons matched by guest_email,
-     * service-role read). Rendered when present; the `get-guest-ticket` edge
-     * fn does NOT return them yet and is outside this workstream's fence —
-     * once it adds `addons`, this surface lights up with no client change.
+     * Add-ons this guest can use with the ticket, from get-guest-ticket
+     * (_shared/ticket-addons.ts). A redeemable unit that is still live
+     * carries its own door code (qrToken).
      */
     addons?: Array<{
       id: string;
@@ -83,10 +82,45 @@ interface GuestTicketData {
       status: "unfulfilled" | "fulfilled" | "redeemed" | "refunded";
       isRedeemable?: boolean;
       qrToken?: string | null;
+      qrPayload?: string | null;
     }>;
   };
 }
 
+
+// One door code per add-on unit. The data url is generated through React
+// Query so it is cached per code and needs no component state.
+function AddonQr({ value, label }: { value: string; label: string }) {
+  const { data: url } = useQuery({
+    queryKey: ["guest-addon-qr", value],
+    queryFn: () =>
+      (
+        QRCode as unknown as {
+          toDataURL: (
+            text: string,
+            opts?: { width?: number; margin?: number },
+          ) => Promise<string>;
+        }
+      ).toDataURL(value, { width: 192, margin: 1 }),
+    staleTime: Infinity,
+  });
+  return (
+    <span className="shrink-0 rounded-xl bg-white p-1.5">
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={`${label} door code`}
+          width={96}
+          height={96}
+          className="block rounded-lg"
+        />
+      ) : (
+        <span className="block h-24 w-24 animate-pulse rounded-lg bg-black/10" />
+      )}
+    </span>
+  );
+}
 
 export function GuestTicketScreen() {
   const params = useParams<{ token: string | string[] }>();
@@ -364,8 +398,7 @@ export function GuestTicketScreen() {
             </div>
           ) : null}
 
-          {/* Guest-owned add-ons (WS-3) — renders once get-guest-ticket
-              returns `addons` (see the SEAM note on GuestTicketData). */}
+          {/* Add-ons bought with this ticket, each live unit with its code. */}
           {ticket.addons && ticket.addons.length > 0 ? (
             <div className="mt-4 flex flex-col gap-2">
               <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-white/45">
@@ -400,6 +433,12 @@ export function GuestTicketScreen() {
                     <span className="shrink-0 font-mono text-sm font-bold text-white/70">
                       ×{addon.quantity}
                     </span>
+                  ) : null}
+                  {addon.isRedeemable &&
+                  addon.qrToken &&
+                  (addon.status === "unfulfilled" ||
+                    addon.status === "fulfilled") ? (
+                    <AddonQr value={addon.qrToken} label={addon.name} />
                   ) : null}
                 </div>
               ))}

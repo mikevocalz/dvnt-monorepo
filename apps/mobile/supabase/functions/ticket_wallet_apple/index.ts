@@ -23,6 +23,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, CORS_HEADERS } from "../_shared/verify-session.ts";
+import { addonPassLines, loadTicketAddons } from "../_shared/ticket-addons.ts";
 import forge from "https://esm.sh/node-forge@1.3.1";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -258,6 +259,7 @@ function buildPassJson(opts: {
   attendeeName: string;
   qrToken: string;
   ticketId: string;
+  addonLines?: string[];
 }): string {
   const passData: Record<string, unknown> = {
     formatVersion: 1,
@@ -333,6 +335,15 @@ function buildPassJson(opts: {
           label: "Ticket Tier",
           value: opts.tierName,
         },
+        // A pass carries one barcode (the ticket). Add-ons are listed so the
+        // holder knows what they bought; their own codes are in the app.
+        ...(opts.addonLines && opts.addonLines.length > 0
+          ? [{
+              key: "addons",
+              label: "Add-ons",
+              value: `${opts.addonLines.join("\n")}\nShow add-on codes from your ticket in the DVNT app.`,
+            }]
+          : []),
         {
           key: "support",
           label: "Support",
@@ -492,7 +503,7 @@ Deno.serve(async (req) => {
     const { data: ticketData, error: ticketError } = await supabaseAdmin
       .from("tickets")
       .select(
-        "id, event_id, ticket_type_id, user_id, status, qr_token, purchase_amount_cents, " +
+        "id, event_id, ticket_type_id, user_id, status, qr_token, purchase_amount_cents, cart_id, " +
           "wallet_serial_number, wallet_auth_token, " +
           "ticket_types(name), " +
           "events(title, start_date, end_date, location, location_name, cover_image_url, host_id)",
@@ -576,6 +587,20 @@ Deno.serve(async (req) => {
     const tierStyle = TIER_STYLES[tier] || TIER_STYLES.ga;
     const tierName = ticketTypeName || tierStyle.label;
 
+    // Best-effort: a failed add-on read must not block the pass.
+    let addonLines: string[] = [];
+    try {
+      addonLines = addonPassLines(
+        await loadTicketAddons(supabaseAdmin, {
+          id: String(ticketId),
+          cart_id: (ticketData as any).cart_id ?? null,
+          user_id: (ticketData as any).user_id ?? null,
+        }),
+      );
+    } catch (addonError) {
+      console.error("[ticket_wallet_apple] add-on lookup:", addonError);
+    }
+
     const passJsonStr = buildPassJson({
       passTypeId: applePassTypeId,
       teamId: appleTeamId,
@@ -591,6 +616,7 @@ Deno.serve(async (req) => {
       attendeeName,
       qrToken: ticketData.qr_token,
       ticketId,
+      addonLines,
     });
 
     const passJsonBytes = new TextEncoder().encode(passJsonStr);
