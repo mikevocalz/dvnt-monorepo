@@ -20,8 +20,9 @@
  * result card.
  *
  * Two token resolution paths:
- * 1. qr_payload (HMAC-signed) — fast-path cryptographic verification
- * 2. qr_token (legacy) — DB lookup (tickets first, then order_addons)
+ * 1. qr_payload (HMAC-signed): verify the signature, then tickets.id,
+ *    then order_addons.qr_payload (add-on payloads sign a random id)
+ * 2. qr_token (legacy): DB lookup (tickets first, then order_addons)
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -263,7 +264,7 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
     let resolvedEventId: number | null = null;
 
     if (qr_payload) {
-      // Fast path: HMAC-signed QR payload (tickets only).
+      // Fast path: HMAC-signed QR payload (tickets and add-ons).
       const verification = await verifySignedQrPayload(qr_payload);
       if (!verification.valid) {
         return json({ valid: false, reason: "invalid_signature" });
@@ -278,6 +279,21 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
         resolvedEventId = byId.event_id ?? verification.eventId!;
       } else {
         resolvedEventId = verification.eventId!;
+        // Add-on payloads are signed over a random id, not a ticket id
+        // (cart-issuance.ts prepareCartAddonRows), so the signed id never
+        // matches a ticket. Match the stored payload exactly, scoped to
+        // the signed event, and redeem through the add-on CAS below.
+        const { data: addonRow } = await supabase
+          .from("order_addons")
+          .select("qr_token, event_id")
+          .eq("qr_payload", qr_payload)
+          .eq("event_id", verification.eventId!)
+          .maybeSingle();
+        if (addonRow?.qr_token) {
+          scanKind = "addon";
+          resolvedToken = addonRow.qr_token;
+          resolvedEventId = addonRow.event_id;
+        }
       }
     } else {
       const { data: byToken } = await supabase
