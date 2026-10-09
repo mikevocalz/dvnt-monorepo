@@ -10,7 +10,8 @@
  *
  * Transfers a ticket from one user to another with a 24h expiry.
  * - Initiate: creates a pending transfer, marks ticket as "transfer_pending"
- * - Accept: reassigns ticket to recipient, generates new QR token
+ * - Accept: reassigns ticket to recipient, generates new QR token, and moves
+ *   the add-ons bound to the ticket (with fresh QRs) to the recipient
  * - Decline/Cancel: reverts ticket to active
  */
 
@@ -131,6 +132,53 @@ async function notifyTransfer(
     }
   } catch (err) {
     console.warn("[transfer-ticket] notifyTransfer failed (non-fatal):", err);
+  }
+}
+
+/**
+ * Move the add-ons bound to a transferred ticket (order_addons.ticket_id,
+ * set at issuance since migration 20261009100200) to the new owner.
+ *
+ * Only unredeemed, unrefunded rows move: a redeemed drink was consumed by
+ * the sender and a refunded one is not anyone's. Each row that carries a
+ * door QR gets a fresh one, for the same reason the ticket's QR is rotated
+ * above: the sender may still hold a screenshot of the old code. The update
+ * is guarded on the status read here, so a row redeemed at the door between
+ * the read and the write is left alone.
+ */
+async function moveTicketAddons(
+  supabase: any,
+  ticketId: string,
+  eventId: number,
+  newOwner: string,
+): Promise<void> {
+  const { data: rows, error } = await supabase
+    .from("order_addons")
+    .select("id, status, qr_token")
+    .eq("ticket_id", ticketId)
+    .in("status", ["unfulfilled", "fulfilled"]);
+  if (error) throw error;
+
+  for (const row of rows ?? []) {
+    const patch: Record<string, unknown> = {
+      user_id: newOwner,
+      guest_email: null,
+      guest_phone: null,
+    };
+    if (row.qr_token) {
+      const { qrToken, qrPayload } = await createSignedQrPayload(
+        crypto.randomUUID(),
+        eventId,
+      );
+      patch.qr_token = qrToken;
+      patch.qr_payload = qrPayload;
+    }
+    const { error: moveErr } = await supabase
+      .from("order_addons")
+      .update(patch)
+      .eq("id", row.id)
+      .eq("status", row.status);
+    if (moveErr) throw moveErr;
   }
 }
 
@@ -398,6 +446,8 @@ Deno.serve(async (req: Request) => {
         .eq("id", ticket.id);
 
       if (updateErr) throw updateErr;
+
+      await moveTicketAddons(supabase, ticket.id, ticket.event_id, userId);
 
       console.log(
         `[transfer-ticket] Transfer accepted: ${ticket.id} now owned by ${userId}`,
