@@ -40,6 +40,7 @@
     "verify:brand-follows": "node scripts/verify-brand-follows.mjs",
     "verify:event-lynk-lifecycle": "node scripts/verify-event-lynk-lifecycle.mjs",
     "verify:consolidation": "node scripts/verify-event-consolidation.mjs",
+    "verify:cart-addons": "node scripts/verify-cart-addon-followups.mjs",
     "verify:financials-addons": "node scripts/verify-event-financials-addons.mjs",
     "verify:functions:live": "node scripts/verify-edge-functions.mjs --live --project-ref npfjanxturvmjyevoyfo",
     "check:bundle": "node scripts/check-bundle-budget.mjs",

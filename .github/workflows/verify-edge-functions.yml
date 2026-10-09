@@ -29,6 +29,7 @@ on:
       - "scripts/verify-comp-claims.mjs"
       - "scripts/verify-event-lynk-lifecycle.mjs"
       - "scripts/verify-event-consolidation.mjs"
+      - "scripts/verify-cart-addon-followups.mjs"
       - "scripts/verify-event-financials-addons.mjs"
       - "scripts/verify-call-capacity.mjs"
       - ".github/workflows/verify-edge-functions.yml"
@@ -52,6 +53,7 @@ on:
       - "scripts/verify-brand-follows.mjs"
       - "scripts/verify-event-lynk-lifecycle.mjs"
       - "scripts/verify-event-consolidation.mjs"
+      - "scripts/verify-cart-addon-followups.mjs"
       - "scripts/verify-event-financials-addons.mjs"
       - "scripts/verify-call-capacity.mjs"
 
@@ -246,6 +248,22 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-event-consolidation.mjs
+
+  cart-addon-followups:
+    # Replays cart_create_hold, cart_complete_issuance and the cart cleanup
+    # sweep on a throwaway cluster: parent add-on caps bind variant lines,
+    # add-on purchases bind to a ticket on the cart, redeemable units get one
+    # QR each, and holding carts with no live hold are abandoned. No
+    # --allow-skip.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-cart-addon-followups.mjs
 
   event-financials-addons:
     # Replays the event_financials SQL and its order_addons triggers on a
