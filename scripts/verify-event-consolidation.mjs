@@ -759,6 +759,9 @@ const attendees = async (eventId) =>
   await sql(read("20260516170000_cart_line_refund_rpc.sql"));
   if (!process.argv.includes("--baseline")) {
     await sql(read("20261009010000_cart_line_refund_addons.sql"));
+    if (!process.argv.includes("--baseline-followups")) {
+      await sql(read("20261009100400_cart_line_refund_spreads_addon_credit.sql"));
+    }
   }
 
   const ev = await event("host");
@@ -839,6 +842,19 @@ const attendees = async (eventId) =>
   assert.equal((await sql(`SELECT refund_order_addons_for_cart($1) AS n`, [cart]))[0].n, 0);
   assert.equal(await sold("ticket_addons", coat), 1, "a webhook retry returned stock twice");
   console.log("-. OK: refund_order_addons_for_cart flips live rows once, keeps redeemed rows redeemed");
+
+  // 9f. A line issued as one row per unit (20261009100200): a refund smaller
+  // than the line is spread over the rows, never recorded more than once.
+  const drinkLine = await line({ category: "addon", addon: coat, qty: 3, price: 500 });
+  const units = [];
+  for (let i = 0; i < 3; i++) units.push(await purchase(drinkLine, coat, null, 1, 500));
+  await sql(`UPDATE ticket_addons SET quantity_sold = quantity_sold + 3 WHERE id = $1`, [coat]);
+  assert.equal((await applyRefund(drinkLine, 700)).ok, true);
+  const [{ total }] = await sql(
+    `SELECT sum(refunded_amount_cents)::int AS total FROM order_addons WHERE cart_line_item_id = $1`, [drinkLine]);
+  assert.equal(total, 700, `a $7 refund was recorded as $${total / 100}`);
+  for (const id of units) assert.equal((await addonState(id)).status, "refunded");
+  console.log("-. OK: a line refund is spread over per-unit rows, recorded once");
 
   // 9e. Server-only: anon and authenticated cannot call either function.
   for (const fn of [
