@@ -135,6 +135,23 @@ export function createPublishQueue() {
       return () => { listeners.delete(listener); };
     },
     getSnapshot: () => jobs,
+    /** Keep required first-post onboarding locked until the server confirms
+     * creation. The queue removes only successful jobs; failed jobs stay
+     * available for retry. Ordinary posts retain the existing background UX. */
+    whenFinished(id: string): Promise<void> {
+      return new Promise((resolve, reject) => {
+        const check = () => {
+          const job = jobs.find((item) => item.id === id);
+          if (!job) { listeners.delete(check); resolve(); }
+          else if (job.status === "failed") {
+            listeners.delete(check);
+            reject(new Error(job.message));
+          }
+        };
+        listeners.add(check);
+        check();
+      });
+    },
     enqueue(ownerId: string, label: string, task: Task, descriptor?: PublishDescriptor) {
       if (jobs.length >= MAX_PENDING) throw new Error("Finish or dismiss a pending post before sharing another.");
       const id = `publish-${Date.now()}-${++sequence}`;
