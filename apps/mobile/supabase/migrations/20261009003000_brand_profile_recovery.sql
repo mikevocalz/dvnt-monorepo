@@ -46,6 +46,13 @@ BEGIN
       AND NOT EXISTS (
         SELECT 1 FROM public.brand_message_opt_outs o WHERE o.recipient_id=u.id
       )
+      -- Filter BEFORE the batch limit; otherwise existing outbox rows
+      -- starve higher-ID members forever once the audience exceeds p_limit.
+      AND NOT EXISTS (
+        SELECT 1 FROM public.brand_message_outbox q
+        WHERE q.recipient_id=u.id AND q.campaign_version='profile_photo_v1'
+          AND q.channel='dm'
+      )
       AND NOT EXISTS (
         SELECT 1 FROM public.blocks b
         WHERE (b.blocker_id=613 AND b.blocked_id=u.id)
