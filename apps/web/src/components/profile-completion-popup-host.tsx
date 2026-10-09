@@ -5,10 +5,12 @@ import { usePathname, useRouter } from "next/navigation";
 import { Camera, ArrowUpRight, ImagePlus, PenLine, Sparkles } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
 import { syncAuthUser } from "@dvnt/app/lib/api/privileged";
+import { fetchNewMemberProgress, type NewMemberStep } from "@dvnt/app/lib/profile/new-member-progress";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useVerifiedOnlyPromptStore } from "@dvnt/app/lib/auth/verified-only-prompt";
 import {
   canShowProfileReminderAt,
+  newMemberRedirect,
   missingProfileSteps,
   type ReminderNeeds,
 } from "@dvnt/app/lib/profile/profile-reminder-policy";
@@ -33,33 +35,44 @@ export function ProfileCompletionPopupHost() {
   const [needs, setNeeds] = useState<ReminderNeeds>({ photo: false, firstPost: false });
   const [open, setOpen] = useState(false);
   const tried = useRef<string | null>(null);
+  const [gateStep, setGateStep] = useState<NewMemberStep>("not_required");
+  const [gateError, setGateError] = useState(false);
+  const [reload, setReload] = useState(0);
 
   const memberId = user?.authId || String(user?.id ?? "");
   const ready = hydrated && isAuthenticated && !!memberId;
   const allowed = canShowProfileReminderAt(pathname);
 
   useEffect(() => {
-    // Avoid drawing a popup over onboarding, email/ID verification, a
-    // transaction or a live video room (including deep-linked entry).
-    if (!ready || !allowed || verificationPopupOpen || !user) return;
-
-    const key = `dvnt:profile-reminder:v1:${memberId}`;
-    if (tried.current === key || seenInMemory.has(key)) return;
-    try {
-      if (sessionStorage.getItem(key) === "shown") {
-        seenInMemory.add(key);
-        return;
-      }
-    } catch {
-      // Privacy mode can disable storage; the in-memory per-tab cap still works.
-    }
-    tried.current = key;
+    if (!ready || !user || pathname.startsWith("/auth/")) return;
     let cancelled = false;
+    setGateError(false);
     void (async () => {
       try {
-        // Do not trust persisted postsCount/avatar: it can lag behind a save.\n        // The Better Auth-protected sync endpoint avoids the web JWT-bridge\n        // timing race that can make a direct PostgREST profile read 401.
+        // Every navigation/reload checks fresh server records. Progress can
+        // never be unlocked by manipulating sessionStorage/localStorage.
+        const progress = await fetchNewMemberProgress();
+        if (cancelled) return;
+        setGateStep(progress.step);
+        if (progress.required) {
+          setOpen(false);
+          const redirect = newMemberRedirect(progress.step, pathname);
+          if (redirect) router.replace(redirect);
+          return;
+        }
+        // Earlier members get the original soft once-per-session popup.
+        if (!allowed || verificationPopupOpen) return;
+        const key = `dvnt:profile-reminder:v1:${memberId}`;
+        if (tried.current === key || seenInMemory.has(key)) return;
+        try {
+          if (sessionStorage.getItem(key) === "shown") {
+            seenInMemory.add(key);
+            return;
+          }
+        } catch { /* optional */ }
+        tried.current = key;
         const latest = await syncAuthUser();
-        if (cancelled || !latest) return; // unavailable != incomplete
+        if (cancelled || !latest) return;
         const missing = missingProfileSteps(latest);
         if (!missing.photo && !missing.firstPost) return;
         seenInMemory.add(key);
@@ -67,16 +80,19 @@ export function ProfileCompletionPopupHost() {
         setNeeds(missing);
         setOpen(true);
       } catch {
-        // Fail quietly on a transient profile-fetch error. Never show a false
-        // "blank profile" warning based only on a stale local fallback.
+        if (!cancelled) {
+          setGateError(true);
+          // Fail closed for an account already known to be in required setup,
+          // but never assume an old account is incomplete on network failure.
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [ready, allowed, memberId, verificationPopupOpen]);
+  }, [ready, memberId, pathname, allowed, reload, verificationPopupOpen]);
 
   useEffect(() => {
-    if (!ready || !allowed) setOpen(false);
-  }, [ready, allowed]);
+    if (!ready || !allowed || gateStep !== "not_required") setOpen(false);
+  }, [ready, allowed, gateStep]);
 
   // Profile store may update while the dialog is open (e.g. another tab).
   // Local updates make it disappear immediately; reload rechecks server data.
@@ -96,7 +112,26 @@ export function ProfileCompletionPopupHost() {
     router.push(to);
   };
 
-  if (!ready || !allowed || !needs.photo && !needs.firstPost) return null;
+  // Block the app while a known incomplete new member is being redirected,
+  // including on browser Back. Checkout and identity flows are never covered.
+  const target = newMemberRedirect(gateStep, pathname);
+  if (ready && target && (gateError || target !== pathname)) {
+    return (
+      <div role="status" aria-live="polite" className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#06070d] p-6 text-white">
+        <div className="max-w-sm space-y-4 text-center">
+          <p className="text-xs font-black uppercase tracking-[0.3em] text-[#FF5BFC]">DVNT · Make your entrance</p>
+          <h2 className="text-2xl font-black">{gateStep === "photo" ? "First, add your profile picture" : "Next, create your first post"}</h2>
+          {gateError ? (
+            <button type="button" onClick={() => setReload((n) => n + 1)}
+              className="rounded-xl bg-[#FF5BFC] px-6 py-3 font-bold text-black">Retry connection</button>
+          ) : <p className="text-white/70">Loading your next step…</p>}
+        </div>
+      </div>
+    );
+  }
+
+  if (!ready || !allowed || gateStep !== "not_required" ||
+      (!needs.photo && !needs.firstPost)) return null;
 
   return (
     <Dialog open={open && !verificationPopupOpen} onClose={close} hideClose maxWidth={460}>
