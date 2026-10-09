@@ -111,8 +111,8 @@ export const PROFILE_PHOTO_REMINDER = [
   "While you're at it, introduce yourself with your first post! A hello, a fit check, or your next event — make DVNT yours.",
   "",
   "Add your photo: https://dvntapp.live/feed/profile/edit",
-  "Create your first post: https://dvntapp.live/feed",
-].join("\\n");
+  "Create your first post: https://dvntapp.live/feed/create",
+].join("\n");
 
 export const WELCOME_BROADCAST =
   "Welcome to the cookout 🖤 Your first DVNT post can be a hello, a look, or your next event. Add a photo, tell us a little about yourself, and let your people find you. Ready? Create your first post.";
