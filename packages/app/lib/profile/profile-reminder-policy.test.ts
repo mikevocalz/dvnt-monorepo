@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canShowProfileReminderAt, missingProfileSteps } from "./profile-reminder-policy.ts";
+import { canShowProfileReminderAt, missingProfileSteps, newMemberRedirect } from "./profile-reminder-policy.ts";
 
 test("photo and first post can be missing independently", () => {
   assert.deepEqual(missingProfileSteps({ avatar: "", postsCount: 0 }), { photo: true, firstPost: true });
@@ -26,5 +26,23 @@ test("site entry routes are eligible, immersive and signup/payment routes are no
     "/feed/checkout", "/events/123", "/public/create", "",
   ]) {
     assert.equal(canShowProfileReminderAt(url), false, url);
+  }
+});
+
+test("new signup remains on photo before first post, even after refresh", () => {
+  assert.equal(newMemberRedirect("photo", "/feed"), "/feed/onboarding/photo");
+  assert.equal(newMemberRedirect("photo", "/feed/create"), "/feed/onboarding/photo");
+  assert.equal(newMemberRedirect("photo", "/feed/onboarding/photo"), null);
+  assert.equal(newMemberRedirect("first_post", "/feed"), "/feed/create");
+  assert.equal(newMemberRedirect("first_post", "/feed/onboarding/photo"), "/feed/create");
+  assert.equal(newMemberRedirect("first_post", "/feed/create"), null);
+  assert.equal(newMemberRedirect("complete", "/feed"), null);
+  assert.equal(newMemberRedirect("not_required", "/feed"), null);
+});
+
+test("new member can still finish identity verification and buy tickets", () => {
+  for (const path of ["/auth/signup", "/auth/verify-email", "/feed/checkout", "/feed/tickets"]) {
+    assert.equal(newMemberRedirect("photo", path), null, path);
+    assert.equal(newMemberRedirect("first_post", path), null, path);
   }
 });
