@@ -30,6 +30,11 @@ import {
 import { withSentry } from "../_shared/sentry.ts";
 import { requireMemberPhone } from "../_shared/member-phone.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import {
+  CART_LINE_PRICING_SELECT,
+  priceCartLines,
+  type CartLinePricingRow,
+} from "../_shared/cart-line-pricing.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -55,21 +60,7 @@ type CartRow = {
   idempotency_key: string;
 };
 
-type CartLineItemRow = {
-  id: string;
-  cart_id: string;
-  category: "admission" | "coat_check";
-  tier_id: string;
-  quantity: number;
-  unit_price_cents: number;
-  ticket_types?: {
-    price_cents: number;
-    currency?: string | null;
-    event_id: number;
-    name?: string | null;
-    category?: string | null;
-  } | null;
-};
+type CartLineItemRow = CartLinePricingRow & { cart_id: string };
 
 function parseCartId(input: unknown): string | null {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
@@ -258,9 +249,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
 
     const { data: lineItems, error: lineItemsError } = await supabase
       .from("cart_line_items")
-      .select(
-        "*, ticket_types(price_cents, currency, event_id, name, category)",
-      )
+      .select(CART_LINE_PRICING_SELECT)
       .eq("cart_id", cartId)
       .order("created_at", { ascending: true });
 
@@ -295,44 +284,21 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
           error: "hold_expired",
           lineItemId: missingHold.id,
           tierId: missingHold.tier_id,
+          addonId: missingHold.addon_id,
         },
         409,
       );
     }
 
     const currency = String(cart.currency || "usd").toLowerCase();
-    let subtotalCents = 0;
-    let quantity = 0;
-    let admissionSubtotalCents = 0;
-    let admissionQuantity = 0;
-
-    for (const item of lineItems as CartLineItemRow[]) {
-      const tier = item.ticket_types;
-      if (!tier || tier.event_id !== cart.event_id) {
-        return errorResponse("Cart line item is invalid", 400);
-      }
-      const tierCurrency = String(tier.currency || currency).toLowerCase();
-      if (tierCurrency !== currency) {
-        return errorResponse("Cart contains mixed currencies", 400);
-      }
-      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
-        return errorResponse("Cart line item quantity is invalid", 400);
-      }
-      if (!Number.isInteger(tier.price_cents) || tier.price_cents < 0) {
-        return errorResponse("Cart line item price is invalid", 400);
-      }
-
-      const lineTotal = tier.price_cents * item.quantity;
-      subtotalCents += lineTotal;
-      quantity += item.quantity;
-
-      // Promoter discounts apply to admission tickets only (not add-ons
-      // such as coat check).
-      if (item.category === "admission") {
-        admissionSubtotalCents += lineTotal;
-        admissionQuantity += item.quantity;
-      }
-    }
+    const pricing = priceCartLines(lineItems as CartLineItemRow[], cart);
+    if (!pricing.ok) return errorResponse(pricing.error, pricing.status);
+    const {
+      subtotalCents,
+      quantity,
+      admissionSubtotalCents,
+      admissionQuantity,
+    } = pricing;
 
     if (subtotalCents <= 0) {
       return errorResponse("Cart total must be greater than zero", 400);

@@ -1064,6 +1064,31 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             }
           }
 
+          // Add-on purchases on a cart charge. When the whole charge is back
+          // (organizer-refund, event-cancel, a dashboard refund) the add-on
+          // money is back too, whatever the refund metadata names. The SQL
+          // flips only rows not already refunded, so a retry or an earlier
+          // line refund cannot return stock twice.
+          if (charge.amount_refunded >= charge.amount) {
+            const { data: refundedCart } = await supabase
+              .from("carts")
+              .select("id")
+              .eq("stripe_pi_id", paymentIntent)
+              .maybeSingle();
+            if (refundedCart?.id) {
+              const { error: addonRefundError } = await supabase.rpc(
+                "refund_order_addons_for_cart",
+                { p_cart_id: refundedCart.id },
+              );
+              if (addonRefundError) {
+                console.error(
+                  "[stripe-webhook] Add-on refund sync error:",
+                  addonRefundError,
+                );
+              }
+            }
+          }
+
           // Update order status + add timeline
           const { data: refundedOrder } = await supabase
             .from("orders")

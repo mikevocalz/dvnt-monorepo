@@ -56,3 +56,19 @@ test("buyer fee is computed on the discounted goods", () => {
   const free = computeCheckoutSheetTotals({ admissionSubtotalCents: 1000, quantity: 1, promoterDiscountBps: 10000 });
   assert.equal(free.totalCents, 0);
 });
+
+// With add-ons selected the sheet hands off to cart-checkout, which takes the
+// promo off (tickets + add-ons - promoter discount) and charges the per-unit
+// fee on every unit, add-ons included. The sheet showed a lower total.
+test("with a coat check the sheet previews what cart-checkout charges", () => {
+  const t = computeCheckoutSheetTotals({
+    admissionSubtotalCents: 5000, quantity: 2, promoterDiscountBps: 1000,
+    promo: { type: "percent", value: 10 }, addonCents: 1000, addonQuantity: 1,
+  });
+  // promoter 10% of 5000 = 500; promo 10% of (6000 - 500) = 550.
+  assert.equal(t.promoterDiscountCents, 500);
+  assert.equal(t.promoDiscountCents, 550);
+  assert.equal(t.goodsCents, 4950);
+  // 2.5% of 4950 rounds to 124, plus $1 for each of the 3 units.
+  assert.equal(t.feeCents, 124 + 300);
+});

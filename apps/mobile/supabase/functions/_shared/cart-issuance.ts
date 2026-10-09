@@ -290,7 +290,9 @@ export async function handleCartPaymentIntentSucceeded(
   const { data: lineItems } = await supabase
     .from("cart_line_items")
     .select("tier_id")
-    .eq("cart_id", cartId);
+    .eq("cart_id", cartId)
+    // Add-on lines have no tier; capacity alerts are per ticket tier.
+    .not("tier_id", "is", null);
 
   const seenTierIds = new Set<string>();
   for (const line of lineItems || []) {

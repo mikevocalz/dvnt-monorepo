@@ -28,6 +28,12 @@
       "automation": "packages/app/lib/events/event-access.test.ts"
     },
     {
+      "id": "cart-addon-checkout",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/_shared/cart-line-pricing.test.cjs"
+    },
+    {
       "id": "ticket-exactly-once",
       "owner": "tickets",
       "kind": "script",

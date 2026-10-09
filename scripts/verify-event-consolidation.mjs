@@ -696,6 +696,156 @@ const attendees = async (eventId) =>
   }
 }
 
+// ── 9. add-on refunds (20261009010000) ───────────────────────────────────────
+// Lives here because this cluster already models orders, ticket_addons and
+// order_addons. Adds the cart tables cart_apply_line_refund reads, replays the
+// original RPC (20260516170000) and then the add-on migration over it.
+// --baseline skips the add-on migration, so every assertion below should fail.
+{
+  await sql(`
+  ALTER TABLE public.tickets
+    ADD COLUMN cart_id UUID, ADD COLUMN cart_line_item_id UUID,
+    ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now();
+  ALTER TABLE public.orders
+    ADD COLUMN cart_id UUID, ADD COLUMN refunded_at TIMESTAMPTZ,
+    ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now();
+  CREATE TABLE public.ticket_addon_variants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    addon_id UUID NOT NULL REFERENCES public.ticket_addons(id),
+    quantity_sold INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT addon_variant_qty_nonneg CHECK (quantity_sold >= 0)
+  );
+  ALTER TABLE public.order_addons
+    ADD COLUMN cart_id UUID, ADD COLUMN cart_line_item_id UUID,
+    ADD COLUMN unit_price_cents INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN refunded_amount_cents INTEGER NOT NULL DEFAULT 0,
+    ADD CONSTRAINT order_addons_status_check
+      CHECK (status IN ('unfulfilled','fulfilled','redeemed','refunded'));
+  CREATE TABLE public.carts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL, event_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed', stripe_pi_id TEXT
+  );
+  CREATE TABLE public.cart_line_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cart_id UUID NOT NULL REFERENCES public.carts(id),
+    category TEXT NOT NULL,
+    tier_id UUID REFERENCES public.ticket_types(id),
+    addon_id UUID REFERENCES public.ticket_addons(id),
+    variant_id UUID REFERENCES public.ticket_addon_variants(id),
+    quantity INTEGER NOT NULL, unit_price_cents INTEGER NOT NULL,
+    refunded_amount_cents INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT cart_line_items_target_check CHECK ((tier_id IS NOT NULL) <> (addon_id IS NOT NULL))
+  );
+  CREATE TABLE public.cart_line_refunds (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cart_id UUID NOT NULL, line_item_id UUID NOT NULL,
+    stripe_refund_id TEXT, stripe_payment_intent_id TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL, idempotency_key TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'pending', updated_at TIMESTAMPTZ DEFAULT now()
+  );
+  `);
+  await sql(read("20260516170000_cart_line_refund_rpc.sql"));
+  if (!process.argv.includes("--baseline")) {
+    await sql(read("20261009010000_cart_line_refund_addons.sql"));
+  }
+
+  const ev = await event("host");
+  const gaTier = await tier(ev, null, 1);
+  const coat = (await sql(
+    `INSERT INTO ticket_addons (event_id, quantity_sold) VALUES ($1, 3) RETURNING id`, [ev],
+  ))[0].id;
+  const shirt = await catalogAddon(ev);
+  const shirtM = (await sql(
+    `INSERT INTO ticket_addon_variants (addon_id, quantity_sold) VALUES ($1, 2) RETURNING id`, [shirt],
+  ))[0].id;
+  const cart = (await sql(
+    `INSERT INTO carts (user_id, event_id, stripe_pi_id) VALUES ('buyer', $1, 'pi_addon') RETURNING id`, [ev],
+  ))[0].id;
+  await sql(`INSERT INTO orders (event_id, status, cart_id) VALUES ($1, 'paid', $2)`, [ev, cart]);
+  const line = async (fields) =>
+    (await sql(
+      `INSERT INTO cart_line_items (cart_id, category, tier_id, addon_id, variant_id, quantity, unit_price_cents)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [cart, fields.category, fields.tier ?? null, fields.addon ?? null, fields.variant ?? null, fields.qty, fields.price],
+    ))[0].id;
+  const purchase = async (lineId, addonId, variantId, qty, price, status = "unfulfilled") =>
+    (await sql(
+      `INSERT INTO order_addons (event_id, addon_id, variant_id, cart_id, cart_line_item_id, user_id, quantity, unit_price_cents, status)
+       VALUES ($1,$2,$3,$4,$5,'buyer',$6,$7,$8) RETURNING id`,
+      [ev, addonId, variantId, cart, lineId, qty, price, status],
+    ))[0].id;
+  const ticketLine = await line({ category: "admission", tier: gaTier, qty: 1, price: 2500 });
+  await sql(
+    `INSERT INTO tickets (event_id, ticket_type_id, user_id, cart_id, cart_line_item_id) VALUES ($1,$2,'buyer',$3,$4)`,
+    [ev, gaTier, cart, ticketLine],
+  );
+  const coatLine = await line({ category: "addon", addon: coat, qty: 2, price: 500 });
+  const coatRow = await purchase(coatLine, coat, null, 2, 500);
+  const shirtLine = await line({ category: "addon", addon: shirt, variant: shirtM, qty: 1, price: 3000 });
+  const shirtRow = await purchase(shirtLine, shirt, shirtM, 1, 3000);
+  const redeemedLine = await line({ category: "addon", addon: coat, qty: 1, price: 500 });
+  const redeemedRow = await purchase(redeemedLine, coat, null, 1, 500, "redeemed");
+
+  const applyRefund = async (lineId, amount) =>
+    (await sql(`SELECT cart_apply_line_refund($1,$2,'re_'||$3,$4,'k_'||$3) AS r`, [cart, lineId, lineId, amount]))[0].r;
+  const addonState = async (id) =>
+    (await sql(`SELECT status, refunded_amount_cents AS refunded FROM order_addons WHERE id = $1`, [id]))[0];
+  const sold = async (table, id) =>
+    (await sql(`SELECT quantity_sold AS n FROM ${table} WHERE id = $1`, [id]))[0].n;
+
+  // 9a. An add-on line refund flips its purchase row and returns its stock.
+  const coatResult = await applyRefund(coatLine, 1000);
+  assert.equal(coatResult.ok, true, JSON.stringify(coatResult));
+  assert.deepEqual(await addonState(coatRow), { status: "refunded", refunded: 1000 });
+  assert.equal(await sold("ticket_addons", coat), 1, "coat check stock did not come back (3 sold - 2 refunded)");
+  assert.equal(coatResult.addonRows?.length, 1);
+  console.log("-. OK: an add-on line refund marks order_addons refunded and decrements ticket_addons.quantity_sold");
+
+  // 9b. A variant line returns stock to the variant, not the parent add-on.
+  await applyRefund(shirtLine, 3000);
+  assert.deepEqual(await addonState(shirtRow), { status: "refunded", refunded: 3000 });
+  assert.equal(await sold("ticket_addon_variants", shirtM), 1);
+  assert.equal(await sold("ticket_addons", shirt), 0, "variant refund touched the parent add-on");
+  console.log("-. OK: a variant line refund decrements ticket_addon_variants.quantity_sold only");
+
+  // 9c. Ticket lines behave as before: tickets flip, nothing add-on side moves.
+  const ticketResult = await applyRefund(ticketLine, 2500);
+  assert.equal(ticketResult.ticketRows.length, 1);
+  assert.equal((await sql(`SELECT status FROM tickets WHERE cart_line_item_id = $1`, [ticketLine]))[0].status, "refunded");
+  assert.equal(await sold("ticket_addons", coat), 1);
+  console.log("-. OK: ticket line refunds still flip tickets and leave add-on stock alone");
+
+  // 9d. Full-charge refund: only live rows flip, the second run is a no-op,
+  // a redeemed row keeps its status and stock but records the money.
+  const fresh = await purchase(coatLine, coat, null, 1, 500);
+  await sql(`UPDATE ticket_addons SET quantity_sold = quantity_sold + 1 WHERE id = $1`, [coat]);
+  const first = (await sql(`SELECT refund_order_addons_for_cart($1) AS n`, [cart]))[0].n;
+  assert.equal(first, 1, "only the one live row should flip");
+  assert.deepEqual(await addonState(fresh), { status: "refunded", refunded: 500 });
+  assert.deepEqual(await addonState(redeemedRow), { status: "redeemed", refunded: 500 });
+  assert.equal(await sold("ticket_addons", coat), 1, "redeemed stock must stay sold; live stock comes back");
+  assert.equal((await sql(`SELECT refund_order_addons_for_cart($1) AS n`, [cart]))[0].n, 0);
+  assert.equal(await sold("ticket_addons", coat), 1, "a webhook retry returned stock twice");
+  console.log("-. OK: refund_order_addons_for_cart flips live rows once, keeps redeemed rows redeemed");
+
+  // 9e. Server-only: anon and authenticated cannot call either function.
+  for (const fn of [
+    "cart_apply_line_refund(uuid,uuid,text,integer,text)",
+    "refund_order_addons_for_cart(uuid)",
+  ]) {
+    const grants = (await sql(
+      `SELECT has_function_privilege('anon', $1, 'EXECUTE') AS anon,
+              has_function_privilege('authenticated', $1, 'EXECUTE') AS auth,
+              has_function_privilege('service_role', $1, 'EXECUTE') AS svc`,
+      [`public.${fn}`],
+    ))[0];
+    assert.deepEqual(grants, { anon: false, auth: false, svc: true }, fn);
+  }
+  console.log("-. OK: both refund functions are executable by service_role only");
+}
+
 await pool.end();
 pool = null;
 console.log("verify-event-consolidation: all assertions passed");

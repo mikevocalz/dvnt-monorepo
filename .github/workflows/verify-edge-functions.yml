@@ -29,6 +29,7 @@ on:
       - "scripts/verify-comp-claims.mjs"
       - "scripts/verify-event-lynk-lifecycle.mjs"
       - "scripts/verify-event-consolidation.mjs"
+      - "scripts/verify-event-financials-addons.mjs"
       - "scripts/verify-call-capacity.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
@@ -51,6 +52,7 @@ on:
       - "scripts/verify-brand-follows.mjs"
       - "scripts/verify-event-lynk-lifecycle.mjs"
       - "scripts/verify-event-consolidation.mjs"
+      - "scripts/verify-event-financials-addons.mjs"
       - "scripts/verify-call-capacity.mjs"
 
 jobs:
@@ -244,3 +246,18 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-event-consolidation.mjs
+
+  event-financials-addons:
+    # Replays the event_financials SQL and its order_addons triggers on a
+    # throwaway cluster: coat-check revenue counts in gross, partial and full
+    # add-on refunds come off it, and moving or deleting an add-on row
+    # recomputes both events. Same no-skip rule as the jobs above.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/verify-event-financials-addons.mjs
