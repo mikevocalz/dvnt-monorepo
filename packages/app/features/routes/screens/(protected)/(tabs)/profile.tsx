@@ -230,7 +230,7 @@ function ProfileScreenContent() {
         showToast(
           "error",
           "Upload Failed",
-          "Failed to upload image. Please try again.",
+          uploadResult.error || "Failed to upload image. Please try again.",
         );
         setIsUpdatingAvatar(false);
         return;

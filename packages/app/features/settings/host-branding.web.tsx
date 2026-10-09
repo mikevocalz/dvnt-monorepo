@@ -115,12 +115,12 @@ export function HostBrandingScreen() {
       if (newLogoUri) {
         const res = await uploadSingle(newLogoUri);
         if (res.success && res.url) logoUrl = res.url;
-        else showToast("warning", "Upload Issue", "Logo upload failed. Other changes will be saved.");
+        else showToast("warning", "Upload Issue", `Logo upload failed: ${res.error || "unknown error"}. Other changes will be saved.`);
       }
       if (newMonochromeUri) {
         const res = await uploadSingle(newMonochromeUri);
         if (res.success && res.url) logoMonochromeUrl = res.url;
-        else showToast("warning", "Upload Issue", "Monochrome logo upload failed. Other changes will be saved.");
+        else showToast("warning", "Upload Issue", `Monochrome logo upload failed: ${res.error || "unknown error"}. Other changes will be saved.`);
       }
 
       const next = { ...branding, logoUrl, logoMonochromeUrl };
