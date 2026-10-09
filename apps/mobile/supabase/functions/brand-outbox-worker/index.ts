@@ -203,7 +203,26 @@ Deno.serve(async (req: Request) => {
     // the last NEW_PROFILE_WINDOW that skipped auth-sync. It needs the proven
     // brand ID pair but not DVNT_BRAND_OUTBOX_ENABLED. Once nothing is missing
     // the RPC inserts nothing and reports remaining: 0.
-    const brandFollows = await runBrandFollowBackfill(supabase, followBackfillLimit);
+    // DB-pinned brand identity keeps follow repair functioning even if the
+    // marketing sender environment is accidentally missing. Sending still
+    // requires the explicit enabled sender gate below.
+    const { data: repairedFollows, error: repairError } = await supabase.rpc(
+      "repair_canonical_brand_follows", { p_limit: followBackfillLimit },
+    );
+    const brandFollows = repairError
+      ? await runBrandFollowBackfill(supabase, followBackfillLimit)
+      : { status: "ran" as const,
+          memberToBrandInserted: Number(repairedFollows?.memberToBrandInserted ?? 0),
+          brandToNewMemberInserted: Number(repairedFollows?.brandToNewMemberInserted ?? 0),
+          remaining: Number(repairedFollows?.remaining ?? 0),
+          done: Number(repairedFollows?.remaining ?? 0) === 0 };
+
+    // One campaign-version key per eligible missing-avatar member. The worker
+    // will suppress a resolved profile before delivering the message.
+    const { data: photoReminders, error: photoError } = await supabase.rpc(
+      "enqueue_missing_avatar_reminder", { p_limit: 2000 },
+    );
+    if (photoError) console.error("[brand-outbox-worker] photo reminder enqueue failed:", photoError.message);
 
     const checkoutWelcome = await sendCheckoutWelcomeEmails(supabase);
 
@@ -223,6 +242,7 @@ Deno.serve(async (req: Request) => {
         data: {
           enqueued: enqueued ?? 0,
           brandFollows,
+          photoReminders: photoReminders ?? 0,
           checkoutWelcome,
           claimed: 0,
           sent: 0,
@@ -255,6 +275,7 @@ Deno.serve(async (req: Request) => {
         data: {
           enqueued: enqueued ?? 0,
           brandFollows,
+          photoReminders: photoReminders ?? 0,
           checkoutWelcome,
           claimed: 0,
           sent: 0,
@@ -291,6 +312,10 @@ Deno.serve(async (req: Request) => {
       } else if (!copy) {
         outcome = "permanent_error";
         error = `unknown_campaign_version:${row.campaign_version}`;
+      } else if (row.campaign_version === "profile_photo_v1" &&
+                 await hasProfilePhoto(supabase, recipient)) {
+        outcome = "suppress";
+        error = "profile_photo_already_added";
       } else if (row.channel === "dm") {
         const result = await sendDirectMessage(
           supabase,
@@ -407,4 +432,15 @@ async function sendDirectMessage(
     content: body,
     metadata: { automated: true, brandAnnouncement: true, idempotencyKey },
   });
+}
+
+/** Recheck right before the DM leaves; photo uploads cancel the campaign. */
+async function hasProfilePhoto(supabase: any, recipient: { id: number; auth_id: string }): Promise<boolean> {
+  const [{ data: profile, error: pError }, { data: auth, error: aError }] = await Promise.all([
+    supabase.from("users").select("avatar_id").eq("id", recipient.id).single(),
+    supabase.from("user").select("image").eq("id", recipient.auth_id).single(),
+  ]);
+  // A read failure must not incorrectly send a profile-shaming nudge.
+  if (pError || aError) return true;
+  return profile?.avatar_id != null || Boolean(String(auth?.image ?? "").trim());
 }
