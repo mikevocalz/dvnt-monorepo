@@ -43,3 +43,20 @@ export function canShowProfileReminderAt(pathname: string): boolean {
   ]);
   return !segments.some(s => blocked.has(s));
 }
+
+/** A restricted new member may enter only the screen needed for the next step. */
+export function newMemberRedirect(
+  step: "not_required" | "pending_verification" | "photo" | "first_post" | "complete",
+  path: string,
+): string | null {
+  if (step === "not_required" || step === "complete" || step === "pending_verification") return null;
+  // Existing ID and email verification flows, legal documents and ticket
+  // purchases remain accessible. No gate may trap a user inside checkout.
+  if (/^\/(?:auth|legal)(?:\/|$)/.test(path) ||
+      /\/(?:checkout|payment|billing|tickets|ticket|orders)(?:\/|$)/.test(path)) return null;
+  if (step === "photo") {
+    return path === "/feed/onboarding/photo" ? null : "/feed/onboarding/photo";
+  }
+  return path === "/feed/create" || path.startsWith("/feed/camera")
+    ? null : "/feed/create";
+}
