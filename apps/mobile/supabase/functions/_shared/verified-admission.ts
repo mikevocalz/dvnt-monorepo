@@ -11,7 +11,11 @@
  * with `enforce = false`, so merging this changes nothing for live members.
  */
 import { checkAdultBirthDate } from "./age-policy.ts";
-import { determineNewMemberStep, NEW_MEMBER_ONBOARDING_CUTOFF } from "./new-member-onboarding.ts";
+import {
+  determineNewMemberStep,
+  isNewMemberOnboardingEnabled,
+  NEW_MEMBER_ONBOARDING_CUTOFF,
+} from "./new-member-onboarding.ts";
 
 /**
  * Every account is in scope once `enforce` is on (checklist A03). There is no
@@ -247,6 +251,7 @@ export async function resolveVerifiedAdmission(
     now,
   });
   if (opts.purpose === "ticket_purchase" || verdict.state === "blocked") return verdict;
+  if (!isNewMemberOnboardingEnabled()) return verdict;
 
   // The mandatory onboarding gate is independent of the legacy verified-only
   // rollout. It only applies to NEW Better Auth signups, never old accounts,

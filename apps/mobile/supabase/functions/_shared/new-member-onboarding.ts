@@ -6,6 +6,20 @@
  */
 export const NEW_MEMBER_ONBOARDING_CUTOFF = "2026-10-09T00:30:00.000Z";
 
+/**
+ * The gate stays off until DVNT_NEW_MEMBER_ONBOARDING_ENABLED is exactly
+ * "true". Native builds without the photo/first-post screens would trap new
+ * signups, and the gate also requires ID verification, so it must not go live
+ * on deploy. Turn it on once those builds have reached users, and move
+ * NEW_MEMBER_ONBOARDING_CUTOFF to that date in the same change.
+ */
+export function isNewMemberOnboardingEnabled(
+  read: (name: string) => string | undefined = (name) =>
+    (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env.get(name),
+): boolean {
+  return (read("DVNT_NEW_MEMBER_ONBOARDING_ENABLED") ?? "").trim() === "true";
+}
+
 export interface OnboardingEvidence {
   accountCreatedAt: string | null | undefined;
   emailVerified: boolean;

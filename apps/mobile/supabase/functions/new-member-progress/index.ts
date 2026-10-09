@@ -7,7 +7,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
 import { checkAdultBirthDate } from "../_shared/age-policy.ts";
-import { determineNewMemberStep } from "../_shared/new-member-onboarding.ts";
+import {
+  determineNewMemberStep,
+  isNewMemberOnboardingEnabled,
+} from "../_shared/new-member-onboarding.ts";
 import { withSentry } from "../_shared/sentry.ts";
 
 function json(req: Request, value: unknown, status = 200): Response {
@@ -26,6 +29,10 @@ Deno.serve(withSentry("new-member-progress", async (req) => {
   const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
   const authId = await verifySession(db, req);
   if (!authId) return json(req, { ok: false, error: "Please sign in again" }, 401);
+  // Gate off: report "not_required" so web and native clients never redirect.
+  if (!isNewMemberOnboardingEnabled()) {
+    return json(req, { ok: true, data: { step: "not_required", required: false } });
+  }
 
   const [{ data: account, error: accountError }, { data: profile, error: profileError },
          { data: verified, error: verifiedError }] = await Promise.all([

@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { determineNewMemberStep } from "./new-member-onboarding.ts";
+import { determineNewMemberStep, isNewMemberOnboardingEnabled } from "./new-member-onboarding.ts";
 
 const newer = {
   accountCreatedAt: "2026-10-09T00:31:00.000Z",
@@ -33,4 +33,11 @@ Deno.test("onboarding boundary uses the server enrollment timestamp", () => {
   assertEquals(determineNewMemberStep({
     ...newer, accountCreatedAt: "2026-10-09T00:29:59.999Z",
   }), "not_required");
+});
+
+Deno.test("the onboarding gate is off unless the flag is exactly true", () => {
+  assertEquals(isNewMemberOnboardingEnabled(() => undefined), false);
+  assertEquals(isNewMemberOnboardingEnabled(() => "1"), false);
+  assertEquals(isNewMemberOnboardingEnabled(() => "TRUE"), false);
+  assertEquals(isNewMemberOnboardingEnabled(() => " true "), true);
 });
