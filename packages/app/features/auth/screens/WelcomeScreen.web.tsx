@@ -13,6 +13,7 @@ import { IDENTITY_OPTIONS, AUDIENCE_OPTIONS } from '../../../lib/constants/ident
 import { fetchOwnIdentity, onboardingState } from '../../../lib/profile/own-identity';
 import { onboardingCheckpoint, onboardingFailure } from '@dvnt/observability/flows';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
+import { fetchNewMemberProgress } from '../../../lib/profile/new-member-progress';
 
 /**
  * Post-signup welcome flow (web): identity → event audience → location.
@@ -82,6 +83,17 @@ export function WelcomeScreen() {
   // read that only failed.
   const checkIdentity = async (userId: string) => {
     setCheck('checking');
+    // Newly verified signups MUST do photo -> first published post BEFORE the
+    // optional location/interests welcome questions or the main app.
+    try {
+      const progress = await fetchNewMemberProgress();
+      if (progress.step === 'photo') { router.replace('/feed/onboarding/photo'); return; }
+      if (progress.step === 'first_post') { router.replace('/feed/create'); return; }
+      if (progress.step === 'complete') { router.replace('/feed'); return; }
+    } catch {
+      // A network error is not proof onboarding is complete. The shared
+      // site guard will retry rather than setting a client "done" flag.
+    }
     const result = await fetchOwnIdentity(supabase, userId);
     const state = onboardingState(result);
     if (state === 'unknown') {
