@@ -350,6 +350,7 @@ function EditProfileScreenContent() {
       const errorMessage =
         error?.message || "Failed to save profile. Please try again.";
       showToast("error", "Error", errorMessage);
+    } finally {
       setIsSaving(false);
     }
   };
