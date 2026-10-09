@@ -156,3 +156,27 @@ test('a restored job never publishes under whoever is signed in now', async () =
   assert.equal(job.ownerId, 'owner-a');
   assert.match(job.message, /Sign back into the account/);
 });
+
+test('required first-post onboarding waits for server-side publish completion', async () => {
+  const queue = createPublishQueue();
+  const gate = deferred();
+  const id = queue.enqueue('new-member', 'first DVNT post', async () => gate.promise);
+  let complete = false;
+  const done = queue.whenFinished(id).then(() => { complete = true; });
+  await tick();
+  assert.equal(complete, false, 'an enqueued post must NOT unlock onboarding');
+  gate.resolve();
+  await done;
+  assert.equal(complete, true, 'successful completion unlocks next status read');
+  assert.deepEqual(queue.getSnapshot(), []);
+});
+
+test('failed first-post publish keeps the member on the composer', async () => {
+  const queue = createPublishQueue();
+  const id = queue.enqueue('new-member', 'first DVNT post', async () => {
+    throw new Error('Upload could not finish');
+  });
+  await assert.rejects(queue.whenFinished(id), /Upload could not finish/);
+  const saved = queue.getSnapshot().find((job) => job.id === id);
+  assert.equal(saved?.status, 'failed');
+});
