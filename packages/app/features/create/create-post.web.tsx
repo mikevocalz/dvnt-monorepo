@@ -35,6 +35,8 @@ import {
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { usePublishPost } from "@dvnt/app/lib/hooks/use-publish-post";
+import { postPublishQueue } from "@dvnt/app/lib/posts/publish-queue";
+import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
 import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
 import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -261,11 +263,23 @@ export function CreatePostScreen() {
     try {
       // Same publication-time visibility recheck as native.
       await assertFirstPostPublishable();
-      publishPost(useCreatePostStore.getState());
+      // Ordinary members keep the background publish queue. During mandatory
+      // first-post onboarding, do NOT clear the draft or navigate on enqueue:
+      // only a successfully persisted server post unlocks the app.
+      const progress = await fetchNewMemberProgress();
+      const mandatoryFirstPost = progress.step === "first_post";
+      const publishId = publishPost(useCreatePostStore.getState());
+      if (mandatoryFirstPost) {
+        await postPublishQueue.whenFinished(publishId);
+        const checked = await fetchNewMemberProgress();
+        if (checked.step !== "complete" || !checked.hasPost) {
+          throw new Error("Your first post is still processing. Please retry after it finishes.");
+        }
+      }
       useFirstPostOfferStore.getState().clearPending();
       reset();
       ui.setTagInput("");
-      router.push("/feed");
+      router.replace("/feed");
     } catch (error) {
       showToast("error", "Could not share", error instanceof Error ? error.message : "Please try again.");
     } finally {
