@@ -100,6 +100,14 @@ function EditProfileScreenContent() {
   const updateProfile = useUpdateProfile();
   const [isSaving, setIsSaving] = useState(false);
   const [newAvatarUri, setNewAvatarUri] = useState<string | null>(null);
+  const [requiredPhoto, setRequiredPhoto] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void fetchNewMemberProgress().then((p) => {
+      if (active) setRequiredPhoto(p.step === "photo");
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [user?.id]);
   const { uploadSingle, isUploading, progress } = useMediaUpload({
     folder: "avatars",
     userId: user?.id,
@@ -446,6 +454,23 @@ function EditProfileScreenContent() {
         </Pressable>
       </View>
 
+      {requiredPhoto && (
+        <View style={{
+          paddingHorizontal: 18, paddingVertical: 14, marginHorizontal: 16,
+          marginTop: 10, borderRadius: 16, borderWidth: 1,
+          borderColor: "rgba(255,91,252,0.45)", backgroundColor: "rgba(255,91,252,0.12)",
+        }}>
+          <Text style={{ color: "#FF5BFC", fontSize: 11, letterSpacing: 2, fontWeight: "900" }}>
+            DVNT · STEP 1 OF 2
+          </Text>
+          <Text style={{ color: "#fff", fontSize: 17, fontWeight: "800", marginTop: 6 }}>
+            First, upload your profile picture.
+          </Text>
+          <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 13, marginTop: 4 }}>
+            Once the photo saves successfully, we'll take you straight to creating your first post.
+          </Text>
+        </View>
+      )}
       <KeyboardAwareScrollView
         ref={scrollRef}
         style={{ flex: 1 }}
