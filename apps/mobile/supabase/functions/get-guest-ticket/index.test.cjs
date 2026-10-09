@@ -5,7 +5,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { harness } = require('../_shared/payment-safety.test.cjs');
 
-const TOKEN = '0b5c1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3';
+const TOKEN = '00000000-0000-4000-8000-000000000001';
 
 function db() {
   const addonRows = [
