@@ -28,14 +28,14 @@ export function ProfileCompletionPopupHost() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const hydrated = useAuthStore((s) => s._hasHydrated);
-  const authStatus = useAuthStore((s) => s.authStatus);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const verificationPopupOpen = useVerifiedOnlyPromptStore((s) => s.open);
   const [needs, setNeeds] = useState<ReminderNeeds>({ photo: false, firstPost: false });
   const [open, setOpen] = useState(false);
   const tried = useRef<string | null>(null);
 
   const memberId = user?.authId || String(user?.id ?? "");
-  const ready = hydrated && authStatus === "authenticated" && !!memberId;
+  const ready = hydrated && isAuthenticated && !!memberId;
   const allowed = canShowProfileReminderAt(pathname);
 
   useEffect(() => {
