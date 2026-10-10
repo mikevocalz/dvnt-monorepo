@@ -35,6 +35,7 @@ import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
+import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 interface PromoCode {
@@ -78,6 +79,7 @@ function PromoCodesScreenContent() {
         .from("promo_codes")
         .select("*")
         .eq("event_id", eventId)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -170,15 +172,19 @@ function PromoCodesScreenContent() {
           style: "destructive",
           onPress: async () => {
             try {
-              const { error } = await supabase
-                .from("promo_codes")
-                .delete()
-                .eq("id", promoId);
-              if (error) throw error;
+              const { data, error } = await invokeEdge<{ ok: boolean; error?: string }>(
+                "manage-promo-code",
+                { action: "delete", promo_id: promoId },
+              );
+              if (error) throw new Error(error.message);
+              if (!data?.ok) {
+                throw new Error(data?.error || "Failed to delete promo code");
+              }
               setPromoCodes((prev) => prev.filter((p) => p.id !== promoId));
               showToast("success", "Deleted", `Promo code "${code}" deleted`);
             } catch (err: any) {
-              showToast("error", "Error", "Failed to delete promo code");
+              console.error("[PromoCodes] Delete error:", err);
+              showToast("error", "Error", err?.message || "Failed to delete promo code");
             }
           },
         },
