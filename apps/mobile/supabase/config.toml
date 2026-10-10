@@ -281,6 +281,9 @@ verify_jwt = false
 [functions.lynk-moq-token]
 verify_jwt = false
 
+[functions.manage-promo-code]
+verify_jwt = false
+
 [functions.manage-promoters]
 verify_jwt = false
 
