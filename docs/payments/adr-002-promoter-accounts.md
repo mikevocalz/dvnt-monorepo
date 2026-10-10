@@ -12,11 +12,13 @@ Promoters are individuals who drive ticket sales through a tracked code or link 
 
 ## Decision
 
-### Promoters are transfers-only connected accounts
+### Promoters are payout recipients — current platform onboarding requests both capabilities
 
-- Required Stripe capability: **transfers**.
-- No card payments capability is needed; promoters do not accept payments on behalf of the event.
-- Using the transfers-only path shortens onboarding compared to full card-present / card-not-present accounts.
+- Business requirement: a promoter receives transfers; promoter ticket payments are still charged by DVNT, not by the promoter.
+- **2026-10-10 production incident amendment:** DVNT's current Stripe platform is not approved to request `transfers` without `card_payments`. Stripe rejects that request before onboarding can begin.
+- Until Stripe approves transfers-only accounts, promoter Express account creation requests both `card_payments` and `transfers`, matching `organizer-connect`. Existing transfer-only account mappings request the missing `card_payments` capability via the Stripe Account Capability API, rather than silently creating a duplicate.
+- Requesting a capability can introduce extra Stripe verification requirements; a capability request is not proof of activation. `payouts_enabled` remains the release gate for promoter transfers.
+- **Long-term preference:** request transfers-only approval from Stripe and return to least-privilege transfers-only onboarding when explicitly approved and tested.
 
 ### Same account API as organizers
 
@@ -66,7 +68,7 @@ State is refreshed from Stripe on return from the onboarding link and on account
 ### Negative / open questions
 
 - A person who is both organizer and promoter has a single Stripe account; their promoter earnings and organizer payouts share the same balance and tax reporting. This is acceptable for individuals but may need review for LLC/entity accounts.
-- The "same account API" decision assumes the organizer account type already supports transfers. If it is a Custom account with card payments capability, the prompt's "transfers only" rule must still be enforced for promoters by requesting only the transfers capability.
+- The extra card payments capability is a current platform restriction, not a product decision to let promoters independently charge buyers. It can add verification friction and should be revisited if Stripe grants the transfers-only exception.
 
 ## Follow-ups
 

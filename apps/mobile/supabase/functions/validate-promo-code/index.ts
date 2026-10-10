@@ -64,6 +64,7 @@ Deno.serve(async (req: Request) => {
       .from("promo_codes")
       .select("*")
       .eq("event_id", parseInt(event_id))
+      .is("deleted_at", null)
       .ilike("code", normalizedCode);
 
     const { data: promos, error: promoError } = await query;

@@ -5,13 +5,13 @@
  * (`app/(protected)/events/[id]/promo-codes.tsx`).
  *
  * Law 1 (data flow is sacred): consumes the EXACT same server contract as
- * native — the screen reads/writes the `promo_codes` table directly through the
- * shared `supabase` client (native has no dedicated hook; the queries ARE the
- * contract). The list is `from("promo_codes").select("*").eq("event_id", id)
+ * native — list/create use the `promo_codes` table. Delete calls the
+ * owner-authorized `manage-promo-code` Edge Function so prior orders retain
+ * their promo references and clients never need direct DELETE privileges. The list is `from("promo_codes").select("*").eq("event_id", id)
  * .order("created_at", { ascending: false })`; create is the same `.insert({...})`
  * payload (code upper-cased, dollars→cents, `created_by` from
- * `getCurrentUserAuthId()`, duplicate `23505` → "already exists"); delete is the
- * same `.delete().eq("id", promoId)`. Toasts go through `useUIStore.showToast`
+ * `getCurrentUserAuthId()`, duplicate `23505` → "already exists"); deletion is
+ * an authenticated revoke. Toasts go through `useUIStore.showToast`,
  * exactly like native. The read/create/delete are wrapped in TanStack Query
  * (`useQuery` + two `useMutation`s) so the web cache invalidates the list — the
  * underlying supabase calls are byte-for-byte the native ones.
@@ -38,6 +38,7 @@ import { X, Plus, Tag, Trash2, Copy, Percent, DollarSign } from "lucide-react";
 import { FormField, Dialog } from "@dvnt/ui";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
+import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usePromoCodesUIStore } from "@dvnt/app/lib/stores/promo-codes-ui-store";
 
@@ -172,6 +173,7 @@ export function EventPromoCodesScreen() {
         .from("promo_codes")
         .select("*")
         .eq("event_id", eventId)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data || []) as PromoCode[];
@@ -223,14 +225,15 @@ export function EventPromoCodesScreen() {
     },
   });
 
-  // DELETE — exact native supabase delete.
+  // DELETE — server-side revoke; prior paid orders keep their promo refs.
   const deleteMutation = useMutation({
     mutationFn: async (promoId: string) => {
-      const { error } = await supabase
-        .from("promo_codes")
-        .delete()
-        .eq("id", promoId);
-      if (error) throw error;
+      const { data, error } = await invokeEdge<{ ok: boolean; error?: string }>(
+        "manage-promo-code",
+        { action: "delete", promo_id: promoId },
+      );
+      if (error) throw new Error(error.message);
+      if (!data?.ok) throw new Error(data?.error || "Failed to delete promo code");
       return promoId;
     },
     onSuccess: () => {
@@ -240,9 +243,9 @@ export function EventPromoCodesScreen() {
       setIsDeleting(false);
       queryClient.invalidateQueries({ queryKey: ["event-promo-codes", eventId] });
     },
-    onError: () => {
+    onError: (error: Error) => {
       setIsDeleting(false);
-      showToast("error", "Error", "Failed to delete promo code");
+      showToast("error", "Error", error.message || "Failed to delete promo code");
     },
   });
 

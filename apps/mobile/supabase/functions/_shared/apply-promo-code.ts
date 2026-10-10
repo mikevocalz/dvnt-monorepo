@@ -42,6 +42,7 @@ export async function validateAndApplyPromo(
     .from("promo_codes")
     .select("*")
     .eq("event_id", eventId)
+    .is("deleted_at", null)
     .ilike("code", normalizedCode);
 
   if (promoError || !promos?.length) {

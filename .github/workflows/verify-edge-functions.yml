@@ -79,6 +79,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node --test apps/mobile/supabase/functions/_shared/verification-session-onboarding.test.cjs
+      # Stripe/organizer and promo-code production-incident regressions.
+      - run: node --test apps/mobile/supabase/functions/promoter-connect/index.test.cjs apps/mobile/supabase/functions/manage-promo-code/index.test.cjs
 
   deno-shared-suites:
     # 138 Deno.test cases under apps/mobile/supabase/functions/_shared that no
