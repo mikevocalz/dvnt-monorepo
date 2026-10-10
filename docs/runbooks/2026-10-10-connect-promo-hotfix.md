@@ -7,7 +7,7 @@
 
 ## Cause and code changes
 1. `promoter-connect` requested transfers only, while `organizer-connect` already requests card payments + transfers. The platform is currently not approved for transfers-only creation. Request both capabilities at creation and request missing `card_payments` on an existing linked account before returning its Stripe onboarding link. Do **not** create another account for existing promoters.
-2. Web/native clients deleted `promo_codes` directly, even though authorization/RLS and `orders.promo_code_id` references can prevent DELETE. The client now calls `manage-promo-code` with Better Auth session credentials. Only event hosts or accepted admin co-organizers may revoke. Server sets `deleted_at`, preserving all historic purchase/accounting references. Both the public validator and the checkout's shared discount helper ignore revoked rows.
+2. Web/native clients deleted `promo_codes` directly, even though authorization/RLS and `orders.promo_code_id` references can prevent DELETE. The client now calls `manage-promo-code` with Better Auth session credentials. Only event hosts or accepted admin co-organizers may revoke. Server sets `deleted_at` and a past `valid_until`, preserving all historic purchase/accounting references. The past expiry makes older deployed checkout versions reject the discount during a staggered rollout; the new public validator and shared helper also explicitly ignore revoked rows.
 3. A new Edge Function requires `verify_jwt = false` in Supabase config to allow DVNT Better Auth sessions. Authentication is still enforced in the function via `verifySession`—never expose service-role keys to a client.
 
 ## Verification (before production deployment)
@@ -23,7 +23,7 @@
 ## Production deployment order (review with release owner)
 1. Confirm production Stripe mode/platform and current connected-account capabilities. These changes request an **additional** capability, which can add Stripe onboarding requirements. If policy prohibits requesting card payments, obtain Stripe approval for transfers-only instead; code alone cannot override account eligibility.
 2. Apply and verify **only** the reviewed `20261010160000_promo_codes_soft_delete.sql` migration, after inspecting the remote migration ledger and SQL diff. Do **not** run an unchecked bulk migration push.
-3. Deploy `manage-promo-code` with `--no-verify-jwt`; deploy `validate-promo-code`, `cart-checkout`, and `door-sell` after the migration (the latter two import the changed shared promo helper). Confirm deployed config pins Better Auth.
+3. Deploy `manage-promo-code` with `--no-verify-jwt`; deploy `validate-promo-code`, `cart-checkout`, and `door-sell` after the migration (the latter two import the changed shared promo helper). While those checkout redeployments are pending, the revoke function sets a past `valid_until` as a backwards-compatible checkout guard. Confirm deployed config pins Better Auth.
 4. Deploy `promoter-connect` with `--no-verify-jwt`. Verify new and linked Express account onboarding from web/mobile.
 5. Ship the web client and any relevant native OTA updates after the function and migration are live, following existing release procedures. Keep rollout scoped; monitor 4xx/5xx and checkout-discount redemption.
 6. Smoke test the actual reported flows on `dvntapp.live` with accounts authorized for testing. Never perform real charges or payouts as part of a smoke test.
