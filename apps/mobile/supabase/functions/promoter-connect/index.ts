@@ -184,8 +184,12 @@ Deno.serve(withSentry("promoter-connect", async (req: Request) => {
         organizerAccount?.stripe_account_id ?? null;
 
       if (!stripeAccountId) {
+        // DVNT's Stripe platform is not approved for transfers-only Connect
+        // accounts. Pair card_payments with transfers (as organizer-connect
+        // already does) to avoid rejecting bank onboarding at account creation.
         const account = await stripeRequest("/accounts", {
           type: "express",
+          "capabilities[card_payments][requested]": "true",
           "capabilities[transfers][requested]": "true",
           "metadata[dvnt_user_id]": userId,
           "metadata[dvnt_promoter_id]": promoter.id,
@@ -196,6 +200,20 @@ Deno.serve(withSentry("promoter-connect", async (req: Request) => {
           "[promoter-connect] Stripe account created:",
           stripeAccountId,
         );
+      } else {
+        // Previously created transfer-only accounts may already be linked to
+        // promoters, or shared with organizer_accounts. Don't create a new
+        // account: add the missing capability before issuing an onboarding link.
+        const existingAccount = await stripeGet(`/accounts/${stripeAccountId}`);
+        if (
+          !existingAccount.capabilities?.card_payments ||
+          existingAccount.capabilities.card_payments === "unrequested"
+        ) {
+          await stripeRequest(
+            `/accounts/${stripeAccountId}/capabilities/card_payments`,
+            { requested: "true" },
+          );
+        }
       }
 
       // Store the link on the promoter row. If the row already has an account
