@@ -13,7 +13,7 @@ function harness({
   deletedAt = null,
 } = {}) {
   let handler;
-  const promo = { id: PROMO_ID, event_id: 42, deleted_at: deletedAt };
+  const promo = { id: PROMO_ID, event_id: 42, deleted_at: deletedAt, valid_until: null };
   const tables = {
     promo_codes: [promo],
     events: [{ id: 42, host_id: host }],
@@ -90,6 +90,9 @@ test("organizer removal revokes the code but preserves the row for orders", asyn
   assert.equal(response.body.ok, true);
   assert.equal(h.updates.length, 1);
   assert.ok(h.promo.deleted_at);
+  // Existing deployed checkout versions use valid_until; deletion must
+  // immediately revoke discounts even before those functions are redeployed.
+  assert.ok(new Date(h.promo.valid_until) < new Date());
 
   const duplicate = await h.send();
   assert.equal(duplicate.status, 200);
