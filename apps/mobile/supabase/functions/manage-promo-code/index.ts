@@ -88,10 +88,14 @@ Deno.serve(withSentry("manage-promo-code", async (req: Request) => {
     if (promo.deleted_at) return json(req, { ok: true, alreadyDeleted: true });
 
     // Do not delete physically: orders.promo_code_id may reference this row.
-    // Guard against concurrent deletes so the operation is idempotent.
+    // Also expire the code for already-deployed checkout functions, which
+    // enforce valid_until but have not yet received the deleted_at filter.
+    // This makes a staggered deployment safe without rewriting order history.
+    const now = new Date();
+    const expiredAt = new Date(now.getTime() - 1000).toISOString();
     const { error: revokeError } = await supabase
       .from("promo_codes")
-      .update({ deleted_at: new Date().toISOString() })
+      .update({ deleted_at: now.toISOString(), valid_until: expiredAt })
       .eq("id", promo.id)
       .eq("event_id", promo.event_id)
       .is("deleted_at", null);
