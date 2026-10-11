@@ -1,0 +1,36 @@
+name: Ticket embed integration
+on:
+  push:
+    branches: [feat/ticket-embed-live-checkout]
+  pull_request:
+    paths:
+      - 'apps/web/**'
+      - 'packages/app/**'
+      - 'apps/mobile/supabase/**'
+      - 'scripts/ticket-embed/**'
+      - '.github/workflows/ticket-embed-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ticket-embed-integration-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Existing organizer and preview contracts
+        run: node --test docs/ticketing/responsive-embed.test.cjs apps/mobile/supabase/functions/manage-ticket-embed/index.test.cjs
+      - name: Capture tracked source for reproducible offline verification
+        run: git archive --format=tar.gz -o /tmp/dvnt-embed-source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ticket-embed-source
+          path: /tmp/dvnt-embed-source.tar.gz
+          retention-days: 2
