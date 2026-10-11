@@ -355,12 +355,12 @@ export const promotersApi = {
   },
 
   /** Start Stripe Connect onboarding for the current user's promoter account. */
-  async connectStart(eventId: number): Promise<{ url: string; accountId: string }> {
+  async connectStart(eventId: number, platform: "web" | "native" = "native"): Promise<{ url: string; accountId: string }> {
     const { data, error } = await invokeEdge<{
       url?: string;
       account_id?: string;
       error?: string;
-    }>("promoter-connect", { action: "start", event_id: eventId });
+    }>("promoter-connect", { action: "start", event_id: eventId, platform });
     if (error) throw new Error(error.message);
     if (!data?.url || !data?.account_id) {
       throw new Error(data?.error || "Could not start Connect onboarding");
