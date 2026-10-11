@@ -25,7 +25,13 @@ STRIPE_STUB = '''window.Stripe = function(key) {return {initEmbeddedCheckout: as
   window.__stripeSecret = await options.fetchClientSecret();
   return {mount: function(target) { window.__stripeTopLevel = target.ownerDocument === document && window.top === window;
     const b=document.createElement('button');b.textContent='Pay test card';b.onclick=()=>options.onComplete();target.append(b);},
-    destroy: function(){}};}};'''
+    destroy: function(){}};}};};'''
+# Fail at the actual JavaScript error, not at a later missing payment button.
+# These are the scripts the browser will execute, including the explicit test double.
+for name, source in [('Stripe test double', STRIPE_STUB), ('ticket loader', loader), ('selection client', client)]:
+    syntax = subprocess.run(['node', '--check'], input=source, text=True, capture_output=True)
+    if syntax.returncode:
+        raise SystemExit(f'{name} JavaScript syntax check failed:\n{syntax.stderr}')
 with sync_playwright() as p:
     options = {'headless':True}
     if os.environ.get('DVNT_CHROMIUM_EXECUTABLE'):
