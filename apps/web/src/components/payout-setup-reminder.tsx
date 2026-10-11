@@ -31,11 +31,13 @@ export function PayoutSetupReminder(){
     if(shown.has(key)||checked.current===key)return;
     try{if(sessionStorage.getItem(key)==='dismissed'){shown.add(key);return;}}catch{}
     let cancelled=false;
+    let settled=false;
     checked.current=key;
     void (async()=>{
       try{
         const admission=await fetchNewMemberProgress();
-        if(cancelled||admission.required)return;
+        if(cancelled)return;
+        if(admission.required){checked.current=null;return;}
         const status=await checkPayoutSetupReminder();
         if(cancelled||!status.eligible||!status.needsSetup||!status.route)return;
         // Avoid overlaying the mandatory profile gate or another modal.
@@ -45,9 +47,9 @@ export function PayoutSetupReminder(){
       }catch{
         // A failed Stripe status read never becomes a false accusation.
         checked.current=null;
-      }
+      }finally{settled=true;}
     })();
-    return()=>{cancelled=true;};
+    return()=>{cancelled=true;if(!settled && checked.current===key)checked.current=null;};
   },[authenticated,hydrated,id,key,eligiblePath,verifying,path]);
   const close=()=>{
     setOpen(false);

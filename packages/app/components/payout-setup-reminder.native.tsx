@@ -29,17 +29,18 @@ export function PayoutSetupReminderNative(){
   useEffect(()=>{
     if(!authenticated||!hydrated||!id||!permitted){setVisible(false);return;}
     if(shown.has(key)||checked.current===key)return;
-    let cancelled=false;checked.current=key;
+    let cancelled=false;let settled=false;checked.current=key;
     void (async()=>{
       try{
         const progress=await fetchNewMemberProgress();
-        if(cancelled||progress.required)return;
+        if(cancelled)return;
+        if(progress.required){checked.current=null;return;}
         const result=await checkPayoutSetupReminder();
         if(cancelled||!result.eligible||!result.needsSetup||!result.route)return;
         setReminder(result);setVisible(true);
-      }catch{checked.current=null;}
+      }catch{checked.current=null;}finally{settled=true;}
     })();
-    return()=>{cancelled=true;};
+    return()=>{cancelled=true;if(!settled&&checked.current===key)checked.current=null;};
   },[authenticated,hydrated,id,key,permitted,revision]);
   const close=()=>{setVisible(false);shown.add(key);};
   const setup=()=>{
