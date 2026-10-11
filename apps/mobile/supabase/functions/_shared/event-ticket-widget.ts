@@ -28,14 +28,16 @@ export function createEventWidgetHandler(d:{db:any;authenticate:(r:Request)=>Pro
     const cutoff=salesCutoffAt(e)?.getTime();const salesOpen=typeof cutoff==='number'&&cutoff>Date.now();
     const tiers=[];
     if(salesOpen){
-     const t=await d.db.from('ticket_types').select('id,name,is_active,status,tier_visibility,sale_start,sale_end').eq('event_id',e.id).limit(40);
+     const t=await d.db.from('ticket_types').select('id,name,currency,is_active,status,tier_visibility,sale_start,sale_end').eq('event_id',e.id).limit(40);
      if(t.error)throw new Error('tiers');
      for(const tier of t.data||[]){
-      if(tier.is_active===false || (tier.tier_visibility&&tier.tier_visibility!=='public') || ['paused','ended','sold_out'].includes(tier.status) ||
+      if(tier.is_active===false || (tier.tier_visibility&&tier.tier_visibility!=='public') || tier.status!=='on_sale' ||
        (tier.sale_start && !(Date.parse(tier.sale_start)<=Date.now())) || (tier.sale_end && !(Date.parse(tier.sale_end)>Date.now())))continue;
       const [p,a]=await Promise.all([d.db.rpc('ticket_type_current_price_cents',{p_tier_id:tier.id}),d.db.rpc('ticket_type_available',{p_tier_id:tier.id})]);
       if(p.error||a.error||!Number.isSafeInteger(p.data)||p.data<0||typeof a.data!=='number'||a.data<=0)continue;
-      tiers.push({name:String(tier.name||'Admission'),priceCents:p.data});
+      const currency=String(tier.currency||'USD').toUpperCase();
+      if(!/^[A-Z]{3}$/.test(currency))continue;
+      tiers.push({name:String(tier.name||'Admission'),priceCents:p.data,currency});
      }
     }
     return json({ok:true,mode:'existing_checkout',allowedOrigin:normalizeEmbedOrigin(setting.data.allowed_origin),
