@@ -559,3 +559,8 @@ verify_jwt = false
 
 [functions.creator-program]
 verify_jwt = false
+
+# Organizer embed drafts: verifies Better Auth and event owner/admin internally.
+# Feature is disabled unless TICKET_EMBED_BUILDER_ENABLED=true; no live publishing.
+[functions.manage-ticket-embed]
+verify_jwt = false
