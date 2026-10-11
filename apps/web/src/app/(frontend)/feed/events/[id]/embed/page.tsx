@@ -1,9 +1,6 @@
 import { notFound } from 'next/navigation';
-import { TicketEmbedSettingsScreen } from '@dvnt/app/features/events/ui/ticket-embed-settings.web';
-
-export default async function Page({ params }: { params: Promise<{ id: string }> }) {
-  if (process.env.TICKET_EMBED_BUILDER_ENABLED !== 'true') notFound();
-  const { id } = await params;
-  if (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id))) notFound();
-  return <TicketEmbedSettingsScreen eventId={Number(id)} />;
+import { EventWidgetScreen } from '@dvnt/app/features/events/ui/event-widget.web';
+export default async function Page({params}:{params:Promise<{id:string}>}){
+ const {id}=await params;const eventId=Number(id);if(!Number.isSafeInteger(eventId)||eventId<=0)notFound();
+ return <EventWidgetScreen eventId={eventId}/>;
 }
