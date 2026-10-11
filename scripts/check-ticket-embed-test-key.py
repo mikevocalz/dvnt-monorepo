@@ -23,6 +23,19 @@ def check_key(raw_key, read_balance):
               "authenticated": False, "test_mode_confirmed": False}
     if not key:
         return result, "missing_test_key"
+    # Report only a category, never the value or any part of its secret suffix.
+    if "=" in key and (key.startswith("STRIPE_") or key.startswith("export ")):
+        return result, "environment_assignment_in_secret_value"
+    if key[:1] in ("\"", "'") or key[-1:] in ("\"", "'"):
+        return result, "quotes_in_secret_value"
+    if key.startswith(("pk_test_", "pk_live_")):
+        return result, "publishable_key_in_secret_field"
+    if key.startswith(("sk_live_", "rk_live_")):
+        return result, "live_key_in_test_field"
+    if key.startswith("whsec_"):
+        return result, "webhook_secret_in_api_key_field"
+    if any(character.isspace() for character in key):
+        return result, "internal_whitespace_in_secret_value"
     if not re.fullmatch(r"(?:sk|rk)_test_[A-Za-z0-9]{16,}", key):
         return result, "invalid_test_key_format"
     if any(word in key.lower() for word in ("your_key", "placeholder", "replace_me", "example")):
