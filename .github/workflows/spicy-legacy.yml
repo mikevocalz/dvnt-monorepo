@@ -1,0 +1,29 @@
+name: Legacy Spicy access
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/*legacy_adult_access*'
+      - 'scripts/test-spicy-legacy.*'
+      - '.github/workflows/spicy-legacy.yml'
+permissions:
+  contents: read
+jobs:
+  eligibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node --test scripts/test-spicy-legacy.cjs scripts/test-spicy-post-feedback.cjs scripts/test-spicy-native-draft.cjs
+      - name: Actual migration and role tests in disposable local PostgreSQL
+        run: |
+          sudo systemctl start postgresql
+          sudo -u postgres createdb dvnt_legacy_test
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_legacy_test -f "$GITHUB_WORKSPACE/scripts/test-spicy-legacy.sql"

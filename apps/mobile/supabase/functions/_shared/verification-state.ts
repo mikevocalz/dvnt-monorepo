@@ -1,3 +1,4 @@
+import { applyLegacyAdultAccess } from "./legacy-adult-access.ts";
 import { checkAdultBirthDate } from "./age-policy.ts";
 
 export type VerificationState =
@@ -97,5 +98,5 @@ export async function resolveAdultVerificationState(
   if (data && data.user_id !== userId) {
     return { state: "not_started", retryable: true, reason: "account_changed", message: "Verify this account before continuing.", providerRef: null };
   }
-  return normalizeVerificationState(data, now);
+  return applyLegacyAdultAccess(db, userId, normalizeVerificationState(data, now));
 }
