@@ -4,6 +4,7 @@
   "installCommand": "pnpm install",
   "buildCommand": "pnpm --filter web build",
   "outputDirectory": "apps/web/.next",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- :/apps/web :/packages :/pnpm-lock.yaml :/.vercelignore :/vercel.json :/package.json :/pnpm-workspace.yaml && exit 0 || exit 1",
   "headers": [
     {
       "source": "/(.*)",
