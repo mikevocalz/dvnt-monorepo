@@ -21,6 +21,12 @@ const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const FUNCTION_BASE = `${SUPABASE_URL}/functions/v1/promoter-connect`;
+const WEB_ORIGIN = "https://dvntapp.live";
+
+/** Stripe callback destinations are constructed from verified event ids only. */
+function webPromoterUrl(eventId: number, outcome: "return" | "refresh"): string {
+  return `${WEB_ORIGIN}/feed/events/${eventId}/promoter?stripe_connect=${outcome}`;
+}
 
 if (!STRIPE_SECRET_KEY) {
   console.error(
@@ -83,16 +89,18 @@ Deno.serve(withSentry("promoter-connect", async (req: Request) => {
   if (req.method === "GET") {
     const url = new URL(req.url);
     const callback = url.searchParams.get("callback");
-    if (callback === "return") {
+    const eventId = Number(url.searchParams.get("event_id"));
+    const isWeb = url.searchParams.get("platform") === "web" &&
+      Number.isSafeInteger(eventId) && eventId > 0;
+    if (callback === "return" || callback === "refresh") {
+      const destination = isWeb
+        ? webPromoterUrl(eventId, callback)
+        : callback === "return"
+          ? "dvnt://stripe/connect/success"
+          : "dvnt://stripe/connect/refresh";
       return new Response(null, {
         status: 302,
-        headers: { Location: "dvnt://stripe/connect/success" },
-      });
-    }
-    if (callback === "refresh") {
-      return new Response(null, {
-        status: 302,
-        headers: { Location: "dvnt://stripe/connect/refresh" },
+        headers: { Location: destination, "Cache-Control": "no-store" },
       });
     }
     return new Response("Not found", { status: 404 });
@@ -231,10 +239,14 @@ Deno.serve(withSentry("promoter-connect", async (req: Request) => {
         return json({ error: "Could not save promoter account" }, 500);
       }
 
+      // Browser buyers must return to a HTTPS page, not a dvnt:// URL that
+      // Safari/Chrome may not be able to open. Native keeps its deep links.
+      const platform = body.platform === "web" ? "web" : "native";
+      const callbackParams = `&platform=${platform}&event_id=${eventId}`;
       const link = await stripeRequest("/account_links", {
         account: stripeAccountId,
-        refresh_url: `${FUNCTION_BASE}?callback=refresh`,
-        return_url: `${FUNCTION_BASE}?callback=return`,
+        refresh_url: `${FUNCTION_BASE}?callback=refresh${callbackParams}`,
+        return_url: `${FUNCTION_BASE}?callback=return${callbackParams}`,
         type: "account_onboarding",
       });
 
