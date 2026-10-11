@@ -1,0 +1,54 @@
+name: Ticket embed staging preflight
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ticket-embed-staging-preflight.yml'
+      - 'scripts/check-ticket-embed-test-key.py'
+      - 'scripts/test-ticket-embed-test-key.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ticket-embed-staging-preflight-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test-key-authentication:
+    name: Stripe TEST key authentication only (not purchase acceptance)
+    if: >-
+      github.repository == 'mikevocalz/dvnt-monorepo' &&
+      ((github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feat/ticket-embed-commerce') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/ticket-embed-commerce'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Unit tests for redaction and test-mode rejection
+        run: python scripts/test-ticket-embed-test-key.py
+      - name: Read-only Stripe test-key authentication
+        env:
+          STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          STRIPE_TEST_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
+          TICKET_EMBED_SANDBOX_HOST_URL: ${{ vars.TICKET_EMBED_SANDBOX_HOST_URL }}
+          TICKET_EMBED_SANDBOX_ID: ${{ vars.TICKET_EMBED_SANDBOX_ID }}
+          TICKET_EMBED_SANDBOX_EMAIL: ${{ secrets.TICKET_EMBED_SANDBOX_EMAIL }}
+        run: python scripts/check-ticket-embed-test-key.py
+      - name: Package committed source for isolated staging diagnosis
+        if: always()
+        run: |
+          git archive --format=tar.gz HEAD -o ticket-embed-source.tar.gz
+          git rev-parse HEAD > ticket-embed-source-commit.txt
+      - name: Upload sanitized result and committed source (no runtime secrets)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ticket-embed-staging-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            stripe-test-key-check.json
+            ticket-embed-source.tar.gz
+            ticket-embed-source-commit.txt
+          retention-days: 1
+          if-no-files-found: error
