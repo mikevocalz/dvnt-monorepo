@@ -1,11 +1,6 @@
 -- Isolated embed checkout attempts. Existing checkout functions are not replaced.
 BEGIN;
-ALTER TABLE public.event_ticket_embed_settings
-  DROP CONSTRAINT event_ticket_embed_settings_status_check;
-ALTER TABLE public.event_ticket_embed_settings
-  ADD CONSTRAINT event_ticket_embed_settings_status_check
-  CHECK (status IN ('draft', 'published', 'revoked'));
-
+-- Use the one existing published event widget. No parallel embed-settings table.
 CREATE TABLE public.ticket_embed_checkout_attempts (
   id uuid PRIMARY KEY,
   -- Keep immutable origin/config identity after an organizer deletes settings.
@@ -35,7 +30,7 @@ CREATE FUNCTION public.ticket_embed_prepare_checkout(
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
   a public.ticket_embed_checkout_attempts%ROWTYPE;
-  s public.event_ticket_embed_settings%ROWTYPE;
+  s public.event_ticket_widgets%ROWTYPE;
   e public.events%ROWTYPE;
   t public.ticket_types%ROWTYPE;
   h jsonb; f jsonb := p_quote->'fees'; p jsonb := p_quote->'promoter';
@@ -53,8 +48,8 @@ BEGIN
     END IF;
     RETURN to_jsonb(a);
   END IF;
-  SELECT * INTO s FROM event_ticket_embed_settings WHERE id = p_embed_id FOR SHARE;
-  IF NOT FOUND OR s.status <> 'published' OR s.allowed_origin <> p_origin
+  SELECT * INTO s FROM event_ticket_widgets WHERE id = p_embed_id FOR SHARE;
+  IF NOT FOUND OR s.published IS DISTINCT FROM true OR s.allowed_origin <> p_origin
      OR s.revision <> (p_quote->>'revision')::integer THEN RAISE EXCEPTION 'embed_unavailable'; END IF;
   SELECT * INTO e FROM events WHERE id = s.event_id FOR SHARE;
   IF NOT FOUND OR e.visibility IS DISTINCT FROM 'public' OR e.ticketing_enabled IS NOT TRUE

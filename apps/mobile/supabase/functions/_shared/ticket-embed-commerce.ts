@@ -147,8 +147,8 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
       // Revocation blocks new attempts, not paid order lookup or fulfillment.
       let setting:any, event:any;
       if(!attempt) {
-        setting=checked(await db.from('event_ticket_embed_settings').select('id,event_id,allowed_origin,revision,status').eq('id',embedId).maybeSingle());
-        if(!setting || setting.status!=='published') throw new EmbedError('not_found','This ticket embed is unavailable.',404);
+        setting=checked(await db.from('event_ticket_widgets').select('id,event_id,allowed_origin,revision,published').eq('id',embedId).maybeSingle());
+        if(!setting || setting.published!==true) throw new EmbedError('not_found','This ticket embed is unavailable.',404);
         if(action!=='describe' && origin!==setting.allowed_origin) throw new EmbedError('origin_denied','This website is not authorized for this embed.',403);
         event=checked(await db.from('events').select(EVENT_FIELDS).eq('id',setting.event_id).maybeSingle());
         if(!isEmbedEventAvailable(event,now())) throw new EmbedError('event_unavailable','This event is not currently selling embedded tickets.',404);

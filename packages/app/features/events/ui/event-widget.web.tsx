@@ -11,6 +11,7 @@ import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
 import { useUIStore } from '@dvnt/app/lib/stores/ui-store';
 import { useEventRole } from '@dvnt/app/lib/hooks/use-event-role';
 import { invokeEdge } from '@dvnt/app/lib/api/invoke-edge';
+import { onSiteTicketEmbedCode } from '@dvnt/app/lib/ticket-embed/unified-code';
 interface WidgetData {ok:true;event:{id:number;title:string};settings:{id:string;allowed_origin:string;published:boolean;revision:number}|null;eligible:boolean;code:string|null}
 async function request(body:Record<string,unknown>):Promise<WidgetData>{
  const result=await invokeEdge<WidgetData & {error?:string}>('event-ticket-widget',body);
@@ -36,10 +37,12 @@ function Builder({eventId,userId,authenticated}:{eventId:number;userId:string;au
  if(query.isPending)return <P style={text}>Loading event widget…</P>;
  if(query.isError||!query.data)return <Section style={{padding:24,gap:16}}><P style={text}>{query.error?.message||'Could not load this event.'}</P><Button onPress={()=>{void query.refetch()}}>Retry</Button></Section>;
  const d=query.data;const busy=mutation.isPending;const changed=draft.origin!==null;
+ const onSiteReady=process.env.NEXT_PUBLIC_TICKET_EMBED_PAYMENTS_ENABLED==='true';
+ const onSiteCode=d.settings?.published&&onSiteReady?onSiteTicketEmbedCode(d.settings.id):null;
  return <Main style={{backgroundColor:'#06070d',padding:24,minHeight:960}}><View style={{width:'100%',maxWidth:1100,alignSelf:'center',gap:20}}>
   <A href={`/feed/events/${eventId}/organizer`} style={{color:'#3FDCFF'}}>← Organizer dashboard</A>
-  <H1 style={{color:'white',fontSize:28,fontWeight:'700'}}>Embed tickets</H1><P style={text}>{d.event.title}</P>
-  <P style={text}>Show your event flyer and current ticket prices on your website. Buyers select and pay through the existing DVNT checkout in a new tab. Payment is not collected inside this iframe.</P>
+  <H1 style={{color:'white',fontSize:28,fontWeight:'700'}}>Embed tickets</H1><P style={text}>{d.event.title} · Event #{eventId}</P>
+  <P style={text}>Generate an external ticket-sales embed for this event. Both ways use the same event, widget ID, ticket tiers, prices, inventory, orders and fulfillment. The standard iframe opens DVNT checkout; on-page payment keeps the buyer on the organizer's website when enabled.</P>
   <Section style={{padding:20,borderWidth:1,borderColor:'#ffffff26',borderRadius:16,gap:16}}>
    <Input label="Website origin" value={draft.origin??d.settings?.allowed_origin??''} onChangeText={draft.setOrigin} placeholder="https://www.deviant.live" autoCapitalize="none" editable={!busy}/>
    <P style={text}>Use the exact HTTPS address of the website, without a page path. The widget can be framed only by that origin and DVNT. www and non-www are different origins.</P>
@@ -50,7 +53,12 @@ function Builder({eventId,userId,authenticated}:{eventId:number;userId:string;au
    </View>
    {!d.eligible?<P style={text}>Public non-Spicy ticketed events can be embedded. Private, hidden, draft, cancelled and Spicy events are not exposed through a public iframe.</P>:null}
    {mutation.error?<Text accessibilityRole="alert" style={{color:'#fca5a5'}}>{mutation.error.message}</Text>:null}
-   {d.code&&!changed?<><EventWidgetCode code={d.code}/><Button variant="outline" onPress={()=>{void (async()=>{try{if(!navigator.clipboard)throw new Error();await navigator.clipboard.writeText(d.code!);toast('success','Embed code copied')}catch{toast('info','Select the code above to copy it.')}})()}}>Copy embed code</Button><P style={text}>Paste this iframe into your website’s HTML/embed block. No Stripe key or extra payment script is needed.</P></>:null}
+   {d.code&&!changed?<><EventWidgetCode code={d.code}/><Button variant="outline" onPress={()=>{void (async()=>{try{if(!navigator.clipboard)throw new Error();await navigator.clipboard.writeText(d.code!);toast('success','Embed code copied')}catch{toast('info','Select the code above to copy it.')}})()}}>Copy embed code</Button><P style={text}>Paste this event-specific iframe on your website. The standard mode opens DVNT checkout rather than taking payment inside the external site.</P></>:null}
+  </Section>
+  <Section style={{gap:12,padding:20,borderWidth:1,borderColor:'#ffffff26',borderRadius:16}}>
+   <H2 style={{color:'white',fontSize:20,fontWeight:'600'}}>Checkout directly on your website</H2>
+   <P style={text}>Use this option to embed the same event and take payment on an external site. The lightweight script creates the event's ticket iframe and mounts secure Stripe checkout into the host page; no additional event or second widget is created.</P>
+   {onSiteCode&&!changed?<><EventWidgetCode code={onSiteCode}/><Button variant="outline" onPress={()=>{void (async()=>{try{if(!navigator.clipboard)throw new Error();await navigator.clipboard.writeText(onSiteCode);toast('success','On-page ticket embed copied')}catch{toast('info','Select the code above to copy it.')}})()}}>Copy on-page ticket embed</Button></>:<P style={text}>On-page Stripe checkout is not yet enabled for this event. The same-event payment code will appear here when the existing DVNT payment integration has passed its release test. The standard iframe above remains available.</P>}
   </Section>
   {d.settings?.published?<Section style={{gap:16}}><H2 style={{color:'white',fontSize:20,fontWeight:'600'}}>Live widget preview</H2><View style={{flexDirection:'row',gap:12}}><Button variant="outline" onPress={()=>draft.setWidth('100%')}>Desktop</Button><Button variant="outline" onPress={()=>draft.setWidth('390px')}>Mobile</Button></View><EventWidgetFrame id={d.settings.id} width={draft.width}/></Section>:null}
  </View></Main>;
