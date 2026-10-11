@@ -343,7 +343,7 @@ verify_jwt = false
 
 
 # RevenueCat posts Authorization: Bearer <webhook secret> (not a JWT); the fn
-# does its own constant-time secret auth (I4), so the gateway JWT check must stay off.
+# does its own constant-time secret auth (I4). Gateway JWT check must stay off.
 [functions.revenuecat-webhook]
 verify_jwt = false
 
@@ -561,10 +561,15 @@ verify_jwt = false
 verify_jwt = false
 
 # Organizer embed drafts: verifies Better Auth and event owner/admin internally.
-# Builder can be disabled with TICKET_EMBED_BUILDER_ENABLED=false; publishing additionally requires the payments release gate.
+# Embedded payment publication has a separate runtime release gate.
 [functions.manage-ticket-embed]
 verify_jwt = false
 
-# Public embed endpoint authorizes published config/origin and buyer-bound attempts.
+# Public event DTO on GET; Better Auth plus owner/admin checks on POST.
+# This widget only links to existing checkout; it never charges or reserves.
+[functions.event-ticket-widget]
+verify_jwt = false
+
+# The embedded commerce function verifies origin, buyer session and payment state internally.
 [functions.ticket-embed]
 verify_jwt = false

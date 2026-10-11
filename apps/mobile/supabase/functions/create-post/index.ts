@@ -8,6 +8,8 @@ import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { resolveAdultVerificationState } from "../_shared/verification-state.ts";
+import { resolveSpicyEligibility } from "../_shared/spicy-eligibility.ts";
+import { spicyPostRefusal } from "../_shared/spicy-post-refusal.ts";
 import { firstPostRefusal } from "../_shared/first-post-gate.ts";
 
 const corsHeaders = {
@@ -136,18 +138,12 @@ Deno.serve(async (req) => {
     const normalizedVisibility = visibility || "public";
     const normalizedIsNsfw = Boolean(isNSFW);
 
-    // SPICY is stricter than the staged membership-wide admission policy:
-    // a verified adult document is required even while verified_admission_policy
-    // is still in prompt/grace mode. The client toggle is convenience only;
-    // direct API callers hit the same server gate here.
+    // SPICY recognizes approved adult documents and server-owned legacy
+    // membership. Ticket campaigns below retain their separate ID requirement.
     if (normalizedIsNsfw) {
-      const verification = await resolveAdultVerificationState(supabaseAdmin, authUserId);
+      const verification = await resolveSpicyEligibility(supabaseAdmin, authUserId);
       if (verification.state !== "approved") {
-        return errorResponse(
-          "adult_verification_required",
-          verification.message || "Verify that you're 18 or older before posting SPICY content.",
-          403,
-        );
+        return jsonResponse(spicyPostRefusal(verification), 403);
       }
     }
 

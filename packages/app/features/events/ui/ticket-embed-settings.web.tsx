@@ -14,9 +14,9 @@ export function TicketEmbedOrganizerEntry({ eventId }: { eventId: string }) {
   if (role !== 'owner' && role !== 'admin') return null;
   return (
     <nav className="mx-auto w-full max-w-2xl px-4 py-3" aria-label="Event embed tools">
-      <a href={`/feed/events/${encodeURIComponent(eventId)}/embed`}
+      <a href={`/feed/events/${encodeURIComponent(eventId)}/embed/checkout`}
         className="block rounded-xl border border-white/10 bg-[#06070d] px-4 py-3 text-sm font-semibold text-[#3FDCFF]">
-        Embed tickets <span className="ml-2 text-xs font-normal text-white/50">Configure and preview</span>
+        Embedded checkout (test) <span className="ml-2 text-xs font-normal text-white/50">Configure and preview</span>
       </a>
     </nav>
   );

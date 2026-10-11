@@ -1,34 +1,12 @@
 {
   "framework": "nextjs",
-  "regions": [
-    "iad1"
-  ],
+  "regions": ["iad1"],
   "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "X-Content-Type-Options",
-          "value": "nosniff"
-        },
-        {
-          "key": "X-Frame-Options",
-          "value": "DENY"
-        },
-        {
-          "key": "X-XSS-Protection",
-          "value": "1; mode=block"
-        }
-      ]
-    },
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "no-store, max-age=0"
-        }
-      ]
-    }
+    {"source": "/(.*)", "headers": [
+      {"key": "X-Content-Type-Options", "value": "nosniff"},
+      {"key": "X-XSS-Protection", "value": "1; mode=block"}
+    ]},
+    {"source": "/api/(.*)", "headers": [{"key": "Cache-Control", "value": "no-store, max-age=0"}]},
+    {"source": "/((?!tickets/embed/|embed/tickets/).*)", "headers": [{"key": "X-Frame-Options", "value": "DENY"}]}
   ]
 }
