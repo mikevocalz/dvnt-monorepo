@@ -460,8 +460,8 @@ function EditPostScreenContent() {
         </View>
         <View className="flex-1 items-center justify-center px-6">
           <Motion.View
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
             transition={{ type: "spring", damping: 20, stiffness: 300 }}
             className="items-center"
           >
