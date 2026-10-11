@@ -1,0 +1,58 @@
+name: Event ticket widget
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/*event_ticket_widgets*'
+      - 'apps/web/src/app/tickets/**'
+      - 'apps/web/src/app/(frontend)/feed/events/**'
+      - 'apps/web/vercel.json'
+      - 'packages/app/lib/ticket-embed/**'
+      - 'packages/app/features/events/ui/event-widget.web.tsx'
+      - 'packages/app/components/ui/event-widget*'
+      - 'scripts/*event-widget*'
+      - '.github/workflows/event-ticket-widget.yml'
+permissions:
+  contents: read
+jobs:
+  widget-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node --test scripts/test-event-widget.cjs
+      - name: Actual widget migration in disposable PostgreSQL
+        run: |
+          set -euo pipefail
+          sudo systemctl start postgresql
+          sudo -u postgres createdb dvnt_widget_test
+          python - <<'PY' | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_widget_test
+          from pathlib import Path
+          test = Path('scripts/test-event-widget.sql').read_text()
+          migration = Path('apps/mobile/supabase/migrations/20261011204000_event_ticket_widgets.sql').read_text()
+          marker = r'\ir ../apps/mobile/supabase/migrations/20261011204000_event_ticket_widgets.sql'
+          assert test.count(marker) == 1
+          print(test.replace(marker, migration))
+          PY
+      - name: Render actual template using fixture event data
+        run: node scripts/render-event-widget-fixture.cjs
+      - name: Install browser used by existing checkout test tooling
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Cross-origin responsive browser and existing-checkout navigation
+        run: python scripts/test-event-widget-browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: event-widget-browser-evidence
+          path: .widget-browser/*.png
+          retention-days: 3
+          if-no-files-found: ignore

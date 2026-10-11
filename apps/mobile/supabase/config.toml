@@ -564,3 +564,8 @@ verify_jwt = false
 # Feature is disabled unless TICKET_EMBED_BUILDER_ENABLED=true; no live publishing.
 [functions.manage-ticket-embed]
 verify_jwt = false
+
+# Public event DTO on GET; Better Auth plus owner/admin checks on POST.
+# This widget only links to existing checkout; it never charges or reserves.
+[functions.event-ticket-widget]
+verify_jwt = false
