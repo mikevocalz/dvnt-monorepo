@@ -26,7 +26,7 @@ export default function Page() {
   return (
     <>
       {id ? <EventWidgetEntry eventId={id} /> : null}
-      {id && process.env.NEXT_PUBLIC_TICKET_EMBED_BUILDER_ENABLED !== 'false' ? <TicketEmbedOrganizerEntry eventId={id} /> : null}
+      {id && process.env.NEXT_PUBLIC_TICKET_EMBED_BUILDER_ENABLED === 'true' ? <TicketEmbedOrganizerEntry eventId={id} /> : null}
       <EventOrganizerScreen />
     </>
   );
