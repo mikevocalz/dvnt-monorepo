@@ -32,7 +32,7 @@ function deploymentHeaders(config,pathname){
 }
 for(const filename of ['vercel.json','apps/web/vercel.json'])test(filename+' protects ordinary pages and APIs without blocking widget framing',()=>{
  const config=JSON.parse(fs.readFileSync(path.join(ROOT,filename),'utf8'));
- for(const pathname of ['/','/feed/events','/feed/events/1','/feed/events/1/organizer','/api/checkout','/tickets','/tickets/embed','/tickets/embed-other/1','/admin']){
+ for(const pathname of ['/','/feed/events','/feed/events/1','/feed/events/1/organizer','/api/checkout','/tickets','/tickets/embed','/tickets/embed-other/1','/embed/tickets','/embed/tickets-other/1','/admin']){
   const headers=deploymentHeaders(config,pathname);
   assert.equal(headers['x-frame-options'],'DENY',filename+' '+pathname);
   assert.equal(headers['x-content-type-options'],'nosniff',filename+' '+pathname);
@@ -40,6 +40,9 @@ for(const filename of ['vercel.json','apps/web/vercel.json'])test(filename+' pro
  const widget=deploymentHeaders(config,'/tickets/embed/'+ID);
  assert.equal(widget['x-frame-options'],undefined,'the route sets its exact-origin CSP');
  assert.equal(widget['x-content-type-options'],'nosniff');
+ const checkoutWidget=deploymentHeaders(config,'/embed/tickets/'+ID);
+ assert.equal(checkoutWidget['x-frame-options'],undefined,'embedded-checkout route has exact-origin CSP');
+ assert.equal(checkoutWidget['x-content-type-options'],'nosniff');
  assert.equal(deploymentHeaders(config,'/api/checkout')['cache-control'],'no-store, max-age=0');
 });
 test('root and standalone web deployments use the same security header rules',()=>{

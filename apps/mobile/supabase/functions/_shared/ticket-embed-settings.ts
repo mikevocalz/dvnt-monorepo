@@ -1,4 +1,5 @@
-/** Organizer-only draft settings. Deliberately has no Stripe or checkout dependency. */
+/** Organizer-only settings and publication. Never creates payments or inventory holds. */
+import { EMBED_UUID, isEmbedEventAvailable } from "./ticket-embed-commerce.ts";
 export const EMBED_SETTINGS_SELECT =
   'id,event_id,allowed_origin,revision,status,updated_at';
 
@@ -8,7 +9,8 @@ export function normalizeEmbedOrigin(value: unknown): string {
   }
   const url = new URL(value);
   // Exact origins only. No wildcard, redirect path, credentials or insecure scheme.
-  if (url.protocol !== 'https:' || url.username || url.password || url.port ||
+  const hasUserInfo = Boolean(url.username) || Boolean(url.password);
+  if (url.protocol !== 'https:' || hasUserInfo || url.port ||
       url.pathname !== '/' || url.search || url.hash ||
       !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/i.test(url.hostname) ||
       /\.(?:localhost|local|internal|test)$/i.test(url.hostname)) {
@@ -21,6 +23,8 @@ export type EmbedManagerDependencies = {
   db: any;
   authenticate: (req: Request) => Promise<string | null>;
   enabled: boolean;
+  paymentsEnabled?: boolean;
+  siteOrigin?: string;
   headers: (req: Request) => Record<string, string>;
 };
 
@@ -52,7 +56,7 @@ export function createEmbedSettingsHandler(deps: EmbedManagerDependencies) {
       }
       const { db } = deps;
       const eventResult = await db.from('events')
-        .select('id,host_id,title,start_date,event_tz,location_name,location,flyer_image_url,cover_image_url,image')
+        .select('id,host_id,title,start_date,end_date,event_tz,location_name,location,flyer_image_url,cover_image_url,image,visibility,status,ticketing_enabled,is_hidden,publish_at')
         .eq('id', eventId).maybeSingle();
       if (eventResult.error) throw new Error('event_read');
       const event = eventResult.data;
@@ -66,10 +70,8 @@ export function createEmbedSettingsHandler(deps: EmbedManagerDependencies) {
         if (!staff.data) return json({ error: 'Only the event owner or an accepted admin can manage embeds.' }, 403);
         role = 'admin';
       }
-      // This gate is server-side, not merely a disabled UI button. No client
-      // flag may opt into unfinished payment, inventory or ticket delivery code.
-      if (body.action === 'generate') {
-        return json({ error: 'Live embed code is unavailable until checkout and fulfillment are verified.', code: 'embed_checkout_not_ready' }, 409);
+      if (body.action === 'generate' && deps.paymentsEnabled !== true) {
+        return json({ error: 'Embedded checkout is not enabled in this environment.', code: 'embed_checkout_not_ready' }, 409);
       }
       const existingResult = await db.from('event_ticket_embed_settings')
         .select(EMBED_SETTINGS_SELECT).eq('event_id', eventId).maybeSingle();
@@ -81,6 +83,12 @@ export function createEmbedSettingsHandler(deps: EmbedManagerDependencies) {
           return json({ error: 'A settings revision is required.' }, 400);
         }
         if ((settings?.revision ?? 0) !== revision) return json({ error: 'Settings changed. Reload before saving.' }, 409);
+        if (body.action === 'generate' && (!settings || settings.status === 'revoked')) return json({ error: 'Save the website settings before generating code.' }, 409);
+        if (body.action === 'generate' && !isEmbedEventAvailable(event)) return json({ error: 'Only published public ticketed events with open sales can be embedded.' }, 409);
+        if (body.action === 'generate') {
+          const account = await db.from('organizer_accounts').select('charges_enabled,stripe_account_id').eq('host_id',event.host_id).maybeSingle();
+          if (account.error || !account.data?.charges_enabled || !account.data?.stripe_account_id) return json({ error: 'Complete organizer payment setup before publishing an embed.' }, 409);
+        }
         if (body.action === 'revoke' && !settings) return json({ error: 'No embed settings to revoke.' }, 409);
         let origin = settings?.allowed_origin;
         if (body.action === 'save') {
@@ -89,7 +97,7 @@ export function createEmbedSettingsHandler(deps: EmbedManagerDependencies) {
         }
         const patch = {
           allowed_origin: origin,
-          status: body.action === 'revoke' ? 'revoked' : 'draft',
+          status: body.action === 'revoke' ? 'revoked' : body.action === 'generate' ? 'published' : 'draft',
           revision: revision + 1,
           updated_at: new Date().toISOString(),
           updated_by: userId,
@@ -109,7 +117,10 @@ export function createEmbedSettingsHandler(deps: EmbedManagerDependencies) {
       // A role-checked preview only. Do not return host IDs, unlock codes,
       // attendees, buyer details or payment credentials.
       return json({
-        ok: true, role, settings, canGenerate: false,
+        ok: true, role, settings,
+        canGenerate: deps.paymentsEnabled === true && isEmbedEventAvailable(event),
+        embedCode: deps.paymentsEnabled === true && settings?.status === 'published'
+          ? buildTicketEmbedCode(settings.id, deps.siteOrigin || 'https://dvntapp.live') : null,
         event: {
           id: event.id, title: event.title ?? 'Event', startDate: event.start_date, timeZone: event.event_tz,
           location: event.location_name || event.location || '',
@@ -120,4 +131,13 @@ export function createEmbedSettingsHandler(deps: EmbedManagerDependencies) {
       return json({ error: 'Could not manage embed settings. No purchasing settings were changed.' }, 500);
     }
   };
+}
+
+/** Only trusted deployment origins and server-generated UUIDs enter the snippet. */
+export function buildTicketEmbedCode(id: string, siteOrigin: string): string {
+  const site = new URL(siteOrigin);
+  if (site.protocol !== 'https:' || site.origin !== siteOrigin || !EMBED_UUID.test(id)) {
+    throw new Error('Invalid embed configuration');
+  }
+  return `<div data-dvnt-ticket-embed="${id}"></div>\n<script async src="${site.origin}/embed/tickets.js"></script>`;
 }

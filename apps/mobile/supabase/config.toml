@@ -561,11 +561,15 @@ verify_jwt = false
 verify_jwt = false
 
 # Organizer embed drafts: verifies Better Auth and event owner/admin internally.
-# Feature is disabled unless TICKET_EMBED_BUILDER_ENABLED=true; no live publishing.
+# Embedded payment publication has a separate runtime release gate.
 [functions.manage-ticket-embed]
 verify_jwt = false
 
 # Public event DTO on GET; Better Auth plus owner/admin checks on POST.
 # This widget only links to existing checkout; it never charges or reserves.
 [functions.event-ticket-widget]
+verify_jwt = false
+
+# The embedded commerce function verifies origin, buyer session and payment state internally.
+[functions.ticket-embed]
 verify_jwt = false

@@ -20,7 +20,7 @@
       ]
     },
     {
-      "source": "/((?!tickets/embed/).*)",
+      "source": "/((?!tickets/embed/|embed/tickets/).*)",
       "headers": [
         { "key": "X-Frame-Options", "value": "DENY" }
       ]

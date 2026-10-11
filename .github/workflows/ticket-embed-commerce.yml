@@ -1,0 +1,67 @@
+name: Ticket embed commerce
+on:
+  pull_request:
+    paths:
+      - "apps/mobile/supabase/**"
+      - "apps/web/**"
+      - "packages/app/**"
+      - "scripts/*ticket-embed*"
+      - ".github/workflows/ticket-embed-commerce.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ticket-embed-commerce-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  contracts-and-inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Publication and payment runtime configuration agreement
+        run: node --test apps/mobile/supabase/functions/_shared/ticket-embed-runtime.test.cjs
+      - run: node --test apps/mobile/supabase/functions/ticket-embed/index.test.cjs apps/mobile/supabase/functions/manage-ticket-embed/index.test.cjs docs/ticketing/responsive-embed.test.cjs
+      - name: Real disposable PostgreSQL inventory and transaction tests
+        run: node scripts/verify-ticket-embed.mjs
+  browser-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: External host, iframe, recovery and payment-component contract (mock Stripe)
+        run: python scripts/test-ticket-embed-browser.py
+  sandbox-release:
+    name: Real sandbox purchase (required before release)
+    runs-on: ubuntu-latest
+    needs: [contracts-and-inventory, browser-contract]
+    # Intentionally fails, never skips or pretends to pass, if sandbox access is absent.
+    env:
+      TICKET_EMBED_SANDBOX_HOST_URL: ${{ vars.TICKET_EMBED_SANDBOX_HOST_URL }}
+      TICKET_EMBED_SANDBOX_ID: ${{ vars.TICKET_EMBED_SANDBOX_ID }}
+      TICKET_EMBED_SANDBOX_EMAIL: ${{ secrets.TICKET_EMBED_SANDBOX_EMAIL }}
+      STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python -m pip install playwright==1.57.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Actual Stripe test payment, QR ticket, delivery and refund
+        run: python scripts/test-ticket-embed-sandbox.py

@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { create } from 'zustand';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ticketEmbedsApi, type TicketEmbedBuilderData } from '@dvnt/app/lib/api/ticket-embeds';
+import { useUIStore } from '@dvnt/app/lib/stores/ui-store';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
 import { useEventRole } from '@dvnt/app/lib/hooks/use-event-role';
 import { renderOrganizerEmbedPreview } from '@dvnt/app/lib/ticket-embed/preview';
@@ -13,9 +14,9 @@ export function TicketEmbedOrganizerEntry({ eventId }: { eventId: string }) {
   if (role !== 'owner' && role !== 'admin') return null;
   return (
     <nav className="mx-auto w-full max-w-2xl px-4 py-3" aria-label="Event embed tools">
-      <a href={`/feed/events/${encodeURIComponent(eventId)}/embed`}
+      <a href={`/feed/events/${encodeURIComponent(eventId)}/embed/checkout`}
         className="block rounded-xl border border-white/10 bg-[#06070d] px-4 py-3 text-sm font-semibold text-[#3FDCFF]">
-        Embed tickets <span className="ml-2 text-xs font-normal text-white/50">Configure and preview</span>
+        Embedded checkout (test) <span className="ml-2 text-xs font-normal text-white/50">Configure and preview</span>
       </a>
     </nav>
   );
@@ -34,6 +35,7 @@ function Builder({ eventId, userId, authenticated }: { eventId: number; userId: 
     setOrigin: (origin: string | null) => void; setWidth: (width: '100%' | '390px') => void;
   }>((set) => ({ origin: null, width: '100%', setOrigin: (origin) => set({ origin }), setWidth: (width) => set({ width }) })), []);
   const draft = useDraft();
+  const showToast = useUIStore((s) => s.showToast);
   const client = useQueryClient();
   const key = ['ticket-embed-settings', userId, eventId] as const;
   const query = useQuery({ queryKey: key, queryFn: () => ticketEmbedsApi.get(eventId), enabled: authenticated, retry: false });
@@ -54,9 +56,13 @@ function Builder({ eventId, userId, authenticated }: { eventId: number; userId: 
     mutationFn: () => ticketEmbedsApi.revoke(eventId, query.data?.settings?.revision ?? 0),
     onSuccess: (data) => { client.setQueryData(key, data); draft.setOrigin(null); },
   });
+  const generate = useMutation({
+    mutationFn: () => ticketEmbedsApi.generate(eventId, query.data?.settings?.revision ?? 0),
+    onSuccess: (data) => client.setQueryData(key, data),
+  });
   const preview = useMemo(() => query.data && logo.data
     ? renderOrganizerEmbedPreview(query.data.event, logo.data) : '', [query.data, logo.data]);
-  const busy = save.isPending || revoke.isPending;
+  const busy = save.isPending || revoke.isPending || generate.isPending;
   const inputClass = 'mt-2 block w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#379ED8]';
   const buttonClass = 'rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold disabled:opacity-40';
 
@@ -69,7 +75,7 @@ function Builder({ eventId, userId, authenticated }: { eventId: number; userId: 
     </div>
   );
   const data: TicketEmbedBuilderData = query.data;
-  const mutationError = save.error || revoke.error;
+  const mutationError = save.error || revoke.error || generate.error;
   return (
     <main className="min-h-[100dvh] bg-[#06070d] px-4 py-6 text-white">
       <div className="mx-auto max-w-6xl">
@@ -77,8 +83,9 @@ function Builder({ eventId, userId, authenticated }: { eventId: number; userId: 
         <h1 className="mt-4 text-2xl font-bold">Embed tickets</h1>
         <p className="mt-1 text-sm text-white/60">{data.event.title}</p>
         <p id="embed-release-note" className="mt-5 rounded-xl border border-[#379ED8]/30 bg-[#379ED8]/5 p-4 text-sm text-white/75">
-          Prepare your website integration here. Live embed sales and code publishing are not enabled yet.
-          Saving this draft does not change ticket sales on DVNT.
+          {data.canGenerate
+            ? 'Save your website origin, generate the widget, then paste its code into that website. Card payments stay on the page. Existing ticket purchases on DVNT are unchanged.'
+            : 'You can prepare and preview your widget here. Publishing requires an eligible public event, organizer payment setup, and an enabled embedded-checkout environment.'}
         </p>
         <form className="mt-5 rounded-2xl border border-white/10 p-5" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
           <label className="block text-sm font-medium" htmlFor="embed-origin">Website origin</label>
@@ -87,7 +94,7 @@ function Builder({ eventId, userId, authenticated }: { eventId: number; userId: 
             aria-describedby="origin-help" onChange={(event) => draft.setOrigin(event.target.value)} />
           <p id="origin-help" className="mt-2 text-xs leading-relaxed text-white/50">
             Enter one HTTPS origin, with no page path or wildcard. This is a draft allowlist setting,
-            not domain-ownership verification. The live widget must enforce it before publishing is unlocked.
+            not domain-ownership verification. The published widget permits purchases only from this exact origin.
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
             <button type="submit" disabled={busy} className={`${buttonClass} bg-linear-to-r from-[#379ED8] to-[#874E9F]`}>
@@ -96,10 +103,22 @@ function Builder({ eventId, userId, authenticated }: { eventId: number; userId: 
             <button type="button" disabled={busy} className={buttonClass} onClick={() => { draft.setOrigin(null); save.reset(); revoke.reset(); query.refetch(); }}>Reload settings</button>
             <button type="button" disabled={busy || !data.settings || data.settings.status === 'revoked'} className={buttonClass}
               onClick={() => { if (window.confirm('Revoke this embed draft? Existing ticket purchases and paid orders will not change.')) revoke.mutate(); }}>Revoke draft</button>
-            <button type="button" disabled className={buttonClass} aria-describedby="embed-release-note">Copy embed code</button>
+            <button type="button" disabled={busy || !data.canGenerate || !data.settings || data.settings.status === 'revoked' || draft.origin !== null}
+              className={buttonClass} aria-describedby="embed-release-note" onClick={() => generate.mutate()}>
+              {generate.isPending ? 'Generating…' : 'Generate embed code'}
+            </button>
+            {data.embedCode ? <button type="button" className={buttonClass} onClick={() => {
+              navigator.clipboard?.writeText(data.embedCode!).then(() => showToast('success','Embed code copied'))
+                .catch(() => showToast('info','Select the code below to copy it.'));
+            }}>Copy embed code</button> : null}
           </div>
           <p className="mt-3 text-xs text-white/50" role="status">{data.settings ? `Saved ${data.settings.status} · revision ${data.settings.revision}` : 'No settings saved yet'}</p>
           {mutationError ? <p className="mt-3 text-sm text-red-300" role="alert">{mutationError.message}</p> : null}
+          {data.embedCode ? <label className="mt-4 block text-sm">Website embed code
+            <textarea readOnly aria-label="Website embed code" className={`${inputClass} min-h-28 font-mono text-xs`} value={data.embedCode}
+              onFocus={(event) => event.currentTarget.select()} />
+            <span className="mt-2 block text-xs text-white/50">Paste both lines together. Your website must allow the DVNT loader and Stripe.js. Test a purchase before sharing the page.</span>
+          </label> : null}
         </form>
         <section className="mt-6" aria-labelledby="embed-preview-title">
           <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -112,7 +131,7 @@ function Builder({ eventId, userId, authenticated }: { eventId: number; userId: 
             <iframe title="Your event ticket layout — no purchases" srcDoc={preview} sandbox="" referrerPolicy="no-referrer"
               className="mx-auto block max-w-full border-0" style={{ width: draft.width, height: 1120 }} />
           )}
-          <p className="mt-3 text-xs text-white/50">Your saved flyer and event information are used here. Ticket selection, payment and confirmation remain release-gated.</p>
+          <p className="mt-3 text-xs text-white/50">This is a safe layout preview, not a purchase. Test the generated widget on your saved website origin for ticket selection, secure payment and confirmation.</p>
         </section>
       </div>
     </main>

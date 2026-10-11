@@ -8,16 +8,22 @@ function load(file) {
   const result = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, reportDiagnostics: true });
   assert.equal((result.diagnostics || []).filter(x => x.category === ts.DiagnosticCategory.Error).length, 0);
   const module = { exports: {} };
-  new Function('exports', 'module', result.outputText)(module.exports, module);
+  const relativeRequire = (name) => {
+    if (!name.startsWith('.')) throw new Error(`Unexpected module: ${name}`);
+    const resolved = path.resolve(path.dirname(file), name);
+    return load(path.extname(resolved) ? resolved : resolved + '.ts');
+  };
+  new Function('exports', 'module', 'require', result.outputText)(module.exports, module, relativeRequire);
   return module.exports;
 }
 const { normalizeEmbedOrigin, createEmbedSettingsHandler } = load(path.join(__dirname, '../_shared/ticket-embed-settings.ts'));
 const { renderOrganizerEmbedPreview, safeFlyerUrl } = load(path.join(__dirname, '../../../../../packages/app/lib/ticket-embed/preview.ts'));
 
-function harness({ user = 'owner', role = null, accepted = true, enabled = true, failTable = '', starting = null } = {}) {
+function harness({ user = 'owner', role = null, accepted = true, enabled = true, paymentsEnabled = false, ready = false, accountReady = true, failTable = '', starting = null } = {}) {
   const calls = [];
   const tables = {
-    events: [{ id: 90, host_id: 'owner', title: 'Event <title>', start_date: null, location: 'NYC', flyer_image_url: null }],
+    events: [{ id: 90, host_id: 'owner', title: 'Event <title>', start_date: ready ? new Date(Date.now()+86400000).toISOString() : null, visibility: 'public', status: 'active', ticketing_enabled: true, location: 'NYC', flyer_image_url: null }],
+    organizer_accounts: [{host_id:'owner', stripe_account_id:'acct_fixture', charges_enabled:accountReady}],
     event_co_organizers: role ? [{ id: 'staff', event_id: 90, user_id: user, role, accepted }] : [],
     event_ticket_embed_settings: starting ? [{ ...starting }] : [],
   };
@@ -36,7 +42,7 @@ function harness({ user = 'owner', role = null, accepted = true, enabled = true,
         let row = tables[table].find(row => filters.every(test => test(row)));
         if (action === 'insert') {
           if (tables[table].some(row => row.event_id === patch.event_id)) return { data: null, error: { code: '23505' } };
-          row = { id: 'embed-1', ...patch }; tables[table].push(row);
+          row = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ...patch }; tables[table].push(row);
         }
         if (action === 'update' && row) Object.assign(row, patch);
         return { data: row ? Object.fromEntries(columns.split(',').map(k => [k, row[k]])) : null, error: null };
@@ -44,14 +50,14 @@ function harness({ user = 'owner', role = null, accepted = true, enabled = true,
     };
     return q;
   } };
-  const handler = createEmbedSettingsHandler({ db, enabled, authenticate: async () => user, headers: () => ({ 'Access-Control-Allow-Origin': 'https://dvntapp.live' }) });
+  const handler = createEmbedSettingsHandler({ db, enabled, paymentsEnabled, authenticate: async () => user, headers: () => ({ 'Access-Control-Allow-Origin': 'https://dvntapp.live' }) });
   async function invoke(body = { action: 'get', event_id: 90 }, method = 'POST') {
     const response = await handler(new Request('https://fixture.invalid/manage-ticket-embed', { method, ...(method !== 'GET' && method !== 'OPTIONS' ? { body: typeof body === 'string' ? body : JSON.stringify(body) } : {}) }));
     return { status: response.status, headers: response.headers, body: response.status === 204 ? null : await response.json() };
   }
   return { invoke, calls, tables };
 }
-const saved = { id: 'embed-1', event_id: 90, allowed_origin: 'https://events.example.com', revision: 1, status: 'draft' };
+const saved = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', event_id: 90, allowed_origin: 'https://events.example.com', revision: 1, status: 'draft' };
 
 test('normalizes an exact HTTPS origin', () => {
   assert.equal(normalizeEmbedOrigin('https://EVENTS.example.com/'), 'https://events.example.com');
@@ -126,4 +132,41 @@ test('preview escapes untrusted event content and contains no script or form', (
 test('flyer preview rejects script, insecure and video sources', () => {
   for (const input of ['javascript:alert(1)', 'http://example.com/a.png', 'https://example.com/a.mov', 'https://user:pass@example.com/a.jpg']) assert.equal(safeFlyerUrl(input), null);
   assert.equal(safeFlyerUrl('https://cdn.example.com/flyer.jpg'), 'https://cdn.example.com/flyer.jpg');
+});
+
+const generate = {action:'generate',event_id:90,expected_revision:1};
+test('ready organizer publishes a real script/iframe integration, not a sample URL', async () => {
+  const h=harness({paymentsEnabled:true,ready:true,starting:saved});
+  const r=await h.invoke(generate);
+  assert.equal(r.status,200); assert.equal(r.body.settings.status,'published');
+  assert.equal(r.body.settings.revision,2); assert.equal(r.body.canGenerate,true);
+  assert.equal(r.body.embedCode,'<div data-dvnt-ticket-embed="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"></div>\n<script async src="https://dvntapp.live/embed/tickets.js"></script>');
+  assert.ok(h.calls.filter(c=>c.action!=='read').every(c=>c.table==='event_ticket_embed_settings'));
+});
+test('payment gate rejects even an otherwise ready event',async()=>{
+  const h=harness({ready:true,starting:saved}); const r=await h.invoke(generate);
+  assert.equal(r.status,409);assert.equal(r.body.code,'embed_checkout_not_ready');
+  assert.equal(h.tables.event_ticket_embed_settings[0].status,'draft');
+});
+for (const options of [{ready:false},{accountReady:false},{starting:{...saved,status:'revoked'}},{starting:null}]) {
+  test('publish refuses an unready or revoked setup: '+JSON.stringify(options),async()=>{
+    const h=harness({paymentsEnabled:true,ready:true,starting:saved,...options});
+    assert.equal((await h.invoke(generate)).status,409);
+    assert.equal(h.calls.some(c=>c.action!=='read'),false);
+  });
+}
+test('a stale generation request cannot republish revoked settings',async()=>{
+  const h=harness({paymentsEnabled:true,ready:true,starting:{...saved,status:'revoked',revision:2}});
+  assert.equal((await h.invoke(generate)).status,409);
+});
+test('accepted admin can publish, unrelated organizer cannot',async()=>{
+  const admin=harness({paymentsEnabled:true,ready:true,starting:saved,user:'admin',role:'admin'});
+  assert.equal((await admin.invoke(generate)).status,200);
+  const stranger=harness({paymentsEnabled:true,ready:true,starting:saved,user:'other'});
+  assert.equal((await stranger.invoke(generate)).status,403);
+});
+test('editing a published origin returns settings to draft and removes copyable code',async()=>{
+  const h=harness({paymentsEnabled:true,ready:true,starting:{...saved,status:'published'}});
+  const r=await h.invoke({action:'save',event_id:90,expected_revision:1,allowed_origin:'https://new.example.com'});
+  assert.equal(r.status,200);assert.equal(r.body.settings.status,'draft');assert.equal(r.body.embedCode,null);
 });
