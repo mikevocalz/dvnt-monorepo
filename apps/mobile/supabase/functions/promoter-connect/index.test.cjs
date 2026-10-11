@@ -81,14 +81,18 @@ function harness({ existingAccount = null, cardPayments = "unrequested" } = {}) 
   // Shadow fetch for the handler; no actual Stripe or Supabase network calls.
   new Function("exports", "require", "Deno", "fetch", compiled)({}, requireMock, deno, mockFetch);
 
-  async function start() {
+  async function start(platform) {
     const response = await handler(new Request("https://test.supabase.co/functions/v1/promoter-connect", {
       method: "POST",
-      body: JSON.stringify({ action: "start", event_id: 42 }),
+      body: JSON.stringify({ action: "start", event_id: 42, ...(platform ? { platform } : {}) }),
     }));
     return { status: response.status, body: await response.json() };
   }
-  return { calls, promoter, start };
+  async function callback(query) {
+    const response = await handler(new Request(`https://test.supabase.co/functions/v1/promoter-connect?${query}`, { method: "GET" }));
+    return { status: response.status, location: response.headers.get("location") };
+  }
+  return { calls, promoter, start, callback };
 }
 
 test("new Stripe Express accounts request both card_payments and transfers", async () => {
@@ -118,4 +122,31 @@ test("existing account with card payments capability does not rerequest it", asy
   const h = harness({ existingAccount: "acct_ok", cardPayments: "active" });
   assert.equal((await h.start()).status, 200);
   assert.equal(h.calls.some((x) => x.endpoint.includes("/capabilities/card_payments")), false);
+});
+
+test("browser onboarding has event-scoped HTTPS return and refresh URLs", async () => {
+  const h = harness({ existingAccount: "acct_prior", cardPayments: "active" });
+  const r = await h.start("web");
+  assert.equal(r.status, 200);
+  const link = h.calls.find((c) => c.endpoint === "/v1/account_links");
+  assert.ok(link);
+  assert.equal(link.body.get("return_url"), "https://test.supabase.co/functions/v1/promoter-connect?callback=return&platform=web&event_id=42");
+  assert.equal(link.body.get("refresh_url"), "https://test.supabase.co/functions/v1/promoter-connect?callback=refresh&platform=web&event_id=42");
+  assert.deepEqual(await h.callback("callback=return&platform=web&event_id=42"), {
+    status: 302,
+    location: "https://dvntapp.live/feed/events/42/promoter?stripe_connect=return",
+  });
+  assert.deepEqual(await h.callback("callback=refresh&platform=web&event_id=42"), {
+    status: 302,
+    location: "https://dvntapp.live/feed/events/42/promoter?stripe_connect=refresh",
+  });
+});
+
+test("native deep links remain unchanged and bad web ids never become redirects", async () => {
+  const h = harness({ existingAccount: "acct_prior", cardPayments: "active" });
+  await h.start();
+  const link = h.calls.find((c) => c.endpoint === "/v1/account_links");
+  assert.equal(link.body.get("return_url"), "https://test.supabase.co/functions/v1/promoter-connect?callback=return&platform=native&event_id=42");
+  assert.equal((await h.callback("callback=return&platform=native&event_id=42")).location, "dvnt://stripe/connect/success");
+  assert.equal((await h.callback("callback=return&platform=web&event_id=NaN")).location, "dvnt://stripe/connect/success");
 });
