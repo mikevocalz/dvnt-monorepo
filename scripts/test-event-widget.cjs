@@ -23,6 +23,29 @@ test('hidden/locked tiers never expose their names or prices',async()=>{const h=
 test('closed sales show event details only',async()=>{const r=await harness({patch:{start_date:'2020-01-01'}}).call();assert.equal(r.data.salesOpen,false);const html=renderEventWidget(r.data);assert.ok(!html.includes('Buy tickets on DVNT'));assert.match(html,/Online ticket sales are closed/)});
 test('HTML escapes attacker content and cannot redirect checkout elsewhere',async()=>{const r=await harness().call();r.data.event.title='<script>alert(1)</script>';r.data.tiers[0].name='"><img onerror=alert(1)>';const html=renderEventWidget(r.data);assert.ok(!html.includes('<script>'));assert.match(html,/&lt;script&gt;/);assert.match(html,/target="_blank" rel="noopener noreferrer"/);assert.match(html,/Powered by/);assert.ok(!html.includes('<form'));assert.throws(()=>renderEventWidget({...r.data,checkoutUrl:'https://evil.invalid'}));assert.throws(()=>widgetCode('not-a-uuid'))});
 test('route enforces exact frame origin and never forwards user credentials',async()=>{const d=(await harness().call()).data;let observed;const {GET}=load(path.join(ROOT,'apps/web/src/app/tickets/embed/[id]/route.ts'),{process:{env:{NEXT_PUBLIC_SUPABASE_URL:'https://fixture.supabase.co',NEXT_PUBLIC_SUPABASE_ANON_KEY:'public-fixture'}},fetch:async(url,opts)=>{observed=opts;return Response.json(d)}});const r=await GET(new Request('https://dvntapp.live/tickets/embed/'+ID,{headers:{Cookie:'private',Authorization:'Bearer private'}}),{params:Promise.resolve({id:ID})});assert.equal(r.status,200);assert.match(r.headers.get('Content-Security-Policy'),/frame-ancestors 'self' https:\/\/merchant.example.com/);assert.equal(observed.headers.Authorization,undefined);assert.equal(observed.headers.Cookie,undefined);assert.equal(observed.cache,'no-store');assert.equal(observed.redirect,'error')});
-test('only widget paths are exempt from X-Frame-Options DENY',()=>{const config=JSON.parse(fs.readFileSync(path.join(ROOT,'apps/web/vercel.json')));const rule=config.headers.find(r=>r.headers.some(h=>h.key==='X-Frame-Options'));const re=new RegExp('^'+rule.source+'$');for(const p of ['/','/feed/events/1','/api/checkout','/tickets','/admin'])assert.ok(re.test(p));assert.equal(re.test('/tickets/embed/'+ID),false)});
+// Production builds from the monorepo root. Checking only apps/web/vercel.json
+// misses a real release defect: nested header rules are ignored by that build.
+function deploymentHeaders(config,pathname){
+ return Object.fromEntries((config.headers||[])
+  .filter(rule=>new RegExp('^'+rule.source+'$').test(pathname))
+  .flatMap(rule=>rule.headers.map(h=>[h.key.toLowerCase(),h.value])));
+}
+for(const filename of ['vercel.json','apps/web/vercel.json'])test(filename+' protects ordinary pages and APIs without blocking widget framing',()=>{
+ const config=JSON.parse(fs.readFileSync(path.join(ROOT,filename),'utf8'));
+ for(const pathname of ['/','/feed/events','/feed/events/1','/feed/events/1/organizer','/api/checkout','/tickets','/tickets/embed','/tickets/embed-other/1','/admin']){
+  const headers=deploymentHeaders(config,pathname);
+  assert.equal(headers['x-frame-options'],'DENY',filename+' '+pathname);
+  assert.equal(headers['x-content-type-options'],'nosniff',filename+' '+pathname);
+ }
+ const widget=deploymentHeaders(config,'/tickets/embed/'+ID);
+ assert.equal(widget['x-frame-options'],undefined,'the route sets its exact-origin CSP');
+ assert.equal(widget['x-content-type-options'],'nosniff');
+ assert.equal(deploymentHeaders(config,'/api/checkout')['cache-control'],'no-store, max-age=0');
+});
+test('root and standalone web deployments use the same security header rules',()=>{
+ const root=JSON.parse(fs.readFileSync(path.join(ROOT,'vercel.json'),'utf8'));
+ const web=JSON.parse(fs.readFileSync(path.join(ROOT,'apps/web/vercel.json'),'utf8'));
+ assert.deepEqual(root.headers,web.headers);
+});
 for(const status of ['draft','scheduled','paused',null,'unexpected'])test('only on-sale tiers are public: '+status,async()=>{const h=harness();h.tables.ticket_types[0].status=status;const r=await h.call();assert.deepEqual(r.data.tiers,[]);assert.equal(h.rpcs.length,0)});
 test('stored tier currency is preserved in advertised price',async()=>{const h=harness();h.tables.ticket_types[0].currency='gbp';const r=await h.call();assert.equal(r.data.tiers[0].currency,'GBP');const html=renderEventWidget(r.data);assert.match(html,/£25\.00/);assert.ok(!html.includes('$25.00'))});
