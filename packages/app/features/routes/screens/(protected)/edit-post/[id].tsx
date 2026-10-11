@@ -86,6 +86,7 @@ function EditPostScreenContent() {
   const showToast = useUIStore((s) => s.showToast);
   const currentUser = useAuthStore((s) => s.user);
   const scrollRef = useRef<RNScrollView>(null);
+  const hydratedPostId = useRef<string | null>(null);
 
   // ─── Fetch post ───
   const { data: post, isLoading, isError } = usePost(id || "");
@@ -117,22 +118,6 @@ function EditPostScreenContent() {
     [refetchTags],
   );
 
-  // Initialize form from post data
-  useEffect(() => {
-    if (post) {
-      const nextCaption =
-        post.kind === "text"
-          ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
-          : post.caption || "";
-      setCaption(nextCaption);
-      setOriginalCaption(nextCaption);
-      setLocation(post.location ? { name: post.location } : null);
-      setOriginalLocation(post.location ? { name: post.location } : null);
-      setIsNSFW(post.isNSFW || false);
-      setOriginalIsNSFW(post.isNSFW || false);
-    }
-  }, [post]);
-
   // ─── Dirty detection ───
   const hasRotations = Object.values(rotations).some((r) => r % 360 !== 0);
   const isDirty = useMemo(
@@ -151,6 +136,25 @@ function EditPostScreenContent() {
       hasRotations,
     ],
   );
+
+  // Initialize form from post data
+  useEffect(() => {
+    if (post && (hydratedPostId.current !== String(post.id) || !isDirty)) {
+      // Accept a fresh server response until editing starts; preserve dirty drafts.
+      // usePost may initially expose an older feed/profile placeholder.
+      hydratedPostId.current = String(post.id);
+      const nextCaption =
+        post.kind === "text"
+          ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
+          : post.caption || "";
+      setCaption(nextCaption);
+      setOriginalCaption(nextCaption);
+      setLocation(post.location ? { name: post.location } : null);
+      setOriginalLocation(post.location ? { name: post.location } : null);
+      setIsNSFW(post.isNSFW || false);
+      setOriginalIsNSFW(post.isNSFW || false);
+    }
+  }, [post, isDirty]);
 
   const captionOverLimit = caption.length > MAX_CAPTION;
 
@@ -236,7 +240,7 @@ function EditPostScreenContent() {
       return { previousPost, previousFeed };
     },
 
-    onError: (_err, _vars, context) => {
+    onError: (error, _vars, context) => {
       // Rollback
       if (context?.previousPost) {
         queryClient.setQueryData(postKeys.detail(id!), context.previousPost);
@@ -244,7 +248,9 @@ function EditPostScreenContent() {
       if (context?.previousFeed) {
         queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), context.previousFeed);
       }
-      showToast("error", "Error", "Couldn't save changes. Try again.");
+      showToast("error", "Couldn't save changes", error instanceof Error && error.message
+        ? error.message
+        : "Couldn't save changes. Try again.");
     },
 
     onSuccess: () => {
@@ -323,10 +329,8 @@ function EditPostScreenContent() {
       setIsRotating(false);
     }
 
-    updateMutation.mutate(updates);
-
-    // Navigate back immediately (optimistic)
-    router.back();
+    // Keep the draft open if verification or the save is refused.
+    updateMutation.mutate(updates, { onSuccess: () => router.back() });
   }, [
     id,
     isDirty,
