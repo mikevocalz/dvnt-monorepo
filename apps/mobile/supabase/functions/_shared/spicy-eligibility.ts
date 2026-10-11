@@ -1,7 +1,8 @@
-import type { NormalizedVerification } from './verification-state.ts';
+import { resolveAdultVerificationState, type NormalizedVerification } from './verification-state.ts';
 
-/** Resolve the separate server-owned legacy entitlement; never fabricate an ID pass. */
-export async function applyLegacyAdultAccess(db: any, userId: string | null | undefined, state: NormalizedVerification): Promise<NormalizedVerification> {
+/** Legacy membership eligibility is separate from identity-provider verification. */
+export async function resolveSpicyEligibility(db: any, userId: string | null | undefined, now = new Date()): Promise<NormalizedVerification> {
+  const state = await resolveAdultVerificationState(db, userId, now);
   if (!userId || state.state === 'approved' || state.state === 'rejected' ||
       state.reason === 'verification_unavailable' || state.reason === 'account_changed') return state;
   try {
@@ -10,6 +11,6 @@ export async function applyLegacyAdultAccess(db: any, userId: string | null | un
       return { state: 'approved', retryable: false, reason: 'legacy_membership',
         message: null, providerRef: null };
     }
-  } catch { /* Missing/unreadable grants never admit an account. */ }
+  } catch { /* A missing/unreadable grant never admits an account. */ }
   return state;
 }

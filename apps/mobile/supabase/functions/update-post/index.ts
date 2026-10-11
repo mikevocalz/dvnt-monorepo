@@ -7,7 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
-import { resolveAdultVerificationState } from "../_shared/verification-state.ts";
+import { resolveSpicyEligibility } from "../_shared/spicy-eligibility.ts";
 import { spicyPostRefusal } from "../_shared/spicy-post-refusal.ts";
 
 const corsHeaders = {
@@ -122,11 +122,10 @@ Deno.serve(async (req) => {
         403,
       );
 
-    // Same rule as create-post: marking a post SPICY needs an approved adult
-    // ID, whatever verified_admission_policy says. Without this an unverified
-    // account could publish a normal post and flip it to SPICY afterwards.
+    // SPICY requires approved adult verification or a server-owned legacy
+    // entitlement. Direct clients cannot supply either permission themselves.
     if (isNSFW === true) {
-      const verification = await resolveAdultVerificationState(supabaseAdmin, authUserId);
+      const verification = await resolveSpicyEligibility(supabaseAdmin, authUserId);
       if (verification.state !== "approved") {
         return jsonResponse(spicyPostRefusal(verification), 200);
       }
