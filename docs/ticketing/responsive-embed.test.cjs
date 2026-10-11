@@ -23,6 +23,8 @@ test('both brand placements use the exact repository SVG paths', () => {
   assert.match(widget, /viewBox="0 0 2360 908"/);
   assert.match(widget, /top:12px/);
   assert.match(widget, /Powered by/);
+  assert.match(widget, /id="footer-wg"/);
+  assert.match(widget, /url\\(#footer-wg\\)/);
 });
 test('iframe parent offers responsive widths and bounded resize messages', () => {
   for (const width of ['100%', '760px', '390px', '320px']) {
