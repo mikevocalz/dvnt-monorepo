@@ -52,3 +52,23 @@ test('root and standalone web deployments use the same security header rules',()
 });
 for(const status of ['draft','scheduled','paused',null,'unexpected'])test('only on-sale tiers are public: '+status,async()=>{const h=harness();h.tables.ticket_types[0].status=status;const r=await h.call();assert.deepEqual(r.data.tiers,[]);assert.equal(h.rpcs.length,0)});
 test('stored tier currency is preserved in advertised price',async()=>{const h=harness();h.tables.ticket_types[0].currency='gbp';const r=await h.call();assert.equal(r.data.tiers[0].currency,'GBP');const html=renderEventWidget(r.data);assert.match(html,/£25\.00/);assert.ok(!html.includes('$25.00'))});
+
+const {onSiteTicketEmbedCode}=load(path.join(ROOT,'packages/app/lib/ticket-embed/unified-code.ts'));
+test('both external selling modes share one event-scoped published widget UUID',async()=>{
+ const h=harness();const managed=await h.call({action:'get'});
+ assert.equal(managed.status,200);assert.equal(managed.data.settings.event_id,1);
+ const id=managed.data.settings.id;
+ assert.ok(managed.data.code.includes('/tickets/embed/'+id));
+ const inline=onSiteTicketEmbedCode(id);
+ assert.ok(inline.includes('data-dvnt-ticket-embed="'+id+'"'));
+ assert.ok(inline.includes('https://dvntapp.live/embed/tickets.js'));
+ assert.throws(()=>onSiteTicketEmbedCode('<svg onload=alert(1)>'));
+ const visible=await h.call();assert.equal(visible.data.event.id,managed.data.settings.event_id);
+});
+test('organizer links only the original event embed generator',()=>{
+ const organizer=fs.readFileSync(path.join(ROOT,'apps/web/src/app/(frontend)/feed/events/[id]/organizer/page.tsx'),'utf8');
+ const alternate=fs.readFileSync(path.join(ROOT,'apps/web/src/app/(frontend)/feed/events/[id]/embed/checkout/page.tsx'),'utf8');
+ assert.equal((organizer.match(/<EventWidgetEntry/g)||[]).length,1);
+ assert.equal(organizer.includes('TicketEmbedOrganizerEntry'),false);
+ assert.ok(alternate.includes('redirect(') && alternate.includes('/embed'));
+});

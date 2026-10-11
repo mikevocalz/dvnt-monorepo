@@ -36,7 +36,7 @@ function harness(options={}) {
     events:[{id:90,host_id:'owner',title:'DVNT fixture',visibility:'public',status:'active',ticketing_enabled:true,
       start_date:'2026-10-12T12:00:00Z',end_date:'2026-10-12T18:00:00Z',fee_mode:'pass',attendee_name_requirement:'optional',...options.event}],
     ticket_types:[{id:TIER,event_id:90,name:'Admission',price_cents:2500,is_active:true,status:'on_sale',tier_visibility:'public',quantity_total:20,quantity_sold:0,max_per_user:10,...options.tier}],
-    event_ticket_embed_settings:[{id:EMBED,event_id:90,allowed_origin:ORIGIN,revision:2,status:'published',...options.setting}],
+    event_ticket_widgets:[{id:EMBED,event_id:90,allowed_origin:ORIGIN,revision:2,published:true,...options.setting}],
     organizer_accounts:[{host_id:'owner',stripe_account_id:'acct_fixture',charges_enabled:true,...options.organizer}],
     event_promoters:[{id:PROMOTER,event_id:90,code:'TRE_1',customer_discount_bps:1000,promoter_commission_bps:2000,status:'active'}],
     ticket_embed_checkout_attempts:[],orders:[],ticket_holds:[],tickets:[],
@@ -217,7 +217,7 @@ test('unknown proof, foreign origin and other embed cannot read an order',async(
   }
 });
 test('revocation denies new buyers but existing checkout remains recoverable',async()=>{
-  const h=harness();await h.open();h.tables.event_ticket_embed_settings[0].status='revoked';
+  const h=harness();await h.open();h.tables.event_ticket_widgets[0].published=false;
   assert.equal((await h.call('quote',buyer)).status,404);assert.equal((await h.call('resume',h.identity)).status,200);
 });
 test('paid provider callback is not ticket fulfillment',async()=>{

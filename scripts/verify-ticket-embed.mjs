@@ -105,8 +105,8 @@ CREATE TABLE public.promoter_attributions(order_id uuid UNIQUE REFERENCES orders
 const migration=(file)=>readFileSync(join(MIGRATIONS,file),'utf8');
 await sql(migration('20260915172318_atomic_legacy_ticket_hold.sql'));
 await sql(migration('20260919120000_promoter_code_v2.sql'));
-await sql(migration('20261011071000_event_ticket_embed_settings.sql'));
-await sql(migration('20261011120000_ticket_embed_checkout.sql'));
+await sql(migration('20261011204000_event_ticket_widgets.sql'));
+await sql(migration('20261011233500_unified_ticket_embed_checkout.sql'));
 console.log('PASS: real canonical hold, promoter attribution and both embed migrations applied');
 const ORIGIN='https://events.example.com',PROOF='a'.repeat(64),REQUEST='b'.repeat(64);
 const fees=(price,quantity=1)=>{
@@ -121,8 +121,8 @@ async function fixture(cap=20){
  await sql(`INSERT INTO organizer_accounts VALUES('host','acct_fixture',true) ON CONFLICT(host_id) DO NOTHING`);
  const tier=(await sql(`INSERT INTO ticket_types(event_id,name,price_cents,is_active,status,tier_visibility,quantity_total,max_per_user)
  VALUES($1,'General admission',2500,true,'on_sale','public',$2,10) RETURNING id`,[event.id,cap]))[0];
- const embed=(await sql(`INSERT INTO event_ticket_embed_settings(event_id,allowed_origin,status,revision,updated_by)
- VALUES($1,$2,'published',1,'host') RETURNING id`,[event.id,ORIGIN]))[0];
+ const embed=(await sql(`INSERT INTO event_ticket_widgets(event_id,allowed_origin,published,revision,updated_by)
+ VALUES($1,$2,true,1,'host') RETURNING id`,[event.id,ORIGIN]))[0];
  const quote={eventId:event.id,revision:1,tierId:tier.id,quantity:1,email:'buyer@example.com',name:'Fixture buyer',attendeeNames:[],
   unitPrice:2500,requestedFeeMode:'pass',destination:'acct_fixture',fees:fees(2500),promoter:null,
   expiresAt:Math.floor(Date.now()/1000)+35*60};
@@ -178,11 +178,11 @@ await check('failed pending order insert rolls back the new hold',async()=>{
  assert.deepEqual(await counts(f),{orders:0,holds:0,attempts:0});}finally{await sql('ALTER TABLE orders DROP CONSTRAINT fixture_order_rejection');}
 });
 await check('revoked/stale origin and changed catalog reject before creating money state',async()=>{
- const f=await fixture();await sql("UPDATE event_ticket_embed_settings SET status='revoked' WHERE id=$1",[f.embedId]);
+ const f=await fixture();await sql("UPDATE event_ticket_widgets SET published=false WHERE id=$1",[f.embedId]);
  await assert.rejects(prepare(f),/embed_unavailable/);
- await sql("UPDATE event_ticket_embed_settings SET status='published',revision=2 WHERE id=$1",[f.embedId]);
+ await sql("UPDATE event_ticket_widgets SET published=true,revision=2 WHERE id=$1",[f.embedId]);
  await assert.rejects(prepare(f),/embed_unavailable/);
- await sql('UPDATE event_ticket_embed_settings SET revision=1 WHERE id=$1',[f.embedId]);
+ await sql('UPDATE event_ticket_widgets SET revision=1 WHERE id=$1',[f.embedId]);
  await sql('UPDATE ticket_types SET price_cents=3500 WHERE id=$1',[f.tierId]);
  await assert.rejects(prepare(f),/selection_changed/);assert.deepEqual(await counts(f),{orders:0,holds:0,attempts:0});
 });
@@ -233,7 +233,7 @@ await check('new table and money-changing RPCs deny public client roles',async()
 await check('ordinary hold/settings cleanup is not blocked by recovery rows',async()=>{
  const f=await fixture(),a=await prepare(f);await attach(a);
  await sql('DELETE FROM ticket_holds WHERE id=$1',[a.hold_id]);
- await sql('DELETE FROM event_ticket_embed_settings WHERE id=$1',[f.embedId]);
+ await sql('DELETE FROM event_ticket_widgets WHERE id=$1',[f.embedId]);
  assert.equal((await sql('SELECT count(*)::integer AS n FROM ticket_embed_checkout_attempts WHERE id=$1',[a.id]))[0].n,1);
  await sql('DELETE FROM orders WHERE id=$1',[a.order_id]);
  assert.equal((await sql('SELECT count(*)::integer AS n FROM ticket_embed_checkout_attempts WHERE id=$1',[a.id]))[0].n,0);
