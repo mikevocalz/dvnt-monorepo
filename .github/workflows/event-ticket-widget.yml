@@ -6,6 +6,7 @@ on:
       - 'apps/mobile/supabase/migrations/*event_ticket_widgets*'
       - 'apps/web/src/app/tickets/**'
       - 'apps/web/src/app/(frontend)/feed/events/**'
+      - 'vercel.json'
       - 'apps/web/vercel.json'
       - 'packages/app/lib/ticket-embed/**'
       - 'packages/app/features/events/ui/event-widget.web.tsx'
