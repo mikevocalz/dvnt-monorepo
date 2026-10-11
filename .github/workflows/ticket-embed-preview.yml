@@ -1,0 +1,18 @@
+name: Ticket embed preview checks
+on:
+  pull_request:
+    paths:
+      - "docs/ticketing/previews/**"
+      - "docs/ticketing/responsive-embed.test.cjs"
+      - ".github/workflows/ticket-embed-preview.yml"
+  workflow_dispatch:
+jobs:
+  responsive-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate isolated responsive preview
+        run: node --test docs/ticketing/responsive-embed.test.cjs

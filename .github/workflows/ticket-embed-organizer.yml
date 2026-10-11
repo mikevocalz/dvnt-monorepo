@@ -1,0 +1,27 @@
+name: Ticket embed organizer checks
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/manage-ticket-embed/**'
+      - 'apps/mobile/supabase/functions/_shared/ticket-embed-settings.ts'
+      - 'apps/mobile/supabase/migrations/*event_ticket_embed_settings.sql'
+      - 'packages/app/lib/api/ticket-embeds.ts'
+      - 'packages/app/lib/ticket-embed/**'
+      - 'packages/app/features/events/ui/ticket-embed-settings.web.tsx'
+      - 'apps/web/src/app/**/embed/**'
+      - 'apps/web/src/app/**/organizer/page.tsx'
+      - '.github/workflows/ticket-embed-organizer.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  organizer-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node --test apps/mobile/supabase/functions/manage-ticket-embed/index.test.cjs
