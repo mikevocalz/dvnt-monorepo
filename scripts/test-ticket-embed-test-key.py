@@ -22,6 +22,23 @@ class TestKeyCheck(unittest.TestCase):
                 self.assertIsNotNone(error)
                 self.assertFalse(result["authenticated"])
 
+    def test_wrong_key_categories_never_expose_values(self):
+        cases = {
+            "STRIPE_TEST_SECRET_KEY=" + self.key: "environment_assignment_in_secret_value",
+            "\"" + self.key + "\"": "quotes_in_secret_value",
+            "pk_test_" + "b" * 32: "publishable_key_in_secret_field",
+            "sk_live_" + "b" * 32: "live_key_in_test_field",
+            "whsec_" + "b" * 32: "webhook_secret_in_api_key_field",
+            self.key[:15] + "\n" + self.key[15:]: "internal_whitespace_in_secret_value",
+        }
+        for key, expected in cases.items():
+            with self.subTest(category=expected):
+                called = []
+                result, error = m.check_key(key, lambda _: called.append(True))
+                self.assertEqual(error, expected)
+                self.assertEqual(called, [])
+                self.assertNotIn(key, str(result) + str(error))
+
     def test_accepts_authenticated_test_balance(self):
         result, error = m.check_key("\n" + self.key + "\n", lambda key: {"object":"balance", "livemode":False})
         self.assertIsNone(error)
