@@ -1,0 +1,30 @@
+name: Spicy post feedback regression
+on:
+  pull_request:
+    paths:
+      - "apps/mobile/supabase/functions/**"
+      - "packages/app/features/post/**"
+      - "packages/app/features/routes/screens/**"
+      - "packages/app/lib/auth/**"
+      - "scripts/test-spicy-*.cjs"
+      - ".github/workflows/spicy-post-feedback.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  feedback-and-adult-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Real handler and editor callbacks with explicit fixture dependencies
+        run: node --test scripts/test-spicy-post-feedback.cjs scripts/test-spicy-native-draft.cjs
+      - name: Existing adult policy and ticket campaign regressions
+        run: node --test apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs apps/mobile/supabase/functions/_shared/first-post-gate.test.cjs

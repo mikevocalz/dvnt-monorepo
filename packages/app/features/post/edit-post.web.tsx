@@ -203,14 +203,16 @@ export function EditPostScreen() {
 
       return { previousPost, previousFeed };
     },
-    onError: (_err, _vars, context) => {
+    onError: (error, _vars, context) => {
       if (context?.previousPost) {
         queryClient.setQueryData(postKeys.detail(id), context.previousPost);
       }
       if (context?.previousFeed) {
         queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), context.previousFeed);
       }
-      showToast("error", "Error", "Couldn't save changes. Try again.");
+      showToast("error", "Couldn't save changes", error instanceof Error && error.message
+        ? error.message
+        : "Couldn't save changes. Try again.");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: postKeys.detail(id) });

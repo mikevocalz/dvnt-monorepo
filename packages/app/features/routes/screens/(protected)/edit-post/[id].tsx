@@ -86,6 +86,7 @@ function EditPostScreenContent() {
   const showToast = useUIStore((s) => s.showToast);
   const currentUser = useAuthStore((s) => s.user);
   const scrollRef = useRef<RNScrollView>(null);
+  const hydratedPostId = useRef<string | null>(null);
 
   // ─── Fetch post ───
   const { data: post, isLoading, isError } = usePost(id || "");
@@ -119,7 +120,9 @@ function EditPostScreenContent() {
 
   // Initialize form from post data
   useEffect(() => {
-    if (post) {
+    if (post && hydratedPostId.current !== String(post.id)) {
+      // Cache updates/rollback must not replace this post's unsaved draft.
+      hydratedPostId.current = String(post.id);
       const nextCaption =
         post.kind === "text"
           ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
@@ -236,7 +239,7 @@ function EditPostScreenContent() {
       return { previousPost, previousFeed };
     },
 
-    onError: (_err, _vars, context) => {
+    onError: (error, _vars, context) => {
       // Rollback
       if (context?.previousPost) {
         queryClient.setQueryData(postKeys.detail(id!), context.previousPost);
@@ -244,7 +247,9 @@ function EditPostScreenContent() {
       if (context?.previousFeed) {
         queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), context.previousFeed);
       }
-      showToast("error", "Error", "Couldn't save changes. Try again.");
+      showToast("error", "Couldn't save changes", error instanceof Error && error.message
+        ? error.message
+        : "Couldn't save changes. Try again.");
     },
 
     onSuccess: () => {
@@ -323,10 +328,8 @@ function EditPostScreenContent() {
       setIsRotating(false);
     }
 
-    updateMutation.mutate(updates);
-
-    // Navigate back immediately (optimistic)
-    router.back();
+    // Keep the draft open if verification or the save is refused.
+    updateMutation.mutate(updates, { onSuccess: () => router.back() });
   }, [
     id,
     isDirty,
