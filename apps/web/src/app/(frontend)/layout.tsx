@@ -9,6 +9,7 @@ import { WebToaster } from "@/components/web-toaster";
 import { CohostInviteWatcher } from "@/components/cohost-invite-watcher";
 import { VerifiedOnlyPopupHost } from "@/components/verified-only-popup-host";
 import { ProfileCompletionPopupHost } from "@/components/profile-completion-popup-host";
+import { PayoutSetupReminderHost } from "@/components/payout-setup-reminder-host";
 import { ScreenViewTracker } from "@/components/screen-view-tracker";
 import { RNWStyleRegistry } from "./registry";
 import { RegisterSW } from "@/components/pwa/register-sw";
@@ -127,6 +128,8 @@ export default function FrontendLayout({
               <VerifiedOnlyPopupHost />
               {/* One per authenticated tab entry, never over auth, payments or video calls. */}
               <ProfileCompletionPopupHost />
+              {/* Signed-in organizers and promoters with unfinished Stripe payouts. */}
+              <PayoutSetupReminderHost />
             </ApiProvider>
           </ImageProvider>
         </RNWStyleRegistry>

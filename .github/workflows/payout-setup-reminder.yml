@@ -1,0 +1,30 @@
+name: Payout reminder
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/_shared/payout-setup-reminder*'
+      - 'apps/mobile/supabase/functions/payout-setup-reminder/**'
+      - 'apps/mobile/supabase/config.toml'
+      - 'packages/app/lib/payments/payout-reminder-policy.ts'
+      - 'packages/app/lib/api/payout-setup-reminder.ts'
+      - 'packages/app/components/payout-setup-reminder.native.tsx'
+      - 'apps/web/src/components/payout-setup-reminder*'
+      - '.github/workflows/payout-setup-reminder.yml'
+permissions:
+  contents: read
+jobs:
+  reminder-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node --test apps/mobile/supabase/functions/_shared/payout-setup-reminder.test.cjs
+      - name: Typecheck and integration route check
+        run: pnpm --filter web typecheck

@@ -573,3 +573,7 @@ verify_jwt = false
 # The embedded commerce function verifies origin, buyer session and payment state internally.
 [functions.ticket-embed]
 verify_jwt = false
+
+# User-scoped Stripe payout setup reminder: Better Auth token validated internally.
+[functions.payout-setup-reminder]
+verify_jwt = false

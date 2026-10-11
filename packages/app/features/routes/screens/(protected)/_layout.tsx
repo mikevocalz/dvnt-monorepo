@@ -56,6 +56,7 @@ import { useMotionTier } from "@dvnt/app/lib/navigation/use-motion-tier";
 import { AppDrawerHost } from "@dvnt/app/features/navigation/app-drawer-host";
 import { DrawerTrigger } from "@dvnt/app/components/drawer-trigger";
 import { VerifiedOnlyPopup } from "@dvnt/app/components/verified-only-popup";
+import { PayoutSetupReminderNative } from "@dvnt/app/components/payout-setup-reminder.native";
 import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
 import { useMyTickets } from "@dvnt/app/lib/hooks/use-tickets";
 import {
@@ -550,6 +551,8 @@ export default function ProtectedLayout() {
           verified-only action, or by a participation rail's refusal. Renders
           nothing while closed, and never opens while enforcement is off. */}
       <VerifiedOnlyPopup />
+      {/* Passive payout setup nudge. Never blocks purchases or sign-in. */}
+      <PayoutSetupReminderNative />
       {/* PERSISTENT: Weather overlay — renders ON TOP of screens.
           pointerEvents="none" — touches pass through to content below. */}
       <WeatherReanimatedOverlay />
