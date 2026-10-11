@@ -118,24 +118,6 @@ function EditPostScreenContent() {
     [refetchTags],
   );
 
-  // Initialize form from post data
-  useEffect(() => {
-    if (post && hydratedPostId.current !== String(post.id)) {
-      // Cache updates/rollback must not replace this post's unsaved draft.
-      hydratedPostId.current = String(post.id);
-      const nextCaption =
-        post.kind === "text"
-          ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
-          : post.caption || "";
-      setCaption(nextCaption);
-      setOriginalCaption(nextCaption);
-      setLocation(post.location ? { name: post.location } : null);
-      setOriginalLocation(post.location ? { name: post.location } : null);
-      setIsNSFW(post.isNSFW || false);
-      setOriginalIsNSFW(post.isNSFW || false);
-    }
-  }, [post]);
-
   // ─── Dirty detection ───
   const hasRotations = Object.values(rotations).some((r) => r % 360 !== 0);
   const isDirty = useMemo(
@@ -154,6 +136,25 @@ function EditPostScreenContent() {
       hasRotations,
     ],
   );
+
+  // Initialize form from post data
+  useEffect(() => {
+    if (post && (hydratedPostId.current !== String(post.id) || !isDirty)) {
+      // Accept a fresh server response until editing starts; preserve dirty drafts.
+      // usePost may initially expose an older feed/profile placeholder.
+      hydratedPostId.current = String(post.id);
+      const nextCaption =
+        post.kind === "text"
+          ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
+          : post.caption || "";
+      setCaption(nextCaption);
+      setOriginalCaption(nextCaption);
+      setLocation(post.location ? { name: post.location } : null);
+      setOriginalLocation(post.location ? { name: post.location } : null);
+      setIsNSFW(post.isNSFW || false);
+      setOriginalIsNSFW(post.isNSFW || false);
+    }
+  }, [post, isDirty]);
 
   const captionOverLimit = caption.length > MAX_CAPTION;
 
@@ -459,8 +460,8 @@ function EditPostScreenContent() {
         </View>
         <View className="flex-1 items-center justify-center px-6">
           <Motion.View
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ type: "spring", damping: 20, stiffness: 300 }}
             className="items-center"
           >
