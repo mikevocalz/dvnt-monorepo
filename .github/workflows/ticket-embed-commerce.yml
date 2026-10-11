@@ -26,6 +26,8 @@ jobs:
           node-version: '22'
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Publication and payment runtime configuration agreement
+        run: node --test apps/mobile/supabase/functions/_shared/ticket-embed-runtime.test.cjs
       - run: node --test apps/mobile/supabase/functions/ticket-embed/index.test.cjs apps/mobile/supabase/functions/manage-ticket-embed/index.test.cjs docs/ticketing/responsive-embed.test.cjs
       - name: Real disposable PostgreSQL inventory and transaction tests
         run: node scripts/verify-ticket-embed.mjs
