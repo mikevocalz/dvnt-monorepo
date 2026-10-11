@@ -26,5 +26,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node --test apps/mobile/supabase/functions/_shared/payout-setup-reminder.test.cjs
-      - name: Typecheck and integration route check
-        run: pnpm --filter web typecheck
+      - name: Typecheck web integration and native Expo screen
+        run: |
+          pnpm --filter web typecheck
+          pnpm --filter mobile typecheck
