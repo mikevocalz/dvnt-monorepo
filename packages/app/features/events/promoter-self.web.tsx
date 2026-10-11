@@ -7,6 +7,7 @@
  */
 
 import { useParams } from "next/navigation";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Megaphone, ArrowLeft, Wallet, AlertCircle } from "lucide-react";
@@ -36,7 +37,7 @@ export function PromoterSelfScreen() {
   });
 
   const connectStart = useMutation({
-    mutationFn: () => promotersApi.connectStart(eventId),
+    mutationFn: () => promotersApi.connectStart(eventId, "web"),
     onSuccess: ({ url }) => {
       window.location.href = url;
     },
@@ -54,6 +55,29 @@ export function PromoterSelfScreen() {
       showToast("error", "Status refresh failed", err?.message || "Try again.");
     },
   });
+
+  // Stripe's return_url is a navigation signal, NOT proof of verified payouts.
+  // Refresh the Stripe status when the browser returns and remove the one-time
+  // marker to avoid repeated requests on subsequent renders.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("stripe_connect");
+    if (outcome !== "return" && outcome !== "refresh") return;
+    params.delete("stripe_connect");
+    const search = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      window.location.pathname + (search ? `?${search}` : "") + window.location.hash,
+    );
+    if (Number.isFinite(eventId) && eventId > 0) {
+      if (outcome === "return") {
+        connectStatus.mutate();
+      } else {
+        showToast("info", "Stripe setup not finished", "Tap Connect bank account to resume.");
+      }
+    }
+  }, [eventId, connectStatus.mutate, showToast]);
 
   if (!Number.isFinite(eventId) || eventId <= 0) {
     return (
