@@ -42,7 +42,7 @@ window.addEventListener('message',(event)=>{
   if(event.source!==frame.contentWindow || event.origin!=='null') return;
   const data=event.data;
   if(!data || typeof data!=='object' || data.type!=='dvnt-demo-height' || typeof data.height!=='number' || !Number.isFinite(data.height)) return;
-  frame.style.height=Math.max(450,Math.min(1400,Math.ceil(data.height)))+'px';
+  frame.style.height=Math.max(450,Math.min(3000,Math.ceil(data.height)))+'px';
 });
 </script>
 </body>
