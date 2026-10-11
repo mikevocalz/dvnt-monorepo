@@ -27,10 +27,25 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Existing organizer and preview contracts
         run: node --test docs/ticketing/responsive-embed.test.cjs apps/mobile/supabase/functions/manage-ticket-embed/index.test.cjs
-      - name: Capture tracked source for reproducible offline verification
-        run: git archive --format=tar.gz -o /tmp/dvnt-embed-source.tar.gz HEAD
+      - name: Prepare disposable offline test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pgtools/lib /tmp/pgtools/runtime /tmp/pgtools/share
+          PGROOT=$(find /usr/lib/postgresql -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          PGVERSION=$(basename "$PGROOT")
+          cp -a "$PGROOT" /tmp/pgtools/runtime/
+          cp -a "/usr/share/postgresql/$PGVERSION" /tmp/pgtools/share/
+          for BIN in postgres initdb pg_ctl psql; do
+            ldd "$PGROOT/bin/$BIN" | awk '/=> \/ / {print $3} /=> \/[^ ]+/ {print $3}' | sort -u | while read -r LIB; do
+              case "$(basename "$LIB")" in libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*) continue;; esac
+              cp -L "$LIB" /tmp/pgtools/lib/
+            done
+          done
+          npm install --prefix /tmp/pgtools/node --ignore-scripts --no-audit --no-fund pg@8.18.0
+          tar -czf /tmp/dvnt-pg-testtools.tar.gz -C /tmp/pgtools .
       - uses: actions/upload-artifact@v4
         with:
-          name: ticket-embed-source
-          path: /tmp/dvnt-embed-source.tar.gz
+          name: ticket-embed-testtools
+          path: /tmp/dvnt-pg-testtools.tar.gz
           retention-days: 2
