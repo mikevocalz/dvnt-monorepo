@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; connect-src 'none'"><title>DVNT Ticket Widget — interactive demo</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#f9f8fd;background:transparent}*{box-sizing:border-box}body{margin:0;padding:2px}.widget{background:#17161d;border:1px solid #36323e;border-radius:18px;padding:24px;max-width:550px;margin:auto}h1{font-size:26px;letter-spacing:-.6px;margin:12px 0 6px}h2{font-size:19px;margin:8px 0}p{line-height:1.55;margin:0;color:#bdb8c8}.eyebrow{display:flex;justify-content:space-between;align-items:center;font-size:11px;letter-spacing:1.3px;text-transform:uppercase;font-weight:750}.brand{font-size:17px;letter-spacing:1px}.demo{color:#cfb6f6;border:1px solid #5d417c;border-radius:5px;padding:5px 7px;font-size:9px;letter-spacing:1px}.sub{font-size:12px}.line{height:1px;background:#34303c;margin:20px 0}.section-title{font-size:12px;font-weight:650;letter-spacing:.3px;margin:18px 0 10px;color:#c9c3d2}.tier{border:1px solid #49414f;border-radius:10px;padding:15px;display:flex;gap:12px;align-items:center;cursor:pointer;margin:10px 0}.tier.selected{border-color:#b88be9;background:#231b2f;box-shadow:0 0 0 1px #b88be922}.tier input{accent-color:#caa2f3;width:17px;height:17px;margin:0}.tier-main{flex:1;font-size:14px;font-weight:650}.tier-main small{display:block;font-size:11px;font-weight:400;margin-top:4px;color:#b3aabe}.price{font-size:17px;font-weight:650}.qty{display:flex;align-items:center;justify-content:space-between;margin-top:18px;font-size:13px}.stepper{border:1px solid #514659;display:flex;align-items:center;border-radius:8px;overflow:hidden}.stepper button{background:transparent;border:0;color:inherit;font-size:20px;width:35px;height:34px;cursor:pointer}.stepper output{width:30px;text-align:center;font-weight:650}button:focus-visible,input:focus-visible{outline:3px solid #59d6e8;outline-offset:4px}.buyer{display:grid;grid-template-columns:1fr 1fr;gap:12px}.buyer label{font-size:11px;color:#a9a1b3;display:grid;gap:6px}.buyer input{width:100%;background:#201d26;border:1px solid #3d3547;border-radius:7px;color:#ded8e6;padding:10px 11px;font-size:12px}.row{display:flex;align-items:center;justify-content:space-between;margin:10px 0;font-size:12px;color:#bdb6c8}.row.total{font-size:18px;font-weight:700;color:#fff;margin-top:15px}.row.total span:last-child{font-variant-numeric:tabular-nums}.primary,.secondary{width:100%;border:0;border-radius:9px;padding:15px;font-weight:750;font-size:13px;cursor:pointer;margin-top:19px}.primary{background:#bd93ed;color:#1a1027}.primary:hover{background:#cfacf6}.secondary{border:1px solid #5d4f69;background:transparent;color:#ddd1e9}.fine{font-size:10px;text-align:center;color:#a49aae;margin-top:12px;line-height:1.6}.footer{font-size:10px;color:#96909f;text-align:center;margin-top:20px}.secure{padding:24px 17px;text-align:center;background:#211c2a;border:1px dashed #73627e;border-radius:12px;margin:20px 0}.secure .lock{font-size:26px;color:#d0b2ed;margin-bottom:8px}.secure strong{display:block;font-size:15px;margin:8px 0}.secure p{font-size:12px}.receipt{text-align:center;padding:24px 0 4px}.check{width:58px;height:58px;margin:auto auto 16px;display:grid;place-items:center;border:1px solid #797093;border-radius:50%;font-size:30px;color:#d7baff;background:#26202f}.receipt h2{font-size:23px}.receipt p{font-size:13px}.receipt .summary{background:#211d29;border-radius:10px;padding:16px;margin-top:20px}[hidden]{display:none!important}@media(max-width:400px){.widget{padding:19px}.buyer{grid-template-columns:1fr}.tier{padding:12px}.price{font-size:16px}}
+
+/* Responsive width follows the embedding iframe viewport, not the host page. */
+body{padding:0;background:transparent}
+.widget{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr);max-width:1100px;margin:0 auto;padding:0;overflow:hidden;background:#09090c;border:1px solid #302e34;border-radius:18px}
+.embed-header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ffffff1a;padding:12px 20px;min-width:0}
+.embed-header svg{width:112px;height:44px;display:block}
+.embed-header .eyebrow{color:#a7a3af}
+.flyer-pane{min-width:0}
+.flyer-art{position:relative;aspect-ratio:16/9;background:radial-gradient(circle at 50% 45%,#713893 0%,#2d174a 55%,#09090c 100%);overflow:hidden}
+.flyer-art:before,.flyer-art:after{content:"";position:absolute;inset:10% 25%;border-radius:50%;border:1px solid #d7b0eb55;pointer-events:none}.flyer-art:after{inset:18% 30%}
+.flyer-title{position:absolute;top:36%;left:0;right:0;text-align:center;font:italic clamp(27px,8vw,58px) Georgia,serif;color:white;z-index:1}
+.flyer-subtitle{position:absolute;top:65%;left:0;right:0;text-align:center;font-size:11px;letter-spacing:4px;color:#e3bbec;z-index:1}
+.flyer-art img{position:absolute;width:100%;height:100%;inset:0;object-fit:cover;z-index:2}
+.flyer-info{padding:20px}
+.flyer-info h1{font-size:24px;margin:0 0 7px}
+.flyer-info p{font-size:13px}
+.checkout-pane{min-width:0;padding:20px}
+.embed-footer{grid-column:1/-1;border-top:1px solid #ffffff16;padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:9px}
+.embed-footer .powered-text{font-size:12px;color:#aaa2b2;position:relative;top:12px}
+.embed-footer svg{display:block;width:78px;height:30px;flex:none}
+.tier{background:#ffffff08;border-color:#ffffff1a;border-radius:12px}
+.tier.selected{border-color:#379ed8;background:#379ed80d;box-shadow:none}
+.tier input{accent-color:#379ed8}
+.primary{background:linear-gradient(90deg,#379ed8,#874e9f);color:#fff;border-radius:12px}
+.primary:hover{filter:brightness(1.1);background:linear-gradient(90deg,#379ed8,#874e9f)}
+.widget p.fine{line-height:1.6}
+@media(min-width:740px){.widget{grid-template-columns:minmax(0,.88fr) minmax(0,1fr)}.flyer-pane{border-right:1px solid #ffffff18}.flyer-art{aspect-ratio:4/5}.flyer-title{font-size:clamp(30px,5vw,60px)}.checkout-pane{padding:26px 28px}.buyer{grid-template-columns:1fr 1fr}.flyer-info{padding:24px}.embed-footer{min-height:60px}}
+@media(max-width:400px){.checkout-pane{padding:18px 16px}.flyer-info{padding:16px}.embed-header{padding:10px 16px}.flyer-info h1{font-size:21px}.buyer{grid-template-columns:1fr}.tier{padding:12px}.price{font-size:16px}}
+</style></head><body><main class="widget" aria-label="DVNT ticket embed demonstration"><header class="embed-header"><svg aria-label="DVNT" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2360 908">
+  <defs>
+    <linearGradient id="wg" x1="924.9" x2="1289.2" y1="456" y2="456" gradientTransform="matrix(1 0 0 -1 0 910)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#175b7b"/>
+      <stop offset=".1" stop-color="#217098"/>
+      <stop offset=".2" stop-color="#2981af"/>
+      <stop offset=".3" stop-color="#2f8ec1"/>
+      <stop offset=".5" stop-color="#3397ce"/>
+      <stop offset=".6" stop-color="#369cd5"/>
+      <stop offset="1" stop-color="#379ed8"/>
+    </linearGradient>
+    <linearGradient id="wg1" x1="873.7" x2="1174" y1="369.3" y2="369.3" xlink:href="#wg" xmlns:xlink="http://www.w3.org/1999/xlink"/>
+    <linearGradient id="wg2" x1="822.8" x2="1057.6" y1="282.6" y2="282.6" xlink:href="#wg" xmlns:xlink="http://www.w3.org/1999/xlink"/>
+    <linearGradient id="wg3" x1="703.4" x2="881" y1="343.5" y2="343.5" gradientTransform="matrix(1 0 0 -1 0 910)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#874e9f"/>
+      <stop offset=".3" stop-color="#824a9b"/>
+      <stop offset=".6" stop-color="#743f92"/>
+      <stop offset=".9" stop-color="#5d2d82"/>
+      <stop offset="1" stop-color="#5b2c81"/>
+    </linearGradient>
+    <linearGradient id="wg4" x1="651.7" x2="855.7" y1="309.1" y2="309.1" xlink:href="#wg3" xmlns:xlink="http://www.w3.org/1999/xlink"/>
+    <linearGradient id="wg5" x1="600.7" x2="829.5" y1="282.6" y2="282.6" xlink:href="#wg3" xmlns:xlink="http://www.w3.org/1999/xlink"/>
+  </defs>
+  <path d="M350.7 348.2c-9.6-.9-28.9-1.4-57.9-1.4H0v23.9h295.3c26.7 0 44.8.5 54.4 1.4C493 386.6 603.9 508.4 587.8 655.9c-7 64.1-38.9 122.5-88.1 163.9-49.9 42-113 64.2-178.2 64.3h-106c-.2 0-.4-.2-.4-.4v-23.1c0-.2.2-.3.4-.3h106.8c86-.2 168.6-44 212.5-118.8 32.8-56 39.6-124.2 18.9-185.8-31.2-92.8-118.8-154-215-160.4-16.1-1.1-34.9-.8-53.3-.8h-237c-.3 0-.5.2-.5.5v23.1c0 .2.2.4.4.4H320c53 0 103.6 17.3 144.9 50.6 49.3 39.7 78 99.7 76.6 163.2-2 89.4-62.3 163.5-145.5 191.7-17.2 5.8-35 9.6-53.2 11.4-8.2.8-25.4 1.1-51.6 1h-75.4c-.4 0-.7-.3-.7-.7v-22.9c0-.2.2-.4.4-.4h88.3c18.7.2 33.3-.4 43.7-1.7 60.5-7.6 115.1-40.7 146.3-93.8 26.3-44.7 31.1-100.4 13.7-149-25.1-70-89.1-115.3-161.9-124.3-8.7-1.1-23.9-1.6-45.7-1.5H96.1c-.2 0-.4.2-.4.4V908h23.8V466.6c0-.2.2-.5.5-.5h22.9c.3 0 .5.2.5.5v441.3h23.9V466.6c0-.3.2-.5.5-.5h22.8c.3 0 .5.2.5.5v441.3h137.7c6.1-.3 12.1-.8 18.1-1.3 31.7-2.6 62-9.9 90.8-21.9 61.9-25.8 113.7-71.8 144.7-131.3 40.3-77.4 40.7-169.5 2.5-247-44.7-90.6-135.7-148.7-234.3-158.4ZM215.1 627.4V466.6c0-19.4.2-.4.4-.4h88.3c18.6 0 32.3.5 40.9 1.7 49 6.8 93.4 32.1 121.2 72.6 17.6 25.6 27 55.6 27 87s-9.5 61.4-27 87c-27.8 40.5-72.3 65.8-121.3 72.5-8.7 1.2-22.3 1.8-40.9 1.7-26-.1-55.4-.1-88.3 0-.2 0-.4-.2-.4-.4V627.5Z" fill="#fff"/>
+  <path d="M1289.2 0h-24.4c-.3.2-.6.4-.7.7C1151 303.1 1037.9 605.5 925 908h25.1L1289.1.9V.7c-.1-.4-.1-.6 0-.6Z" fill="url(#wg)"/>
+  <path d="M1173.7 173.3h-24.8c-.4 0-.7.2-.8.6L873.7 908h25.7L1174 173.7c0-.2 0-.3-.2-.3Z" fill="url(#wg1)"/>
+  <path d="M1057.4 346.7h-23.9c-.3 0-.6.2-.7.5l-128.4 342-61.9 165.9v.4l-12.9 34.3-6.8 18.1h24.7l210.1-561c0-.1 0-.3-.2-.3Z" fill="url(#wg2)"/>
+  <path d="M728.9 347c0-.2-.2-.3-.4-.3H704c-.3 0-.6.3-.5.6 0 0 164.7 438.9 164.8 438.9 0 0 12.9-34.2 12.8-34.3L729 346.9Z" fill="url(#wg3)"/>
+  <path d="M855.6 819.7c0 .1-.2.1-.2 0L677.8 347.1c0-.2-.3-.4-.5-.4H652c-.2 0-.3.2-.3.4l190.8 507.8v.2l13.2-35.3Z" fill="url(#wg4)"/>
+  <path d="M828.9 889.8 627 347.1c0-.2-.3-.4-.6-.4h-25.5c-.2 0-.3.2-.2.4L810.8 908h11.9l6.8-18.1c-.2.2-.5.2-.6 0Z" fill="url(#wg5)"/>
+  <path d="M1256.4 346.8h-22.8c-.3 0-.6.3-.6.6V908h23.9V347.4c0-.3-.3-.6-.6-.6ZM1304.3 346.8h-22.8c-.3 0-.6.3-.6.6v560.7h23.9V347.3c0-.3-.3-.6-.6-.6ZM1662.8 346.7h-23.2c-.2 0-.3.2-.3.4v415.2c0 .3-.4.4-.5.1l-224.2-415c-.2-.4-.7-.7-1.2-.7h-25.2c-.2 0-.4.2-.3.5l251 464.6c.2.4.3.9.3 1.3V858c0 .1-.2.2-.3 0l-280.5-510.8c-.2-.3-.5-.5-.8-.5H1329c-.1 0-.2 0-.2.2V908h23.8V477.3c0-.2.2-.3.3 0l233.8 430.8h27.9L1353 431.2c-.3-.5-.4-1.1-.4-1.6v-39c0-.2.3-.3.4-.1l286.3 517.6h23.8v-561c0-.2-.2-.4-.3-.4ZM1710.4 346.8h-22.7c-.3 0-.6.3-.6.6V908h23.8V347.3c0-.3-.2-.5-.5-.5ZM1758.2 346.8h-22.8c-.3 0-.5.2-.5.5v560.8h23.9V347.3c0-.3-.2-.5-.6-.5Z" fill="#fff"/>
+  <rect width="525.6" height="23.9" x="1834.4" y="346.7" fill="#fff" rx=".5" ry=".5"/>
+  <path d="M1834.9 394.4h476.7c.3 0 .5.2.5.5v22.9c0 .3-.2.5-.5.5h-476.7c-.3 0-.5-.2-.5-.5v-22.9c0-.3.2-.5.5-.5ZM2264 442.2h-429.2c-.2 0-.4.2-.4.4v23.2c0 .2.2.3.3.3h154.5c.3 0 .5.2.5.5V908h23.9V466.7c0-.3.3-.6.6-.6h22.7c.3 0 .6.3.6.6v441.2h23.9V466.6c0-.3.2-.5.5-.5h22.7c.3 0 .6.3.6.6V908h23.9V466.6c0-.3.2-.5.5-.5h154.5c.2 0 .3-.2.3-.4v-23.2c0-.2-.2-.4-.4-.4Z" fill="#fff"/>
+</svg>
+<span class="eyebrow">OFFICIAL TICKETS · DEMO</span></header><section class="flyer-pane" aria-label="Event information"><div class="flyer-art"><span class="flyer-title">Moonlight</span><span class="flyer-subtitle">AFTER DARK</span></div><div class="flyer-info"><h1>Moonlight After Dark</h1><p>October 11 · Miami, FL · Example event</p></div></section><section class="checkout-pane">
+
+<div id="choose"><div class="section-title">Choose your tickets</div>
+<label class="tier selected"><input type="radio" name="tier" value="2500" checked><span class="tier-main">General admission<small>Entry to the event</small></span><span class="price">$25</span></label>
+<label class="tier"><input type="radio" name="tier" value="4500"><span class="tier-main">VIP admission<small>Entry + sample VIP benefits</small></span><span class="price">$45</span></label>
+<div class="qty"><span>Quantity</span><div class="stepper"><button id="minus" aria-label="Fewer tickets">−</button><output id="quantity" aria-live="polite">1</output><button id="plus" aria-label="More tickets">+</button></div></div>
+<div class="line"></div><div class="buyer"><label>Sample name<input value="Demo Guest" readonly aria-label="Sample name"></label><label>Sample email<input value="demo@example.com" readonly aria-label="Sample email"></label></div>
+<p class="fine" style="text-align:left;margin-top:8px">Sample details are prefilled. Nothing is sent or stored.</p>
+</div>
+<div id="payment" hidden><div class="line"></div><h2>Secure payment</h2><p class="sub">You are still on the event website.</p><div class="secure"><div class="lock" aria-hidden="true">⌑</div><strong>Stripe payment area</strong><p>The real Stripe form appears here after integration.<br>This demo does not collect card details.</p></div></div>
+<div id="totals"><div class="row"><span id="ticket-label">1 × General admission</span><span id="subtotal">$25.00</span></div><div class="row"><span>Sample service fee</span><span id="fee">$1.63</span></div><div class="row total"><span>Total</span><span id="total">$26.63</span></div></div>
+<button id="continue" class="primary">Continue to secure checkout →</button><button id="simulate" class="primary" hidden>Simulate payment — no charge</button><button id="back" class="secondary" hidden>Back to tickets</button>
+<div id="receipt" class="receipt" hidden><div class="check" aria-hidden="true">✓</div><h2>Demo purchase complete</h2><p>This is how the confirmation could look.</p><div class="summary"><div class="row"><span id="receipt-tickets">1 sample ticket</span><span id="receipt-total">$26.63</span></div></div><p class="fine">No payment was taken. No tickets were issued.<br>Nothing was sent to Stripe or DVNT.</p><button id="reset" class="secondary">Try the demo again</button></div>
+<p id="disclaimer" class="fine">Demonstration only. Real payment and ticket delivery<br>remain disabled until testing and approval.</p></section><footer class="embed-footer"><span class="powered-text">Powered by</span><svg aria-label="DVNT" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2360 908">
+  <defs>
+    <linearGradient id="wg" x1="924.9" x2="1289.2" y1="456" y2="456" gradientTransform="matrix(1 0 0 -1 0 910)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#175b7b"/>
+      <stop offset=".1" stop-color="#217098"/>
+      <stop offset=".2" stop-color="#2981af"/>
+      <stop offset=".3" stop-color="#2f8ec1"/>
+      <stop offset=".5" stop-color="#3397ce"/>
+      <stop offset=".6" stop-color="#369cd5"/>
+      <stop offset="1" stop-color="#379ed8"/>
+    </linearGradient>
+    <linearGradient id="wg1" x1="873.7" x2="1174" y1="369.3" y2="369.3" xlink:href="#wg" xmlns:xlink="http://www.w3.org/1999/xlink"/>
+    <linearGradient id="wg2" x1="822.8" x2="1057.6" y1="282.6" y2="282.6" xlink:href="#wg" xmlns:xlink="http://www.w3.org/1999/xlink"/>
+    <linearGradient id="wg3" x1="703.4" x2="881" y1="343.5" y2="343.5" gradientTransform="matrix(1 0 0 -1 0 910)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#874e9f"/>
+      <stop offset=".3" stop-color="#824a9b"/>
+      <stop offset=".6" stop-color="#743f92"/>
+      <stop offset=".9" stop-color="#5d2d82"/>
+      <stop offset="1" stop-color="#5b2c81"/>
+    </linearGradient>
+    <linearGradient id="wg4" x1="651.7" x2="855.7" y1="309.1" y2="309.1" xlink:href="#wg3" xmlns:xlink="http://www.w3.org/1999/xlink"/>
+    <linearGradient id="wg5" x1="600.7" x2="829.5" y1="282.6" y2="282.6" xlink:href="#wg3" xmlns:xlink="http://www.w3.org/1999/xlink"/>
+  </defs>
+  <path d="M350.7 348.2c-9.6-.9-28.9-1.4-57.9-1.4H0v23.9h295.3c26.7 0 44.8.5 54.4 1.4C493 386.6 603.9 508.4 587.8 655.9c-7 64.1-38.9 122.5-88.1 163.9-49.9 42-113 64.2-178.2 64.3h-106c-.2 0-.4-.2-.4-.4v-23.1c0-.2.2-.3.4-.3h106.8c86-.2 168.6-44 212.5-118.8 32.8-56 39.6-124.2 18.9-185.8-31.2-92.8-118.8-154-215-160.4-16.1-1.1-34.9-.8-53.3-.8h-237c-.3 0-.5.2-.5.5v23.1c0 .2.2.4.4.4H320c53 0 103.6 17.3 144.9 50.6 49.3 39.7 78 99.7 76.6 163.2-2 89.4-62.3 163.5-145.5 191.7-17.2 5.8-35 9.6-53.2 11.4-8.2.8-25.4 1.1-51.6 1h-75.4c-.4 0-.7-.3-.7-.7v-22.9c0-.2.2-.4.4-.4h88.3c18.7.2 33.3-.4 43.7-1.7 60.5-7.6 115.1-40.7 146.3-93.8 26.3-44.7 31.1-100.4 13.7-149-25.1-70-89.1-115.3-161.9-124.3-8.7-1.1-23.9-1.6-45.7-1.5H96.1c-.2 0-.4.2-.4.4V908h23.8V466.6c0-.2.2-.5.5-.5h22.9c.3 0 .5.2.5.5v441.3h23.9V466.6c0-.3.2-.5.5-.5h22.8c.3 0 .5.2.5.5v441.3h137.7c6.1-.3 12.1-.8 18.1-1.3 31.7-2.6 62-9.9 90.8-21.9 61.9-25.8 113.7-71.8 144.7-131.3 40.3-77.4 40.7-169.5 2.5-247-44.7-90.6-135.7-148.7-234.3-158.4ZM215.1 627.4V466.6c0-19.4.2-.4.4-.4h88.3c18.6 0 32.3.5 40.9 1.7 49 6.8 93.4 32.1 121.2 72.6 17.6 25.6 27 55.6 27 87s-9.5 61.4-27 87c-27.8 40.5-72.3 65.8-121.3 72.5-8.7 1.2-22.3 1.8-40.9 1.7-26-.1-55.4-.1-88.3 0-.2 0-.4-.2-.4-.4V627.5Z" fill="#fff"/>
+  <path d="M1289.2 0h-24.4c-.3.2-.6.4-.7.7C1151 303.1 1037.9 605.5 925 908h25.1L1289.1.9V.7c-.1-.4-.1-.6 0-.6Z" fill="url(#wg)"/>
+  <path d="M1173.7 173.3h-24.8c-.4 0-.7.2-.8.6L873.7 908h25.7L1174 173.7c0-.2 0-.3-.2-.3Z" fill="url(#wg1)"/>
+  <path d="M1057.4 346.7h-23.9c-.3 0-.6.2-.7.5l-128.4 342-61.9 165.9v.4l-12.9 34.3-6.8 18.1h24.7l210.1-561c0-.1 0-.3-.2-.3Z" fill="url(#wg2)"/>
+  <path d="M728.9 347c0-.2-.2-.3-.4-.3H704c-.3 0-.6.3-.5.6 0 0 164.7 438.9 164.8 438.9 0 0 12.9-34.2 12.8-34.3L729 346.9Z" fill="url(#wg3)"/>
+  <path d="M855.6 819.7c0 .1-.2.1-.2 0L677.8 347.1c0-.2-.3-.4-.5-.4H652c-.2 0-.3.2-.3.4l190.8 507.8v.2l13.2-35.3Z" fill="url(#wg4)"/>
+  <path d="M828.9 889.8 627 347.1c0-.2-.3-.4-.6-.4h-25.5c-.2 0-.3.2-.2.4L810.8 908h11.9l6.8-18.1c-.2.2-.5.2-.6 0Z" fill="url(#wg5)"/>
+  <path d="M1256.4 346.8h-22.8c-.3 0-.6.3-.6.6V908h23.9V347.4c0-.3-.3-.6-.6-.6ZM1304.3 346.8h-22.8c-.3 0-.6.3-.6.6v560.7h23.9V347.3c0-.3-.3-.6-.6-.6ZM1662.8 346.7h-23.2c-.2 0-.3.2-.3.4v415.2c0 .3-.4.4-.5.1l-224.2-415c-.2-.4-.7-.7-1.2-.7h-25.2c-.2 0-.4.2-.3.5l251 464.6c.2.4.3.9.3 1.3V858c0 .1-.2.2-.3 0l-280.5-510.8c-.2-.3-.5-.5-.8-.5H1329c-.1 0-.2 0-.2.2V908h23.8V477.3c0-.2.2-.3.3 0l233.8 430.8h27.9L1353 431.2c-.3-.5-.4-1.1-.4-1.6v-39c0-.2.3-.3.4-.1l286.3 517.6h23.8v-561c0-.2-.2-.4-.3-.4ZM1710.4 346.8h-22.7c-.3 0-.6.3-.6.6V908h23.8V347.3c0-.3-.2-.5-.5-.5ZM1758.2 346.8h-22.8c-.3 0-.5.2-.5.5v560.8h23.9V347.3c0-.3-.2-.5-.6-.5Z" fill="#fff"/>
+  <rect width="525.6" height="23.9" x="1834.4" y="346.7" fill="#fff" rx=".5" ry=".5"/>
+  <path d="M1834.9 394.4h476.7c.3 0 .5.2.5.5v22.9c0 .3-.2.5-.5.5h-476.7c-.3 0-.5-.2-.5-.5v-22.9c0-.3.2-.5.5-.5ZM2264 442.2h-429.2c-.2 0-.4.2-.4.4v23.2c0 .2.2.3.3.3h154.5c.3 0 .5.2.5.5V908h23.9V466.7c0-.3.3-.6.6-.6h22.7c.3 0 .6.3.6.6v441.2h23.9V466.6c0-.3.2-.5.5-.5h22.7c.3 0 .6.3.6.6V908h23.9V466.6c0-.3.2-.5.5-.5h154.5c.2 0 .3-.2.3-.4v-23.2c0-.2-.2-.4-.4-.4Z" fill="#fff"/>
+</svg>
+</footer></main><script>
+(()=>{let qty=1,unit=2500,name='General admission';const $=id=>document.getElementById(id);const money=c=>(c/100).toLocaleString('en-US',{style:'currency',currency:'USD'});const height=()=>parent.postMessage({type:'dvnt-demo-height',height:document.documentElement.scrollHeight},'*');function calculate(){const base=unit*qty,fee=Math.round(base*.025)+100*qty;$('quantity').textContent=qty;$('ticket-label').textContent=qty+' × '+name;$('subtotal').textContent=money(base);$('fee').textContent=money(fee);$('total').textContent=money(base+fee);$('receipt-tickets').textContent=qty+' sample ticket'+(qty===1?'':'s');$('receipt-total').textContent=money(base+fee);$('minus').disabled=qty===1;$('plus').disabled=qty===10;height();}document.querySelectorAll('input[name=tier]').forEach(input=>input.addEventListener('change',()=>{unit=Number(input.value);name=unit===2500?'General admission':'VIP admission';document.querySelectorAll('.tier').forEach(t=>t.classList.toggle('selected',t.querySelector('input').checked));calculate();}));$('minus').onclick=()=>{qty=Math.max(1,qty-1);calculate();};$('plus').onclick=()=>{qty=Math.min(10,qty+1);calculate();};function stage(n){$('choose').hidden=n!==0;$('payment').hidden=n!==1;$('totals').hidden=n===2;$('continue').hidden=n!==0;$('simulate').hidden=n!==1;$('back').hidden=n!==1;$('receipt').hidden=n!==2;$('disclaimer').hidden=n===2;height();} $('continue').onclick=()=>stage(1);$('back').onclick=()=>stage(0);$('simulate').onclick=()=>stage(2);$('reset').onclick=()=>stage(0);new ResizeObserver(height).observe(document.body);calculate();})();
+</script></body></html>
