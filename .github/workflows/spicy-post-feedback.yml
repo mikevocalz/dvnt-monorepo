@@ -28,3 +28,46 @@ jobs:
         run: node --test scripts/test-spicy-post-feedback.cjs scripts/test-spicy-native-draft.cjs
       - name: Existing adult policy and ticket campaign regressions
         run: node --test apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs apps/mobile/supabase/functions/_shared/first-post-gate.test.cjs
+  anonymous-runtime-smoke:
+    name: Anonymous posting boot smoke (no user session or content writes)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check both deployed runtimes reject anonymous writes
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+          import urllib.error
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          opener = urllib.request.build_opener(NoRedirect())
+          targets = {
+              'staging': 'hsedurpcxcqsgoonatth',
+              'production': 'npfjanxturvmjyevoyfo',
+          }
+          for environment, project in targets.items():
+              for function in ('create-post', 'update-post'):
+                  url = f'https://{project}.supabase.co/functions/v1/{function}'
+                  preflight = urllib.request.Request(url, method='OPTIONS')
+                  with opener.open(preflight, timeout=20) as response:
+                      assert response.status == 204, 'Preflight must boot cleanly'
+                  # Intentionally no Authorization or apikey header. Neither handler
+                  # may reach a database write for this empty anonymous request.
+                  request = urllib.request.Request(url, data=b'{}', method='POST',
+                      headers={'Content-Type': 'application/json'})
+                  try:
+                      response = opener.open(request, timeout=20)
+                  except urllib.error.HTTPError as error:
+                      response = error
+                  with response:
+                      status = response.code
+                      payload = json.load(response)
+                  assert status == (401 if function == 'create-post' else 200)
+                  assert payload.get('ok') is False
+                  assert payload.get('error', {}).get('code') == 'unauthorized'
+                  print(f'PASS {environment}/{function}: boot, CORS and anonymous refusal')
+          print('No authenticated user, customer post, payment or verification record was changed.')
+          PY
