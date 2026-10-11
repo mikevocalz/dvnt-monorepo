@@ -24,6 +24,14 @@ jobs:
       - run: node --test scripts/test-spicy-legacy.cjs scripts/test-spicy-post-feedback.cjs scripts/test-spicy-native-draft.cjs
       - name: Actual migration and role tests in disposable local PostgreSQL
         run: |
+          set -euo pipefail
           sudo systemctl start postgresql
           sudo -u postgres createdb dvnt_legacy_test
-          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_legacy_test -f "$GITHUB_WORKSPACE/scripts/test-spicy-legacy.sql"
+          python - <<'PY' | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_legacy_test
+          from pathlib import Path
+          test = Path('scripts/test-spicy-legacy.sql').read_text()
+          migration = Path('apps/mobile/supabase/migrations/20261011203000_legacy_adult_access.sql').read_text()
+          marker = r'\ir ../apps/mobile/supabase/migrations/20261011203000_legacy_adult_access.sql'
+          assert test.count(marker) == 1
+          print(test.replace(marker, migration))
+          PY
