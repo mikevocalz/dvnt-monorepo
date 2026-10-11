@@ -5,14 +5,15 @@ export interface TicketEmbedSettings {
   event_id: number;
   allowed_origin: string;
   revision: number;
-  status: 'draft' | 'revoked';
+  status: 'draft' | 'published' | 'revoked';
   updated_at: string;
 }
 export interface TicketEmbedBuilderData {
   ok: true;
   role: 'owner' | 'admin';
   settings: TicketEmbedSettings | null;
-  canGenerate: false;
+  canGenerate: boolean;
+  embedCode: string | null;
   event: { id: number; title: string; startDate: string | null; timeZone?: string | null; location: string; flyerUrl: string | null };
 }
 
@@ -23,6 +24,7 @@ async function request(body: Record<string, unknown>): Promise<TicketEmbedBuilde
   return data;
 }
 export const ticketEmbedsApi = {
+  generate: (eventId: number, revision: number) => request({action:'generate',event_id:eventId,expected_revision:revision}),
   get: (eventId: number) => request({ action: 'get', event_id: eventId }),
   save: (eventId: number, origin: string, revision: number) => request({ action: 'save', event_id: eventId, allowed_origin: origin, expected_revision: revision }),
   revoke: (eventId: number, revision: number) => request({ action: 'revoke', event_id: eventId, expected_revision: revision }),

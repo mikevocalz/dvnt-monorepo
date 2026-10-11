@@ -20,7 +20,7 @@ export default function Page() {
   const id = typeof params?.id === 'string' ? params.id : '';
   return (
     <>
-      {process.env.NEXT_PUBLIC_TICKET_EMBED_BUILDER_ENABLED === 'true' && id ? <TicketEmbedOrganizerEntry eventId={id} /> : null}
+      {process.env.NEXT_PUBLIC_TICKET_EMBED_BUILDER_ENABLED !== 'false' && id ? <TicketEmbedOrganizerEntry eventId={id} /> : null}
       <EventOrganizerScreen />
     </>
   );
