@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self' file: about:; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>DVNT ticket embed — interactive demonstration</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b0a10;color:#f9f7fe}*{box-sizing:border-box}body{margin:0}header{height:76px;display:flex;align-items:center;justify-content:space-between;padding:0 5%;border-bottom:1px solid #282332}header strong{font-size:23px;letter-spacing:3px}header span{font-size:12px;color:#bdb2ca}.notice{text-align:center;background:#221a2d;border-bottom:1px solid #493454;padding:12px 20px;color:#d6c6e8;font-size:12px;line-height:1.6}.layout{display:grid;grid-template-columns:1fr;gap:6%;max-width:1240px;padding:52px 4% 48px;margin:auto;align-items:start}.intro{padding-top:62px}.eyebrow{color:#cda8ee;text-transform:uppercase;font-size:11px;letter-spacing:2px;font-weight:700}h1{font-size:clamp(34px,5vw,58px);line-height:1.05;letter-spacing:-2px;margin:24px 0}h1 span{color:#c49bea}.lead{font-size:15px;line-height:1.8;color:#bbb1c6;max-width:410px}.steps{border-top:1px solid #322739;margin-top:34px;padding-top:24px}.steps p{font-size:12px;line-height:1.8;color:#bbb1c6}.steps b{color:#e9dcf2;padding-right:10px}.hint{color:#a297b0;font-size:12px;line-height:1.7;margin-top:28px}.demo-label{color:#beb0cc;font-size:11px;font-weight:700;letter-spacing:.4px;margin:0 4px 13px}iframe{display:block;width:100%;height:950px;border:0;background:transparent}.caption{text-align:center;font-size:11px;color:#a296b0;margin:16px 0 0}a{color:#dbc2f4}@media(max-width:750px){header{height:64px}.layout{grid-template-columns:1fr;padding:26px 16px;gap:26px;max-width:560px}.intro{padding:0}h1{font-size:38px;margin:15px 0}.steps{display:none}.lead{font-size:14px}.hint{margin-top:12px}.widget-area{min-width:0}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+.widget-area{width:100%;min-width:0}.sizes{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}.sizes button{border:1px solid #494251;border-radius:9px;background:#24202d;color:white;font-size:12px;padding:9px 12px;cursor:pointer}.sizes button[aria-pressed="true"]{border-color:#379ed8;background:#143444}iframe{margin-left:auto;margin-right:auto;max-width:100%}@media(max-width:430px){.sizes button{font-size:11px;padding:7px 9px}}</style>
+</head>
+<body>
+<header><strong>DVNT</strong><span>Ticket embed preview</span></header>
+<div class="notice">INTERACTIVE DEMO · Sample event and prices · No real payments or ticket issuance</div>
+<main class="layout">
+<section class="intro" aria-labelledby="page-title">
+<div class="eyebrow">On your event website</div>
+<h1 id="page-title">Your event.<br>Your tickets.<br><span>Right here.</span></h1>
+<p class="lead">Try the ticket widget inside this sample website. Choose tickets, review a total, and simulate the payment and confirmation steps without leaving the page.</p>
+<div class="steps"><p><b>01</b>Choose a ticket and quantity.</p><p><b>02</b>Preview the embedded payment step.</p><p><b>03</b>Simulate confirmation. No charge.</p></div>
+<p class="hint">This is a UI demonstration, not a production checkout.<br>The payment area is a placeholder for Stripe.</p>
+</section>
+<section class="widget-area" aria-label="Interactive ticket embed">
+<p class="demo-label">EMBEDDED WIDGET · RESPONSIVE PREVIEW</p><div class="sizes" aria-label="Embed width previews"><button type="button" data-preview-width="100%">Wide desktop</button><button type="button" data-preview-width="760px">Tablet</button><button type="button" data-preview-width="390px">Mobile</button><button type="button" data-preview-width="320px">Narrow phone</button></div>
+<iframe id="ticket-demo" title="DVNT ticket selection and simulated checkout" src="widget-responsive.html" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+<p class="caption">This demo cannot contact Stripe or DVNT.</p>
+</section>
+</main>
+<script>
+// This iframe has an opaque origin because it is sandboxed without allow-same-origin.
+// Accept only a bounded, numeric height from this exact frame, never arbitrary messages.
+const frame=document.getElementById('ticket-demo');
+document.querySelectorAll('[data-preview-width]').forEach(button=>{
+  button.addEventListener('click',()=>{
+    const width=button.getAttribute('data-preview-width');
+    frame.style.width=width;
+    document.querySelectorAll('[data-preview-width]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+  });
+});
+document.querySelector('[data-preview-width]').setAttribute('aria-pressed','true');
+window.addEventListener('message',(event)=>{
+  if(event.source!==frame.contentWindow || event.origin!=='null') return;
+  const data=event.data;
+  if(!data || typeof data!=='object' || data.type!=='dvnt-demo-height' || typeof data.height!=='number' || !Number.isFinite(data.height)) return;
+  frame.style.height=Math.max(450,Math.min(1400,Math.ceil(data.height)))+'px';
+});
+</script>
+</body>
+</html>
