@@ -1,0 +1,33 @@
+name: Ticket embed commerce
+on:
+  pull_request:
+    paths:
+      - "apps/mobile/supabase/**"
+      - "apps/web/**"
+      - "packages/app/**"
+      - "scripts/verify-ticket-embed*"
+      - ".github/workflows/ticket-embed-commerce.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ticket-embed-commerce-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive tracked source only for reproducible verification
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/COMMIT.txt
+          git archive --format=tar HEAD | gzip > evidence/source.tar.gz
+          sha256sum evidence/source.tar.gz > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ticket-embed-source-${{ github.run_id }}
+          path: evidence/
+          retention-days: 1
