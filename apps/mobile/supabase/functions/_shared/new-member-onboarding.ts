@@ -1,23 +1,21 @@
 /**
- * Mandatory welcome steps for accounts created after the 2026-10-09 rollout.
- * Account age is the Better Auth creation timestamp, not a localStorage bit.
- * The status is recomputed from authoritative server-side media/posts.
- * Existing accounts are NOT retroactively locked out by this requirement.
+ * Mandatory DVNT entry steps for every member account.
+ *
+ * This used to apply only to accounts created after a rollout cutoff. That left
+ * legacy accounts able to dismiss the profile-completion reminder forever.
+ * Photo + first post are now account requirements for everyone. Progress is
+ * recomputed from authoritative server-side media/posts on every check.
+ *
+ * Keep the old cutoff/flag exports for source compatibility with older callers;
+ * they no longer weaken enforcement.
  */
 export const NEW_MEMBER_ONBOARDING_CUTOFF = "2026-10-09T00:30:00.000Z";
 
-/**
- * The gate stays off until DVNT_NEW_MEMBER_ONBOARDING_ENABLED is exactly
- * "true". Native builds without the photo/first-post screens would trap new
- * signups, and the gate also requires ID verification, so it must not go live
- * on deploy. Turn it on once those builds have reached users, and move
- * NEW_MEMBER_ONBOARDING_CUTOFF to that date in the same change.
- */
+/** @deprecated The photo + first-post gate is always enabled. */
 export function isNewMemberOnboardingEnabled(
-  read: (name: string) => string | undefined = (name) =>
-    (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env.get(name),
+  _read?: (name: string) => string | undefined,
 ): boolean {
-  return (read("DVNT_NEW_MEMBER_ONBOARDING_ENABLED") ?? "").trim() === "true";
+  return true;
 }
 
 export interface OnboardingEvidence {
@@ -27,14 +25,22 @@ export interface OnboardingEvidence {
   hasProfilePhoto: boolean;
   hasPost: boolean;
 }
-export type OnboardingStep = "not_required" | "pending_verification" | "photo" | "first_post" | "complete";
 
+export type OnboardingStep =
+  | "not_required"
+  | "pending_verification"
+  | "photo"
+  | "first_post"
+  | "complete";
+
+/**
+ * Photo always comes first, then the first published post.
+ *
+ * Age/email verification remains enforced by DVNT's separate verification and
+ * posting rails. It is intentionally not used to exempt legacy accounts from
+ * these two profile requirements.
+ */
 export function determineNewMemberStep(input: OnboardingEvidence): OnboardingStep {
-  const created = Date.parse(String(input.accountCreatedAt ?? ""));
-  if (!Number.isFinite(created) || created < Date.parse(NEW_MEMBER_ONBOARDING_CUTOFF))
-    return "not_required";
-  // Signup must finish identity/email verification first. No shortcuts around 18+.
-  if (!input.emailVerified || !input.adultVerified) return "pending_verification";
   if (!input.hasProfilePhoto) return "photo";
   if (!input.hasPost) return "first_post";
   return "complete";
