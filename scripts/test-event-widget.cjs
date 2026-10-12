@@ -13,9 +13,9 @@ function harness({user='owner',patch={},settings={id:ID,event_id:1,allowed_origi
  const handler=createEventWidgetHandler({db,authenticate:async()=>user,headers:()=>({})});return{tables,writes,rpcs,call:async(body)=>{const r=await handler(new Request('https://fixture.invalid/widget'+(body?'':'?id='+ID),body?{method:'POST',body:JSON.stringify({eventId:1,...body})}:{}));return{status:r.status,data:await r.json()}}}
 }
 test('bare-domain input becomes exact HTTPS origin before publishing',()=>{
- assert.deepEqual(prepareOrganizerOrigin('www.deviant.live'),{origin:'https://www.deviant.live',error:null});
- assert.deepEqual(prepareOrganizerOrigin('https://www.deviant.live/'),{origin:'https://www.deviant.live',error:null});
- assert.deepEqual(prepareOrganizerOrigin(' https://events.example.org '),{origin:'https://events.example.org',error:null});
+ assert.deepEqual({...prepareOrganizerOrigin('www.deviant.live')},{origin:'https://www.deviant.live',error:null});
+ assert.deepEqual({...prepareOrganizerOrigin('https://www.deviant.live/')},{origin:'https://www.deviant.live',error:null});
+ assert.deepEqual({...prepareOrganizerOrigin(' https://events.example.org ')},{origin:'https://events.example.org',error:null});
  for(const bad of ['http://www.deviant.live','https://www.deviant.live/event','https://*.deviant.live','https://example.com:444','https://foo.test','https://user:pass@example.com','example.com/checkout','']){
   const r=prepareOrganizerOrigin(bad);assert.equal(r.origin,null,bad);assert.ok(r.error,bad);
  }
@@ -31,7 +31,7 @@ test('owner receives exact eligibility blockers and never disables eligible even
   [{publish_at:'not-a-date'},'invalid']
  ];
  assert.equal(widgetEventEligible(event),true);
- assert.deepEqual(widgetEligibilityIssues(event),[]);
+ assert.equal(widgetEligibilityIssues(event).length,0);
  for(const [patch,word] of patches){
   const h=harness({patch});
   const result=await h.call({action:'get'});
