@@ -120,6 +120,7 @@ export async function priceGuestCheckout(db: any, input: GuestPriceInput): Promi
     ...(promo ? { promo_code_id: promo.promo_code_id } : {}),
     ...(discount > 0 ? { discount_cents: discount } : {}),
     ...(promoter ? {
+      ...(netSubtotal === 0 ? { promoter_id: promoter.promoter_id } : {}),
       promoter_policy_version: "v2_eligible_subtotal_after_discount",
       promoter_original_amount_cents: rawSubtotal,
       promoter_customer_discount_bps: promoter.customer_discount_bps,
@@ -127,7 +128,9 @@ export async function priceGuestCheckout(db: any, input: GuestPriceInput): Promi
       promoter_discounted_amount_cents: promoter.discounted_amount_cents,
       promoter_code: promoter.code,
       promoter_commission_bps: promoter.promoter_commission_bps,
-      promoter_commission_amount_cents: promoter.commission_cents,
+      // Free orders cannot create a payable earning, even when a normal
+      // promo removes the subtotal remaining after the promoter discount.
+      promoter_commission_amount_cents: netSubtotal === 0 ? 0 : promoter.commission_cents,
     } : {}),
   };
   const metadata: Record<string, string> = {

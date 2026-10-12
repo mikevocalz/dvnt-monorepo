@@ -57,7 +57,42 @@ function err(code: string, message: string, status = 200): Response {
   return json({ ok: false, error: { code, message } }, status);
 }
 
- 
+/** Free orders have no Stripe webhook. Persist the already validated promoter
+ * and locked order rates directly to the existing attribution table. Resolving
+ * a code again would lose/alter history when the promoter is renamed, paused or
+ * edited. ON CONFLICT DO NOTHING keeps replays idempotent. No ledger is written.
+ */
+async function recordFreePromoterAttribution(supabase: any, order: {
+  id: string;
+  promoter_id?: unknown;
+  promoter_customer_discount_bps?: unknown;
+  promoter_commission_bps?: unknown;
+  promoter_discount_amount_cents?: unknown;
+  promoter_commission_amount_cents?: unknown;
+}): Promise<void> {
+  const validRate = (value: unknown) => typeof value === "number" &&
+    Number.isInteger(value) && value >= 0 && value <= 10000;
+  if (typeof order.promoter_id !== "string" || !order.promoter_id ||
+      order.promoter_commission_amount_cents !== 0 ||
+      !validRate(order.promoter_customer_discount_bps) ||
+      !validRate(order.promoter_commission_bps)) return;
+  try {
+    const { error } = await supabase.from("promoter_attributions").upsert({
+      order_id: order.id,
+      promoter_id: order.promoter_id,
+      locked_rev_share_bps: order.promoter_commission_bps,
+      locked_customer_discount_bps: order.promoter_customer_discount_bps,
+      locked_promoter_commission_bps: order.promoter_commission_bps,
+      locked_promoter_discount_amount_cents: order.promoter_discount_amount_cents ?? null,
+      locked_promoter_commission_amount_cents: 0,
+    }, { onConflict: "order_id", ignoreDuplicates: true });
+    if (error) console.error("[guest-checkout] free-order promoter attribution failed:", error);
+  } catch (error) {
+    console.error("[guest-checkout] free-order promoter attribution failed:", error);
+  }
+}
+
+
 async function stripePost(endpoint: string, body: Record<string, string>): Promise<any> {
   const res = await fetch(`https://api.stripe.com/v1${endpoint}`, {
     method: "POST",
@@ -126,7 +161,7 @@ Deno.serve(async (req) => {
     if (!isQuote && idempotencyKey) {
       const { data: existing } = await supabase
         .from("orders")
-        .select("id, quantity, event_id, guest_email, total_cents, status")
+        .select("id, quantity, event_id, guest_email, total_cents, status, promoter_id, promoter_customer_discount_bps, promoter_commission_bps, promoter_discount_amount_cents, promoter_commission_amount_cents")
         .eq("idempotency_key", idempotencyKey)
         .maybeSingle();
       if (existing) {
@@ -140,6 +175,7 @@ Deno.serve(async (req) => {
           .eq("order_id", existing.id);
         if (count !== existing.quantity)
           return err("checkout_processing", "Your tickets are still being issued. Please retry shortly.", 409);
+        await recordFreePromoterAttribution(supabase, existing);
         return json({
           ok: true,
           free: true,
@@ -298,7 +334,7 @@ Deno.serve(async (req) => {
         if (freeOrderErr?.code === "23505" && idempotencyKey) {
           const { data: won } = await supabase
             .from("orders")
-            .select("id, quantity, event_id, guest_email, total_cents, status")
+            .select("id, quantity, event_id, guest_email, total_cents, status, promoter_id, promoter_customer_discount_bps, promoter_commission_bps, promoter_discount_amount_cents, promoter_commission_amount_cents")
             .eq("idempotency_key", idempotencyKey)
             .maybeSingle();
           if (won) {
@@ -312,6 +348,7 @@ Deno.serve(async (req) => {
               .eq("order_id", won.id);
             if (count !== won.quantity)
               return err("checkout_processing", "Your tickets are still being issued. Please retry shortly.", 409);
+            await recordFreePromoterAttribution(supabase, won);
             return json({
               ok: true,
               free: true,
@@ -385,6 +422,10 @@ Deno.serve(async (req) => {
       // Count a promo only after the ticket insert succeeds, never on quote,
       // abandoned checkout, or the existing idempotent replay path.
       if (pricing.promo) await incrementPromoUsage(supabase, pricing.promo.promo_code_id);
+      await recordFreePromoterAttribution(supabase, {
+        id: freeOrder.id,
+        ...pricing.orderFields,
+      });
 
       // Profile before email, so the email can name the account it made.
       // Best-effort: a failure here never touches the issued tickets.

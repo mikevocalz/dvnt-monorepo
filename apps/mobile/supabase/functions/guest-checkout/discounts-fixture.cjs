@@ -30,8 +30,8 @@ function fixture(options={}){
  ticket_types:[{id:TIER,event_id:1,name:'Admission',price_cents:3000,is_active:true,status:'on_sale',tier_visibility:'public',
  quantity_total:100,quantity_sold:0,max_per_user:10,...options.tier}],orders:[],tickets:[],ticket_holds:[],order_timeline:[],
  organizer_accounts:[{host_id:'host',stripe_account_id:'acct_fixture',charges_enabled:true}],
- promo_codes:options.promos||[],event_promoters:options.promoters||[]};
- const writes=[],stripe=[],emails=[],usage=[];let serial=0;
+ promo_codes:options.promos||[],event_promoters:options.promoters||[],promoter_attributions:[]};
+ const writes=[],stripe=[],emails=[],usage=[],logs=[];let serial=0;
  const db={rpc:async(fn,args)=>{
   writes.push({table:'rpc',fn,args});
   if(fn==='ticket_hold_create_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
@@ -39,13 +39,21 @@ function fixture(options={}){
   throw Error('Unexpected RPC '+fn);
  },from:table=>{
   assert.ok(table in tables,'unexpected table '+table);
-  let filters=[],op='read',payload,head=false;
+  let filters=[],op='read',payload,head=false,conflict;
   function run(){
    if(options.readError===table&&op==='read')return {data:null,error:{message:'fixture read failure'},count:null};
    let hit=tables[table].filter(row=>filters.every(f=>f(row)));
+   if(op==='insert'&&table==='tickets'&&options.ticketInsertError)return{data:null,error:{message:'fixture ticket insert failure'}};
    if(op!=='read'){
     writes.push({table,op,payload});
-    if(op==='insert'){
+    if(op==='upsert'){
+     assert.equal(table,'promoter_attributions');assert.equal(conflict.onConflict,'order_id');assert.equal(conflict.ignoreDuplicates,true);
+     assert.ok(tables.tickets.some(t=>t.order_id===payload.order_id),'attribution follows successful issuance');
+     if(options.attributionThrow){options.attributionThrow=false;throw Error('fixture attribution exception')}
+     if(options.attributionError){const error=options.attributionError;options.attributionError=null;return{data:null,error:{message:error}}}
+     hit=tables[table].filter(row=>row.order_id===payload.order_id);
+     if(!hit.length){hit=[{...payload}];tables[table].push(...hit)}
+    }else if(op==='insert'){
      hit=(Array.isArray(payload)?payload:[payload]).map(row=>({id:'row-'+(++serial),...row}));tables[table].push(...hit);
     }else if(op==='update')hit.forEach(row=>Object.assign(row,payload));
     else if(op==='delete')tables[table]=tables[table].filter(row=>!hit.includes(row));
@@ -57,7 +65,7 @@ function fixture(options={}){
    ilike(k,v){filters.push(row=>like(v,String(row[k]??'')));return q},
    in(k,v){filters.push(row=>v.includes(row[k]));return q},limit(){return q},
    gt(k,v){filters.push(row=>row[k]>v);return q},
-   insert(v){op='insert';payload=v;return q},update(v){op='update';payload=v;return q},delete(){op='delete';return q},
+   upsert(v,opts){op='upsert';payload=v;conflict=opts;return q},insert(v){op='insert';payload=v;return q},update(v){op='update';payload=v;return q},delete(){op='delete';return q},
    maybeSingle:async()=>{const r=run();return{...r,data:r.data?.[0]??null}},
    single:async()=>{const r=run();return{...r,data:r.data?.[0]??null}},then:(a,b)=>Promise.resolve(run()).then(a,b)};
   return q;
@@ -67,7 +75,7 @@ function fixture(options={}){
   const full=path.resolve(file);if(cache.has(full))return cache.get(full);
   const exports={};cache.set(full,exports);
   const code=ts.transpileModule(fs.readFileSync(full,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  vm.runInNewContext(code,{exports,Request,Response,URL,URLSearchParams,TextEncoder,Date,crypto,console,
+  vm.runInNewContext(code,{exports,Request,Response,URL,URLSearchParams,TextEncoder,Date,crypto,console:{...console,error:(...args)=>logs.push(args)},
    Deno:{env:{get:k=>k==='STRIPE_SECRET_KEY'?(options.noStripe?'':'fixture-not-a-provider-key'):''},serve:fn=>{handler=fn}},
    fetch:async(url,opts)=>{
     assert.equal(new URL(url).hostname,'api.stripe.com');
@@ -87,7 +95,7 @@ function fixture(options={}){
   const res=await handler(new Request('https://fixture.invalid/guest-checkout',{method,...(method==='POST'?{body:JSON.stringify(body)}:{})}));
   return {status:res.status,headers:res.headers,data:await res.json()};
  }
- return{tables,writes,stripe,emails,usage,load,call,
+ return{tables,writes,stripe,emails,usage,logs,load,call,
   quote:(body={})=>call({action:'quote',quote_request:{...selection,...body}}),
   pay:(body={})=>call({...selection,...body})};
 }

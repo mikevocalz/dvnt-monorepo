@@ -117,3 +117,89 @@ test('a paid or still-issuing replay is never reported as a completed free purch
   const r=await f.pay({idempotency_key:'incomplete-fixture'});assert.equal(r.status,409);assert.equal(f.stripe.length,0);
  }
 });
+
+
+test('stacked full promo locks zero promoter commission on the free order',async()=>{
+ const f=fixture({promos:[promo({discount_value:100})],promoters:[promoter()]});
+ const {paid}=await checkoutWith(f,{discount_code:'SAVE10',promoter_code:'SHARE10'});
+ assert.equal(paid.data.free,true);assert.equal(f.tables.orders[0].total_cents,0);
+ assert.equal(f.tables.orders[0].promoter_commission_amount_cents,0);
+ assert.equal(f.tables.orders[0].promoter_id,PROMOTER);
+ const {computeLockedPromoterEarning}=f.load(path.join(ROOT,'apps/mobile/supabase/functions/_shared/promoter-earning.ts'));
+ assert.equal(computeLockedPromoterEarning({promoterCommissionAmountCents:f.tables.orders[0].promoter_commission_amount_cents}),0);
+ assert.equal(f.stripe.length,0);
+});
+test('free promoter tickets record one attribution and never create a ledger earning',async()=>{
+ const f=fixture({promoters:[promoter({customer_discount_bps:10000})]});
+ const input={discount_code:'SHARE10',idempotency_key:'free-promoter'};
+ const quote=await f.quote(input);assert.equal(f.writes.length,0);
+ const paid=await f.pay({...input,expected_quote_key:quote.data.quote.quote_key});
+ assert.equal(paid.data.free,true);assert.equal(f.tables.promoter_attributions.length,1);
+ assert.equal(f.tables.promoter_attributions[0].promoter_id,PROMOTER);
+ assert.equal(f.tables.orders[0].promoter_commission_amount_cents,0);
+ await f.pay({...input,promoter_code:'REPLACED',discount_code:'REPLACED'});
+ assert.equal(f.tables.promoter_attributions.length,1);assert.equal(f.tables.tickets.length,1);assert.equal(f.emails.length,1);
+ assert.equal(f.writes.some(w=>w.fn==='record_promoter_ledger_entry'),false);
+ assert.equal(f.stripe.length,0);
+});
+test('completed free replay repairs transient attribution failure using stored promoter',async()=>{
+ const f=fixture({promoters:[promoter({customer_discount_bps:10000})],attributionError:'temporary unavailable'});
+ const input={discount_code:'SHARE10',idempotency_key:'retry-attribution'};
+ const {paid}=await checkoutWith(f,input);assert.equal(paid.data.free,true);
+ assert.equal(f.tables.promoter_attributions.length,0);assert.equal(f.emails.length,1);
+ const replay=await f.pay({...input,discount_code:'INVALID',promoter_code:'INVALID'});
+ assert.equal(replay.data.idempotent,true);assert.equal(f.tables.promoter_attributions.length,1);
+ assert.equal(f.tables.tickets.length,1);assert.equal(f.emails.length,1);
+});
+test('failed free issuance never records attribution or an earning',async()=>{
+ const f=fixture({promoters:[promoter({customer_discount_bps:10000})],ticketInsertError:true});
+ const {paid}=await checkoutWith(f,{discount_code:'SHARE10'});
+ assert.equal(paid.status,500);assert.equal(f.tables.orders.length,0);assert.equal(f.tables.tickets.length,0);
+ assert.equal(f.writes.some(w=>w.table==='promoter_attributions'||w.fn==='record_promoter_ledger_entry'),false);
+ assert.equal(f.emails.length,0);
+});
+test('paid promoter checkout still leaves attribution to confirmed-payment fulfillment',async()=>{
+ const f=fixture({promoters:[promoter()]});await checkoutWith(f,{discount_code:'SHARE10'});
+ assert.equal(f.tables.orders[0].promoter_commission_amount_cents,270);
+ assert.equal(f.writes.some(w=>w.table==='promoter_attributions'),false);
+});
+
+test('replay does not activate an older free order with a positive commission snapshot',async()=>{
+ const f=fixture({promoters:[promoter()]});
+ f.tables.orders.push({id:'old-free',quantity:1,event_id:1,guest_email:EMAIL,total_cents:0,status:'paid',
+  idempotency_key:'old-free',promoter_code:'SHARE10',promoter_commission_amount_cents:270});
+ f.tables.tickets.push({id:'old-ticket',order_id:'old-free'});
+ const replay=await f.pay({idempotency_key:'old-free'});assert.equal(replay.data.idempotent,true);
+ assert.equal(f.tables.promoter_attributions.length,0);assert.equal(f.writes.length,0);
+});
+
+test('attribution exception is logged without failing delivery and can be retried',async()=>{
+ const f=fixture({promoters:[promoter({customer_discount_bps:10000})],attributionThrow:true});
+ const input={discount_code:'SHARE10',idempotency_key:'retry-attribution-result'};
+ const {paid}=await checkoutWith(f,input);assert.equal(paid.data.free,true);
+ assert.equal(f.tables.promoter_attributions.length,0);assert.equal(f.emails.length,1);
+ assert.ok(f.logs.some(args=>JSON.stringify(args).includes('free-order promoter attribution failed')));
+ await f.pay(input);assert.equal(f.tables.promoter_attributions.length,1);
+ assert.equal(f.tables.tickets.length,1);assert.equal(f.emails.length,1);
+});
+
+test('free attribution retry survives a paused or renamed promoter',async()=>{
+ const f=fixture({promoters:[promoter({customer_discount_bps:10000})],attributionError:'try again'});
+ const input={discount_code:'SHARE10',idempotency_key:'paused-after-purchase'};
+ await checkoutWith(f,input);
+ Object.assign(f.tables.event_promoters[0],{status:'paused',code:'NEWCODE'});
+ await f.pay(input);
+ assert.equal(f.tables.promoter_attributions.length,1);
+ assert.equal(f.tables.promoter_attributions[0].promoter_id,PROMOTER);
+ assert.equal(f.tables.tickets.length,1);assert.equal(f.emails.length,1);
+});
+test('free attribution retry preserves purchased rates when promoter settings change',async()=>{
+ const f=fixture({promoters:[promoter({customer_discount_bps:10000})],attributionError:'try again'});
+ const input={discount_code:'SHARE10',idempotency_key:'rates-after-purchase'};
+ await checkoutWith(f,input);
+ Object.assign(f.tables.event_promoters[0],{customer_discount_bps:500,promoter_commission_bps:9000});
+ await f.pay(input);
+ const attr=f.tables.promoter_attributions[0];
+ assert.equal(attr.locked_customer_discount_bps,10000);assert.equal(attr.locked_promoter_commission_bps,1000);
+ assert.equal(attr.locked_promoter_commission_amount_cents,0);
+});
