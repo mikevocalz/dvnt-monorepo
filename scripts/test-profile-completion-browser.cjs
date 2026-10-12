@@ -31,6 +31,9 @@ const boundaries = {
       import {ProfileCompletionPopup} from './apps/web/src/components/profile-completion-popup';
       createRoot(document.getElementById('root')).render(<><button id="background" onClick={()=>window.fixture.backgroundClicks++}>Background action</button><ProfileCompletionPopup/></>);`, resolveDir: ROOT, loader: 'tsx' },
     bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
+    // Exercise the web DOM components with React's JSX runtime; the app's
+    // NativeWind tsconfig is consumed by Next's own compiler, not this fixture.
+    tsconfigRaw: { compilerOptions: { jsx: 'react-jsx', jsxImportSource: 'react' } },
     nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean),
     define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'explicit-profile-fixtures', setup(build) {
