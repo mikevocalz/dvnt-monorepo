@@ -26,8 +26,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Sender identity, routes, and broadcast persistence
-        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node --test packages/app/lib/activity/*.test.ts packages/app/lib/notifications/event-broadcast-routing.test.cjs apps/mobile/supabase/functions/event-broadcast-message/index.test.cjs
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node --test packages/app/lib/activity/*.test.ts packages/app/lib/activity/*.test.cjs packages/app/lib/notifications/event-broadcast-routing.test.cjs apps/mobile/supabase/functions/event-broadcast-message/index.test.cjs
       - name: Install Chromium
         run: pnpm --filter web exec playwright install --with-deps chromium
       - name: Actual web and native row interactions
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-event-notification-browser.cjs
+

@@ -275,6 +275,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       const activities = allActivities.filter((a) => {
         if (seenIds.has(a.id)) return false;
         seenIds.add(a.id);
+        // Broadcasts are separate messages, even from the same sender/event.
+        // Their notification ID is the only safe deduplication key.
+        if (a.type === "event_broadcast") return true;
         // Composite key: same actor doing the same action on the same entity
         const compositeKey = `${a.type}:${a.user?.id || ""}:${a.entityId || a.post?.id || ""}`;
         if (seenKeys.has(compositeKey)) return false;
@@ -465,3 +468,4 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     useUnreadCountsStore.getState().setNotificationsUnread(0);
   },
 }));
+
