@@ -60,7 +60,8 @@ export function Dialog({
     const focusables = () =>
       Array.from(panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
     const initial =
-      panelRef.current?.querySelector<HTMLElement>("[data-autofocus]") ?? focusables()[0];
+      panelRef.current?.querySelector<HTMLElement>("[data-autofocus]") ??
+      focusables()[0] ?? panelRef.current;
     initial?.focus();
 
     const onKey = (e: KeyboardEvent) => {
@@ -71,7 +72,11 @@ export function Dialog({
       }
       if (e.key !== "Tab") return;
       const items = focusables();
-      if (items.length === 0) return;
+      if (items.length === 0) {
+        e.preventDefault();
+        panelRef.current?.focus();
+        return;
+      }
       const first = items[0];
       const last = items[items.length - 1];
       const active = document.activeElement;
@@ -108,6 +113,7 @@ export function Dialog({
     >
       <div
         ref={panelRef}
+        tabIndex={-1}
         className="w-full max-h-[88vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#101321] shadow-2xl"
         style={{ maxWidth }}
         onClick={(e) => e.stopPropagation()}
@@ -137,3 +143,4 @@ export function Dialog({
     </div>
   );
 }
+

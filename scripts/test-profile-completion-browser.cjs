@@ -14,7 +14,7 @@ const firstPost = { ...complete, step: 'first_post', required: true, hasPost: fa
 const boundaries = {
   'profile-fixture': `import {useSyncExternalStore} from 'react';
     const listeners=new Set();let revision=0;
-    export const state={path:'/feed',user:{authId:'a',id:'1'},verification:false};
+    export const state={path:'/feed',user:{authId:'a',id:'1'},verification:false,empty:false};
     export const useValue=select=>{useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn)},()=>revision);return select(state)};
     const update=patch=>{Object.assign(state,patch);revision++;for(const fn of listeners)fn()};
     window.fixture={requests:[],navigations:[],backgroundClicks:0,update};
@@ -27,9 +27,10 @@ const boundaries = {
 };
 (async () => {
   const build = await esbuild.build({
-    stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import 'profile-fixture';
+    stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {useValue} from 'profile-fixture';import {Dialog} from '@dvnt/ui';
       import {ProfileCompletionPopup} from './apps/web/src/components/profile-completion-popup';
-      createRoot(document.getElementById('root')).render(<><button id="background" onClick={()=>window.fixture.backgroundClicks++}>Background action</button><ProfileCompletionPopup/></>);`, resolveDir: ROOT, loader: 'tsx' },
+      function Fixture(){const empty=useValue(s=>s.empty);return <><button id="background" onClick={()=>window.fixture.backgroundClicks++}>Background action</button>{empty?<Dialog open hideClose dismissible={false} onClose={()=>{}} labelledBy="empty-title"><h2 id="empty-title">Waiting without controls</h2></Dialog>:<ProfileCompletionPopup/>}</>}
+      createRoot(document.getElementById('root')).render(<Fixture/>);`, resolveDir: ROOT, loader: 'tsx' },
     bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
     // Exercise the web DOM components with React's JSX runtime; the app's
     // NativeWind tsconfig is consumed by Next's own compiler, not this fixture.
@@ -66,10 +67,22 @@ const boundaries = {
       await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').count(),1);
       await page.getByRole('dialog').click({position:{x:5,y:5}});assert.equal(await page.getByRole('dialog').count(),1);
       assert.equal(await page.getByRole('button',{name:'Close',exact:true}).count(),0);
+      // Clicking a nonfocusable backdrop may blur the control. The next Tab
+      // must return to the first dialog control rather than the covered app.
+      await page.keyboard.press('Tab');await focusInside();
+      // Programmatic/outside focus is also recaptured in either direction.
+      await page.locator('#background').focus();
+      await page.keyboard.press('Shift+Tab');await focusInside();
+      await page.locator('#background').focus();
+      await page.keyboard.press('Tab');await focusInside();
     };
     // Pending reads trap focus, including Enter on the previously focused app.
     await waitRequests(1);await focusInside();await dismissFails();
-    for(const key of ['Tab','Shift+Tab','Enter']){await page.keyboard.press(key);await focusInside()}
+    for(const key of ['Tab','Shift+Tab','Tab','Shift+Tab']){await page.keyboard.press(key);await focusInside()}
+    // Enter belongs on the status heading for this safety assertion. Enter on
+    // the deliberately reachable My tickets button should navigate to tickets.
+    await page.locator('#profile-completion-status-title').focus();
+    await page.keyboard.press('Enter');await focusInside();
     assert.equal(await page.evaluate(()=>window.fixture.backgroundClicks),0);
     await reject(0);await page.getByRole('button',{name:'Retry connection'}).waitFor();await focusInside();
     assert.equal(await page.evaluate(()=>document.activeElement.textContent.trim()),'Retry connection');
@@ -109,8 +122,12 @@ const boundaries = {
     for(const state of ['pending','error','photo']){
       count=await page.evaluate(()=>window.fixture.requests.length);
       await update({path:'/feed'});await waitRequests(count+1);
-      if(state==='error')await reject(count);
-      if(state==='photo')await resolve(count,photo);
+      if(state==='error'){
+        await reject(count);await page.getByRole('button',{name:'Retry connection'}).waitFor();
+      }
+      if(state==='photo'){
+        await resolve(count,photo);await page.getByRole('button',{name:'Add my profile picture'}).waitFor();
+      }
       await page.getByRole('button',{name:'My tickets',exact:true}).click();
       await waitRequests(count+2);await assertNoDialog();
       assert.equal(await page.evaluate(()=>window.fixture.navigations.at(-1)),'/feed/events/my-tickets');
@@ -121,6 +138,14 @@ const boundaries = {
     await update({path:'/feed',verification:true});await waitRequests(count+1);await assertNoDialog();
     await update({verification:false});await focusInside();
     await resolve(count,{...photo,step:'pending_verification',adultVerified:false});await assertNoDialog();
+    // The shared Dialog also has to retain focus while all controls are absent.
+    await update({empty:true});await page.getByText('Waiting without controls').waitFor();await focusInside();
+    for(const key of ['Tab','Shift+Tab']){
+      await page.locator('#background').focus();await page.keyboard.press(key);await focusInside();
+    }
+    await page.keyboard.press('Enter');await page.keyboard.press('Escape');
+    assert.equal(await page.getByRole('dialog').count(),1);
+    assert.equal(await page.evaluate(()=>window.fixture.backgroundClicks),0);
     assert.deepEqual(errors,[]);
     console.log('PASS: actual React popup/Dialog pending/error/retry, keyboard focus, Escape/backdrop, account switch/stale results, ordinary route coverage, photo/post ordering, ticket exemptions and verification priority.');
   } finally {await browser?.close();await new Promise(resolve=>server.close(resolve))}
