@@ -1,0 +1,45 @@
+name: Guest checkout discounts
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/guest-checkout/**'
+      - 'apps/mobile/supabase/functions/_shared/*promo*'
+      - 'apps/mobile/supabase/functions/_shared/guest-checkout-pricing.ts'
+      - 'apps/mobile/supabase/functions/_shared/fee-calculator.ts'
+      - 'apps/mobile/supabase/functions/_shared/checkout-line-items.ts'
+      - 'packages/app/features/events/*guest-checkout*'
+      - 'packages/app/lib/stores/guest-checkout-store.ts'
+      - 'packages/app/lib/tickets/guest-checkout-quote.ts'
+      - 'scripts/test-guest-checkout-browser.cjs'
+      - '.github/workflows/guest-checkout-discounts.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'apps/mobile/supabase/functions/guest-checkout/**'
+      - 'apps/mobile/supabase/functions/_shared/*promo*'
+      - 'apps/mobile/supabase/functions/_shared/guest-checkout-pricing.ts'
+      - 'packages/app/features/events/*guest-checkout*'
+      - 'packages/app/lib/stores/guest-checkout-store.ts'
+      - 'packages/app/lib/tickets/guest-checkout-quote.ts'
+      - 'scripts/test-guest-checkout-browser.cjs'
+      - '.github/workflows/guest-checkout-discounts.yml'
+permissions:
+  contents: read
+jobs:
+  guest-discount-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Real guest handler with explicit database and Stripe fixtures
+        run: node --test apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Guest sheet code entry, stale quote protection and reviewed checkout
+        run: node scripts/test-guest-checkout-browser.cjs
+      - run: pnpm --filter web exec tsc --noEmit

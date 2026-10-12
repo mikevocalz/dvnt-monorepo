@@ -4,6 +4,8 @@
  * Zustand, no useState (matches the other event-detail UI stores).
  */
 import { create } from "zustand";
+import { getPendingPromoterRef } from "./promoter-ref-store";
+import type { GuestCheckoutQuote } from "../tickets/guest-checkout-quote";
 
 interface GuestCheckoutState {
   open: boolean;
@@ -20,6 +22,14 @@ interface GuestCheckoutState {
   nameRequirement: string;
   refundPolicy: string;
   refundDaysBefore: number | null;
+  codeDraft: string;
+  discountCode: string;
+  trackedPromoterCode: string;
+  quote: GuestCheckoutQuote | null;
+  quoteSelectionKey: string;
+  quoteLoading: boolean;
+  quoteError: string | null;
+  quoteRevision: number;
   loading: boolean;
   error: string | null;
   /** Set when a $0 tier issued directly (no Stripe redirect). */
@@ -55,6 +65,14 @@ const base = {
   nameRequirement: "off",
   refundPolicy: "before_event",
   refundDaysBefore: null as number | null,
+  codeDraft: "",
+  discountCode: "",
+  trackedPromoterCode: "",
+  quote: null as GuestCheckoutQuote | null,
+  quoteSelectionKey: "",
+  quoteLoading: false,
+  quoteError: null as string | null,
+  quoteRevision: 0,
   loading: false,
   error: null as string | null,
   done: false,
@@ -73,6 +91,7 @@ export const useGuestCheckoutStore = create<GuestCheckoutState>((set) => ({
           ? crypto.randomUUID()
           : `gc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       ...a,
+      trackedPromoterCode: getPendingPromoterRef(a.eventId) ?? "",
     }),
   close: () => set({ open: false }),
   patch: (p) => set(p),

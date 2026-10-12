@@ -19,10 +19,9 @@
  * Deno env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, PUBLIC_SITE_URL.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import {
-  computeFeesWithMode,
-  MIN_TIER_PRICE_CENTS,
-} from "../_shared/fee-calculator.ts";
+import { priceGuestCheckout, GuestPriceError } from "../_shared/guest-checkout-pricing.ts";
+import { checkoutTicketLines } from "../_shared/checkout-line-items.ts";
+import { incrementPromoUsage } from "../_shared/apply-promo-code.ts";
 import {
   enforceTierVisibility,
   TIER_VISIBILITY_MESSAGES,
@@ -42,6 +41,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Cache-Control": "no-store",
 };
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live").replace(/\/$/, "");
@@ -74,39 +74,42 @@ async function stripePost(endpoint: string, body: Record<string, string>): Promi
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return err("method", "Method not allowed.", 405);
   try {
-    if (!STRIPE_SECRET_KEY) return err("config", "Payments are not configured.", 500);
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
       { auth: { persistSession: false } },
     );
 
-    const body = await req.json().catch(() => ({}));
+    const envelope = await req.json().catch(() => ({}));
+    if (!envelope || typeof envelope !== "object" || Array.isArray(envelope))
+      return err("invalid_request", "Invalid checkout request.", 400);
+    const isQuote = envelope.action === "quote";
+    if (envelope.action != null && !["quote", "checkout"].includes(envelope.action))
+      return err("invalid_request", "Unknown checkout action.", 400);
+    // A nested quote payload cannot accidentally execute a purchase against an
+    // older deployed guest-checkout version that does not understand quotes.
+    const body = isQuote ? envelope.quote_request : envelope;
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      return err("invalid_request", "Invalid checkout request.", 400);
+    if (!isQuote && !STRIPE_SECRET_KEY) return err("config", "Payments are not configured.", 500);
     const eventId = Number(body.event_id);
     const ticketTypeId = String(body.ticket_type_id || "");
-    const quantity = Math.max(1, Math.min(10, Number(body.quantity) || 1));
+    const quantity = Number(body.quantity ?? 1);
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10)
+      return err("invalid_quantity", "Choose between 1 and 10 tickets.", 400);
     const guestEmail = String(body.guest_email || "").trim().toLowerCase();
     const guestName = body.guest_name ? String(body.guest_name).trim() : "";
     const attendeeNames: string[] = Array.isArray(body.attendee_names)
       ? body.attendee_names.slice(0, quantity).map((n: unknown) => (n == null ? "" : String(n).trim()))
       : [];
-    // Promoter attribution code (WS-4) — from a tracked ?ref= link or
-    // manual entry. Never touches pricing; stashed in Stripe metadata so
-    // stripe-webhook can record attribution + rev-share when paid.
-    const promoterCodeRaw =
-      typeof body.promoter_code === "string"
-        ? body.promoter_code.trim().toUpperCase().slice(0, 32)
-        : "";
-    const promoterCode = /^[A-Z0-9_-]{2,32}$/.test(promoterCodeRaw)
-      ? promoterCodeRaw
-      : "";
-
-    if (!EMAIL_RE.test(guestEmail)) return err("invalid_email", "Enter a valid email.");
-    const profile = parseCheckoutProfileFields(body);
+    if ((!isQuote || guestEmail) && (!EMAIL_RE.test(guestEmail) || guestEmail.length > 254))
+      return err("invalid_email", "Enter a valid email.");
+    const profile = isQuote ? { ok: true as const, fields: null } : parseCheckoutProfileFields(body);
     if (!profile.ok) return err(profile.code, profile.message);
     const profileFields = profile.fields;
-    if (!Number.isFinite(eventId) || !ticketTypeId) return err("invalid_request", "Missing event or tier.");
+    if (!Number.isSafeInteger(eventId) || eventId <= 0 || !ticketTypeId) return err("invalid_request", "Missing event or tier.");
 
     // Idempotency: the client generates one key per sheet open, so a
     // double-tap or retried submission returns the SAME order+tickets.
@@ -120,17 +123,23 @@ Deno.serve(async (req) => {
     // Replay short-circuit BEFORE any cap/inventory checks: a retried
     // request would otherwise trip max_per_user on the tickets it already
     // minted. Returns the SAME order, never a second issuance.
-    if (idempotencyKey) {
+    if (!isQuote && idempotencyKey) {
       const { data: existing } = await supabase
         .from("orders")
-        .select("id, quantity")
+        .select("id, quantity, event_id, guest_email, total_cents, status")
         .eq("idempotency_key", idempotencyKey)
         .maybeSingle();
       if (existing) {
+        if (existing.event_id !== eventId || existing.guest_email !== guestEmail || existing.quantity !== quantity)
+          return err("idempotency_conflict", "This checkout attempt belongs to a different selection.", 409);
+        if (existing.status !== "paid" || existing.total_cents !== 0)
+          return err("checkout_processing", "Your previous checkout is still processing.", 409);
         const { count } = await supabase
           .from("tickets")
           .select("id", { count: "exact", head: true })
           .eq("order_id", existing.id);
+        if (count !== existing.quantity)
+          return err("checkout_processing", "Your tickets are still being issued. Please retry shortly.", 409);
         return json({
           ok: true,
           free: true,
@@ -157,7 +166,7 @@ Deno.serve(async (req) => {
     if (isSalesClosed(ev)) return err("sales_closed", "Ticket sales have ended for this event.");
 
     // Attendee-name requirement (Eventbrite parity) — enforced before payment.
-    if (ev.attendee_name_requirement === "required") {
+    if (!isQuote && ev.attendee_name_requirement === "required") {
       for (let i = 0; i < quantity; i++) {
         if (!attendeeNames[i]) return err("name_required", "A name is required for each ticket.");
       }
@@ -209,7 +218,7 @@ Deno.serve(async (req) => {
     }
 
     // Per-email cap (the posh.vip pattern — guests are NOT unlimited).
-    if (tier.max_per_user && tier.max_per_user > 0) {
+    if (guestEmail && tier.max_per_user && tier.max_per_user > 0) {
       const { count } = await supabase
         .from("tickets")
         .select("id", { count: "exact", head: true })
@@ -221,13 +230,26 @@ Deno.serve(async (req) => {
         return err("limit", `Limit ${tier.max_per_user} per person for this ticket.`);
     }
 
-    // ── Free tier on a ticketed event — issue directly, no Stripe ─────
+    // The quote is read-only. The charge recomputes this same server pricing,
+    // including code validity, buyer caps, and the exact current fee mode.
+    const pricing = await priceGuestCheckout(supabase, {
+      eventId, tierId: ticketTypeId, unitPriceCents: tier.price_cents, quantity,
+      feeMode: ev.fee_mode, guestEmail, discountCode: body.discount_code,
+      promoCode: body.promo_code, promoterCode: body.promoter_code,
+    });
+    if (isQuote) return json({ ok: true, quote: pricing.quote });
+    if ((body.discount_code || body.promo_code) && !body.expected_quote_key)
+      return err("quote_required", "Apply your code and review the total before paying.", 409);
+    if (body.expected_quote_key && body.expected_quote_key !== pricing.quote.quote_key)
+      return err("quote_changed", "Your ticket price or discount changed. Review the updated total before paying.", 409);
+
+    // ── Free tier or fully discounted ticket — existing direct issuance ─────
     // A $0 tier is still real inventory: capacity is serialized by the
     // same atomic hold the paid rails use (counts live ticket_holds +
     // cart_holds), converted to sold on success, released on failure.
     // The guest gets the standard ticket-bundle email — the QR + lookup
     // link is the whole delivery contract for account-less buyers.
-    if (tier.price_cents <= 0) {
+    if (pricing.quote.total_cents === 0) {
       const { data: freeHold, error: freeHoldErr } = await supabase.rpc(
         "ticket_hold_create_atomic",
         {
@@ -262,6 +284,7 @@ Deno.serve(async (req) => {
           event_id: eventId,
           paid_at: new Date().toISOString(),
           currency: "usd",
+          ...pricing.orderFields,
           ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
         })
         .select("id")
@@ -275,14 +298,20 @@ Deno.serve(async (req) => {
         if (freeOrderErr?.code === "23505" && idempotencyKey) {
           const { data: won } = await supabase
             .from("orders")
-            .select("id, quantity")
+            .select("id, quantity, event_id, guest_email, total_cents, status")
             .eq("idempotency_key", idempotencyKey)
             .maybeSingle();
           if (won) {
+            if (won.event_id !== eventId || won.guest_email !== guestEmail || won.quantity !== quantity)
+              return err("idempotency_conflict", "This checkout attempt belongs to a different selection.", 409);
+            if (won.status !== "paid" || won.total_cents !== 0)
+              return err("checkout_processing", "Your previous checkout is still processing.", 409);
             const { count } = await supabase
               .from("tickets")
               .select("id", { count: "exact", head: true })
               .eq("order_id", won.id);
+            if (count !== won.quantity)
+              return err("checkout_processing", "Your tickets are still being issued. Please retry shortly.", 409);
             return json({
               ok: true,
               free: true,
@@ -353,6 +382,10 @@ Deno.serve(async (req) => {
         },
       ]);
 
+      // Count a promo only after the ticket insert succeeds, never on quote,
+      // abandoned checkout, or the existing idempotent replay path.
+      if (pricing.promo) await incrementPromoUsage(supabase, pricing.promo.promo_code_id);
+
       // Profile before email, so the email can name the account it made.
       // Best-effort: a failure here never touches the issued tickets.
       const created = profileFields
@@ -388,17 +421,15 @@ Deno.serve(async (req) => {
       return err("organizer_payouts", "This organizer hasn't finished payment setup yet.");
     }
 
-    // Fees (v1_250_1pt), identical math to create-payment-intent.
-    const subtotal = tier.price_cents * quantity;
-    if (tier.price_cents < MIN_TIER_PRICE_CENTS) {
-      return err("price_too_low", "This ticket is priced below the $2.00 minimum for fees.");
-    }
-    // fee_mode: 'pass' (default) → buyer pays the buyer-side fee; 'absorb' →
-    // organizer eats it (buyer pays just the ticket), with automatic fallback
-    // to pass when the platform fee doesn't fit inside the subtotal. Shared
-    // entry point — same branch on every rail.
-    const fees = computeFeesWithMode(subtotal, quantity, ev.fee_mode);
+    const fees = pricing.fees!;
     const absorb = fees.fee_mode === "absorb";
+    const ticketLines = checkoutTicketLines(fees.subtotal, quantity, "usd", `${ev.title} — ${tier.name}`);
+    const feeLine = ticketLines.count;
+    const discountMetadata: Record<string, string> = {};
+    for (const [key, value] of Object.entries(pricing.metadata)) {
+      discountMetadata[`metadata[${key}]`] = value;
+      discountMetadata[`payment_intent_data[metadata][${key}]`] = value;
+    }
 
     // Hosted Checkout Session. Metadata mirrors what stripe-webhook reads for
     // guest event_ticket issuance (user_id omitted → treated as a guest).
@@ -406,10 +437,8 @@ Deno.serve(async (req) => {
       mode: "payment",
       "payment_method_types[0]": "card",
       customer_email: guestEmail,
-      "line_items[0][price_data][currency]": "usd",
-      "line_items[0][price_data][unit_amount]": String(tier.price_cents),
-      "line_items[0][price_data][product_data][name]": `${ev.title} — ${tier.name}`,
-      "line_items[0][quantity]": String(quantity),
+      ...ticketLines.params,
+      ...discountMetadata,
       // Expire the session in 30min (Stripe min) so an abandoned checkout's hold
       // can be released without leaking inventory.
       expires_at: String(Math.floor(Date.now() / 1000) + 30 * 60),
@@ -424,14 +453,6 @@ Deno.serve(async (req) => {
       // Per-ticket names → the webhook stamps attendee_name + "Ticket N of M".
       ...(attendeeNames.some((n) => n)
         ? { "metadata[attendee_names]": JSON.stringify(attendeeNames) }
-        : {}),
-      // Promoter attribution — house dvnt_* metadata key (session +
-      // PI copies, mirroring the fee metadata duplication below).
-      ...(promoterCode
-        ? {
-            "metadata[dvnt_promoter_code]": promoterCode,
-            "payment_intent_data[metadata][dvnt_promoter_code]": promoterCode,
-          }
         : {}),
       // Destination charge → organizer's connected account; DVNT keeps the fee.
       "payment_intent_data[transfer_data][destination]": organizer.stripe_account_id,
@@ -449,10 +470,10 @@ Deno.serve(async (req) => {
     // In pass mode the buyer covers the buyer-side fee as a second line item;
     // in absorb mode there's no extra line (they pay just the ticket).
     if (!absorb) {
-      params["line_items[1][price_data][currency]"] = "usd";
-      params["line_items[1][price_data][unit_amount]"] = String(fees.buyer_fee);
-      params["line_items[1][price_data][product_data][name]"] = "Service fee";
-      params["line_items[1][quantity]"] = "1";
+      params[`line_items[${feeLine}][price_data][currency]`] = "usd";
+      params[`line_items[${feeLine}][price_data][unit_amount]`] = String(fees.buyer_fee);
+      params[`line_items[${feeLine}][price_data][product_data][name]`] = "Service fee";
+      params[`line_items[${feeLine}][quantity]`] = "1";
     }
     const session = await stripePost("/checkout/sessions", params);
 
@@ -522,6 +543,7 @@ Deno.serve(async (req) => {
       fee_policy_version: fees.fee_policy_version,
       event_id: eventId,
       stripe_checkout_session_id: session.id,
+      ...pricing.orderFields,
     });
     if (guestOrderError) {
       // Non-fatal: the Stripe session is already live. Log loudly —
@@ -538,6 +560,7 @@ Deno.serve(async (req) => {
 
     return json({ ok: true, url: session.url });
   } catch (e) {
+    if (e instanceof GuestPriceError) return err("invalid_discount", e.message, 400);
     console.error("[guest-checkout]", e);
     return err("internal_error", "Could not start checkout.", 500);
   }
