@@ -1,3 +1,5 @@
+import { useCheckoutCode } from "./use-checkout-code.web";
+import { canContinueWithCheckoutCode } from "@dvnt/app/lib/payments/checkout-code";
 import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
@@ -488,6 +490,7 @@ export function EventDetailScreen() {
           void promotersApi
             .claimRef(Number(eventId), code)
             .then((claim) => {
+              if (usePromoterRefStore.getState().getRef(eventId) !== code.trim().toUpperCase()) return;
               setPromoterRef(
                 eventId,
                 claim.code,
@@ -501,7 +504,7 @@ export function EventDetailScreen() {
           void promotersApi
             .getClaim(Number(eventId))
             .then((claim) => {
-              if (!claim) return;
+              if (!claim || usePromoterRefStore.getState().getRef(eventId)) return;
               setPromoterRef(
                 eventId,
                 claim.code,
@@ -2798,38 +2801,12 @@ function CheckoutSheet({
   });
   const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 
-  const applyPromo = async () => {
-    const code = promoCode.trim();
-    if (!code) {
-      setPromoError("Enter a promo code.");
-      return;
-    }
-    if (!tier) return;
-    setPromoApplying(true);
-    setPromoError(null);
-    const { data, error } = await invokeEdge<{
-      valid: boolean;
-      discount_type?: "percent" | "fixed_cents" | "bogo";
-      discount_value?: number;
-      code?: string;
-      error?: string;
-    }>("validate-promo-code", {
-      event_id: Number(eventId),
-      code,
-      ticket_type_id: tier.id,
-    });
-    setPromoApplying(false);
-    if (error || !data?.valid || !data.discount_type) {
-      setAppliedPromo(null);
-      setPromoError(data?.error || error?.message || "Invalid promo code.");
-      return;
-    }
-    setAppliedPromo({
-      type: data.discount_type,
-      value: data.discount_value ?? 0,
-      code: data.code || code,
-    });
-  };
+  const applyPromo = useCheckoutCode({
+    eventId, ticketTypeId: tier?.id, scopeId: `${eventId}:${tier?.id}:${open}`,
+    enabled: open && !!tier && !isCheckingOut, code: promoCode, applying: promoApplying,
+    setCode: setPromoCode, setPromo: setAppliedPromo, setError: setPromoError, setApplying: setPromoApplying,
+  });
+  const codeReady = canContinueWithCheckoutCode(promoCode, appliedPromo, promoApplying, promoError);
 
   return (
     <BottomSheet open={open} onClose={onClose} title="Checkout">
@@ -2885,7 +2862,9 @@ function CheckoutSheet({
             <input
               value={promoCode}
               onChange={(ev) => setPromoCode(ev.target.value)}
-              placeholder="Promo code (optional)"
+              placeholder="Promo or promoter code (optional)"
+              aria-label="Promo or promoter code"
+              maxLength={64}
               autoCapitalize="characters"
               className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#379ED8]"
             />
@@ -2970,8 +2949,8 @@ function CheckoutSheet({
         <CheckoutPhoneField />
 
         <button
-          onClick={onCheckout}
-          disabled={isCheckingOut || !tier}
+          onClick={() => { if (codeReady) onCheckout(); }}
+          disabled={isCheckingOut || !tier || !codeReady}
           className="w-full h-12 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-white font-bold disabled:opacity-50"
         >
           {isCheckingOut

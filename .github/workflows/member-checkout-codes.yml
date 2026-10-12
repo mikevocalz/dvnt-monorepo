@@ -1,0 +1,44 @@
+name: Member checkout codes
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/validate-promo-code/**'
+      - 'apps/mobile/supabase/functions/guest-checkout/discounts-fixture.cjs'
+      - 'apps/mobile/supabase/functions/_shared/*promo*'
+      - 'packages/app/features/events/event-detail.web.tsx'
+      - 'packages/app/features/events/checkout-review.web.tsx'
+      - 'packages/app/features/events/use-checkout-code.web.ts'
+      - 'packages/app/lib/payments/checkout-code.ts'
+      - 'packages/app/lib/api/cart.ts'
+      - 'scripts/test-member-checkout-code.cjs'
+      - '.github/workflows/member-checkout-codes.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'apps/mobile/supabase/functions/validate-promo-code/**'
+      - 'packages/app/features/events/event-detail.web.tsx'
+      - 'packages/app/features/events/checkout-review.web.tsx'
+      - 'packages/app/features/events/use-checkout-code.web.ts'
+      - 'packages/app/lib/payments/checkout-code.ts'
+      - 'scripts/test-member-checkout-code.cjs'
+      - '.github/workflows/member-checkout-codes.yml'
+permissions:
+  contents: read
+jobs:
+  member-code-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Real validation handler plus guest regression (fixture auth/database)
+        run: node --test apps/mobile/supabase/functions/validate-promo-code/index.test.cjs apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Real member sheet, handoff, review and cart API (fixture transport)
+        run: node scripts/test-member-checkout-code.cjs
+      - run: pnpm --filter web exec tsc --noEmit
