@@ -73,7 +73,7 @@ export default function NewMemberPhotoPage() {
     <main className="min-h-[100dvh] bg-[#06070d] px-4 py-10 text-white">
       <div className="mx-auto flex min-h-[75dvh] w-full max-w-lg flex-col justify-center gap-6">
         <div className="flex items-center justify-between text-xs font-black uppercase tracking-[0.2em]">
-          <span className="text-[#FF5BFC]">DVNT · Welcome</span>
+          <span className="text-[#FF5BFC]">DVNT · Required setup</span>
           <span className="text-white/55">Step 1 of 2</span>
         </div>
         <div className="h-1 overflow-hidden rounded-full bg-white/10">
@@ -85,7 +85,7 @@ export default function NewMemberPhotoPage() {
           </div>
           <h1 className="text-4xl font-black leading-tight tracking-tight">First, show us who's here.</h1>
           <p className="text-base leading-7 text-white/70">
-            Every new DVNT member starts with a profile picture. Upload a real photo of yourself before you create your first post and enter the community.
+            Every DVNT member needs a profile picture. Upload a real photo of yourself before you create your first post and enter the rest of the community.
           </p>
         </div>
         <button type="button" onClick={() => inputRef.current?.click()}
