@@ -7,8 +7,10 @@
  * `decideVerifiedAdmission` to draw its banner, so the screen and the server
  * cannot disagree.
  *
- * Enforcement is configuration, not code: `verified_admission_policy` ships
- * with `enforce = false`, so merging this changes nothing for live members.
+ * The verified-only ID policy remains independently configurable through
+ * `verified_admission_policy`. The profile-image + first-post participation
+ * gate below is always enforced for authenticated members, including legacy
+ * accounts, while ticket purchase and read access remain outside this gate.
  */
 import { checkAdultBirthDate } from "./age-policy.ts";
 import { determineNewMemberStep } from "./new-member-onboarding.ts";
