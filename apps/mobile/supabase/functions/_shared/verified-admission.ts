@@ -193,7 +193,7 @@ export async function resolveVerifiedAdmission(
   db: any,
   userId: string | null | undefined,
   now = new Date(),
-  opts: { purpose?: "participation" | "ticket_purchase" | "first_post" } = {},
+  opts: { purpose?: "participation" | "ticket_purchase" | "ticket_claim" | "first_post" } = {},
 ): Promise<AdmissionVerdict> {
   if (!userId) return decideVerifiedAdmission({ userId, now });
   // Buying a ticket is the one thing a checkout-created profile can always do
@@ -248,7 +248,9 @@ export async function resolveVerifiedAdmission(
     restricted,
     now,
   });
-  if (opts.purpose === "ticket_purchase" || verdict.state === "blocked") return verdict;
+  // A claim retains its existing age/restricted-profile checks above, but
+  // receiving an existing ticket does not require a photo or a social post.
+  if (opts.purpose === "ticket_purchase" || opts.purpose === "ticket_claim" || verdict.state === "blocked") return verdict;
 
   // Profile photo + first post are mandatory participation requirements for
   // every member account, regardless of signup date. They are derived from
@@ -323,3 +325,4 @@ export function readRestricted(
   }
   return result?.data === true;
 }
+

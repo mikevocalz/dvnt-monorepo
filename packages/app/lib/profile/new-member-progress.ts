@@ -1,5 +1,6 @@
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { supabase } from "@dvnt/app/lib/supabase/client";
+import { readNewMemberProgress } from "./new-member-progress-contract";
 
 export type NewMemberStep = "not_required" | "pending_verification" | "photo" | "first_post" | "complete";
 export type NewMemberProgress = {
@@ -23,5 +24,6 @@ export async function fetchNewMemberProgress(): Promise<NewMemberProgress> {
   });
   if (error || !data?.ok || !data.data)
     throw new Error(data?.error || error?.message || "Couldn't check your profile progress");
-  return data.data;
+  return readNewMemberProgress(data.data);
 }
+

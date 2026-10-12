@@ -42,7 +42,12 @@ function seed(policy = ENFORCED) {
   users.push({ id: SPICY_AUTHOR, auth_id: 'auth_author', username: 'author' });
   return {
     verified_admission_policy: [policy],
-    user: Object.values(PERSONAS).map(p => ({ id: p.authId, createdAt: p.createdAt })),
+    // These personas exercise age admission after profile setup. Missing-photo
+    // behavior has its own case below so it cannot mask the adult-only rail.
+    user: Object.values(PERSONAS).map(p => ({
+      id: p.authId, createdAt: p.createdAt, emailVerified: true,
+      image: `https://cdn.test/${p.authId}.jpg`,
+    })),
     identity_verifications: Object.values(PERSONAS).filter(p => p.record)
       .map(p => ({ user_id: p.authId, failure_code: null, failure_message: null, provider_ref: null, ...p.record })),
     users,
@@ -211,6 +216,9 @@ for (const [fn, body] of PROTECTED) {
       const persona = PERSONAS[who];
       const res = await h.call(fn, persona.authId, { ...body, expectedAuthId: persona.authId });
       assert.equal(refusedForVerification(res), who !== 'adult', `${fn}/${who}: ${JSON.stringify(res.json)}`);
+      if (who === 'adult') {
+        assert.notEqual(res.json.error?.code, 'profile_completion_required', JSON.stringify(res.json));
+      }
       if (who === 'minor') assert.equal(res.json.error.reason ?? res.json.error.detail?.reason ?? 'underage', 'underage');
     });
   }
@@ -389,3 +397,51 @@ test('update-post: the verified adult can mark their own post SPICY', async () =
   assert.equal(res.json.ok, true, JSON.stringify(res.json));
   assert.equal(h.fake.tables.posts.find(p => p.id === 14).is_nsfw, true);
 });
+
+test('update-post: a verified adult still needs a saved profile photo', async () => {
+  const h = harness();
+  h.fake.tables.user.find(p => p.id === PERSONAS.adult.authId).image = null;
+  const res = await h.call('update-post', PERSONAS.adult.authId, { postId: 14, isNSFW: true });
+  assert.equal(res.json.ok, false);
+  assert.equal(res.json.error.code, 'profile_completion_required');
+  assert.equal(h.fake.tables.posts.find(p => p.id === 14).is_nsfw, false);
+  assert.equal(h.fake.writes.length, 0);
+});
+
+test('claim-comp-ticket: an admitted adult can receive their ticket before social profile setup', async () => {
+  const h = harness();
+  h.fake.tables.user.find(p => p.id === PERSONAS.adult.authId).image = null;
+  h.fake.tables.posts = h.fake.tables.posts.filter(p => p.author_id !== PERSONAS.adult.userId);
+  const claims = [];
+  h.fake.db.rpc = async (name, args) => {
+    if (name === 'is_checkout_restricted') return { data: false, error: null };
+    assert.equal(name, 'claim_comp_ticket');
+    claims.push(args);
+    return { data: { ok: true, ticket_id: 'ticket-1', event_id: 1, already_claimed: false }, error: null };
+  };
+  const token = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJ-_01234';
+  const res = await h.call('claim-comp-ticket', PERSONAS.adult.authId, { token });
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  assert.equal(res.json.ok, true);
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].p_user_id, PERSONAS.adult.authId);
+  assert.equal(claims[0].p_token, token);
+});
+
+for (const who of ['buyer', 'minor']) {
+  test(`claim-comp-ticket: ${who} keeps the existing age refusal and does not consume the token`, async () => {
+    const h = harness();
+    let claims = 0;
+    h.fake.db.rpc = async name => {
+      if (name === 'claim_comp_ticket') claims++;
+      return { data: false, error: null };
+    };
+    const res = await h.call('claim-comp-ticket', PERSONAS[who].authId, {
+      token: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJ-_01234',
+    });
+    assert.equal(res.status, 403);
+    assert.equal(res.json.ok, false);
+    assert.equal(claims, 0);
+  });
+}
+

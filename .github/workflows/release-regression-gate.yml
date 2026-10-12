@@ -61,6 +61,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Install Chromium for profile-entry regression
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      - name: Profile entry, account switches, keyboard focus and ticket access
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-profile-completion-browser.cjs
+
       # The manifest check first: if a scenario lost its automation, the rest of
       # this job can still pass and tell you nothing.
       - run: pnpm verify:release
@@ -85,3 +91,4 @@ jobs:
       - run: pnpm test:community
       - run: pnpm test:tickets
       - run: pnpm test:lynk-session
+
