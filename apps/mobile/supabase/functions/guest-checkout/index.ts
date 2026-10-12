@@ -70,11 +70,12 @@ async function recordFreePromoterAttribution(supabase: any, order: {
   if (typeof order.promoter_code !== "string" || !order.promoter_code ||
       order.promoter_commission_amount_cents !== 0) return;
   try {
-    const { error } = await supabase.rpc("record_promoter_attribution", {
+    const { data, error } = await supabase.rpc("record_promoter_attribution", {
       p_order_id: order.id,
       p_code: order.promoter_code,
     });
-    if (error) console.error("[guest-checkout] free-order promoter attribution failed:", error);
+    if (error || data?.ok === false)
+      console.error("[guest-checkout] free-order promoter attribution failed:", error || data.error);
   } catch (error) {
     console.error("[guest-checkout] free-order promoter attribution failed:", error);
   }

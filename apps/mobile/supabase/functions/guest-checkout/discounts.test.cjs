@@ -171,3 +171,13 @@ test('replay does not activate an older free order with a positive commission sn
  const replay=await f.pay({idempotency_key:'old-free'});assert.equal(replay.data.idempotent,true);
  assert.equal(f.tables.promoter_attributions.length,0);assert.equal(f.writes.length,0);
 });
+
+test('attribution business failure is logged without failing delivery and can be retried',async()=>{
+ const f=fixture({promoters:[promoter({customer_discount_bps:10000})],attributionResultError:'promoter_not_found'});
+ const input={discount_code:'SHARE10',idempotency_key:'retry-attribution-result'};
+ const {paid}=await checkoutWith(f,input);assert.equal(paid.data.free,true);
+ assert.equal(f.tables.promoter_attributions.length,0);assert.equal(f.emails.length,1);
+ assert.ok(f.logs.some(args=>JSON.stringify(args).includes('promoter_not_found')));
+ await f.pay(input);assert.equal(f.tables.promoter_attributions.length,1);
+ assert.equal(f.tables.tickets.length,1);assert.equal(f.emails.length,1);
+});
