@@ -85,15 +85,15 @@ export default function NewMemberPhotoPage() {
           </div>
           <h1 className="text-4xl font-black leading-tight tracking-tight">First, show us who's here.</h1>
           <p className="text-base leading-7 text-white/70">
-            Every DVNT member needs a profile picture. Upload a real photo of yourself before you create your first post and enter the rest of the community.
+            Every DVNT member needs a profile image. Add an image for your account before you create your first post and enter the rest of the community.
           </p>
         </div>
         <button type="button" onClick={() => inputRef.current?.click()}
-          aria-label="Choose a profile photo"
+          aria-label="Choose a profile image"
           className="flex min-h-56 flex-col items-center justify-center gap-3 overflow-hidden rounded-[28px] border-2 border-dashed border-[#3FDCFF]/40 bg-white/5 text-white hover:bg-white/9 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF]">
           {preview
             // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={preview} alt="Selected profile photo preview" className="h-64 w-full object-contain"/>
+            ? <img src={preview} alt="Selected profile image preview" className="h-64 w-full object-contain"/>
             : <><ImagePlus size={36} className="text-[#3FDCFF]"/><span className="font-bold">Choose a photo or use your camera</span><span className="text-sm text-white/55">JPEG, PNG and supported images</span></>}
         </button>
         <input ref={inputRef} hidden type="file" accept="image/*" onChange={onFile} />
