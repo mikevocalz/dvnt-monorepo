@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { determineNewMemberStep, isNewMemberOnboardingEnabled } from "./new-member-onboarding.ts";
 
-const newer = {
+const evidence = {
   accountCreatedAt: "2026-10-09T00:31:00.000Z",
   emailVerified: true,
   adultVerified: true,
@@ -9,35 +9,40 @@ const newer = {
   hasPost: false,
 };
 
-Deno.test("legacy accounts are never retroactively forced through setup", () => {
-  assertEquals(determineNewMemberStep({ ...newer, accountCreatedAt: "2026-10-08T23:59:00.000Z" }), "not_required");
-  assertEquals(determineNewMemberStep({ ...newer, accountCreatedAt: null }), "not_required");
+Deno.test("legacy accounts are retroactively required to add photo and first post", () => {
+  assertEquals(
+    determineNewMemberStep({ ...evidence, accountCreatedAt: "2024-01-01T00:00:00.000Z" }),
+    "photo",
+  );
+  assertEquals(determineNewMemberStep({ ...evidence, accountCreatedAt: null }), "photo");
 });
 
-Deno.test("new account must finish ID and email before photo/post", () => {
-  assertEquals(determineNewMemberStep({ ...newer, emailVerified: false }), "pending_verification");
-  assertEquals(determineNewMemberStep({ ...newer, adultVerified: false }), "pending_verification");
+Deno.test("photo stage always precedes first post", () => {
+  assertEquals(determineNewMemberStep(evidence), "photo");
+  assertEquals(determineNewMemberStep({ ...evidence, hasProfilePhoto: true }), "first_post");
+  assertEquals(determineNewMemberStep({ ...evidence, hasPost: true }), "photo");
+  assertEquals(
+    determineNewMemberStep({ ...evidence, hasProfilePhoto: true, hasPost: true }),
+    "complete",
+  );
 });
 
-Deno.test("new member photo stage precedes first post, persisted across devices", () => {
-  assertEquals(determineNewMemberStep(newer), "photo");
-  assertEquals(determineNewMemberStep({ ...newer, hasProfilePhoto: true }), "first_post");
-  assertEquals(determineNewMemberStep({ ...newer, hasPost: true }), "photo");
-  assertEquals(determineNewMemberStep({ ...newer, hasProfilePhoto: true, hasPost: true }), "complete");
+Deno.test("email and adult-verification state do not exempt the two required profile steps", () => {
+  assertEquals(determineNewMemberStep({ ...evidence, emailVerified: false }), "photo");
+  assertEquals(determineNewMemberStep({ ...evidence, adultVerified: false }), "photo");
+  assertEquals(
+    determineNewMemberStep({
+      ...evidence,
+      emailVerified: false,
+      adultVerified: false,
+      hasProfilePhoto: true,
+    }),
+    "first_post",
+  );
 });
 
-Deno.test("onboarding boundary uses the server enrollment timestamp", () => {
-  assertEquals(determineNewMemberStep({
-    ...newer, accountCreatedAt: "2026-10-09T00:30:00.000Z",
-  }), "photo");
-  assertEquals(determineNewMemberStep({
-    ...newer, accountCreatedAt: "2026-10-09T00:29:59.999Z",
-  }), "not_required");
-});
-
-Deno.test("the onboarding gate is off unless the flag is exactly true", () => {
-  assertEquals(isNewMemberOnboardingEnabled(() => undefined), false);
-  assertEquals(isNewMemberOnboardingEnabled(() => "1"), false);
-  assertEquals(isNewMemberOnboardingEnabled(() => "TRUE"), false);
-  assertEquals(isNewMemberOnboardingEnabled(() => " true "), true);
+Deno.test("the photo + first-post gate cannot be disabled by an environment flag", () => {
+  assertEquals(isNewMemberOnboardingEnabled(() => undefined), true);
+  assertEquals(isNewMemberOnboardingEnabled(() => "false"), true);
+  assertEquals(isNewMemberOnboardingEnabled(() => "true"), true);
 });
