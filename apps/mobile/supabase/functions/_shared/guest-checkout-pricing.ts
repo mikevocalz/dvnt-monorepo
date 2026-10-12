@@ -120,6 +120,7 @@ export async function priceGuestCheckout(db: any, input: GuestPriceInput): Promi
     ...(promo ? { promo_code_id: promo.promo_code_id } : {}),
     ...(discount > 0 ? { discount_cents: discount } : {}),
     ...(promoter ? {
+      ...(netSubtotal === 0 ? { promoter_id: promoter.promoter_id } : {}),
       promoter_policy_version: "v2_eligible_subtotal_after_discount",
       promoter_original_amount_cents: rawSubtotal,
       promoter_customer_discount_bps: promoter.customer_discount_bps,

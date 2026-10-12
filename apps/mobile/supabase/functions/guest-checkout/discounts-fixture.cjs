@@ -36,27 +36,24 @@ function fixture(options={}){
   writes.push({table:'rpc',fn,args});
   if(fn==='ticket_hold_create_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
   if(fn==='increment_promo_uses'){usage.push(args.p_promo_id);return{data:null,error:null}}
-  if(fn==='record_promoter_attribution'){
-   if(options.attributionResultError){const error=options.attributionResultError;options.attributionResultError=null;return{data:{ok:false,error},error:null}}
-   if(options.attributionError){const error=options.attributionError;options.attributionError=null;return{data:null,error:{message:error}}}
-   assert.ok(tables.tickets.some(t=>t.order_id===args.p_order_id),'attribution follows successful issuance');
-   const order=tables.orders.find(o=>o.id===args.p_order_id);
-   const ref=tables.event_promoters.find(p=>p.event_id===order.event_id&&p.code===args.p_code);
-   if(!ref)return{data:{ok:false,error:'promoter_not_found'},error:null};
-   if(!tables.promoter_attributions.some(a=>a.order_id===order.id))tables.promoter_attributions.push({order_id:order.id,promoter_id:ref.id});
-   return{data:{ok:true},error:null};
-  }
   throw Error('Unexpected RPC '+fn);
  },from:table=>{
   assert.ok(table in tables,'unexpected table '+table);
-  let filters=[],op='read',payload,head=false;
+  let filters=[],op='read',payload,head=false,conflict;
   function run(){
    if(options.readError===table&&op==='read')return {data:null,error:{message:'fixture read failure'},count:null};
    let hit=tables[table].filter(row=>filters.every(f=>f(row)));
    if(op==='insert'&&table==='tickets'&&options.ticketInsertError)return{data:null,error:{message:'fixture ticket insert failure'}};
    if(op!=='read'){
     writes.push({table,op,payload});
-    if(op==='insert'){
+    if(op==='upsert'){
+     assert.equal(table,'promoter_attributions');assert.equal(conflict.onConflict,'order_id');assert.equal(conflict.ignoreDuplicates,true);
+     assert.ok(tables.tickets.some(t=>t.order_id===payload.order_id),'attribution follows successful issuance');
+     if(options.attributionThrow){options.attributionThrow=false;throw Error('fixture attribution exception')}
+     if(options.attributionError){const error=options.attributionError;options.attributionError=null;return{data:null,error:{message:error}}}
+     hit=tables[table].filter(row=>row.order_id===payload.order_id);
+     if(!hit.length){hit=[{...payload}];tables[table].push(...hit)}
+    }else if(op==='insert'){
      hit=(Array.isArray(payload)?payload:[payload]).map(row=>({id:'row-'+(++serial),...row}));tables[table].push(...hit);
     }else if(op==='update')hit.forEach(row=>Object.assign(row,payload));
     else if(op==='delete')tables[table]=tables[table].filter(row=>!hit.includes(row));
@@ -68,7 +65,7 @@ function fixture(options={}){
    ilike(k,v){filters.push(row=>like(v,String(row[k]??'')));return q},
    in(k,v){filters.push(row=>v.includes(row[k]));return q},limit(){return q},
    gt(k,v){filters.push(row=>row[k]>v);return q},
-   insert(v){op='insert';payload=v;return q},update(v){op='update';payload=v;return q},delete(){op='delete';return q},
+   upsert(v,opts){op='upsert';payload=v;conflict=opts;return q},insert(v){op='insert';payload=v;return q},update(v){op='update';payload=v;return q},delete(){op='delete';return q},
    maybeSingle:async()=>{const r=run();return{...r,data:r.data?.[0]??null}},
    single:async()=>{const r=run();return{...r,data:r.data?.[0]??null}},then:(a,b)=>Promise.resolve(run()).then(a,b)};
   return q;
