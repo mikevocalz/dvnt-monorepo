@@ -11,11 +11,7 @@
  * with `enforce = false`, so merging this changes nothing for live members.
  */
 import { checkAdultBirthDate } from "./age-policy.ts";
-import {
-  determineNewMemberStep,
-  isNewMemberOnboardingEnabled,
-  NEW_MEMBER_ONBOARDING_CUTOFF,
-} from "./new-member-onboarding.ts";
+import { determineNewMemberStep } from "./new-member-onboarding.ts";
 
 /**
  * Every account is in scope once `enforce` is on (checklist A03). There is no
@@ -251,17 +247,21 @@ export async function resolveVerifiedAdmission(
     now,
   });
   if (opts.purpose === "ticket_purchase" || verdict.state === "blocked") return verdict;
-  if (!isNewMemberOnboardingEnabled()) return verdict;
 
-  // The mandatory onboarding gate is independent of the legacy verified-only
-  // rollout. It only applies to NEW Better Auth signups, never old accounts,
-  // and cannot be lifted by localStorage or a fabricated posts_count.
+  // Profile photo + first post are mandatory participation requirements for
+  // every member account, regardless of signup date. They are derived from
+  // canonical server records so local/session state cannot grandfather or
+  // bypass an incomplete existing account.
   const { data: account, error: accountError } = await db.from("user")
     .select("id,createdAt,emailVerified,image").eq("id", userId).maybeSingle();
-  if (accountError || !account) return verdict;
-  const createdAt = Date.parse(String(account.createdAt || ""));
-  if (!Number.isFinite(createdAt) || createdAt < Date.parse(NEW_MEMBER_ONBOARDING_CUTOFF))
-    return verdict;
+  if (accountError || !account) {
+    return {
+      state: "blocked",
+      reason: "profile_photo_required",
+      message: "We couldn't confirm your profile. Retry.",
+      deadline: null,
+    };
+  }
 
   const { data: member, error: memberError } = await db.from("users")
     .select("id,avatar_id").eq("auth_id", userId).maybeSingle();
