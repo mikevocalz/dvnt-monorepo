@@ -1,3 +1,4 @@
+import { eventActivityRoute } from "@dvnt/app/lib/activity/event-activity";
 import { create } from "zustand";
 import { getPostDetailRoute } from "@dvnt/app/lib/routes/post-routes";
 import {
@@ -52,6 +53,7 @@ export interface Activity {
   user: {
     id?: string;
     username: string;
+    displayName?: string;
     avatar: string;
   };
   // Entity reference for correct routing
@@ -115,6 +117,7 @@ function notificationToActivity(notif: Notification): Activity | null {
       user: {
         id: notif.sender?.id || "",
         username: senderUsername,
+        displayName: notif.sender?.displayName,
         avatar: notif.sender?.avatar || "",
       },
       entityType: notif.entityType as
@@ -306,6 +309,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   // Get the correct route for an activity item
   getRouteForActivity: (activity) => {
     const { type, entityType, entityId, post, event, user } = activity;
+
+    const eventRoute = eventActivityRoute(activity, "native");
+    if (eventRoute) return eventRoute;
 
     // Use entityType/entityId if available (preferred routing)
     if (entityType && entityId) {

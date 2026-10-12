@@ -29,12 +29,14 @@ export interface Notification {
   sender?: {
     id: string;
     username: string;
+    displayName?: string;
     avatar: string;
     viewerFollows?: boolean;
   } | null;
   actor?: {
     id: string;
     username: string;
+    displayName?: string;
     avatar: string;
     viewerFollows?: boolean;
   } | null;
@@ -456,6 +458,8 @@ export const notificationsApi = {
           actor:actor_id(
             id,
             username,
+            first_name,
+            last_name,
             avatar:avatar_id(url)
           )
         `,
@@ -697,6 +701,11 @@ export const notificationsApi = {
           ? {
               id: String(n.actor.id),
               username: n.actor.username,
+              displayName:
+                [n.actor.first_name, n.actor.last_name]
+                  .filter(Boolean)
+                  .join(" ")
+                  .trim() || n.actor.username,
               avatar: n.actor.avatar?.url || "",
               viewerFollows: viewerFollowsSet.has(n.actor_id),
             }

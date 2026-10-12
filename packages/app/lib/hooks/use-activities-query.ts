@@ -9,6 +9,7 @@
  * toggleFollow) and realtime subscriptions. This hook provides the READ path.
  */
 
+import { eventActivityRoute } from "@dvnt/app/lib/activity/event-activity";
 import { ticketActivityRoute } from "@dvnt/app/lib/activity/ticket-activity";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -68,6 +69,7 @@ export interface Activity {
   user: {
     id?: string;
     username: string;
+    displayName?: string;
     avatar: string;
     viewerFollows?: boolean;
   };
@@ -142,6 +144,7 @@ export function notificationToActivity(notif: Notification): Activity | null {
       user: {
         id: notif.sender?.id || "",
         username: senderUsername,
+        displayName: notif.sender?.displayName,
         avatar: notif.sender?.avatar || "",
         viewerFollows: notif.sender?.viewerFollows,
       },
@@ -298,6 +301,9 @@ export function getRouteForActivity(activity: Activity): string {
     "native",
   );
   if (ticketRoute) return ticketRoute;
+
+  const eventRoute = eventActivityRoute(activity, "native");
+  if (eventRoute) return eventRoute;
 
   // Use entityType/entityId if available (preferred routing)
   if (entityType && entityId) {

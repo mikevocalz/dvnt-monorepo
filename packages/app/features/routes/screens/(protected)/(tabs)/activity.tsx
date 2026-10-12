@@ -1,3 +1,4 @@
+import { activitySenderLabel } from "@dvnt/app/lib/activity/event-activity";
 import { View, Text, Pressable, ScrollView } from "react-native";
 import { LegendList } from "@dvnt/app/components/list";
 import { Image } from "expo-image";
@@ -335,7 +336,7 @@ interface ActivityItemProps {
   onFollowBack: (activity: Activity) => void;
 }
 
-const ActivityItem = memo(
+export const ActivityItem = memo(
   ({
     activity,
     isFollowed,
@@ -365,7 +366,9 @@ const ActivityItem = memo(
       ) : (
       <Pressable
         onPress={() =>
-          onUserPress(activity.user.username, activity.user.avatar)
+          activity.type === "event_broadcast"
+            ? onActivityPress(activity)
+            : onUserPress(activity.user.username, activity.user.avatar)
         }
         style={{ overflow: "visible", marginRight: 4 }}
       >
@@ -392,10 +395,12 @@ const ActivityItem = memo(
             <Text
               className="font-semibold text-foreground"
               onPress={() =>
-                onUserPress(activity.user.username, activity.user.avatar)
+                activity.type === "event_broadcast"
+                  ? onActivityPress(activity)
+                  : onUserPress(activity.user.username, activity.user.avatar)
               }
             >
-              {activity.user.username}
+              {activitySenderLabel(activity)}
             </Text>
           )}
           {getActivityText(activity)}
