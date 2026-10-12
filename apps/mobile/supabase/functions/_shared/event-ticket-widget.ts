@@ -5,8 +5,26 @@ import { salesCutoffAt } from './sales-cutoff.ts';
 export const WIDGET_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const FIELDS = 'id,host_id,title,start_date,end_date,event_tz,location_name,location,flyer_image_url,cover_image_url,image,visibility,status,ticketing_enabled,is_hidden,publish_at,nsfw';
 const SETTINGS='id,event_id,allowed_origin,published,revision';
+/** Human-readable management blockers are returned only after owner/admin authorization. */
+export function widgetEligibilityIssues(e:any, now=Date.now()): string[] {
+  if(!e)return ['Event not found.'];
+  const issues:string[]=[];
+  if(e.visibility!=='public')issues.push('Change event visibility to Public.');
+  if(e.status!=='active')issues.push('Set the event status to Active.');
+  if(e.ticketing_enabled!==true)issues.push('Enable ticketing for this event.');
+  if(e.nsfw===true)issues.push('Spicy events cannot be published as public ticket widgets.');
+  if(isUnpublished(e,now)){
+    if(e.is_hidden===true)issues.push('Unhide the event.');
+    if(e.publish_at){
+      const at=Date.parse(e.publish_at);
+      if(!Number.isFinite(at))issues.push('Correct the invalid scheduled publication date.');
+      else if(at>now)issues.push('Publish the event now or wait until its scheduled publication time.');
+    }
+  }
+  return issues;
+}
 export function widgetEventEligible(e:any, now=Date.now()) {
-  return !!e && e.visibility==='public' && e.status==='active' && e.ticketing_enabled===true && e.nsfw!==true && !isUnpublished(e,now);
+  return widgetEligibilityIssues(e,now).length===0;
 }
 export function widgetCode(id:string) {
   if(!WIDGET_ID.test(id)) throw new Error('Invalid widget ID');
@@ -59,7 +77,7 @@ export function createEventWidgetHandler(d:{db:any;authenticate:(r:Request)=>Pro
    if(old.error)throw new Error('settings');let settings=old.data;
    if(b.action!=='get'){
     if(!Number.isSafeInteger(b.revision)||b.revision<0||b.revision!==(settings?.revision??0))return json({error:'Settings changed. Reload before saving.'},409);
-    if(b.action==='publish'&&!widgetEventEligible(e))return json({error:'Only published public non-Spicy ticketed events can have a public widget.'},409);
+    if(b.action==='publish'&&!widgetEventEligible(e))return json({error:'This event is not eligible for a public ticket widget.',eligibilityIssues:widgetEligibilityIssues(e)},409);
     if(b.action==='revoke'&&!settings)return json({error:'No widget to revoke'},409);
     let origin=settings?.allowed_origin;
     if(b.action==='publish'){try{origin=normalizeEmbedOrigin(b.origin)}catch{return json({error:'Enter the exact HTTPS website origin, with no page path or wildcard.'},400)}}
@@ -69,7 +87,7 @@ export function createEventWidgetHandler(d:{db:any;authenticate:(r:Request)=>Pro
     if(write.error?.code==='23505'||(!write.error&&!write.data))return json({error:'Settings changed. Reload before saving.'},409);
     if(write.error)throw new Error('save');settings=write.data;
    }
-   return json({ok:true,event:{id:e.id,title:e.title},settings,eligible:widgetEventEligible(e),
+   return json({ok:true,event:{id:e.id,title:e.title},settings,eligible:widgetEventEligible(e),eligibilityIssues:widgetEligibilityIssues(e),
      code:settings?.published?widgetCode(settings.id):null});
   }catch{return json({error:'The event widget is temporarily unavailable. Existing checkout is unchanged.'},503)}
  };

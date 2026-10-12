@@ -2,7 +2,8 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),ts=require('typescript');
 const ROOT=process.env.WIDGET_ROOT||path.resolve(__dirname,'..');
 function load(file,globals={}){if(!path.extname(file))file+='.ts';const exports={};const out=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},reportDiagnostics:true});assert.equal((out.diagnostics||[]).filter(x=>x.category===1).length,0);vm.runInNewContext(out.outputText,{exports,Request,Response,URL,Date,Intl,AbortSignal,TextEncoder,crypto,console,process:{env:{}},...globals,require:n=>load(n.startsWith('@dvnt/app/')?path.join(ROOT,'packages/app',n.slice('@dvnt/app/'.length)):path.resolve(path.dirname(file),n),globals)});return exports}
-const {createEventWidgetHandler,widgetCode,widgetEventEligible}=load(path.join(ROOT,'apps/mobile/supabase/functions/_shared/event-ticket-widget.ts'));
+const {createEventWidgetHandler,widgetCode,widgetEventEligible,widgetEligibilityIssues}=load(path.join(ROOT,'apps/mobile/supabase/functions/_shared/event-ticket-widget.ts'));
+const {prepareOrganizerOrigin}=load(path.join(ROOT,'packages/app/lib/ticket-embed/organizer-origin.ts'));
 const {renderEventWidget}=load(path.join(ROOT,'packages/app/lib/ticket-embed/event-widget-html.ts'));
 const ID='11111111-1111-4111-8111-111111111111';
 const event={id:1,host_id:'owner',title:'Fixture event',visibility:'public',status:'active',ticketing_enabled:true,nsfw:false,start_date:'2099-01-01T20:00:00Z'};
@@ -11,6 +12,38 @@ function harness({user='owner',patch={},settings={id:ID,event_id:1,allowed_origi
  const db={rpc:async(fn)=>{rpcs.push(fn);assert.ok(['ticket_type_current_price_cents','ticket_type_available'].includes(fn));return{data:fn==='ticket_type_available'?5:2500}},from:t=>{assert.ok(t in tables,'unexpected table '+t);let filters=[],action='read',payload;const run=()=>{let hit=tables[t].filter(r=>filters.every(f=>f(r)));if(action!=='read'){assert.equal(t,'event_ticket_widgets','never write purchasing state');writes.push(t);if(action==='insert'){hit=[{id:ID,...payload}];tables[t].push(...hit)}else hit.forEach(r=>Object.assign(r,payload))}return{data:hit,error:null}};const q={select(){return q},eq(k,v){filters.push(r=>r[k]===v);return q},limit(){return q},update(v){action='update';payload=v;return q},insert(v){action='insert';payload=v;return q},maybeSingle:async()=>{const r=run();return{data:r.data[0]||null,error:r.error}},then:(a,b)=>Promise.resolve(run()).then(a,b)};return q}};
  const handler=createEventWidgetHandler({db,authenticate:async()=>user,headers:()=>({})});return{tables,writes,rpcs,call:async(body)=>{const r=await handler(new Request('https://fixture.invalid/widget'+(body?'':'?id='+ID),body?{method:'POST',body:JSON.stringify({eventId:1,...body})}:{}));return{status:r.status,data:await r.json()}}}
 }
+test('bare-domain input becomes exact HTTPS origin before publishing',()=>{
+ assert.deepEqual({...prepareOrganizerOrigin('www.deviant.live')},{origin:'https://www.deviant.live',error:null});
+ assert.deepEqual({...prepareOrganizerOrigin('https://www.deviant.live/')},{origin:'https://www.deviant.live',error:null});
+ assert.deepEqual({...prepareOrganizerOrigin(' https://events.example.org ')},{origin:'https://events.example.org',error:null});
+ for(const bad of ['http://www.deviant.live','https://www.deviant.live/event','https://*.deviant.live','https://example.com:444','https://foo.test','https://user:pass@example.com','example.com/checkout','']){
+  const r=prepareOrganizerOrigin(bad);assert.equal(r.origin,null,bad);assert.ok(r.error,bad);
+ }
+});
+test('owner receives exact eligibility blockers and never disables eligible events',async()=>{
+ const patches=[
+  [{visibility:'private'},'visibility'],
+  [{status:'draft'},'status'],
+  [{ticketing_enabled:false},'ticketing'],
+  [{nsfw:true},'Spicy'],
+  [{is_hidden:true},'Unhide'],
+  [{publish_at:'2099-01-01T00:00:00Z'},'scheduled'],
+  [{publish_at:'not-a-date'},'invalid']
+ ];
+ assert.equal(widgetEventEligible(event),true);
+ assert.equal(widgetEligibilityIssues(event).length,0);
+ for(const [patch,word] of patches){
+  const h=harness({patch});
+  const result=await h.call({action:'get'});
+  assert.equal(result.status,200);
+  assert.equal(result.data.eligible,false);
+  assert.ok(result.data.eligibilityIssues.some(x=>x.includes(word)),word);
+  assert.equal(h.writes.length,0);
+  const denied=await h.call({action:'publish',origin:'https://www.deviant.live',revision:1});
+  assert.equal(denied.status,409);
+  assert.ok(denied.data.eligibilityIssues.some(x=>x.includes(word)),word);
+ }
+});
 test('owner creates actual iframe code, not a disabled copy button',async()=>{const h=harness({settings:null}),r=await h.call({action:'publish',revision:0,origin:'https://merchant.example.com'});assert.equal(r.status,200);assert.match(r.data.code,/<iframe/);assert.match(r.data.code,/\/tickets\/embed\//);assert.equal(h.writes.length,1);assert.equal(h.rpcs.length,0)});
 test('accepted admin may publish',async()=>{assert.equal((await harness({user:'admin',admin:true}).call({action:'publish',revision:1,origin:'https://merchant.example.com'})).status,200)});
 for(const user of [null,'stranger'])test('non-owner '+user+' cannot publish',async()=>{const h=harness({user}),r=await h.call({action:'publish',revision:1,origin:'https://merchant.example.com',userId:'owner'});assert.equal(r.status,user?403:401);assert.equal(h.writes.length,0)});
