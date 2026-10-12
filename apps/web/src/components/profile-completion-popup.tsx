@@ -59,10 +59,17 @@ export function ProfileCompletionPopup() {
       .then((progress) => {
         if (cancelled) return;
         setGateStep(progress.step);
-        setNeeds({
-          photo: !progress.hasPhoto,
-          firstPost: !progress.hasPost,
-        });
+        // Verification-era signups must finish the existing 18+/email flow
+        // first. The verified-only/auth UI owns that stage; this dialog begins
+        // only once the member can actually complete photo -> first post.
+        if (progress.step === "pending_verification") {
+          setNeeds({ photo: false, firstPost: false });
+        } else {
+          setNeeds({
+            photo: !progress.hasPhoto,
+            firstPost: !progress.hasPost,
+          });
+        }
         setChecked(true);
       })
       .catch(() => {
