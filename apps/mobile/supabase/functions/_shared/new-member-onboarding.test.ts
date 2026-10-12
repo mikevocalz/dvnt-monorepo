@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { determineNewMemberStep, isNewMemberOnboardingEnabled } from "./new-member-onboarding.ts";
 
-const evidence = {
+const newer = {
   accountCreatedAt: "2026-10-09T00:31:00.000Z",
   emailVerified: true,
   adultVerified: true,
@@ -11,33 +11,45 @@ const evidence = {
 
 Deno.test("legacy accounts are retroactively required to add photo and first post", () => {
   assertEquals(
-    determineNewMemberStep({ ...evidence, accountCreatedAt: "2024-01-01T00:00:00.000Z" }),
+    determineNewMemberStep({ ...newer, accountCreatedAt: "2024-01-01T00:00:00.000Z" }),
     "photo",
   );
-  assertEquals(determineNewMemberStep({ ...evidence, accountCreatedAt: null }), "photo");
+  assertEquals(determineNewMemberStep({ ...newer, accountCreatedAt: null }), "photo");
 });
 
-Deno.test("photo stage always precedes first post", () => {
-  assertEquals(determineNewMemberStep(evidence), "photo");
-  assertEquals(determineNewMemberStep({ ...evidence, hasProfilePhoto: true }), "first_post");
-  assertEquals(determineNewMemberStep({ ...evidence, hasPost: true }), "photo");
-  assertEquals(
-    determineNewMemberStep({ ...evidence, hasProfilePhoto: true, hasPost: true }),
-    "complete",
-  );
-});
-
-Deno.test("email and adult-verification state do not exempt the two required profile steps", () => {
-  assertEquals(determineNewMemberStep({ ...evidence, emailVerified: false }), "photo");
-  assertEquals(determineNewMemberStep({ ...evidence, adultVerified: false }), "photo");
+Deno.test("new signup keeps verification-first ordering", () => {
+  assertEquals(determineNewMemberStep({ ...newer, emailVerified: false }), "pending_verification");
+  assertEquals(determineNewMemberStep({ ...newer, adultVerified: false }), "pending_verification");
   assertEquals(
     determineNewMemberStep({
-      ...evidence,
+      ...newer,
       emailVerified: false,
       adultVerified: false,
       hasProfilePhoto: true,
+      hasPost: true,
     }),
-    "first_post",
+    "pending_verification",
+  );
+});
+
+Deno.test("legacy profile requirements do not force legacy accounts through the new verification stage", () => {
+  const legacy = {
+    ...newer,
+    accountCreatedAt: "2024-01-01T00:00:00.000Z",
+    emailVerified: false,
+    adultVerified: false,
+  };
+  assertEquals(determineNewMemberStep(legacy), "photo");
+  assertEquals(determineNewMemberStep({ ...legacy, hasProfilePhoto: true }), "first_post");
+});
+
+Deno.test("photo stage always precedes first post", () => {
+  assertEquals(determineNewMemberStep(newer), "photo");
+  assertEquals(determineNewMemberStep({ ...newer, hasProfilePhoto: true }), "first_post");
+  assertEquals(determineNewMemberStep({ ...newer, hasPost: true }), "photo");
+  assertEquals(
+    determineNewMemberStep({ ...newer, hasProfilePhoto: true, hasPost: true }),
+    "complete",
   );
 });
 
