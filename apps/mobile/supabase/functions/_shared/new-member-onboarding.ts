@@ -1,13 +1,14 @@
 /**
  * Mandatory DVNT entry steps for every member account.
  *
- * This used to apply only to accounts created after a rollout cutoff. That left
- * legacy accounts able to dismiss the profile-completion reminder forever.
- * Photo + first post are now account requirements for everyone. Progress is
- * recomputed from authoritative server-side media/posts on every check.
+ * The old flow applied photo + first-post only to accounts created after a
+ * rollout cutoff. Existing accounts are no longer exempt: everybody must have
+ * both pieces of server-proven evidence.
  *
- * Keep the old cutoff/flag exports for source compatibility with older callers;
- * they no longer weaken enforcement.
+ * The cutoff is still used for one purpose only: accounts created after the
+ * 18+ onboarding rollout must finish email/adult verification before they can
+ * enter the photo -> first-post sequence. Legacy accounts keep their existing
+ * age-access treatment while gaining the two new profile requirements.
  */
 export const NEW_MEMBER_ONBOARDING_CUTOFF = "2026-10-09T00:30:00.000Z";
 
@@ -34,13 +35,17 @@ export type OnboardingStep =
   | "complete";
 
 /**
- * Photo always comes first, then the first published post.
- *
- * Age/email verification remains enforced by DVNT's separate verification and
- * posting rails. It is intentionally not used to exempt legacy accounts from
- * these two profile requirements.
+ * New signups preserve DVNT's verification-first ordering. After that, and for
+ * every legacy account, photo always comes first and first post second.
  */
 export function determineNewMemberStep(input: OnboardingEvidence): OnboardingStep {
+  const created = Date.parse(String(input.accountCreatedAt ?? ""));
+  const isVerificationEraAccount =
+    Number.isFinite(created) && created >= Date.parse(NEW_MEMBER_ONBOARDING_CUTOFF);
+
+  if (isVerificationEraAccount && (!input.emailVerified || !input.adultVerified)) {
+    return "pending_verification";
+  }
   if (!input.hasProfilePhoto) return "photo";
   if (!input.hasPost) return "first_post";
   return "complete";
