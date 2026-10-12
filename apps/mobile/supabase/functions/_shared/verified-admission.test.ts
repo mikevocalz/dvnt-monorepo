@@ -229,24 +229,26 @@ Deno.test("an unreadable restricted flag refuses, a missing function does not", 
   assertEquals(notMigrated.state, "allowed");
 });
 
-Deno.test("the new-member gate admits everyone while its flag is off", async () => {
+Deno.test("existing accounts are not grandfathered out of mandatory profile setup", async () => {
   Deno.env.delete("DVNT_NEW_MEMBER_ONBOARDING_ENABLED");
   const verdict = await resolveVerifiedAdmission(
     fakeDb({
       verified_admission_policy: { data: { enforce: false }, error: null },
       identity_verifications: { data: null, error: null },
-      user: { data: { id: "new-member", createdAt: "2026-10-09T01:00:00Z", emailVerified: false, image: null }, error: null },
+      user: {
+        data: { id: "existing-member", createdAt: "2024-03-01T00:00:00Z", emailVerified: true, image: null },
+        error: null,
+      },
       users: { data: { id: 555, avatar_id: null }, error: null },
       posts: { data: [], error: null },
     }),
-    "new-member",
+    "existing-member",
   );
-  assertEquals(verdict.state, "allowed");
+  assertEquals(verdict.state, "blocked");
+  assertEquals(verdict.reason, "profile_photo_required");
 });
 
-Deno.test("new-account participation is blocked until saved photo then first post", async () => {
-  Deno.env.set("DVNT_NEW_MEMBER_ONBOARDING_ENABLED", "true");
-  try {
+Deno.test("member participation is blocked until saved photo then first post", async () => {
   const account = {
     id: "new-member",
     createdAt: "2026-10-09T01:00:00Z",
@@ -286,9 +288,6 @@ Deno.test("new-account participation is blocked until saved photo then first pos
     fakeDb({ ...hasPhoto, posts: { data: [{ id: 1 }], error: null } }), "new-member",
   );
   assertEquals(complete.state, "allowed");
-  } finally {
-    Deno.env.delete("DVNT_NEW_MEMBER_ONBOARDING_ENABLED");
-  }
 });
 
 Deno.test("new onboarding must never close ticket purchase", async () => {
