@@ -30,12 +30,21 @@ function fixture(options={}){
  ticket_types:[{id:TIER,event_id:1,name:'Admission',price_cents:3000,is_active:true,status:'on_sale',tier_visibility:'public',
  quantity_total:100,quantity_sold:0,max_per_user:10,...options.tier}],orders:[],tickets:[],ticket_holds:[],order_timeline:[],
  organizer_accounts:[{host_id:'host',stripe_account_id:'acct_fixture',charges_enabled:true}],
- promo_codes:options.promos||[],event_promoters:options.promoters||[]};
+ promo_codes:options.promos||[],event_promoters:options.promoters||[],promoter_attributions:[]};
  const writes=[],stripe=[],emails=[],usage=[];let serial=0;
  const db={rpc:async(fn,args)=>{
   writes.push({table:'rpc',fn,args});
   if(fn==='ticket_hold_create_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
   if(fn==='increment_promo_uses'){usage.push(args.p_promo_id);return{data:null,error:null}}
+  if(fn==='record_promoter_attribution'){
+   if(options.attributionError){const error=options.attributionError;options.attributionError=null;return{data:null,error:{message:error}}}
+   assert.ok(tables.tickets.some(t=>t.order_id===args.p_order_id),'attribution follows successful issuance');
+   const order=tables.orders.find(o=>o.id===args.p_order_id);
+   const ref=tables.event_promoters.find(p=>p.event_id===order.event_id&&p.code===args.p_code);
+   if(!ref)return{data:{ok:false,error:'promoter_not_found'},error:null};
+   if(!tables.promoter_attributions.some(a=>a.order_id===order.id))tables.promoter_attributions.push({order_id:order.id,promoter_id:ref.id});
+   return{data:{ok:true},error:null};
+  }
   throw Error('Unexpected RPC '+fn);
  },from:table=>{
   assert.ok(table in tables,'unexpected table '+table);
@@ -43,6 +52,7 @@ function fixture(options={}){
   function run(){
    if(options.readError===table&&op==='read')return {data:null,error:{message:'fixture read failure'},count:null};
    let hit=tables[table].filter(row=>filters.every(f=>f(row)));
+   if(op==='insert'&&table==='tickets'&&options.ticketInsertError)return{data:null,error:{message:'fixture ticket insert failure'}};
    if(op!=='read'){
     writes.push({table,op,payload});
     if(op==='insert'){

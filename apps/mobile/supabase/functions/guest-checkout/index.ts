@@ -57,7 +57,29 @@ function err(code: string, message: string, status = 200): Response {
   return json({ ok: false, error: { code, message } }, status);
 }
 
- 
+/** Free orders have no Stripe webhook. Reuse the existing idempotent attribution
+ * RPC without writing a payable ledger entry. Bookkeeping cannot undo tickets.
+ * On replay, use only the saved code and explicit zero-earning snapshot; never
+ * let changed request fields reassign a sale or activate an old unsafe snapshot.
+ */
+async function recordFreePromoterAttribution(supabase: any, order: {
+  id: string;
+  promoter_code?: unknown;
+  promoter_commission_amount_cents?: unknown;
+}): Promise<void> {
+  if (typeof order.promoter_code !== "string" || !order.promoter_code ||
+      order.promoter_commission_amount_cents !== 0) return;
+  try {
+    const { error } = await supabase.rpc("record_promoter_attribution", {
+      p_order_id: order.id,
+      p_code: order.promoter_code,
+    });
+    if (error) console.error("[guest-checkout] free-order promoter attribution failed:", error);
+  } catch (error) {
+    console.error("[guest-checkout] free-order promoter attribution failed:", error);
+  }
+}
+
 async function stripePost(endpoint: string, body: Record<string, string>): Promise<any> {
   const res = await fetch(`https://api.stripe.com/v1${endpoint}`, {
     method: "POST",
@@ -126,7 +148,7 @@ Deno.serve(async (req) => {
     if (!isQuote && idempotencyKey) {
       const { data: existing } = await supabase
         .from("orders")
-        .select("id, quantity, event_id, guest_email, total_cents, status")
+        .select("id, quantity, event_id, guest_email, total_cents, status, promoter_code, promoter_commission_amount_cents")
         .eq("idempotency_key", idempotencyKey)
         .maybeSingle();
       if (existing) {
@@ -140,6 +162,7 @@ Deno.serve(async (req) => {
           .eq("order_id", existing.id);
         if (count !== existing.quantity)
           return err("checkout_processing", "Your tickets are still being issued. Please retry shortly.", 409);
+        await recordFreePromoterAttribution(supabase, existing);
         return json({
           ok: true,
           free: true,
@@ -298,7 +321,7 @@ Deno.serve(async (req) => {
         if (freeOrderErr?.code === "23505" && idempotencyKey) {
           const { data: won } = await supabase
             .from("orders")
-            .select("id, quantity, event_id, guest_email, total_cents, status")
+            .select("id, quantity, event_id, guest_email, total_cents, status, promoter_code, promoter_commission_amount_cents")
             .eq("idempotency_key", idempotencyKey)
             .maybeSingle();
           if (won) {
@@ -312,6 +335,7 @@ Deno.serve(async (req) => {
               .eq("order_id", won.id);
             if (count !== won.quantity)
               return err("checkout_processing", "Your tickets are still being issued. Please retry shortly.", 409);
+            await recordFreePromoterAttribution(supabase, won);
             return json({
               ok: true,
               free: true,
@@ -385,6 +409,11 @@ Deno.serve(async (req) => {
       // Count a promo only after the ticket insert succeeds, never on quote,
       // abandoned checkout, or the existing idempotent replay path.
       if (pricing.promo) await incrementPromoUsage(supabase, pricing.promo.promo_code_id);
+      await recordFreePromoterAttribution(supabase, {
+        id: freeOrder.id,
+        promoter_code: pricing.orderFields.promoter_code,
+        promoter_commission_amount_cents: pricing.orderFields.promoter_commission_amount_cents,
+      });
 
       // Profile before email, so the email can name the account it made.
       // Best-effort: a failure here never touches the issued tickets.
