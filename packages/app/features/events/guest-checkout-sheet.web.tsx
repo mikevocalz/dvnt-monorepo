@@ -15,7 +15,9 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useGuestCheckoutStore } from "@dvnt/app/lib/stores/guest-checkout-store";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
-import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
+import { guestQuoteReady, guestQuoteSelectionKey } from "@dvnt/app/lib/tickets/guest-checkout-quote";
+import { useGuestCheckoutQuote } from "./use-guest-checkout-quote.web";
+import { GuestCheckoutCode } from "./guest-checkout-code.web";
 import { useCheckoutProfileStore } from "@dvnt/app/lib/stores/checkout-profile-store";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 import { CheckoutProfileFields } from "./checkout-profile-fields.web";
@@ -24,6 +26,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function GuestCheckoutSheet() {
   const s = useGuestCheckoutStore();
+  useGuestCheckoutQuote();
   const profile = useCheckoutProfileStore();
   const resetProfile = profile.reset;
   // Door time in the venue's zone, from the detail query the sheet opened on.
@@ -64,9 +67,17 @@ export function GuestCheckoutSheet() {
   const collectNames = s.quantity > 1 || s.nameRequirement !== "off";
   const namesRequired = s.nameRequirement === "required";
 
-  const total = (s.priceCents * s.quantity) / 100;
+  const quote = s.quoteSelectionKey === guestQuoteSelectionKey(s) ? s.quote : null;
+  const total = quote ? quote.total_cents / 100 : null;
+  const ready = guestQuoteReady(s);
 
   const checkout = async () => {
+    const current = useGuestCheckoutStore.getState();
+    if (current.loading || !current.open || guestQuoteSelectionKey(current) !== guestQuoteSelectionKey(s)) return;
+    if (!guestQuoteReady(current)) {
+      s.patch({ error: "Apply your code and review the ticket total before paying." });
+      return;
+    }
     const email = s.email.trim().toLowerCase();
     if (!EMAIL_RE.test(email)) {
       s.patch({ error: "Enter a valid email." });
@@ -86,10 +97,9 @@ export function GuestCheckoutSheet() {
       }
     }
     s.patch({ loading: true, error: null });
-    // Promoter attribution (WS-4): pending ?ref= from a tracked share
-    // link — persisted so the Stripe redirect can't lose it.
-    const promoterCode = getPendingPromoterRef(s.eventId);
-    const { data, error } = await supabase.functions.invoke("guest-checkout", {
+    let result;
+    try {
+      result = await supabase.functions.invoke("guest-checkout", {
       body: {
         event_id: Number(s.eventId),
         ticket_type_id: s.tierId,
@@ -101,10 +111,20 @@ export function GuestCheckoutSheet() {
         full_name: fields.fields.fullName,
         phone: fields.fields.phoneE164,
         idempotency_key: s.requestKey,
+        discount_code: s.discountCode,
+        promoter_code: s.trackedPromoterCode,
+        expected_quote_key: quote!.quote_key,
         ...(collectNames ? { attendee_names: s.attendeeNames.slice(0, s.quantity) } : {}),
-        ...(promoterCode ? { promoter_code: promoterCode } : {}),
       },
-    });
+      });
+    } catch {
+      if (useGuestCheckoutStore.getState().requestKey === requestKey)
+        s.patch({ loading: false, error: "Could not reach checkout. Please try again." });
+      return;
+    }
+    // A response for a dismissed/previous sheet must not redirect another event.
+    if (!useGuestCheckoutStore.getState().open || useGuestCheckoutStore.getState().requestKey !== requestKey) return;
+    const { data, error } = result;
     let url: string | undefined;
     let message = "Could not start checkout.";
     if (error) {
@@ -112,6 +132,8 @@ export function GuestCheckoutSheet() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const j = await (error as any).context?.json?.();
         if (j?.error?.message) message = j.error.message;
+        if (["quote_changed", "invalid_discount"].includes(j?.error?.code))
+          s.patch({ quote: null, quoteRevision: s.quoteRevision + 1 });
       } catch {
         /* ignore */
       }
@@ -138,7 +160,7 @@ export function GuestCheckoutSheet() {
     s.patch({ loading: false, error: message });
   };
 
-  const isFree = s.priceCents === 0;
+  const isFree = quote?.total_cents === 0;
 
   return (
     <BottomSheet open={s.open} onClose={s.close} title={s.done ? "" : "Checkout"}>
@@ -172,6 +194,7 @@ export function GuestCheckoutSheet() {
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-medium uppercase tracking-wide text-white/45">Email</span>
           <input
+            disabled={s.loading}
             type="email"
             inputMode="email"
             autoComplete="email"
@@ -190,7 +213,7 @@ export function GuestCheckoutSheet() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => s.patch({ quantity: Math.max(1, s.quantity - 1) })}
-              disabled={s.quantity <= 1}
+              disabled={s.loading || s.quantity <= 1}
               aria-label="Fewer"
               className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 disabled:opacity-40"
             >
@@ -199,7 +222,7 @@ export function GuestCheckoutSheet() {
             <span className="w-6 text-center font-semibold">{s.quantity}</span>
             <button
               onClick={() => s.patch({ quantity: Math.min(10, s.quantity + 1) })}
-              disabled={s.quantity >= 10}
+              disabled={s.loading || s.quantity >= 10}
               aria-label="More"
               className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 disabled:opacity-40"
             >
@@ -217,6 +240,7 @@ export function GuestCheckoutSheet() {
               {Array.from({ length: s.quantity }).map((_, i) => (
                 <input
                   key={i}
+                  disabled={s.loading}
                   value={s.attendeeNames[i] ?? ""}
                   onChange={(e) => s.setAttendeeName(i, e.target.value)}
                   placeholder={`Ticket ${i + 1}${namesRequired ? "" : " (optional)"}`}
@@ -227,9 +251,11 @@ export function GuestCheckoutSheet() {
           </label>
         ) : null}
 
+        <GuestCheckoutCode />
+
         <div className="flex items-center justify-between border-t border-white/10 pt-3">
           <span className="text-sm text-white/70">Total</span>
-          <span className="font-bold">{isFree ? "Free" : `$${total.toFixed(2)}`}</span>
+          <span className="font-bold">{total === null ? "Checking…" : isFree ? "Free" : `$${total.toFixed(2)}`}</span>
         </div>
 
         {!isFree ? (
@@ -242,7 +268,7 @@ export function GuestCheckoutSheet() {
 
         <button
           onClick={checkout}
-          disabled={s.loading}
+          disabled={s.loading || !ready}
           className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] font-bold text-white disabled:opacity-50"
         >
           <Lock size={16} color="#fff" />
@@ -250,7 +276,7 @@ export function GuestCheckoutSheet() {
             ? "Starting…"
             : isFree
               ? "Get free tickets"
-              : `Pay $${total.toFixed(2)}`}
+              : total === null ? "Review ticket total" : `Pay $${total.toFixed(2)}`}
         </button>
         <p className="text-center text-[11px] text-white/40">
           {isFree ? "We'll email your free ticket." : "Secure checkout by Stripe."}{" "}

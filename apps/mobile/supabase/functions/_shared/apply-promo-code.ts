@@ -43,7 +43,7 @@ export async function validateAndApplyPromo(
     .select("*")
     .eq("event_id", eventId)
     .is("deleted_at", null)
-    .ilike("code", normalizedCode);
+    .ilike("code", normalizedCode.replace(/[\\%_]/g, (ch) => `\\${ch}`));
 
   if (promoError || !promos?.length) {
     return { result: null, error: "Invalid promo code" };
@@ -84,7 +84,8 @@ export async function validateAndApplyPromo(
         .eq("promo_code_id", promo.id)
         .eq("status", "paid");
       q = userId ? q.eq("user_id", userId) : q.eq("guest_email", guestEmail);
-      const { count } = await q;
+      const { count, error: countError } = await q;
+      if (countError) return { result: null, error: "Could not verify promo usage. Please try again." };
       if ((count ?? 0) >= promo.max_per_user) {
         return { result: null, error: "You've already used this code." };
       }
