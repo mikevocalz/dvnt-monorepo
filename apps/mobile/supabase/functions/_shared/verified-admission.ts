@@ -7,15 +7,13 @@
  * `decideVerifiedAdmission` to draw its banner, so the screen and the server
  * cannot disagree.
  *
- * Enforcement is configuration, not code: `verified_admission_policy` ships
- * with `enforce = false`, so merging this changes nothing for live members.
+ * The verified-only ID policy remains independently configurable through
+ * `verified_admission_policy`. The profile-image + first-post participation
+ * gate below is always enforced for authenticated members, including legacy
+ * accounts, while ticket purchase and read access remain outside this gate.
  */
 import { checkAdultBirthDate } from "./age-policy.ts";
-import {
-  determineNewMemberStep,
-  isNewMemberOnboardingEnabled,
-  NEW_MEMBER_ONBOARDING_CUTOFF,
-} from "./new-member-onboarding.ts";
+import { determineNewMemberStep } from "./new-member-onboarding.ts";
 
 /**
  * Every account is in scope once `enforce` is on (checklist A03). There is no
@@ -195,7 +193,7 @@ export async function resolveVerifiedAdmission(
   db: any,
   userId: string | null | undefined,
   now = new Date(),
-  opts: { purpose?: "participation" | "ticket_purchase" | "first_post" } = {},
+  opts: { purpose?: "participation" | "ticket_purchase" | "ticket_claim" | "first_post" } = {},
 ): Promise<AdmissionVerdict> {
   if (!userId) return decideVerifiedAdmission({ userId, now });
   // Buying a ticket is the one thing a checkout-created profile can always do
@@ -250,18 +248,24 @@ export async function resolveVerifiedAdmission(
     restricted,
     now,
   });
-  if (opts.purpose === "ticket_purchase" || verdict.state === "blocked") return verdict;
-  if (!isNewMemberOnboardingEnabled()) return verdict;
+  // A claim retains its existing age/restricted-profile checks above, but
+  // receiving an existing ticket does not require a photo or a social post.
+  if (opts.purpose === "ticket_purchase" || opts.purpose === "ticket_claim" || verdict.state === "blocked") return verdict;
 
-  // The mandatory onboarding gate is independent of the legacy verified-only
-  // rollout. It only applies to NEW Better Auth signups, never old accounts,
-  // and cannot be lifted by localStorage or a fabricated posts_count.
+  // Profile photo + first post are mandatory participation requirements for
+  // every member account, regardless of signup date. They are derived from
+  // canonical server records so local/session state cannot grandfather or
+  // bypass an incomplete existing account.
   const { data: account, error: accountError } = await db.from("user")
     .select("id,createdAt,emailVerified,image").eq("id", userId).maybeSingle();
-  if (accountError || !account) return verdict;
-  const createdAt = Date.parse(String(account.createdAt || ""));
-  if (!Number.isFinite(createdAt) || createdAt < Date.parse(NEW_MEMBER_ONBOARDING_CUTOFF))
-    return verdict;
+  if (accountError || !account) {
+    return {
+      state: "blocked",
+      reason: "profile_photo_required",
+      message: "We couldn't confirm your profile. Retry.",
+      deadline: null,
+    };
+  }
 
   const { data: member, error: memberError } = await db.from("users")
     .select("id,avatar_id").eq("auth_id", userId).maybeSingle();
@@ -321,3 +325,4 @@ export function readRestricted(
   }
   return result?.data === true;
 }
+

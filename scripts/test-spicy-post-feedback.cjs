@@ -11,10 +11,17 @@ const FUNCTIONS = path.join(ROOT, 'apps/mobile/supabase/functions');
 const CAPTION = '#fixture #nightlife';
 function harness({ record = null, owner = true, session = true, failWrite = false } = {}) {
   const tables = {
-    posts: [{ id: 1, author_id: owner ? 1 : 2, post_kind: 'media', is_nsfw: false, content: CAPTION }],
+    posts: [
+      { id: 1, author_id: owner ? 1 : 2, post_kind: 'media', is_nsfw: false, content: CAPTION },
+      // Profile-completion evidence for the signed-in fixture. Keep it
+      // independent from the target post so the non-owner test can reach the
+      // ownership check instead of being stopped by the mandatory first-post gate.
+      { id: 99, author_id: 1, post_kind: 'text', is_nsfw: false, content: 'Existing member post' },
+    ],
     identity_verifications: record ? [{ user_id: 'fixture-owner', ...record }] : [],
     verified_admission_policy: [{ id: 1, enforce: false }],
-    user: [{ id: 'fixture-owner', createdAt: '2023-01-01T00:00:00Z' }],
+    user: [{ id: 'fixture-owner', createdAt: '2023-01-01T00:00:00Z', emailVerified: true, image: 'https://fixture.invalid/avatar.jpg' }],
+    users: [{ id: 1, auth_id: 'fixture-owner', avatar_id: null }],
     posts_media: [{ _parent_id: 1, _order: 0, url: 'https://fixture.invalid/photo.jpg' }],
   };
   const writes = [];
@@ -36,6 +43,7 @@ function harness({ record = null, owner = true, session = true, failWrite = fals
       insert(v) { op = 'insert'; payload = v; return q; },
       single: async () => { const r=run(); return { ...r, data:r.data?.[0] ?? null }; },
       maybeSingle: async () => { const r=run(); return { ...r, data:r.data?.[0] ?? null }; },
+      limit() { return q; },
       then(resolve, reject) { return Promise.resolve(run()).then(resolve, reject); },
     }; return q;
   } };

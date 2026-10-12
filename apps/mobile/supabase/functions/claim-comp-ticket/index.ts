@@ -7,11 +7,10 @@
  * Binds a phone comp to the signed-in account. Better Auth session required:
  * the claim is what turns "whoever has this text" into a named ticket holder.
  *
- * The verified-admission gate runs before the claim, the same check
- * ticket-checkout runs for a signed-in buyer, so a comp cannot be used to get
- * a ticket the account could not buy. A refused account keeps the link: the
- * token is not burned until a claim succeeds, so the person can verify and
- * come back.
+ * Existing age and restricted-profile checks run before the claim. Claiming
+ * a ticket does not require the social profile photo/first-post sequence.
+ * A refused account keeps the link: the token is not burned until a claim
+ * succeeds, so the person can verify and come back.
  *
  * claim_comp_ticket (service_role only) does the atomic part: single use,
  * idempotent for the same account, refused for any other, refused after
@@ -82,7 +81,7 @@ Deno.serve(async (req: Request) => {
       return refuse(429, "rate_limited", "Too many attempts. Wait a minute and try again.", req);
     }
 
-    const admission = await resolveVerifiedAdmission(supabase, userId);
+    const admission = await resolveVerifiedAdmission(supabase, userId, new Date(), { purpose: "ticket_claim" });
     if (admission.state === "blocked") {
       const r = admissionRefusal(admission);
       return refuse(403, r.code, r.message, req);
@@ -114,3 +113,4 @@ Deno.serve(async (req: Request) => {
     return refuse(500, "claim_failed", "Could not claim this ticket. Try again.", req);
   }
 });
+

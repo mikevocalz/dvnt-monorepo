@@ -51,6 +51,18 @@ const EXISTING_ACCOUNT = { createdAt: "2024-03-01T00:00:00Z" };
 
 const ACCOUNT = { createdAt: "2026-09-01T00:00:00Z" };
 
+/** Isolate ID-policy behavior from the independently mandatory profile gate. */
+function completedProfile(userId = "user_abc") {
+  return {
+    user: {
+      data: { ...ACCOUNT, id: userId, emailVerified: true, image: "https://cdn.test/profile.jpg" },
+      error: null,
+    },
+    users: { data: { id: 555, avatar_id: null }, error: null },
+    posts: { data: [{ id: 1 }], error: null },
+  };
+}
+
 Deno.test("a failed policy read blocks instead of admitting", async () => {
   const verdict = await resolveVerifiedAdmission(
     fakeDb({
@@ -125,24 +137,63 @@ Deno.test("an operator-set future deadline still gives grace", async () => {
     fakeDb({
       verified_admission_policy: { data: OPEN_GRACE_POLICY, error: null },
       identity_verifications: { data: null, error: null },
-      user: { data: ACCOUNT, error: null },
+      ...completedProfile(),
     }),
     "user_abc",
   );
   assertEquals(verdict.state, "grace");
 });
 
-Deno.test("enforcement off still admits, so the fix did not close the gate on everyone", async () => {
+Deno.test("enforcement off still admits a member who completed profile setup", async () => {
   const verdict = await resolveVerifiedAdmission(
     fakeDb({
       verified_admission_policy: { data: { ...ENFORCING_POLICY, enforce: false }, error: null },
       identity_verifications: { data: null, error: null },
-      user: { data: ACCOUNT, error: null },
+      ...completedProfile(),
     }),
     "user_abc",
   );
   assertEquals(verdict.state, "allowed");
   assertEquals(verdict.reason, "not_enforced");
+});
+
+for (const policy of [OPEN_GRACE_POLICY, { ...ENFORCING_POLICY, enforce: false }]) {
+  Deno.test(`profile setup is still required with ${policy.enforce ? "ID-policy grace" : "ID enforcement off"}`, async () => {
+    const verdict = await resolveVerifiedAdmission(
+      fakeDb({
+        ...completedProfile(),
+        verified_admission_policy: { data: policy, error: null },
+        identity_verifications: { data: null, error: null },
+        posts: { data: [], error: null },
+      }),
+      "user_abc",
+    );
+    assertEquals(verdict.state, "blocked");
+    assertEquals(verdict.reason, "first_post_required");
+  });
+}
+
+Deno.test("a new signup cannot use completed profile evidence to skip ID or email verification", async () => {
+  for (const emailVerified of [false, true]) {
+    for (const adultVerified of [false, true]) {
+      if (emailVerified && adultVerified) continue;
+      const db = fakeDb({
+        ...completedProfile(),
+        verified_admission_policy: { data: { enforce: false }, error: null },
+        identity_verifications: {
+          data: adultVerified ? { user_id: "user_abc", status: "passed", date_of_birth: "1990-01-01" } : null,
+          error: null,
+        },
+        user: {
+          data: { id: "user_abc", createdAt: "2026-10-09T01:00:00Z", emailVerified, image: "https://cdn.test/profile.jpg" },
+          error: null,
+        },
+      });
+      const verdict = await resolveVerifiedAdmission(db, "user_abc", undefined, { purpose: "first_post" });
+      assertEquals(verdict.state, "blocked");
+      assertEquals(verdict.reason, "verification_required");
+    }
+  }
 });
 
 // ── Checkout-created restricted profiles ─────────────────────────────────────
@@ -190,12 +241,43 @@ Deno.test("a restricted profile can still buy tickets", async () => {
   assertEquals(db.rpcCalls, []);
 });
 
+Deno.test("a ticket claim keeps age checks but does not need a social photo or post", async () => {
+  const db = fakeDb({
+    verified_admission_policy: { data: ENFORCING_POLICY, error: null },
+    identity_verifications: {
+      data: { user_id: "user_abc", status: "passed", date_of_birth: "1990-01-01" },
+      error: null,
+    },
+    // No profile/photo/post fixtures: a ticket claim must not read them.
+  });
+  const verdict = await resolveVerifiedAdmission(db, "user_abc", undefined, { purpose: "ticket_claim" });
+  assertEquals(verdict.state, "allowed");
+  assertEquals(verdict.reason, "verified");
+  assertEquals(db.rpcCalls, ["is_checkout_restricted"]);
+});
+
+Deno.test("ticket claims retain underage, enforced-ID and restricted-profile refusals", async () => {
+  for (const scenario of [
+    { policy: OFF_POLICY, record: { user_id: "user_abc", status: "failed", date_of_birth: "2015-01-01" }, restricted: false, reason: "underage" },
+    { policy: ENFORCING_POLICY, record: null, restricted: false, reason: "verification_required" },
+    { policy: OFF_POLICY, record: null, restricted: true, reason: "restricted_profile" },
+  ]) {
+    const verdict = await resolveVerifiedAdmission(fakeDb({
+      verified_admission_policy: { data: scenario.policy, error: null },
+      identity_verifications: { data: scenario.record, error: null },
+      "rpc:is_checkout_restricted": { data: scenario.restricted, error: null },
+    }), "user_abc", undefined, { purpose: "ticket_claim" });
+    assertEquals(verdict.state, "blocked");
+    assertEquals(verdict.reason, scenario.reason);
+  }
+});
+
 Deno.test("a passed adult verification unlocks a restricted profile", async () => {
   const verdict = await resolveVerifiedAdmission(
     fakeDb({
       verified_admission_policy: { data: OFF_POLICY, error: null },
       identity_verifications: { data: { user_id: "user_abc", status: "passed", date_of_birth: "1990-01-01" }, error: null },
-      user: { data: ACCOUNT, error: null },
+      ...completedProfile(),
       // The SQL already answers false once verification passes; the TS
       // decision agrees even if a stale true slips through.
       "rpc:is_checkout_restricted": { data: true, error: null },
@@ -221,7 +303,7 @@ Deno.test("an unreadable restricted flag refuses, a missing function does not", 
     fakeDb({
       verified_admission_policy: { data: OFF_POLICY, error: null },
       identity_verifications: { data: null, error: null },
-      user: { data: ACCOUNT, error: null },
+      ...completedProfile(),
       "rpc:is_checkout_restricted": { data: null, error: { message: "not found", code: "PGRST202" } },
     }),
     "user_abc",
@@ -229,24 +311,26 @@ Deno.test("an unreadable restricted flag refuses, a missing function does not", 
   assertEquals(notMigrated.state, "allowed");
 });
 
-Deno.test("the new-member gate admits everyone while its flag is off", async () => {
+Deno.test("existing accounts are not grandfathered out of mandatory profile setup", async () => {
   Deno.env.delete("DVNT_NEW_MEMBER_ONBOARDING_ENABLED");
   const verdict = await resolveVerifiedAdmission(
     fakeDb({
       verified_admission_policy: { data: { enforce: false }, error: null },
       identity_verifications: { data: null, error: null },
-      user: { data: { id: "new-member", createdAt: "2026-10-09T01:00:00Z", emailVerified: false, image: null }, error: null },
+      user: {
+        data: { id: "existing-member", createdAt: "2024-03-01T00:00:00Z", emailVerified: true, image: null },
+        error: null,
+      },
       users: { data: { id: 555, avatar_id: null }, error: null },
       posts: { data: [], error: null },
     }),
-    "new-member",
+    "existing-member",
   );
-  assertEquals(verdict.state, "allowed");
+  assertEquals(verdict.state, "blocked");
+  assertEquals(verdict.reason, "profile_photo_required");
 });
 
-Deno.test("new-account participation is blocked until saved photo then first post", async () => {
-  Deno.env.set("DVNT_NEW_MEMBER_ONBOARDING_ENABLED", "true");
-  try {
+Deno.test("member participation is blocked until saved photo then first post", async () => {
   const account = {
     id: "new-member",
     createdAt: "2026-10-09T01:00:00Z",
@@ -286,9 +370,6 @@ Deno.test("new-account participation is blocked until saved photo then first pos
     fakeDb({ ...hasPhoto, posts: { data: [{ id: 1 }], error: null } }), "new-member",
   );
   assertEquals(complete.state, "allowed");
-  } finally {
-    Deno.env.delete("DVNT_NEW_MEMBER_ONBOARDING_ENABLED");
-  }
 });
 
 Deno.test("new onboarding must never close ticket purchase", async () => {
@@ -300,3 +381,4 @@ Deno.test("new onboarding must never close ticket purchase", async () => {
   const decision = await resolveVerifiedAdmission(db, "new-member", new Date(), { purpose: "ticket_purchase" });
   assertEquals(decision.state, "allowed");
 });
+

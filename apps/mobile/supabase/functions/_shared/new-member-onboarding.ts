@@ -1,23 +1,22 @@
 /**
- * Mandatory welcome steps for accounts created after the 2026-10-09 rollout.
- * Account age is the Better Auth creation timestamp, not a localStorage bit.
- * The status is recomputed from authoritative server-side media/posts.
- * Existing accounts are NOT retroactively locked out by this requirement.
+ * Mandatory DVNT entry steps for every member account.
+ *
+ * The old flow applied photo + first-post only to accounts created after a
+ * rollout cutoff. Existing accounts are no longer exempt: everybody must have
+ * both pieces of server-proven evidence.
+ *
+ * The cutoff is still used for one purpose only: accounts created after the
+ * 18+ onboarding rollout must finish email/adult verification before they can
+ * enter the photo -> first-post sequence. Legacy accounts keep their existing
+ * age-access treatment while gaining the two new profile requirements.
  */
 export const NEW_MEMBER_ONBOARDING_CUTOFF = "2026-10-09T00:30:00.000Z";
 
-/**
- * The gate stays off until DVNT_NEW_MEMBER_ONBOARDING_ENABLED is exactly
- * "true". Native builds without the photo/first-post screens would trap new
- * signups, and the gate also requires ID verification, so it must not go live
- * on deploy. Turn it on once those builds have reached users, and move
- * NEW_MEMBER_ONBOARDING_CUTOFF to that date in the same change.
- */
+/** @deprecated The photo + first-post gate is always enabled. */
 export function isNewMemberOnboardingEnabled(
-  read: (name: string) => string | undefined = (name) =>
-    (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env.get(name),
+  _read?: (name: string) => string | undefined,
 ): boolean {
-  return (read("DVNT_NEW_MEMBER_ONBOARDING_ENABLED") ?? "").trim() === "true";
+  return true;
 }
 
 export interface OnboardingEvidence {
@@ -27,14 +26,26 @@ export interface OnboardingEvidence {
   hasProfilePhoto: boolean;
   hasPost: boolean;
 }
-export type OnboardingStep = "not_required" | "pending_verification" | "photo" | "first_post" | "complete";
 
+export type OnboardingStep =
+  | "not_required"
+  | "pending_verification"
+  | "photo"
+  | "first_post"
+  | "complete";
+
+/**
+ * New signups preserve DVNT's verification-first ordering. After that, and for
+ * every legacy account, photo always comes first and first post second.
+ */
 export function determineNewMemberStep(input: OnboardingEvidence): OnboardingStep {
   const created = Date.parse(String(input.accountCreatedAt ?? ""));
-  if (!Number.isFinite(created) || created < Date.parse(NEW_MEMBER_ONBOARDING_CUTOFF))
-    return "not_required";
-  // Signup must finish identity/email verification first. No shortcuts around 18+.
-  if (!input.emailVerified || !input.adultVerified) return "pending_verification";
+  const isVerificationEraAccount =
+    Number.isFinite(created) && created >= Date.parse(NEW_MEMBER_ONBOARDING_CUTOFF);
+
+  if (isVerificationEraAccount && (!input.emailVerified || !input.adultVerified)) {
+    return "pending_verification";
+  }
   if (!input.hasProfilePhoto) return "photo";
   if (!input.hasPost) return "first_post";
   return "complete";

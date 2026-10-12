@@ -16,6 +16,11 @@ export interface DialogProps {
   maxWidth?: number;
   /** Hide the default close (X) button. */
   hideClose?: boolean;
+  /**
+   * Whether Escape, backdrop presses, and the default X may dismiss the dialog.
+   * Defaults to true. Set false for a required flow that must be completed.
+   */
+  dismissible?: boolean;
   /** id of the element that names the dialog, when there is no `title`. */
   labelledBy?: string;
 }
@@ -25,8 +30,8 @@ const FOCUSABLE =
 
 /**
  * Centered modal dialog (web) — the Law-3 translation of a native bottom sheet
- * used for confirmations / compact forms. Esc + backdrop close, scroll-lock,
- * safe-area aware. For an edge-anchored panel use `Drawer`.
+ * used for confirmations / compact forms. Scroll-lock and safe-area aware.
+ * For an edge-anchored panel use `Drawer`.
  */
 export function Dialog({
   open,
@@ -36,6 +41,7 @@ export function Dialog({
   footer,
   maxWidth = 520,
   hideClose,
+  dismissible = true,
   labelledBy,
 }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -54,16 +60,23 @@ export function Dialog({
     const focusables = () =>
       Array.from(panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
     const initial =
-      panelRef.current?.querySelector<HTMLElement>("[data-autofocus]") ?? focusables()[0];
+      panelRef.current?.querySelector<HTMLElement>("[data-autofocus]") ??
+      focusables()[0] ?? panelRef.current;
     initial?.focus();
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onCloseRef.current();
+        if (dismissible) onCloseRef.current();
+        else e.preventDefault();
         return;
       }
       if (e.key !== "Tab") return;
       const items = focusables();
-      if (items.length === 0) return;
+      if (items.length === 0) {
+        e.preventDefault();
+        panelRef.current?.focus();
+        return;
+      }
       const first = items[0];
       const last = items[items.length - 1];
       const active = document.activeElement;
@@ -75,6 +88,7 @@ export function Dialog({
         first.focus();
       }
     };
+
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -83,13 +97,15 @@ export function Dialog({
       document.body.style.overflow = prev;
       opener?.focus?.();
     };
-  }, [open]);
+  }, [open, dismissible]);
 
   if (!open) return null;
+  const showDefaultClose = dismissible && !hideClose;
+
   return (
     <div
       className="fixed inset-0 z-[1500] flex items-center justify-center p-4 bg-black/70"
-      onClick={onClose}
+      onClick={dismissible ? onClose : undefined}
       role="dialog"
       aria-modal="true"
       aria-labelledby={labelledBy}
@@ -97,14 +113,15 @@ export function Dialog({
     >
       <div
         ref={panelRef}
+        tabIndex={-1}
         className="w-full max-h-[88vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#101321] shadow-2xl"
         style={{ maxWidth }}
         onClick={(e) => e.stopPropagation()}
       >
-        {title || !hideClose ? (
+        {title || showDefaultClose ? (
           <div className="sticky top-0 flex items-center justify-between px-5 py-4 border-b border-white/8 bg-[#101321]/95 backdrop-blur">
             <h2 className="text-base font-bold text-white">{title}</h2>
-            {!hideClose ? (
+            {showDefaultClose ? (
               <button
                 type="button"
                 onClick={onClose}
@@ -126,3 +143,4 @@ export function Dialog({
     </div>
   );
 }
+

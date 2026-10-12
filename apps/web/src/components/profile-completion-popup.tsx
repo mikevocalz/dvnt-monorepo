@@ -1,29 +1,31 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Camera, ArrowUpRight, ImagePlus, PenLine, Sparkles } from "lucide-react";
+import { ArrowUpRight, Camera, CheckCircle2, ImagePlus, PenLine, Sparkles } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
-import { syncAuthUser } from "@dvnt/app/lib/api/privileged";
-import { fetchNewMemberProgress, type NewMemberStep } from "@dvnt/app/lib/profile/new-member-progress";
+import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
+import {
+  INITIAL_PROFILE_COMPLETION_CHECK,
+  profileCompletionCheckReducer,
+  readProfileCompletionCheck,
+} from "@dvnt/app/lib/profile/profile-completion-check";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useVerifiedOnlyPromptStore } from "@dvnt/app/lib/auth/verified-only-prompt";
 import {
   canShowProfileReminderAt,
-  newMemberRedirect,
-  missingProfileSteps,
   type ReminderNeeds,
 } from "@dvnt/app/lib/profile/profile-reminder-policy";
 
-const seenInMemory = new Set<string>();
-
 /**
- * One entry-time reminder per signed-in member per browser-tab session.
- * - Only after auth hydration and an up-to-date own-profile read.
- * - Non-blocking and dismissible, never on verification/checkout/call routes.
- * - Avoids flashing when the latest DB profile already has a photo/post.
- * - A new tab/session can remind again if the profile remains incomplete.
- * - No authentication, ticketing or verification rules are changed.
+ * Required profile-entry gate for every signed-in DVNT member.
+ *
+ * Server evidence is authoritative: the dialog remains until the account has a
+ * saved profile photo AND at least one published post. It has no X, no "later",
+ * no Escape/backdrop dismissal, and no session/local-storage bypass.
+ *
+ * Completion routes and purchase/verification flows remain usable so the gate
+ * cannot trap somebody away from the exact action they need to finish.
  */
 export function ProfileCompletionPopup() {
   const pathname = usePathname() ?? "";
@@ -32,157 +34,223 @@ export function ProfileCompletionPopup() {
   const hydrated = useAuthStore((s) => s._hasHydrated);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const verificationPopupOpen = useVerifiedOnlyPromptStore((s) => s.open);
-  const [needs, setNeeds] = useState<ReminderNeeds>({ photo: false, firstPost: false });
-  const [open, setOpen] = useState(false);
-  const tried = useRef<string | null>(null);
-  const [gateStep, setGateStep] = useState<NewMemberStep>("not_required");
-  const [gateError, setGateError] = useState(false);
+
+  const [checkState, dispatchCheck] = useReducer(
+    profileCompletionCheckReducer,
+    INITIAL_PROFILE_COMPLETION_CHECK,
+  );
   const [reload, setReload] = useState(0);
 
   const memberId = user?.authId || String(user?.id ?? "");
   const ready = hydrated && isAuthenticated && !!memberId;
-  const allowed = canShowProfileReminderAt(pathname);
+  const scope = { memberId, pathname, reload };
+  const check = readProfileCompletionCheck(checkState, scope);
+  const allowed = canShowProfileReminderAt(
+    pathname,
+    check.status === "ready" ? check.progress.step : undefined,
+  );
 
   useEffect(() => {
-    if (!ready || !user || pathname.startsWith("/auth/")) return;
+    if (!ready || pathname.startsWith("/auth/")) {
+      dispatchCheck({ type: "reset" });
+      return;
+    }
+
     let cancelled = false;
-    setGateError(false);
-    void (async () => {
-      try {
-        // Every navigation/reload checks fresh server records. Progress can
-        // never be unlocked by manipulating sessionStorage/localStorage.
-        const progress = await fetchNewMemberProgress();
+    const requestScope = { memberId, pathname, reload };
+    dispatchCheck({ type: "start", scope: requestScope });
+
+    void fetchNewMemberProgress()
+      .then((progress) => {
         if (cancelled) return;
-        setGateStep(progress.step);
-        if (progress.required) {
-          setOpen(false);
-          const redirect = newMemberRedirect(progress.step, pathname);
-          if (redirect) router.replace(redirect);
-          return;
-        }
-        // Earlier members get the original soft once-per-session popup.
-        if (!allowed || verificationPopupOpen) return;
-        const key = `dvnt:profile-reminder:v1:${memberId}`;
-        if (tried.current === key || seenInMemory.has(key)) return;
-        try {
-          if (sessionStorage.getItem(key) === "shown") {
-            seenInMemory.add(key);
-            return;
-          }
-        } catch { /* optional */ }
-        tried.current = key;
-        const latest = await syncAuthUser();
-        if (cancelled || !latest) return;
-        const missing = missingProfileSteps(latest);
-        if (!missing.photo && !missing.firstPost) return;
-        seenInMemory.add(key);
-        try { sessionStorage.setItem(key, "shown"); } catch { /* optional */ }
-        setNeeds(missing);
-        setOpen(true);
-      } catch {
-        if (!cancelled) {
-          setGateError(true);
-          // Fail closed for an account already known to be in required setup,
-          // but never assume an old account is incomplete on network failure.
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [ready, memberId, pathname, allowed, reload, verificationPopupOpen]);
+        dispatchCheck({ type: "resolve", scope: requestScope, progress });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        dispatchCheck({ type: "reject", scope: requestScope });
+      });
 
-  useEffect(() => {
-    if (!ready || !allowed || gateStep !== "not_required") setOpen(false);
-  }, [ready, allowed, gateStep]);
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, memberId, pathname, reload]);
 
-  // Profile store may update while the dialog is open (e.g. another tab).
-  // Local updates make it disappear immediately; reload rechecks server data.
-  useEffect(() => {
-    if (!open || !user) return;
-    if (needs.photo && !!String(user.avatar ?? "").trim()) {
-      setNeeds((prev) => ({ ...prev, photo: false }));
-    }
-    if (needs.firstPost && Number(user.postsCount) > 0) {
-      setNeeds((prev) => ({ ...prev, firstPost: false }));
-    }
-  }, [open, user?.avatar, user?.postsCount, needs.photo, needs.firstPost]);
+  // Verification-era signups finish the existing 18+/email UI first. Only a
+  // current, successful server read can expose the photo -> first-post stage.
+  const needs: ReminderNeeds = check.status === "ready" && check.progress.step !== "pending_verification"
+    ? { photo: !check.progress.hasPhoto, firstPost: !check.progress.hasPost }
+    : { photo: false, firstPost: false };
+  const incomplete = needs.photo || needs.firstPost;
+  const modalOpen =
+    ready &&
+    allowed &&
+    check.status === "ready" &&
+    incomplete &&
+    !verificationPopupOpen;
 
-  const close = () => setOpen(false);
-  const navigate = (to: string) => {
-    close();
-    router.push(to);
-  };
-
-  // Block the app while a known incomplete new member is being redirected,
-  // including on browser Back. Checkout and identity flows are never covered.
-  const target = newMemberRedirect(gateStep, pathname);
-  if (ready && target && (gateError || target !== pathname)) {
+  // Block both unresolved and failed reads, including the first render after
+  // an account switch, navigation or retry. Purchases and verification stay open.
+  if (ready && allowed && check.status !== "ready" && !verificationPopupOpen) {
+    const failed = check.status === "error";
     return (
-      <div role="status" aria-live="polite" className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#06070d] p-6 text-white">
-        <div className="max-w-sm space-y-4 text-center">
-          <p className="text-xs font-black uppercase tracking-[0.3em] text-[#FF5BFC]">DVNT · Make your entrance</p>
-          <h2 className="text-2xl font-black">{gateStep === "photo" ? "First, add your profile picture" : "Next, create your first post"}</h2>
-          {gateError ? (
-            <button type="button" onClick={() => setReload((n) => n + 1)}
-              className="rounded-xl bg-[#FF5BFC] px-6 py-3 font-bold text-black">Retry connection</button>
-          ) : <p className="text-white/70">Loading your next step…</p>}
+      <Dialog
+        key={failed ? "retry" : "pending"}
+        open
+        onClose={() => {}}
+        hideClose
+        dismissible={false}
+        maxWidth={460}
+        labelledBy="profile-completion-status-title"
+      >
+        <div
+          role={failed ? "alert" : "status"}
+          aria-live={failed ? "assertive" : "polite"}
+          className="space-y-4 py-2 text-center text-white"
+        >
+          <p className="text-xs font-black uppercase tracking-[0.3em] text-[#FF5BFC]">
+            DVNT · Required setup
+          </p>
+          <h2
+            id="profile-completion-status-title"
+            className="text-2xl font-black"
+            tabIndex={failed ? undefined : 0}
+            data-autofocus={failed ? undefined : true}
+          >
+            {failed ? "We couldn't confirm your profile yet." : "Checking your profile…"}
+          </h2>
+          <p className="text-sm leading-6 text-white/70">
+            {failed
+              ? "Reconnect so DVNT can verify your profile picture and first post."
+              : "Confirming your saved profile picture and first post."}
+          </p>
+          {failed && <button
+            type="button"
+            data-autofocus
+            onClick={() => setReload((n) => n + 1)}
+            className="min-h-12 w-full rounded-xl bg-[#FF5BFC] px-6 py-3 font-bold text-black"
+          >
+            Retry connection
+          </button>}
+          <button
+            type="button"
+            onClick={() => router.push("/feed/events/my-tickets")}
+            className="min-h-11 w-full rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-white"
+          >
+            My tickets
+          </button>
         </div>
-      </div>
+      </Dialog>
     );
   }
 
-  if (!ready || !allowed || gateStep !== "not_required" ||
-      (!needs.photo && !needs.firstPost)) return null;
+  if (!ready || !allowed || check.status !== "ready" || !incomplete) return null;
+
+  const photoDone = !needs.photo;
+  const postDone = !needs.firstPost;
+  const nextIsPhoto = needs.photo;
+  const action = nextIsPhoto
+    ? {
+        label: "Add my profile picture",
+        to: "/feed/onboarding/photo",
+        icon: <ImagePlus size={20} aria-hidden="true" />,
+      }
+    : {
+        label: "Create my first post",
+        to: "/feed/create",
+        icon: <PenLine size={20} aria-hidden="true" />,
+      };
 
   return (
-    <Dialog open={open && !verificationPopupOpen} onClose={close} hideClose maxWidth={460}>
-      <div className="flex flex-col gap-5 py-2 text-white" data-testid="profile-completion-popup">
+    <Dialog
+      key="required"
+      open={modalOpen}
+      onClose={() => {}}
+      hideClose
+      dismissible={false}
+      maxWidth={460}
+      labelledBy="profile-completion-title"
+    >
+      <div
+        className="flex flex-col gap-5 py-2 text-white"
+        data-testid="profile-completion-popup"
+      >
         <div className="flex items-start justify-between gap-4">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[#FF5BFC]/30 bg-[#FF5BFC]/12">
-            {needs.photo ? <Camera size={26} color="#FF5BFC" /> : <Sparkles size={26} color="#3FDCFF" />}
+            {nextIsPhoto ? (
+              <Camera size={26} color="#FF5BFC" aria-hidden="true" />
+            ) : (
+              <Sparkles size={26} color="#3FDCFF" aria-hidden="true" />
+            )}
           </div>
           <span className="rounded-full border border-white/15 bg-white/7 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.18em] text-white/65">
-            DVNT Community
+            Required setup
           </span>
         </div>
 
         <div className="space-y-2">
-          <p className="text-[11px] font-black uppercase tracking-[0.26em] text-[#3FDCFF]">Make your entrance</p>
-          <h2 className="text-[clamp(1.65rem,5vw,2.25rem)] leading-[1.09] font-black tracking-tight">
-            {needs.photo ? "Don't be a mystery. 📸" : "Your first post is calling. ✨"}
+          <p className="text-[11px] font-black uppercase tracking-[0.26em] text-[#3FDCFF]">
+            Make your entrance
+          </p>
+          <h2 id="profile-completion-title" className="text-[clamp(1.65rem,5vw,2.25rem)] leading-[1.09] font-black tracking-tight">
+            Two things, then you're in.
           </h2>
           <p className="text-sm leading-6 text-white/75">
-            {needs.photo
-              ? "Blank profiles aren't allowed on DVNT. Add a real profile photo so the community knows who they're connecting with."
-              : "You're part of the DVNT community. Say hello, share your look, or tell everybody about an event."}
+            Every DVNT member needs a profile picture and a first post. Once both are
+            complete, the rest of DVNT unlocks automatically.
           </p>
         </div>
 
-        <div className="space-y-2.5">
-          {needs.photo && (
-            <button type="button" onClick={() => navigate("/feed/profile/edit")}
-              className="flex min-h-13 w-full items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-[#35D2EF] to-[#B75BE8] px-4 py-3 text-left text-[15px] font-extrabold text-[#07040C] transition-transform hover:scale-[1.01] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#35D2EF]">
-              <span className="flex items-center gap-3"><ImagePlus size={20} aria-hidden="true" /> Add my profile picture</span>
-              <ArrowUpRight size={18} aria-hidden="true" />
-            </button>
-          )}
-          {needs.firstPost && (
-            <button type="button" onClick={() => navigate("/feed/create")}
-              className="flex min-h-13 w-full items-center justify-between gap-3 rounded-2xl border border-[#FF5BFC]/45 bg-[#FF5BFC]/12 px-4 py-3 text-left text-[15px] font-extrabold text-white transition-colors hover:bg-[#FF5BFC]/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FF5BFC]">
-              <span className="flex items-center gap-3"><PenLine size={20} aria-hidden="true" /> Create my first post</span>
-              <ArrowUpRight size={18} aria-hidden="true" />
-            </button>
-          )}
+        <div className="space-y-2.5" aria-label="Required profile steps">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-3.5">
+            {photoDone ? (
+              <CheckCircle2 size={20} className="text-emerald-300" aria-hidden="true" />
+            ) : (
+              <Camera size={20} className="text-[#3FDCFF]" aria-hidden="true" />
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="font-bold">Profile picture</p>
+              <p className="text-xs text-white/55">{photoDone ? "Complete" : "Required"}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-3.5">
+            {postDone ? (
+              <CheckCircle2 size={20} className="text-emerald-300" aria-hidden="true" />
+            ) : (
+              <PenLine size={20} className="text-[#FF5BFC]" aria-hidden="true" />
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="font-bold">First post</p>
+              <p className="text-xs text-white/55">{postDone ? "Complete" : "Required"}</p>
+            </div>
+          </div>
         </div>
 
-        <button type="button" onClick={close}
-          className="min-h-11 w-full rounded-xl px-4 py-2 text-sm font-semibold text-white/65 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-          aria-label="Remind me later">
-          Remind me later
+        <button
+          type="button"
+          data-autofocus
+          onClick={() => router.push(action.to)}
+          className="flex min-h-13 w-full items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-[#35D2EF] to-[#B75BE8] px-4 py-3 text-left text-[15px] font-extrabold text-[#07040C] transition-transform hover:scale-[1.01] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#35D2EF]"
+        >
+          <span className="flex items-center gap-3">
+            {action.icon}
+            {action.label}
+          </span>
+          <ArrowUpRight size={18} aria-hidden="true" />
         </button>
+
         <p className="text-center text-xs text-white/45">
-          This reminder goes away once you've completed these steps.
+          This window closes automatically after both required steps are complete.
         </p>
+        <button
+          type="button"
+          onClick={() => router.push("/feed/events/my-tickets")}
+          className="min-h-11 w-full rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-white"
+        >
+          My tickets
+        </button>
       </div>
     </Dialog>
   );
 }
+
